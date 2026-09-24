@@ -10,6 +10,7 @@ import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
 import type { CanonicalWriterResponse } from "../canonical-agent-writer-protocol.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
+import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 
 const THREAD_ID = "writer-thread";
 const TURN_ID = "writer-turn";
@@ -160,6 +161,52 @@ describe("canonical SQLite writer", () => {
     expect(replay).toEqual(first);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 3 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 1 });
+  });
+
+  it("replays durable semantic assistant text after a worker reply is lost", async () => {
+    const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID };
+    const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "text-lease" };
+    const start: ExecutionSemanticOperation = {
+      operationId: "text-lease:1", execution, lease, ordinal: 1,
+      mutation: {
+        kind: "begin", providerId: "codex",
+        input: {
+          thread: { id: THREAD_ID, workspaceId: "writer-workspace", providerId: "codex", createdAt: NOW },
+          turnId: TURN_ID, executionId: EXECUTION_ID,
+          permissionMode: "supervised", providerIdentities: [],
+          userMessage: { kind: "create", messageId: "text-user", content: "Question", sequence: 1 },
+        },
+      },
+    };
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect(await writer.transactSemantic(start, () => {})).toMatchObject({ kind: "committed" });
+    await writer.close();
+
+    let created = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => created++ === 0
+      ? workerDroppingReply("semantic-transacted")
+      : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+    const textOperation: ExecutionSemanticOperation = {
+      operationId: "text-lease:2", execution, lease, ordinal: 2,
+      mutation: { kind: "append-assistant-text", inputs: [{ ...execution, sequence: 1, text: "Worker durable text" }] },
+    };
+    const receipt = await writer.transactSemantic(textOperation, () => {});
+    expect(receipt).toMatchObject({ kind: "committed", operationId: "text-lease:2",
+      assistantTextCheckpoint: { outcome: "committed", durableThrough: 1 } });
+    expect(created).toBe(2);
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("Worker durable text");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM parent_assistant_text_checkpoint_chunks WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ count: 1 });
+    await expect(NodeFSPromises.stat(NodePath.join(tempDir, "app.sqlite.recovery", "parent-assistant-text")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await writer.close();
+
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect(await writer.transactSemantic(textOperation, () => {})).toEqual(receipt);
+    expect(await writer.interruptWorkerLoss({ execution, lease, reason: "worker exited", recoveryIncidentId: "text-loss" },
+      () => {})).toMatchObject({ kind: "committed", operationId: "text-lease:worker-lost" });
+    expect(db.prepare("SELECT content FROM messages WHERE role = 'assistant' AND is_internal = 0").get())
+      .toEqual({ content: "Worker durable text" });
   });
 
   it("rejects a database failure without reporting a durable receipt", async () => {

@@ -9,6 +9,10 @@ import type {
 import type { CanonicalAgentCommitResult } from "../canonical/canonical-agent-boundary.js";
 import type { ProviderEventIngressEvent } from "../../providers/composition/provider-event-ingress.js";
 import type {
+  ParentAssistantTextCheckpointInput,
+  ParentAssistantTextCheckpointResult,
+} from "../turns/parent-assistant-text-checkpoint-service.js";
+import type {
   ExecutionIdentity,
   ExecutionLease,
   ExecutionWorkerReply,
@@ -21,6 +25,7 @@ export type ExecutionWorkCommand =
   | { readonly kind: "start"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput }
   | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
   | { readonly kind: "event"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[] }
+  | { readonly kind: "assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
   | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
   | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
@@ -38,6 +43,7 @@ export interface ExecutionSemanticOperation {
     | { readonly kind: "begin"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput }
     | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
     | { readonly kind: "append-events"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[] }
+    | { readonly kind: "append-assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
     | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
@@ -64,7 +70,7 @@ export type ProjectedCommittedProviderEvent = Omit<
 
 /** A writer reply is valid only after the semantic operation commits durably. */
 export type ExecutionWriteReceipt =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[] }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult }
   | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState?: "not-started" | "already-terminal" };
 
 /**
@@ -78,9 +84,9 @@ export interface ExecutionSemanticWriter {
 
 /** A command result that never calls an uncommitted mutation successful. */
 export type ExecutionWorkerResult =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[] }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult }
   | { readonly kind: "released" }
-  | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-stop-watermark" | "writer-conflict" };
+  | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-text-routing" | "invalid-stop-watermark" | "writer-conflict" };
 
 type WorkerCommand = ExecutionMailboxCommand<ExecutionWorkCommand>;
 const METADATA_MUTATIONS: ReadonlySet<WorkerCommand["kind"]> = new Set([
@@ -189,7 +195,6 @@ function mutationFor(
   state: ExecutionState,
 ): ExecutionSemanticOperation["mutation"] | undefined {
   const command = request.command;
-  if (isMetadataMutation(command)) return command;
   switch (command.kind) {
     case "event":
       return eventMutation(command, request.execution, state);
@@ -201,11 +206,18 @@ function mutationFor(
     case "resume":
     case "release":
       return undefined;
-    default: {
-      const exhaustive: never = command;
-      return exhaustive;
-    }
+    default: return metadataOrTextMutation(command, request.execution, state);
   }
+}
+
+function metadataOrTextMutation(
+  command: Extract<WorkerCommand, { kind: "assistant-text" | "checkpoint" | "effect-result" | "provider-outcome" | "stage-terminal" }>,
+  execution: ExecutionIdentity,
+  state: ExecutionState,
+): ExecutionSemanticOperation["mutation"] | undefined {
+  if (isMetadataMutation(command)) return command;
+  return state.phase === "running" && validTextRouting(command.inputs, execution)
+    ? { kind: "append-assistant-text", inputs: command.inputs } : undefined;
 }
 
 function isMetadataMutation(command: WorkerCommand): command is Extract<
@@ -256,12 +268,21 @@ function invalidReason(request: ExecutionWorkerRequest<WorkerCommand>): Extract<
   if (request.command.kind === "event" && !validEventRouting(request.command.events, request.execution)) {
     return "invalid-event-routing";
   }
+  if (request.command.kind === "assistant-text" && !validTextRouting(request.command.inputs, request.execution)) {
+    return "invalid-text-routing";
+  }
   return "invalid-transition";
 }
 
 function validEventRouting(events: readonly ProviderEventDraft[], execution: ExecutionIdentity): boolean {
   return events.length > 0 && events.every((event) => event.routing.threadId === execution.threadId
     && event.routing.turnId === execution.turnId && event.routing.executionId === execution.executionId);
+}
+
+function validTextRouting(inputs: readonly ParentAssistantTextCheckpointInput[], execution: ExecutionIdentity): boolean {
+  return Array.isArray(inputs) && inputs.length > 0 && inputs.every((input) => input
+    && input.threadId === execution.threadId
+    && input.turnId === execution.turnId && input.executionId === execution.executionId);
 }
 
 function validStartInput(
@@ -317,6 +338,7 @@ function committedResult(receipt: Extract<ExecutionWriteReceipt, { kind: "commit
     kind: "committed", operationId: receipt.operationId, durableRevision: receipt.durableRevision,
     ...(receipt.providerCommit ? { providerCommit: receipt.providerCommit } : {}),
     ...(receipt.providerEvents ? { providerEvents: receipt.providerEvents } : {}),
+    ...(receipt.assistantTextCheckpoint ? { assistantTextCheckpoint: receipt.assistantTextCheckpoint } : {}),
   };
 }
 

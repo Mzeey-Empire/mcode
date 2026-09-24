@@ -152,6 +152,101 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(published).toContain(`${EXECUTION_ID}:recovery-interrupted`);
   });
 
+  it("keeps an assistant-text receipt and text across writer restart and worker loss", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const inputs = [{ ...execution, sequence: 1, text: "Durable partial answer" }];
+    const textOperation = operation(2, { kind: "append-assistant-text", inputs });
+    const appended = await send(2, { kind: "assistant-text", inputs });
+    expect(appended).toMatchObject({
+      kind: "committed", operationId: "lease-1:2",
+      assistantTextCheckpoint: { outcome: "committed", durableThrough: 1, committedItems: 1 },
+    });
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("Durable partial answer");
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalExecutionSemanticWriter(db, () => {});
+    expect(await writer.transact(textOperation)).toEqual(appended);
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("Durable partial answer");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM parent_assistant_text_checkpoint_chunks WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ count: 1 });
+    expect(writer.interruptWorkerLoss(loss).kind).toBe("committed");
+    expect(new MessageRepo(db).listIncludingInternal(THREAD_ID)).toContainEqual(expect.objectContaining({
+      role: "assistant", content: "Durable partial answer", outcome: "interrupted",
+    }));
+  });
+
+  it("cancels after a text checkpoint and retires it only after terminal commit", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    expect((await send(2, { kind: "assistant-text", inputs: [
+      { ...execution, sequence: 1, text: "Saved before cancellation" },
+    ] })).kind).toBe("committed");
+    expect((await handler.handle({ requestId: 3, execution, lease, ordinal: 3, stopWatermark: 2,
+      command: { kind: "stop", requestId: "cancel-1" } })).result.kind).toBe("committed");
+    expect((await send(4, { kind: "provider-outcome", outcome: "cancelled" })).kind).toBe("committed");
+    expect((await send(5, { kind: "stage-terminal", input: {
+      threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "cancelled", endedAt: NOW,
+      assistant: { content: "Saved before cancellation", model: null, attachments: [] }, narrative: [],
+    } })).kind).toBe("committed");
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("Saved before cancellation");
+    const finish = operation(6, { kind: "finish", outcome: "cancelled", input: {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+      providerId: "codex", providerIdentities: [], outcome: "cancelled", projection: { kind: "writer-staged" },
+    } });
+    db.run("CREATE TRIGGER fail_text_retirement BEFORE DELETE ON parent_assistant_text_checkpoints BEGIN SELECT RAISE(ABORT, 'retirement unavailable'); END");
+    await expect(writer.transact(finish)).rejects.toThrow("retirement unavailable");
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ terminal_outcome: "cancelled" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM parent_assistant_text_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ count: 1 });
+    db.run("DROP TRIGGER fail_text_retirement");
+    expect((await writer.transact(finish)).kind).toBe("committed");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM parent_assistant_text_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ count: 0 });
+    expect(new MessageRepo(db).listIncludingInternal(THREAD_ID)).toContainEqual(expect.objectContaining({
+      role: "assistant", content: "Saved before cancellation", outcome: "cancelled", is_internal: false,
+    }));
+    expect((await writer.transact(finish)).kind).toBe("committed");
+  });
+
+  it("fences assistant-text routing, lease, ordinal, input size, and conflicting replay", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const inputs = [{ ...execution, sequence: 1, text: "Saved text" }];
+    const appendText = operation(2, { kind: "append-assistant-text", inputs });
+    expect(await writer.transact({ ...appendText, lease: { ...lease, ownerEpoch: 2, leaseId: "lease-2" },
+      operationId: "lease-2:2" })).toEqual({ kind: "conflict", operationId: "lease-2:2" });
+    expect(await writer.transact({ ...appendText, ordinal: 3, operationId: "lease-1:3" }))
+      .toEqual({ kind: "conflict", operationId: "lease-1:3" });
+    expect(await writer.transact(operation(2, { kind: "append-assistant-text",
+      inputs: [{ ...inputs[0]!, threadId: "wrong-thread" }],
+    }))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact(operation(2, { kind: "append-assistant-text",
+      inputs: [{ ...inputs[0]!, text: "x".repeat(16 * 1024 + 1) }],
+    }))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact(appendText)).toMatchObject({ kind: "committed", operationId: "lease-1:2" });
+    expect(await writer.transact(operation(2, { kind: "append-assistant-text",
+      inputs: [{ ...inputs[0]!, text: "Changed text" }],
+    }))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact(operation(3, { kind: "append-assistant-text", inputs })))
+      .toEqual({ kind: "conflict", operationId: "lease-1:3" });
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("Saved text");
+  });
+
+  it("rolls back assistant text if its semantic receipt cannot commit", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    db.run("CREATE TRIGGER fail_text_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:append-assistant-text' BEGIN SELECT RAISE(ABORT, 'text receipt unavailable'); END");
+    const input = operation(2, { kind: "append-assistant-text",
+      inputs: [{ ...execution, sequence: 1, text: "Keep me out until receipt" }],
+    });
+    await expect(writer.transact(input)).rejects.toThrow("text receipt unavailable");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM parent_assistant_text_checkpoint_chunks").get())
+      .toEqual({ count: 0 });
+    expect(db.prepare("SELECT receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, "semantic:head")).toMatchObject({ receipt_json: expect.stringContaining('"ordinal":1') });
+    db.run("DROP TRIGGER fail_text_receipt");
+    expect(await writer.transact(input)).toMatchObject({ kind: "committed", operationId: "lease-1:2" });
+  });
+
   it("rejects stale worker-loss leases without changing the unfinished turn", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     expect(writer.interruptWorkerLoss({ ...loss, lease: { ...lease, ownerEpoch: 2 } }))

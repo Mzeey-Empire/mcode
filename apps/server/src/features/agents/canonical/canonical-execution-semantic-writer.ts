@@ -21,6 +21,12 @@ import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
 import { CanonicalParentTurnWrite } from "./canonical-parent-turn-write.js";
+import {
+  ParentAssistantTextCheckpointService,
+  PARENT_ASSISTANT_TEXT_QUEUE_POLICY,
+  type ParentAssistantTextCheckpointInput,
+  type ParentAssistantTextCheckpointResult,
+} from "../turns/parent-assistant-text-checkpoint-service.js";
 
 const HEAD_ID = "semantic:head";
 const HEAD_KIND = "semantic-head";
@@ -76,6 +82,12 @@ const storedReceiptSchema = z.object({
     eventCount: z.number().int().nonnegative(),
   }).optional(),
   providerEvents: z.array(projectedProviderEventSchema).optional(),
+  assistantTextCheckpoint: z.object({
+    outcome: z.literal("committed"),
+    durableThrough: z.number().int().nonnegative(),
+    committedItems: z.number().int().positive(),
+    committedBytes: z.number().int().positive(),
+  }).optional(),
 });
 const storedOperationSchema = z.object({
   kind: z.string(),
@@ -115,6 +127,7 @@ export interface LostExecutionInterruption {
 export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter {
   private readonly turns: CanonicalParentTurnWrite;
   private readonly providerProjector: CanonicalCommittedProviderProjector;
+  private readonly assistantText: ParentAssistantTextCheckpointService;
   private readonly findOperation: ReturnType<Database["prepare"]>;
   private readonly listPublicationChunks: ReturnType<Database["prepare"]>;
   private readonly findPublishedEvent: ReturnType<Database["prepare"]>;
@@ -137,6 +150,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.bufferPublication(events);
     });
     this.providerProjector = new CanonicalCommittedProviderProjector(codexBoundary);
+    this.assistantText = new ParentAssistantTextCheckpointService(db);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
     this.listPublicationChunks = db.prepare("SELECT operation_id, kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id > ? AND operation_id < ? ORDER BY operation_id LIMIT ?");
     this.findPublishedEvent = db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE execution_id = ? AND accepted_sequence = ?");
@@ -153,7 +167,12 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (!validOperation(operation)) return conflict(operation);
     const hash = fingerprint(operation);
     const existing = this.existingReceipt(operation, hash);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.kind === "committed" && operation.mutation.kind === "finish") {
+        this.assistantText.retire(operation.execution.executionId);
+      }
+      return existing;
+    }
     try {
       return await this.applySupported(operation, hash);
     } catch (error) {
@@ -212,6 +231,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     switch (operation.mutation.kind) {
       case "begin": return this.begin(operation, hash);
       case "append-events": return this.append(operation, hash);
+      case "append-assistant-text": return this.appendAssistantText(operation, hash);
       case "checkpoint":
       case "stop-requested":
       case "provider-outcome": return this.control(operation, hash);
@@ -299,6 +319,21 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     })());
   }
 
+  private appendAssistantText(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
+    const mutation = operation.mutation;
+    if (mutation.kind !== "append-assistant-text") return conflict(operation);
+    return this.db.transaction(() => {
+      const head = this.requireNextHead(operation);
+      const result = this.assistantText.appendChunk(mutation.inputs);
+      if (result.outcome !== "committed") throw new SemanticConflict();
+      // Assistant text has its own durable sequence; it does not advance the canonical event revision.
+      const receipt = committed(operation, head.durableRevision, undefined, undefined, result);
+      this.storeHead({ ...head, ordinal: operation.ordinal });
+      this.storeReceipt(operation, hash, receipt);
+      return receipt;
+    })();
+  }
+
   private async finish(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
     const mutation = operation.mutation;
     if (mutation.kind !== "finish" || !validFinish(operation, mutation)) return conflict(operation);
@@ -319,7 +354,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     });
     if (result.outcome !== "committed") return conflict(operation);
     const stored = this.loadOperation(operation.execution.executionId, operation.operationId);
-    return stored ? this.readReceipt(operation, hash, stored) : conflict(operation);
+    if (!stored) return conflict(operation);
+    const receipt = this.readReceipt(operation, hash, stored);
+    if (receipt.kind === "committed") this.assistantText.retire(operation.execution.executionId);
+    return receipt;
   }
 
   private stageTerminal(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
@@ -480,7 +518,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (stored.kind !== `semantic:${operation.mutation.kind}` || stored.input_hash !== hash) return conflict(operation);
     const receipt = storedReceiptSchema.parse(JSON.parse(stored.receipt_json));
     return receipt.operationId === operation.operationId && Number.isSafeInteger(receipt.durableRevision)
-      ? committed(operation, receipt.durableRevision, receipt.providerCommit, receipt.providerEvents) : conflict(operation);
+      ? committed(operation, receipt.durableRevision, receipt.providerCommit, receipt.providerEvents,
+        receipt.assistantTextCheckpoint) : conflict(operation);
   }
 
   private publishStoredEvents(executionId: string, hash: string): void {
@@ -539,7 +578,35 @@ function validOperation(operation: ExecutionSemanticOperation): boolean {
   return operation.operationId === `${operation.lease.leaseId}:${operation.ordinal}`
     && operation.operationId !== HEAD_ID && operation.operationId.length <= 256
     && Number.isSafeInteger(operation.ordinal) && operation.ordinal > 0
-    && validIdentity(operation.execution) && validLease(operation.lease);
+    && validIdentity(operation.execution) && validLease(operation.lease)
+    && (operation.mutation.kind !== "append-assistant-text"
+      || validAssistantTextInput(operation.mutation.inputs, operation.execution));
+}
+
+function validAssistantTextInput(
+  inputs: readonly ParentAssistantTextCheckpointInput[],
+  execution: ExecutionIdentity,
+): boolean {
+  if (!Array.isArray(inputs) || inputs.length === 0
+    || inputs.length > PARENT_ASSISTANT_TEXT_QUEUE_POLICY.maxQueuedEvents) return false;
+  let bytes = 0;
+  const first = inputs[0];
+  if (!first || !validAssistantTextEntry(first, execution)) return false;
+  const firstSequence = first.sequence;
+  for (const [index, input] of inputs.entries()) {
+    if (!validAssistantTextEntry(input, execution) || input.sequence !== firstSequence + index) return false;
+    bytes += Buffer.byteLength(input.text, "utf8");
+    if (bytes > PARENT_ASSISTANT_TEXT_QUEUE_POLICY.maxChunkBytes) return false;
+  }
+  return bytes > 0;
+}
+
+function validAssistantTextEntry(input: ParentAssistantTextCheckpointInput | undefined, execution: ExecutionIdentity): boolean {
+  if (!input) return false;
+  return input.executionId === execution.executionId && input.threadId === execution.threadId
+    && input.turnId === execution.turnId && typeof input.text === "string"
+    && Buffer.byteLength(input.text, "utf8") > 0
+    && Number.isSafeInteger(input.sequence) && input.sequence > 0;
 }
 
 function validIdentity(identity: ExecutionIdentity): boolean {
@@ -598,11 +665,13 @@ function committed(
   durableRevision: number,
   providerCommit?: ExecutionProviderCommitReceipt,
   providerEvents?: readonly ProjectedCommittedProviderEvent[],
+  assistantTextCheckpoint?: ParentAssistantTextCheckpointResult,
 ): Extract<ExecutionWriteReceipt, { kind: "committed" }> {
   return {
     kind: "committed", operationId: operation.operationId, durableRevision,
     ...(providerCommit ? { providerCommit } : {}),
     ...(providerEvents ? { providerEvents } : {}),
+    ...(assistantTextCheckpoint ? { assistantTextCheckpoint } : {}),
   };
 }
 
