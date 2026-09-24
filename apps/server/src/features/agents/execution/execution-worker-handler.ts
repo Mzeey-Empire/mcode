@@ -1,4 +1,4 @@
-import type { AgentEvent, TurnOutcome } from "@mcode/contracts";
+import type { AgentEvent, PlanQuestion, PlanRecord, TurnOutcome } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 
 import type {
@@ -16,6 +16,7 @@ import type {
 } from "../turns/parent-assistant-text-checkpoint-service.js";
 import type { ParentNarrativeRecoveryCommit } from "../turns/parent-turn-durability.js";
 import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
+import type { PlanPersistenceReady } from "../planning/plan-execution-state.js";
 import type {
   ExecutionIdentity,
   ExecutionLease,
@@ -42,6 +43,8 @@ export type ExecutionWorkCommand =
     readonly taskIntents?: readonly TaskToolWriteIntent[];
     readonly systemIntents?: readonly CodexSystemWriterIntent[];
     readonly message?: DataOnlyParentLiveMessageInput;
+    readonly planQuestions?: readonly PlanQuestion[];
+    readonly planOutput?: PlanPersistenceReady;
     readonly publication: ExecutionLivePublicationIntent;
   }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
@@ -72,6 +75,8 @@ export interface ExecutionSemanticOperation {
       readonly taskIntents?: readonly TaskToolWriteIntent[];
       readonly systemIntents?: readonly CodexSystemWriterIntent[];
       readonly message?: DataOnlyParentLiveMessageInput;
+      readonly planQuestions?: readonly PlanQuestion[];
+      readonly planOutput?: PlanPersistenceReady;
     }
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
@@ -93,6 +98,13 @@ export interface ExecutionLivePublicationReceipt extends ExecutionLivePublicatio
   readonly publicationId: string;
 }
 
+/** Plan questions may be pushed only after their text event's durable writer receipt. */
+export interface ExecutionPlanQuestionsReceipt {
+  readonly publicationId: string;
+  readonly threadId: string;
+  readonly questions: readonly PlanQuestion[];
+}
+
 /** Provider-facing receipt values retained with the execution operation. */
 export type ExecutionProviderCommitReceipt = Pick<
   CanonicalAgentCommitResult,
@@ -110,7 +122,7 @@ export type ProjectedCommittedProviderEvent = Omit<
 
 /** A writer reply is valid only after the semantic operation commits durably. */
 export type ExecutionWriteReceipt =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[] }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[]; readonly planQuestions?: ExecutionPlanQuestionsReceipt; readonly planOutput?: PlanRecord }
   | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState?: "not-started" | "already-terminal" };
 
 /**
@@ -124,7 +136,7 @@ export interface ExecutionSemanticWriter {
 
 /** A command result that never calls an uncommitted mutation successful. */
 export type ExecutionWorkerResult =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[] }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[]; readonly planQuestions?: ExecutionPlanQuestionsReceipt; readonly planOutput?: PlanRecord }
   | { readonly kind: "released" }
   | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-text-routing" | "invalid-narrative-routing" | "invalid-stop-watermark" | "writer-conflict" };
 
@@ -301,6 +313,8 @@ function liveEventMutation(
     ...(command.taskIntents ? { taskIntents: command.taskIntents } : {}),
     ...(command.systemIntents ? { systemIntents: command.systemIntents } : {}),
     ...(command.message ? { message: command.message } : {}),
+    ...(command.planQuestions ? { planQuestions: command.planQuestions } : {}),
+    ...(command.planOutput ? { planOutput: command.planOutput } : {}),
   };
 }
 
@@ -380,6 +394,7 @@ function validLiveEventRouting(
   execution: ExecutionIdentity,
 ): boolean {
   if (command.narrative !== undefined && command.narrative?.executionId !== execution.executionId) return false;
+  if (!validPlanMessageRouting(command)) return false;
   switch (command.text?.kind) {
     case "unchanged":
     case "reclassify":
@@ -391,6 +406,10 @@ function validLiveEventRouting(
     default:
       return false;
   }
+}
+
+function validPlanMessageRouting(command: Extract<ExecutionWorkCommand, { kind: "live-event" }>): boolean {
+  return command.planOutput === undefined || command.message !== undefined;
 }
 
 function validStartInput(
@@ -460,6 +479,8 @@ function committedResult(receipt: Extract<ExecutionWriteReceipt, { kind: "commit
     ...(receipt.providerEvents ? { providerEvents: receipt.providerEvents } : {}),
     ...(receipt.assistantTextCheckpoint ? { assistantTextCheckpoint: receipt.assistantTextCheckpoint } : {}),
     ...(receipt.livePublication ? { livePublication: receipt.livePublication } : {}),
+    ...(receipt.planQuestions ? { planQuestions: receipt.planQuestions } : {}),
+    ...(receipt.planOutput ? { planOutput: receipt.planOutput } : {}),
   };
 }
 

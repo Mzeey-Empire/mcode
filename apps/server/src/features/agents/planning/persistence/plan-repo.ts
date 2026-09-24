@@ -111,6 +111,12 @@ export class PlanRepo {
     return row ? this.toRecord(row) : null;
   }
 
+  /** Find the plan bound to one durable assistant message. */
+  getByMessageId(messageId: string): PlanRecord | null {
+    const row = this.orm.select().from(plans).where(eq(plans.messageId, messageId)).get();
+    return row ? this.toRecord(row) : null;
+  }
+
   private toRecord(row: Row): PlanRecord {
     return {
       id: row.id,

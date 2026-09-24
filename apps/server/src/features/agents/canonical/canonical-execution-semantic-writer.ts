@@ -5,6 +5,9 @@ import {
   AgentEventType,
   CanonicalAgentEventEnvelopeSchema,
   ParentNarrativeRecoveryItemSchema,
+  PlanQuestionBatchSchema,
+  PlanRecordSchema,
+  PlanSectionNavSchema,
   ProviderIdSchema,
   TurnOutcomeSchema,
   type TurnOutcome,
@@ -21,6 +24,7 @@ import type {
   ExecutionSemanticWriter,
   ExecutionWriteReceipt,
   ExecutionLivePublicationReceipt,
+  ExecutionPlanQuestionsReceipt,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
@@ -29,6 +33,7 @@ import { CanonicalCodexSystemErrorProjection, matchesCodexSystemIntents } from "
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
 import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput } from "./canonical-parent-turn-write.js";
 import { TaskRepo } from "../orchestration/persistence/task-repo.js";
+import { PlanRepo } from "../planning/persistence/plan-repo.js";
 import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import {
   ParentAssistantTextCheckpointService,
@@ -70,6 +75,13 @@ const taskIntentsSchema = z.array(z.discriminatedUnion("kind", [
     group: z.string().max(128), patch: storedTaskSchema.pick({ status: true, content: true, activeForm: true }).partial() }).strict(),
   z.object({ kind: z.literal("remove-task"), id: z.string().min(1).max(256), group: z.string().max(128) }).strict(),
 ])).max(16);
+const planOutputSchema = z.object({
+  title: z.string().trim().min(1).max(512),
+  contentMd: z.string().min(1).max(256 * 1024),
+  sectionsJson: z.string().max(64 * 1024),
+  changeSummary: z.string().max(4096).nullable(),
+}).strict();
+const planSectionsSchema = z.array(PlanSectionNavSchema()).max(128);
 const storedPublicationSequencesSchema = z.array(z.union([
   z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   z.object({ executionId: z.string(), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
@@ -130,6 +142,11 @@ const storedReceiptSchema = z.object({
     committedItems: z.number().int().positive(),
     committedBytes: z.number().int().positive(),
   }).optional(),
+  planQuestions: z.object({
+    publicationId: z.string(), threadId: z.string(),
+    questions: PlanQuestionBatchSchema().shape.questions,
+  }).optional(),
+  planOutput: PlanRecordSchema().optional(),
 });
 const storedOperationSchema = z.object({
   kind: z.string(),
@@ -174,6 +191,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private readonly contextCompaction: CanonicalContextCompactionProjection;
   private readonly systemProjection: CanonicalCodexSystemErrorProjection;
   private readonly tasks: TaskRepo;
+  private readonly plans: PlanRepo;
   private readonly assistantText: ParentAssistantTextCheckpointService;
   private readonly canonical: CanonicalAgentBoundary;
   private readonly findOperation: ReturnType<Database["prepare"]>;
@@ -202,6 +220,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.contextCompaction = new CanonicalContextCompactionProjection(db);
     this.systemProjection = new CanonicalCodexSystemErrorProjection(db);
     this.tasks = new TaskRepo(db);
+    this.plans = new PlanRepo(db);
     this.assistantText = new ParentAssistantTextCheckpointService(db);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
     this.listPublicationChunks = db.prepare("SELECT operation_id, kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id > ? AND operation_id < ? ORDER BY operation_id LIMIT ?");
@@ -423,15 +442,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const head = this.requireNextHead(operation);
       if (head.providerId !== "codex") throw new SemanticConflict();
       this.requireUnfinishedCheckpoint(operation.execution);
-      this.stageLiveMessage(operation.execution, head, mutation.message);
-      const textResult = this.applyLiveText(mutation.text, operation.execution.executionId);
-      if (mutation.narrative) this.persistNarrativeDelta(mutation.narrative);
-      if (mutation.taskIntents) this.applyTaskIntents(operation.execution.threadId, mutation.taskIntents);
-      if (mutation.text.kind === "reclassify" && !this.assistantText.resetInTransaction(operation.execution.executionId)) {
-        throw new SemanticConflict();
-      }
+      const { textResult, planQuestions, planOutput } = this.applyLiveFeatureEffects(operation, head);
       const livePublication = this.projectLiveSystem(operation);
-      const committedReceipt = committed(operation, head.durableRevision, undefined, undefined, textResult, livePublication);
+      const committedReceipt = committed(operation, head.durableRevision, undefined, undefined, textResult,
+        livePublication, planQuestions, planOutput);
       this.storeHead({ ...head, ordinal: operation.ordinal,
         ...(mutation.message ? { assignedMessageId: mutation.message.messageId } : {}) });
       this.storeReceipt(operation, hash, committedReceipt);
@@ -454,6 +468,28 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     return [{ publicationId: `${operation.operationId}:0`, after: result.after, event: result.event }];
   }
 
+  private applyLiveFeatureEffects(
+    operation: ExecutionSemanticOperation,
+    head: SemanticHead,
+  ) {
+    const mutation = operation.mutation;
+    if (mutation.kind !== "live-event") throw new SemanticConflict();
+    this.stageLiveMessage(operation.execution, head, mutation.message);
+    const textResult = this.applyLiveText(mutation.text, operation.execution.executionId);
+    if (mutation.narrative) this.persistNarrativeDelta(mutation.narrative);
+    if (mutation.taskIntents) this.applyTaskIntents(operation.execution.threadId, mutation.taskIntents);
+    const planOutput = this.persistLivePlanOutput(operation.execution.threadId, mutation);
+    if (mutation.text.kind === "reclassify" && !this.assistantText.resetInTransaction(operation.execution.executionId)) {
+      throw new SemanticConflict();
+    }
+    const planQuestions = mutation.planQuestions ? {
+      publicationId: `${operation.operationId}:plan-questions`,
+      threadId: operation.execution.threadId,
+      questions: mutation.planQuestions,
+    } satisfies ExecutionPlanQuestionsReceipt : undefined;
+    return { textResult, planQuestions, planOutput };
+  }
+
   private stageLiveMessage(
     execution: ExecutionIdentity,
     head: SemanticHead,
@@ -462,6 +498,15 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (!message) return;
     if (head.assignedMessageId && head.assignedMessageId !== message.messageId) throw new SemanticConflict();
     if (!this.turns.stageLiveAssistant(execution, message)) throw new SemanticConflict();
+  }
+
+  private persistLivePlanOutput(
+    threadId: string,
+    mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>,
+  ) {
+    return mutation.planOutput && mutation.message
+      ? this.persistPlanOutput(threadId, mutation.message.messageId, mutation.planOutput)
+      : undefined;
   }
 
   private applyLiveText(
@@ -487,6 +532,16 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         case "remove-task": this.tasks.removeTask(threadId, intent.id, intent.group); break;
       }
     }
+  }
+
+  private persistPlanOutput(
+    threadId: string,
+    messageId: string,
+    output: NonNullable<Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>["planOutput"]>,
+  ) {
+    if (this.plans.getByMessageId(messageId)) throw new SemanticConflict();
+    return this.plans.create(threadId, messageId, output.title, output.contentMd,
+      output.sectionsJson, output.changeSummary);
   }
 
   private requireUnfinishedCheckpoint(execution: ExecutionIdentity): void {
@@ -707,7 +762,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     }
     return receipt.operationId === operation.operationId && Number.isSafeInteger(receipt.durableRevision)
       ? committed(operation, receipt.durableRevision, receipt.providerCommit, receipt.providerEvents,
-        receipt.assistantTextCheckpoint, receipt.livePublication) : conflict(operation);
+        receipt.assistantTextCheckpoint, receipt.livePublication, receipt.planQuestions, receipt.planOutput) : conflict(operation);
   }
 
   private matchesLivePublicationReceipt(
@@ -859,8 +914,17 @@ function validLiveEventInput(operation: ExecutionSemanticOperation): boolean {
     || !AgentEventSchema().safeParse(event).success
     || !validLiveEventAssociation(mutation, event, operation.execution)) return false;
   if (mutation.narrative && !validNarrativeDeltaInput(mutation.narrative, operation.execution)) return false;
-  if (!validLiveTaskIntents(mutation.taskIntents, event)) return false;
+  if (!validLiveFeatureIntents(mutation, event, operation.execution.threadId)) return false;
   return validLiveEventBudget(operation, mutation);
+}
+
+function validLiveFeatureIntents(
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>,
+  event: ExecutionLivePublicationIntent["event"],
+  threadId: string,
+): boolean {
+  return validLiveTaskIntents(mutation.taskIntents, event)
+    && validLivePlanProjection(mutation, event, threadId);
 }
 
 function validLiveSystemMutation(
@@ -871,6 +935,24 @@ function validLiveSystemMutation(
   return Array.isArray(mutation.systemIntents) && mutation.systemIntents.length <= 1
     && mutation.text.kind === "unchanged" && mutation.narrative === undefined && mutation.taskIntents === undefined
     && matchesCodexSystemIntents(event, mutation.systemIntents);
+}
+
+function validLivePlanProjection(
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>,
+  event: ExecutionLivePublicationIntent["event"],
+  threadId: string,
+): boolean {
+  if (mutation.planQuestions !== undefined) {
+    if (event.type !== "textDelta" || mutation.planOutput !== undefined
+      || !PlanQuestionBatchSchema().safeParse({ threadId, questions: mutation.planQuestions }).success) return false;
+  }
+  if (mutation.planOutput === undefined) return true;
+  if (event.type !== "message" || !mutation.message || !planOutputSchema.safeParse(mutation.planOutput).success) return false;
+  try {
+    return planSectionsSchema.safeParse(JSON.parse(mutation.planOutput.sectionsJson)).success;
+  } catch {
+    return false;
+  }
 }
 
 function validLiveTaskIntents(
@@ -896,7 +978,8 @@ function validLiveEventBudget(
     ? mutation.narrative.items.length + (mutation.narrative.discardedItemIds?.length ?? 0) : 0;
   const textRows = mutation.text.kind === "append" ? mutation.text.inputs.length
     : mutation.text.kind === "unchanged" ? 0 : 1;
-  const rows = textRows + narrativeRows + (mutation.taskIntents?.length ?? 0) + (mutation.message ? 1 : 0);
+  const rows = textRows + narrativeRows + (mutation.taskIntents?.length ?? 0)
+    + Number(Boolean(mutation.message)) + Number(Boolean(mutation.planOutput));
   if (rows > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
   return Buffer.byteLength(JSON.stringify(operation), "utf8") <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes;
 }
@@ -1082,6 +1165,8 @@ function committed(
   providerEvents?: readonly ProjectedCommittedProviderEvent[],
   assistantTextCheckpoint?: ParentAssistantTextCheckpointResult,
   livePublication: readonly ExecutionLivePublicationReceipt[] | undefined = livePublicationFor(operation),
+  planQuestions?: ExecutionPlanQuestionsReceipt,
+  planOutput?: ReturnType<PlanRepo["create"]>,
 ): Extract<ExecutionWriteReceipt, { kind: "committed" }> {
   return {
     kind: "committed", operationId: operation.operationId, durableRevision,
@@ -1089,6 +1174,8 @@ function committed(
     ...(providerEvents ? { providerEvents } : {}),
     ...(assistantTextCheckpoint ? { assistantTextCheckpoint } : {}),
     ...(livePublication ? { livePublication } : {}),
+    ...(planQuestions ? { planQuestions } : {}),
+    ...(planOutput ? { planOutput } : {}),
   };
 }
 
