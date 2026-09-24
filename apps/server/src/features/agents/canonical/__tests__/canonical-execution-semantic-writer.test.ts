@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
+import { AgentEventType } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
@@ -403,6 +404,90 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       .get(EXECUTION_ID, "semantic:head")).toMatchObject({ kind: "semantic-head" });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind != 'semantic-publication'").get(EXECUTION_ID))
       .toEqual({ count: 4 });
+  });
+
+  it("retains terminal live publication behind a completed finalization and rejects invalid routing", async () => {
+    const ended = { type: AgentEventType.Ended, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, outcome: "completed" as const };
+    const invalidStart: ExecutionSemanticOperation = {
+      ...operation(1, { kind: "begin", providerId: "codex", input: startInput() }),
+      livePublication: [{ after: "terminal", event: ended }],
+    };
+    expect(await writer.transact(invalidStart)).toEqual({ kind: "conflict", operationId: "lease-1:1" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ count: 0 });
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+
+    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const input = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+      providerId: "codex", providerIdentities: [], outcome: "completed" as const,
+      projection: { message: staged, narrative: [] } };
+    const finish: ExecutionSemanticOperation = {
+      ...operation(2, { kind: "finish", outcome: "completed", input }),
+      livePublication: [{ after: "terminal", event: ended }],
+    };
+    db.run("CREATE TRIGGER fail_live_finish BEFORE UPDATE OF kind ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:finish' BEGIN SELECT RAISE(ABORT, 'finish unavailable'); END");
+    await expect(writer.transact(finish)).rejects.toThrow("finish unavailable");
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ terminal_outcome: null });
+    db.run("DROP TRIGGER fail_live_finish");
+
+    const receipt = await writer.transact(finish);
+    expect(receipt).toMatchObject({ kind: "committed", livePublication: [{
+      publicationId: "lease-1:2:0", after: "terminal", event: ended,
+    }] });
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ terminal_outcome: "completed" });
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalExecutionSemanticWriter(db, () => {});
+    expect(await writer.transact(finish)).toEqual(receipt);
+    expect(await writer.transact({ ...finish, livePublication: [{ after: "terminal", event: {
+      ...ended, threadId: "another-thread",
+    } }] })).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+  });
+
+  it("rejects oversized live intents before writes and oversized receipts before replay publication", async () => {
+    const started = { type: AgentEventType.TurnStarted, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID };
+    const begin: ExecutionSemanticOperation = {
+      ...operation(1, { kind: "begin", providerId: "codex", input: startInput() }),
+      livePublication: [{ after: "writer", event: started }],
+    };
+    expect(await writer.transact({ ...begin, livePublication: Array.from({ length: 65 }, () => ({
+      after: "writer" as const, event: started,
+    })) })).toEqual({ kind: "conflict", operationId: "lease-1:1" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ count: 0 });
+
+    const beginReceipt = await writer.transact(begin);
+    expect(beginReceipt.kind).toBe("committed");
+    const before = db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?")
+      .get(EXECUTION_ID);
+    published.length = 0;
+    const largeDelta: ExecutionSemanticOperation = {
+      ...operation(2, { kind: "append-events", phase: "running", nativeCursor: null, events: [event()] }),
+      livePublication: [{ after: "writer", event: {
+        type: AgentEventType.TextDelta, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+        delta: "x".repeat(256 * 1024),
+      } }],
+    };
+    expect(await writer.transact(largeDelta)).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual(before);
+    expect(published).toEqual([]);
+
+    db.prepare("UPDATE canonical_writer_operation_receipts SET receipt_json = ? WHERE execution_id = ? AND operation_id = ?")
+      .run("x".repeat(512 * 1024 + 1), EXECUTION_ID, begin.operationId);
+    await expect(writer.transact(begin)).rejects.toThrow("Live publication receipt exceeds its size limit");
+    expect(published).toEqual([]);
+
+    db.prepare("UPDATE canonical_writer_operation_receipts SET receipt_json = ? WHERE execution_id = ? AND operation_id = ?")
+      .run(JSON.stringify({ ...beginReceipt, publicationVersion: 1, livePublication: [{
+        publicationId: "lease-1:1:0", after: "writer",
+        event: { ...started, threadId: "another-thread" },
+      }] }), EXECUTION_ID, begin.operationId);
+    await expect(writer.transact(begin)).rejects.toThrow("Live publication receipt does not match its operation");
+    expect(published).toEqual([]);
   });
 
   it("rejects stale leases and skipped ordinals while checkpointing without a new event", async () => {

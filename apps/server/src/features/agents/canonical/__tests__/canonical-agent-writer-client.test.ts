@@ -4,7 +4,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import { AgentEventType, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
@@ -161,6 +161,41 @@ describe("canonical SQLite writer", () => {
     expect(replay).toEqual(first);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 3 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 1 });
+  });
+
+  it("recovers one durable live publication identity after a file-backed writer loses its reply", async () => {
+    const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID };
+    const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "publication-lease" };
+    const operation: ExecutionSemanticOperation = {
+      operationId: "publication-lease:1", execution, lease, ordinal: 1,
+      mutation: { kind: "begin", providerId: "codex", input: {
+        thread: { id: THREAD_ID, workspaceId: "writer-workspace", providerId: "codex", createdAt: NOW },
+        turnId: TURN_ID, executionId: EXECUTION_ID, permissionMode: "supervised", providerIdentities: [],
+        userMessage: { kind: "create", messageId: "publication-user", content: "Question", sequence: 1 },
+      } },
+      livePublication: [{ after: "writer", event: {
+        type: AgentEventType.TurnStarted, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+      } }],
+    };
+    let created = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => created++ === 0
+      ? workerDroppingReply("semantic-transacted")
+      : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+
+    const receipt = await writer.transactSemantic(operation, () => {});
+    expect(created).toBe(2);
+    expect(receipt).toMatchObject({ kind: "committed", livePublication: [{
+      publicationId: "publication-lease:1:0", after: "writer",
+      event: { type: AgentEventType.TurnStarted, turnExecutionId: EXECUTION_ID },
+    }] });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = ?").get("publication-user"))
+      .toEqual({ count: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, operation.operationId)).toEqual({ count: 1 });
+
+    await writer.close();
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect(await writer.transactSemantic(operation, () => {})).toEqual(receipt);
   });
 
   it("replays durable semantic assistant text after a worker reply is lost", async () => {

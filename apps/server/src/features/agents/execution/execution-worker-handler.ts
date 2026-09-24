@@ -1,4 +1,4 @@
-import type { TurnOutcome } from "@mcode/contracts";
+import type { AgentEvent, TurnOutcome } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 
 import type {
@@ -41,6 +41,8 @@ export interface ExecutionSemanticOperation {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
   readonly ordinal: number;
+  /** Live Codex events to release with this operation's durable receipt. */
+  readonly livePublication?: readonly ExecutionLivePublicationIntent[];
   readonly mutation:
     | { readonly kind: "begin"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput }
     | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
@@ -54,6 +56,17 @@ export interface ExecutionSemanticOperation {
     | { readonly kind: "stage-terminal"; readonly input: DataOnlyParentTerminalProjectionInput }
     | { readonly kind: "worker-lost"; readonly reason: string; readonly recoveryIncidentId: string }
     | { readonly kind: "finish"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput };
+}
+
+/** A live event has one durability barrier and stays inert until its semantic effects commit. */
+export interface ExecutionLivePublicationIntent {
+  readonly event: AgentEvent;
+  readonly after: "writer" | "terminal";
+}
+
+/** Stable identity lets the transport deduplicate a replayed publication receipt. */
+export interface ExecutionLivePublicationReceipt extends ExecutionLivePublicationIntent {
+  readonly publicationId: string;
 }
 
 /** Provider-facing receipt values retained with the execution operation. */
@@ -73,7 +86,7 @@ export type ProjectedCommittedProviderEvent = Omit<
 
 /** A writer reply is valid only after the semantic operation commits durably. */
 export type ExecutionWriteReceipt =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[] }
   | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState?: "not-started" | "already-terminal" };
 
 /**
@@ -87,7 +100,7 @@ export interface ExecutionSemanticWriter {
 
 /** A command result that never calls an uncommitted mutation successful. */
 export type ExecutionWorkerResult =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[] }
   | { readonly kind: "released" }
   | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-text-routing" | "invalid-narrative-routing" | "invalid-stop-watermark" | "writer-conflict" };
 
@@ -356,6 +369,7 @@ function committedResult(receipt: Extract<ExecutionWriteReceipt, { kind: "commit
     ...(receipt.providerCommit ? { providerCommit: receipt.providerCommit } : {}),
     ...(receipt.providerEvents ? { providerEvents: receipt.providerEvents } : {}),
     ...(receipt.assistantTextCheckpoint ? { assistantTextCheckpoint: receipt.assistantTextCheckpoint } : {}),
+    ...(receipt.livePublication ? { livePublication: receipt.livePublication } : {}),
   };
 }
 

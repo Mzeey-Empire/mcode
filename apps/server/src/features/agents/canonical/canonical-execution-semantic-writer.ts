@@ -18,6 +18,8 @@ import type {
   ExecutionSemanticOperation,
   ExecutionSemanticWriter,
   ExecutionWriteReceipt,
+  ExecutionLivePublicationIntent,
+  ExecutionLivePublicationReceipt,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
@@ -37,6 +39,9 @@ const PENDING_FINISH_KIND = "semantic:finish-pending";
 const PUBLICATION_CHUNK_SIZE = 64;
 const PUBLICATION_CHUNK_PAGE_SIZE = 16;
 const MAX_BUFFERED_PUBLICATION_EVENTS = 2_048;
+const MAX_LIVE_PUBLICATION_EVENTS = 64;
+const MAX_LIVE_PUBLICATION_BYTES = 256 * 1024;
+const MAX_LIVE_RECEIPT_BYTES = 512 * 1024;
 const narrativeDeltaSchema = z.object({
   executionId: z.string(),
   items: z.array(ParentNarrativeRecoveryItemSchema()),
@@ -80,6 +85,11 @@ const storedReceiptSchema = z.object({
   operationId: z.string(),
   durableRevision: z.number().int(),
   publicationVersion: z.literal(1),
+  livePublication: z.array(z.object({
+    publicationId: z.string(),
+    after: z.enum(["writer", "terminal"]),
+    event: AgentEventSchema(),
+  })).min(1).max(MAX_LIVE_PUBLICATION_EVENTS).optional(),
   providerCommit: z.object({
     outcome: z.enum(["committed", "duplicate", "conflict", "terminal-outcome-confirmed", "ingest-overflow"]),
     conversationRevision: z.number().int(),
@@ -264,6 +274,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       return conflict(operation);
     }
     if (mutation.providerId !== mutation.input.thread.providerId
+      || !validPublicationProvider(operation, mutation.providerId)
       || mutation.input.thread.id !== operation.execution.threadId
       || mutation.input.turnId !== operation.execution.turnId
       || mutation.input.executionId !== operation.execution.executionId) return conflict(operation);
@@ -299,6 +310,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         || event.routing.executionId !== operation.execution.executionId)) return conflict(operation);
     return this.withBufferedPublication(() => this.db.transaction(() => {
       const head = this.requireNextHead(operation);
+      if (!validPublicationProvider(operation, head.providerId)) throw new SemanticConflict();
       const result = this.turns.append({
         ...operation.execution,
         phase: mutation.phase,
@@ -365,9 +377,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private async finish(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
     const mutation = operation.mutation;
     if (mutation.kind !== "finish" || !validFinish(operation, mutation)) return conflict(operation);
-    const head = this.loadHead(operation.execution.executionId);
-    if (!head || !nextHead(head, operation) || head.providerId !== mutation.input.providerId) return conflict(operation);
-    if (!this.validStagedFinish(operation, head)) return conflict(operation);
+    if (!this.validFinishHead(operation, mutation.input.providerId)) return conflict(operation);
     this.reserveFinish(operation, hash);
     this.publishStoredEvents(operation.execution.executionId, hash);
     const result = await this.turns.finish(mutation.input, (batch) => {
@@ -466,6 +476,12 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     return head.providerOutcome === mutation.outcome && this.hasStagedTerminalPredecessor(operation);
   }
 
+  private validFinishHead(operation: ExecutionSemanticOperation, providerId: string): boolean {
+    const head = this.loadHead(operation.execution.executionId);
+    return Boolean(head && nextHead(head, operation) && head.providerId === providerId
+      && validPublicationProvider(operation, head.providerId) && this.validStagedFinish(operation, head));
+  }
+
   private requireNextHead(operation: ExecutionSemanticOperation): SemanticHead {
     const head = this.loadHead(operation.execution.executionId);
     if (!head || !nextHead(head, operation)) throw new SemanticConflict();
@@ -520,6 +536,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private storeReceipt(operation: ExecutionSemanticOperation, hash: string, receipt: ExecutionWriteReceipt): void {
     const receiptJson = JSON.stringify({ ...receipt, publicationVersion: 1 });
+    if (operation.livePublication && Buffer.byteLength(receiptJson, "utf8") > MAX_LIVE_RECEIPT_BYTES) {
+      throw new SemanticConflict();
+    }
     if (operation.mutation.kind === "finish") {
       const updated = this.commitPendingFinish.run(
         "semantic:finish", receiptJson, operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash,
@@ -544,10 +563,16 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private readReceipt(operation: ExecutionSemanticOperation, hash: string, stored: StoredOperation): ExecutionWriteReceipt {
     if (stored.kind !== `semantic:${operation.mutation.kind}` || stored.input_hash !== hash) return conflict(operation);
+    if (operation.livePublication && Buffer.byteLength(stored.receipt_json, "utf8") > MAX_LIVE_RECEIPT_BYTES) {
+      throw new Error("Live publication receipt exceeds its size limit");
+    }
     const receipt = storedReceiptSchema.parse(JSON.parse(stored.receipt_json));
+    if (fingerprint(receipt.livePublication ?? null) !== fingerprint(livePublicationFor(operation) ?? null)) {
+      throw new Error("Live publication receipt does not match its operation");
+    }
     return receipt.operationId === operation.operationId && Number.isSafeInteger(receipt.durableRevision)
       ? committed(operation, receipt.durableRevision, receipt.providerCommit, receipt.providerEvents,
-        receipt.assistantTextCheckpoint) : conflict(operation);
+        receipt.assistantTextCheckpoint, receipt.livePublication) : conflict(operation);
   }
 
   private publishStoredEvents(executionId: string, hash: string): void {
@@ -607,7 +632,51 @@ function validOperation(operation: ExecutionSemanticOperation): boolean {
     && operation.operationId !== HEAD_ID && operation.operationId.length <= 256
     && Number.isSafeInteger(operation.ordinal) && operation.ordinal > 0
     && validIdentity(operation.execution) && validLease(operation.lease)
-    && validSemanticMutationInput(operation);
+    && validSemanticMutationInput(operation)
+    && validLivePublication(operation);
+}
+
+function validLivePublication(operation: ExecutionSemanticOperation): boolean {
+  const publication = operation.livePublication;
+  if (publication === undefined) return true;
+  if (!validLivePublicationShape(publication, operation.mutation.kind)) return false;
+  const barrier = operation.mutation.kind === "finish" ? "terminal" : "writer";
+  let bytes = 0;
+  for (const intent of publication) {
+    if (!validLivePublicationIntent(intent, operation, barrier)) return false;
+    bytes += Buffer.byteLength(JSON.stringify(intent), "utf8");
+    if (bytes > MAX_LIVE_PUBLICATION_BYTES) return false;
+  }
+  return true;
+}
+
+function validLivePublicationShape(
+  publication: readonly ExecutionLivePublicationIntent[],
+  mutationKind: ExecutionSemanticOperation["mutation"]["kind"],
+): boolean {
+  return Array.isArray(publication) && publication.length > 0 && publication.length <= MAX_LIVE_PUBLICATION_EVENTS
+    && (mutationKind === "begin" || mutationKind === "append-events" || mutationKind === "finish");
+}
+
+function validLivePublicationIntent(
+  intent: NonNullable<ExecutionSemanticOperation["livePublication"]>[number],
+  operation: ExecutionSemanticOperation,
+  barrier: "writer" | "terminal",
+): boolean {
+  return intent.after === barrier && AgentEventSchema().safeParse(intent.event).success
+    && intent.event.threadId === operation.execution.threadId
+    && intent.event.turnExecutionId === operation.execution.executionId
+    && (operation.mutation.kind !== "begin" || intent.event.type === "turnStarted")
+    && (intent.event.type !== "turnStarted" || operation.mutation.kind === "begin")
+    && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type));
+}
+
+function isTerminalLiveEvent(type: ExecutionLivePublicationIntent["event"]["type"]): boolean {
+  return type === "turnComplete" || type === "ended";
+}
+
+function validPublicationProvider(operation: ExecutionSemanticOperation, providerId: string): boolean {
+  return operation.livePublication === undefined || providerId === "codex";
 }
 
 function validSemanticMutationInput(operation: ExecutionSemanticOperation): boolean {
@@ -716,13 +785,22 @@ function committed(
   providerCommit?: ExecutionProviderCommitReceipt,
   providerEvents?: readonly ProjectedCommittedProviderEvent[],
   assistantTextCheckpoint?: ParentAssistantTextCheckpointResult,
+  livePublication: readonly ExecutionLivePublicationReceipt[] | undefined = livePublicationFor(operation),
 ): Extract<ExecutionWriteReceipt, { kind: "committed" }> {
   return {
     kind: "committed", operationId: operation.operationId, durableRevision,
     ...(providerCommit ? { providerCommit } : {}),
     ...(providerEvents ? { providerEvents } : {}),
     ...(assistantTextCheckpoint ? { assistantTextCheckpoint } : {}),
+    ...(livePublication ? { livePublication } : {}),
   };
+}
+
+function livePublicationFor(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationReceipt[] | undefined {
+  return operation.livePublication?.map((intent, index) => ({
+    publicationId: `${operation.operationId}:${index}`, after: intent.after,
+    event: AgentEventSchema().parse(intent.event),
+  }));
 }
 
 function conflict(operation: ExecutionSemanticOperation): Extract<ExecutionWriteReceipt, { kind: "conflict" }> {
