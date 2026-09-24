@@ -9,7 +9,6 @@ import {
   type ParentNarrativeRecoveryWriter,
 } from "../parent-narrative-recovery-coordinator.js";
 import type { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
-import type { ParentTurnDurability } from "../parent-turn-durability.js";
 
 const EXECUTION_ID = "execution-1";
 const THREAD_ID = "thread-1";
@@ -37,16 +36,13 @@ function coordinatorFor(writer: ParentNarrativeRecoveryWriter): ParentNarrativeR
   const narrativeStore = {
     recoverySnapshot: vi.fn(() => recoveryItems),
   } as unknown as NarrativeStore;
-  const durability = {
-    loadTurnByExecution: vi.fn(() => ({ id: "turn-1" })),
-  } as unknown as ParentTurnDurability;
-  return new ParentNarrativeRecoveryCoordinator(writer, narrativeStore, durability);
+  return new ParentNarrativeRecoveryCoordinator(writer, narrativeStore);
 }
 
 describe("ParentNarrativeRecoveryCoordinator", () => {
   it("retries an uncommitted recovery snapshot with the same operation identity", async () => {
     const recordParentNarrativeRecovery = vi.fn()
-      .mockResolvedValueOnce({ recorded: false })
+      .mockRejectedValueOnce(new Error("writer unavailable"))
       .mockResolvedValue({ recorded: true });
     const writer: ParentNarrativeRecoveryWriter = {
       recordParentNarrativeRecovery,
@@ -60,9 +56,7 @@ describe("ParentNarrativeRecoveryCoordinator", () => {
       discardedItemIds: [],
     };
 
-    await expect(coordinator.checkpoint(event)).rejects.toThrow(
-      `Canonical parent turn was not found: ${EXECUTION_ID}`,
-    );
+    await expect(coordinator.checkpoint(event)).rejects.toThrow("writer unavailable");
     await coordinator.checkpoint(event);
     await coordinator.checkpoint(event);
 
@@ -74,6 +68,26 @@ describe("ParentNarrativeRecoveryCoordinator", () => {
     expect(writer.acknowledgeOperation).not.toHaveBeenCalled();
     coordinator.acknowledgeHandled(event);
     await vi.waitFor(() => expect(writer.acknowledgeOperation).toHaveBeenCalledWith(EXECUTION_ID, operationId));
+  });
+
+  it("treats a missing execution as a normal receipt and retries its snapshot for later events", async () => {
+    const recordParentNarrativeRecovery = vi.fn()
+      .mockResolvedValueOnce({ recorded: false })
+      .mockResolvedValue({ recorded: true });
+    const writer: ParentNarrativeRecoveryWriter = {
+      recordParentNarrativeRecovery,
+      classifyParentNarrativeRecovery: vi.fn(),
+      acknowledgeOperation: vi.fn(async () => undefined),
+    };
+    const coordinator = coordinatorFor(writer);
+    await coordinator.checkpoint(event);
+    coordinator.acknowledgeHandled(event);
+    const laterEvent = { ...event };
+    await coordinator.checkpoint(laterEvent);
+
+    expect(recordParentNarrativeRecovery).toHaveBeenCalledTimes(2);
+    expect(recordParentNarrativeRecovery.mock.calls[1]?.[1]).toEqual(recordParentNarrativeRecovery.mock.calls[0]?.[1]);
+    expect(recordParentNarrativeRecovery.mock.calls[1]?.[0]).not.toBe(recordParentNarrativeRecovery.mock.calls[0]?.[0]);
   });
 
   it("retries the atomic narration classification without changing its input", async () => {

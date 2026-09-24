@@ -1218,13 +1218,13 @@ describe("AgentService narrative persistence", () => {
     });
     await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
-    expect(taskAppend).toHaveBeenCalledWith(THREAD_ID, {
+    await vi.waitFor(() => expect(taskAppend).toHaveBeenCalledWith(THREAD_ID, {
       id: "1",
       content: "Buy groceries - Pick up milk, eggs, bread",
       status: "pending",
       activeForm: "Buying groceries",
       group: "Tasks",
-    });
+    }));
   });
 
   it("does not persist a TaskCreate whose result errored", () => {
