@@ -20,6 +20,7 @@ import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
+import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
 import { StartupProgressCard, useThreadStartup, type StartupDisplayContext } from "@/features/thread-startup";
@@ -294,11 +295,13 @@ function ThreadPreparingShell({
   return (
     <div className="flex h-full flex-col bg-background" data-testid="thread-preparing-shell">
       <PreparingThreadHeader thread={thread} state={state} startupPending={pendingStartup !== undefined} />
-      <div className="flex flex-1 flex-col items-stretch justify-center gap-6 px-4 py-8 sm:px-8">
-        <div className="flex justify-end">
-          <div className="min-w-0 max-w-[min(82%,56rem)] rounded-xl border border-border/50 bg-muted/15 px-4 py-3 text-sm text-foreground/90"><p className="whitespace-pre-wrap break-words">{pendingStartup?.queuedMessage || thread.title}</p></div>
+      <div className="flex flex-1 flex-col justify-center px-4 py-8 sm:px-8">
+        <div className={`${PRIMARY_CONTENT_RAIL_CLASS} flex flex-col items-stretch gap-6`}>
+          <div className="flex justify-end">
+            <div className="min-w-0 max-w-[min(82%,56rem)] rounded-xl border border-border/50 bg-muted/15 px-4 py-3 text-sm text-foreground/90"><p className="whitespace-pre-wrap break-words">{pendingStartup?.queuedMessage || thread.title}</p></div>
+          </div>
+          <PreparingStartupContent thread={thread} pendingStartup={pendingStartup} startup={startup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} />} />
         </div>
-        <PreparingStartupContent thread={thread} pendingStartup={pendingStartup} startup={startup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} />} />
       </div>
       <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} />
     </div>
