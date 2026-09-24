@@ -79,7 +79,7 @@ export interface ExecutionMailboxOptions<Work extends { readonly kind: string },
   readonly workerCount: number;
   readonly limits: ExecutionMailboxLimits;
   readonly createWorker: (workerIndex: number) => ExecutionWorkerPort<ExecutionMailboxCommand<Work>, Result>;
-  readonly onWorkerLost: (assignments: readonly ExecutionLostAssignment[]) => void;
+  readonly onWorkerLost: (assignments: readonly ExecutionLostAssignment[], workerIndex: number) => void;
 }
 
 export type ExecutionClaim =
@@ -400,7 +400,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     for (const assignment of revokedAssignments) assignment.revoked = true;
     const revoked = revokedAssignments.map((assignment) => ({ execution: assignment.execution, lease: assignment.lease }));
     this.settleSlot(slot, "worker-lost");
-    this.onWorkerLost(revoked);
+    this.onWorkerLost(revoked, slot.index);
   }
 
   private settleSlot(slot: Slot<ExecutionMailboxCommand<Work>, Result>, kind: "worker-lost" | "shutdown"): void {
