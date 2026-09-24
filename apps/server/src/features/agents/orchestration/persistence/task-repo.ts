@@ -5,7 +5,10 @@
 
 import { injectable, inject } from "tsyringe";
 import type { Database } from "bun:sqlite";
+import { eq, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { logger } from "@mcode/shared";
+import { threadTasks } from "../../../../runtime/persistence/sqlite/schema.js";
 
 /**
  * Serialized task item stored in `thread_tasks.tasks_json`.
@@ -33,29 +36,15 @@ export interface StoredTask {
 /** Repository for persisting and retrieving per-thread TodoWrite task state. */
 @injectable()
 export class TaskRepo {
-  private readonly stmtUpsert;
-  private readonly stmtGet;
-  private readonly stmtDelete;
+  private readonly orm: BunSQLiteDatabase;
 
   constructor(@inject("Database") db: Database) {
-    this.stmtUpsert = db.prepare(`
-      INSERT INTO thread_tasks (thread_id, tasks_json, updated_at)
-      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-      ON CONFLICT(thread_id) DO UPDATE SET
-        tasks_json = excluded.tasks_json,
-        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    `);
-    this.stmtGet = db.prepare(
-      "SELECT tasks_json FROM thread_tasks WHERE thread_id = ?",
-    );
-    this.stmtDelete = db.prepare(
-      "DELETE FROM thread_tasks WHERE thread_id = ?",
-    );
+    this.orm = drizzle(db);
   }
 
   /** Save or update the task list for a thread (full replace). */
   upsert(threadId: string, tasks: readonly StoredTask[]): void {
-    this.stmtUpsert.run(threadId, JSON.stringify(tasks));
+    this.upsertRows(threadId, JSON.stringify(tasks));
   }
 
   /** Replace only tasks belonging to a specific group, preserving other groups. */
@@ -63,7 +52,7 @@ export class TaskRepo {
     const existing = this.get(threadId) ?? [];
     const otherGroups = existing.filter((t) => (t.group ?? "Tasks") !== group);
     const merged = [...otherGroups, ...tasks];
-    this.stmtUpsert.run(threadId, JSON.stringify(merged));
+    this.upsertRows(threadId, JSON.stringify(merged));
   }
 
   /**
@@ -82,7 +71,7 @@ export class TaskRepo {
       }
       return existingTask.content !== task.content || !sameGroup;
     });
-    this.stmtUpsert.run(threadId, JSON.stringify([...otherTasks, task]));
+    this.upsertRows(threadId, JSON.stringify([...otherTasks, task]));
   }
 
   /**
@@ -134,7 +123,7 @@ export class TaskRepo {
           }
         : task,
     );
-    this.stmtUpsert.run(threadId, JSON.stringify(next));
+    this.upsertRows(threadId, JSON.stringify(next));
     return true;
   }
 
@@ -145,15 +134,19 @@ export class TaskRepo {
     const index = this.findTaskIndex(existing, id, group);
     if (index < 0) return;
     const next = existing.filter((_, i) => i !== index);
-    this.stmtUpsert.run(threadId, JSON.stringify(next));
+    this.upsertRows(threadId, JSON.stringify(next));
   }
 
   /** Retrieve the persisted task list for a thread, or null if none exists. */
   get(threadId: string): StoredTask[] | null {
-    const row = this.stmtGet.get(threadId) as { tasks_json: string } | undefined;
+    const row = this.orm
+      .select({ tasksJson: threadTasks.tasksJson })
+      .from(threadTasks)
+      .where(eq(threadTasks.threadId, threadId))
+      .get();
     if (!row) return null;
     try {
-      return JSON.parse(row.tasks_json) as StoredTask[];
+      return JSON.parse(row.tasksJson) as StoredTask[];
     } catch (err) {
       logger.warn("Malformed tasks_json for thread %s: %s", threadId, err);
       return null;
@@ -162,6 +155,23 @@ export class TaskRepo {
 
   /** Remove persisted tasks for a thread. */
   delete(threadId: string): void {
-    this.stmtDelete.run(threadId);
+    this.orm
+      .delete(threadTasks)
+      .where(eq(threadTasks.threadId, threadId))
+      .run();
+  }
+
+  private upsertRows(threadId: string, tasksJson: string): void {
+    this.orm
+      .insert(threadTasks)
+      .values({ threadId, tasksJson })
+      .onConflictDoUpdate({
+        target: threadTasks.threadId,
+        set: {
+          tasksJson,
+          updatedAt: sql`strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+        },
+      })
+      .run();
   }
 }

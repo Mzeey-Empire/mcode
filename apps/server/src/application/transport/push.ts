@@ -13,10 +13,11 @@ import { getTransportPayloadValidator } from "./payload-validation.js";
 export const MAX_AGENT_EVENT_JOURNAL_EVENTS_PER_THREAD = 256;
 /** Maximum thread journals retained by the process. */
 export const MAX_AGENT_EVENT_JOURNAL_THREADS = 100;
-/** Maximum buffered push bytes for one connected client. */
-export const MAX_PUSH_SOCKET_BUFFERED_BYTES = 16 * 1_024 * 1_024;
+/** Maximum unsent push bytes for one connected client, excluding RPC response bytes. */
+export const MAX_QUEUED_PUSH_BYTES = 16 * 1_024 * 1_024;
 
 const clients = new Set<WebSocket>();
+const queuedPushBytes = new Map<WebSocket, number>();
 const threadSubscriptions = new Map<WebSocket, Set<string>>();
 const threadJournals = new Map<string, { events: unknown[] }>();
 const nextSequenceByThread = new Map<string, number>();
@@ -59,6 +60,7 @@ export function onSessionChange(cb: (count: number) => void): () => void {
 /** Register a WebSocket client for push event delivery. */
 export function addClient(ws: WebSocket): void {
   clients.add(ws);
+  queuedPushBytes.set(ws, 0);
   threadSubscriptions.set(ws, new Set());
   _sessionCount++;
   for (let i = 0; i < sessionChangeListeners.length; i++) sessionChangeListeners[i](_sessionCount);
@@ -67,6 +69,7 @@ export function addClient(ws: WebSocket): void {
 /** Remove a disconnected WebSocket client. No-op if already removed. */
 export function removeClient(ws: WebSocket): void {
   if (!clients.delete(ws)) return;
+  queuedPushBytes.delete(ws);
   threadSubscriptions.delete(ws);
   _sessionCount--;
   for (let i = 0; i < sessionChangeListeners.length; i++) sessionChangeListeners[i](_sessionCount);
@@ -232,24 +235,18 @@ function sendBroadcastPayload(channel: WsChannelName, threadId: string | undefin
   for (const ws of clients) {
     if (ws.readyState !== ws.OPEN) continue;
     if (requiresThreadSubscription && threadId && !threadSubscriptions.get(ws)?.has(threadId)) continue;
-    if (!canSendPayload(ws, channel, payloadBytes)) continue;
-    try {
-      ws.send(payload);
-    } catch {
-      // A socket can die between the readyState check and the send; one dead
-      // client must not abort the broadcast or take the server down.
-      logger.warn("Broadcast send failed", { channel });
-    }
+    sendPush(ws, channel, payload, payloadBytes);
   }
 }
 
-/** Terminate only the lagging connection so its next subscription can replay or hydrate. */
+/** Count only push writes, so a large RPC response cannot evict its own client. */
 function canSendPayload(ws: WebSocket, channel: WsChannelName | "terminal.data", payloadBytes: number): boolean {
-  const bufferedAmount = ws.bufferedAmount;
-  if (bufferedAmount + payloadBytes <= MAX_PUSH_SOCKET_BUFFERED_BYTES) return true;
+  const queuedBytes = queuedPushBytes.get(ws) ?? 0;
+  if (queuedBytes + payloadBytes <= MAX_QUEUED_PUSH_BYTES) return true;
   logger.warn("Terminating slow WebSocket client for push recovery", {
     channel,
-    bufferedAmount,
+    queuedPushBytes: queuedBytes,
+    bufferedAmount: ws.bufferedAmount,
     payloadBytes,
   });
   try {
@@ -264,6 +261,33 @@ function canSendPayload(ws: WebSocket, channel: WsChannelName | "terminal.data",
   return false;
 }
 
+function sendPush(
+  ws: WebSocket,
+  channel: WsChannelName | "terminal.data",
+  payload: string | Uint8Array,
+  payloadBytes: number,
+): boolean {
+  if (!canSendPayload(ws, channel, payloadBytes)) return false;
+  queuedPushBytes.set(ws, (queuedPushBytes.get(ws) ?? 0) + payloadBytes);
+  const complete = (error?: Error) => {
+    const queued = queuedPushBytes.get(ws);
+    if (queued !== undefined) queuedPushBytes.set(ws, Math.max(0, queued - payloadBytes));
+    if (error) logger.warn("Push delivery failed", { channel, error: error.message });
+  };
+  try {
+    if (typeof payload === "string") ws.send(payload, complete);
+    else ws.send(payload, { binary: true }, complete);
+    return true;
+  } catch (error) {
+    complete();
+    logger.warn("Push send failed", {
+      channel,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 /** Sends one validated push event to exactly one connected WebSocket client. */
 export function sendToClient(
   ws: WebSocket,
@@ -276,17 +300,7 @@ export function sendToClient(
   const validation = getTransportPayloadValidator().validatePush(channel, data, schema);
   if (!validation.ok) return false;
   const payload = JSON.stringify({ type: "push" as const, channel, data: validation.data });
-  if (!canSendPayload(ws, channel, Buffer.byteLength(payload, "utf8"))) return false;
-  try {
-    ws.send(payload);
-    return true;
-  } catch (error) {
-    logger.warn("Directed push delivery failed", {
-      channel,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
+  return sendPush(ws, channel, payload, Buffer.byteLength(payload, "utf8"));
 }
 
 /**
@@ -303,16 +317,7 @@ export function broadcastTerminalData(
   const frame = encodeTerminalDataFrame(ptyId, seq, payload);
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) {
-      if (!canSendPayload(ws, "terminal.data", frame.byteLength)) continue;
-      try {
-        ws.send(frame, { binary: true });
-      } catch (err) {
-        // One bad socket must not interrupt delivery to the remaining clients.
-        // Log and continue — the client will reconnect and re-request state.
-        logger.warn("broadcastTerminalData: ws.send failed for a client", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      sendPush(ws, "terminal.data", frame, frame.byteLength);
     }
   }
 }
@@ -328,6 +333,7 @@ export function _resetForTest(): void {
   _sessionCount = 0;
   sessionChangeListeners.length = 0;
   clients.clear();
+  queuedPushBytes.clear();
   threadSubscriptions.clear();
   threadJournals.clear();
   nextSequenceByThread.clear();

@@ -10,10 +10,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // Store mocks must be declared before importing the component under test.
 
 const emptyDisplayedConversationIds = vi.hoisted((): readonly string[] => []);
+const workspaceStateRef = vi.hoisted(() => ({ current: null as unknown }));
 
 vi.mock("@/features/projects/state/workspaceStore", () => ({
-  useWorkspaceStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector(defaultWorkspaceState())
+  useWorkspaceStore: Object.assign(
+    vi.fn((selector: (s: unknown) => unknown) => selector(workspaceStateRef.current)),
+    { getState: () => workspaceStateRef.current },
   ),
 }));
 
@@ -71,7 +73,6 @@ vi.mock("@/components/chat/CliErrorBanner", () => ({
   isCliError: () => false,
 }));
 
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { ChatView } from "@/features/conversation";
 
 /** Produces a workspace state that shows the new-thread empty state. */
@@ -96,9 +97,7 @@ function defaultWorkspaceState() {
 }
 
 function setupWorkspaceMock(state: ReturnType<typeof defaultWorkspaceState>) {
-  (useWorkspaceStore as unknown as { mockImplementation: (fn: (selector: (s: unknown) => unknown) => unknown) => void }).mockImplementation(
-    (selector) => selector(state)
-  );
+  workspaceStateRef.current = state;
 }
 
 describe("NewThreadWelcome", () => {

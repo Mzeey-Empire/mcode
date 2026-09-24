@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import { and, asc, count, desc, eq, gt, or, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   CANONICAL_AGENT_RECONNECT_DELTA_MAX_EVENTS,
   CanonicalAgentEventEnvelopeSchema,
@@ -15,6 +17,14 @@ import {
   CanonicalConversationProjectionReader,
   type CanonicalConversationProjection,
 } from "./canonical-conversation-projection-reader.js";
+import {
+  canonicalAgentIngestCheckpoints,
+  canonicalAgentEvents,
+  canonicalAgentItems,
+  canonicalAgentThreads,
+  canonicalAgentTurns,
+  canonicalCollaborationActions,
+} from "../../../runtime/persistence/sqlite/schema.js";
 
 export type { CanonicalConversationProjection } from "./canonical-conversation-projection-reader.js";
 
@@ -29,11 +39,13 @@ export interface CanonicalAgentReadRepositoryOperations {
 /** Reads canonical reconnect state without changing durable data. */
 export class CanonicalAgentReadRepository {
   private readonly conversationProjection: CanonicalConversationProjectionReader;
+  private readonly orm: BunSQLiteDatabase;
 
   constructor(
-    private readonly db: Database,
+    db: Database,
     private readonly operations: CanonicalAgentReadRepositoryOperations,
   ) {
+    this.orm = drizzle(db);
     this.conversationProjection = new CanonicalConversationProjectionReader(db);
   }
 
@@ -64,68 +76,72 @@ export class CanonicalAgentReadRepository {
 
   /** Loads one canonical thread. */
   loadThread(threadId: string): AgentThread | null {
-    const row = this.db.prepare("SELECT * FROM canonical_agent_threads WHERE id = ?").get(threadId);
-    return row ? this.operations.mapThread(row as Record<string, unknown>) : null;
+    const row = this.orm.select().from(canonicalAgentThreads).where(eq(canonicalAgentThreads.id, threadId)).get();
+    return row ? this.operations.mapThread(row) : null;
   }
 
   /** Loads one canonical turn. */
   loadTurn(turnId: string): AgentTurn | null {
-    const row = this.db.prepare("SELECT * FROM canonical_agent_turns WHERE id = ?").get(turnId);
-    return row ? this.operations.mapTurn(row as Record<string, unknown>) : null;
+    const row = this.orm.select().from(canonicalAgentTurns).where(eq(canonicalAgentTurns.id, turnId)).get();
+    return row ? this.operations.mapTurn(row) : null;
   }
 
   /** Loads one canonical turn by its execution identity. */
   loadTurnByExecution(executionId: string): AgentTurn | null {
-    const row = this.db.prepare("SELECT * FROM canonical_agent_turns WHERE execution_id = ?").get(executionId);
-    return row ? this.operations.mapTurn(row as Record<string, unknown>) : null;
+    const row = this.orm.select().from(canonicalAgentTurns).where(eq(canonicalAgentTurns.executionId, executionId)).get();
+    return row ? this.operations.mapTurn(row) : null;
   }
 
   /** Loads one canonical checkpoint. */
   loadCheckpoint(executionId: string): CanonicalAgentCheckpoint | null {
-    const row = this.db.prepare("SELECT * FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
-      .get(executionId) as Record<string, unknown> | undefined;
+    const row = this.orm.select().from(canonicalAgentIngestCheckpoints)
+      .where(eq(canonicalAgentIngestCheckpoints.executionId, executionId))
+      .get();
     return row ? this.operations.mapCheckpoint(row) : null;
   }
 
   /** Loads the durable assistant projection and tool count for one terminal turn. */
   loadTerminalProjection(turnId: string): { message: Message | null; toolCallCount: number } {
-    const messageRow = this.db.prepare(`
-      SELECT payload_json
-      FROM canonical_agent_items
-      WHERE turn_id = ?
-        AND kind = 'message'
-        AND json_extract(payload_json, '$.projection') = 'message'
-        AND json_extract(payload_json, '$.message.role') = 'assistant'
-      ORDER BY created_at DESC
-      LIMIT 1
-    `).get(turnId) as { payload_json: string } | undefined;
-    const countRow = this.db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM canonical_agent_items
-      WHERE turn_id = ?
-        AND json_extract(payload_json, '$.projection') = 'toolCall'
-    `).get(turnId) as { count: number };
+    const messageRow = this.orm.select({ payloadJson: canonicalAgentItems.payloadJson })
+      .from(canonicalAgentItems)
+      .where(and(
+        eq(canonicalAgentItems.turnId, turnId),
+        eq(canonicalAgentItems.kind, "message"),
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.role') = 'assistant'`,
+      ))
+      .orderBy(desc(canonicalAgentItems.createdAt))
+      .limit(1)
+      .get();
+    const countRow = this.orm.select({ count: count() })
+      .from(canonicalAgentItems)
+      .where(and(
+        eq(canonicalAgentItems.turnId, turnId),
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'toolCall'`,
+      ))
+      .get();
     return {
       message: messageRow
-        ? (JSON.parse(messageRow.payload_json) as { message: Message }).message
+        ? (JSON.parse(messageRow.payloadJson) as { message: Message }).message
         : null,
-      toolCallCount: Number(countRow.count),
+      toolCallCount: Number(countRow?.count ?? 0),
     };
   }
 
   /** Loads the accepted user message for one canonical turn. */
   loadUserMessage(turnId: string): Message | null {
-    const row = this.db.prepare(`
-      SELECT payload_json
-      FROM canonical_agent_items
-      WHERE turn_id = ?
-        AND kind = 'message'
-        AND json_extract(payload_json, '$.projection') = 'message'
-        AND json_extract(payload_json, '$.message.role') = 'user'
-      ORDER BY created_at ASC, id ASC
-      LIMIT 1
-    `).get(turnId) as { payload_json: string } | undefined;
-    return row ? (JSON.parse(row.payload_json) as { message: Message }).message : null;
+    const row = this.orm.select({ payloadJson: canonicalAgentItems.payloadJson })
+      .from(canonicalAgentItems)
+      .where(and(
+        eq(canonicalAgentItems.turnId, turnId),
+        eq(canonicalAgentItems.kind, "message"),
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.role') = 'user'`,
+      ))
+      .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
+      .limit(1)
+      .get();
+    return row ? (JSON.parse(row.payloadJson) as { message: Message }).message : null;
   }
 
 
@@ -149,43 +165,49 @@ export class CanonicalAgentReadRepository {
 
   private hasUnfinishedNarrative(threadId: string): boolean {
     // Recovery records change without advancing the canonical event revision.
-    return this.db.prepare(`
-      SELECT 1 FROM canonical_agent_items item
-      JOIN canonical_agent_turns turn ON turn.id = item.turn_id
-      WHERE item.thread_id = ? AND turn.status IN ('Pending', 'Running')
-        AND json_extract(item.payload_json, '$.projection') = 'narrativeRecovery'
-      LIMIT 1
-    `).get(threadId) !== null;
+    return this.orm.select({ one: sql`1` })
+      .from(canonicalAgentItems)
+      .innerJoin(canonicalAgentTurns, eq(canonicalAgentTurns.id, canonicalAgentItems.turnId))
+      .where(and(
+        eq(canonicalAgentItems.threadId, threadId),
+        sql`${canonicalAgentTurns.status} IN ('Pending', 'Running')`,
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'narrativeRecovery'`,
+      ))
+      .limit(1)
+      .get() != null;
   }
 
   private eventsSince(
     threadId: string,
     known: CanonicalAgentRevision,
   ): CanonicalAgentEventEnvelope[] | null {
-    const rows = this.db.prepare(`
-      SELECT envelope_json
-      FROM canonical_agent_events
-      WHERE thread_id = ?
-        AND (durable_revision > ? OR COALESCE(roster_revision, 0) > ?)
-      ORDER BY durable_revision ASC, persisted_at ASC, accepted_sequence ASC, event_id ASC
-      LIMIT ?
-    `).all(
-      threadId,
-      known.conversationRevision,
-      known.rosterRevision,
-      CANONICAL_AGENT_RECONNECT_DELTA_MAX_EVENTS + 1,
-    ) as Array<{ envelope_json: string }>;
+    const rows = this.orm.select({ envelopeJson: canonicalAgentEvents.envelopeJson })
+      .from(canonicalAgentEvents)
+      .where(and(
+        eq(canonicalAgentEvents.threadId, threadId),
+        or(
+          gt(canonicalAgentEvents.durableRevision, known.conversationRevision),
+          sql`COALESCE(${canonicalAgentEvents.rosterRevision}, 0) > ${known.rosterRevision}`,
+        ),
+      ))
+      .orderBy(
+        asc(canonicalAgentEvents.durableRevision),
+        asc(canonicalAgentEvents.persistedAt),
+        asc(canonicalAgentEvents.acceptedSequence),
+        asc(canonicalAgentEvents.eventId),
+      )
+      .limit(CANONICAL_AGENT_RECONNECT_DELTA_MAX_EVENTS + 1)
+      .all();
     if (rows.length > CANONICAL_AGENT_RECONNECT_DELTA_MAX_EVENTS) return null;
-    return rows.map((row) => CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelope_json)));
+    return rows.map((row) => CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelopeJson)));
   }
 
   private hasInboundCollaboration(threadId: string): boolean {
-    const row = this.db.prepare(`
-      SELECT 1 AS present
-      FROM canonical_collaboration_actions
-      WHERE target_thread_id = ?
-      LIMIT 1
-    `).get(threadId) as { present: number } | undefined;
+    const row = this.orm.select({ present: sql<number>`1` })
+      .from(canonicalCollaborationActions)
+      .where(eq(canonicalCollaborationActions.targetThreadId, threadId))
+      .limit(1)
+      .get();
     return row?.present === 1;
   }
 

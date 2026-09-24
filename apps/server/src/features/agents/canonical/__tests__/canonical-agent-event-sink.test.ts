@@ -552,15 +552,15 @@ describe("CanonicalAgentEventSink", () => {
     });
 
     const retainedTargets = [
-      "INSERT INTO canonical_agent_threads",
-      "INSERT INTO canonical_agent_turns",
-      "INSERT INTO canonical_agent_items",
-      "INSERT INTO canonical_agent_events",
-      "INSERT INTO canonical_agent_ingest_checkpoints",
-      "SELECT * FROM canonical_agent_threads\n      WHERE id = ? AND parent_thread_id = ?",
-      "SELECT * FROM canonical_agent_turns\n      WHERE id = ? AND thread_id = ?",
-      "SELECT event_id, accepted_sequence\n      FROM canonical_agent_events",
-      "SELECT accepted_sequence\n      FROM canonical_agent_events",
+      'insert into "canonical_agent_threads"',
+      'insert into "canonical_agent_turns"',
+      'insert into "canonical_agent_items"',
+      'insert into "canonical_agent_events"',
+      'insert into "canonical_agent_ingest_checkpoints"',
+      '"canonical_agent_threads"."id" = ? and "canonical_agent_threads"."parent_thread_id" = ?',
+      '"canonical_agent_turns"."id" = ? and "canonical_agent_turns"."thread_id" = ?',
+      'select "event_id", "accepted_sequence" from "canonical_agent_events"',
+      'select "accepted_sequence" from "canonical_agent_events"',
     ];
     expect(retainedTargets.map((target) =>
       preparedSql.filter((sql) => sql.includes(target)).length

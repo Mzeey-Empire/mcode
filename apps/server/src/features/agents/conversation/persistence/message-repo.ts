@@ -5,7 +5,9 @@
 
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
-import type { Changes, Database, Statement } from "bun:sqlite";
+import type { Changes, Database } from "bun:sqlite";
+import { and, asc, count, desc, eq, getTableColumns, gt, inArray, isNotNull, lt, lte, placeholder, sql, type SQL } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type {
   Message,
   LegacyMessageProvenance,
@@ -26,45 +28,10 @@ import {
   SystemNoticeMetadataSchema,
   THREAD_GET_TRANSCRIPT_MAX_BYTES,
 } from "@mcode/contracts";
+import { messages, threads, toolCallRecords } from "../../../../runtime/persistence/sqlite/schema.js";
+import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
 
-interface MessageRow {
-  id: string;
-  thread_id: string;
-  role: string;
-  content: string;
-  tool_calls: string | null;
-  files_changed: string | null;
-  cost_usd: number | null;
-  tokens_used: number | null;
-  timestamp: string;
-  sequence: number;
-  attachments: string | null;
-  preview_annotations: string | null;
-  mentions: string | null;
-  selected_text_comments: string | null;
-  reply_to_message_id: string | null;
-  quoted_text: string | null;
-  model: string | null;
-  provider: string | null;
-  origin_type: string;
-  source_thread_id: string | null;
-  source_turn_id: string | null;
-  source_provider_id: string | null;
-  legacy_provenance: string | null;
-  parent_agent_provenance: string | null;
-  is_internal: number;
-  outcome?: TurnOutcome | null;
-  outcome_execution_id?: string | null;
-  system_notice: string | null;
-  tool_call_count?: number;
-}
-
-interface MessageBudgetRow {
-  id: string;
-  sequence: number;
-  content_bytes: number;
-  metadata_bytes: number;
-}
+type MessageRow = typeof messages.$inferSelect & { toolCallCount?: number };
 
 type MessageOriginInput =
   | { type: "composer" }
@@ -166,34 +133,34 @@ function serializeSelectedTextComments(
 function rowToMessage(row: MessageRow): Message {
   const msg: Message = {
     id: row.id,
-    thread_id: row.thread_id,
+    thread_id: row.threadId,
     role: row.role as MessageRole,
     content: row.content,
-    tool_calls: parseJsonField(row.tool_calls),
-    files_changed: parseJsonField(row.files_changed),
-    cost_usd: row.cost_usd,
-    tokens_used: row.tokens_used,
+    tool_calls: parseJsonField(row.toolCalls),
+    files_changed: parseJsonField(row.filesChanged),
+    cost_usd: row.costUsd,
+    tokens_used: row.tokensUsed,
     timestamp: row.timestamp,
     sequence: row.sequence,
     attachments: parseJsonField(row.attachments) as
       | StoredAttachment[]
       | null,
-    previewAnnotations: parsePreviewAnnotations(row.preview_annotations),
+    previewAnnotations: parsePreviewAnnotations(row.previewAnnotations),
     mentions: parseJsonField(row.mentions) as MessageMention[] | null,
-    selectedTextComments: parseSelectedTextComments(row.selected_text_comments),
-    reply_to_message_id: row.reply_to_message_id,
-    quoted_text: row.quoted_text,
+    selectedTextComments: parseSelectedTextComments(row.selectedTextComments),
+    reply_to_message_id: row.replyToMessageId,
+    quoted_text: row.quotedText,
     model: row.model,
-    outcome: row.outcome ?? null,
-    outcomeExecutionId: row.outcome_execution_id ?? null,
-    systemNotice: parseSystemNotice(row.system_notice),
-    is_internal: row.is_internal === 1,
-    ...(row.parent_agent_provenance
-      ? { parentAgentProvenance: parseParentAgentProvenance(row.parent_agent_provenance) }
+    outcome: (row.outcome ?? null) as TurnOutcome | null,
+    outcomeExecutionId: row.outcomeExecutionId ?? null,
+    systemNotice: parseSystemNotice(row.systemNotice),
+    is_internal: row.isInternal === 1,
+    ...(row.parentAgentProvenance
+      ? { parentAgentProvenance: parseParentAgentProvenance(row.parentAgentProvenance) }
       : {}),
-    ...(row.legacy_provenance
-      ? { legacyProvenance: parseLegacyProvenance(row.legacy_provenance) }
-      : row.origin_type === "legacy"
+    ...(row.legacyProvenance
+      ? { legacyProvenance: parseLegacyProvenance(row.legacyProvenance) }
+      : row.originType === "legacy"
       ? {
           legacyProvenance: {
             source: "messages" as const,
@@ -205,42 +172,15 @@ function rowToMessage(row: MessageRow): Message {
       : {}),
   };
 
-  if (row.tool_call_count && row.tool_call_count > 0) {
-    msg.tool_call_count = row.tool_call_count;
+  if (row.toolCallCount && row.toolCallCount > 0) {
+    msg.tool_call_count = row.toolCallCount;
   }
 
   return msg;
 }
 
-const MESSAGE_COLUMNS =
-  "id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, preview_annotations, mentions, selected_text_comments, reply_to_message_id, quoted_text, model, provider, origin_type, source_thread_id, source_turn_id, source_provider_id, legacy_provenance, parent_agent_provenance, is_internal, outcome, outcome_execution_id, system_notice";
-
-const MESSAGE_COLUMNS_PREFIXED =
-  "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.preview_annotations, m.mentions, m.selected_text_comments, m.reply_to_message_id, m.quoted_text, m.model, m.provider, m.origin_type, m.source_thread_id, m.source_turn_id, m.source_provider_id, m.legacy_provenance, m.parent_agent_provenance, m.is_internal, m.outcome, m.outcome_execution_id, m.system_notice";
-
-/**
- * Pre-aggregates tool call counts for the selected page only.
- * The page CTE prevents a correlated count from running once per message row.
- */
-function pagedMessageQuery(whereClause: string, direction: "ASC" | "DESC" = "DESC"): string {
-  return `WITH page AS (
-  SELECT ${MESSAGE_COLUMNS_PREFIXED}
-  FROM messages m
-  WHERE ${whereClause}
-  ORDER BY m.sequence ${direction}
-  LIMIT ?
-),
-tool_counts AS (
-  SELECT message_id, COUNT(*) AS tool_call_count
-  FROM tool_call_records
-  WHERE message_id IN (SELECT id FROM page)
-  GROUP BY message_id
-)
-SELECT page.*, COALESCE(tool_counts.tool_call_count, 0) AS tool_call_count
-FROM page
-LEFT JOIN tool_counts ON tool_counts.message_id = page.id
-ORDER BY page.sequence ASC`;
-}
+/** Session-scoped system notices are hidden from transcript reads. */
+const notSessionNotice = sql`json_extract(${messages.systemNotice}, '$.scope') IS NOT 'session'`;
 
 const DEFAULT_HISTORY_PAGE_SIZE = 100;
 const MAX_HISTORY_PAGE_SIZE = 500;
@@ -272,29 +212,87 @@ function takeUtf8Prefix(text: string, maxBytes: number): { text: string; bytes: 
 /** Repository for message creation and retrieval against SQLite. */
 @injectable()
 export class MessageRepo {
-  private createStatement: Statement | null = null;
-  private createAssistantStatement: Statement | null = null;
-  private publishAssistantStatement: Statement | null = null;
-  private latestSequenceStatement: Statement | null = null;
+  private readonly orm: BunSQLiteDatabase;
+  private createStatement: ReturnType<MessageRepo["buildCreateStatement"]> | null = null;
+  private createAssistantStatement: ReturnType<MessageRepo["buildCreateAssistantStatement"]> | null = null;
+  private publishAssistantStatement: ReturnType<MessageRepo["buildPublishAssistantStatement"]> | null = null;
+  private latestSequenceStatement: ReturnType<MessageRepo["buildLatestSequenceStatement"]> | null = null;
 
-  constructor(@inject("Database") private readonly db: Database) {}
-
-  private getCreateStatement(): Statement {
-    return this.createStatement ??= this.db.prepare(
-      "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, attachments, preview_annotations, mentions, reply_to_message_id, quoted_text, model, origin_type, source_thread_id, source_turn_id, source_provider_id, is_internal, selected_text_comments, system_notice) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    );
+  constructor(@inject("Database") private readonly db: Database) {
+    this.orm = drizzle(db);
   }
 
-  private getCreateAssistantStatement(): Statement {
-    return this.createAssistantStatement ??= this.db.prepare(
-      "INSERT OR IGNORE INTO messages (id, thread_id, role, content, timestamp, sequence, attachments, mentions, model, provider, origin_type, is_internal) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, 'composer', ?)",
-    );
+  private buildCreateStatement() {
+    return this.orm.insert(messages).values({
+      id: placeholder("id"),
+      threadId: placeholder("threadId"),
+      role: placeholder("role"),
+      content: placeholder("content"),
+      timestamp: placeholder("timestamp"),
+      sequence: placeholder("sequence"),
+      attachments: placeholder("attachments"),
+      previewAnnotations: placeholder("previewAnnotations"),
+      mentions: placeholder("mentions"),
+      replyToMessageId: placeholder("replyToMessageId"),
+      quotedText: placeholder("quotedText"),
+      model: placeholder("model"),
+      originType: placeholder("originType"),
+      sourceThreadId: placeholder("sourceThreadId"),
+      sourceTurnId: placeholder("sourceTurnId"),
+      sourceProviderId: placeholder("sourceProviderId"),
+      isInternal: placeholder("isInternal"),
+      selectedTextComments: placeholder("selectedTextComments"),
+      systemNotice: placeholder("systemNotice"),
+    }).prepare();
   }
 
-  private getPublishAssistantStatement(): Statement {
-    return this.publishAssistantStatement ??= this.db.prepare(
-      "UPDATE messages SET is_internal = 0 WHERE id = ? AND role = 'assistant'",
-    );
+  private getCreateStatement() {
+    return this.createStatement ??= this.buildCreateStatement();
+  }
+
+  private buildCreateAssistantStatement() {
+    return this.orm.insert(messages).values({
+      id: placeholder("id"),
+      threadId: placeholder("threadId"),
+      role: "assistant",
+      content: placeholder("content"),
+      timestamp: placeholder("timestamp"),
+      sequence: placeholder("sequence"),
+      attachments: placeholder("attachments"),
+      mentions: placeholder("mentions"),
+      model: placeholder("model"),
+      provider: placeholder("provider"),
+      originType: "composer",
+      isInternal: placeholder("isInternal"),
+    }).onConflictDoNothing().prepare();
+  }
+
+  private getCreateAssistantStatement() {
+    return this.createAssistantStatement ??= this.buildCreateAssistantStatement();
+  }
+
+  private buildPublishAssistantStatement() {
+    return this.orm.update(messages)
+      .set({ isInternal: 0 })
+      .where(and(eq(messages.id, placeholder("id")), eq(messages.role, "assistant")))
+      .prepare();
+  }
+
+  private getPublishAssistantStatement() {
+    return this.publishAssistantStatement ??= this.buildPublishAssistantStatement();
+  }
+
+  private buildLatestSequenceStatement() {
+    return this.orm.select({ sequence: messages.sequence })
+      .from(messages)
+      .where(eq(messages.threadId, placeholder("threadId")))
+      .orderBy(desc(messages.sequence))
+      .limit(1)
+      .prepare();
+  }
+
+  private getLatestSequenceStatement() {
+    return this.latestSequenceStatement ??= this.buildLatestSequenceStatement();
   }
 
   /**
@@ -331,13 +329,29 @@ export class MessageRepo {
     const selectedTextCommentsJson = serializeSelectedTextComments(selectedTextComments);
     const systemNoticeJson = systemNotice ? JSON.stringify(SystemNoticeMetadataSchema().parse(systemNotice)) : null;
     const modelValue = model ?? null;
-    const isInternalValue = isInternal ? 1 : 0;
     const source = this.messageSource(origin);
 
-    this.getCreateStatement().run(
-        id, threadId, role, content, now, sequence,
-        attachmentsJson, previewAnnotationsJson, mentionsJson, replyToMessageId ?? null, quotedText ?? null, modelValue, origin.type, source.threadId, source.turnId, source.providerId, isInternalValue, selectedTextCommentsJson, systemNoticeJson,
-      );
+    this.getCreateStatement().run({
+      id,
+      threadId,
+      role,
+      content,
+      timestamp: now,
+      sequence,
+      attachments: attachmentsJson,
+      previewAnnotations: previewAnnotationsJson,
+      mentions: mentionsJson,
+      replyToMessageId: replyToMessageId ?? null,
+      quotedText: quotedText ?? null,
+      model: modelValue,
+      originType: origin.type,
+      sourceThreadId: source.threadId,
+      sourceTurnId: source.turnId,
+      sourceProviderId: source.providerId,
+      isInternal: isInternal ? 1 : 0,
+      selectedTextComments: selectedTextCommentsJson,
+      systemNotice: systemNoticeJson,
+    });
 
     return this.createdMessage({
       id,
@@ -371,14 +385,28 @@ export class MessageRepo {
 
   private writeSystemNotice(threadId: string, content: string, sequence: number, systemNotice: SystemNoticeMetadata | undefined): Message {
     if (systemNotice?.noticeKey) {
-      const existing = this.db.prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE thread_id = ? AND json_extract(system_notice, '$.sessionId') IS ? AND (json_extract(system_notice, '$.noticeKey') = ? OR (? = 'model-rerouted' AND json_extract(system_notice, '$.kind') = 'model-rerouted')) ORDER BY sequence DESC LIMIT 1`).get(threadId, systemNotice.sessionId ?? null, systemNotice.noticeKey, systemNotice.kind) as MessageRow | undefined;
+      const existing = this.orm.select().from(messages).where(and(
+        eq(messages.threadId, threadId),
+        sql`json_extract(${messages.systemNotice}, '$.sessionId') IS ${systemNotice.sessionId ?? null}`,
+        sql`(json_extract(${messages.systemNotice}, '$.noticeKey') = ${systemNotice.noticeKey} OR (${systemNotice.kind} = 'model-rerouted' AND json_extract(${messages.systemNotice}, '$.kind') = 'model-rerouted'))`,
+      )).orderBy(desc(messages.sequence)).limit(1).get();
       if (existing) {
-        this.db.prepare("UPDATE messages SET content = ?, system_notice = ? WHERE id = ?").run(content, JSON.stringify(systemNotice), existing.id);
-        return rowToMessage({ ...existing, content, system_notice: JSON.stringify(systemNotice) });
+        this.orm.update(messages)
+          .set({ content, systemNotice: JSON.stringify(systemNotice) })
+          .where(eq(messages.id, existing.id))
+          .run();
+        return rowToMessage({ ...existing, content, systemNotice: JSON.stringify(systemNotice) });
       }
     }
     if (systemNotice?.scope === "session") {
-      this.db.prepare("DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE thread_id = ? AND json_extract(system_notice, '$.scope') = 'session' AND json_extract(system_notice, '$.sessionId') IS ? ORDER BY sequence DESC LIMIT -1 OFFSET 19)").run(threadId, systemNotice.sessionId ?? null);
+      // drizzle drops limit(-1), emitting a bare OFFSET which is invalid
+      // SQLite; a saturating limit keeps the "all but the newest 19" semantics.
+      const prunableIds = this.orm.select({ id: messages.id }).from(messages).where(and(
+        eq(messages.threadId, threadId),
+        sql`json_extract(${messages.systemNotice}, '$.scope') = 'session'`,
+        sql`json_extract(${messages.systemNotice}, '$.sessionId') IS ${systemNotice.sessionId ?? null}`,
+      )).orderBy(desc(messages.sequence)).limit(Number.MAX_SAFE_INTEGER).offset(19);
+      this.orm.delete(messages).where(inArray(messages.id, prunableIds)).run();
     }
     return this.create(
       threadId, "system", content, sequence,
@@ -390,25 +418,29 @@ export class MessageRepo {
   /** Select the provider notice session and expire session-scoped rows from prior sessions. */
   beginNoticeSession(threadId: string, sessionId: string | undefined): void {
     this.db.transaction(() => {
-      this.db.prepare("UPDATE threads SET current_notice_session_id = ? WHERE id = ?").run(sessionId ?? null, threadId);
-      this.db.prepare("DELETE FROM messages WHERE thread_id = ? AND json_extract(system_notice, '$.scope') = 'session' AND json_extract(system_notice, '$.sessionId') IS NOT ?").run(threadId, sessionId ?? null);
+      this.orm.update(threads)
+        .set({ currentNoticeSessionId: sessionId ?? null })
+        .where(eq(threads.id, threadId))
+        .run();
+      this.orm.delete(messages).where(and(
+        eq(messages.threadId, threadId),
+        sql`json_extract(${messages.systemNotice}, '$.scope') = 'session'`,
+        sql`json_extract(${messages.systemNotice}, '$.sessionId') IS NOT ${sessionId ?? null}`,
+      )).run();
     })();
   }
 
   /** Read the latest notices for the provider session selected at its startup boundary. */
   listSessionNotices(threadId: string): Message[] {
-    const rows = this.db.prepare(`SELECT ${MESSAGE_COLUMNS} FROM (
-      SELECT ${MESSAGE_COLUMNS}
-      FROM messages
-      WHERE thread_id = ?
-        AND system_notice IS NOT NULL
-        AND json_extract(system_notice, '$.sessionId') IS (
-          SELECT current_notice_session_id FROM threads WHERE id = ?
-        )
-      ORDER BY sequence DESC
-      LIMIT 20
-    ) ORDER BY sequence ASC`).all(threadId, threadId) as MessageRow[];
-    return rows.map(rowToMessage);
+    const latest = this.orm.select().from(messages).where(and(
+      eq(messages.threadId, threadId),
+      isNotNull(messages.systemNotice),
+      sql`json_extract(${messages.systemNotice}, '$.sessionId') IS (
+        SELECT ${threads.currentNoticeSessionId} FROM ${threads} WHERE ${threads.id} = ${threadId}
+      )`,
+    )).orderBy(desc(messages.sequence)).limit(20).as("latest_notices");
+    const rows = this.orm.select().from(latest).orderBy(asc(latest.sequence)).all();
+    return rows.map((row) => rowToMessage(row as MessageRow));
   }
 
   /**
@@ -444,18 +476,18 @@ export class MessageRepo {
     const attachmentsJson = this.serializeNonEmptyArray(input.attachments);
     const mentionsJson = this.serializeNonEmptyArray(input.mentions);
 
-    const result = this.getCreateAssistantStatement().run(
-      input.id,
-      input.threadId,
-      input.content,
-      now,
-      input.sequence,
-      attachmentsJson,
-      mentionsJson,
-      modelValue,
-      providerValue,
-      input.isInternal ? 1 : 0,
-    );
+    const result = runChanges(this.getCreateAssistantStatement(), {
+      id: input.id,
+      threadId: input.threadId,
+      content: input.content,
+      timestamp: now,
+      sequence: input.sequence,
+      attachments: attachmentsJson,
+      mentions: mentionsJson,
+      model: modelValue,
+      provider: providerValue,
+      isInternal: input.isInternal ? 1 : 0,
+    });
 
     const attachments = this.assistantAttachments(result, input.id, input.attachments);
     return this.createdMessage({
@@ -544,31 +576,31 @@ export class MessageRepo {
 
   /** Persist a terminal outcome after the turn finalizer proves the turn ended. */
   setAssistantOutcome(messageId: string, outcome: TurnOutcome, executionId?: string): void {
-    this.db
-      .prepare("UPDATE messages SET outcome = ?, outcome_execution_id = ? WHERE id = ? AND role = 'assistant'")
-      .run(outcome, executionId ?? null, messageId);
+    this.orm.update(messages)
+      .set({ outcome, outcomeExecutionId: executionId ?? null })
+      .where(and(eq(messages.id, messageId), eq(messages.role, "assistant")))
+      .run();
   }
 
   /** Make a staged assistant message visible after its terminal checkpoint commits. */
   publishAssistant(messageId: string): void {
-    this.getPublishAssistantStatement().run(messageId);
+    this.getPublishAssistantStatement().run({ id: messageId });
   }
 
   /** Return the newest sequence in a thread, including internal rows. */
   getLatestSequenceIncludingInternal(threadId: string): number {
-    this.latestSequenceStatement ??= this.db.prepare(
-      "SELECT sequence FROM messages WHERE thread_id = ? ORDER BY sequence DESC LIMIT 1",
-    );
-    const row = this.latestSequenceStatement.get(threadId) as { sequence?: number } | undefined;
+    const row = this.getLatestSequenceStatement().get({ threadId });
     return row?.sequence ?? 0;
   }
 
   /** Append stored attachments to an existing message, deduping by attachment id. */
   appendAttachments(messageId: string, attachments: StoredAttachment[]): StoredAttachment[] {
     if (attachments.length === 0) return [];
-    const row = this.db
-      .prepare("SELECT attachments FROM messages WHERE id = ? AND is_internal = 0")
-      .get(messageId) as Pick<MessageRow, "attachments"> | undefined;
+    const row = this.orm
+      .select({ attachments: messages.attachments })
+      .from(messages)
+      .where(and(eq(messages.id, messageId), eq(messages.isInternal, 0)))
+      .get();
     const parsed = parseJsonField(row?.attachments ?? null);
     const existing = Array.isArray(parsed)
       ? (parsed as StoredAttachment[])
@@ -578,9 +610,10 @@ export class MessageRepo {
       byId.set(att.id, att);
     }
     const merged = [...byId.values()];
-    this.db
-      .prepare("UPDATE messages SET attachments = ? WHERE id = ? AND is_internal = 0")
-      .run(merged.length > 0 ? JSON.stringify(merged) : null, messageId);
+    this.orm.update(messages)
+      .set({ attachments: merged.length > 0 ? JSON.stringify(merged) : null })
+      .where(and(eq(messages.id, messageId), eq(messages.isInternal, 0)))
+      .run();
     return merged;
   }
 
@@ -604,16 +637,16 @@ export class MessageRepo {
     const clampedLimit = Math.max(1, Math.min(1000, limit));
     const fetchLimit = clampedLimit + 1;
 
-    const whereClause = before != null
-      ? "m.thread_id = ? AND m.sequence < ? AND m.is_internal = 0 AND json_extract(m.system_notice, '$.scope') IS NOT 'session'"
-      : "m.thread_id = ? AND m.is_internal = 0 AND json_extract(m.system_notice, '$.scope') IS NOT 'session'";
-    const queryParams = before != null
-      ? [threadId, before, fetchLimit]
-      : [threadId, fetchLimit];
-
-    let rows = this.db
-      .prepare(pagedMessageQuery(whereClause))
-      .all(...queryParams) as MessageRow[];
+    let rows = this.pageWithToolCounts(
+      and(
+        eq(messages.threadId, threadId),
+        ...(before != null ? [lt(messages.sequence, before)] : []),
+        eq(messages.isInternal, 0),
+        notSessionNotice,
+      ),
+      "DESC",
+      fetchLimit,
+    );
 
     const hasMore = rows.length > clampedLimit;
     if (hasMore) {
@@ -621,6 +654,36 @@ export class MessageRepo {
     }
 
     return { messages: rows.map(rowToMessage), hasMore };
+  }
+
+  /**
+   * Fetch a bounded page of messages and attach per-message tool call counts.
+   * One grouped count query over the page ids replaces a correlated count
+   * that would otherwise run once per row.
+   */
+  private pageWithToolCounts(
+    where: SQL | undefined,
+    direction: "ASC" | "DESC",
+    limit: number,
+  ): MessageRow[] {
+    const rows = this.orm
+      .select()
+      .from(messages)
+      .where(where)
+      .orderBy(direction === "ASC" ? asc(messages.sequence) : desc(messages.sequence))
+      .limit(limit)
+      .all();
+    if (rows.length === 0) return [];
+    const counts = this.orm
+      .select({ messageId: toolCallRecords.messageId, toolCallCount: count() })
+      .from(toolCallRecords)
+      .where(inArray(toolCallRecords.messageId, rows.map((row) => row.id)))
+      .groupBy(toolCallRecords.messageId)
+      .all();
+    const countByMessageId = new Map(counts.map((row) => [row.messageId, row.toolCallCount]));
+    return rows
+      .map((row) => ({ ...row, toolCallCount: countByMessageId.get(row.id) ?? 0 }))
+      .sort((a, b) => a.sequence - b.sequence);
   }
 
   /** Return the first N messages after a sequence cursor in ascending order. */
@@ -631,12 +694,16 @@ export class MessageRepo {
   ): { messages: Message[]; hasMore: boolean } {
     const clampedLimit = Math.max(1, Math.min(1000, limit));
     const fetchLimit = clampedLimit + 1;
-    let rows = this.db
-      .prepare(pagedMessageQuery(
-        "m.thread_id = ? AND m.sequence > ? AND m.is_internal = 0 AND json_extract(m.system_notice, '$.scope') IS NOT 'session'",
-        "ASC",
-      ))
-      .all(threadId, after, fetchLimit) as MessageRow[];
+    let rows = this.pageWithToolCounts(
+      and(
+        eq(messages.threadId, threadId),
+        gt(messages.sequence, after),
+        eq(messages.isInternal, 0),
+        notSessionNotice,
+      ),
+      "ASC",
+      fetchLimit,
+    );
 
     const hasMore = rows.length > clampedLimit;
     if (hasMore) rows = rows.slice(0, clampedLimit);
@@ -653,32 +720,28 @@ export class MessageRepo {
     const byteBudget = Number.isFinite(maxBytes)
       ? Math.max(1, Math.min(THREAD_GET_TRANSCRIPT_MAX_BYTES, Math.floor(maxBytes)))
       : THREAD_GET_TRANSCRIPT_MAX_BYTES;
-    const rows = this.db.prepare(`
-      SELECT id, sequence, role, length(CAST(content AS BLOB)) AS content_bytes,
-             timestamp, provider, model, origin_type,
-             source_thread_id, source_turn_id, source_provider_id
-      FROM messages
-      WHERE thread_id = ? AND is_internal = 0 AND json_extract(system_notice, '$.scope') IS NOT 'session'
-      ORDER BY sequence DESC
-      LIMIT ?
-    `).all(threadId, clampedLimit + 1) as Array<{
-      id: string;
-      sequence: number;
-      role: "user" | "assistant" | "system";
-      content_bytes: number;
-      timestamp: string;
-      provider: string | null;
-      model: string | null;
-      origin_type: string;
-      source_thread_id: string | null;
-      source_turn_id: string | null;
-      source_provider_id: string | null;
-    }>;
+    const rows = this.orm.select({
+      id: messages.id,
+      sequence: messages.sequence,
+      role: messages.role,
+      contentBytes: sql<number>`length(CAST(${messages.content} AS BLOB))`.mapWith(Number),
+      timestamp: messages.timestamp,
+      provider: messages.provider,
+      model: messages.model,
+      originType: messages.originType,
+      sourceThreadId: messages.sourceThreadId,
+      sourceTurnId: messages.sourceTurnId,
+      sourceProviderId: messages.sourceProviderId,
+    }).from(messages).where(and(
+      eq(messages.threadId, threadId),
+      eq(messages.isInternal, 0),
+      notSessionNotice,
+    )).orderBy(desc(messages.sequence)).limit(clampedLimit + 1).all();
     let hasMore = rows.length > clampedLimit;
     const selected: Array<typeof rows[number] & { contentLimit?: number }> = [];
     let remainingBytes = byteBudget;
     for (const row of rows.slice(0, clampedLimit)) {
-      const contentBytes = Math.max(0, row.content_bytes ?? 0);
+      const contentBytes = Math.max(0, row.contentBytes ?? 0);
       if (contentBytes <= remainingBytes) {
         selected.push(row);
         remainingBytes -= contentBytes;
@@ -690,37 +753,30 @@ export class MessageRepo {
       hasMore = true;
       break;
     }
-    const fullStmt = this.db.prepare(`
-      SELECT id, role, content, timestamp, provider, model, origin_type,
-             source_thread_id, source_turn_id, source_provider_id
-      FROM messages
-      WHERE id = ? AND thread_id = ? AND is_internal = 0
-    `);
-    const truncatedStmt = this.db.prepare(`
-      SELECT id, role, substr(content, 1, ?) AS content, timestamp, provider, model, origin_type,
-             source_thread_id, source_turn_id, source_provider_id
-      FROM messages
-      WHERE id = ? AND thread_id = ? AND is_internal = 0
-    `);
-    const messages = selected
+    const transcriptFields = {
+      id: messages.id,
+      role: messages.role,
+      content: messages.content,
+      timestamp: messages.timestamp,
+      provider: messages.provider,
+      model: messages.model,
+      originType: messages.originType,
+      sourceThreadId: messages.sourceThreadId,
+      sourceTurnId: messages.sourceTurnId,
+      sourceProviderId: messages.sourceProviderId,
+    };
+    const messageRows = selected
       .sort((left, right) => left.sequence - right.sequence)
       .flatMap((row) => {
         const fetched = row.contentLimit === undefined
-          ? fullStmt.get(row.id, threadId)
-          : truncatedStmt.get(row.contentLimit, row.id, threadId);
+          ? this.orm.select(transcriptFields).from(messages)
+              .where(and(eq(messages.id, row.id), eq(messages.threadId, threadId), eq(messages.isInternal, 0)))
+              .get()
+          : this.orm.select({ ...transcriptFields, content: sql<string>`substr(${messages.content}, 1, ${row.contentLimit})` }).from(messages)
+              .where(and(eq(messages.id, row.id), eq(messages.threadId, threadId), eq(messages.isInternal, 0)))
+              .get();
         if (!fetched) return [];
-        const contentRow = fetched as {
-          id: string;
-          role: "user" | "assistant" | "system";
-          content: string;
-          timestamp: string;
-          provider: string | null;
-          model: string | null;
-          origin_type: string;
-          source_thread_id: string | null;
-          source_turn_id: string | null;
-          source_provider_id: string | null;
-        };
+        const contentRow = fetched as typeof fetched & { role: "user" | "assistant" | "system" };
         const prefix = row.contentLimit === undefined
           ? contentRow.content
           : takeUtf8Prefix(contentRow.content, row.contentLimit).text;
@@ -731,14 +787,14 @@ export class MessageRepo {
           timestamp: contentRow.timestamp,
           provider: contentRow.provider,
           model: contentRow.model,
-          originType: contentRow.origin_type === "composer" || contentRow.origin_type === "thread" ? contentRow.origin_type : "legacy",
-          sourceThreadId: contentRow.source_thread_id,
-          sourceTurnId: contentRow.source_turn_id,
-          sourceProviderId: contentRow.source_provider_id,
+          originType: contentRow.originType === "composer" || contentRow.originType === "thread" ? contentRow.originType : "legacy",
+          sourceThreadId: contentRow.sourceThreadId,
+          sourceTurnId: contentRow.sourceTurnId,
+          sourceProviderId: contentRow.sourceProviderId,
         } satisfies ThreadControlMessageRecord];
       });
     return {
-      messages,
+      messages: messageRows,
       hasMore,
     };
   }
@@ -755,25 +811,47 @@ export class MessageRepo {
     threadId: string,
     maxSequence: number,
   ): Message[] {
-    const rows = this.db
-      .prepare(
-        `WITH counts AS (
-  SELECT message_id, COUNT(*) AS tool_call_count
-  FROM tool_call_records
-  WHERE message_id IN (
-    SELECT id FROM messages WHERE thread_id = ? AND sequence <= ? AND is_internal = 0
-  )
-  GROUP BY message_id
-)
-SELECT ${MESSAGE_COLUMNS_PREFIXED}, COALESCE(counts.tool_call_count, 0) AS tool_call_count
-FROM messages m
-LEFT JOIN counts ON counts.message_id = m.id
-WHERE m.thread_id = ? AND m.sequence <= ? AND m.is_internal = 0 AND json_extract(m.system_notice, '$.scope') IS NOT 'session'
-ORDER BY m.sequence ASC`,
-      )
-      .all(threadId, maxSequence, threadId, maxSequence) as MessageRow[];
+    const rows = this.threadMessagesWithToolCounts(
+      and(eq(messages.threadId, threadId), lte(messages.sequence, maxSequence), eq(messages.isInternal, 0)),
+      and(
+        eq(messages.threadId, threadId),
+        lte(messages.sequence, maxSequence),
+        eq(messages.isInternal, 0),
+        notSessionNotice,
+      ),
+    );
 
     return rows.map(rowToMessage);
+  }
+
+  /**
+   * Attach tool call counts to an unbounded thread message scan.
+   * The counts subquery stays in SQL because the id list can exceed the
+   * SQLite bound-parameter limit on large threads.
+   */
+  private threadMessagesWithToolCounts(countsWhere: SQL | undefined, outerWhere: SQL | undefined): MessageRow[] {
+    const counts = this.orm
+      .select({
+        messageId: toolCallRecords.messageId,
+        toolCallCount: count().as("tool_call_count"),
+      })
+      .from(toolCallRecords)
+      .where(inArray(
+        toolCallRecords.messageId,
+        this.orm.select({ id: messages.id }).from(messages).where(countsWhere),
+      ))
+      .groupBy(toolCallRecords.messageId)
+      .as("counts");
+    return this.orm
+      .select({
+        ...getTableColumns(messages),
+        toolCallCount: sql<number>`COALESCE(${counts.toolCallCount}, 0)`.mapWith(Number),
+      })
+      .from(messages)
+      .leftJoin(counts, eq(counts.messageId, messages.id))
+      .where(outerWhere)
+      .orderBy(asc(messages.sequence))
+      .all() as MessageRow[];
   }
 
   /**
@@ -785,33 +863,37 @@ ORDER BY m.sequence ASC`,
     maxSequence: number,
     options: BudgetedThreadMessageOptions,
   ): BudgetedThreadMessages {
-    const { budgetBytes, pageSize, maxRows, internalClause, countInternalClause } =
+    const { budgetBytes, pageSize, maxRows, visibilityConditions } =
       this.budgetedHistoryOptions(options);
 
-    const pageStmt = this.db.prepare(
-      `SELECT
-  m.id,
-  m.sequence,
-  length(CAST(m.content AS BLOB)) AS content_bytes,
-  (
-    length(CAST(COALESCE(m.files_changed, '') AS BLOB)) +
-    length(CAST(COALESCE(m.attachments, '') AS BLOB)) +
-    length(CAST(COALESCE(m.mentions, '') AS BLOB)) +
-    length(CAST(COALESCE(m.selected_text_comments, '') AS BLOB)) +
-    length(CAST(COALESCE(m.quoted_text, '') AS BLOB))
-  ) AS metadata_bytes
-FROM messages m
-WHERE m.thread_id = ? AND m.sequence <= ? AND m.sequence < ? ${internalClause}
-ORDER BY m.sequence DESC
-LIMIT ?`,
-    );
+    const pageRows = (cursor: number) => this.orm.select({
+      id: messages.id,
+      sequence: messages.sequence,
+      contentBytes: sql<number>`length(CAST(${messages.content} AS BLOB))`.mapWith(Number),
+      metadataBytes: sql<number>`(
+        length(CAST(COALESCE(${messages.filesChanged}, '') AS BLOB)) +
+        length(CAST(COALESCE(${messages.attachments}, '') AS BLOB)) +
+        length(CAST(COALESCE(${messages.mentions}, '') AS BLOB)) +
+        length(CAST(COALESCE(${messages.selectedTextComments}, '') AS BLOB)) +
+        length(CAST(COALESCE(${messages.quotedText}, '') AS BLOB))
+      )`.mapWith(Number),
+    }).from(messages).where(and(
+      eq(messages.threadId, threadId),
+      lte(messages.sequence, maxSequence),
+      lt(messages.sequence, cursor),
+      ...visibilityConditions,
+    )).orderBy(desc(messages.sequence)).limit(pageSize).all();
 
-    const countBeforeStmt = this.db.prepare(
-      `SELECT COUNT(*) AS count FROM messages WHERE thread_id = ? AND sequence < ? ${countInternalClause}`,
-    );
-    const countAtOrBeforeStmt = this.db.prepare(
-      `SELECT COUNT(*) AS count FROM messages WHERE thread_id = ? AND sequence <= ? ${countInternalClause}`,
-    );
+    const countBefore = (sequence: number) => this.orm
+      .select({ count: count() })
+      .from(messages)
+      .where(and(eq(messages.threadId, threadId), lt(messages.sequence, sequence), ...visibilityConditions))
+      .get()?.count ?? 0;
+    const countAtOrBefore = (sequence: number) => this.orm
+      .select({ count: count() })
+      .from(messages)
+      .where(and(eq(messages.threadId, threadId), lte(messages.sequence, sequence), ...visibilityConditions))
+      .get()?.count ?? 0;
 
     const selected: Array<{
       id: string;
@@ -825,19 +907,18 @@ LIMIT ?`,
     let omittedBeforeCount = 0;
 
     while (true) {
-      const rows = pageStmt.all(threadId, maxSequence, cursor, pageSize) as MessageBudgetRow[];
+      const rows = pageRows(cursor);
       if (rows.length === 0) break;
 
       for (const row of rows) {
-        const contentBytes = Math.max(0, row.content_bytes ?? 0);
-        const metadataBytes = Math.max(0, row.metadata_bytes ?? 0);
+        const contentBytes = Math.max(0, row.contentBytes ?? 0);
+        const metadataBytes = Math.max(0, row.metadataBytes ?? 0);
         const rowBytes = contentBytes + metadataBytes;
         const rowCost = Math.max(1, rowBytes);
 
         if (retainedBytes + rowCost <= budgetBytes) {
           if (selected.length >= maxRows) {
-            const countRow = countAtOrBeforeStmt.get(threadId, row.sequence) as { count: number };
-            omittedBeforeCount = countRow.count;
+            omittedBeforeCount = countAtOrBefore(row.sequence);
             const fetched = this.fetchBudgetedMessages(selected, truncatedMessages);
             return {
               messages: fetched.messages,
@@ -868,11 +949,9 @@ LIMIT ?`,
             originalBytes: contentBytes,
             retainedBytes: contentBudget,
           });
-          const countRow = countBeforeStmt.get(threadId, row.sequence) as { count: number };
-          omittedBeforeCount = countRow.count;
+          omittedBeforeCount = countBefore(row.sequence);
         } else {
-          const countRow = countAtOrBeforeStmt.get(threadId, row.sequence) as { count: number };
-          omittedBeforeCount = countRow.count;
+          omittedBeforeCount = countAtOrBefore(row.sequence);
         }
 
         const fetched = this.fetchBudgetedMessages(selected, truncatedMessages);
@@ -905,8 +984,7 @@ LIMIT ?`,
     budgetBytes: number;
     pageSize: number;
     maxRows: number;
-    internalClause: string;
-    countInternalClause: string;
+    visibilityConditions: SQL[];
   } {
     const includeInternal = options.includeInternal === true;
     return {
@@ -921,8 +999,7 @@ LIMIT ?`,
         DEFAULT_HISTORY_MAX_ROWS,
         MAX_HISTORY_MAX_ROWS,
       ),
-      internalClause: includeInternal ? "" : "AND m.is_internal = 0 AND json_extract(m.system_notice, '$.scope') IS NOT 'session'",
-      countInternalClause: includeInternal ? "" : "AND is_internal = 0 AND json_extract(system_notice, '$.scope') IS NOT 'session'",
+      visibilityConditions: includeInternal ? [] : [eq(messages.isInternal, 0), notSessionNotice],
     };
   }
 
@@ -935,38 +1012,48 @@ LIMIT ?`,
     }>,
     truncatedMessages: ThreadHistoryBudget["truncatedMessages"],
   ): { messages: Message[]; retainedBytesDelta: number } {
-    const toolCallCountSql =
-      "(SELECT COUNT(*) FROM tool_call_records WHERE message_id = m.id) AS tool_call_count";
-    const fullStmt = this.db.prepare(
-      `SELECT
-  m.id, m.thread_id, m.role, m.content, NULL AS tool_calls,
-  m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence,
-  m.attachments, m.preview_annotations, m.mentions, m.selected_text_comments, m.reply_to_message_id, m.quoted_text, m.model, m.is_internal,
-  m.outcome, m.outcome_execution_id, m.system_notice,
-  ${toolCallCountSql}
-FROM messages m
-WHERE m.id = ?`,
-    );
-    const truncatedStmt = this.db.prepare(
-      `SELECT
-  m.id, m.thread_id, m.role, substr(m.content, 1, ?) AS content, NULL AS tool_calls,
-  m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence,
-  m.attachments, m.preview_annotations, m.mentions, m.selected_text_comments, m.reply_to_message_id, m.quoted_text, m.model, m.is_internal,
-  m.outcome, m.outcome_execution_id, m.system_notice,
-  ${toolCallCountSql}
-FROM messages m
-WHERE m.id = ?`,
-    );
+    const budgetedFields = {
+      id: messages.id,
+      threadId: messages.threadId,
+      role: messages.role,
+      content: messages.content,
+      toolCalls: sql<string | null>`NULL`,
+      filesChanged: messages.filesChanged,
+      costUsd: messages.costUsd,
+      tokensUsed: messages.tokensUsed,
+      timestamp: messages.timestamp,
+      sequence: messages.sequence,
+      attachments: messages.attachments,
+      previewAnnotations: messages.previewAnnotations,
+      mentions: messages.mentions,
+      selectedTextComments: messages.selectedTextComments,
+      replyToMessageId: messages.replyToMessageId,
+      quotedText: messages.quotedText,
+      model: messages.model,
+      provider: sql<string | null>`NULL`,
+      originType: sql<string>`NULL`,
+      sourceThreadId: sql<string | null>`NULL`,
+      sourceTurnId: sql<string | null>`NULL`,
+      sourceProviderId: sql<string | null>`NULL`,
+      legacyProvenance: sql<string | null>`NULL`,
+      parentAgentProvenance: sql<string | null>`NULL`,
+      isInternal: messages.isInternal,
+      outcome: messages.outcome,
+      outcomeExecutionId: messages.outcomeExecutionId,
+      systemNotice: messages.systemNotice,
+      toolCallCount: sql<number>`(SELECT COUNT(*) FROM ${toolCallRecords} WHERE ${toolCallRecords.messageId} = ${messages.id})`.mapWith(Number),
+    };
 
     let retainedBytesDelta = 0;
-    const messages = selected
+    const fetched = selected
       .sort((a, b) => a.sequence - b.sequence)
       .map((item) => {
         if (item.truncateContentToBytes === undefined) {
-          return rowToMessage(fullStmt.get(item.id) as MessageRow);
+          const row = this.orm.select(budgetedFields).from(messages).where(eq(messages.id, item.id)).get() as MessageRow;
+          return rowToMessage(row);
         }
 
-        const row = truncatedStmt.get(item.truncateContentToBytes, item.id) as MessageRow;
+        const row = this.orm.select({ ...budgetedFields, content: sql<string>`substr(${messages.content}, 1, ${item.truncateContentToBytes})` }).from(messages).where(eq(messages.id, item.id)).get() as MessageRow;
         const prefix = takeUtf8Prefix(row.content, item.truncateContentToBytes);
         row.content = prefix.text;
         const truncated = rowToMessage(row);
@@ -979,25 +1066,27 @@ WHERE m.id = ?`,
         }
         return truncated;
       });
-    return { messages, retainedBytesDelta };
+    return { messages: fetched, retainedBytesDelta };
   }
 
   /** Find a single message by ID within a specific thread. Returns null if not found. */
   findByIdInThread(threadId: string, messageId: string): Message | null {
-    const row = this.db
-      .prepare(
-        `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ? AND thread_id = ? AND is_internal = 0`,
-      )
-      .get(messageId, threadId) as MessageRow | undefined;
+    const row = this.orm
+      .select()
+      .from(messages)
+      .where(and(eq(messages.id, messageId), eq(messages.threadId, threadId), eq(messages.isInternal, 0)))
+      .get();
 
     return row ? rowToMessage(row) : null;
   }
 
   /** Look up a single message by its primary key. */
   findById(id: string): Message | undefined {
-    const row = this.db
-      .prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ? AND is_internal = 0`)
-      .get(id) as MessageRow | undefined;
+    const row = this.orm
+      .select()
+      .from(messages)
+      .where(and(eq(messages.id, id), eq(messages.isInternal, 0)))
+      .get();
     return row ? rowToMessage(row) : undefined;
   }
 
@@ -1010,22 +1099,8 @@ WHERE m.id = ?`,
    * `listByThread` instead, which filters out internal messages.
    */
   listIncludingInternal(threadId: string): Message[] {
-    const rows = this.db
-      .prepare(
-        `WITH counts AS (
-  SELECT message_id, COUNT(*) AS tool_call_count
-  FROM tool_call_records
-  WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
-  GROUP BY message_id
-)
-SELECT ${MESSAGE_COLUMNS_PREFIXED}, COALESCE(counts.tool_call_count, 0) AS tool_call_count
-FROM messages m
-LEFT JOIN counts ON counts.message_id = m.id
-WHERE m.thread_id = ?
-ORDER BY m.sequence ASC`,
-      )
-      .all(threadId, threadId) as MessageRow[];
-
+    const threadFilter = eq(messages.threadId, threadId);
+    const rows = this.threadMessagesWithToolCounts(threadFilter, threadFilter);
     return rows.map(rowToMessage);
   }
 }

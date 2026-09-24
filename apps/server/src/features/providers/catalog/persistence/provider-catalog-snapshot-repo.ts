@@ -1,31 +1,39 @@
 import { inject, injectable } from "tsyringe";
 import type { Database } from "bun:sqlite";
+import { desc, eq, inArray, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   ProviderCatalogSnapshotSchema,
   type ProviderCatalogSnapshot,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-
-interface ProviderCatalogSnapshotRow {
-  snapshot_json: string;
-}
+import {
+  providerCatalogSnapshots,
+  workspaces,
+} from "../../../../runtime/persistence/sqlite/schema.js";
 
 const MAX_PERSISTED_CONTEXTS_PER_PROVIDER = 512;
 
 /** Persists bounded provider catalog snapshots by realized discovery context. */
 @injectable()
 export class ProviderCatalogSnapshotRepo {
-  constructor(@inject("Database") private readonly db: Database) {}
+  private readonly orm: BunSQLiteDatabase;
+
+  constructor(@inject("Database") db: Database) {
+    this.orm = drizzle(db);
+  }
 
   /** Returns one validated snapshot, or null when the row is absent or corrupt. */
   get(contextKey: string): ProviderCatalogSnapshot | null {
-    const row = this.db.prepare(
-      "SELECT snapshot_json FROM provider_catalog_snapshots WHERE context_key = ?",
-    ).get(contextKey) as ProviderCatalogSnapshotRow | undefined;
+    const row = this.orm
+      .select({ snapshotJson: providerCatalogSnapshots.snapshotJson })
+      .from(providerCatalogSnapshots)
+      .where(eq(providerCatalogSnapshots.contextKey, contextKey))
+      .get();
     if (!row) return null;
 
     try {
-      return ProviderCatalogSnapshotSchema().parse(JSON.parse(row.snapshot_json));
+      return ProviderCatalogSnapshotSchema().parse(JSON.parse(row.snapshotJson));
     } catch (error) {
       logger.warn("Ignoring invalid provider catalog snapshot", {
         contextKey,
@@ -43,39 +51,56 @@ export class ProviderCatalogSnapshotRepo {
     snapshot: ProviderCatalogSnapshot,
   ): boolean {
     const validated = ProviderCatalogSnapshotSchema().parse(snapshot);
-    return this.db.transaction(() => {
-      const result = this.db.prepare(`
-        INSERT INTO provider_catalog_snapshots
-          (context_key, provider_id, workspace_id, cwd, snapshot_json, updated_at)
-        SELECT ?, ?, ?, ?, ?, datetime('now')
-        WHERE ? IS NULL OR EXISTS (SELECT 1 FROM workspaces WHERE id = ?)
-        ON CONFLICT(context_key) DO UPDATE SET
-          provider_id = excluded.provider_id,
-          workspace_id = excluded.workspace_id,
-          cwd = excluded.cwd,
-          snapshot_json = excluded.snapshot_json,
-          updated_at = excluded.updated_at
-      `).run(
-        contextKey,
-        validated.providerId,
-        workspaceId ?? null,
-        cwd ?? null,
-        JSON.stringify(validated),
-        workspaceId ?? null,
-        workspaceId ?? null,
-      );
-      if (result.changes === 0) return false;
-      this.db.prepare(`
-        DELETE FROM provider_catalog_snapshots
-        WHERE context_key IN (
-          SELECT context_key
-          FROM provider_catalog_snapshots
-          WHERE provider_id = ?
-          ORDER BY updated_at DESC, context_key DESC
-          LIMIT -1 OFFSET ?
+    return this.orm.transaction((tx) => {
+      // The legacy INSERT...SELECT only wrote when the referenced workspace
+      // still existed, so a dangling workspaceId must abort with no changes.
+      if (workspaceId !== undefined) {
+        const workspace = tx
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .where(eq(workspaces.id, workspaceId))
+          .get();
+        if (!workspace) return false;
+      }
+      tx.insert(providerCatalogSnapshots)
+        .values({
+          contextKey,
+          providerId: validated.providerId,
+          workspaceId: workspaceId ?? null,
+          cwd: cwd ?? null,
+          snapshotJson: JSON.stringify(validated),
+          updatedAt: sql`datetime('now')`,
+        })
+        .onConflictDoUpdate({
+          target: providerCatalogSnapshots.contextKey,
+          set: {
+            providerId: validated.providerId,
+            workspaceId: workspaceId ?? null,
+            cwd: cwd ?? null,
+            snapshotJson: JSON.stringify(validated),
+            updatedAt: sql`datetime('now')`,
+          },
+        })
+        .run();
+      tx.delete(providerCatalogSnapshots)
+        .where(
+          inArray(
+            providerCatalogSnapshots.contextKey,
+            tx
+              .select({ contextKey: providerCatalogSnapshots.contextKey })
+              .from(providerCatalogSnapshots)
+              .where(eq(providerCatalogSnapshots.providerId, validated.providerId))
+              .orderBy(
+                desc(providerCatalogSnapshots.updatedAt),
+                desc(providerCatalogSnapshots.contextKey),
+              )
+              // drizzle drops limit(-1), emitting a bare OFFSET which is invalid
+              .limit(Number.MAX_SAFE_INTEGER)
+              .offset(MAX_PERSISTED_CONTEXTS_PER_PROVIDER),
+          ),
         )
-      `).run(validated.providerId, MAX_PERSISTED_CONTEXTS_PER_PROVIDER);
+        .run();
       return true;
-    })();
+    });
   }
 }

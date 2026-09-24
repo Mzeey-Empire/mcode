@@ -2,6 +2,14 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import {
+  canonicalAgentIngestCheckpoints,
+  parentAssistantTextCheckpointChunks,
+  parentAssistantTextCheckpoints,
+} from "../../../runtime/persistence/sqlite/schema.js";
 import { inject, injectable } from "tsyringe";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "./active-turn-recovery-retention-policy.js";
@@ -69,16 +77,18 @@ interface PreparedParentAssistantTextCheckpointChunk {
 }
 
 interface DurableParentAssistantTextCheckpoint {
-  thread_id: string;
-  turn_id: string;
-  last_sequence: number;
-  retained_bytes: number;
-  retained_chunks: number;
+  threadId: string;
+  turnId: string;
+  lastSequence: number;
+  retainedBytes: number;
+  retainedChunks: number;
 }
 
 /** Persists bounded chunks for unfinished ordinary parent assistant responses. */
 @injectable()
 export class ParentAssistantTextCheckpointService {
+  private readonly orm: BunSQLiteDatabase;
+
   constructor(
     @inject("Database") private readonly db: Database,
     @inject("ParentAssistantTextCheckpointLimits", { isOptional: true })
@@ -86,6 +96,7 @@ export class ParentAssistantTextCheckpointService {
     @inject("ParentAssistantTextRecoveryJournalOptions", { isOptional: true })
     journalOptions: ParentAssistantTextRecoveryJournalOptions = {},
   ) {
+    this.orm = drizzle(db);
     this.recoveryJournal = new ParentAssistantTextRecoveryJournal(
       journalOptions.directory ?? resolveDefaultRecoveryJournalDirectory(this.db),
     );
@@ -136,7 +147,7 @@ export class ParentAssistantTextCheckpointService {
   ): ParentAssistantTextCheckpointResult {
     const checkpoint = this.loadCheckpoint(prepared.executionId);
     this.verifyCheckpointRouting(checkpoint, prepared);
-    const durableThrough = checkpoint?.last_sequence ?? 0;
+    const durableThrough = checkpoint?.lastSequence ?? 0;
     const duplicate = this.duplicateCheckpointResult(prepared, durableThrough);
     if (duplicate) return duplicate;
     this.verifyNextSequence(prepared, durableThrough);
@@ -146,18 +157,22 @@ export class ParentAssistantTextCheckpointService {
   }
 
   private loadCheckpoint(executionId: string): DurableParentAssistantTextCheckpoint | undefined {
-    return this.db.prepare(`
-      SELECT thread_id, turn_id, last_sequence, retained_bytes, retained_chunks
-      FROM parent_assistant_text_checkpoints
-      WHERE execution_id = ?
-    `).get(executionId) as DurableParentAssistantTextCheckpoint | undefined;
+    return this.orm.select({
+      threadId: parentAssistantTextCheckpoints.threadId,
+      turnId: parentAssistantTextCheckpoints.turnId,
+      lastSequence: parentAssistantTextCheckpoints.lastSequence,
+      retainedBytes: parentAssistantTextCheckpoints.retainedBytes,
+      retainedChunks: parentAssistantTextCheckpoints.retainedChunks,
+    }).from(parentAssistantTextCheckpoints)
+      .where(eq(parentAssistantTextCheckpoints.executionId, executionId))
+      .get();
   }
 
   private verifyCheckpointRouting(
     checkpoint: DurableParentAssistantTextCheckpoint | undefined,
     prepared: PreparedParentAssistantTextCheckpointChunk,
   ): void {
-    if (checkpoint && (checkpoint.thread_id !== prepared.threadId || checkpoint.turn_id !== prepared.turnId)) {
+    if (checkpoint && (checkpoint.threadId !== prepared.threadId || checkpoint.turnId !== prepared.turnId)) {
       throw new Error("Assistant text checkpoint routing conflicts with its execution");
     }
   }
@@ -170,15 +185,17 @@ export class ParentAssistantTextCheckpointService {
     if (prepared.lastSequence > durableThrough) {
       throw new Error("Assistant text checkpoint retry overlaps durable and new text");
     }
-    const duplicate = this.db.prepare(`
-      SELECT text, byte_length
-      FROM parent_assistant_text_checkpoint_chunks
-      WHERE execution_id = ? AND first_sequence = ? AND last_sequence = ?
-    `).get(prepared.executionId, prepared.firstSequence, prepared.lastSequence) as {
-      text: string;
-      byte_length: number;
-    } | undefined;
-    if (!duplicate || duplicate.text !== prepared.text || duplicate.byte_length !== prepared.byteLength) {
+    const duplicate = this.orm.select({
+      text: parentAssistantTextCheckpointChunks.text,
+      byteLength: parentAssistantTextCheckpointChunks.byteLength,
+    }).from(parentAssistantTextCheckpointChunks)
+      .where(and(
+        eq(parentAssistantTextCheckpointChunks.executionId, prepared.executionId),
+        eq(parentAssistantTextCheckpointChunks.firstSequence, prepared.firstSequence),
+        eq(parentAssistantTextCheckpointChunks.lastSequence, prepared.lastSequence),
+      ))
+      .get();
+    if (!duplicate || duplicate.text !== prepared.text || duplicate.byteLength !== prepared.byteLength) {
       throw new Error("Assistant text checkpoint duplicate conflicts with durable text");
     }
     return { outcome: "duplicate", durableThrough, committedItems: 0, committedBytes: 0 };
@@ -195,8 +212,8 @@ export class ParentAssistantTextCheckpointService {
     checkpoint: DurableParentAssistantTextCheckpoint | undefined,
     durableThrough: number,
   ): ParentAssistantTextCheckpointResult | undefined {
-    const retainedBytes = (checkpoint?.retained_bytes ?? 0) + prepared.byteLength;
-    const retainedChunks = (checkpoint?.retained_chunks ?? 0) + 1;
+    const retainedBytes = (checkpoint?.retainedBytes ?? 0) + prepared.byteLength;
+    const retainedChunks = (checkpoint?.retainedChunks ?? 0) + 1;
     if (retainedBytes <= this.limits.maxBytes && retainedChunks <= this.limits.maxChunks) return undefined;
     return { outcome: "overflow", durableThrough, committedItems: 0, committedBytes: 0 };
   }
@@ -205,28 +222,32 @@ export class ParentAssistantTextCheckpointService {
     prepared: PreparedParentAssistantTextCheckpointChunk,
     checkpoint: DurableParentAssistantTextCheckpoint | undefined,
   ): ParentAssistantTextCheckpointResult {
-    const retainedBytes = (checkpoint?.retained_bytes ?? 0) + prepared.byteLength;
-    const retainedChunks = (checkpoint?.retained_chunks ?? 0) + 1;
-    this.db.prepare(`
-      INSERT INTO parent_assistant_text_checkpoints (
-        execution_id, thread_id, turn_id, last_sequence, retained_bytes, retained_chunks, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(execution_id) DO UPDATE SET
-        last_sequence = excluded.last_sequence,
-        retained_bytes = excluded.retained_bytes,
-        retained_chunks = excluded.retained_chunks,
-        updated_at = excluded.updated_at
-    `).run(
-      prepared.executionId, prepared.threadId, prepared.turnId, prepared.lastSequence,
-      retainedBytes, retainedChunks, new Date().toISOString(),
-    );
-    this.db.prepare(`
-      INSERT INTO parent_assistant_text_checkpoint_chunks (
-        execution_id, first_sequence, last_sequence, text, byte_length
-      ) VALUES (?, ?, ?, ?, ?)
-    `).run(
-      prepared.executionId, prepared.firstSequence, prepared.lastSequence, prepared.text, prepared.byteLength,
-    );
+    const retainedBytes = (checkpoint?.retainedBytes ?? 0) + prepared.byteLength;
+    const retainedChunks = (checkpoint?.retainedChunks ?? 0) + 1;
+    this.orm.insert(parentAssistantTextCheckpoints).values({
+      executionId: prepared.executionId,
+      threadId: prepared.threadId,
+      turnId: prepared.turnId,
+      lastSequence: prepared.lastSequence,
+      retainedBytes,
+      retainedChunks,
+      updatedAt: new Date().toISOString(),
+    }).onConflictDoUpdate({
+      target: parentAssistantTextCheckpoints.executionId,
+      set: {
+        lastSequence: sql`excluded.last_sequence`,
+        retainedBytes: sql`excluded.retained_bytes`,
+        retainedChunks: sql`excluded.retained_chunks`,
+        updatedAt: sql`excluded.updated_at`,
+      },
+    }).run();
+    this.orm.insert(parentAssistantTextCheckpointChunks).values({
+      executionId: prepared.executionId,
+      firstSequence: prepared.firstSequence,
+      lastSequence: prepared.lastSequence,
+      text: prepared.text,
+      byteLength: prepared.byteLength,
+    }).run();
     return {
       outcome: "committed",
       durableThrough: prepared.lastSequence,
@@ -242,22 +263,15 @@ export class ParentAssistantTextCheckpointService {
 
   /** Restore durable chunks in accepted order for recovery and diagnostics. */
   restoreChunks(executionId: string): RestoredParentAssistantTextChunk[] {
-    const rows = this.db.prepare(`
-      SELECT first_sequence, last_sequence, text, byte_length
-      FROM parent_assistant_text_checkpoint_chunks
-      WHERE execution_id = ?
-      ORDER BY first_sequence ASC
-    `).all(executionId) as Array<{
-      first_sequence: number;
-      last_sequence: number;
-      text: string;
-      byte_length: number;
-    }>;
+    const rows = this.orm.select().from(parentAssistantTextCheckpointChunks)
+      .where(eq(parentAssistantTextCheckpointChunks.executionId, executionId))
+      .orderBy(asc(parentAssistantTextCheckpointChunks.firstSequence))
+      .all();
     return rows.map((row) => ({
-      firstSequence: row.first_sequence,
-      lastSequence: row.last_sequence,
+      firstSequence: row.firstSequence,
+      lastSequence: row.lastSequence,
       text: row.text,
-      byteLength: row.byte_length,
+      byteLength: row.byteLength,
     }));
   }
 
@@ -271,14 +285,17 @@ export class ParentAssistantTextCheckpointService {
   /** Discard every unfinished storage tier before a provider retry starts a fresh response. */
   resetForRetry(executionId: string): boolean {
     const reset = this.db.transaction(() => {
-      const unfinished = this.db.prepare(`
-        SELECT 1 FROM canonical_agent_ingest_checkpoints
-        WHERE execution_id = ? AND terminal_outcome IS NULL
-      `).get(executionId);
+      const unfinished = this.orm.select({ executionId: canonicalAgentIngestCheckpoints.executionId })
+        .from(canonicalAgentIngestCheckpoints)
+        .where(and(
+          eq(canonicalAgentIngestCheckpoints.executionId, executionId),
+          isNull(canonicalAgentIngestCheckpoints.terminalOutcome),
+        ))
+        .get();
       if (!unfinished) return false;
-      this.db.prepare(
-        "DELETE FROM parent_assistant_text_checkpoints WHERE execution_id = ?",
-      ).run(executionId);
+      this.orm.delete(parentAssistantTextCheckpoints)
+        .where(eq(parentAssistantTextCheckpoints.executionId, executionId))
+        .run();
       return true;
     })();
     if (reset) this.recoveryJournal.discard(executionId);
@@ -287,15 +304,15 @@ export class ParentAssistantTextCheckpointService {
 
   /** Discard provisional text while the caller owns the surrounding SQLite transaction. */
   resetInTransaction(executionId: string): boolean {
-    return this.db.prepare(`
-      DELETE FROM parent_assistant_text_checkpoints
-      WHERE execution_id = ?
-        AND EXISTS (
+    return runChanges(this.orm.delete(parentAssistantTextCheckpoints)
+      .where(and(
+        eq(parentAssistantTextCheckpoints.executionId, executionId),
+        sql`EXISTS (
           SELECT 1 FROM canonical_agent_ingest_checkpoints
-          WHERE execution_id = parent_assistant_text_checkpoints.execution_id
+          WHERE execution_id = ${parentAssistantTextCheckpoints.executionId}
             AND terminal_outcome IS NULL
-        )
-    `).run(executionId).changes > 0;
+        )`,
+      ))).changes > 0;
   }
 
   /** Remove the journal after its equivalent canonical projection commits. */
@@ -306,14 +323,17 @@ export class ParentAssistantTextCheckpointService {
   /** Retire provisional text only after the canonical execution is terminal. */
   retire(executionId: string): boolean {
     const terminal = this.db.transaction(() => {
-      const terminal = this.db.prepare(`
-        SELECT 1 FROM canonical_agent_ingest_checkpoints
-        WHERE execution_id = ? AND terminal_outcome IS NOT NULL
-      `).get(executionId);
+      const terminal = this.orm.select({ executionId: canonicalAgentIngestCheckpoints.executionId })
+        .from(canonicalAgentIngestCheckpoints)
+        .where(and(
+          eq(canonicalAgentIngestCheckpoints.executionId, executionId),
+          isNotNull(canonicalAgentIngestCheckpoints.terminalOutcome),
+        ))
+        .get();
       if (!terminal) return false;
-      this.db.prepare(
-        "DELETE FROM parent_assistant_text_checkpoints WHERE execution_id = ?",
-      ).run(executionId);
+      this.orm.delete(parentAssistantTextCheckpoints)
+        .where(eq(parentAssistantTextCheckpoints.executionId, executionId))
+        .run();
       return true;
     })();
     if (terminal) this.recoveryJournal.discard(executionId);
@@ -322,14 +342,12 @@ export class ParentAssistantTextCheckpointService {
 
   /** Remove stale provisional data whose canonical executions are already terminal. */
   retireTerminalCheckpoints(): number {
-    return this.db.prepare(`
-      DELETE FROM parent_assistant_text_checkpoints
-      WHERE EXISTS (
+    return runChanges(this.orm.delete(parentAssistantTextCheckpoints)
+      .where(sql`EXISTS (
         SELECT 1 FROM canonical_agent_ingest_checkpoints
-        WHERE execution_id = parent_assistant_text_checkpoints.execution_id
+        WHERE execution_id = ${parentAssistantTextCheckpoints.executionId}
           AND terminal_outcome IS NOT NULL
-      )
-    `).run().changes;
+      )`)).changes;
   }
 
   private prepareChunk(

@@ -143,8 +143,8 @@ Use `runtime check` for both protocol shapes. Use `runtime live --scenario subag
 
 ## Managed-worktree Setup readiness
 
-1. Create a New-worktree first turn through the public agent API.
-2. Wait for Git to finish the checkout before the thread is returned.
+1. Send a New-worktree first turn through the public agent API with one startup ID and discard its response.
+2. From a second client, observe that the startup is bound to a thread, close the first client, and retry the exact request. The response must wait for Git checkout to finish. Confirm one durable startup, thread, worktree, queued first turn, and user prompt.
 3. Keep the first turn queued while automatic Setup reads every tracked fixture file, records its PID, and writes its proof marker.
 4. Cancel startup through the public API. Confirm the terminal startup state, stopped Setup process, interrupted Setup attempt, queued first turn, and no agent runtime.
 5. Remove the generated thread, worktree, workspace, and fixture repository.

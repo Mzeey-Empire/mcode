@@ -1,4 +1,4 @@
-import { useEffect, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
 import type { RecoveryIncident, SelectedTextComment } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,7 @@ import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
+import { useThreadDraftStore, type ThreadDraftPayload } from "@/stores/threadDraftStore";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
 import { StartupProgressCard, useThreadStartup, type StartupDisplayContext } from "@/features/thread-startup";
@@ -299,7 +300,7 @@ function ThreadPreparingShell({
         <div className="flex justify-end">
           <div className="min-w-0 max-w-[min(82%,56rem)] rounded-xl border border-border/50 bg-muted/15 px-4 py-3 text-sm text-foreground/90"><p className="whitespace-pre-wrap break-words">{pendingStartup?.queuedMessage || thread.title}</p></div>
         </div>
-        <PreparingStartupContent thread={thread} pendingStartup={pendingStartup} startup={startup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} />} />
+        <PreparingStartupContent thread={thread} pendingStartup={pendingStartup} startup={startup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} thread={thread} startup={startup} pendingStartup={pendingStartup} />} />
       </div>
       <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} />
     </div>
@@ -493,7 +494,87 @@ function SetupRecoveryActions({ automaticSetup }: { readonly automaticSetup: Ret
   );
 }
 
-function StartupAutomaticSetupActions({ automaticSetup }: { readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup> }) {
+function preserveIncompleteDraft(thread: WorkspaceThread, draft: ThreadDraftPayload["draft"], autoPreviewBranch: string): string {
+  const id = useThreadDraftStore.getState().saveDraft({
+    workspaceId: thread.workspace_id,
+    draft,
+    selection: {
+      interactionMode: thread.interaction_mode ?? "build",
+      permissionMode: thread.permission_mode ?? "full",
+      orchestrationMode: thread.orchestration_mode ?? "standard",
+      approvalReviewMode: "manual",
+      copilotAgent: thread.copilot_agent,
+      thinking: thread.thinking,
+    },
+    target: {
+      mode: "worktree",
+      branch: thread.base_branch || thread.branch || "main",
+      branchSource: "branch",
+      customBranchName: "",
+      autoPreviewBranch,
+      selectedWorktree: null,
+      branchManuallySelected: true,
+    },
+  });
+  if (!id) throw new Error("Could not keep this draft");
+  useComposerDraftStore.getState().removeDraftAfterAttachmentTransfer(thread.id);
+  return id;
+}
+
+function RemoveIncompleteThreadAction({ thread, pendingStartup }: {
+  readonly thread: WorkspaceThread;
+  readonly pendingStartup: PendingStartup | undefined;
+}) {
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remove = async () => {
+    const draftStore = useComposerDraftStore.getState();
+    const workspace = useWorkspaceStore.getState();
+    const draft = draftStore.getDraft(thread.id);
+    const prompt = pendingStartup?.queuedMessage || thread.title;
+    const threadDraftStore = useThreadDraftStore.getState();
+    let savedDraftId: string | null = null;
+    setRemoving(true);
+    setError(null);
+    try {
+      if (draft) savedDraftId = preserveIncompleteDraft(thread, draft, workspace.autoPreviewBranch);
+      await workspace.deleteThread(thread.id, true);
+    } catch (failure) {
+      if (savedDraftId && draft) {
+        draftStore.saveDraft(thread.id, draft);
+        threadDraftStore.removeDraftAfterAttachmentTransfer(savedDraftId);
+      }
+      setError(String(failure));
+      return;
+    } finally {
+      setRemoving(false);
+    }
+    if (savedDraftId) workspace.openThreadDraft(thread.workspace_id, savedDraftId);
+    else if (prompt) draftStore.setPendingPrefill(prompt);
+  };
+  return (
+    <>
+      <Button type="button" variant="outline" size="sm" disabled={removing} onClick={() => { void remove(); }}>
+        Remove incomplete thread
+      </Button>
+      {error && <span role="alert">{error}</span>}
+    </>
+  );
+}
+
+function StartupAutomaticSetupActions({ automaticSetup, thread, startup, pendingStartup }: {
+  readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup>;
+  readonly thread: WorkspaceThread;
+  readonly startup: ReturnType<typeof useThreadStartup>;
+  readonly pendingStartup: PendingStartup | undefined;
+}) {
+  if (startup?.threadId === thread.id
+    && thread.mode === "worktree" && thread.worktree_managed
+    && (startup.state === "failed" || startup.state === "interrupted")
+    && startup.phase !== "agent"
+    && automaticSetup.snapshotLoaded && !automaticSetup.snapshot.attempt) {
+    return <RemoveIncompleteThreadAction thread={thread} pendingStartup={pendingStartup} />;
+  }
   return <StartupAutomaticSetupAction automaticSetup={automaticSetup} />;
 }
 

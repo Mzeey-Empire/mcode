@@ -20,6 +20,10 @@ const {
   chatViewResidencyMock,
   chatViewDisplayLeaseIdsRef,
   chatViewDisplayLeaseListeners,
+  chatViewGetDraftMock,
+  chatViewSetPendingPrefillMock,
+  chatViewSaveDraftMock,
+  chatViewRemoveDraftMock,
 } = vi.hoisted(() => {
   const chatViewDisplayLeaseIdsRef = { current: [] as readonly string[] };
   const chatViewDisplayLeaseListeners = new Set<() => void>();
@@ -49,6 +53,10 @@ const {
     chatViewApplyCanonicalRecoveriesMock: vi.fn(),
     chatViewDisplayLeaseIdsRef,
     chatViewDisplayLeaseListeners,
+    chatViewGetDraftMock: vi.fn(),
+    chatViewSetPendingPrefillMock: vi.fn(),
+    chatViewSaveDraftMock: vi.fn(),
+    chatViewRemoveDraftMock: vi.fn(),
     chatViewResidencyMock: {
       invalidateConversation: vi.fn(),
       refresh: vi.fn().mockResolvedValue(undefined),
@@ -133,8 +141,19 @@ vi.mock("@/stores/thread-selectors", async () => {
 });
 
 vi.mock("@/stores/composerDraftStore", () => ({
-  useComposerDraftStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ drafts: {}, setPendingPrefill: vi.fn() })
+  draftHasNoSendableContent: (draft: { input: string; attachments: unknown[]; selectedTextComments?: unknown[]; selectedTextCommentEditor?: unknown }) =>
+    draft.input.trim() === "" && draft.attachments.length === 0
+    && (draft.selectedTextComments?.length ?? 0) === 0 && !draft.selectedTextCommentEditor,
+  useComposerDraftStore: Object.assign(
+    vi.fn((selector: (s: unknown) => unknown) =>
+      selector({ drafts: {}, setPendingPrefill: chatViewSetPendingPrefillMock })
+    ),
+    { getState: () => ({
+      getDraft: chatViewGetDraftMock,
+      setPendingPrefill: chatViewSetPendingPrefillMock,
+      saveDraft: chatViewSaveDraftMock,
+      removeDraftAfterAttachmentTransfer: chatViewRemoveDraftMock,
+    }) },
   ),
 }));
 
@@ -190,6 +209,8 @@ import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryInci
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { createMockMessage } from "@/__tests__/mocks/transport";
 import { useThreadStartupStore } from "@/features/thread-startup";
+import { useProjectAutomaticSetupStore } from "@/features/projects/environment/ProjectAutomaticSetupControl";
+import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import {
   __resetThreadSwitchTelemetryForTests,
   getThreadSwitchTelemetryCounters,
@@ -297,12 +318,21 @@ function defaultWorkspaceState(overrides: Partial<{
     createWorkspace: vi.fn(),
     deleteWorkspace: vi.fn(),
     deleteThread: vi.fn(),
+    openThreadDraft: vi.fn(),
     setPendingNewThread: vi.fn(),
     updateThreadTitle: overrides.updateThreadTitle ?? vi.fn().mockResolvedValue(undefined),
-    failPreparingThreadOnConnectionLost: vi.fn(),
+    recoverPreparingThreads: vi.fn().mockResolvedValue(undefined),
     retryPreparingThread: vi.fn(),
     dismissPreparingThread: vi.fn(),
     loadWorktrees: vi.fn(),
+    newThreadMode: "direct" as const,
+    newThreadBranch: "main",
+    newThreadBranchSource: "branch" as const,
+    newThreadPullRequestNumber: undefined,
+    customBranchName: "",
+    autoPreviewBranch: "preview",
+    selectedWorktree: null,
+    branchManuallySelected: false,
     worktrees: [],
     worktreesLoadedForWorkspace: null,
     checksById: {},
@@ -397,6 +427,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     chatViewGetTransportMock.mockReset();
     chatViewGetTransportMock.mockReturnValue(chatViewTransportMock);
+    chatViewGetDraftMock.mockReset();
+    chatViewSetPendingPrefillMock.mockReset();
+    chatViewSaveDraftMock.mockReset();
+    chatViewRemoveDraftMock.mockReset();
     chatViewThreadStoreSetStateMock.mockClear();
     chatViewApplyCanonicalRecoveriesMock.mockClear();
     chatViewResidencyMock.invalidateConversation.mockClear();
@@ -1047,6 +1081,169 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByText("Start agent").closest("li")).toHaveAttribute("data-state", "pending");
     expect(screen.queryByText("Error: Thread startup was cancelled")).toBeNull();
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
+  });
+
+  it("offers removal after a bound managed startup stops before setup begins", async () => {
+    const thread = makeThread({
+      id: "thread-incomplete",
+      title: "Incomplete thread",
+      mode: "worktree",
+      worktree_managed: true,
+      worktree_path: "/repo/incomplete",
+    });
+    useThreadStartupStore.getState().apply({
+      startupId: "00000000-0000-4000-8000-000000000027",
+      workspaceId: thread.workspace_id,
+      kind: "managed-worktree",
+      state: "interrupted",
+      phase: "worktree",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "worktree", state: "interrupted" },
+        { phase: "setup", state: "pending" },
+        { phase: "agent", state: "pending" },
+      ],
+      transcript: [],
+      cancellation: "none",
+      revision: 1,
+      threadId: thread.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    });
+    let resolveSetup!: (snapshot: WorkspaceEnvironmentAutomaticSetupSnapshot) => void;
+    chatViewTransportMock.getAutomaticSetup.mockReturnValueOnce(new Promise((resolve) => {
+      resolveSetup = resolve;
+    }));
+    const workspace = defaultWorkspaceState({
+      activeThreadId: thread.id,
+      threads: [thread],
+      pendingStartupByThreadId: {
+        [thread.id]: { startupId: "00000000-0000-4000-8000-000000000027", context: "new-worktree", queuedMessage: "Build the feature" },
+      },
+    });
+    setupWorkspaceMock(workspace);
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
+
+    render(<ChatView />);
+    expect(screen.queryByRole("button", { name: "Remove incomplete thread" })).toBeNull();
+    await act(async () => {
+      resolveSetup({ gate: "not-required", attempt: null, queuedTurns: [] });
+    });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Remove incomplete thread" }));
+
+    expect(workspace.deleteThread).toHaveBeenCalledWith(thread.id, true);
+    expect(chatViewSetPendingPrefillMock).toHaveBeenCalledWith("Build the feature");
+  });
+
+  it("moves the full unsent draft before removing an incomplete thread", async () => {
+    const thread = makeThread({
+      id: "thread-incomplete-rich-draft",
+      mode: "worktree",
+      worktree_managed: true,
+      worktree_path: "/repo/incomplete-rich",
+      branch: "generated-branch",
+      base_branch: "feature/source",
+    });
+    useThreadStartupStore.getState().apply({
+      startupId: "00000000-0000-4000-8000-000000000029",
+      workspaceId: thread.workspace_id,
+      kind: "managed-worktree",
+      state: "interrupted",
+      phase: "worktree",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "worktree", state: "interrupted" },
+        { phase: "setup", state: "pending" },
+        { phase: "agent", state: "pending" },
+      ],
+      transcript: [],
+      cancellation: "none",
+      revision: 1,
+      threadId: thread.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    });
+    chatViewTransportMock.getAutomaticSetup.mockResolvedValueOnce({ gate: "not-required", attempt: null, queuedTurns: [] });
+    const workspace = defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] });
+    workspace.deleteThread.mockRejectedValueOnce(new Error("Delete failed"));
+    setupWorkspaceMock(workspace);
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
+    const draft = {
+      input: "",
+      attachments: [{ id: "attachment", name: "image.png", mimeType: "image/png", sizeBytes: 12, filePath: "C:/tmp/image.png", previewUrl: "blob:incomplete" }],
+      mentions: [{ kind: "file", id: "mention", label: "file", range: { start: 0, end: 4 }, path: "/repo/file" }],
+      selectedTextComments: [{
+        id: "11111111-1111-4111-8111-111111111111",
+        displayNumber: 1,
+        source: { threadId: "parent", messageId: "message", sourceRole: "assistant", start: 0, end: 4, quote: "text" },
+        note: "Keep this note",
+        mentions: [],
+      }],
+      modelId: "gpt-5.5",
+      provider: "codex",
+      reasoning: "high",
+    };
+    chatViewGetDraftMock.mockReturnValue(draft);
+    useThreadDraftStore.setState({ drafts: {} });
+    const revokePreview = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    render(<ChatView />);
+    const user = userEvent.setup();
+    const remove = await screen.findByRole("button", { name: "Remove incomplete thread" });
+    await user.click(remove);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Delete failed");
+    expect(useThreadDraftStore.getState().drafts).toEqual({});
+    expect(chatViewSaveDraftMock).toHaveBeenCalledWith(thread.id, draft);
+    expect(revokePreview).not.toHaveBeenCalled();
+
+    await user.click(remove);
+
+    const saved = Object.values(useThreadDraftStore.getState().drafts)[0];
+    expect(saved?.draft).toEqual(draft);
+    expect(saved?.target).toEqual(expect.objectContaining({ mode: "worktree", branch: "feature/source", selectedWorktree: null }));
+    expect(workspace.openThreadDraft).toHaveBeenCalledWith(thread.workspace_id, saved?.id);
+    expect(workspace.deleteThread).toHaveBeenCalledWith(thread.id, true);
+    expect(chatViewRemoveDraftMock).toHaveBeenCalledWith(thread.id);
+    expect(chatViewSetPendingPrefillMock).not.toHaveBeenCalled();
+    expect(revokePreview).not.toHaveBeenCalled();
+    revokePreview.mockRestore();
+  });
+
+  it("does not offer incomplete-thread removal when agent startup fails after checkout", async () => {
+    const thread = makeThread({
+      id: "thread-agent-failed",
+      mode: "worktree",
+      worktree_managed: true,
+      worktree_path: "/repo/valid-checkout",
+    });
+    useThreadStartupStore.getState().apply({
+      startupId: "00000000-0000-4000-8000-000000000028",
+      workspaceId: thread.workspace_id,
+      kind: "managed-worktree",
+      state: "failed",
+      phase: "agent",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "worktree", state: "completed" },
+        { phase: "setup", state: "completed" },
+        { phase: "agent", state: "failed" },
+      ],
+      transcript: [],
+      cancellation: "none",
+      revision: 1,
+      threadId: thread.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    });
+    chatViewTransportMock.getAutomaticSetup.mockResolvedValueOnce({ gate: "not-required", attempt: null, queuedTurns: [] });
+    setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] }));
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
+
+    render(<ChatView />);
+    await waitFor(() => expect(useProjectAutomaticSetupStore.getState().snapshotsByThread[thread.id])
+      .toEqual({ gate: "not-required", attempt: null, queuedTurns: [] }));
+    expect(screen.getByTestId("startup-progress")).toHaveTextContent("Startup failed");
+    expect(screen.queryByRole("button", { name: "Remove incomplete thread" })).toBeNull();
   });
 
   it("keeps a recovered startup visible while the durable thread hydrates", () => {

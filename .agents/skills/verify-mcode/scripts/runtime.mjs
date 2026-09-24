@@ -112,7 +112,7 @@ Commands:
       with the project-scoped always-allow option, records the .devin config file it writes, and
       removes that grant after the proof.
   worktree-setup --confirm-cleanup
-      Create an owned Git project, verify its held automatic Setup gate, cancel Setup through the public API, then remove the project, workspace, thread, and worktree. Does not make a provider call.
+      Create an owned Git project, lose the first create response, retry with the same startup ID, verify held Setup, cancel it, then remove owned state. Does not make a provider call.
   worktree-setup-cleanup --confirm-cleanup
       Remove a retained worktree-setup run after an interrupted proof.
   diagnostics
@@ -544,14 +544,25 @@ async function worktreeSetup(repoRoot) {
   const report = createWorktreeSetupReport();
   const deadline = Date.now() + LIVE_TIMEOUT_MS;
   let socket = null;
+  let firstSocket = null;
   try {
     await health(repoRoot);
-    socket = await openSocket(repoRoot, readRuntime(repoRoot));
+    firstSocket = await openSocket(repoRoot, readRuntime(repoRoot));
+    socket = firstSocket;
     await createWorktreeSetupFixture(run.record);
     const workspace = await createWorktreeSetupWorkspace(socket, run.evidenceDirectory, run.record, deadline);
     await saveWorktreeSetupConfiguration(socket, workspace.id, deadline);
-    const thread = await createWorktreeSetupThread(socket, workspace.id, run.record.startupId, deadline);
+    const request = worktreeSetupCreateRequest(workspace.id, run.record.startupId);
+    await firstSocket.sendWithoutResponse("agent.createAndSend", request);
+    socket = await openSocket(repoRoot, readRuntime(repoRoot));
+    const boundThreadId = await waitForBoundWorktreeSetup(socket, run.record, deadline);
+    await firstSocket.close();
+    const thread = await createWorktreeSetupThread(socket, request, deadline);
+    if (thread.id !== boundThreadId) {
+      throw actionable("The retried create request returned a different thread", "Run worktree-setup-cleanup with --confirm-cleanup, inspect runtime diagnostics, then retry.");
+    }
     recordWorktreeSetupThread(run.evidenceDirectory, run.record, thread);
+    report.lostResponse = await proveSingleWorktreeSetupCreation(socket, run.record, request.content, deadline);
     report.checkout = await proveWorktreeSetup(socket, run.evidenceDirectory, run.record, deadline);
     report.cancellation = await cancelWorktreeSetup(socket, run.record, deadline);
   } catch (error) {
@@ -563,6 +574,7 @@ async function worktreeSetup(repoRoot) {
       report.cleanup.failure = safeError(error);
     }
     await socket?.close();
+    if (firstSocket && firstSocket !== socket) await firstSocket.close();
   }
   return writeWorktreeSetupReceipt(repoRoot, run.receiptPath, report);
 }
@@ -570,6 +582,7 @@ async function worktreeSetup(repoRoot) {
 function createWorktreeSetupReport() {
   return {
     command: "worktree-setup",
+    lostResponse: null,
     checkout: null,
     cancellation: null,
     cleanup: {
@@ -705,8 +718,8 @@ function worktreeSetupFixtureScript() {
   ].join("\n");
 }
 
-async function createWorktreeSetupThread(socket, workspaceId, startupId, deadline) {
-  const thread = await socket.rpc("agent.createAndSend", {
+function worktreeSetupCreateRequest(workspaceId, startupId) {
+  return {
     workspaceId,
     startupId,
     content: "Verify automatic Setup checkout readiness.",
@@ -715,7 +728,24 @@ async function createWorktreeSetupThread(socket, workspaceId, startupId, deadlin
     permissionMode: "full",
     mode: "worktree",
     branch: "main",
-  }, deadline);
+  };
+}
+
+async function waitForBoundWorktreeSetup(socket, record, deadline) {
+  while (Date.now() < deadline) {
+    const startup = await socket.rpc("thread.startup.get", { startupId: record.startupId }, deadline);
+    if (startup?.threadId) {
+      if (startup.workspaceId === record.workspaceId && startup.kind === "managed-worktree") return startup.threadId;
+      break;
+    }
+    if (startup && ["failed", "cancelled", "interrupted"].includes(startup.state)) break;
+    await delayUntil(deadline);
+  }
+  throw actionable("The first create request did not bind an owned managed-worktree startup", "Run worktree-setup-cleanup with --confirm-cleanup, inspect runtime diagnostics, then retry.");
+}
+
+async function createWorktreeSetupThread(socket, request, deadline) {
+  const thread = await socket.rpc("agent.createAndSend", request, deadline);
   if (
     typeof thread?.id !== "string" ||
     typeof thread?.worktree_path !== "string" ||
@@ -726,6 +756,49 @@ async function createWorktreeSetupThread(socket, workspaceId, startupId, deadlin
     throw actionable("agent.createAndSend did not retain a queued managed worktree turn", "Run worktree-setup-cleanup with --confirm-cleanup, inspect runtime diagnostics, then retry.");
   }
   return thread;
+}
+
+async function proveSingleWorktreeSetupCreation(socket, record, prompt, deadline) {
+  const [threads, startups, automatic, messages] = await Promise.all([
+    socket.rpc("thread.list", { workspaceId: record.workspaceId }, deadline),
+    socket.rpc("thread.startup.list", { workspaceId: record.workspaceId }, deadline),
+    socket.rpc("workspace.environment.automaticSetup.get", { threadId: record.threadId }, deadline),
+    socket.rpc("message.list", { threadId: record.threadId, limit: 10 }, deadline),
+  ]);
+  if (!hasOneWorktreeSetupThread(threads, record.threadId)) {
+    throw actionable("The lost-response retry did not retain exactly one thread", "Run worktree-setup-cleanup with --confirm-cleanup, inspect runtime diagnostics, then retry.");
+  }
+  if (!hasOneBoundWorktreeSetup(startups, record)) {
+    throw actionable("The lost-response retry did not retain exactly one bound startup", "Run worktree-setup-cleanup with --confirm-cleanup, inspect runtime diagnostics, then retry.");
+  }
+  if (!hasQueuedFirstTurn(automatic)) {
+    throw actionable("The lost-response retry did not retain exactly one queued first Turn", "Run worktree-setup-cleanup with --confirm-cleanup, inspect runtime diagnostics, then retry.");
+  }
+  if (!hasOnePersistedWorktreeSetupPrompt(messages, automatic.queuedTurns[0].messageId, prompt)) {
+    throw actionable("The lost-response retry did not retain one durable first-turn prompt", "Run worktree-setup-cleanup with --confirm-cleanup, inspect runtime diagnostics, then retry.");
+  }
+  const listed = await runFixtureGit(record.sourceRepositoryPath, ["worktree", "list", "--porcelain"]);
+  const worktrees = fixtureWorktreePaths(listed).filter((path) => !pathsMatch(path, record.sourceRepositoryPath));
+  if (worktrees.length !== 1 || !pathsMatch(worktrees[0], record.worktreePath)) {
+    throw actionable("The lost-response retry did not retain exactly one managed worktree", "Run worktree-setup-cleanup with --confirm-cleanup, inspect runtime diagnostics, then retry.");
+  }
+  return { firstResponseUnavailable: true, sameStartupIdRetried: true, oneBoundStartup: true, oneThread: true, oneWorktree: true, oneQueuedFirstTurn: true, onePersistedPrompt: true };
+}
+
+function hasOneWorktreeSetupThread(threads, threadId) {
+  return Array.isArray(threads) && threads.length === 1 && threads[0]?.id === threadId;
+}
+
+function hasOneBoundWorktreeSetup(startups, record) {
+  return Array.isArray(startups?.records) && startups.records.length === 1
+    && startups.records[0]?.startupId === record.startupId
+    && startups.records[0]?.threadId === record.threadId;
+}
+
+function hasOnePersistedWorktreeSetupPrompt(result, messageId, prompt) {
+  return Array.isArray(result?.messages) && result.messages.length === 1 && result.hasMore === false
+    && result.messages[0]?.id === messageId && result.messages[0]?.role === "user"
+    && result.messages[0]?.content === prompt;
 }
 
 function recordWorktreeSetupThread(evidenceDirectory, record, thread) {
@@ -1039,6 +1112,7 @@ function writeWorktreeSetupReceipt(repoRoot, receiptPath, report) {
   const receipt = {
     ok: report.failure === null && report.cleanup.failure === null,
     command: report.command,
+    lostResponse: report.lostResponse,
     checkout: report.checkout,
     cancellation: report.cancellation,
     cleanup: report.cleanup,
@@ -1711,10 +1785,23 @@ function hasStoppedStatus(events) {
 
 function hasSharedStopResult(stopResults, threadId) {
   if (!Array.isArray(stopResults) || stopResults.length !== 2) return false;
-  const [first, second] = stopResults;
-  return isCancelledStopResult(first, threadId)
-    && isCancelledStopResult(second, threadId)
-    && sharedStopMetadata(first, second, threadId);
+  const cancelled = cancelledStopResult(stopResults, threadId);
+  return cancelled !== null
+    && stopResults.every((result) => result === cancelled || isTerminalStopPeer(result, cancelled, threadId));
+}
+
+function cancelledStopResult(stopResults, threadId) {
+  if (!Array.isArray(stopResults)) return null;
+  return stopResults.find((result) => isCancelledStopResult(result, threadId)) ?? null;
+}
+
+// agent.stop terminalizes the turn synchronously, so a concurrent peer can only
+// observe the same execution as already terminal rather than win the same stop.
+function isTerminalStopPeer(result, cancelled, threadId) {
+  return result?.status === "already-terminal"
+    && result.threadId === threadId
+    && result.turnExecutionId === cancelled.turnExecutionId
+    && result.snapshot?.phase === "cancelled";
 }
 
 function isCancelledStopResult(result, threadId) {
@@ -1726,20 +1813,8 @@ function isCancelledStopResult(result, threadId) {
     && result.snapshot.turnExecutionId === result.turnExecutionId;
 }
 
-function sharedStopMetadata(first, second, threadId) {
-  return first.turnExecutionId === second.turnExecutionId
-    && first.dispatchState === second.dispatchState
-    && snapshotsMatch(first.snapshot, second.snapshot)
-    && first.snapshot.threadId === threadId;
-}
-
-function snapshotsMatch(first, second) {
-  if (!first || !second) return false;
-  return ["threadId", "turnExecutionId", "phase", "savingStatus"].every((key) => first[key] === second[key]);
-}
-
 async function requireCancelledRuntimeState(socket, threadId, report, deadline) {
-  const turnExecutionId = report.stopResults[0].turnExecutionId;
+  const turnExecutionId = cancelledStopResult(report.stopResults, threadId).turnExecutionId;
   const verified = await waitForAsync(async () => {
     const [activeCount, snapshots] = await Promise.all([
       socket.rpc("agent.activeCount", {}, deadline),
@@ -2264,8 +2339,23 @@ async function waitForSocketOpen(ws, state, pending) {
 function createSocketClient(ws, state, pending) {
   return {
     rpc: (method, params, deadline) => sendSocketRpc(ws, state, pending, method, params, deadline),
+    sendWithoutResponse: (method, params) => sendSocketRpcWithoutResponse(ws, state, method, params),
     close: () => closeSocketClient(ws, state, pending),
   };
+}
+
+function sendSocketRpcWithoutResponse(ws, state, method, params) {
+  if (state.failure) return Promise.reject(state.failure);
+  if (ws.readyState !== state.openState) {
+    return Promise.reject(socketFailure("The WebSocket is not open", "Run bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime health, then retry the command."));
+  }
+  const id = `verify-${++state.counter}`;
+  return new Promise((resolve, reject) => {
+    ws.send(JSON.stringify({ id, method, params }), (error) => {
+      if (error) reject(socketFailure(`RPC ${method} could not be sent`, "Run bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime health, then retry the command."));
+      else resolve();
+    });
+  });
 }
 
 function sendSocketRpc(ws, state, pending, method, params, deadline) {

@@ -1,6 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SelectedTextComment } from "@mcode/contracts";
+import { ORCHESTRATION_MODES, type SelectedTextComment } from "@mcode/contracts";
+import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import type { ComposerExecutionTargetController } from "../execution/useComposerExecutionTarget";
 import { useComposerFormController } from "../draft/useComposerFormController";
 
@@ -65,10 +68,11 @@ function execution(): ComposerExecutionTargetController {
   };
 }
 
-function useHarness(queueOverrides: Partial<ComposerSubmissionQueue> = {}) {
+function useHarness(queueOverrides: Partial<ComposerSubmissionQueue> = {}, draftId?: string) {
   const form = useComposerFormController({
     isNewThread: true,
     workspaceId: "workspace-1",
+    draftId,
   });
   const controller = useComposerSubmissionController({
     isNewThread: true,
@@ -138,6 +142,55 @@ describe("useComposerSubmissionController selected-text comments", () => {
 
     await waitFor(() => expect(routeMocks.dispatchComposerTarget).toHaveBeenCalled());
     expect(result.current.form.state.selectedTextComments).toEqual([comment]);
+  });
+
+  it("restores a saved Draft when dispatch fails before a preparing task exists", async () => {
+    useThreadDraftStore.setState({ drafts: {} });
+    useWorkspaceStore.setState({ activeDraftId: null, activeWorkspaceId: "workspace-1" });
+    const draftId = useThreadDraftStore.getState().saveDraft({
+      workspaceId: "workspace-1",
+      draft: {
+        input: "Keep this draft",
+        mentions: [],
+        selectedTextComments: [],
+        attachments: [],
+        modelId: "gpt-5.5",
+        provider: "codex",
+        reasoning: "high",
+      },
+      selection: {
+        interactionMode: INTERACTION_MODES.PLAN,
+        permissionMode: PERMISSION_MODES.FULL,
+        orchestrationMode: ORCHESTRATION_MODES.STANDARD,
+        approvalReviewMode: "manual",
+        copilotAgent: null,
+        thinking: null,
+      },
+      target: {
+        mode: "direct",
+        branch: "main",
+        branchSource: "branch",
+        customBranchName: "",
+        autoPreviewBranch: "",
+        selectedWorktree: null,
+        branchManuallySelected: false,
+      },
+    });
+    expect(draftId).not.toBeNull();
+    useWorkspaceStore.setState({ activeDraftId: draftId });
+    let rejectDispatch!: (error: Error) => void;
+    routeMocks.dispatchComposerTarget.mockReturnValueOnce(new Promise<void>((_resolve, reject) => {
+      rejectDispatch = reject;
+    }));
+    const { result } = renderHook(() => useHarness({}, draftId!));
+
+    await waitFor(() => expect(result.current.form.state.text).toBe("Keep this draft"));
+    act(() => { void result.current.controller.submit(); });
+    await waitFor(() => expect(useThreadDraftStore.getState().drafts[draftId!]).toBeUndefined());
+    await act(async () => { rejectDispatch(new Error("invalid target")); });
+
+    await waitFor(() => expect(useThreadDraftStore.getState().drafts[draftId!]?.draft.input).toBe("Keep this draft"));
+    expect(useWorkspaceStore.getState().activeDraftId).toBe(draftId);
   });
 
   it("dispatches saved cards after a dirty editor completes its dismissal warning flow", async () => {

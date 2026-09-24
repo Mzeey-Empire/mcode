@@ -4,6 +4,10 @@
 
 import { inject, injectable } from "tsyringe";
 import type { Database } from "bun:sqlite";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { pullRequestReviewLinks } from "../../../../runtime/persistence/sqlite/schema.js";
+import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
 
 /** Stable provider identity for one pull request. */
 export interface PullRequestReviewLinkIdentity {
@@ -80,202 +84,70 @@ export interface UpdatePullRequestReviewRemoteStateInput {
   headOid?: string;
 }
 
-interface PullRequestReviewLinkRow {
-  worktree_id: string;
-  provider: string;
-  repository_node_id: string;
-  pull_request_number: number;
-  pr_url: string;
-  pr_state: string;
-  workspace_id: string;
-  worktree_path: string;
-  worktree_managed: number;
-  head_repository_node_id: string;
-  head_repository_owner: string;
-  head_repository_name: string;
-  head_ref: string;
-  head_oid: string;
-  local_branch: string;
-  push_remote: string;
-  push_ref: string;
-  managed_remote_name: string | null;
-  primary_thread_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-const REVIEW_LINK_COLUMNS = `
-  worktree_id,
-  provider,
-  repository_node_id,
-  pull_request_number,
-  pr_url,
-  pr_state,
-  workspace_id,
-  worktree_path,
-  worktree_managed,
-  head_repository_node_id,
-  head_repository_owner,
-  head_repository_name,
-  head_ref,
-  head_oid,
-  local_branch,
-  push_remote,
-  push_ref,
-  managed_remote_name,
-  primary_thread_id,
-  created_at,
-  updated_at
-`;
+type PullRequestReviewLinkRow = typeof pullRequestReviewLinks.$inferSelect;
 
 function rowToReviewLink(row: PullRequestReviewLinkRow): PullRequestReviewLink {
   return {
-    worktreeId: row.worktree_id,
+    worktreeId: row.worktreeId,
     provider: row.provider,
-    repositoryNodeId: row.repository_node_id,
-    pullRequestNumber: row.pull_request_number,
-    pullRequestUrl: row.pr_url,
-    pullRequestState: row.pr_state,
-    workspaceId: row.workspace_id,
-    worktreePath: row.worktree_path,
-    worktreeManaged: row.worktree_managed === 1,
-    headRepositoryNodeId: row.head_repository_node_id,
-    headRepositoryOwner: row.head_repository_owner,
-    headRepositoryName: row.head_repository_name,
-    headRef: row.head_ref,
-    headOid: row.head_oid,
-    localBranch: row.local_branch,
-    pushRemote: row.push_remote,
-    pushRef: row.push_ref,
-    managedRemoteName: row.managed_remote_name,
-    primaryThreadId: row.primary_thread_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    repositoryNodeId: row.repositoryNodeId,
+    pullRequestNumber: row.pullRequestNumber,
+    pullRequestUrl: row.pullRequestUrl,
+    pullRequestState: row.pullRequestState,
+    workspaceId: row.workspaceId,
+    worktreePath: row.worktreePath,
+    worktreeManaged: row.worktreeManaged === 1,
+    headRepositoryNodeId: row.headRepositoryNodeId,
+    headRepositoryOwner: row.headRepositoryOwner,
+    headRepositoryName: row.headRepositoryName,
+    headRef: row.headRef,
+    headOid: row.headOid,
+    localBranch: row.localBranch,
+    pushRemote: row.pushRemote,
+    pushRef: row.pushRef,
+    managedRemoteName: row.managedRemoteName,
+    primaryThreadId: row.primaryThreadId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
+}
+
+function identityWhere(identity: PullRequestReviewLinkIdentity) {
+  return and(
+    eq(pullRequestReviewLinks.provider, identity.provider),
+    eq(pullRequestReviewLinks.repositoryNodeId, identity.repositoryNodeId),
+    eq(pullRequestReviewLinks.pullRequestNumber, identity.pullRequestNumber),
+  );
 }
 
 /** Repository for durable pull request Review task links. */
 @injectable()
 export class PullRequestReviewLinkRepo {
-  private readonly findByIdentityStatement;
-  private readonly findByPrimaryThreadStatement;
-  private readonly findByWorktreePathStatement;
-  private readonly insertStatement;
-  private readonly replaceLocalCheckoutStatement;
-  private readonly updateRemoteStateStatement;
-  private readonly updatePrimaryThreadStatement;
-  private readonly clearPrimaryThreadStatement;
+  private readonly orm: BunSQLiteDatabase;
 
   constructor(@inject("Database") private readonly db: Database) {
-    this.findByIdentityStatement = db.prepare(`
-      SELECT ${REVIEW_LINK_COLUMNS}
-      FROM pull_request_review_links
-      WHERE provider = ?
-        AND repository_node_id = ?
-        AND pull_request_number = ?
-    `);
-    this.findByPrimaryThreadStatement = db.prepare(`
-      SELECT ${REVIEW_LINK_COLUMNS}
-      FROM pull_request_review_links
-      WHERE primary_thread_id = ?
-    `);
-    this.findByWorktreePathStatement = db.prepare(`
-      SELECT ${REVIEW_LINK_COLUMNS}
-      FROM pull_request_review_links
-      WHERE worktree_path = ?
-        AND pull_request_number = ?
-      LIMIT 1
-    `);
-    this.insertStatement = db.prepare(`
-      INSERT INTO pull_request_review_links (
-        worktree_id,
-        provider,
-        repository_node_id,
-        pull_request_number,
-        pr_url,
-        pr_state,
-        workspace_id,
-        worktree_path,
-        worktree_managed,
-        head_repository_node_id,
-        head_repository_owner,
-        head_repository_name,
-        head_ref,
-        head_oid,
-        local_branch,
-        push_remote,
-        push_ref,
-        managed_remote_name,
-        primary_thread_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      RETURNING ${REVIEW_LINK_COLUMNS}
-    `);
-    this.replaceLocalCheckoutStatement = db.prepare(`
-      UPDATE pull_request_review_links
-      SET pr_url = ?,
-          pr_state = ?,
-          workspace_id = ?,
-          worktree_path = ?,
-          worktree_managed = ?,
-          head_repository_node_id = ?,
-          head_repository_owner = ?,
-          head_repository_name = ?,
-          head_ref = ?,
-          head_oid = ?,
-          local_branch = ?,
-          push_remote = ?,
-          push_ref = ?,
-          managed_remote_name = ?,
-          updated_at = ?
-      WHERE provider = ?
-        AND repository_node_id = ?
-        AND pull_request_number = ?
-        AND primary_thread_id IS NULL
-      RETURNING ${REVIEW_LINK_COLUMNS}
-    `);
-    this.updateRemoteStateStatement = db.prepare(`
-      UPDATE pull_request_review_links
-      SET pr_url = ?,
-          pr_state = ?,
-          head_oid = COALESCE(?, head_oid),
-          updated_at = ?
-      WHERE provider = ?
-        AND repository_node_id = ?
-        AND pull_request_number = ?
-      RETURNING ${REVIEW_LINK_COLUMNS}
-    `);
-    this.updatePrimaryThreadStatement = db.prepare(`
-      UPDATE pull_request_review_links
-      SET primary_thread_id = ?, updated_at = ?
-      WHERE provider = ?
-        AND repository_node_id = ?
-        AND pull_request_number = ?
-      RETURNING ${REVIEW_LINK_COLUMNS}
-    `);
-    this.clearPrimaryThreadStatement = db.prepare(`
-      UPDATE pull_request_review_links
-      SET primary_thread_id = NULL, updated_at = ?
-      WHERE primary_thread_id = ?
-    `);
+    this.orm = drizzle(db);
   }
 
   /** Find the canonical local link for a provider pull request identity. */
   findByIdentity(
     identity: PullRequestReviewLinkIdentity,
   ): PullRequestReviewLink | null {
-    const row = this.findByIdentityStatement.get(
-      identity.provider,
-      identity.repositoryNodeId,
-      identity.pullRequestNumber,
-    ) as PullRequestReviewLinkRow | undefined;
+    const row = this.orm
+      .select()
+      .from(pullRequestReviewLinks)
+      .where(identityWhere(identity))
+      .get();
     return row ? rowToReviewLink(row) : null;
   }
 
   /** Find the Review link whose canonical task is the supplied thread. */
   findByPrimaryThreadId(threadId: string): PullRequestReviewLink | null {
-    const row = this.findByPrimaryThreadStatement.get(threadId) as
-      | PullRequestReviewLinkRow
-      | undefined;
+    const row = this.orm
+      .select()
+      .from(pullRequestReviewLinks)
+      .where(eq(pullRequestReviewLinks.primaryThreadId, threadId))
+      .get();
     return row ? rowToReviewLink(row) : null;
   }
 
@@ -284,10 +156,15 @@ export class PullRequestReviewLinkRepo {
     worktreePath: string,
     pullRequestNumber: number,
   ): PullRequestReviewLink | null {
-    const row = this.findByWorktreePathStatement.get(
-      worktreePath,
-      pullRequestNumber,
-    ) as PullRequestReviewLinkRow | undefined;
+    const row = this.orm
+      .select()
+      .from(pullRequestReviewLinks)
+      .where(and(
+        eq(pullRequestReviewLinks.worktreePath, worktreePath),
+        eq(pullRequestReviewLinks.pullRequestNumber, pullRequestNumber),
+      ))
+      .limit(1)
+      .get();
     return row ? rowToReviewLink(row) : null;
   }
 
@@ -298,27 +175,31 @@ export class PullRequestReviewLinkRepo {
    * the caller can reread the canonical row after a concurrent attempt wins.
    */
   insert(input: CreatePullRequestReviewLinkInput): PullRequestReviewLink {
-    const row = this.insertStatement.get(
-      input.worktreeId,
-      input.provider,
-      input.repositoryNodeId,
-      input.pullRequestNumber,
-      input.pullRequestUrl,
-      input.pullRequestState,
-      input.workspaceId,
-      input.worktreePath,
-      input.worktreeManaged ? 1 : 0,
-      input.headRepositoryNodeId,
-      input.headRepositoryOwner,
-      input.headRepositoryName,
-      input.headRef,
-      input.headOid,
-      input.localBranch,
-      input.pushRemote,
-      input.pushRef,
-      input.managedRemoteName ?? null,
-      input.primaryThreadId ?? null,
-    ) as PullRequestReviewLinkRow;
+    const row = this.orm
+      .insert(pullRequestReviewLinks)
+      .values({
+        worktreeId: input.worktreeId,
+        provider: input.provider,
+        repositoryNodeId: input.repositoryNodeId,
+        pullRequestNumber: input.pullRequestNumber,
+        pullRequestUrl: input.pullRequestUrl,
+        pullRequestState: input.pullRequestState,
+        workspaceId: input.workspaceId,
+        worktreePath: input.worktreePath,
+        worktreeManaged: input.worktreeManaged ? 1 : 0,
+        headRepositoryNodeId: input.headRepositoryNodeId,
+        headRepositoryOwner: input.headRepositoryOwner,
+        headRepositoryName: input.headRepositoryName,
+        headRef: input.headRef,
+        headOid: input.headOid,
+        localBranch: input.localBranch,
+        pushRemote: input.pushRemote,
+        pushRef: input.pushRef,
+        managedRemoteName: input.managedRemoteName ?? null,
+        primaryThreadId: input.primaryThreadId ?? null,
+      })
+      .returning()
+      .get();
     return rowToReviewLink(row);
   }
 
@@ -330,26 +211,28 @@ export class PullRequestReviewLinkRepo {
     identity: PullRequestReviewLinkIdentity,
     input: ReplacePullRequestReviewCheckoutInput,
   ): PullRequestReviewLink | null {
-    const row = this.replaceLocalCheckoutStatement.get(
-      input.pullRequestUrl,
-      input.pullRequestState,
-      input.workspaceId,
-      input.worktreePath,
-      input.worktreeManaged ? 1 : 0,
-      input.headRepositoryNodeId,
-      input.headRepositoryOwner,
-      input.headRepositoryName,
-      input.headRef,
-      input.headOid,
-      input.localBranch,
-      input.pushRemote,
-      input.pushRef,
-      input.managedRemoteName ?? null,
-      new Date().toISOString(),
-      identity.provider,
-      identity.repositoryNodeId,
-      identity.pullRequestNumber,
-    ) as PullRequestReviewLinkRow | undefined;
+    const row = this.orm
+      .update(pullRequestReviewLinks)
+      .set({
+        pullRequestUrl: input.pullRequestUrl,
+        pullRequestState: input.pullRequestState,
+        workspaceId: input.workspaceId,
+        worktreePath: input.worktreePath,
+        worktreeManaged: input.worktreeManaged ? 1 : 0,
+        headRepositoryNodeId: input.headRepositoryNodeId,
+        headRepositoryOwner: input.headRepositoryOwner,
+        headRepositoryName: input.headRepositoryName,
+        headRef: input.headRef,
+        headOid: input.headOid,
+        localBranch: input.localBranch,
+        pushRemote: input.pushRemote,
+        pushRef: input.pushRef,
+        managedRemoteName: input.managedRemoteName ?? null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(identityWhere(identity), isNull(pullRequestReviewLinks.primaryThreadId)))
+      .returning()
+      .get();
     return row ? rowToReviewLink(row) : null;
   }
 
@@ -358,15 +241,17 @@ export class PullRequestReviewLinkRepo {
     identity: PullRequestReviewLinkIdentity,
     input: UpdatePullRequestReviewRemoteStateInput,
   ): PullRequestReviewLink | null {
-    const row = this.updateRemoteStateStatement.get(
-      input.pullRequestUrl,
-      input.pullRequestState,
-      input.headOid ?? null,
-      new Date().toISOString(),
-      identity.provider,
-      identity.repositoryNodeId,
-      identity.pullRequestNumber,
-    ) as PullRequestReviewLinkRow | undefined;
+    const row = this.orm
+      .update(pullRequestReviewLinks)
+      .set({
+        pullRequestUrl: input.pullRequestUrl,
+        pullRequestState: input.pullRequestState,
+        headOid: sql`COALESCE(${input.headOid ?? null}, ${pullRequestReviewLinks.headOid})`,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(identityWhere(identity))
+      .returning()
+      .get();
     return row ? rowToReviewLink(row) : null;
   }
 
@@ -375,21 +260,28 @@ export class PullRequestReviewLinkRepo {
     identity: PullRequestReviewLinkIdentity,
     primaryThreadId: string | null,
   ): PullRequestReviewLink | null {
-    const row = this.updatePrimaryThreadStatement.get(
-      primaryThreadId,
-      new Date().toISOString(),
-      identity.provider,
-      identity.repositoryNodeId,
-      identity.pullRequestNumber,
-    ) as PullRequestReviewLinkRow | undefined;
+    const row = this.orm
+      .update(pullRequestReviewLinks)
+      .set({
+        primaryThreadId,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(identityWhere(identity))
+      .returning()
+      .get();
     return row ? rowToReviewLink(row) : null;
   }
 
   /** Clear a deleted thread from any canonical Review link. */
   clearPrimaryThreadByThreadId(threadId: string): boolean {
-    const result = this.clearPrimaryThreadStatement.run(
-      new Date().toISOString(),
-      threadId,
+    const result = runChanges(
+      this.orm
+        .update(pullRequestReviewLinks)
+        .set({
+          primaryThreadId: null,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(pullRequestReviewLinks.primaryThreadId, threadId)),
     );
     return result.changes > 0;
   }

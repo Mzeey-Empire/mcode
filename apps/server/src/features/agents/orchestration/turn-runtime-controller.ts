@@ -43,6 +43,7 @@ import { TURN_RUNTIME_PERSISTENCE, type TurnRuntimePersistence } from "../turns/
 import {
   ThreadCreationCoordinator,
   type CreateAndSendCommand,
+  type CreatedInitialTurn,
 } from "../turns/thread-creation-coordinator.js";
 import {
   TurnAdmissionDispatchCoordinator,
@@ -1337,6 +1338,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Provision a thread through its coordinator, then start its generic first-turn command. */
   async createAndSend(command: CreateAndSendCommand): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[] }> {
     const created = await this.threadCreation.createInitialTurn(command);
+    if (created.kind === "replay") {
+      return {
+        ...created.thread,
+        runtimeSnapshot: this.turnRuntime.snapshot(created.thread.id) ?? idleRuntime(created.thread.id),
+      };
+    }
     if (created.kind === "queued") {
       return {
         ...created.thread,
@@ -1344,6 +1351,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         ...(created.thread.warnings?.length ? { warnings: created.thread.warnings } : {}),
       };
     }
+    return this.dispatchInitialTurn(created);
+  }
+
+  private async dispatchInitialTurn(
+    created: Extract<CreatedInitialTurn, { kind: "dispatch" }>,
+  ): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[] }> {
     let runtimeSnapshot: TurnRuntimeSnapshot;
     try {
       this.threadCreation.startInitialAgent(created.startupId);

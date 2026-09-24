@@ -1,5 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
+import { and, asc, desc, eq, gt, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   CONVERSATION_HISTORY_PAGE_MAX_MESSAGES,
   ThoughtSegmentRecordSchema,
@@ -7,6 +9,10 @@ import {
   type ConversationNarrativeBatch,
   type Message,
 } from "@mcode/contracts";
+import {
+  canonicalAgentIngestCheckpoints,
+  canonicalAgentItems,
+} from "../../../runtime/persistence/sqlite/schema.js";
 
 /** Canonical conversation rows used by the staged compatibility read. */
 export interface CanonicalConversationProjection {
@@ -23,10 +29,10 @@ interface MessageProjectionRow {
 interface NarrativeRow {
   id: string;
   kind: string;
-  payload_json: string;
-  created_at: string;
-  updated_at: string;
-  turn_id: string;
+  payloadJson: string;
+  createdAt: string;
+  updatedAt: string;
+  turnId: string;
 }
 
 interface NarrativePayload {
@@ -48,7 +54,11 @@ interface ProjectionState {
 
 /** Reads canonical conversation rows and projects narrative records for compatibility consumers. */
 export class CanonicalConversationProjectionReader {
-  constructor(private readonly db: Database) {}
+  private readonly orm: BunSQLiteDatabase;
+
+  constructor(db: Database) {
+    this.orm = drizzle(db);
+  }
 
   /** Loads one canonical conversation page in ascending message order. */
   load(
@@ -83,30 +93,26 @@ export class CanonicalConversationProjectionReader {
     after?: number,
   ): { rows: MessageProjectionRow[]; hasMore: boolean } {
     const clampedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-    const direction = after === undefined ? "DESC" : "ASC";
     const cursor = after ?? before ?? Number.MAX_SAFE_INTEGER;
-    const cursorOperator = after === undefined ? "<" : ">";
-    const rows = this.db.prepare(`
-      SELECT turn_id, payload_json
-      FROM canonical_agent_items
-      WHERE thread_id = ?
-        AND kind = 'message'
-        AND json_extract(payload_json, '$.projection') = 'message'
-        AND json_extract(payload_json, '$.message.sequence') ${cursorOperator} ?
-        AND COALESCE(json_extract(payload_json, '$.message.is_internal'), 0) = 0
-        AND (
-          json_extract(payload_json, '$.message.role') <> 'assistant'
-          OR EXISTS (
-            SELECT 1
-            FROM canonical_agent_ingest_checkpoints checkpoint
-            WHERE checkpoint.turn_id = canonical_agent_items.turn_id
-              AND checkpoint.terminal_outcome IS NOT NULL
-          )
-        )
-      ORDER BY json_extract(payload_json, '$.message.sequence') ${direction},
-        json_extract(payload_json, '$.message.id') ${direction}
-      LIMIT ?
-    `).all(threadId, cursor, clampedLimit + 1) as Array<{ turn_id: string; payload_json: string }>;
+    const messageSequence = sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.sequence')`;
+    const messageId = sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.id')`;
+    const rows = this.orm
+      .select({
+        turnId: canonicalAgentItems.turnId,
+        payloadJson: canonicalAgentItems.payloadJson,
+      })
+      .from(canonicalAgentItems)
+      .where(and(
+        ...messageProjectionConditions(threadId),
+        after === undefined ? lt(messageSequence, cursor) : gt(messageSequence, cursor),
+      ))
+      .orderBy(
+        ...(after === undefined
+          ? [desc(messageSequence), desc(messageId)]
+          : [asc(messageSequence), asc(messageId)]),
+      )
+      .limit(clampedLimit + 1)
+      .all();
     const hasMore = rows.length > clampedLimit;
     const pageRows = rows.slice(0, clampedLimit).map(toMessageProjectionRow);
     pageRows.sort(compareMessageProjectionRows);
@@ -123,68 +129,68 @@ export class CanonicalConversationProjectionReader {
 
   private loadNarrativeRows(threadId: string, messageRows: readonly MessageProjectionRow[]): NarrativeRow[] {
     const turnIds = [...new Set(messageRows.map(({ turnId }) => turnId))];
-    return this.db.prepare(`
-      SELECT id, kind, payload_json, created_at, updated_at, turn_id
-      FROM canonical_agent_items
-      WHERE thread_id = ?
-        AND kind <> 'message'
-        AND turn_id IN (${turnIds.map(() => "?").join(", ")})
-      ORDER BY created_at ASC, id ASC
-      LIMIT ?
-    `).all(
-      threadId,
-      ...turnIds,
-      CONVERSATION_HISTORY_PAGE_MAX_MESSAGES,
-    ) as NarrativeRow[];
+    return this.orm
+      .select({
+        id: canonicalAgentItems.id,
+        kind: canonicalAgentItems.kind,
+        payloadJson: canonicalAgentItems.payloadJson,
+        createdAt: canonicalAgentItems.createdAt,
+        updatedAt: canonicalAgentItems.updatedAt,
+        turnId: canonicalAgentItems.turnId,
+      })
+      .from(canonicalAgentItems)
+      .where(and(
+        eq(canonicalAgentItems.threadId, threadId),
+        ne(canonicalAgentItems.kind, "message"),
+        inArray(canonicalAgentItems.turnId, turnIds),
+      ))
+      .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
+      .limit(CONVERSATION_HISTORY_PAGE_MAX_MESSAGES)
+      .all();
   }
 
   private findChildTurnIds(rows: readonly NarrativeRow[]): string[] {
     const childTurnIds = new Set<string>();
     for (const row of rows) {
-      if (isCodexChildProjection(parseNarrativePayload(row))) childTurnIds.add(row.turn_id);
+      if (isCodexChildProjection(parseNarrativePayload(row))) childTurnIds.add(row.turnId);
     }
     return [...childTurnIds];
   }
 
   private loadChildMessageRows(threadId: string, childTurnIds: readonly string[]): MessageProjectionRow[] {
     if (childTurnIds.length === 0) return [];
-    const rows = this.db.prepare(`
-      WITH candidate_messages AS (
-        SELECT turn_id, payload_json,
-          ROW_NUMBER() OVER (
-            PARTITION BY turn_id
+    const candidateMessages = this.orm.$with("candidate_messages").as(
+      this.orm
+        .select({
+          turnId: canonicalAgentItems.turnId,
+          payloadJson: canonicalAgentItems.payloadJson,
+          candidateRank: sql<number>`ROW_NUMBER() OVER (
+            PARTITION BY ${canonicalAgentItems.turnId}
             ORDER BY CASE
-              WHEN json_extract(payload_json, '$.message.role') = 'assistant' THEN 0
+              WHEN json_extract(${canonicalAgentItems.payloadJson}, '$.message.role') = 'assistant' THEN 0
               ELSE 1
             END,
-            json_extract(payload_json, '$.message.sequence') ASC,
-            json_extract(payload_json, '$.message.id') ASC
-          ) AS candidate_rank
-        FROM canonical_agent_items
-        WHERE thread_id = ?
-          AND kind = 'message'
-          AND json_extract(payload_json, '$.projection') = 'message'
-          AND COALESCE(json_extract(payload_json, '$.message.is_internal'), 0) = 0
-          AND (
-            json_extract(payload_json, '$.message.role') <> 'assistant'
-            OR EXISTS (
-              SELECT 1
-              FROM canonical_agent_ingest_checkpoints checkpoint
-              WHERE checkpoint.turn_id = canonical_agent_items.turn_id
-                AND checkpoint.terminal_outcome IS NOT NULL
-            )
-          )
-          AND turn_id IN (${childTurnIds.map(() => "?").join(", ")})
-      )
-      SELECT turn_id, payload_json
-      FROM candidate_messages
-      WHERE candidate_rank <= 2
-      ORDER BY turn_id ASC, candidate_rank ASC
-      LIMIT ?
-    `).all(threadId, ...childTurnIds, childTurnIds.length * 2) as Array<{
-      turn_id: string;
-      payload_json: string;
-    }>;
+            json_extract(${canonicalAgentItems.payloadJson}, '$.message.sequence') ASC,
+            json_extract(${canonicalAgentItems.payloadJson}, '$.message.id') ASC
+          )`.as("candidate_rank"),
+        })
+        .from(canonicalAgentItems)
+        .where(and(
+          ...messageProjectionConditions(threadId),
+          inArray(canonicalAgentItems.turnId, childTurnIds),
+        )),
+    );
+    const rows = this.orm
+      .with(candidateMessages)
+      .select({
+        turnId: candidateMessages.turnId,
+        payloadJson: candidateMessages.payloadJson,
+      })
+      .from(candidateMessages)
+      .where(lte(candidateMessages.candidateRank, 2))
+      .orderBy(asc(candidateMessages.turnId), asc(candidateMessages.candidateRank))
+      .limit(childTurnIds.length * 2)
+      .all();
     return rows.map(toMessageProjectionRow);
   }
 
@@ -222,7 +228,7 @@ export class CanonicalConversationProjectionReader {
     childMessageByTurn: ReadonlyMap<string, string>,
     state: ProjectionState,
   ): boolean {
-    const childAnchor = childMessageByTurn.get(row.turn_id);
+    const childAnchor = childMessageByTurn.get(row.turnId);
     if (!childAnchor || !state.narrativeByMessage[childAnchor] || !isCodexChildProjection(payload)) return false;
     switch (payload.projection) {
       case "codexChildReasoning":
@@ -244,14 +250,14 @@ export class CanonicalConversationProjectionReader {
     childAnchor: string,
     state: ProjectionState,
   ): void {
-    const nativeItemId = payload.nativeItemId ?? row.payload_json;
+    const nativeItemId = payload.nativeItemId ?? row.payloadJson;
     const sortOrder = state.childThoughtOrderByMessage.get(childAnchor) ?? 0;
     state.narrativeByMessage[childAnchor]!.thoughts.push(ThoughtSegmentRecordSchema().parse({
       id: `codex-child-reasoning:${hashCodexKey(`${nativeItemId}:${row.id}`)}`,
       message_id: childAnchor,
       text: typeof payload.content === "string" ? payload.content : "",
-      started_at: row.created_at,
-      ended_at: row.updated_at,
+      started_at: row.createdAt,
+      ended_at: row.updatedAt,
       sort_order: sortOrder,
     }));
     state.childThoughtOrderByMessage.set(childAnchor, sortOrder + 1);
@@ -296,7 +302,7 @@ export class CanonicalConversationProjectionReader {
   }
 
   private childToolNativeItemId(row: NarrativeRow, payload: NarrativePayload): string {
-    return payload.nativeItemId ?? row.payload_json;
+    return payload.nativeItemId ?? row.payloadJson;
   }
 
   private childToolsForMessage(
@@ -391,7 +397,7 @@ export class CanonicalConversationProjectionReader {
     sortOrder: number,
   ) {
     return {
-      started_at: existing?.started_at ?? row.created_at,
+      started_at: existing?.started_at ?? row.createdAt,
       completed_at: existing?.completed_at ?? null,
       sort_order: existing?.sort_order ?? sortOrder,
     };
@@ -418,8 +424,8 @@ export class CanonicalConversationProjectionReader {
     sortOrder: number,
   ) {
     return {
-      started_at: existing?.started_at ?? row.created_at,
-      completed_at: row.updated_at,
+      started_at: existing?.started_at ?? row.createdAt,
+      completed_at: row.updatedAt,
       sort_order: existing?.sort_order ?? sortOrder,
     };
   }
@@ -459,16 +465,16 @@ export class CanonicalConversationProjectionReader {
   }
 }
 
-function toMessageProjectionRow(row: { turn_id: string; payload_json: string }): MessageProjectionRow {
-  return { turnId: row.turn_id, message: (JSON.parse(row.payload_json) as { message: Message }).message };
+function toMessageProjectionRow(row: { turnId: string; payloadJson: string }): MessageProjectionRow {
+  return { turnId: row.turnId, message: (JSON.parse(row.payloadJson) as { message: Message }).message };
 }
 
 function compareMessageProjectionRows(left: MessageProjectionRow, right: MessageProjectionRow): number {
   return left.message.sequence - right.message.sequence || left.message.id.localeCompare(right.message.id);
 }
 
-function parseNarrativePayload(row: Pick<NarrativeRow, "payload_json">): NarrativePayload {
-  return JSON.parse(row.payload_json) as NarrativePayload;
+function parseNarrativePayload(row: Pick<NarrativeRow, "payloadJson">): NarrativePayload {
+  return JSON.parse(row.payloadJson) as NarrativePayload;
 }
 
 function isCodexChildProjection(payload: NarrativePayload): boolean {
@@ -484,4 +490,24 @@ function formatToolInput(value: unknown): string {
 
 function hashCodexKey(value: string): string {
   return NodeCrypto.createHash("sha256").update(value).digest("hex").slice(0, 32);
+}
+
+// Both message-page reads share this predicate block; one definition keeps the
+// projection gate from drifting between the page query and the child CTE.
+function messageProjectionConditions(threadId: string) {
+  return [
+    eq(canonicalAgentItems.threadId, threadId),
+    eq(canonicalAgentItems.kind, "message"),
+    eq(sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection')`, "message"),
+    eq(sql`COALESCE(json_extract(${canonicalAgentItems.payloadJson}, '$.message.is_internal'), 0)`, 0),
+    or(
+      ne(sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.role')`, "assistant"),
+      sql`EXISTS (
+        SELECT 1
+        FROM ${canonicalAgentIngestCheckpoints} checkpoint
+        WHERE checkpoint.turn_id = ${canonicalAgentItems.turnId}
+          AND checkpoint.terminal_outcome IS NOT NULL
+      )`,
+    ),
+  ];
 }

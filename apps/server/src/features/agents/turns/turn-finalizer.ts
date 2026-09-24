@@ -21,6 +21,9 @@ import { logger } from "@mcode/shared";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent, StoredAttachment } from "@mcode/contracts";
 import type { Database } from "bun:sqlite";
+import { and, eq } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { threads } from "../../../runtime/persistence/sqlite/schema.js";
 import { broadcast } from "../../../application/transport/push.js";
 import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
@@ -93,6 +96,7 @@ export class TurnFinalizer {
   private readonly bufferedAttachmentsByThread = new Map<string, StoredAttachment[]>();
   /** Threads whose assistant row was already materialized this turn (e.g. eagerly for a plan FK). */
   private readonly materializedThreads = new Set<string>();
+  private readonly orm: BunSQLiteDatabase;
   /** Serializes finalize calls per thread so a slow git snapshot cannot drop a later turn. */
   private readonly finalizeChainByThread = new Map<string, Promise<void>>();
   private readonly pendingDiffSettlement = new Map<string, { executionId: string | undefined; settle: SettleTurnDiff }>();
@@ -108,7 +112,9 @@ export class TurnFinalizer {
     private readonly canonicalSink?: ParentTurnDurability,
     private readonly parentAssistantTextCheckpoints?: ParentAssistantTextCheckpointService,
     private readonly turnDiffs?: TurnDiffService,
-  ) {}
+  ) {
+    this.orm = drizzle(db);
+  }
 
   /** Append a streaming assistant-text delta for the current turn. */
   appendStreamingText(threadId: string, delta: string): void {
@@ -630,9 +636,11 @@ export class TurnFinalizer {
           worktreePath: null,
         });
         if (hasFileEffects || files.length > 0) {
-          this.db
-            .prepare("UPDATE threads SET has_file_changes = 1 WHERE id = ? AND has_file_changes = 0")
-            .run(threadId);
+          this.orm
+            .update(threads)
+            .set({ hasFileChanges: 1 })
+            .where(and(eq(threads.id, threadId), eq(threads.hasFileChanges, 0)))
+            .run();
         }
       });
       writeTurn(filesChanged);
