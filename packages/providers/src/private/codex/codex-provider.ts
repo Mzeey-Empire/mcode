@@ -98,6 +98,8 @@ const SIDE_CHANNEL_TIMEOUT_MS = 120_000;
 const USAGE_WARMUP_TIMEOUT_MS = 10_000;
 const CODEX_MCP_STARTUP_TIMEOUT_MS = 10_000;
 const STOP_SETTLE_TIMEOUT_MS = 10_000;
+/** Bound on a follow-up send's wait for a user-stop drain before it respawns instead. */
+const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
 const USAGE_WARMUP_RETRY_MS = 60_000;
 const CODEX_MIN_VERSION = "0.37.0";
 // The installed 0.153.4 app-server exposes approvalsReviewer plus the gated
@@ -319,6 +321,8 @@ interface CodexSessionState {
   /** True until the current `turn/start` RPC response arrives. */
   turnStartResponsePending: boolean;
   turnStartPromise?: Promise<void>;
+  /** In-flight user-stop drain; a follow-up sendTurn waits on it before reusing this session. */
+  interruptDrain?: Promise<boolean>;
   cancelledTurnExecutionId?: string;
   /** Native turn notification buffered until the authoritative RPC response arrives. */
   pendingTurnStartNotification?: { nativeTurnId: string; executionId: string };
@@ -675,6 +679,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     private readonly host: ProviderHostPorts,
     private readonly codexPorts: CodexProviderPorts,
     idleSessionTtlMs: number,
+    private readonly stopDrainReuseTimeoutMs: number = STOP_DRAIN_REUSE_TIMEOUT_MS,
   ) {
     super();
     this.runtime = new SessionRuntime<CodexSessionState>(this, {
@@ -1215,7 +1220,52 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     state.nextTurnExecutionId = turn.request.turnExecutionId;
     state.turnDiffRouting = { turnId: turn.request.turnId, turnExecutionId: turn.request.turnExecutionId, deliveryAttempt: turn.request.deliveryAttempt ?? 1 };
     state.turnDiffRevision = 0;
-    void this.runTurnAfterGoal(turn.request.sessionId, turn.threadId, state.server, turn.input, turn.turnOptions, turn.request.turnExecutionId);
+    void this.dispatchReusedCodexTurn(turn, state);
+  }
+
+  /**
+   * Wait for an in-flight user-stop drain before reusing the warm session. When
+   * the drain is wedged the send discards the session and respawns via the
+   * staged-turn path rather than queueing `turn/start` behind an interrupt that
+   * may never produce `turn/completed`.
+   */
+  private async dispatchReusedCodexTurn(turn: PreparedCodexTurn, state: CodexSessionState): Promise<void> {
+    const sessionId = turn.request.sessionId;
+    const drain = state.interruptDrain;
+    if (drain) {
+      const settled = await Promise.race([
+        drain.then((value) => value, () => false),
+        new Promise<false>((resolve) => {
+          const timer = setTimeout(() => resolve(false), this.stopDrainReuseTimeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+      const pooled = this.runtime.get(sessionId);
+      if (!settled || pooled !== state || !state.server.isAlive || this.isBusy(state)) {
+        // The drain wedged or the session was replaced mid-wait; teardown
+        // failure must not lose the staged turn, so respawn regardless. Only
+        // discard when the pool still holds this entry — a concurrent send may
+        // have already spawned a replacement under the same sessionId.
+        if (pooled === state) {
+          await this.discardSession(sessionId).catch((error: unknown) => {
+            logger.warn("Codex draining-session discard failed", {
+              sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+        }
+        this.stageCodexTurn(turn);
+        await this.acquireCodexTurn(turn);
+        return;
+      }
+    } else if (this.runtime.get(sessionId) !== state || !state.server.isAlive) {
+      // The entry was evicted between acquire and dispatch; a turn started on
+      // the dead state would be silently dropped, so re-stage and respawn.
+      this.stageCodexTurn(turn);
+      await this.acquireCodexTurn(turn);
+      return;
+    }
+    await this.runTurnAfterGoal(sessionId, turn.threadId, state.server, turn.input, turn.turnOptions, turn.request.turnExecutionId);
   }
 
   /**
@@ -1370,7 +1420,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     server.on("fatal", (error: string) => this.handleCodexServerFatal(context, server, mapper, error));
     this.attachFatalDrain(context.sessionId, server);
     server.on("exit", () => {
-      if (!server.isAlive) void this.runtime.stop(context.sessionId);
+      // Only evict when this server is still the pooled one — a drained
+      // session's replacement may already own the sessionId.
+      if (!server.isAlive && this.runtime.get(context.sessionId)?.server === server) {
+        void this.runtime.stop(context.sessionId);
+      }
     });
   }
 
@@ -1437,7 +1491,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       this.emitRuntimeEvent(providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event));
     }
     this.emitTurnFailure(context.threadId, error, undefined, true, executionId);
-    void this.runtime.stop(context.sessionId);
+    if (this.runtime.get(context.sessionId)?.server === server) {
+      void this.runtime.stop(context.sessionId);
+    }
   }
 
   private async startCodexAppServer(
@@ -2639,9 +2695,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.drainPending((e) => e.sessionId === sessionId);
     if (state) {
       state.cancelledTurnExecutionId = state.nextTurnExecutionId;
-      const settled = await this.awaitStopSettled(state);
-      if (!settled) {
+      const drain = this.awaitStopSettled(state);
+      state.interruptDrain = drain;
+      const settled = await drain.catch(() => false);
+      if (state.interruptDrain === drain) state.interruptDrain = undefined;
+      if (!settled && this.runtime.get(sessionId) === state) {
         // A wedged app-server cannot be interrupted; evict so the next turn respawns.
+        // Identity check: a follow-up send may have already replaced the entry.
         logger.warn("Codex stop did not settle; discarding wedged session", { sessionId });
         await this.discardSession(sessionId);
       }

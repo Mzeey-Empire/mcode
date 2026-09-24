@@ -90,6 +90,9 @@ type CursorTurnContext = {
   browserPermissionCapability: ReturnType<typeof providerBrowserPermissionCapability>;
 };
 
+/** Bound on a follow-up send's wait for a user-stop drain before it respawns instead. */
+const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
+
 const CURSOR_SUPPORTED_CAPABILITIES = [
   "build",
   "plan",
@@ -207,6 +210,7 @@ export class CursorProvider
     private readonly host: ProviderHostPorts,
     private readonly cursorPorts: CursorProviderPorts,
     idleSessionTtlMs: number,
+    private readonly stopDrainReuseTimeoutMs: number = STOP_DRAIN_REUSE_TIMEOUT_MS,
   ) {
     super();
     this.canonicalEventPublisher = new CursorCanonicalEventPublisher(host.events);
@@ -357,8 +361,11 @@ export class CursorProvider
     this.clearBrowserStageAfterAcquire(sessionId, browserStage, entry, existing);
     if (await this.consumePendingStop(context)) return;
 
+    const readyEntry = await this.resolveStopDrain(context, entry);
+    if (!readyEntry) return;
+
     try {
-      await this.enqueueTurn(entry, context);
+      await this.enqueueTurn(readyEntry, context);
     } finally {
       this.finishPendingTurnRouting(sessionId, req.turnExecutionId);
     }
@@ -688,6 +695,42 @@ export class CursorProvider
     ]);
     this.finishPendingTurnRouting(context.sessionId, context.req.turnExecutionId);
     return true;
+  }
+
+  /**
+   * Wait briefly for an in-flight user-stop cancel to drain before reusing the
+   * warm entry. Queueing the prompt behind a turn that is still settling would
+   * stall the send, so past the bound the session is discarded and respawned.
+   */
+  private async resolveStopDrain(
+    context: CursorTurnContext,
+    entry: CursorSessionState,
+  ): Promise<CursorSessionState | undefined> {
+    if (entry.pendingUserStopAbort) {
+      const settled = await Promise.race([
+        entry.turnChain.then(() => true, () => true),
+        new Promise<false>((resolve) => {
+          const timer = setTimeout(() => resolve(false), this.stopDrainReuseTimeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+      if (settled && this.runtime.get(context.sessionId) === entry && !entry.activeTurnState) return entry;
+      // The pool entry is already removed even if teardown fails partway, so
+      // the send still proceeds to a fresh spawn. Identity check: a concurrent
+      // send may have already spawned a replacement under the same sessionId.
+      if (!settled && this.runtime.get(context.sessionId) === entry) {
+        await this.discardSession(context.sessionId).catch((error: unknown) => {
+          logger.warn("Cursor draining-session discard failed", {
+            sessionId: context.sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    } else if (this.runtime.get(context.sessionId) === entry) {
+      return entry;
+    }
+    // An evicted entry cannot take a prompt; reacquire joins a pending spawn.
+    return this.acquireTurnSession(context, undefined);
   }
 
   private async enqueueTurn(

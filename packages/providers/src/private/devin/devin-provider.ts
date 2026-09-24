@@ -112,6 +112,9 @@ const MAX_AUTO_CONTINUES = 8;
  */
 const CANCEL_SETTLE_TIMEOUT_MS = 10_000;
 
+/** Bound on a follow-up send's wait for a user-stop drain before it respawns instead. */
+const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
+
 /** `Ended` outcome for stop reasons that cut the turn short; others stay a normal completion. */
 const STOP_OUTCOMES: Record<string, "cancelled" | "interrupted" | "errored"> = {
   cancelled: "cancelled",
@@ -184,6 +187,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     private readonly devin: DevinProviderPorts,
     idleSessionTtlMs: number,
     private readonly cancelSettleTimeoutMs: number = CANCEL_SETTLE_TIMEOUT_MS,
+    private readonly stopDrainReuseTimeoutMs: number = STOP_DRAIN_REUSE_TIMEOUT_MS,
   ) {
     super();
     this.canonicalEvents = new DevinCanonicalEventPublisher(host.events);
@@ -348,13 +352,14 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     };
     this.pendingTurnRoutings.set(req.sessionId, routing);
     try {
-      const entry = await this.sessions.acquire({
+      let entry = await this.sessions.acquire({
         sessionId: req.sessionId,
         threadId: req.threadId,
         cwd: req.cwd,
         permissionMode: req.permissionMode,
         resumeFrom: req.resumeFrom,
       });
+      entry = await this.resolveStopDrain(req, entry);
       entry.devinMode = resolveDevinMode(req);
       const run = entry.turnChain.then(() => this.executeTurn(entry, req, routing));
       entry.turnChain = run.then(() => undefined, () => undefined);
@@ -362,6 +367,43 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     } finally {
       this.pendingTurnRoutings.delete(req.sessionId);
     }
+  }
+
+  /**
+   * Wait briefly for an in-flight user-stop cancel to drain before reusing the
+   * warm entry. Queueing the prompt behind a turn that is ignoring cancel would
+   * stall the send until the kill timer, so a wedged drain falls back to an
+   * early stop plus respawn (which joins the already-warming replacement).
+   */
+  private async resolveStopDrain(
+    req: TurnRequest<"devin">,
+    entry: DevinAcpSessionEntry,
+  ): Promise<DevinAcpSessionEntry> {
+    if (entry.pendingUserStopAbort) {
+      const settled = await Promise.race([
+        entry.turnChain.then(() => true, () => true),
+        new Promise<false>((resolve) => {
+          const timer = setTimeout(() => resolve(false), this.stopDrainReuseTimeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+      if (settled && this.sessions.get(req.sessionId) === entry) return entry;
+      // Stop only when the pool still holds this entry — a concurrent send may
+      // have already spawned a replacement under the same sessionId.
+      if (!settled && this.sessions.get(req.sessionId) === entry) {
+        await this.sessions.stop(req.sessionId).catch(() => undefined);
+      }
+    } else if (this.sessions.get(req.sessionId) === entry) {
+      return entry;
+    }
+    // An evicted entry cannot take a prompt; reacquire joins a pending spawn.
+    return this.sessions.acquire({
+      sessionId: req.sessionId,
+      threadId: req.threadId,
+      cwd: req.cwd,
+      permissionMode: req.permissionMode,
+      resumeFrom: req.resumeFrom,
+    });
   }
 
   private async executeTurn(
@@ -750,7 +792,8 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
         timer.unref?.();
       }),
     ]);
-    if (settled) return;
+    // Identity check: a follow-up send may have already replaced the entry.
+    if (settled || this.sessions.get(sessionId) !== entry) return;
     logger.warn("Devin turn ignored session/cancel; killing ACP child and warming a replacement", {
       sessionId,
       threadId: entry.threadId,
