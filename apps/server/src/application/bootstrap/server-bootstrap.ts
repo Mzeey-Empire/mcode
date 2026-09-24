@@ -109,7 +109,7 @@ import { ProviderUsageWarmupService } from "../../features/providers/availabilit
 import { ProviderRegistry } from "../../features/providers/composition/provider-registry.js";
 import { ProviderEventIngress } from "../../features/providers/composition/provider-event-ingress.js";
 import type { CursorProviderBoundary } from "@mcode/providers";
-import { ModelCacheService } from "../../features/providers/models/model-cache-service.js";
+import { ModelCacheService, startupModelProviderIds } from "../../features/providers/models/model-cache-service.js";
 import { DiffSummaryService } from "../../features/projects/diffs/summaries/diff-summary-service.js";
 import { RecapService } from "../../features/agents/recap/recap-service.js";
 import { seedAgentRuntimeWorkspace } from "../../runtime/startup/dev-agent-seed.js";
@@ -571,11 +571,7 @@ providerAvailability
     // blocking `codex --version` spawnSync.
     warmCodexVersionGate();
     providerUsageWarmup.warmEnabledProviders(true);
-    // Warm only enabled providers. Disabled adapters remain registered but
-    // their model listing can start a provider process.
-    const modelProviders = providerAvailability.listAvailability()
-      .filter((provider) => provider.enabled && provider.hasAdapter && !provider.comingSoon && provider.cli.status !== "not_found")
-      .map((provider) => provider.id);
+    const modelProviders = startupModelProviderIds(providerAvailability.listAvailability());
     void modelCacheService.refreshProviders(modelProviders).catch((err: unknown) => {
       logger.warn("Model cache startup refresh failed", {
         error: err instanceof Error ? err.message : String(err),

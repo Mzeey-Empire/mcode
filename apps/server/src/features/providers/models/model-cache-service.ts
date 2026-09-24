@@ -10,12 +10,19 @@
 
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import type { ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+import type { ProviderAvailability, ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
 import { broadcast } from "../../../application/transport/push.js";
 import { ModelCacheRepo } from "./persistence/model-cache-repo.js";
 
 /** How long a cached entry is considered "fresh" (no background refresh). */
 const CACHE_FRESH_MS = 60 * 60 * 1000; // 1 hour
+
+/** Select providers whose model lists can be warmed without starting OpenCode. */
+export function startupModelProviderIds(providers: readonly ProviderAvailability[]): ProviderId[] {
+  return providers
+    .filter((provider) => provider.id !== "opencode" && provider.enabled && provider.hasAdapter && !provider.comingSoon && provider.cli.status !== "not_found")
+    .map((provider) => provider.id);
+}
 
 /**
  * Parse a SQLite `datetime('now')` string as UTC. SQLite returns

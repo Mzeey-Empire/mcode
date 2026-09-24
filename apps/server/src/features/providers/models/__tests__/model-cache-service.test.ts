@@ -14,8 +14,15 @@ vi.mock("../../../../application/transport/push.js", () => ({
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ModelCacheRepo } from "../persistence/model-cache-repo.js";
-import { ModelCacheService } from "../model-cache-service.js";
-import type { ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+import { ModelCacheService, startupModelProviderIds } from "../model-cache-service.js";
+import type { ProviderAvailability, ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+
+function availableProvider(id: ProviderId, enabled: boolean): ProviderAvailability {
+  return {
+    id, enabled, hasAdapter: true, beta: false, comingSoon: false, capabilities: [],
+    cli: { status: "found", resolvedPath: id, configuredPath: "" },
+  };
+}
 
 function makeProvider(models: ProviderModelInfo[], id = "test-provider") {
   return {
@@ -55,16 +62,25 @@ describe("ModelCacheService", () => {
     db.close();
   });
 
-  it("warms only the selected providers", async () => {
+  it("warms enabled providers without starting idle OpenCode", async () => {
     const claude = makeProvider([{ id: "claude-model", name: "Claude Model" }], "claude");
     const opencode = makeProvider([{ id: "open-model", name: "Open Model" }], "opencode");
-    const registry = makeRegistry(new Map([["claude", claude], ["opencode", opencode]]));
+    const codex = makeProvider([{ id: "codex-model", name: "Codex Model" }], "codex");
+    const registry = makeRegistry(new Map([["claude", claude], ["opencode", opencode], ["codex", codex]]));
     const service = new ModelCacheService(repo, registry);
 
-    await service.refreshProviders(["claude"]);
+    const startupProviders = startupModelProviderIds([
+      availableProvider("claude", true),
+      availableProvider("opencode", true),
+      availableProvider("codex", false),
+    ]);
+    expect(startupProviders).toEqual(["claude"]);
+    await service.refreshProviders(startupProviders);
 
     expect(service.getCached("claude")).toEqual([{ id: "claude-model", name: "Claude Model" }]);
     expect(service.getCached("opencode")).toBeUndefined();
+    expect(opencode.listModels).not.toHaveBeenCalled();
+    expect(codex.listModels).not.toHaveBeenCalled();
   });
 
   it("returns cached models without calling provider when cache is fresh", async () => {
