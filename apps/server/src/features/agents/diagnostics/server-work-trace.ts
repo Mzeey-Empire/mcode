@@ -5,6 +5,7 @@ import { logger } from "@mcode/shared";
 export type ServerWorkPhase =
   | "provider-callback" | "worker-admission" | "worker-wait" | "mailbox-wait"
   | "canonical-write" | "event-apply" | "narrative-checkpoint"
+  | "assistant-text-write"
   | "narrative-prepare" | "narrative-persist" | "narrative-confirm"
   | "finalization" | "publication"
   | "terminal-create" | "thread-create" | "agent-send";
