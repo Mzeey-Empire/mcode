@@ -133,6 +133,42 @@ describe("TurnFileTracker", () => {
     expect(await tracker.finalizeTurn("t", nextGeneration)).toMatchObject({ fileCount: 0 });
   });
 
+  it("binds captured observations to the exact before and after evidence text", async () => {
+    const root = await tempDir("mcode-observation-evidence-");
+    const tracker = trackerWithBaseline({}, []);
+    tracker.beginTurn("t", root, null);
+    const mutation = { path: "file.txt", kind: "edit", fullFileContent: true, beforeText: "before\n", afterText: "after\n" };
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { _mcodeFileMutations: [mutation] } };
+    const captured = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected captured text evidence");
+
+    expect(await tracker.observeCapturedToolUse({
+      ...event, toolInput: { _mcodeFileMutations: [{ ...mutation, beforeText: "befoXe\n" }] },
+    }, captured)).toBe(false);
+    expect(await tracker.observeCapturedToolUse({
+      ...event, toolInput: { _mcodeFileMutations: [{ ...mutation, afterText: "aftEr\n" }] },
+    }, captured)).toBe(false);
+  });
+
+  it("does not accept an observation if input extraction clears its turn", async () => {
+    const root = await tempDir("mcode-observation-cleared-turn-");
+    const tracker = trackerWithBaseline({}, []);
+    tracker.beginTurn("t", root, null);
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { file_path: "file.txt" } };
+    const captured = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected captured tool observation");
+    const clearingInput: Record<string, unknown> = {};
+    Object.defineProperty(clearingInput, "file_path", {
+      get: () => {
+        tracker.clearTurn("t");
+        return "file.txt";
+      },
+    });
+
+    expect(await tracker.observeCapturedToolUse({ ...event, toolInput: clearingInput }, captured)).toBe(false);
+    expect(tracker.getCurrentTurnId("t")).toBeUndefined();
+  });
+
   it("classifies added, edited, and removed files with net line totals", async () => {
     const root = await tempDir("mcode-file-effects-");
     await NodeFSPromises.writeFile(NodePath.join(root, "edited.txt"), "one\ntwo");

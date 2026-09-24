@@ -213,6 +213,7 @@ export class TurnFileTracker {
     const boundedCandidates = boundedMutationCandidates(toolName, toolInput);
     if (boundedCandidates.length === 0 || captured.observations.length !== boundedCandidates.length
       || captured.candidateIdentity !== mutationCandidateIdentity(toolName, boundedCandidates)) return Promise.resolve(false);
+    if (this.getTurn(threadId) !== turn) return Promise.resolve(false);
     this.generationByToolCall.set(toolGenerationKey(threadId, toolCallId), generation);
     return this.enqueue(threadId, async (queuedTurn) => {
       for (const [index, candidate] of boundedCandidates.entries()) {
@@ -736,13 +737,20 @@ function capturedMatchesTurn(
 
 function mutationCandidateIdentity(toolName: string, candidates: readonly MutationCandidate[]): string {
   const hash = NodeCrypto.createHash("sha256");
-  hash.update(toolName);
+  hash.update(JSON.stringify([toolName]));
   for (const candidate of candidates) {
     hash.update(JSON.stringify([
       candidate.path, candidate.oldPath ?? null, candidate.operationHint,
       candidate.providerConfirmed === true, candidate.beforeText !== undefined,
       candidate.afterText !== undefined,
     ]));
+    for (const text of [candidate.beforeText, candidate.afterText]) {
+      if (text === undefined) hash.update("u");
+      else {
+        hash.update(`t${text.length}:`);
+        hash.update(text, "utf16le");
+      }
+    }
   }
   return hash.digest("hex");
 }
