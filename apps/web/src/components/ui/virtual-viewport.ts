@@ -43,6 +43,7 @@ export class VirtualViewport {
   private expectedScrollTop = 0;
   private disposed = false;
   private animating = false;
+  private pinnedAnchor: { key: string; top: number } | undefined;
 
   constructor(
     container: HTMLElement,
@@ -84,7 +85,7 @@ export class VirtualViewport {
       },
       hooks: {
         onCommit: () => this.publishVisible(),
-        onResize: () => this.applyPosition(),
+        onResize: () => this.applyPosition(true),
       },
     }]);
     this.viewport = this.context.dom.viewport;
@@ -146,7 +147,7 @@ export class VirtualViewport {
       if (!this.rowIndexes.has(key)) this.heights.delete(key);
     }
     this.list.setItems([...this.rows]);
-    this.applyPosition();
+    this.applyPosition(true);
     if (restoreFocus && focused.isConnected && document.activeElement !== focused) {
       focused.focus({ preventScroll: true });
     }
@@ -179,7 +180,7 @@ export class VirtualViewport {
       if (this.disposed) return;
       this.context.rebuildSizeCache();
       this.context.updateContentSize(this.context.sizeCache.getTotalSize());
-      this.applyPosition();
+      this.applyPosition(true);
     });
   }
 
@@ -192,18 +193,42 @@ export class VirtualViewport {
     return true;
   }
 
-  private applyPosition(): void {
+  private applyPosition(correctAnchor = false): void {
     if (this.disposed || !this.viewport) return;
+    const anchor = correctAnchor ? this.readingAnchorHost() : undefined;
     const target = Math.max(0, this.targetScrollTop());
     // A short initial page needs its trailing space retained when history is prepended.
     this.context.updateContentSize(Math.max(
       this.context.sizeCache.getTotalSize(),
       this.position.kind === "reading" ? target + this.viewport.clientHeight : 0,
     ));
-    if (!this.animating) this.context.scrollTo(target);
+    if (!this.animating) {
+      this.context.scrollTo(target);
+      this.correctAnchorDrift(anchor);
+    }
     this.expectedScrollTop = this.viewport.scrollTop;
     this.context.forceRender();
     this.onPosition(this.position);
+  }
+
+  /** The reading row's live host plus the screen position it must keep. */
+  private readingAnchorHost(): { host: HTMLDivElement; top: number } | undefined {
+    if (this.position.kind !== "reading") return undefined;
+    const host = this.hosts.get(this.position.key);
+    // Content changes push the anchored row between measurement passes, so the
+    // pin must come from the user's last scroll, not the current drifted rect.
+    const pinned = this.pinnedAnchor;
+    const top = pinned?.key === this.position.key
+      ? pinned.top
+      : host?.isConnected ? host.getBoundingClientRect().top : undefined;
+    return host && top !== undefined ? { host, top } : undefined;
+  }
+
+  /** Sizes resolve through provisional heights; the host's real rect is truth. */
+  private correctAnchorDrift(anchor: { host: HTMLDivElement; top: number } | undefined): void {
+    if (!anchor?.host.isConnected) return;
+    const drift = anchor.host.getBoundingClientRect().top - anchor.top;
+    if (drift !== 0) this.viewport.scrollTop += drift;
   }
 
   private targetScrollTop(): number {
@@ -240,6 +265,7 @@ export class VirtualViewport {
     this.context.cancelScroll();
     this.animating = false;
     this.position = this.readingPosition();
+    this.pinReadingAnchor();
     this.onPosition(this.position);
   };
 
@@ -264,9 +290,17 @@ export class VirtualViewport {
     const atEnd = this.viewport.scrollHeight - this.viewport.clientHeight - top <= 2;
     const anchor = this.readingPosition();
     this.position = this.options.positionOnScroll?.(anchor, atEnd) ?? anchor;
+    this.pinReadingAnchor();
     this.expectedScrollTop = top;
     this.onPosition(this.position);
   };
+
+  private pinReadingAnchor(): void {
+    const host = this.position.kind === "reading" ? this.hosts.get(this.position.key) : undefined;
+    this.pinnedAnchor = this.position.kind === "reading" && host?.isConnected
+      ? { key: this.position.key, top: host.getBoundingClientRect().top }
+      : undefined;
+  }
 
   /** Captures the first visible row independently of React's commit timing. */
   getReadingAnchor(): { key: string; offset: number } | undefined {
@@ -283,9 +317,11 @@ export class VirtualViewport {
       this.context.smoothScrollTo(() => Math.max(0, this.targetScrollTop()), 250, undefined, () => {
         this.animating = false;
         this.applyPosition();
+        this.pinReadingAnchor();
       });
     }
     this.applyPosition();
+    this.pinReadingAnchor();
   }
 
   /** Restores an absolute offset and captures its row anchor. */
@@ -293,12 +329,14 @@ export class VirtualViewport {
     this.context.scrollTo(top);
     this.position = this.readingPosition();
     this.applyPosition();
+    this.pinReadingAnchor();
   }
 
   /** Compensates for a layout inset changing the viewport's screen position. */
   shiftReadingPosition(delta: number): void {
     if (this.position.kind !== "reading" || delta === 0) return;
     this.position = { ...this.position, offset: this.position.offset + delta };
+    if (this.pinnedAnchor) this.pinnedAnchor = { ...this.pinnedAnchor, top: this.pinnedAnchor.top + delta };
     this.applyPosition();
   }
 
