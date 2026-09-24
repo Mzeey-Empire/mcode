@@ -13,8 +13,8 @@ import { getTransportPayloadValidator } from "./payload-validation.js";
 export const MAX_AGENT_EVENT_JOURNAL_EVENTS_PER_THREAD = 256;
 /** Maximum thread journals retained by the process. */
 export const MAX_AGENT_EVENT_JOURNAL_THREADS = 100;
-/** Per-socket send backlog that triggers reconnect and state recovery. */
-export const MAX_PUSH_SOCKET_BUFFERED_BYTES = 262_144;
+/** Allow a subscribed local client to absorb a seven-task burst before disconnecting it. */
+export const MAX_PUSH_SOCKET_BUFFERED_BYTES = 16 * 1_024 * 1_024;
 
 const clients = new Set<WebSocket>();
 const threadSubscriptions = new Map<WebSocket, Set<string>>();
