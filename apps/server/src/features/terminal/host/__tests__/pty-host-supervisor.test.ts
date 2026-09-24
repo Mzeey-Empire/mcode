@@ -186,8 +186,6 @@ describe("PtyHostSupervisor", () => {
     const children: FakeHostChild[] = [];
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
-      heartbeatDegradedMs: 750,
-      heartbeatUnhealthyMs: 1_000,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => {
         const child = new FakeHostChild();
@@ -197,14 +195,14 @@ describe("PtyHostSupervisor", () => {
     });
     await supervisor.start();
 
-    await vi.advanceTimersByTimeAsync(750);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(supervisor.health().state).toBe("degraded");
     expect(children[0]!.send).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "probe" }),
       expect.any(Function),
     );
 
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(5_250);
     await expect(supervisor.whenHealthy()).resolves.toMatchObject({
       hostGeneration: "2",
       state: "healthy",
