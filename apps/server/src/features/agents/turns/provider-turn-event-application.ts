@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import { inject, injectable } from "tsyringe";
 import {
   AgentEventType,
@@ -16,11 +17,7 @@ import { TURN_FINALIZER, TurnFinalizer } from "./turn-finalizer.js";
 import { TURN_FILE_EFFECTS, TurnFileEffects } from "./turn-file-effects.js";
 import { ParentAssistantTextCheckpointService } from "./parent-assistant-text-checkpoint-service.js";
 import { ParentAssistantTextCoordinator } from "./parent-assistant-text-coordinator.js";
-import {
-  PARENT_NARRATIVE_RECOVERY_WRITER,
-  ParentNarrativeRecoveryCoordinator,
-  type ParentNarrativeRecoveryWriter,
-} from "./parent-narrative-recovery-coordinator.js";
+import { ParentNarrativeRecoveryCoordinator } from "./parent-narrative-recovery-coordinator.js";
 import { PARENT_TURN_DURABILITY, type ParentTurnDurability } from "./parent-turn-durability.js";
 import { TurnConversationProjectionService } from "./turn-conversation-projection-service.js";
 import { PostTerminalHookCompletionEffect } from "./post-terminal-hook-completion-effect.js";
@@ -58,11 +55,6 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private readonly lastContextByThread = new Map<string, number>();
   private readonly lastContextWindowByThread = new Map<string, number>();
   private readonly terminalProjectionByThread = new Map<string, Promise<boolean>>();
-  private readonly narrativeApplicationsByThread = new Map<string, {
-    executionId: string;
-    pending: Promise<boolean>;
-  }>();
-  private readonly failedNarrativeExecutionByThread = new Map<string, string | undefined>();
 
   constructor(
     @inject(TURN_FINALIZER) private readonly finalizer: TurnFinalizer,
@@ -80,7 +72,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     @inject(NarrativeStore) private readonly narrative: NarrativeStore,
     @inject(ParentAssistantTextCheckpointService) checkpoints: ParentAssistantTextCheckpointService,
     @inject(TURN_FEATURE_EFFECTS) private readonly featureEffects: TurnFeatureEffects,
-    @inject(PARENT_NARRATIVE_RECOVERY_WRITER) narrativeWriter: ParentNarrativeRecoveryWriter,
+    @inject("Database") private readonly db: Database,
     @inject(TURN_RUNTIME_EVENT_CONTROL) private readonly runtime: TurnRuntimeEventControl,
     @inject(AgentEventPublicationRegistry)
     private readonly publication: AgentEventPublicationRegistry,
@@ -95,7 +87,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
         }
       },
     );
-    this.parentNarrativeRecovery = new ParentNarrativeRecoveryCoordinator(narrativeWriter, narrative, parentDurability);
+    this.parentNarrativeRecovery = new ParentNarrativeRecoveryCoordinator(parentDurability, narrative);
     this.browserNarrativeEventSanitizer = new BrowserNarrativeEventSanitizer(
       (threadId, toolCallId) => this.narrative.getBufferedToolCalls(threadId)
         .find((toolCall) => toolCall.toolCallId === toolCallId)
@@ -114,7 +106,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   /** Apply one queue-admitted provider event and publish it only after its durable prerequisites complete. */
-  apply(input: ProviderEventIngressEvent, event: AgentEvent, publish: boolean): boolean | Promise<boolean> {
+  apply(input: ProviderEventIngressEvent, event: AgentEvent, publish: boolean): boolean {
     const queued = this.queueVisibleAssistantText(input, event, publish);
     if (queued !== undefined) return queued;
     return this.applyPreparedEvent(input, event, publish);
@@ -155,25 +147,13 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     if (this.terminalFinalizedThreads.has(command.threadId)) return null;
     this.terminalFinalizedThreads.add(command.threadId);
     const executionId = this.runtime.snapshot(command.threadId)?.turnExecutionId;
-    const finalizeEffects = () => this.fileEffects.finalize(
+    const finalization = this.fileEffects.finalize(
       command.threadId,
       command.outcome,
       executionId ?? undefined,
       command.source,
     );
-    const narrative = this.narrativeApplicationsByThread.get(command.threadId);
-    const failedExecutionId = this.failedNarrativeExecutionByThread.get(command.threadId);
-    const failed = this.failedNarrativeExecutionByThread.has(command.threadId)
-      && (failedExecutionId === undefined || failedExecutionId === executionId);
-    const finalization = failed
-      ? Promise.resolve(false)
-      : narrative && narrative.executionId === executionId
-      ? narrative.pending.then((ready) => ready ? finalizeEffects() : false)
-      : finalizeEffects();
-    void finalization.then(
-      () => this.clearFinalizedEventState(command.threadId, executionId),
-      () => this.clearFinalizedEventState(command.threadId, executionId),
-    );
+    void finalization.finally(() => this.clearFinalizedEventState(command.threadId, executionId));
     return finalization;
   }
 
@@ -269,55 +249,15 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     event: AgentEvent,
     publish: boolean,
     textIsDurable = false,
-  ): boolean | Promise<boolean> {
+  ): boolean {
     const terminal = isTerminal(event);
     const preparation = this.prepareEventForApplication(event, publish, textIsDurable, terminal);
-    if (preparation instanceof Promise) {
-      return preparation.then((ready) => ready === undefined
-        ? this.applyReadyEvent(input, event, publish, terminal)
-        : ready);
-    }
     if (preparation !== undefined) return preparation;
-    return this.applyReadyEvent(input, event, publish, terminal);
-  }
-
-  private applyReadyEvent(
-    input: ProviderEventIngressEvent,
-    event: AgentEvent,
-    publish: boolean,
-    terminal: boolean,
-  ): boolean | Promise<boolean> {
     this.recordDiagnostic(input, event);
     const accepted = this.applyEvent(input.providerId, event, publish);
-    if (accepted instanceof Promise) {
-      return accepted.then((result) => this.finishAppliedEvent(event, publish, terminal, result));
-    }
-    return this.finishAppliedEvent(event, publish, terminal, accepted);
-  }
-
-  private finishAppliedEvent(
-    event: AgentEvent,
-    publish: boolean,
-    terminal: boolean,
-    accepted: EventApplicationResult,
-  ): boolean | Promise<boolean> {
     if (accepted === false) return true;
     if (terminal && accepted !== true) return false;
-    const durable = this.checkpointNarrative(event, publish);
-    if (durable instanceof Promise) {
-      return durable.then((ready) => this.publishAppliedEvent(event, publish, terminal, accepted, ready));
-    }
-    return this.publishAppliedEvent(event, publish, terminal, accepted, durable);
-  }
-
-  private publishAppliedEvent(
-    event: AgentEvent,
-    publish: boolean,
-    terminal: boolean,
-    accepted: EventApplicationResult,
-    durable: boolean,
-  ): boolean {
-    if (!durable) return false;
+    if (!this.checkpointNarrative(event, publish)) return false;
     if (publish && accepted === OWNED_LATE_HOOK_COMPLETION) return true;
     if (publish) this.publishAfterDurability(event, terminal);
     return true;
@@ -331,34 +271,16 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     if (!publish || !this.publication.isBound() || event.type !== AgentEventType.TextDelta) return undefined;
     if (event.isFinalResponse === false || !event.turnExecutionId) return undefined;
     const queued = this.queueParentAssistantText(event, () => {
-      this.applyQueuedVisibleText(input, event);
+      void this.applyPreparedEvent(input, event, true, true);
     });
     return queued === "blocked" ? false : queued;
   }
 
-  private applyQueuedVisibleText(input: ProviderEventIngressEvent, event: AgentEvent): void {
-    const executionId = event.turnExecutionId;
-    if (!executionId) return;
-    const prior = this.narrativeApplicationsByThread.get(event.threadId)?.pending ?? Promise.resolve(true);
-    const pending = prior.then((ready) => ready ? this.applyPreparedEvent(input, event, true, true) : false)
-      .catch(() => this.failNarrativeCheckpoint(event));
-    this.narrativeApplicationsByThread.set(event.threadId, { executionId, pending });
-    void pending.then((ready) => {
-      if (ready && this.narrativeApplicationsByThread.get(event.threadId)?.pending === pending) {
-        this.narrativeApplicationsByThread.delete(event.threadId);
-      }
-    });
-  }
-
-  private applyEvent(
-    providerId: ProviderId,
-    event: AgentEvent,
-    publish: boolean,
-  ): EventApplicationResult | Promise<EventApplicationResult> {
+  private applyEvent(providerId: ProviderId, event: AgentEvent, publish: boolean): EventApplicationResult {
     return this.applyNarrativeEvent(providerId, event) ?? this.applyLifecycleEvent(providerId, event, publish);
   }
 
-  private applyNarrativeEvent(providerId: ProviderId, event: AgentEvent): EventApplicationResult | Promise<EventApplicationResult> {
+  private applyNarrativeEvent(providerId: ProviderId, event: AgentEvent): EventApplicationResult {
     switch (event.type) {
       case AgentEventType.TextDelta: return this.applyTextDelta(event);
       case AgentEventType.GeneratedAttachment: return this.applyGeneratedAttachment(event);
@@ -393,14 +315,12 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     publish: boolean,
     textIsDurable: boolean,
     terminal: boolean,
-  ): boolean | Promise<boolean | undefined> | undefined {
+  ): boolean | undefined {
     if (!this.prepareTerminalText(event, publish, terminal)) return false;
-    if (!publish || textIsDurable) return undefined;
-    if (!this.parentAssistantText.prepareSemanticBoundary(event.threadId)) {
-      return this.parentAssistantText.hasThreadStoppedForStorageFailure(event.threadId);
+    if (!publish || textIsDurable || this.parentAssistantText.prepareSemanticBoundary(event.threadId)) {
+      return undefined;
     }
-    const narrative = this.narrativeApplicationsByThread.get(event.threadId);
-    return narrative ? narrative.pending.then((ready) => ready ? undefined : false) : undefined;
+    return this.parentAssistantText.hasThreadStoppedForStorageFailure(event.threadId);
   }
 
   private applyTextDelta(event: Extract<AgentEvent, { type: "textDelta" }>): boolean {
@@ -440,7 +360,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return true;
   }
 
-  private applyAssistantMessageBoundary(event: Extract<AgentEvent, { type: "assistantMessageBoundary" }>): boolean | Promise<boolean> {
+  private applyAssistantMessageBoundary(event: Extract<AgentEvent, { type: "assistantMessageBoundary" }>): boolean {
     if (event.isFinalResponse === true) {
       const finalText = this.narrative.takeOpenThought(event.threadId);
       if (finalText) this.finalizer.appendStreamingText(event.threadId, finalText);
@@ -666,27 +586,18 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return false;
   }
 
-  private checkpointNarrative(event: AgentEvent, publish: boolean): boolean | Promise<boolean> {
+  private checkpointNarrative(event: AgentEvent, publish: boolean): boolean {
     if (!publish || this.isUnsavedNarrationBoundary(event)) return true;
     try {
-      const checkpoint = () => this.parentNarrativeRecovery.checkpoint(event);
-      const pending = serverWorkTrace
-        ? serverWorkTrace.measure("narrative-checkpoint", event.threadId, event.turnExecutionId, checkpoint)
-        : checkpoint();
-      if (!pending) return true;
-      return pending.then(
-        () => true,
-        () => this.failNarrativeCheckpoint(event),
-      );
+      if (serverWorkTrace) {
+        serverWorkTrace.measure("narrative-checkpoint", event.threadId, event.turnExecutionId,
+          () => this.parentNarrativeRecovery.checkpoint(event));
+      } else this.parentNarrativeRecovery.checkpoint(event);
+      return true;
     } catch {
-      return this.failNarrativeCheckpoint(event);
+      this.runtime.stopForEventApplicationFailure(event, "Parent narrative recovery checkpoint failed");
+      return false;
     }
-  }
-
-  private failNarrativeCheckpoint(event: AgentEvent): false {
-    this.failedNarrativeExecutionByThread.set(event.threadId, event.turnExecutionId);
-    this.runtime.stopForEventApplicationFailure(event, "Parent narrative recovery checkpoint failed");
-    return false;
   }
 
   private publishAfterDurability(event: AgentEvent, terminal: boolean): void {
@@ -710,7 +621,6 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
         ? { ...event, outcome: "interrupted" }
         : event,
     );
-    this.parentNarrativeRecovery.acknowledgeHandled(event);
   }
 
   /** Retain terminal durability from its scheduling point until every dependent publication observes it. */
@@ -792,7 +702,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
 
   private classifyUnclassifiedAssistantTextAsNarration(
     event: Extract<AgentEvent, { type: "assistantMessageBoundary" }>,
-  ): boolean | Promise<boolean> {
+  ): boolean {
     const executionId = event.turnExecutionId;
     if (!executionId) return this.clearUnclassifiedAssistantText(event.threadId);
     const firstSequence = this.unclassifiedAssistantTextStartByExecution.get(executionId);
@@ -810,21 +720,30 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       .map((chunk) => chunk.text)
       .join("");
     const staged = this.narrative.stageNarrationSegment(event.threadId, text);
-    const snapshot = staged
-      ? this.narrative.recoverySnapshotWithStagedNarration(event.threadId, staged)
-      : this.narrative.recoverySnapshot(event.threadId);
-    return this.parentNarrativeRecovery.classify(event, snapshot).then(
-      () => {
-        this.parentAssistantText.checkpoints.discardRecoveryJournal(executionId);
-        this.parentNarrativeRecovery.acknowledgeHandled(event);
-        this.parentAssistantText.discard(executionId);
-        if (staged) this.narrative.applyStagedNarrationSegment(event.threadId, staged);
-        this.unclassifiedAssistantTextStartByExecution.delete(executionId);
-        this.finalizer.resetStreamingText(event.threadId);
-        return true;
-      },
-      () => this.failNarrativeCheckpoint(event),
-    );
+    let confirm: (() => void) | undefined;
+    try {
+      this.db.transaction(() => {
+        const checkpoint = this.parentNarrativeRecovery.prepareCheckpoint(
+          event,
+          staged ? this.narrative.recoverySnapshotWithStagedNarration(event.threadId, staged) : undefined,
+        );
+        checkpoint?.persist();
+        if (!this.parentAssistantText.checkpoints.resetInTransaction(executionId)) {
+          throw new Error(`Unclassified assistant text checkpoint was not reset: ${executionId}`);
+        }
+        confirm = checkpoint?.confirm;
+      })();
+    } catch {
+      this.runtime.stopForEventApplicationFailure(event, "Parent narrative recovery checkpoint failed");
+      return false;
+    }
+    this.parentAssistantText.checkpoints.discardRecoveryJournal(executionId);
+    this.parentAssistantText.discard(executionId);
+    confirm?.();
+    if (staged) this.narrative.applyStagedNarrationSegment(event.threadId, staged);
+    this.unclassifiedAssistantTextStartByExecution.delete(executionId);
+    this.finalizer.resetStreamingText(event.threadId);
+    return true;
   }
 
   private clearUnclassifiedAssistantText(threadId: string): true {
@@ -849,14 +768,6 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private clearFinalizedEventState(threadId: string, executionId: string | null | undefined): void {
-    const failedExecutionId = this.failedNarrativeExecutionByThread.get(threadId);
-    if (this.failedNarrativeExecutionByThread.has(threadId)
-      && (failedExecutionId === undefined || failedExecutionId === executionId)) {
-      this.failedNarrativeExecutionByThread.delete(threadId);
-    }
-    if (this.narrativeApplicationsByThread.get(threadId)?.executionId === executionId) {
-      this.narrativeApplicationsByThread.delete(threadId);
-    }
     if (executionId) {
       this.parentAssistantText.discard(executionId);
       this.unclassifiedAssistantTextStartByExecution.delete(executionId);

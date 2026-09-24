@@ -4,10 +4,7 @@ import {
   type AgentEvent,
   type ParentNarrativeRecoveryItem,
 } from "@mcode/contracts";
-import {
-  ParentNarrativeRecoveryCoordinator,
-  type ParentNarrativeRecoveryWriter,
-} from "../parent-narrative-recovery-coordinator.js";
+import { ParentNarrativeRecoveryCoordinator } from "../parent-narrative-recovery-coordinator.js";
 import type { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import type { ParentTurnDurability } from "../parent-turn-durability.js";
 
@@ -26,84 +23,41 @@ const recoveryItems = [
     },
   },
 ] satisfies ParentNarrativeRecoveryItem[];
-const event: AgentEvent = {
-  type: AgentEventType.TextDelta,
-  threadId: THREAD_ID,
-  turnExecutionId: EXECUTION_ID,
-  delta: "Reasoning before the answer.",
-};
-
-function coordinatorFor(writer: ParentNarrativeRecoveryWriter): ParentNarrativeRecoveryCoordinator {
-  const narrativeStore = {
-    recoverySnapshot: vi.fn(() => recoveryItems),
-  } as unknown as NarrativeStore;
-  const durability = {
-    loadTurnByExecution: vi.fn(() => ({ id: "turn-1" })),
-  } as unknown as ParentTurnDurability;
-  return new ParentNarrativeRecoveryCoordinator(writer, narrativeStore, durability);
-}
 
 describe("ParentNarrativeRecoveryCoordinator", () => {
-  it("retries an uncommitted recovery snapshot with the same operation identity", async () => {
+  it("retries an uncommitted parent recovery snapshot before deduplicating it", () => {
     const recordParentNarrativeRecovery = vi.fn()
-      .mockResolvedValueOnce({ recorded: false })
-      .mockResolvedValue({ recorded: true });
-    const writer: ParentNarrativeRecoveryWriter = {
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true);
+    const durability = {
+      loadTurnByExecution: vi.fn(() => ({ id: "turn-1" })),
       recordParentNarrativeRecovery,
-      classifyParentNarrativeRecovery: vi.fn(),
-      acknowledgeOperation: vi.fn(async () => undefined),
+    } as unknown as ParentTurnDurability;
+    const narrativeStore = {
+      recoverySnapshot: vi.fn(() => recoveryItems),
+    } as unknown as NarrativeStore;
+    const coordinator = new ParentNarrativeRecoveryCoordinator(durability, narrativeStore);
+    const event: AgentEvent = {
+      type: AgentEventType.TextDelta,
+      threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID,
+      delta: "Reasoning before the answer.",
     };
-    const coordinator = coordinatorFor(writer);
     const expectedCommit = {
       executionId: EXECUTION_ID,
       items: recoveryItems,
       discardedItemIds: [],
     };
 
-    await expect(coordinator.checkpoint(event)).rejects.toThrow(
+    expect(() => coordinator.checkpoint(event)).toThrow(
       `Canonical parent turn was not found: ${EXECUTION_ID}`,
     );
-    await coordinator.checkpoint(event);
-    await coordinator.checkpoint(event);
+
+    coordinator.checkpoint(event);
+    coordinator.checkpoint(event);
 
     expect(recordParentNarrativeRecovery).toHaveBeenCalledTimes(2);
-    const operationId = recordParentNarrativeRecovery.mock.calls[0]?.[0];
-    expect(operationId).toMatch(/^narrative:/);
-    expect(recordParentNarrativeRecovery).toHaveBeenNthCalledWith(1, operationId, expectedCommit);
-    expect(recordParentNarrativeRecovery).toHaveBeenNthCalledWith(2, operationId, expectedCommit);
-    expect(writer.acknowledgeOperation).not.toHaveBeenCalled();
-    coordinator.acknowledgeHandled(event);
-    await vi.waitFor(() => expect(writer.acknowledgeOperation).toHaveBeenCalledWith(EXECUTION_ID, operationId));
-  });
-
-  it("retries the atomic narration classification without changing its input", async () => {
-    const classifyParentNarrativeRecovery = vi.fn()
-      .mockRejectedValueOnce(new Error("writer unavailable"))
-      .mockResolvedValue({ recorded: true, reset: true });
-    const writer: ParentNarrativeRecoveryWriter = {
-      recordParentNarrativeRecovery: vi.fn(),
-      classifyParentNarrativeRecovery,
-      acknowledgeOperation: vi.fn(async () => undefined),
-    };
-    const coordinator = coordinatorFor(writer);
-    const boundary: AgentEvent = {
-      type: AgentEventType.AssistantMessageBoundary,
-      threadId: THREAD_ID,
-      turnExecutionId: EXECUTION_ID,
-      isFinalResponse: false,
-    };
-
-    await expect(coordinator.classify(boundary, recoveryItems)).rejects.toThrow("writer unavailable");
-    await coordinator.classify(boundary, recoveryItems);
-    await coordinator.checkpoint(boundary);
-
-    expect(classifyParentNarrativeRecovery).toHaveBeenCalledTimes(2);
-    expect(classifyParentNarrativeRecovery.mock.calls[1]).toEqual(classifyParentNarrativeRecovery.mock.calls[0]);
-    expect(writer.acknowledgeOperation).not.toHaveBeenCalled();
-    coordinator.acknowledgeHandled(boundary);
-    await vi.waitFor(() => expect(writer.acknowledgeOperation).toHaveBeenCalledWith(
-      EXECUTION_ID,
-      classifyParentNarrativeRecovery.mock.calls[0]?.[0],
-    ));
+    expect(recordParentNarrativeRecovery).toHaveBeenNthCalledWith(1, expectedCommit);
+    expect(recordParentNarrativeRecovery).toHaveBeenNthCalledWith(2, expectedCommit);
   });
 });
