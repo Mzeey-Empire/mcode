@@ -74,6 +74,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private readonly insertOperation: ReturnType<Database["prepare"]>;
   private readonly commitPendingFinish: ReturnType<Database["prepare"]>;
   private readonly updateHead: ReturnType<Database["prepare"]>;
+  private readonly updateCheckpointPhase: ReturnType<Database["prepare"]>;
+  private readonly updateCheckpoint: ReturnType<Database["prepare"]>;
   private bufferedPublication: Parameters<CanonicalAgentEventPublisher>[0][] | null = null;
 
   constructor(private readonly db: Database, private readonly publish: CanonicalAgentEventPublisher) {
@@ -87,6 +89,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.insertOperation = db.prepare("INSERT INTO canonical_writer_operation_receipts (execution_id, operation_id, kind, input_hash, receipt_json) VALUES (?, ?, ?, ?, ?)");
     this.commitPendingFinish = db.prepare("UPDATE canonical_writer_operation_receipts SET kind = ?, receipt_json = ? WHERE execution_id = ? AND operation_id = ? AND kind = ? AND input_hash = ?");
     this.updateHead = db.prepare("UPDATE canonical_writer_operation_receipts SET receipt_json = ? WHERE execution_id = ? AND operation_id = ? AND kind = ?");
+    this.updateCheckpointPhase = db.prepare("UPDATE canonical_agent_ingest_checkpoints SET phase = ?, updated_at = ? WHERE execution_id = ? AND terminal_outcome IS NULL");
+    this.updateCheckpoint = db.prepare("UPDATE canonical_agent_ingest_checkpoints SET phase = ?, native_cursor_json = ?, updated_at = ? WHERE execution_id = ? AND terminal_outcome IS NULL");
   }
 
   /** Commit a supported operation with a durable receipt, or reject it without changing canonical state. */
@@ -107,6 +111,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     switch (operation.mutation.kind) {
       case "begin": return this.begin(operation, hash);
       case "append-events": return this.append(operation, hash);
+      case "checkpoint":
       case "stop-requested":
       case "provider-outcome": return this.control(operation, hash);
       case "stage-terminal": return this.stageTerminal(operation, hash);
@@ -217,21 +222,53 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private control(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
     return this.db.transaction(() => {
       const head = this.requireNextHead(operation);
-      const mutation = operation.mutation;
-      let next: SemanticHead;
-      if (mutation.kind === "stop-requested") {
-        if (!mutation.requestId || head.stopRequestId || head.providerOutcome
-          || mutation.lastAdmittedOrdinal !== operation.ordinal - 1) throw new SemanticConflict();
-        next = { ...head, stopRequestId: mutation.requestId, stopWatermark: mutation.lastAdmittedOrdinal };
-      } else if (mutation.kind === "provider-outcome") {
-        if (head.providerOutcome || head.stopRequestId && mutation.outcome !== "cancelled") throw new SemanticConflict();
-        next = { ...head, providerOutcome: mutation.outcome };
-      } else throw new SemanticConflict();
+      const next = this.applyControlMutation(head, operation);
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...next, ordinal: operation.ordinal });
       this.storeReceipt(operation, hash, receipt);
       return receipt;
     })();
+  }
+
+  private applyControlMutation(head: SemanticHead, operation: ExecutionSemanticOperation): SemanticHead {
+    const mutation = operation.mutation;
+    switch (mutation.kind) {
+      case "stop-requested": return this.recordStop(head, operation, mutation);
+      case "provider-outcome": return this.recordProviderOutcome(head, mutation.outcome);
+      case "checkpoint": return this.recordCheckpoint(head, operation.execution.executionId, mutation);
+      default: throw new SemanticConflict();
+    }
+  }
+
+  private recordStop(
+    head: SemanticHead,
+    operation: ExecutionSemanticOperation,
+    mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "stop-requested" }>,
+  ): SemanticHead {
+    if (!mutation.requestId || head.stopRequestId || head.providerOutcome
+      || mutation.lastAdmittedOrdinal !== operation.ordinal - 1) throw new SemanticConflict();
+    if (this.updateCheckpointPhase.run("stopping", new Date().toISOString(), operation.execution.executionId).changes !== 1) {
+      throw new SemanticConflict();
+    }
+    return { ...head, stopRequestId: mutation.requestId, stopWatermark: mutation.lastAdmittedOrdinal };
+  }
+
+  private recordProviderOutcome(head: SemanticHead, outcome: TurnOutcome): SemanticHead {
+    if (head.providerOutcome || head.stopRequestId && outcome !== "cancelled") throw new SemanticConflict();
+    return { ...head, providerOutcome: outcome };
+  }
+
+  private recordCheckpoint(
+    head: SemanticHead,
+    executionId: string,
+    mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "checkpoint" }>,
+  ): SemanticHead {
+    const cursor = mutation.nativeCursor === null ? null : JSON.stringify(mutation.nativeCursor);
+    if (!mutation.phase || mutation.phase.length > 64 || cursor === undefined
+      || this.updateCheckpoint.run(mutation.phase, cursor, new Date().toISOString(), executionId).changes !== 1) {
+      throw new SemanticConflict();
+    }
+    return head;
   }
 
   private hasStagedTerminalPredecessor(operation: ExecutionSemanticOperation): boolean {

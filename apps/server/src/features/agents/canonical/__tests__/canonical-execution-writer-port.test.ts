@@ -208,15 +208,20 @@ describe("execution semantic writer transport", () => {
     expect(await port.transact(op(2, {
       kind: "stop-requested", requestId: "stop-1", lastAdmittedOrdinal: 1,
     }))).toMatchObject({ kind: "committed" });
-    expect(await port.transact(op(3, { kind: "provider-outcome", outcome: "completed" })))
-      .toEqual({ kind: "conflict", operationId: `${lease.leaseId}:3` });
-    expect(await port.transact(op(3, { kind: "provider-outcome", outcome: "cancelled" })))
+    const nativeCursor = { providerId: "codex", scope: "thread", value: "native-thread", provenance: "native" };
+    expect(await port.transact(op(3, { kind: "checkpoint", phase: "stopping", nativeCursor })))
       .toMatchObject({ kind: "committed" });
-    expect(await port.transact(op(4, { kind: "stage-terminal", input: {
+    expect(db.prepare("SELECT phase, native_cursor_json FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ phase: "stopping", native_cursor_json: JSON.stringify(nativeCursor) });
+    expect(await port.transact(op(4, { kind: "provider-outcome", outcome: "completed" })))
+      .toEqual({ kind: "conflict", operationId: `${lease.leaseId}:4` });
+    expect(await port.transact(op(4, { kind: "provider-outcome", outcome: "cancelled" })))
+      .toMatchObject({ kind: "committed" });
+    expect(await port.transact(op(5, { kind: "stage-terminal", input: {
       threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "cancelled", endedAt: NOW,
       assistant: { content: "Partial answer", model: null, attachments: [] }, narrative: [],
     } }))).toMatchObject({ kind: "committed" });
-    expect(await port.transact(op(5, { kind: "finish", outcome: "cancelled", input: {
+    expect(await port.transact(op(6, { kind: "finish", outcome: "cancelled", input: {
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
       providerIdentities: [], outcome: "cancelled", projection: { kind: "writer-staged" },
     } }))).toMatchObject({ kind: "committed" });

@@ -149,7 +149,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       .toEqual({ count: 4 });
   });
 
-  it("rejects stale leases, skipped ordinals and unsupported commands before canonical mutation", async () => {
+  it("rejects stale leases and skipped ordinals while checkpointing without a new event", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const eventsBefore = db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?").get(EXECUTION_ID);
     const append = operation(2, { kind: "append-events", events: [event()] });
@@ -158,11 +158,15 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(await writer.transact({ ...append, ordinal: 3, operationId: "lease-1:3" }))
       .toEqual({ kind: "conflict", operationId: "lease-1:3" });
     expect(await send(2, { kind: "checkpoint", phase: "running", nativeCursor: null }))
+      .toMatchObject({ kind: "committed", operationId: "lease-1:2" });
+    expect(await send(3, { kind: "effect-result", effectId: "unsupported", settled: true }))
       .toEqual({ kind: "rejected", reason: "writer-conflict" });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?").get(EXECUTION_ID))
       .toEqual(eventsBefore);
     expect(db.prepare("SELECT receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
-      .get(EXECUTION_ID, "semantic:head")).toMatchObject({ receipt_json: expect.stringContaining('"ordinal":1') });
+      .get(EXECUTION_ID, "semantic:head")).toMatchObject({ receipt_json: expect.stringContaining('"ordinal":2') });
+    expect(db.prepare("SELECT phase, native_cursor_json FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ phase: "running", native_cursor_json: null });
   });
 
   it("rolls back terminal checkpoint and semantic receipt together when receipt storage fails", async () => {
