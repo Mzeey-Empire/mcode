@@ -268,6 +268,11 @@ describe("ExecutionMailboxScheduler", () => {
     expect(scheduler.submit({ execution: oldExecution, lease: oldLease, command: { kind: "stop", requestId: "stale" }, byteLength: 100 }))
       .toEqual({ kind: "stale-execution" });
 
+    expect(scheduler.replaceWorker(0)).toBe(false);
+    expect(scheduler.claim(oldExecution, 2)).toEqual({ kind: "thread-busy" });
+    expect(scheduler.reconcileLost(oldExecution, { ...oldLease, ownerEpoch: 2 })).toBe(false);
+    expect(scheduler.reconcileLost(oldExecution, oldLease)).toBe(true);
+    expect(scheduler.reconcileLost(oldExecution, oldLease)).toBe(false);
     expect(scheduler.replaceWorker(0)).toBe(true);
     expect(workers[1]?.requests).toHaveLength(0);
 
@@ -337,6 +342,8 @@ describe("ExecutionMailboxScheduler", () => {
     workers[0]?.close();
     expect(await event.completion).toEqual({ kind: "worker-lost" });
     expect(lost).toEqual([[{ execution: identity, lease }]]);
+    expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 1 });
+    expect(scheduler.reconcileLost(identity, lease)).toBe(true);
     expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 0 });
     scheduler.shutdown();
   });

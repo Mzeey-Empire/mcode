@@ -245,7 +245,9 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
       .resolves.toEqual({ kind: "worker-lost" });
     expect(lost).toEqual([[{ execution: EXECUTION, lease }]]);
     expect(worker.terminated).toBe(true);
-    expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 0 });
+    expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 1 });
+    expect(scheduler.claim(EXECUTION, 2)).toEqual({ kind: "thread-busy" });
+    expect(scheduler.replaceWorker(0)).toBe(false);
     scheduler.shutdown();
   });
 });

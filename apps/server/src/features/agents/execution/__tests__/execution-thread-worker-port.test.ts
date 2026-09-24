@@ -151,7 +151,9 @@ describe("ExecutionThreadWorkerPort", () => {
       await expect(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }))
         .resolves.toEqual({ kind: "worker-lost" });
       expect(lost).toEqual([[{ execution: EXECUTION, lease }]]);
-      expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 0 });
+      expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 1 });
+      expect(scheduler.claim(EXECUTION, 2)).toEqual({ kind: "thread-busy" });
+      expect(scheduler.replaceWorker(0)).toBe(false);
     } finally {
       scheduler.shutdown();
     }

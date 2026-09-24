@@ -38,6 +38,7 @@ interface Assignment<Command, Result> {
   normalCount: number;
   normalBytes: number;
   stopping: boolean;
+  revoked: boolean;
 }
 
 interface Slot<Command, Result> {
@@ -160,6 +161,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
       normalCount: 0,
       normalBytes: 0,
       stopping: false,
+      revoked: false,
     });
     slot.activeCount += 1;
     return { kind: "claimed", lease };
@@ -174,7 +176,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
   }): ExecutionAdmission<Result> {
     if (this.stopped) return { kind: "shutdown" };
     const assignment = this.currentAssignment(input.execution, input.lease);
-    if (!assignment) return { kind: "stale-execution" };
+    if (!assignment || assignment.revoked) return { kind: "stale-execution" };
     const decision = this.admissionDecision(assignment, input.command, input.byteLength);
     if (decision.kind !== "accept") return { kind: decision.kind };
     const ordinal = assignment.nextOrdinal++;
@@ -206,7 +208,16 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
   /** Release only after the worker has acknowledged every command for the execution. */
   release(execution: ExecutionIdentity, lease: ExecutionLease): boolean {
     const assignment = this.currentAssignment(execution, lease);
-    if (!assignment || assignment.pendingCount !== 0) return false;
+    if (!assignment || assignment.revoked || assignment.pendingCount !== 0) return false;
+    this.byThread.delete(execution.threadId);
+    assignment.slot.activeCount -= 1;
+    return true;
+  }
+
+  /** Release a crashed worker's ownership only after its durable interruption is acknowledged. */
+  reconcileLost(execution: ExecutionIdentity, lease: ExecutionLease): boolean {
+    const assignment = this.currentAssignment(execution, lease);
+    if (!assignment?.revoked || assignment.pendingCount !== 0) return false;
     this.byThread.delete(execution.threadId);
     assignment.slot.activeCount -= 1;
     return true;
@@ -379,12 +390,10 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     slot.worker = undefined;
     slot.generation += 1;
     worker?.terminate();
-    const revoked = [...this.byThread.values()]
-      .filter((assignment) => assignment.slot === slot)
-      .map((assignment) => ({ execution: assignment.execution, lease: assignment.lease }));
+    const revokedAssignments = [...this.byThread.values()].filter((assignment) => assignment.slot === slot);
+    for (const assignment of revokedAssignments) assignment.revoked = true;
+    const revoked = revokedAssignments.map((assignment) => ({ execution: assignment.execution, lease: assignment.lease }));
     this.settleSlot(slot, "worker-lost");
-    for (const assignment of revoked) this.byThread.delete(assignment.execution.threadId);
-    slot.activeCount = 0;
     this.onWorkerLost(revoked);
   }
 
