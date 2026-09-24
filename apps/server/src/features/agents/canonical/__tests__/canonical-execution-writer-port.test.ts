@@ -177,6 +177,26 @@ describe("execution semantic writer transport", () => {
     }
   });
 
+  it("releases a compound live event after its single writer receipt", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const registry = new AgentEventPublicationRegistry();
+    const published: AgentEvent[] = [];
+    registry.bind((event) => published.push(event));
+    const port = new CanonicalExecutionWriterPort(writer, () => {}, new ExecutionLivePublicationRelease(registry));
+    expect((await port.transact(beginOperation())).kind).toBe("committed");
+    const event: AgentEvent = { type: AgentEventType.AssistantMessageBoundary, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, isFinalResponse: false };
+    const operation: ExecutionSemanticOperation = {
+      operationId: `${lease.leaseId}:2`, execution, lease, ordinal: 2,
+      mutation: { kind: "live-event", text: { kind: "unchanged" } },
+      livePublication: [{ after: "writer", event }],
+    };
+    expect((await port.transact(operation)).kind).toBe("committed");
+    expect(published).toEqual([event]);
+    expect((await port.transact(operation)).kind).toBe("committed");
+    expect(published).toEqual([event]);
+  });
+
   it("replays a committed live receipt when the public publisher becomes available", async () => {
     writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
     const registry = new AgentEventPublicationRegistry();

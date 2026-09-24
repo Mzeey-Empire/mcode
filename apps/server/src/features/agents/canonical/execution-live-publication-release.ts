@@ -78,6 +78,6 @@ function samePublicationHeader(
 }
 
 function barrierFor(kind: ExecutionSemanticOperation["mutation"]["kind"]): "writer" | "terminal" | null {
-  if (kind === "begin" || kind === "append-events") return "writer";
+  if (kind === "begin" || kind === "append-events" || kind === "live-event") return "writer";
   return kind === "finish" ? "terminal" : null;
 }
