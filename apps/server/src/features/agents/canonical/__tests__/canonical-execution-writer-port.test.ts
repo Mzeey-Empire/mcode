@@ -144,7 +144,9 @@ describe("execution semantic writer transport", () => {
       threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed" as const, endedAt: NOW,
       assistant: { content: "Answer", model: "fixture", attachments: [] }, narrative: [],
     };
-    const staged = op(2, { kind: "stage-terminal", input: terminalInput });
+    expect(await port.transact(op(2, { kind: "provider-outcome", outcome: "completed" })))
+      .toMatchObject({ kind: "committed" });
+    const staged = op(3, { kind: "stage-terminal", input: terminalInput });
     expect(await port.transact(staged)).toMatchObject({ kind: "committed" });
     expect(db.prepare("SELECT content, is_internal FROM messages WHERE role = 'assistant'").get())
       .toEqual({ content: "Answer", is_internal: 1 });
@@ -153,7 +155,7 @@ describe("execution semantic writer transport", () => {
       .toMatchObject({ content: "Answer", is_internal: true });
     expect(published).not.toContain(`${EXECUTION_ID}:turn.completed`);
 
-    const finish = op(3, { kind: "finish", outcome: "completed", input: {
+    const finish = op(4, { kind: "finish", outcome: "completed", input: {
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
       providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" },
     } });
@@ -171,8 +173,12 @@ describe("execution semantic writer transport", () => {
     writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
     const port = new CanonicalExecutionWriterPort(writer, () => {});
     expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
-    const stage: ExecutionSemanticOperation = {
+    expect(await port.transact({
       operationId: `${lease.leaseId}:2`, execution, lease, ordinal: 2,
+      mutation: { kind: "provider-outcome", outcome: "completed" },
+    })).toMatchObject({ kind: "committed" });
+    const stage: ExecutionSemanticOperation = {
+      operationId: `${lease.leaseId}:3`, execution, lease, ordinal: 3,
       mutation: { kind: "stage-terminal", input: {
         threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
         assistant: { content: "Answer", model: null, attachments: [] }, narrative: [],
@@ -190,6 +196,32 @@ describe("execution semantic writer transport", () => {
     expect(await port.transact(stage)).toMatchObject({ kind: "committed", operationId: stage.operationId });
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant' AND is_internal = 1").get())
       .toEqual({ count: 1 });
+  });
+
+  it("fences a stopped execution to a cancelled durable outcome", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const port = new CanonicalExecutionWriterPort(writer, () => {});
+    const op = (ordinal: number, mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation => ({
+      operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation,
+    });
+    expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
+    expect(await port.transact(op(2, {
+      kind: "stop-requested", requestId: "stop-1", lastAdmittedOrdinal: 1,
+    }))).toMatchObject({ kind: "committed" });
+    expect(await port.transact(op(3, { kind: "provider-outcome", outcome: "completed" })))
+      .toEqual({ kind: "conflict", operationId: `${lease.leaseId}:3` });
+    expect(await port.transact(op(3, { kind: "provider-outcome", outcome: "cancelled" })))
+      .toMatchObject({ kind: "committed" });
+    expect(await port.transact(op(4, { kind: "stage-terminal", input: {
+      threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "cancelled", endedAt: NOW,
+      assistant: { content: "Partial answer", model: null, attachments: [] }, narrative: [],
+    } }))).toMatchObject({ kind: "committed" });
+    expect(await port.transact(op(5, { kind: "finish", outcome: "cancelled", input: {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
+      providerIdentities: [], outcome: "cancelled", projection: { kind: "writer-staged" },
+    } }))).toMatchObject({ kind: "committed" });
+    expect(db.prepare("SELECT outcome FROM messages WHERE role = 'assistant'").get())
+      .toEqual({ outcome: "cancelled" });
   });
 
   it("runs a complete assistant turn through an execution worker and the sole writer worker", async () => {
@@ -230,6 +262,8 @@ describe("execution semantic writer transport", () => {
           createdAt: NOW, updatedAt: NOW,
         } },
       }] })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      await expect(send(claim.lease, { kind: "provider-outcome", outcome: "completed" }))
+        .resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
       await expect(send(claim.lease, { kind: "stage-terminal", input: {
         threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
         assistant: { content: "Worker answer", model: null, attachments: [] }, narrative: [],

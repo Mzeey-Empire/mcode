@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
-import { CanonicalAgentEventEnvelopeSchema } from "@mcode/contracts";
+import { CanonicalAgentEventEnvelopeSchema, TurnOutcomeSchema, type TurnOutcome } from "@mcode/contracts";
 import { z } from "zod";
 
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
@@ -31,6 +31,9 @@ const storedHeadSchema = z.object({
   ordinal: z.number().int(),
   durableRevision: z.number().int(),
   terminal: z.boolean(),
+  stopRequestId: z.string().nullable(),
+  stopWatermark: z.number().int().nullable(),
+  providerOutcome: TurnOutcomeSchema.nullable(),
 });
 const storedReceiptSchema = z.object({
   kind: z.literal("committed"),
@@ -53,6 +56,9 @@ interface SemanticHead {
   readonly ordinal: number;
   readonly durableRevision: number;
   readonly terminal: boolean;
+  readonly stopRequestId: string | null;
+  readonly stopWatermark: number | null;
+  readonly providerOutcome: TurnOutcome | null;
 }
 
 type StoredOperation = z.infer<typeof storedOperationSchema>;
@@ -90,14 +96,22 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const existing = this.existingReceipt(operation, hash);
     if (existing) return existing;
     try {
-      if (operation.mutation.kind === "begin") return this.begin(operation, hash);
-      if (operation.mutation.kind === "append-events") return this.append(operation, hash);
-      if (operation.mutation.kind === "stage-terminal") return this.stageTerminal(operation, hash);
-      if (operation.mutation.kind === "finish") return await this.finish(operation, hash);
-      return conflict(operation);
+      return await this.applySupported(operation, hash);
     } catch (error) {
       if (error instanceof SemanticConflict) return conflict(operation);
       throw error;
+    }
+  }
+
+  private async applySupported(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
+    switch (operation.mutation.kind) {
+      case "begin": return this.begin(operation, hash);
+      case "append-events": return this.append(operation, hash);
+      case "stop-requested":
+      case "provider-outcome": return this.control(operation, hash);
+      case "stage-terminal": return this.stageTerminal(operation, hash);
+      case "finish": return await this.finish(operation, hash);
+      default: return conflict(operation);
     }
   }
 
@@ -129,6 +143,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         ordinal: operation.ordinal,
         durableRevision: receipt.durableRevision,
         terminal: false,
+        stopRequestId: null,
+        stopWatermark: null,
+        providerOutcome: null,
       };
       this.insertOperation.run(operation.execution.executionId, HEAD_ID, HEAD_KIND, fingerprint(head.lease), JSON.stringify(head));
       this.storePublicationChunks(operation.execution.executionId, hash, result.events.map((event) => event.acceptedSequence));
@@ -164,7 +181,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (mutation.kind !== "finish" || !validFinish(operation, mutation)) return conflict(operation);
     const head = this.loadHead(operation.execution.executionId);
     if (!head || !nextHead(head, operation) || head.providerId !== mutation.input.providerId) return conflict(operation);
-    if ("kind" in mutation.input.projection && !this.hasStagedTerminalPredecessor(operation)) return conflict(operation);
+    if (!this.validStagedFinish(operation, head)) return conflict(operation);
     this.reserveFinish(operation, hash);
     this.publishStoredEvents(operation.execution.executionId, hash);
     const result = await this.turns.finish(mutation.input, (batch) => {
@@ -188,6 +205,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       || mutation.input.executionId !== operation.execution.executionId) return conflict(operation);
     return this.db.transaction(() => {
       const head = this.requireNextHead(operation);
+      if (head.providerOutcome !== mutation.input.outcome) throw new SemanticConflict();
       this.turns.stageTerminalProjection(mutation.input);
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...head, ordinal: operation.ordinal });
@@ -196,9 +214,35 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     })();
   }
 
+  private control(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
+    return this.db.transaction(() => {
+      const head = this.requireNextHead(operation);
+      const mutation = operation.mutation;
+      let next: SemanticHead;
+      if (mutation.kind === "stop-requested") {
+        if (!mutation.requestId || head.stopRequestId || head.providerOutcome
+          || mutation.lastAdmittedOrdinal !== operation.ordinal - 1) throw new SemanticConflict();
+        next = { ...head, stopRequestId: mutation.requestId, stopWatermark: mutation.lastAdmittedOrdinal };
+      } else if (mutation.kind === "provider-outcome") {
+        if (head.providerOutcome || head.stopRequestId && mutation.outcome !== "cancelled") throw new SemanticConflict();
+        next = { ...head, providerOutcome: mutation.outcome };
+      } else throw new SemanticConflict();
+      const receipt = committed(operation, head.durableRevision);
+      this.storeHead({ ...next, ordinal: operation.ordinal });
+      this.storeReceipt(operation, hash, receipt);
+      return receipt;
+    })();
+  }
+
   private hasStagedTerminalPredecessor(operation: ExecutionSemanticOperation): boolean {
     const previousId = `${operation.lease.leaseId}:${operation.ordinal - 1}`;
     return this.loadOperation(operation.execution.executionId, previousId)?.kind === "semantic:stage-terminal";
+  }
+
+  private validStagedFinish(operation: ExecutionSemanticOperation, head: SemanticHead): boolean {
+    const mutation = operation.mutation;
+    if (mutation.kind !== "finish" || !("kind" in mutation.input.projection)) return true;
+    return head.providerOutcome === mutation.outcome && this.hasStagedTerminalPredecessor(operation);
   }
 
   private requireNextHead(operation: ExecutionSemanticOperation): SemanticHead {
