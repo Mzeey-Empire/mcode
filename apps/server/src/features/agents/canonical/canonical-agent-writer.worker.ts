@@ -13,6 +13,7 @@ import type {
   CanonicalWriterRequest,
   CanonicalWriterResponse,
 } from "./canonical-agent-writer-protocol.js";
+import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "./canonical-agent-writer-protocol.js";
 import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 
 let db: Database | undefined;
@@ -20,7 +21,6 @@ let boundary: CanonicalAgentBoundary | undefined;
 let assistantTextCheckpoints: ParentAssistantTextCheckpointService | undefined;
 let receipts: CanonicalAgentWriterReceipts | undefined;
 let semanticWriter: CanonicalExecutionSemanticWriter | undefined;
-const PUBLICATION_PAGE_SIZE = 64;
 let semanticPublication: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId"> | undefined;
 
 function openDatabase(dbPath: string): void {
@@ -36,11 +36,11 @@ function openDatabase(dbPath: string): void {
     semanticWriter = new CanonicalExecutionSemanticWriter(connection, (events) => {
       const correlation = semanticPublication;
       if (!correlation) throw new Error("Semantic publication has no active request");
-      for (let offset = 0; offset < events.length; offset += PUBLICATION_PAGE_SIZE) {
+      for (let offset = 0; offset < events.length; offset += SEMANTIC_PUBLICATION_PAGE_SIZE) {
         globalThis.postMessage({
           ...correlation,
           kind: "semantic-publication",
-          events: events.slice(offset, offset + PUBLICATION_PAGE_SIZE),
+          events: events.slice(offset, offset + SEMANTIC_PUBLICATION_PAGE_SIZE),
         } satisfies CanonicalWriterResponse);
       }
     });

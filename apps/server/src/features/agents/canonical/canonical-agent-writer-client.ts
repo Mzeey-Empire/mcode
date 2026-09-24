@@ -9,6 +9,7 @@ import type {
   CanonicalWriterRequest,
   CanonicalWriterResponse,
 } from "./canonical-agent-writer-protocol.js";
+import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "./canonical-agent-writer-protocol.js";
 import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execution/execution-worker-handler.js";
 import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
@@ -330,7 +331,8 @@ export class CanonicalAgentWriterClient {
     pending: PendingRequest,
     response: Extract<CanonicalWriterResponse, { kind: "semantic-publication" }>,
   ): void {
-    if (!pending.onPublication || response.events.length === 0 || response.events.length > 64) {
+    if (!pending.onPublication || response.events.length === 0
+      || response.events.length > SEMANTIC_PUBLICATION_PAGE_SIZE) {
       this.loseWorker(new Error("Canonical writer publication page is invalid"));
       return;
     }

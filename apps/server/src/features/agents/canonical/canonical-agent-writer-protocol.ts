@@ -8,6 +8,9 @@ import type {
   ParentNarrativeRecoveryCommitInput,
 } from "./canonical-agent-boundary.js";
 
+/** Upper bound for one committed semantic publication message. */
+export const SEMANTIC_PUBLICATION_PAGE_SIZE = 64;
+
 /** Cloneable provider batch accepted by the SQLite writer. Compatibility callbacks stay with their owner. */
 export type CanonicalProviderWriteInput = Pick<
   CanonicalAgentCommitInput,
