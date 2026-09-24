@@ -417,4 +417,64 @@ describe("handleTurnPersisted", () => {
       fileCount: 1,
     });
   });
+
+  it("materializes buffered streaming text when a user stop persists a cancelled turn", () => {
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, {
+        runtimePhase: "running",
+        turnExecutionId: "execution-stop",
+        streaming: "partial answer before stop",
+        streamingPreview: "partial answer before stop",
+      }),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: THREAD_ID,
+      messageId: "server-stop-1",
+      toolCallCount: 0,
+      filesChanged: [],
+      outcome: "cancelled",
+      executionId: "execution-stop",
+    });
+
+    const messages = readThreadField(THREAD_ID, (record) => record.messages);
+    expect(messages).toEqual([
+      expect.objectContaining({
+        id: "server-stop-1",
+        role: "assistant",
+        content: "partial answer before stop",
+        outcome: "cancelled",
+      }),
+    ]);
+    expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("");
+  });
+
+  it("materializes buffered streaming text when a terminal runtime snapshot arrives without a terminal event", () => {
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, {
+        runtimePhase: "running",
+        turnExecutionId: "execution-stop",
+        streaming: "streamed text orphaned by stop",
+        streamingPreview: "streamed text orphaned by stop",
+      }),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().applyThreadRuntimeSnapshot({
+      threadId: THREAD_ID,
+      turnExecutionId: "execution-stop",
+      phase: "cancelled",
+    });
+
+    const messages = readThreadField(THREAD_ID, (record) => record.messages);
+    expect(messages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: "streamed text orphaned by stop",
+        outcome: "cancelled",
+      }),
+    ]);
+    expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("");
+  });
 });

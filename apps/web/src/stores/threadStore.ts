@@ -563,6 +563,7 @@ function ensureAssistantMessageForTurnPersist(
   rec: ThreadRecord,
   threadId: string,
   localMessageId: string,
+  content = "",
 ): Message[] | undefined {
   if (rec.messages.some((m) => m.id === localMessageId)) {
     return undefined;
@@ -571,7 +572,7 @@ function ensureAssistantMessageForTurnPersist(
     id: localMessageId,
     thread_id: threadId,
     role: "assistant",
-    content: "",
+    content,
     tool_calls: null,
     files_changed: null,
     cost_usd: null,
@@ -2084,6 +2085,40 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     };
   };
 
+  /**
+   * Reset ephemeral turn state for a terminal runtime snapshot. A user stop
+   * suppresses the provider's terminal event server-side, so the snapshot can
+   * be the only terminal signal — materialize the streaming buffer into an
+   * assistant row instead of dropping it.
+   */
+  const terminalSnapshotReset = (
+    record: ThreadRecord,
+    snapshot: TurnRuntimeSnapshot,
+  ): Partial<ThreadRecord> => {
+    const base = resetTurnEphemeral(record);
+    if (record.streaming.length === 0) return base;
+    const outcome: TurnOutcome | undefined =
+      snapshot.phase === "completed" || snapshot.phase === "cancelled"
+        || snapshot.phase === "interrupted" || snapshot.phase === "errored"
+        ? snapshot.phase
+        : undefined;
+    const message: Message = {
+      id: crypto.randomUUID(),
+      thread_id: snapshot.threadId,
+      role: "assistant",
+      content: record.streaming,
+      tool_calls: null,
+      files_changed: null,
+      cost_usd: null,
+      tokens_used: null,
+      timestamp: new Date().toISOString(),
+      sequence: messageSequenceFor(snapshot.threadId),
+      attachments: null,
+      ...(outcome !== undefined ? { outcome } : {}),
+    };
+    return appendStreamingTerminalMessage(record, base, message, null, snapshot.threadId);
+  };
+
   const resolvedTurnContextWindow = (event: Extract<AgentEvent, { type: "turnComplete" }>) => {
     const record = getRec(event.threadId);
     const thread = useWorkspaceStore.getState().threads.find((item) => item.id === event.threadId);
@@ -2499,8 +2534,12 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     payload: TurnPersistedPayload,
     localMessageId: string,
   ): Message[] | undefined => {
-    const ensured = payload.filesChanged.length > 0 || payload.toolCallCount > 0
-      ? ensureAssistantMessageForTurnPersist(record, payload.threadId, localMessageId)
+    // A user stop suppresses the provider's terminal event server-side, so a
+    // terminal persist is the last chance to materialize the streaming buffer
+    // before the terminal runtime patch clears it.
+    const unflushedStreaming = payload.outcome !== undefined && record.streaming.length > 0;
+    const ensured = payload.filesChanged.length > 0 || payload.toolCallCount > 0 || unflushedStreaming
+      ? ensureAssistantMessageForTurnPersist(record, payload.threadId, localMessageId, unflushedStreaming ? record.streaming : "")
       : undefined;
     if (payload.outcome === undefined) return ensured;
     return (ensured ?? record.messages).map((message) => message.id === localMessageId
@@ -3125,6 +3164,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   applyThreadRuntimeSnapshot: (snapshot) => {
     const running = snapshot.phase === "running" || snapshot.phase === "finalizing";
+    if (!running) flushPendingTextDeltas();
     set((state) => {
       const nextRunning = new Set(state.runningThreadIds);
       if (running) nextRunning.add(snapshot.threadId);
@@ -3132,7 +3172,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       return {
         runningThreadIds: nextRunning,
         records: patchThreadRecord(state.records, snapshot.threadId, (rec) => ({
-          ...(running ? {} : resetTurnEphemeral(rec)),
+          ...(running ? {} : terminalSnapshotReset(rec, snapshot)),
           turnExecutionId: snapshot.turnExecutionId,
           runtimePhase: snapshot.phase,
           awaitingUserStopPersist: undefined,
