@@ -109,7 +109,7 @@ import { ProviderUsageWarmupService } from "../../features/providers/availabilit
 import { ProviderRegistry } from "../../features/providers/composition/provider-registry.js";
 import { ProviderEventIngress } from "../../features/providers/composition/provider-event-ingress.js";
 import type { CursorProviderBoundary } from "@mcode/providers";
-import { ModelCacheService } from "../../features/providers/models/model-cache-service.js";
+import { ModelCacheService, startupModelProviderIds } from "../../features/providers/models/model-cache-service.js";
 import { DiffSummaryService } from "../../features/projects/diffs/summaries/diff-summary-service.js";
 import { RecapService } from "../../features/agents/recap/recap-service.js";
 import { seedAgentRuntimeWorkspace } from "../../runtime/startup/dev-agent-seed.js";
@@ -571,11 +571,8 @@ providerAvailability
     // blocking `codex --version` spawnSync.
     warmCodexVersionGate();
     providerUsageWarmup.warmEnabledProviders(true);
-    // Warm the model cache once after CLI verification has gated which providers
-    // are usable. Triggering this per WS connect would spam refreshes; running
-    // it once at startup is sufficient because ModelCacheService also refreshes
-    // lazily on stale reads (stale-while-revalidate).
-    void modelCacheService.refreshAll().catch((err: unknown) => {
+    const modelProviders = startupModelProviderIds(providerAvailability.listAvailability());
+    void modelCacheService.refreshProviders(modelProviders).catch((err: unknown) => {
       logger.warn("Model cache startup refresh failed", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -940,17 +937,6 @@ async function shutdown(): Promise<void> {
   shutdownCoordinator.setPhase("stop agent sessions");
   await agentService.stopAll();
 
-  // 2. Shutdown provider registry
-  shutdownCoordinator.setPhase("shutdown providers");
-  await providerRegistry.shutdown();
-  shutdownCoordinator.setPhase("shutdown provider event workers");
-  providerEventIngress.shutdown();
-  browserAutomationBroker.shutdown();
-  browserAutomationSessionLease.shutdown();
-
-  // 3. Dispose settings file watcher
-  settingsService.dispose();
-
   let shutdownFailure: unknown = null;
   const captureCleanupFailure = async (cleanup: () => Promise<void> | void): Promise<void> => {
     try {
@@ -959,6 +945,17 @@ async function shutdown(): Promise<void> {
       shutdownFailure ??= error;
     }
   };
+
+  // 2. Shutdown provider registry
+  shutdownCoordinator.setPhase("shutdown providers");
+  await captureCleanupFailure(() => providerRegistry.shutdown());
+  shutdownCoordinator.setPhase("shutdown provider event workers");
+  providerEventIngress.shutdown();
+  browserAutomationBroker.shutdown();
+  browserAutomationSessionLease.shutdown();
+
+  // 3. Dispose settings file watcher
+  settingsService.dispose();
 
   // 6. Contain Project command sessions before their Terminal dependency shuts down.
   shutdownCoordinator.setPhase("shutdown Project commands");

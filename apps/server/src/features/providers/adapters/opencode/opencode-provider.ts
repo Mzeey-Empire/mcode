@@ -356,7 +356,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     this.turns.delete(sessionId);
   }
 
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     for (const [sessionId, state] of this.turns) {
       state.aborted = true;
       this.drainPendingForSession(sessionId);
@@ -364,9 +364,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     }
     this.drainAllPending();
     this.turns.clear();
-    void this.pool.shutdown().catch((err: unknown) => {
-      logger.warn("OpenCode pool shutdown failed", { error: String(err) });
-    });
+    await this.pool.shutdown();
   }
 
   /**
