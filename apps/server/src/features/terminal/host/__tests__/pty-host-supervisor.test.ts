@@ -186,6 +186,8 @@ describe("PtyHostSupervisor", () => {
     const children: FakeHostChild[] = [];
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      heartbeatDegradedMs: 750,
+      heartbeatUnhealthyMs: 1_000,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => {
         const child = new FakeHostChild();
@@ -240,6 +242,36 @@ describe("PtyHostSupervisor", () => {
         containment: "job-object",
       });
       await expect(creating).resolves.toMatchObject({ state: "running" });
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a live host through a four-second server stall", async () => {
+    vi.useFakeTimers();
+    const child = new FakeHostChild();
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => child,
+    });
+    try {
+      await supervisor.start();
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(supervisor.health().state).toBe("healthy");
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "heartbeat",
+        hostGeneration: "1",
+        monotonicMs: "2",
+        activeSessions: 0,
+        queueBytes: 0,
+        rssBytes: "1",
+      });
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(supervisor.health().state).toBe("healthy");
+      expect(child.kill).not.toHaveBeenCalled();
     } finally {
       await supervisor.shutdown().catch(() => undefined);
       vi.useRealTimers();
@@ -651,6 +683,8 @@ describe("PtyHostSupervisor", () => {
     const child = new FakeHostChild();
     const supervisor = new PtyHostSupervisor({
       platform: "windows",
+      heartbeatDegradedMs: 750,
+      heartbeatUnhealthyMs: 1_000,
       cleanupLedger: new InMemoryPtyHostCleanupLedger(),
       spawnHost: () => child,
     });
