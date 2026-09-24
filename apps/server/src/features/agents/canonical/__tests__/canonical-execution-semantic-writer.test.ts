@@ -10,6 +10,8 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 import { ExecutionWorkerHandler } from "../../execution/execution-worker-handler.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
+import { NarrativeRecoveryDelta } from "../../turns/narrative-recovery-delta.js";
+import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
 
@@ -245,6 +247,76 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       .get(EXECUTION_ID, "semantic:head")).toMatchObject({ receipt_json: expect.stringContaining('"ordinal":1') });
     db.run("DROP TRIGGER fail_text_receipt");
     expect(await writer.transact(input)).toMatchObject({ kind: "committed", operationId: "lease-1:2" });
+  });
+
+  it("replays narrative changes and discards, then recovers only the saved narrative after worker loss", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const canonical = new CanonicalAgentBoundary(db, () => {});
+    const reducer = new NarrativeRecoveryDelta();
+    const publicationCount = published.length;
+    const initialDelta = reducer.prepare(toolNarrative("", 1));
+    if (!initialDelta) throw new Error("Expected an initial narrative delta");
+    const first = operation(2, { kind: "narrative-delta", input: {
+      executionId: EXECUTION_ID, items: initialDelta.items, discardedItemIds: initialDelta.discardedItemIds,
+    } });
+    expect((await writer.transact(first)).kind).toBe("committed");
+    initialDelta.acknowledge();
+    expect(canonical.loadParentNarrativeRecovery(TURN_ID)).toHaveLength(1);
+    expect(published).toHaveLength(publicationCount);
+    const discardedDelta = reducer.prepare([]);
+    if (!discardedDelta) throw new Error("Expected a discarded narrative delta");
+    const discard = operation(3, { kind: "narrative-delta", input: {
+      executionId: EXECUTION_ID, items: discardedDelta.items, discardedItemIds: discardedDelta.discardedItemIds,
+    } });
+    expect((await writer.transact(discard)).kind).toBe("committed");
+    discardedDelta.acknowledge();
+    expect(canonical.loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
+    const latestDelta = reducer.prepare([toolNarrative("", 2)[1]!]);
+    if (!latestDelta) throw new Error("Expected a new narrative delta");
+    const latest = operation(4, { kind: "narrative-delta", input: {
+      executionId: EXECUTION_ID, items: latestDelta.items, discardedItemIds: latestDelta.discardedItemIds,
+    } });
+    const receipt = await writer.transact(latest);
+    expect(receipt).toMatchObject({ kind: "committed", operationId: "lease-1:4" });
+    latestDelta.acknowledge();
+    expect(published).toHaveLength(publicationCount);
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalExecutionSemanticWriter(db, (events) => published.push(...events.map((item) => item.eventId)));
+    expect(await writer.transact(first)).toMatchObject({ kind: "committed", operationId: "lease-1:2" });
+    expect(await writer.transact(discard)).toMatchObject({ kind: "committed", operationId: "lease-1:3" });
+    expect(await writer.transact(latest)).toEqual(receipt);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?").get("toolCall:tool-1"))
+      .toEqual({ count: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?").get("toolCall:tool-0"))
+      .toEqual({ count: 0 });
+    expect(writer.interruptWorkerLoss(loss).kind).toBe("committed");
+    expect(db.prepare("SELECT id, status FROM tool_call_records WHERE id = ?").get("tool-1"))
+      .toEqual({ id: "tool-1", status: "completed" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tool_call_records WHERE id = ?").get("tool-0"))
+      .toEqual({ count: 0 });
+  });
+
+  it("rolls back narrative changes when the semantic receipt cannot commit", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const delta = operation(2, { kind: "narrative-delta", input: {
+      executionId: EXECUTION_ID, items: toolNarrative("", 1), discardedItemIds: [],
+    } });
+    expect(await writer.transact(operation(2, { kind: "narrative-delta", input: {
+      executionId: "wrong-execution", items: toolNarrative("", 1), discardedItemIds: [],
+    } }))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact(operation(2, { kind: "narrative-delta", input: {
+      executionId: EXECUTION_ID, items: [{ ...toolNarrative("", 1)[0]!, record: {
+        ...toolNarrative("", 1)[0]!.record, input_summary: "x".repeat(256 * 1024 + 1),
+      } }], discardedItemIds: [],
+    } }))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    db.run("CREATE TRIGGER fail_narrative_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:narrative-delta' BEGIN SELECT RAISE(ABORT, 'narrative receipt unavailable'); END");
+    await expect(writer.transact(delta)).rejects.toThrow("narrative receipt unavailable");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?").get("toolCall:tool-0"))
+      .toEqual({ count: 0 });
+    db.run("DROP TRIGGER fail_narrative_receipt");
+    expect((await writer.transact(delta)).kind).toBe("committed");
   });
 
   it("rejects stale worker-loss leases without changing the unfinished turn", async () => {

@@ -209,6 +209,48 @@ describe("canonical SQLite writer", () => {
       .toEqual({ content: "Worker durable text" });
   });
 
+  it("replays a narrative delta after the worker commits but loses its reply", async () => {
+    const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID };
+    const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "narrative-lease" };
+    const begin: ExecutionSemanticOperation = {
+      operationId: "narrative-lease:1", execution, lease, ordinal: 1,
+      mutation: { kind: "begin", providerId: "codex", input: {
+        thread: { id: THREAD_ID, workspaceId: "writer-workspace", providerId: "codex", createdAt: NOW },
+        turnId: TURN_ID, executionId: EXECUTION_ID, permissionMode: "supervised", providerIdentities: [],
+        userMessage: { kind: "create", messageId: "narrative-user", content: "Question", sequence: 1 },
+      } },
+    };
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect((await writer.transactSemantic(begin, () => {})).kind).toBe("committed");
+    await writer.close();
+
+    let created = 0;
+    const published: string[] = [];
+    writer = new CanonicalAgentWriterClient(dbPath, () => created++ === 0
+      ? workerDroppingReply("semantic-transacted")
+      : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+    const delta: ExecutionSemanticOperation = {
+      operationId: "narrative-lease:2", execution, lease, ordinal: 2,
+      mutation: { kind: "narrative-delta", input: {
+        executionId: EXECUTION_ID, items: [recoveryToolCall()], discardedItemIds: [],
+      } },
+    };
+    const receipt = await writer.transactSemantic(delta, (events) => published.push(...events.map((event) => event.eventId)));
+    expect(receipt).toMatchObject({ kind: "committed", operationId: "narrative-lease:2" });
+    expect(created).toBe(2);
+    expect(published).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get("toolCall:writer-recovery-tool")).toEqual({ count: 1 });
+    await writer.close();
+
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect(await writer.transactSemantic(delta, () => {})).toEqual(receipt);
+    expect(await writer.interruptWorkerLoss({ execution, lease, reason: "worker exited", recoveryIncidentId: "narrative-loss" },
+      () => {})).toMatchObject({ kind: "committed", operationId: "narrative-lease:worker-lost" });
+    expect(db.prepare("SELECT id, status FROM tool_call_records WHERE id = ?")
+      .get("writer-recovery-tool")).toEqual({ id: "writer-recovery-tool", status: "completed" });
+  });
+
   it("rejects a database failure without reporting a durable receipt", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);
     await writer.whenReady();

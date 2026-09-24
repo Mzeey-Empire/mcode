@@ -3,12 +3,14 @@ import * as NodeCrypto from "node:crypto";
 import {
   AgentEventSchema,
   CanonicalAgentEventEnvelopeSchema,
+  ParentNarrativeRecoveryItemSchema,
   ProviderIdSchema,
   TurnOutcomeSchema,
   type TurnOutcome,
 } from "@mcode/contracts";
 import { z } from "zod";
 
+import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import type {
   ExecutionProviderCommitReceipt,
@@ -35,6 +37,11 @@ const PENDING_FINISH_KIND = "semantic:finish-pending";
 const PUBLICATION_CHUNK_SIZE = 64;
 const PUBLICATION_CHUNK_PAGE_SIZE = 16;
 const MAX_BUFFERED_PUBLICATION_EVENTS = 2_048;
+const narrativeDeltaSchema = z.object({
+  executionId: z.string(),
+  items: z.array(ParentNarrativeRecoveryItemSchema()),
+  discardedItemIds: z.array(z.string().regex(/^(toolCall|narrationSegment|hook):.+$/)).optional(),
+});
 const storedPublicationSequencesSchema = z.array(z.union([
   z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   z.object({ executionId: z.string(), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
@@ -128,6 +135,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private readonly turns: CanonicalParentTurnWrite;
   private readonly providerProjector: CanonicalCommittedProviderProjector;
   private readonly assistantText: ParentAssistantTextCheckpointService;
+  private readonly canonical: CanonicalAgentBoundary;
   private readonly findOperation: ReturnType<Database["prepare"]>;
   private readonly listPublicationChunks: ReturnType<Database["prepare"]>;
   private readonly findPublishedEvent: ReturnType<Database["prepare"]>;
@@ -149,6 +157,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       if (!this.bufferedPublication) throw new Error("Codex projection requires a semantic transaction");
       this.bufferPublication(events);
     });
+    this.canonical = codexBoundary;
     this.providerProjector = new CanonicalCommittedProviderProjector(codexBoundary);
     this.assistantText = new ParentAssistantTextCheckpointService(db);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
@@ -232,6 +241,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       case "begin": return this.begin(operation, hash);
       case "append-events": return this.append(operation, hash);
       case "append-assistant-text": return this.appendAssistantText(operation, hash);
+      case "narrative-delta": return this.recordNarrativeDelta(operation, hash);
       case "checkpoint":
       case "stop-requested":
       case "provider-outcome": return this.control(operation, hash);
@@ -328,6 +338,24 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       if (result.outcome !== "committed") throw new SemanticConflict();
       // Assistant text has its own durable sequence; it does not advance the canonical event revision.
       const receipt = committed(operation, head.durableRevision, undefined, undefined, result);
+      this.storeHead({ ...head, ordinal: operation.ordinal });
+      this.storeReceipt(operation, hash, receipt);
+      return receipt;
+    })();
+  }
+
+  private recordNarrativeDelta(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
+    const mutation = operation.mutation;
+    if (mutation.kind !== "narrative-delta") return conflict(operation);
+    return this.db.transaction(() => {
+      const head = this.requireNextHead(operation);
+      const checkpoint = this.canonical.loadCheckpoint(operation.execution.executionId);
+      if (!checkpoint || checkpoint.threadId !== operation.execution.threadId
+        || checkpoint.turnId !== operation.execution.turnId || checkpoint.terminalOutcome !== null) {
+        throw new SemanticConflict();
+      }
+      if (!this.canonical.recordParentNarrativeRecovery(mutation.input)) throw new SemanticConflict();
+      const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...head, ordinal: operation.ordinal });
       this.storeReceipt(operation, hash, receipt);
       return receipt;
@@ -579,8 +607,30 @@ function validOperation(operation: ExecutionSemanticOperation): boolean {
     && operation.operationId !== HEAD_ID && operation.operationId.length <= 256
     && Number.isSafeInteger(operation.ordinal) && operation.ordinal > 0
     && validIdentity(operation.execution) && validLease(operation.lease)
-    && (operation.mutation.kind !== "append-assistant-text"
-      || validAssistantTextInput(operation.mutation.inputs, operation.execution));
+    && validSemanticMutationInput(operation);
+}
+
+function validSemanticMutationInput(operation: ExecutionSemanticOperation): boolean {
+  if (operation.mutation.kind === "append-assistant-text") {
+    return validAssistantTextInput(operation.mutation.inputs, operation.execution);
+  }
+  if (operation.mutation.kind === "narrative-delta") {
+    return validNarrativeDeltaInput(operation.mutation.input, operation.execution);
+  }
+  return true;
+}
+
+function validNarrativeDeltaInput(
+  input: Extract<ExecutionSemanticOperation["mutation"], { kind: "narrative-delta" }>["input"],
+  execution: ExecutionIdentity,
+): boolean {
+  if (!input || input.executionId !== execution.executionId || !Array.isArray(input.items)) return false;
+  const discarded = input.discardedItemIds ?? [];
+  if (!Array.isArray(discarded)) return false;
+  const count = input.items.length + discarded.length;
+  if (count === 0 || count > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
+  return Buffer.byteLength(JSON.stringify(input), "utf8") <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes
+    && narrativeDeltaSchema.safeParse(input).success;
 }
 
 function validAssistantTextInput(
