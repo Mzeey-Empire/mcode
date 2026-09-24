@@ -2,6 +2,7 @@ import type { AgentEvent, TurnOutcome } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 
 import type {
+  DataOnlyParentLiveMessageInput,
   DataOnlyParentTerminalProjectionInput,
   DataOnlyParentTurnFinishInput,
   DataOnlyParentTurnStartInput,
@@ -40,6 +41,7 @@ export type ExecutionWorkCommand =
     readonly narrative?: ParentNarrativeRecoveryCommit;
     readonly taskIntents?: readonly TaskToolWriteIntent[];
     readonly systemIntents?: readonly CodexSystemWriterIntent[];
+    readonly message?: DataOnlyParentLiveMessageInput;
     readonly publication: ExecutionLivePublicationIntent;
   }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
@@ -69,6 +71,7 @@ export interface ExecutionSemanticOperation {
       readonly narrative?: ParentNarrativeRecoveryCommit;
       readonly taskIntents?: readonly TaskToolWriteIntent[];
       readonly systemIntents?: readonly CodexSystemWriterIntent[];
+      readonly message?: DataOnlyParentLiveMessageInput;
     }
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
@@ -297,6 +300,7 @@ function liveEventMutation(
     ...(command.narrative ? { narrative: command.narrative } : {}),
     ...(command.taskIntents ? { taskIntents: command.taskIntents } : {}),
     ...(command.systemIntents ? { systemIntents: command.systemIntents } : {}),
+    ...(command.message ? { message: command.message } : {}),
   };
 }
 

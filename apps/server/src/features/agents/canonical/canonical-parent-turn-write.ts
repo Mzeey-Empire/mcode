@@ -15,6 +15,7 @@ import { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js"
 import { PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-repo.js";
 import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";
+import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
 import { TURN_DIFF_MAX_BYTES, parseTurnDiff } from "../turns/turn-diff-patch.js";
 import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
@@ -110,6 +111,15 @@ export interface DataOnlyParentTerminalProjectionInput {
   narrative: readonly ParentNarrativeRecoveryItem[];
 }
 
+/** Assistant body and assigned ID that must exist before its live message is published. */
+export interface DataOnlyParentLiveMessageInput {
+  readonly precedingMessageId: string;
+  readonly messageId: string;
+  readonly content: string;
+  readonly model: string | null;
+  readonly attachments: readonly StoredAttachment[];
+}
+
 /** A staged projection ready for the canonical terminal commit. */
 export interface StagedParentTerminalProjection {
   projection: ParentTurnProjection;
@@ -124,6 +134,7 @@ export interface LostParentExecutionInput {
   executionId: string;
   reason: string;
   recoveryIncidentId: string;
+  assignedMessageId?: string;
 }
 
 /** Writer-local semantic operations with cloneable inputs and durable receipts. */
@@ -169,9 +180,10 @@ export class CanonicalParentTurnWrite {
       throw new Error(`Unfinished parent execution not found: ${input.executionId}`);
     }
     const existingAssistant = this.canonical.loadTerminalProjection(input.turnId).message;
+    const assignedAssistant = this.assignedAssistantForLoss(input, existingAssistant);
     const recoveredNarrative = this.canonical.loadParentNarrativeRecovery(input.turnId);
-    const text = existingAssistant ? "" : this.assistantTextCheckpoints.restore(input.executionId);
-    const assistant = existingAssistant ?? this.stageRecoveredAssistant(input, text, recoveredNarrative.length);
+    const text = existingAssistant || assignedAssistant ? "" : this.assistantTextCheckpoints.restore(input.executionId);
+    const assistant = existingAssistant ?? assignedAssistant ?? this.stageRecoveredAssistant(input, text, recoveredNarrative.length);
     this.canonical.markUnresolvedCodexChildDeliveriesUnknown(input.executionId);
     const result = this.canonical.interruptUnfinishedExecution(
       input.executionId,
@@ -186,6 +198,19 @@ export class CanonicalParentTurnWrite {
     if (result.outcome !== "committed") throw new Error(`Parent interruption did not commit: ${input.executionId}`);
     this.threads.updateStatus(input.threadId, "interrupted");
     return result;
+  }
+
+  private assignedAssistantForLoss(
+    input: LostParentExecutionInput,
+    terminal: ReturnType<CanonicalAgentBoundary["loadTerminalProjection"]>["message"],
+  ) {
+    if (!input.assignedMessageId) return null;
+    const assigned = this.messages.findByIdInThreadIncludingInternal(input.threadId, input.assignedMessageId);
+    if (!assigned || assigned.role !== "assistant" || !assigned.is_internal
+      || terminal && terminal.id !== assigned.id) {
+      throw new Error(`Assigned assistant message was not staged: ${input.assignedMessageId}`);
+    }
+    return assigned;
   }
 
   /** Retire provisional text only after the canonical interruption and receipt commit. */
@@ -230,6 +255,38 @@ export class CanonicalParentTurnWrite {
   /** Commit a plain canonical event batch and its checkpoint before publication. */
   append(input: DataOnlyParentEventInput): CanonicalAgentCommitResult {
     return this.canonical.commit(input);
+  }
+
+  /** Stage the exact live body on this writer connection for terminal reuse. */
+  stageLiveAssistant(execution: ExecutionIdentity, input: DataOnlyParentLiveMessageInput): boolean {
+    if (!this.canStageLiveAssistant(execution, input)) return false;
+    const existing = this.messages.findByIdInThreadIncludingInternal(execution.threadId, input.messageId);
+    if (existing) return Boolean(existing.is_internal && this.matchesAssistantBody(existing, input));
+    return this.createLiveAssistant(execution.threadId, input);
+  }
+
+  private canStageLiveAssistant(execution: ExecutionIdentity, input: DataOnlyParentLiveMessageInput): boolean {
+    const turn = this.canonical.loadTurnByExecution(execution.executionId);
+    const checkpoint = this.canonical.loadCheckpoint(execution.executionId);
+    return Boolean(turn && turn.id === execution.turnId && turn.threadId === execution.threadId
+      && checkpoint?.turnId === execution.turnId && checkpoint.terminalOutcome === null)
+      && deriveTurnAssistantMessageId(execution.threadId, input.precedingMessageId) === input.messageId;
+  }
+
+  private createLiveAssistant(threadId: string, input: DataOnlyParentLiveMessageInput): boolean {
+    const preceding = this.messages.findByIdInThreadIncludingInternal(threadId, input.precedingMessageId);
+    if (!preceding || preceding.sequence !== this.messages.getLatestSequenceIncludingInternal(threadId)) return false;
+    this.messages.createAssistantIdempotent({
+      id: input.messageId,
+      threadId,
+      content: input.content,
+      sequence: preceding.sequence + 1,
+      model: input.model,
+      attachments: [...input.attachments],
+      isInternal: true,
+    });
+    const staged = this.messages.findByIdInThreadIncludingInternal(threadId, input.messageId);
+    return Boolean(staged?.is_internal && this.matchesAssistantBody(staged, input));
   }
 
   /** Stage an internal assistant and its terminal narrative without publishing them. */
@@ -315,6 +372,15 @@ export class CanonicalParentTurnWrite {
       || JSON.stringify(message.attachments ?? []) !== JSON.stringify(input.assistant.attachments)) {
       throw new Error(`Staged assistant projection conflicts with terminal input: ${input.executionId}`);
     }
+  }
+
+  private matchesAssistantBody(
+    message: NonNullable<ReturnType<MessageRepo["findByIdInThread"]>>,
+    input: DataOnlyParentLiveMessageInput,
+  ): boolean {
+    return message.role === "assistant" && message.content === input.content
+      && message.model === input.model
+      && JSON.stringify(message.attachments ?? []) === JSON.stringify(input.attachments);
   }
 
   private projectionForMessage(message: NonNullable<ReturnType<MessageRepo["findByIdInThread"]>>): StagedParentTerminalProjection {

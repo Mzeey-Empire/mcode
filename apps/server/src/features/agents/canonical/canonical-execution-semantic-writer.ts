@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import {
   AgentEventSchema,
+  AgentEventType,
   CanonicalAgentEventEnvelopeSchema,
   ParentNarrativeRecoveryItemSchema,
   ProviderIdSchema,
@@ -26,7 +27,7 @@ import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
 import { CanonicalCodexSystemErrorProjection, matchesCodexSystemIntents } from "./canonical-codex-system-error-projection.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
-import { CanonicalParentTurnWrite } from "./canonical-parent-turn-write.js";
+import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput } from "./canonical-parent-turn-write.js";
 import { TaskRepo } from "../orchestration/persistence/task-repo.js";
 import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import {
@@ -272,7 +273,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const current = this.loadHead(input.execution.executionId);
     if (!current || current.terminal || !sameExecutionAndLease(current, input)) throw new SemanticConflict();
     const result = this.turns.interruptLostExecution({ ...input.execution,
-      reason: input.reason, recoveryIncidentId: input.recoveryIncidentId });
+      reason: input.reason, recoveryIncidentId: input.recoveryIncidentId,
+      ...(current.assignedMessageId ? { assignedMessageId: current.assignedMessageId } : {}) });
     const receipt = committed(operation, result.durableThrough);
     const sequences = this.bufferedPublication?.flatMap((batch) => batch.map((event) => event.acceptedSequence)) ?? [];
     this.storePublicationChunks(input.execution.executionId, hash, sequences);
@@ -421,6 +423,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const head = this.requireNextHead(operation);
       if (head.providerId !== "codex") throw new SemanticConflict();
       this.requireUnfinishedCheckpoint(operation.execution);
+      this.stageLiveMessage(operation.execution, head, mutation.message);
       const textResult = this.applyLiveText(mutation.text, operation.execution.executionId);
       if (mutation.narrative) this.persistNarrativeDelta(mutation.narrative);
       if (mutation.taskIntents) this.applyTaskIntents(operation.execution.threadId, mutation.taskIntents);
@@ -429,7 +432,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       }
       const livePublication = this.projectLiveSystem(operation);
       const committedReceipt = committed(operation, head.durableRevision, undefined, undefined, textResult, livePublication);
-      this.storeHead({ ...head, ordinal: operation.ordinal });
+      this.storeHead({ ...head, ordinal: operation.ordinal,
+        ...(mutation.message ? { assignedMessageId: mutation.message.messageId } : {}) });
       this.storeReceipt(operation, hash, committedReceipt);
       return committedReceipt;
     })();
@@ -448,6 +452,16 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       operation.execution, publication.event, mutation.systemIntents, publication.after,
     );
     return [{ publicationId: `${operation.operationId}:0`, after: result.after, event: result.event }];
+  }
+
+  private stageLiveMessage(
+    execution: ExecutionIdentity,
+    head: SemanticHead,
+    message: DataOnlyParentLiveMessageInput | undefined,
+  ): void {
+    if (!message) return;
+    if (head.assignedMessageId && head.assignedMessageId !== message.messageId) throw new SemanticConflict();
+    if (!this.turns.stageLiveAssistant(execution, message)) throw new SemanticConflict();
   }
 
   private applyLiveText(
@@ -519,10 +533,13 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     return this.db.transaction(() => {
       const head = this.requireNextHead(operation);
       if (head.providerOutcome !== mutation.input.outcome) throw new SemanticConflict();
+      if (head.assignedMessageId && head.assignedMessageId !== mutation.input.assistant.messageId) {
+        throw new SemanticConflict();
+      }
       this.turns.stageTerminalProjection(mutation.input);
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...head, ordinal: operation.ordinal,
-        assignedMessageId: mutation.input.assistant.messageId ?? null });
+        assignedMessageId: mutation.input.assistant.messageId ?? head.assignedMessageId ?? null });
       this.storeReceipt(operation, hash, receipt);
       return receipt;
     })();
@@ -839,7 +856,8 @@ function validLiveEventInput(operation: ExecutionSemanticOperation): boolean {
   const event = publication.event;
   if (!validLiveSystemMutation(mutation, event)) return false;
   if (!validLiveTextPayload(mutation, operation.execution)
-    || !AgentEventSchema().safeParse(event).success || !validLiveTextAssociation(mutation.text, event)) return false;
+    || !AgentEventSchema().safeParse(event).success
+    || !validLiveEventAssociation(mutation, event, operation.execution)) return false;
   if (mutation.narrative && !validNarrativeDeltaInput(mutation.narrative, operation.execution)) return false;
   if (!validLiveTaskIntents(mutation.taskIntents, event)) return false;
   return validLiveEventBudget(operation, mutation);
@@ -878,8 +896,8 @@ function validLiveEventBudget(
     ? mutation.narrative.items.length + (mutation.narrative.discardedItemIds?.length ?? 0) : 0;
   const textRows = mutation.text.kind === "append" ? mutation.text.inputs.length
     : mutation.text.kind === "unchanged" ? 0 : 1;
-  if (textRows + narrativeRows + (mutation.taskIntents?.length ?? 0)
-    > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
+  const rows = textRows + narrativeRows + (mutation.taskIntents?.length ?? 0) + (mutation.message ? 1 : 0);
+  if (rows > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
   return Buffer.byteLength(JSON.stringify(operation), "utf8") <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes;
 }
 
@@ -914,6 +932,40 @@ function validLiveTextAssociation(
       && text.expectedText.length > 0;
     case "promote": return event.type === "assistantMessageBoundary" && event.isFinalResponse === true;
   }
+}
+
+function validLiveEventAssociation(
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>,
+  event: ExecutionLivePublicationIntent["event"],
+  execution: ExecutionIdentity,
+): boolean {
+  if (mutation.message) {
+    return mutation.text.kind === "unchanged" && validLiveMessageAssociation(mutation.message, event, execution);
+  }
+  return event.type !== AgentEventType.Message && validLiveTextAssociation(mutation.text, event);
+}
+
+function validLiveMessageAssociation(
+  message: DataOnlyParentLiveMessageInput,
+  event: ExecutionLivePublicationIntent["event"],
+  execution: ExecutionIdentity,
+): boolean {
+  return event.type === AgentEventType.Message && validLiveMessageIdentity(message)
+    && validLiveMessageBody(message) && event.threadId === execution.threadId
+    && event.messageId === message.messageId && event.content === message.content
+    && (event.model ?? null) === message.model
+    && JSON.stringify(event.attachments ?? []) === JSON.stringify(message.attachments);
+}
+
+function validLiveMessageIdentity(message: DataOnlyParentLiveMessageInput): boolean {
+  return typeof message.precedingMessageId === "string" && message.precedingMessageId.length > 0
+    && typeof message.messageId === "string" && /^[0-9a-f]{64}$/.test(message.messageId);
+}
+
+function validLiveMessageBody(message: DataOnlyParentLiveMessageInput): boolean {
+  if (typeof message.content !== "string" || !Array.isArray(message.attachments)) return false;
+  return (message.model === null || typeof message.model === "string")
+    && (message.content.trim().length > 0 || message.attachments.length > 0);
 }
 
 function validNarrativeEvent(event: ExecutionLivePublicationIntent["event"]): boolean {

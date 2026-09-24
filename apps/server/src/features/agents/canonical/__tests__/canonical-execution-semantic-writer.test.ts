@@ -13,6 +13,7 @@ import { CodexLiveEventReducer } from "../../execution/codex-live-event-reducer.
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 import { ExecutionWorkerHandler } from "../../execution/execution-worker-handler.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
+import { CodexParentMessageProjection } from "../../turns/codex-parent-message-projection.js";
 import { NarrativeRecoveryDelta } from "../../turns/narrative-recovery-delta.js";
 import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
 import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-projection.js";
@@ -342,6 +343,103 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       .toBe("committed");
     expect(new MessageRepo(db).findByIdInThread(THREAD_ID, assignedId))
       .toMatchObject({ id: assignedId, content: "Live answer", is_internal: false });
+  });
+
+  it("stages a projected Codex message with its receipt before live publication and reuses it at finish", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const projection = new CodexParentMessageProjection({ execution, turnKind: "ordinary" });
+    const projected = projection.projectMessage({
+      execution, content: "Live answer", model: null, precedingMessageId: "user-1", postTurnGoalReceipt: false,
+    });
+    const message = {
+      precedingMessageId: "user-1", messageId: projected.messageId,
+      content: "Live answer", model: projected.model, attachments: projected.attachments ?? [],
+    };
+    const event = { type: AgentEventType.Message, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+      content: message.content, tokens: null, messageId: message.messageId, model: message.model };
+    const liveOperation = { ...operation(2, { kind: "live-event", text: { kind: "unchanged" }, message }),
+      livePublication: [{ after: "writer" as const, event }] };
+
+    expect(await writer.transact({ ...liveOperation, livePublication: [{ after: "writer",
+      event: { ...event, content: "Different public body" } }] }))
+      .toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, message.messageId)).toBeNull();
+
+    db.run("CREATE TRIGGER fail_message_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:live-event' AND NEW.operation_id = 'lease-1:2' BEGIN SELECT RAISE(ABORT, 'message receipt unavailable'); END");
+    await expect(writer.transact(liveOperation)).rejects.toThrow("message receipt unavailable");
+    expect(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, message.messageId)).toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, "lease-1:2")).toEqual({ count: 0 });
+    db.run("DROP TRIGGER fail_message_receipt");
+
+    const committedMessage = await send(2, {
+      kind: "live-event", text: { kind: "unchanged" }, message,
+      publication: { after: "writer", event },
+    });
+    expect(committedMessage).toMatchObject({ kind: "committed", livePublication: [{
+      publicationId: "lease-1:2:0", event,
+    }] });
+    expect(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, message.messageId))
+      .toMatchObject({ id: message.messageId, content: message.content, model: null, is_internal: true });
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalExecutionSemanticWriter(db, () => {});
+    expect(await writer.transact(liveOperation)).toEqual(committedMessage);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = ?").get(message.messageId))
+      .toEqual({ count: 1 });
+    expect(await writer.transact({ ...liveOperation, mutation: { kind: "live-event", text: { kind: "unchanged" },
+      message: { ...message, content: "Different body" } },
+    livePublication: [{ after: "writer", event: { ...event, content: "Different body" } }] }))
+      .toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact({ ...liveOperation, ordinal: 3, operationId: "lease-1:3",
+      mutation: { kind: "live-event", text: { kind: "unchanged" }, message: { ...message, content: "Different body" } },
+      livePublication: [{ after: "writer", event: { ...event, content: "Different body" } }],
+    })).toEqual({ kind: "conflict", operationId: "lease-1:3" });
+    expect(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, message.messageId))
+      .toMatchObject({ content: "Live answer" });
+
+    expect((await writer.transact(operation(3, { kind: "provider-outcome", outcome: "completed" }))).kind)
+      .toBe("committed");
+    const terminal = projection.projectTerminal({
+      execution, outcome: "completed", endedAt: NOW, fallbackModel: null, narrative: [],
+    });
+    expect(await writer.transact(operation(4, { kind: "stage-terminal", input: {
+      ...terminal, assistant: { ...terminal.assistant, messageId: "b".repeat(64) },
+    } }))).toEqual({ kind: "conflict", operationId: "lease-1:4" });
+    expect((await writer.transact(operation(4, { kind: "stage-terminal", input: terminal }))).kind)
+      .toBe("committed");
+    expect((await writer.transact(operation(5, { kind: "finish", outcome: "completed", input: {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+      providerId: "codex", providerIdentities: [], outcome: "completed",
+      projection: { kind: "writer-staged", messageId: message.messageId },
+    } }))).kind).toBe("committed");
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, message.messageId))
+      .toMatchObject({ id: message.messageId, content: "Live answer", outcome: "completed", is_internal: false });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = ?").get(message.messageId))
+      .toEqual({ count: 1 });
+  });
+
+  it("uses a live message row with its assigned ID when the worker is lost", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const projection = new CodexParentMessageProjection({ execution, turnKind: "ordinary" });
+    const projected = projection.projectMessage({
+      execution, content: "Durable body", model: null, precedingMessageId: "user-1", postTurnGoalReceipt: false,
+    });
+    const message = {
+      precedingMessageId: "user-1", messageId: projected.messageId,
+      content: "Durable body", model: projected.model, attachments: projected.attachments ?? [],
+    };
+    expect((await send(2, { kind: "live-event", text: { kind: "unchanged" }, message,
+      publication: { after: "writer", event: { type: AgentEventType.Message,
+        threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, content: message.content,
+        tokens: null, messageId: message.messageId, model: message.model } },
+    })).kind).toBe("committed");
+    expect(writer.interruptWorkerLoss(loss).kind).toBe("committed");
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, message.messageId))
+      .toMatchObject({ content: "Durable body", outcome: "interrupted", is_internal: false });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE thread_id = ? AND role = 'assistant'")
+      .get(THREAD_ID)).toEqual({ count: 1 });
   });
 
   it("fences assistant-text routing, lease, ordinal, input size, and conflicting replay", async () => {
