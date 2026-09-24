@@ -597,11 +597,12 @@ async function readDurableConversations(context) {
 async function readDurableConversation(context, thread) {
   const tail = await measuredRpc(context.socket, context.receipt.metrics.rpc, "conversation.tail", { threadId: thread.id, limit: 2 });
   const expectedOutcome = context.stopOne && thread.ordinal === STOP_ONE_ORDINAL ? "cancelled" : "completed";
-  const page = expectedOutcome === "cancelled"
-    ? await measuredRpc(context.socket, context.receipt.metrics.rpc, "conversation.page", { threadId: thread.id, limit: 100 })
+  const assistant = tail?.messages?.find((message) => message?.role === "assistant");
+  const narrative = expectedOutcome === "cancelled" && assistant
+    ? await measuredRpc(context.socket, context.receipt.metrics.rpc, "narrative.list", { messageId: assistant.id })
     : null;
   thread.durable = context.stopOne
-    ? auditConversationOutcome(tail, page, expectedOutcome, context.receipt.state.stop?.turnExecutionId)
+    ? auditConversationOutcome(tail, narrative, expectedOutcome, context.receipt.state.stop?.turnExecutionId)
     : auditConversationTail(tail);
   if (!thread.durable.ok) throw new Error(`Durable conversation proof failed for thread ${thread.ordinal}`);
 }
@@ -1026,12 +1027,12 @@ function auditConversationTail(tail) {
   };
 }
 
-function auditConversationOutcome(tail, page, expectedOutcome, expectedExecutionId) {
+function auditConversationOutcome(tail, narrative, expectedOutcome, expectedExecutionId) {
   const messages = Array.isArray(tail?.messages) ? tail.messages : [];
   const assistant = messages.find((message) => message?.role === "assistant");
   const hasUserMessage = messages.some((message) => message?.role === "user");
   const assistantSummary = summarizeAssistantOutcome(assistant);
-  const narrativeSummary = summarizeNarrativeOutcome(page, assistant);
+  const narrativeSummary = summarizeNarrativeOutcome(narrative);
   const summary = { messageCount: messages.length, hasUserMessage, ...assistantSummary, ...narrativeSummary };
   return {
     ...summary,
@@ -1048,15 +1049,13 @@ function summarizeAssistantOutcome(assistant) {
   };
 }
 
-function summarizeNarrativeOutcome(page, assistant) {
-  const narrativeByMessage = page?.narrativeByMessage ?? {};
-  const allNarrative = Object.values(narrativeByMessage);
-  const narrative = assistant ? narrativeByMessage[assistant.id] : null;
+function summarizeNarrativeOutcome(narrative) {
+  const thoughts = narrative?.thoughts ?? [];
+  const tools = narrative?.tools ?? [];
   return {
-    hasRetainedNarrative: narrative?.thoughts?.some((segment) => segment.text?.includes("Fixture step 1:")) === true,
-    narrativeMessageCount: allNarrative.length,
-    thoughtSegmentCount: allNarrative.reduce((count, batch) => count + (batch?.thoughts?.length ?? 0), 0),
-    toolCount: allNarrative.reduce((count, batch) => count + (batch?.tools?.length ?? 0), 0),
+    hasRetainedNarrative: thoughts.some((segment) => segment.text?.includes("Fixture step 1:")),
+    thoughtSegmentCount: thoughts.length,
+    toolCount: tools.length,
   };
 }
 
