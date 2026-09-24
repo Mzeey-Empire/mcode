@@ -14,7 +14,7 @@
  * `agentCallStack`, the open/closed thought segments, hook executions, and the
  * shared sort counter) and the enrichment + classification + persistence logic
  * that AgentService used to inline. The six narrative-pipeline traps documented
- * in `docs/guides/narrative-pipeline.md` are enforced here:
+ * in `docs/internals/narrative-pipeline.md` are enforced here:
  *
  * - Trap 1: {@link bufferToolCall} prefers the SDK `parent_tool_use_id` and only
  *   falls back to {@link getCurrentParentToolCallId} when exactly one Agent on
