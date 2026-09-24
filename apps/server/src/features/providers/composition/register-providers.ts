@@ -9,7 +9,7 @@ import { ProviderRegistry } from "./provider-registry.js";
 import { createProviderHostPorts } from "./provider-host-ports.js";
 import { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { InternalThreadControlMcpRuntime } from "../../thread-control/index.js";
-import { CanonicalAgentBoundary, publishCanonicalAgentEvents } from "../../agents/canonical/canonical-agent-boundary.js";
+import { publishCanonicalAgentEvents } from "../../agents/canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../agents/canonical/canonical-agent-writer-client.js";
 import { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
 import { EnvService } from "../../../runtime/environment/env-service.js";
@@ -94,7 +94,6 @@ export function registerProviderAdapters(container: DependencyContainer): void {
       threadControl: c.resolve(InternalThreadControlMcpRuntime),
       grants: c.resolve(ScopedPreGrantService),
       events: c.resolve(CanonicalAgentWriterClient),
-      diagnostics: c.resolve(CanonicalAgentBoundary),
       publishCanonicalEvents: publishCanonicalAgentEvents,
       ingress: c.resolve(ProviderEventIngress),
     }),

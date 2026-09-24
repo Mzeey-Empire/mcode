@@ -5,7 +5,7 @@ import { logger } from "@mcode/shared";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
 import type { EnvService } from "../../../runtime/environment/env-service.js";
 import type { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
-import type { CanonicalAgentBoundary, CanonicalAgentEventPublisher } from "../../agents/canonical/canonical-agent-boundary.js";
+import type { CanonicalAgentEventPublisher } from "../../agents/canonical/canonical-agent-boundary.js";
 import type { CanonicalAgentWriterClient } from "../../agents/canonical/canonical-agent-writer-client.js";
 import type { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import type { InternalThreadControlMcpRuntime } from "../../thread-control/index.js";
@@ -21,7 +21,6 @@ export interface ProviderHostPortDependencies {
   threadControl: InternalThreadControlMcpRuntime;
   grants: ScopedPreGrantService;
   events: Pick<CanonicalAgentWriterClient, "commit" | "acknowledgeOperation">;
-  diagnostics: Pick<CanonicalAgentBoundary, "recordProviderCommitDiagnostics">;
   publishCanonicalEvents: CanonicalAgentEventPublisher;
   ingress: ProviderEventIngress;
 }
@@ -106,7 +105,6 @@ export function createProviderHostPorts(
         });
         let published = true;
         if (result.outcome === "committed" && result.events.length > 0) {
-          dependencies.diagnostics.recordProviderCommitDiagnostics(result.events);
           try {
             dependencies.publishCanonicalEvents(result.events);
           } catch {

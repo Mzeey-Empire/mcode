@@ -54,7 +54,6 @@ describe("createProviderHostPorts", () => {
       threadControl: {},
       grants: {},
       events: {},
-      diagnostics: {},
       publishCanonicalEvents: vi.fn(),
       ingress: {},
     } as never);
@@ -83,7 +82,6 @@ describe("createProviderHostPorts", () => {
         events,
       };
     });
-    const recordProviderCommitDiagnostics = vi.fn(() => deliveryOrder.push("diagnostics"));
     const publishCanonicalEvents = vi.fn(() => deliveryOrder.push("publication"));
     const acceptCommitted = vi.fn(() => deliveryOrder.push("ingress"));
     const acknowledgeOperation = vi.fn(async () => { deliveryOrder.push("acknowledge"); });
@@ -95,7 +93,6 @@ describe("createProviderHostPorts", () => {
       threadControl: {},
       grants: {},
       events: { commit, acknowledgeOperation },
-      diagnostics: { recordProviderCommitDiagnostics },
       publishCanonicalEvents,
       ingress: { acceptCommitted },
     } as never);
@@ -113,11 +110,10 @@ describe("createProviderHostPorts", () => {
       delivery: { ingress: "queued" },
     });
     expect(commit).toHaveBeenCalledWith(expect.any(String), { ...batch, nativeCursor: undefined });
-    expect(recordProviderCommitDiagnostics).toHaveBeenCalledWith(events);
     expect(publishCanonicalEvents).toHaveBeenCalledWith(events);
     expect(acceptCommitted).toHaveBeenCalledWith(events);
     expect(acknowledgeOperation).toHaveBeenCalledWith(EXECUTION_ID, expect.any(String));
-    expect(deliveryOrder).toEqual(["commit", "diagnostics", "publication", "ingress", "acknowledge"]);
+    expect(deliveryOrder).toEqual(["commit", "publication", "ingress", "acknowledge"]);
   });
 
   it("does not hand duplicate or failed commits to ingress", async () => {
@@ -142,7 +138,6 @@ describe("createProviderHostPorts", () => {
       threadControl: {},
       grants: {},
       events: { commit, acknowledgeOperation: vi.fn() },
-      diagnostics: { recordProviderCommitDiagnostics: vi.fn() },
       publishCanonicalEvents: vi.fn(),
       ingress: { acceptCommitted },
     } as never);
@@ -173,7 +168,6 @@ describe("createProviderHostPorts", () => {
       threadControl: {},
       grants: {},
       events: { commit, acknowledgeOperation: vi.fn() },
-      diagnostics: { recordProviderCommitDiagnostics: vi.fn() },
       publishCanonicalEvents: vi.fn(),
       ingress: { acceptCommitted: vi.fn() },
     } as never);
@@ -209,7 +203,6 @@ describe("createProviderHostPorts", () => {
         })),
         acknowledgeOperation,
       },
-      diagnostics: { recordProviderCommitDiagnostics: vi.fn() },
       publishCanonicalEvents: () => { throw new Error("push unavailable"); },
       ingress: { acceptCommitted },
     } as never);

@@ -492,11 +492,6 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       : this.eventStore.commit(this.toEventStoreCommitInput(input));
   }
 
-  /** Retain diagnostics on the server after a provider writer acknowledges its durable events. */
-  recordProviderCommitDiagnostics(events: readonly CanonicalAgentEventEnvelope[]): void {
-    this.recordCanonicalDiagnostics(events);
-  }
-
   private commitInsideTransaction(input: CanonicalAgentCommitInput): CanonicalAgentCommitResult {
     return serverWorkTrace
       ? serverWorkTrace.measure("canonical-write", input.threadId, input.executionId,

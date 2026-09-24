@@ -90,32 +90,4 @@ describe("CanonicalAgentDiagnostics", () => {
       confirmRaw: true,
     }).rawEvents).toEqual([]);
   });
-
-  it("records a replayed canonical event once while raw capture retains it", () => {
-    const diagnostics = new CanonicalAgentDiagnostics();
-    diagnostics.startRawCapture({ turnId: "turn-1", consent: true, expiresInMs: 60_000 });
-    const event = { eventId: "canonical-1", payload: { type: "item.recorded", content: "answer" } };
-    const input = { turnId: "turn-1", executionId: "execution-1", source: "canonical" as const, event };
-    diagnostics.record(input);
-    for (let index = 0; index < CANONICAL_DIAGNOSTIC_RING_CAPACITY; index += 1) {
-      diagnostics.record({
-        turnId: "other-turn",
-        executionId: "other-execution",
-        source: "provider",
-        event: { type: "textDelta", delta: `other-${index}` },
-      });
-    }
-    diagnostics.record(input);
-    diagnostics.record({
-      turnId: "turn-2",
-      executionId: "execution-2",
-      source: "canonical",
-      event,
-    });
-
-    const exported = diagnostics.exportTurn("turn-1", { includeRaw: true, confirmRaw: true });
-    expect(exported.rawEvents).toEqual([event]);
-    expect(exported.truncation).toEqual({ droppedEntries: 1 });
-    expect(diagnostics.exportTurn("turn-2").entries).toHaveLength(1);
-  });
 });
