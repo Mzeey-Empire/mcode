@@ -849,7 +849,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private clearFinalizedEventState(threadId: string, executionId: string | null | undefined): void {
-    if (this.failedNarrativeExecutionByThread.get(threadId) === executionId) {
+    const failedExecutionId = this.failedNarrativeExecutionByThread.get(threadId);
+    if (this.failedNarrativeExecutionByThread.has(threadId)
+      && (failedExecutionId === undefined || failedExecutionId === executionId)) {
       this.failedNarrativeExecutionByThread.delete(threadId);
     }
     if (this.narrativeApplicationsByThread.get(threadId)?.executionId === executionId) {
