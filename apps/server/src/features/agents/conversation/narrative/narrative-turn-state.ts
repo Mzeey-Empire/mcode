@@ -12,6 +12,7 @@ import type { CreateHookExecutionInput } from "../../events/persistence/hook-exe
 import type { TurnOutcome } from "../../turns/turn-outcome.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { assertActiveTurnRecoveryRetention } from "../../turns/active-turn-recovery-retention-policy.js";
+import type { ExecutionIdentity } from "../../execution/execution-mailbox-protocol.js";
 
 /** Buffered tool call with raw input preserved for deferred summarization. */
 export interface BufferedToolCall extends CreateToolCallRecordInput {
@@ -152,20 +153,42 @@ export type NarrativeTurnStateEffect = {
   readonly identityKey: string;
 };
 
-/** Owns per-thread narrative buffers and classification without a database connection. */
+/** Owns one identity's narrative buffers; the live store currently binds by thread. */
 export class NarrativeTurnState {
-  private turnToolCalls = new Map<string, BufferedToolCall[]>();
-  private agentCallStack = new Map<string, string[]>();
-  private turnSortCounters = new Map<string, number>();
-  private turnOpenThought = new Map<string, OpenThought | null>();
-  private turnThoughts = new Map<string, CreateThoughtSegmentInput[]>();
-  private turnOpenHooks = new Map<string, Map<string, OpenHook>>();
-  private turnHooks = new Map<string, CreateHookExecutionInput[]>();
-  private effectSink: ((effect: NarrativeTurnStateEffect) => void) | undefined;
+  private turnToolCalls: BufferedToolCall[] = [];
+  private agentCallStack: string[] = [];
+  private turnSortCounters = 0;
+  private turnOpenThought: OpenThought | null = null;
+  private turnThoughts: CreateThoughtSegmentInput[] = [];
+  private turnOpenHooks = new Map<string, OpenHook>();
+  private turnHooks: CreateHookExecutionInput[] = [];
+  private readonly effectSink: ((effect: NarrativeTurnStateEffect) => void) | undefined;
   private readonly pendingEffects: NarrativeTurnStateEffect[] = [];
+  readonly threadId: string;
+  readonly execution: ExecutionIdentity | undefined;
 
-  protected setEffectSink(sink: (effect: NarrativeTurnStateEffect) => void): void {
-    this.effectSink = sink;
+  constructor(
+    owner: string | ExecutionIdentity,
+    effectSink?: (effect: NarrativeTurnStateEffect) => void,
+  ) {
+    this.threadId = typeof owner === "string" ? owner : owner.threadId;
+    this.execution = typeof owner === "string" ? undefined : { ...owner };
+    this.effectSink = effectSink;
+  }
+
+  /** Fence a worker command to the exact turn attempt bound to this state. */
+  assertExecution(execution: ExecutionIdentity): void {
+    const owner = this.execution;
+    if (!owner || owner.threadId !== execution.threadId
+      || owner.turnId !== execution.turnId || owner.executionId !== execution.executionId) {
+      throw new Error(`Narrative turn belongs to a different execution: ${execution.executionId}`);
+    }
+  }
+
+  private assertThread(threadId: string): void {
+    if (threadId !== this.threadId) {
+      throw new Error(`Narrative turn belongs to ${this.threadId}, received ${threadId}`);
+    }
   }
 
   /** Return any data-only effects emitted without a live persistence adapter. */
@@ -186,11 +209,12 @@ export class NarrativeTurnState {
    * prior turn can still increment the old counter.
    */
   beginTurn(threadId: string): void {
-    this.turnToolCalls.set(threadId, []);
-    this.turnOpenThought.set(threadId, null);
-    this.turnThoughts.set(threadId, []);
-    this.turnOpenHooks.set(threadId, new Map());
-    this.turnHooks.set(threadId, []);
+    this.assertThread(threadId);
+    this.turnToolCalls = [];
+    this.turnOpenThought = null;
+    this.turnThoughts = [];
+    this.turnOpenHooks = new Map();
+    this.turnHooks = [];
   }
 
   /**
@@ -200,14 +224,16 @@ export class NarrativeTurnState {
    * increment the old one (see {@link clearTurn}).
    */
   resetTurnCounters(threadId: string): void {
-    this.turnSortCounters.set(threadId, 0);
-    this.agentCallStack.set(threadId, []);
+    this.assertThread(threadId);
+    this.turnSortCounters = 0;
+    this.agentCallStack = [];
   }
 
   /** Allocate the next shared sort order for the thread's current turn. */
   nextSortOrder(threadId: string): number {
-    const sortOrder = this.turnSortCounters.get(threadId) ?? 0;
-    this.turnSortCounters.set(threadId, sortOrder + 1);
+    this.assertThread(threadId);
+    const sortOrder = this.turnSortCounters;
+    this.turnSortCounters = sortOrder + 1;
     return sortOrder;
   }
 
@@ -218,15 +244,16 @@ export class NarrativeTurnState {
    * the live client builder. Never touches the `agentCallStack` (Trap 2).
    */
   openOrExtendThought(threadId: string, delta: string): void {
-    const open = this.turnOpenThought.get(threadId);
+    this.assertThread(threadId);
+    const open = this.turnOpenThought;
     if (!open) {
       const sortOrder = this.nextSortOrder(threadId);
-      this.turnOpenThought.set(threadId, {
+      this.turnOpenThought = {
         id: NodeCrypto.randomUUID(),
         text: delta,
         startedAt: new Date().toISOString(),
         sortOrder,
-      });
+      };
     } else {
       open.text += delta;
     }
@@ -238,9 +265,10 @@ export class NarrativeTurnState {
    * sorts strictly before the tool) and during turn-end drain.
    */
   closeOpenThought(threadId: string): void {
-    const open = this.turnOpenThought.get(threadId);
+    this.assertThread(threadId);
+    const open = this.turnOpenThought;
     if (!open) return;
-    const list = this.turnThoughts.get(threadId) ?? [];
+    const list = this.turnThoughts;
     list.push({
       id: open.id,
       messageId: "",
@@ -249,8 +277,8 @@ export class NarrativeTurnState {
       endedAt: new Date().toISOString(),
       sortOrder: open.sortOrder,
     });
-    this.turnThoughts.set(threadId, list);
-    this.turnOpenThought.set(threadId, null);
+    this.turnThoughts = list;
+    this.turnOpenThought = null;
   }
 
   /**
@@ -262,7 +290,8 @@ export class NarrativeTurnState {
    * would duplicate the body as a ThoughtBlock in the narrative.
    */
   dropOpenThought(threadId: string): void {
-    this.turnOpenThought.set(threadId, null);
+    this.assertThread(threadId);
+    this.turnOpenThought = null;
   }
 
   /**
@@ -273,8 +302,9 @@ export class NarrativeTurnState {
    * TurnFinalizer so the same text is not buffered in both stores.
    */
   takeOpenThought(threadId: string): string {
-    const open = this.turnOpenThought.get(threadId);
-    this.turnOpenThought.set(threadId, null);
+    this.assertThread(threadId);
+    const open = this.turnOpenThought;
+    this.turnOpenThought = null;
     return open?.text ?? "";
   }
 
@@ -284,6 +314,7 @@ export class NarrativeTurnState {
    * {@link bufferToolCall} when the SDK omits `parent_tool_use_id` (Trap 1).
    */
   getCurrentParentToolCallId(threadId: string): string | undefined {
+    this.assertThread(threadId);
     return this.getStackDerivedParentFallback(threadId);
   }
 
@@ -295,10 +326,11 @@ export class NarrativeTurnState {
    * undefined so tools do not attach under the wrong subagent row.
    */
   private getStackDerivedParentFallback(threadId: string): string | undefined {
-    const stack = this.agentCallStack.get(threadId) ?? [];
+    this.assertThread(threadId);
+    const stack = this.agentCallStack;
     if (stack.length === 0) return undefined;
 
-    const buffer = this.turnToolCalls.get(threadId) ?? [];
+    const buffer = this.turnToolCalls;
     const runningAgentIds: string[] = [];
     for (const agentId of stack) {
       const row = buffer.find(
@@ -320,8 +352,9 @@ export class NarrativeTurnState {
    * and are pushed onto the `agentCallStack` (Trap 2 push site).
    */
   bufferToolCall(threadId: string, event: BufferToolCallEvent): string | undefined {
-    const buffer = this.turnToolCalls.get(threadId) ?? [];
-    const stack = this.agentCallStack.get(threadId) ?? [];
+    this.assertThread(threadId);
+    const buffer = this.turnToolCalls;
+    const stack = this.agentCallStack;
     const parentToolCallId = this.resolveParentToolCallId(threadId, event);
     this.logParentToolCallAttribution(threadId, event, parentToolCallId, stack.length);
     const existing = buffer.find((tc) => tc.toolCallId === event.toolCallId);
@@ -341,6 +374,7 @@ export class NarrativeTurnState {
     threadId: string,
     event: BufferToolCallEvent,
   ): string | undefined {
+    this.assertThread(threadId);
     if (event.toolName === "Agent") return event.parentToolCallId;
     return event.parentToolCallId ?? this.getStackDerivedParentFallback(threadId);
   }
@@ -351,6 +385,7 @@ export class NarrativeTurnState {
     parentToolCallId: string | undefined,
     stackDepth: number,
   ): void {
+    this.assertThread(threadId);
     if (event.toolName === "Agent" || !parentToolCallId) return;
     logger.debug("bufferToolCall: parent attribution", {
       threadId,
@@ -456,14 +491,15 @@ export class NarrativeTurnState {
     event: BufferToolCallEvent,
     parentToolCallId: string | undefined,
   ): string | undefined {
+    this.assertThread(threadId);
     const sortOrder = this.nextSortOrder(threadId);
     if (event.toolName === "Agent") {
       stack.push(event.toolCallId);
-      this.agentCallStack.set(threadId, stack);
+      this.agentCallStack = stack;
     }
     const presentation = this.subagentPresentation(event);
     buffer.push(this.createBufferedToolCall(event, presentation, sortOrder, parentToolCallId));
-    this.turnToolCalls.set(threadId, buffer);
+    this.turnToolCalls = buffer;
     return parentToolCallId;
   }
 
@@ -524,6 +560,7 @@ export class NarrativeTurnState {
     },
     subagentPresentation?: SubagentPresentation,
   ): void {
+    this.assertThread(threadId);
     this.removeAgentFromStack(threadId, toolCallId);
     const toolCall = this.latestBufferedToolCall(threadId, toolCallId);
     if (!toolCall) return;
@@ -542,11 +579,12 @@ export class NarrativeTurnState {
   }
 
   private removeAgentFromStack(threadId: string, toolCallId: string): void {
-    const stack = this.agentCallStack.get(threadId) ?? [];
+    this.assertThread(threadId);
+    const stack = this.agentCallStack;
     const stackIndex = stack.indexOf(toolCallId);
     if (stackIndex < 0) return;
     stack.splice(stackIndex, 1);
-    this.agentCallStack.set(threadId, stack);
+    this.agentCallStack = stack;
     logger.debug("updateBufferedToolCallOutput: popped Agent from stack", {
       threadId,
       toolCallId,
@@ -555,7 +593,8 @@ export class NarrativeTurnState {
   }
 
   private latestBufferedToolCall(threadId: string, toolCallId: string): BufferedToolCall | undefined {
-    const buffer = this.turnToolCalls.get(threadId) ?? [];
+    this.assertThread(threadId);
+    const buffer = this.turnToolCalls;
     for (let index = buffer.length - 1; index >= 0; index -= 1) {
       if (buffer[index].toolCallId === toolCallId) return buffer[index];
     }
@@ -611,15 +650,17 @@ export class NarrativeTurnState {
    * end-of-turn clear). No-ops when the stack is already empty.
    */
   clearAgentStackOnMessage(threadId: string): void {
-    const stack = this.agentCallStack.get(threadId);
-    if (stack && stack.length > 0) {
+    this.assertThread(threadId);
+    const stack = this.agentCallStack;
+    if (stack.length > 0) {
       stack.length = 0;
     }
   }
 
   /** Snapshot of the thread's buffered tool calls (read-only inspection). */
   getBufferedToolCalls(threadId: string): readonly BufferedToolCall[] {
-    return this.turnToolCalls.get(threadId) ?? [];
+    this.assertThread(threadId);
+    return this.turnToolCalls;
   }
 
   /**
@@ -627,10 +668,11 @@ export class NarrativeTurnState {
    * retaining provider protocol traffic or private raw tool input.
    */
   recoverySnapshot(threadId: string): ParentNarrativeRecoveryItem[] {
+    this.assertThread(threadId);
     const snapshot: ParentNarrativeRecoveryItem[] = [];
     let bytes = 0;
     bytes = this.appendBufferedToolCallRecoveryItems(snapshot, bytes, threadId);
-    for (const thought of this.turnThoughts.get(threadId) ?? []) {
+    for (const thought of this.turnThoughts) {
       bytes = this.appendRecoverySnapshotItem(
         snapshot,
         bytes,
@@ -638,7 +680,7 @@ export class NarrativeTurnState {
         threadId,
       );
     }
-    const openThought = this.turnOpenThought.get(threadId);
+    const openThought = this.turnOpenThought;
     if (openThought) {
       bytes = this.appendRecoverySnapshotItem(
         snapshot,
@@ -647,7 +689,7 @@ export class NarrativeTurnState {
         threadId,
       );
     }
-    for (const hook of this.turnHooks.get(threadId) ?? []) {
+    for (const hook of this.turnHooks) {
       bytes = this.appendRecoverySnapshotItem(
         snapshot,
         bytes,
@@ -655,7 +697,7 @@ export class NarrativeTurnState {
         threadId,
       );
     }
-    for (const hook of this.turnOpenHooks.get(threadId)?.values() ?? []) {
+    for (const hook of this.turnOpenHooks.values()) {
       bytes = this.appendRecoverySnapshotItem(
         snapshot,
         bytes,
@@ -671,7 +713,7 @@ export class NarrativeTurnState {
     bytes: number,
     threadId: string,
   ): number {
-    for (const toolCall of this.turnToolCalls.get(threadId) ?? []) {
+    for (const toolCall of this.turnToolCalls) {
       bytes = this.appendRecoverySnapshotItem(
         snapshot,
         bytes,
@@ -834,7 +876,8 @@ export class NarrativeTurnState {
 
   /** Stage narration for recovery without mutating the active turn buffer. */
   stageNarrationSegment(threadId: string, text: string): StagedNarrationSegment | null {
-    const open = this.turnOpenThought.get(threadId);
+    this.assertThread(threadId);
+    const open = this.turnOpenThought;
     const endedAt = new Date().toISOString();
     if (open) {
       return {
@@ -852,7 +895,7 @@ export class NarrativeTurnState {
       text,
       startedAt: endedAt,
       endedAt,
-      sortOrder: this.turnSortCounters.get(threadId) ?? 0,
+      sortOrder: this.turnSortCounters,
     };
   }
 
@@ -861,6 +904,7 @@ export class NarrativeTurnState {
     threadId: string,
     staged: StagedNarrationSegment,
   ): ParentNarrativeRecoveryItem[] {
+    this.assertThread(threadId);
     const snapshot = this.recoverySnapshot(threadId).filter((item) => (
       item.kind !== "narrationSegment" || item.record.id !== staged.id
     ));
@@ -889,19 +933,20 @@ export class NarrativeTurnState {
 
   /** Apply a narration record only after its recovery projection is durable. */
   applyStagedNarrationSegment(threadId: string, staged: StagedNarrationSegment): void {
+    this.assertThread(threadId);
     if (staged.openThoughtId) {
-      const open = this.turnOpenThought.get(threadId);
+      const open = this.turnOpenThought;
       if (!open || open.id !== staged.openThoughtId) {
         throw new Error(`Staged narration no longer matches the open thought: ${staged.id}`);
       }
-      this.turnOpenThought.set(threadId, null);
+      this.turnOpenThought = null;
     } else {
-      const nextSortOrder = this.turnSortCounters.get(threadId) ?? 0;
+      const nextSortOrder = this.turnSortCounters;
       if (nextSortOrder <= staged.sortOrder) {
-        this.turnSortCounters.set(threadId, staged.sortOrder + 1);
+        this.turnSortCounters = staged.sortOrder + 1;
       }
     }
-    const thoughts = this.turnThoughts.get(threadId) ?? [];
+    const thoughts = this.turnThoughts;
     thoughts.push({
       id: staged.id,
       messageId: "",
@@ -910,7 +955,7 @@ export class NarrativeTurnState {
       endedAt: staged.endedAt,
       sortOrder: staged.sortOrder,
     });
-    this.turnThoughts.set(threadId, thoughts);
+    this.turnThoughts = thoughts;
   }
 
   private requireRecoveryString(value: string | undefined, field: string): string {
@@ -931,16 +976,18 @@ export class NarrativeTurnState {
    * a turn with narrative but no assistant body still earns a persisted row.
    */
   hasBufferedNarrative(threadId: string): boolean {
+    this.assertThread(threadId);
     return this.narrativeBufferStates(threadId).some(Boolean);
   }
 
   private narrativeBufferStates(threadId: string): boolean[] {
+    this.assertThread(threadId);
     return [
-      (this.turnToolCalls.get(threadId)?.length ?? 0) > 0,
-      Boolean(this.turnOpenThought.get(threadId)),
-      (this.turnThoughts.get(threadId)?.length ?? 0) > 0,
-      (this.turnOpenHooks.get(threadId)?.size ?? 0) > 0,
-      (this.turnHooks.get(threadId)?.length ?? 0) > 0,
+      this.turnToolCalls.length > 0,
+      Boolean(this.turnOpenThought),
+      this.turnThoughts.length > 0,
+      this.turnOpenHooks.size > 0,
+      this.turnHooks.length > 0,
     ];
   }
 
@@ -953,7 +1000,8 @@ export class NarrativeTurnState {
     threadId: string,
     hook: { hookName: string; toolName: string | null; phase: string; payload: string; sortOrder: number },
   ): string {
-    const map = this.turnOpenHooks.get(threadId) ?? new Map<string, OpenHook>();
+    this.assertThread(threadId);
+    const map = this.turnOpenHooks;
     const id = NodeCrypto.randomUUID();
     map.set(hook.hookName, {
       id,
@@ -964,25 +1012,28 @@ export class NarrativeTurnState {
       startedAt: new Date().toISOString(),
       sortOrder: hook.sortOrder,
     });
-    this.turnOpenHooks.set(threadId, map);
+    this.turnOpenHooks = map;
     return id;
   }
 
   /** Look up (without removing) an open hook by name. */
   peekOpenHook(threadId: string, hookName: string): OpenHook | undefined {
-    return this.turnOpenHooks.get(threadId)?.get(hookName);
+    this.assertThread(threadId);
+    return this.turnOpenHooks.get(hookName);
   }
 
   /** Remove an open hook by name (after it has been completed or flushed). */
   removeOpenHook(threadId: string, hookName: string): void {
-    this.turnOpenHooks.get(threadId)?.delete(hookName);
+    this.assertThread(threadId);
+    this.turnOpenHooks.delete(hookName);
   }
 
   /** Push a completed hook execution onto the closed-hooks list for persistence. */
   pushClosedHook(threadId: string, hook: CreateHookExecutionInput): void {
-    const list = this.turnHooks.get(threadId) ?? [];
+    this.assertThread(threadId);
+    const list = this.turnHooks;
     list.push(hook);
-    this.turnHooks.set(threadId, list);
+    this.turnHooks = list;
   }
 
   /** Settle one turn's buffered records into data-only persistence rows. */
@@ -992,6 +1043,7 @@ export class NarrativeTurnState {
     messageContent: string,
     outcome: TurnOutcome,
   ): PreparedNarrativePersistence {
+    this.assertThread(threadId);
     const toolCalls = this.prepareToolCallsForPersistence(threadId, messageId, outcome);
     this.closeOpenThought(threadId);
     this.closeOpenHooksForPersistence(threadId);
@@ -1005,7 +1057,8 @@ export class NarrativeTurnState {
     messageId: string,
     outcome: TurnOutcome,
   ): BufferedToolCall[] {
-    const toolCalls = this.turnToolCalls.get(threadId) ?? [];
+    this.assertThread(threadId);
+    const toolCalls = this.turnToolCalls;
     const settledAt = new Date().toISOString();
     for (const toolCall of toolCalls) {
       toolCall.toolCallId ??= NodeCrypto.randomUUID();
@@ -1061,9 +1114,10 @@ export class NarrativeTurnState {
   }
 
   private closeOpenHooksForPersistence(threadId: string): void {
-    const openHookMap = this.turnOpenHooks.get(threadId);
+    this.assertThread(threadId);
+    const openHookMap = this.turnOpenHooks;
     if (!openHookMap || openHookMap.size === 0) return;
-    const list = this.turnHooks.get(threadId) ?? [];
+    const list = this.turnHooks;
     const endedAt = new Date().toISOString();
     for (const open of openHookMap.values()) {
       list.push({
@@ -1080,7 +1134,7 @@ export class NarrativeTurnState {
         sortOrder: open.sortOrder,
       });
     }
-    this.turnHooks.set(threadId, list);
+    this.turnHooks = list;
     openHookMap.clear();
   }
 
@@ -1089,7 +1143,8 @@ export class NarrativeTurnState {
     messageId: string,
     messageContent: string,
   ): CreateThoughtSegmentInput[] {
-    const bufferedThoughts = this.turnThoughts.get(threadId) ?? [];
+    this.assertThread(threadId);
+    const bufferedThoughts = this.turnThoughts;
     for (const thought of bufferedThoughts) thought.id ??= NodeCrypto.randomUUID();
     const thoughts = bufferedThoughts.map((thought) => ({ ...thought, messageId }));
     const message = messageContent.trim();
@@ -1127,7 +1182,8 @@ export class NarrativeTurnState {
     threadId: string,
     messageId: string,
   ): CreateHookExecutionInput[] {
-    const bufferedHooks = this.turnHooks.get(threadId) ?? [];
+    this.assertThread(threadId);
+    const bufferedHooks = this.turnHooks;
     for (const hook of bufferedHooks) hook.id ??= NodeCrypto.randomUUID();
     return bufferedHooks.map((hook) => ({ ...hook, messageId }));
   }
@@ -1139,11 +1195,12 @@ export class NarrativeTurnState {
    * increment the completed turn's counter (mirrors the old clearTurnState).
    */
   clearTurn(threadId: string): void {
-    this.turnToolCalls.delete(threadId);
-    this.turnOpenThought.delete(threadId);
-    this.turnThoughts.delete(threadId);
-    this.turnOpenHooks.delete(threadId);
-    this.turnHooks.delete(threadId);
+    this.assertThread(threadId);
+    this.turnToolCalls = [];
+    this.turnOpenThought = null;
+    this.turnThoughts = [];
+    this.turnOpenHooks = new Map<string, OpenHook>();
+    this.turnHooks = [];
   }
 
   /** Generate a human-readable summary of tool input. */

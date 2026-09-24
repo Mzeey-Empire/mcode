@@ -138,22 +138,121 @@ interface PersistedNarrativeRows {
 type RecoveredToolCallItem = Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }>;
 
 @injectable()
-export class NarrativeStore extends NarrativeTurnState {
+export class NarrativeStore {
   constructor(
     @inject(MessageRepo) _messageRepo: MessageRepo,
     @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,
     @inject(ThoughtSegmentRepo) private readonly thoughtSegmentRepo: ThoughtSegmentRepo,
     @inject(HookExecutionRepo) private readonly hookExecutionRepo: HookExecutionRepo,
     @inject("Database") private readonly db?: Database,
-  ) {
-    super();
-    this.setEffectSink((effect) => this.applyStateEffect(effect));
-  }
+  ) {}
 
   private applyStateEffect(effect: NarrativeTurnStateEffect): void {
     this.toolCallRecordRepo.updateSubagentIdentity(
       effect.toolCallId, effect.messageId, effect.identityKey,
     );
+  }
+
+  private readonly narrativeStates = new Map<string, NarrativeTurnState>();
+
+  private stateFor(threadId: string): NarrativeTurnState {
+    const existing = this.narrativeStates.get(threadId);
+    if (existing) return existing;
+    const state = new NarrativeTurnState(threadId, (effect) => this.applyStateEffect(effect));
+    this.narrativeStates.set(threadId, state);
+    return state;
+  }
+
+  beginTurn(...args: Parameters<NarrativeTurnState["beginTurn"]>): ReturnType<NarrativeTurnState["beginTurn"]> {
+    return this.stateFor(args[0]).beginTurn(...args);
+  }
+
+  resetTurnCounters(...args: Parameters<NarrativeTurnState["resetTurnCounters"]>): ReturnType<NarrativeTurnState["resetTurnCounters"]> {
+    return this.stateFor(args[0]).resetTurnCounters(...args);
+  }
+
+  nextSortOrder(...args: Parameters<NarrativeTurnState["nextSortOrder"]>): ReturnType<NarrativeTurnState["nextSortOrder"]> {
+    return this.stateFor(args[0]).nextSortOrder(...args);
+  }
+
+  openOrExtendThought(...args: Parameters<NarrativeTurnState["openOrExtendThought"]>): ReturnType<NarrativeTurnState["openOrExtendThought"]> {
+    return this.stateFor(args[0]).openOrExtendThought(...args);
+  }
+
+  closeOpenThought(...args: Parameters<NarrativeTurnState["closeOpenThought"]>): ReturnType<NarrativeTurnState["closeOpenThought"]> {
+    this.narrativeStates.get(args[0])?.closeOpenThought(...args);
+  }
+
+  dropOpenThought(...args: Parameters<NarrativeTurnState["dropOpenThought"]>): ReturnType<NarrativeTurnState["dropOpenThought"]> {
+    this.narrativeStates.get(args[0])?.dropOpenThought(...args);
+  }
+
+  takeOpenThought(...args: Parameters<NarrativeTurnState["takeOpenThought"]>): ReturnType<NarrativeTurnState["takeOpenThought"]> {
+    return this.narrativeStates.get(args[0])?.takeOpenThought(...args) ?? "";
+  }
+
+  getCurrentParentToolCallId(...args: Parameters<NarrativeTurnState["getCurrentParentToolCallId"]>): ReturnType<NarrativeTurnState["getCurrentParentToolCallId"]> {
+    return this.narrativeStates.get(args[0])?.getCurrentParentToolCallId(...args);
+  }
+
+  bufferToolCall(...args: Parameters<NarrativeTurnState["bufferToolCall"]>): ReturnType<NarrativeTurnState["bufferToolCall"]> {
+    return this.stateFor(args[0]).bufferToolCall(...args);
+  }
+
+  updateBufferedToolCallOutput(...args: Parameters<NarrativeTurnState["updateBufferedToolCallOutput"]>): ReturnType<NarrativeTurnState["updateBufferedToolCallOutput"]> {
+    return this.stateFor(args[0]).updateBufferedToolCallOutput(...args);
+  }
+
+  clearAgentStackOnMessage(...args: Parameters<NarrativeTurnState["clearAgentStackOnMessage"]>): ReturnType<NarrativeTurnState["clearAgentStackOnMessage"]> {
+    this.narrativeStates.get(args[0])?.clearAgentStackOnMessage(...args);
+  }
+
+  getBufferedToolCalls(...args: Parameters<NarrativeTurnState["getBufferedToolCalls"]>): ReturnType<NarrativeTurnState["getBufferedToolCalls"]> {
+    return this.narrativeStates.get(args[0])?.getBufferedToolCalls(...args) ?? [];
+  }
+
+  recoverySnapshot(...args: Parameters<NarrativeTurnState["recoverySnapshot"]>): ReturnType<NarrativeTurnState["recoverySnapshot"]> {
+    return this.narrativeStates.get(args[0])?.recoverySnapshot(...args) ?? [];
+  }
+
+  stageNarrationSegment(...args: Parameters<NarrativeTurnState["stageNarrationSegment"]>): ReturnType<NarrativeTurnState["stageNarrationSegment"]> {
+    return this.stateFor(args[0]).stageNarrationSegment(...args);
+  }
+
+  recoverySnapshotWithStagedNarration(...args: Parameters<NarrativeTurnState["recoverySnapshotWithStagedNarration"]>): ReturnType<NarrativeTurnState["recoverySnapshotWithStagedNarration"]> {
+    return this.stateFor(args[0]).recoverySnapshotWithStagedNarration(...args);
+  }
+
+  applyStagedNarrationSegment(...args: Parameters<NarrativeTurnState["applyStagedNarrationSegment"]>): ReturnType<NarrativeTurnState["applyStagedNarrationSegment"]> {
+    return this.stateFor(args[0]).applyStagedNarrationSegment(...args);
+  }
+
+  hasBufferedNarrative(...args: Parameters<NarrativeTurnState["hasBufferedNarrative"]>): ReturnType<NarrativeTurnState["hasBufferedNarrative"]> {
+    return this.narrativeStates.get(args[0])?.hasBufferedNarrative(...args) ?? false;
+  }
+
+  openHook(...args: Parameters<NarrativeTurnState["openHook"]>): ReturnType<NarrativeTurnState["openHook"]> {
+    return this.stateFor(args[0]).openHook(...args);
+  }
+
+  peekOpenHook(...args: Parameters<NarrativeTurnState["peekOpenHook"]>): ReturnType<NarrativeTurnState["peekOpenHook"]> {
+    return this.narrativeStates.get(args[0])?.peekOpenHook(...args);
+  }
+
+  removeOpenHook(...args: Parameters<NarrativeTurnState["removeOpenHook"]>): ReturnType<NarrativeTurnState["removeOpenHook"]> {
+    this.narrativeStates.get(args[0])?.removeOpenHook(...args);
+  }
+
+  pushClosedHook(...args: Parameters<NarrativeTurnState["pushClosedHook"]>): ReturnType<NarrativeTurnState["pushClosedHook"]> {
+    return this.stateFor(args[0]).pushClosedHook(...args);
+  }
+
+  prepareNarrativePersistence(...args: Parameters<NarrativeTurnState["prepareNarrativePersistence"]>): ReturnType<NarrativeTurnState["prepareNarrativePersistence"]> {
+    return this.stateFor(args[0]).prepareNarrativePersistence(...args);
+  }
+
+  clearTurn(...args: Parameters<NarrativeTurnState["clearTurn"]>): ReturnType<NarrativeTurnState["clearTurn"]> {
+    this.narrativeStates.get(args[0])?.clearTurn(...args);
   }
 
   private ormInstance: BunSQLiteDatabase | null = null;

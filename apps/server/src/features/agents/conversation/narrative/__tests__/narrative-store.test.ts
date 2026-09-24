@@ -640,7 +640,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
   }
 
   it("emits late Agent identity as data without a repository", () => {
-    const state = new NarrativeTurnState();
+    const state = new NarrativeTurnState(THREAD);
     state.beginTurn(THREAD);
     state.resetTurnCounters(THREAD);
     state.bufferToolCall(THREAD, {
@@ -665,6 +665,43 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       messageId: "m1",
       identityKey: encodeSubagentAliasDetailTarget("native-late-agent"),
     }]);
+  });
+
+  it("keeps two execution states for the same thread independent", () => {
+    const firstExecution = { threadId: THREAD, turnId: "turn-1", executionId: "execution-1" };
+    const secondExecution = { threadId: THREAD, turnId: "turn-2", executionId: "execution-2" };
+    const first = new NarrativeTurnState(firstExecution);
+    const second = new NarrativeTurnState(secondExecution);
+    first.beginTurn(THREAD);
+    first.resetTurnCounters(THREAD);
+    second.beginTurn(THREAD);
+    second.resetTurnCounters(THREAD);
+    first.openOrExtendThought(THREAD, "First turn");
+    first.bufferToolCall(THREAD, toolUse("read-1", "Read"));
+
+    expect(first.recoverySnapshot(THREAD).map((item) => item.record.sort_order)).toEqual([0, 1]);
+    expect(first.execution).toEqual(firstExecution);
+    expect(second.execution).toEqual(secondExecution);
+    expect(() => first.assertExecution(secondExecution)).toThrow("different execution");
+    expect(() => first.assertExecution(firstExecution)).not.toThrow();
+    expect(second.recoverySnapshot(THREAD)).toEqual([]);
+    expect(second.nextSortOrder(THREAD)).toBe(0);
+    expect(() => first.bufferToolCall("another-thread", toolUse("read-2", "Read")))
+      .toThrow("Narrative turn belongs to thread-1");
+    expect(first.getBufferedToolCalls(THREAD)).toHaveLength(1);
+  });
+
+  it("keeps the live store's thread adapters independent", () => {
+    const otherThread = "thread-2";
+    store.beginTurn(THREAD);
+    store.resetTurnCounters(THREAD);
+    store.beginTurn(otherThread);
+    store.resetTurnCounters(otherThread);
+    store.bufferToolCall(THREAD, toolUse("read-1", "Read"));
+
+    expect(store.getBufferedToolCalls(otherThread)).toEqual([]);
+    expect(store.nextSortOrder(otherThread)).toBe(0);
+    expect(store.nextSortOrder(THREAD)).toBe(1);
   });
 
   it("persists a long active turn in order across bounded transactions", async () => {
