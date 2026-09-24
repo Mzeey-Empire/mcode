@@ -1,4 +1,4 @@
-import * as NodeAssert from "node:assert/strict";
+import * as NodeAssertStrict from "node:assert/strict";
 import * as NodeTest from "node:test";
 
 import {
@@ -16,36 +16,36 @@ import {
 } from "./seven-thread-live-harness.mjs";
 
 NodeTest.test("requires an explicit before or after run confirmation", () => {
-  NodeAssert.deepEqual(
+  NodeAssertStrict.deepEqual(
     parseArguments(["--run", "--confirm-run", "--label", "before"]),
     { command: "run", label: "before" },
   );
-  NodeAssert.throws(
+  NodeAssertStrict.throws(
     () => parseArguments(["--run", "--label", "before"]),
     /requires --confirm-run/,
   );
-  NodeAssert.throws(
+  NodeAssertStrict.throws(
     () => parseArguments(["--run", "--confirm-run", "--label", "later"]),
     /before or --label after/,
   );
-  NodeAssert.deepEqual(
+  NodeAssertStrict.deepEqual(
     parseArguments(["--cleanup-receipt", ".dev/verification/performance/seven-thread-live/before-run/receipt.json", "--confirm-run"]),
     { command: "cleanup", receiptPath: ".dev/verification/performance/seven-thread-live/before-run/receipt.json" },
   );
-  NodeAssert.throws(
+  NodeAssertStrict.throws(
     () => parseArguments(["--cleanup-receipt", "receipt.json", "--confirm-cleanup"]),
     /requires --confirm-run/,
   );
 });
 
 NodeTest.test("uses a stable nearest-rank latency summary", () => {
-  NodeAssert.deepEqual(summarizeLatency([8, 1, 6, 2, 5]), {
+  NodeAssertStrict.deepEqual(summarizeLatency([8, 1, 6, 2, 5]), {
     count: 5,
     p50Ms: 5,
     p95Ms: 8,
     maxMs: 8,
   });
-  NodeAssert.deepEqual(summarizeLatency([]), {
+  NodeAssertStrict.deepEqual(summarizeLatency([]), {
     count: 0,
     p50Ms: null,
     p95Ms: null,
@@ -59,8 +59,8 @@ NodeTest.test("flags public event sequence gaps, duplicates, and arrivals out of
     { sequence: 2, type: "message" },
     { sequence: 3, type: "turnComplete" },
   ]);
-  NodeAssert.equal(ordered.sequenceValid, true);
-  NodeAssert.equal(ordered.completed, true);
+  NodeAssertStrict.equal(ordered.sequenceValid, true);
+  NodeAssertStrict.equal(ordered.completed, true);
 
   const damaged = auditAgentEvents([
     { sequence: 1, type: "turnStarted" },
@@ -68,21 +68,25 @@ NodeTest.test("flags public event sequence gaps, duplicates, and arrivals out of
     { sequence: 3, type: "turnComplete" },
     { sequence: 2, type: "message" },
   ]);
-  NodeAssert.deepEqual(damaged.missingSequences, []);
-  NodeAssert.deepEqual(damaged.duplicateSequences, [3]);
-  NodeAssert.equal(damaged.arrivalOrderViolations.length, 2);
-  NodeAssert.equal(damaged.sequenceValid, false);
+  NodeAssertStrict.deepEqual(damaged.missingSequences, []);
+  NodeAssertStrict.deepEqual(damaged.duplicateSequences, [3]);
+  NodeAssertStrict.equal(damaged.arrivalOrderViolations.length, 2);
+  NodeAssertStrict.equal(damaged.sequenceValid, false);
+
+  const empty = auditAgentEvents([]);
+  NodeAssertStrict.equal(empty.sequenceValid, true);
+  NodeAssertStrict.equal(empty.completed, false);
 });
 
 NodeTest.test("names each of the exact verifier-owned threads", () => {
   const names = Array.from({ length: THREAD_COUNT }, (_, index) => expectedThreadTitle("run-id", index + 1));
-  NodeAssert.equal(new Set(names).size, THREAD_COUNT);
-  NodeAssert.deepEqual(names.at(-1), "Seven-thread live performance run-id 7/7");
+  NodeAssertStrict.equal(new Set(names).size, THREAD_COUNT);
+  NodeAssertStrict.deepEqual(names.at(-1), "Seven-thread live performance run-id 7/7");
 });
 
 NodeTest.test("uses the same legacy and modern Terminal lifecycle families as the web transport", () => {
   const legacy = selectTerminalTransport({ contractVersion: 0, backend: "legacy" });
-  NodeAssert.deepEqual(legacy, {
+  NodeAssertStrict.deepEqual(legacy, {
     kind: "legacy",
     createMethod: "terminal.create",
     listMethod: "terminal.listActive",
@@ -90,13 +94,13 @@ NodeTest.test("uses the same legacy and modern Terminal lifecycle families as th
   });
 
   const modern = selectTerminalTransport({ contractVersion: 1, backend: "modern" });
-  NodeAssert.deepEqual(modern, {
+  NodeAssertStrict.deepEqual(modern, {
     kind: "modern",
     createMethod: "terminal.session.create",
     listMethod: "terminal.session.list",
     closeMethod: "terminal.session.close",
   });
-  NodeAssert.deepEqual(normalizeTerminalSessions(modern, [{
+  NodeAssertStrict.deepEqual(normalizeTerminalSessions(modern, [{
     sessionId: "session-1",
     scope: { kind: "thread", workspaceId: "workspace-1", threadId: "thread-1" },
     state: "running",
@@ -118,17 +122,17 @@ NodeTest.test("launches control RPCs and all seven selected terminal creates bef
     workspaceId: "workspace-1",
     terminalTransport: selectTerminalTransport({ contractVersion: 0, backend: "legacy" }),
     threads,
-    persistTerminal: () => NodeAssert.fail("A pending terminal create must not persist before it settles"),
+    persistTerminal: () => NodeAssertStrict.fail("A pending terminal create must not persist before it settles"),
   });
 
-  NodeAssert.equal(requests.length, THREAD_COUNT + 2);
-  NodeAssert.deepEqual(calls.map((call) => call.method), [
+  NodeAssertStrict.equal(requests.length, THREAD_COUNT + 2);
+  NodeAssertStrict.deepEqual(calls.map((call) => call.method), [
     "provider.listModels",
     "terminal.capabilities",
     ...Array(THREAD_COUNT).fill("terminal.create"),
   ]);
   const earliestExpectedDeadline = Date.now() + 89_000;
-  NodeAssert.ok(calls.every((call) => Number.isFinite(call.deadline) && call.deadline >= earliestExpectedDeadline));
+  NodeAssertStrict.ok(calls.every((call) => Number.isFinite(call.deadline) && call.deadline >= earliestExpectedDeadline));
 });
 
 NodeTest.test("records event-derived control launch activity and completion timing without another active-count RPC", () => {
@@ -138,12 +142,12 @@ NodeTest.test("records event-derived control launch activity and completion timi
     { ordinal: 3, startedAtMs: null, completedAtMs: null },
   ];
   const launch = createControlLaunch(threads, 120);
-  NodeAssert.deepEqual(launch.observedActiveThreadOrdinals, [2]);
-  NodeAssert.deepEqual(launch.completedThreadOrdinalsAtLaunch, [1]);
-  NodeAssert.equal(launch.inconclusive, false);
+  NodeAssertStrict.deepEqual(launch.observedActiveThreadOrdinals, [2]);
+  NodeAssertStrict.deepEqual(launch.completedThreadOrdinalsAtLaunch, [1]);
+  NodeAssertStrict.equal(launch.inconclusive, false);
 
   threads[1].completedAtMs = 160;
-  NodeAssert.deepEqual(attributeControlLaunchToTurnCompletion(launch, threads), {
+  NodeAssertStrict.deepEqual(attributeControlLaunchToTurnCompletion(launch, threads), {
     ...launch,
     completionAfterLaunchMs: [
       { ordinal: 1, elapsedMs: -10 },
@@ -161,5 +165,5 @@ NodeTest.test("keeps only server diagnostic stall entries inside the workload wi
     JSON.stringify({ timestamp: "2026-09-24T10:00:01.000Z", message: "other", stalledMs: 999 }),
     JSON.stringify({ timestamp: "2026-09-24T10:00:02.000Z", message: "Event loop stalled", stalledMs: 750 }),
   ].join("\n"), Date.parse("2026-09-24T10:00:00.500Z"), Date.parse("2026-09-24T10:00:02.500Z"));
-  NodeAssert.deepEqual(entries, [{ timestamp: "2026-09-24T10:00:02.000Z", stalledMs: 750 }]);
+  NodeAssertStrict.deepEqual(entries, [{ timestamp: "2026-09-24T10:00:02.000Z", stalledMs: 750 }]);
 });

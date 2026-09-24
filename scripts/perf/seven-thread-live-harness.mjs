@@ -12,7 +12,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { performance } from "node:perf_hooks";
+import * as NodePerfHooks from "node:perf_hooks";
 
 import {
   assertInsideDevDir,
@@ -37,6 +37,22 @@ const CLEANUP_RPC_TIMEOUT_MS = 30_000;
 const PERFORMANCE_DIRECTORY = [".dev", "verification", "performance", "seven-thread-live"];
 const FIXTURE_SOURCE = [".agents", "skills", "verify-mcode", "scripts", "transcript-provider-fixture.mjs"];
 const FIXTURE_PROMPT = "Seven concurrent performance verifier long narrative";
+const FLAG_OPTIONS = new Set(["--run", "--confirm-run", "--confirm-cleanup"]);
+const VALUE_OPTIONS = new Set(["--label", "--cleanup", "--cleanup-receipt"]);
+const TERMINAL_TRANSPORTS = new Map([
+  ["legacy", {
+    kind: "legacy",
+    createMethod: "terminal.create",
+    listMethod: "terminal.listActive",
+    closeMethod: "terminal.kill",
+  }],
+  ["modern", {
+    kind: "modern",
+    createMethod: "terminal.session.create",
+    listMethod: "terminal.session.list",
+    closeMethod: "terminal.session.close",
+  }],
+]);
 
 const HELP = `Seven concurrent thread live performance harness
 
@@ -54,46 +70,85 @@ falls back to a real Codex model or prints runtime credentials.
 /** Parses the small explicit command surface before any runtime mutation. */
 export function parseArguments(argv) {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) return { command: "help" };
+  const { flags, values } = scanArguments(argv);
+  return selectHarnessCommand(flags, values);
+}
+
+function scanArguments(argv) {
   const values = new Map();
   const flags = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (!token.startsWith("--")) throw new Error(`Unexpected argument: ${token}`);
-    if (["--run", "--confirm-run", "--confirm-cleanup"].includes(token)) {
-      if (flags.has(token)) throw new Error(`Duplicate option: ${token}`);
+    assertLongOption(token);
+    if (FLAG_OPTIONS.has(token)) {
+      addUniqueOption(flags, token);
       flags.add(token);
       continue;
     }
-    if (token !== "--label" && token !== "--cleanup" && token !== "--cleanup-receipt") throw new Error(`Unknown option: ${token}`);
-    const value = argv[index + 1];
-    if (!value || value.startsWith("--")) throw new Error(`${token} requires a value`);
-    if (values.has(token)) throw new Error(`Duplicate option: ${token}`);
+    assertValueOption(token);
+    const value = readOptionValue(argv, index, token);
+    addUniqueOption(values, token);
     values.set(token, value);
     index += 1;
   }
+  return { flags, values };
+}
 
+function assertLongOption(token) {
+  if (!token.startsWith("--")) throw new Error(`Unexpected argument: ${token}`);
+}
+
+function addUniqueOption(options, token) {
+  if (options.has(token)) throw new Error(`Duplicate option: ${token}`);
+}
+
+function assertValueOption(token) {
+  if (!VALUE_OPTIONS.has(token)) throw new Error(`Unknown option: ${token}`);
+}
+
+function readOptionValue(argv, index, token) {
+  const value = argv[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${token} requires a value`);
+  return value;
+}
+
+function selectHarnessCommand(flags, values) {
   const wantsRun = flags.has("--run");
   const cleanupPath = values.get("--cleanup");
   const cleanupReceiptPath = values.get("--cleanup-receipt");
-  if (cleanupPath && cleanupReceiptPath) throw new Error("Choose exactly one cleanup receipt option");
+  assertSingleCleanupOption(cleanupPath, cleanupReceiptPath);
   const selectedCleanupPath = cleanupPath ?? cleanupReceiptPath;
   if (wantsRun === Boolean(selectedCleanupPath)) throw new Error("Choose exactly one of --run or cleanup receipt");
-  if (wantsRun) {
-    if (!flags.has("--confirm-run")) throw new Error("--run requires --confirm-run");
-    if (flags.has("--confirm-cleanup") || cleanupPath || cleanupReceiptPath) throw new Error("--run cannot include cleanup options");
-    const label = values.get("--label");
-    if (label !== "before" && label !== "after") throw new Error("--run requires --label before or --label after");
-    return { command: "run", label };
+  if (wantsRun) return parseRunCommand(flags, values);
+  if (cleanupReceiptPath) return parseCleanupReceiptCommand(flags, values, cleanupReceiptPath);
+  return parseCleanupCommand(flags, values, cleanupPath);
+}
+
+function assertSingleCleanupOption(cleanupPath, cleanupReceiptPath) {
+  if (cleanupPath && cleanupReceiptPath) throw new Error("Choose exactly one cleanup receipt option");
+}
+
+function parseRunCommand(flags, values) {
+  if (!flags.has("--confirm-run")) throw new Error("--run requires --confirm-run");
+  if (flags.has("--confirm-cleanup") || values.has("--cleanup") || values.has("--cleanup-receipt")) {
+    throw new Error("--run cannot include cleanup options");
   }
-  if (cleanupReceiptPath) {
-    if (!flags.has("--confirm-run") || flags.has("--confirm-cleanup") || values.has("--label")) {
-      throw new Error("--cleanup-receipt requires --confirm-run and cannot include run options");
-    }
-    return { command: "cleanup", receiptPath: cleanupReceiptPath };
+  const label = values.get("--label");
+  if (label !== "before" && label !== "after") throw new Error("--run requires --label before or --label after");
+  return { command: "run", label };
+}
+
+function parseCleanupReceiptCommand(flags, values, receiptPath) {
+  if (!flags.has("--confirm-run") || flags.has("--confirm-cleanup") || values.has("--label")) {
+    throw new Error("--cleanup-receipt requires --confirm-run and cannot include run options");
   }
+  return { command: "cleanup", receiptPath };
+}
+
+function parseCleanupCommand(flags, values, receiptPath) {
   if (!flags.has("--confirm-cleanup")) throw new Error("--cleanup requires --confirm-cleanup");
   if (flags.has("--confirm-run") || values.has("--label")) throw new Error("--cleanup cannot include run options");
-  return { command: "cleanup", receiptPath: cleanupPath };
+  return { command: "cleanup", receiptPath };
 }
 
 /** Uses a nearest-rank percentile so before and after receipts compare identically. */
@@ -111,7 +166,15 @@ export function summarizeLatency(samples) {
 
 /** Audits delivery order from the public sequence assigned to each agent event. */
 export function auditAgentEvents(events) {
-  const sequences = events.map((event) => event.sequence).filter(Number.isInteger);
+  const audit = auditSequences(events.map((event) => event.sequence).filter(Number.isInteger), events.length);
+  return {
+    received: events.length,
+    ...audit,
+    completed: events.some((event) => event.type === "turnComplete"),
+  };
+}
+
+function auditSequences(sequences, eventCount) {
   const seen = new Set();
   const duplicates = [];
   const arrivalOrderViolations = [];
@@ -122,42 +185,55 @@ export function auditAgentEvents(events) {
     seen.add(sequence);
     previous = sequence;
   }
-  const largestSequence = sequences.length === 0 ? 0 : Math.max(...sequences);
-  const missingSequences = [];
-  for (let sequence = 1; sequence <= largestSequence; sequence += 1) {
-    if (!seen.has(sequence)) missingSequences.push(sequence);
-  }
+  const largestSequence = largestSequenceIn(sequences);
+  const missingSequences = missingSequenceNumbers(seen, largestSequence);
   return {
-    received: events.length,
-    firstSequence: sequences.length === 0 ? null : Math.min(...sequences),
+    firstSequence: firstSequenceIn(sequences),
     lastSequence: largestSequence || null,
     missingSequences,
     duplicateSequences: duplicates,
     arrivalOrderViolations,
-    sequenceValid: sequences.length === events.length && missingSequences.length === 0 && duplicates.length === 0 && arrivalOrderViolations.length === 0,
-    completed: events.some((event) => event.type === "turnComplete"),
+    sequenceValid: sequencesAreValid(sequences, eventCount, missingSequences, duplicates, arrivalOrderViolations),
   };
+}
+
+function largestSequenceIn(sequences) {
+  return sequences.length === 0 ? 0 : Math.max(...sequences);
+}
+
+function firstSequenceIn(sequences) {
+  return sequences.length === 0 ? null : Math.min(...sequences);
+}
+
+function missingSequenceNumbers(seen, largestSequence) {
+  const missingSequences = [];
+  for (let sequence = 1; sequence <= largestSequence; sequence += 1) {
+    if (!seen.has(sequence)) missingSequences.push(sequence);
+  }
+  return missingSequences;
+}
+
+function sequencesAreValid(sequences, eventCount, missingSequences, duplicates, arrivalOrderViolations) {
+  return sequences.length === eventCount
+    && missingSequences.length === 0
+    && duplicates.length === 0
+    && arrivalOrderViolations.length === 0;
 }
 
 /** Selects the exact Terminal lifecycle RPC family that the web transport selects. */
 export function selectTerminalTransport(capabilities) {
   if (capabilities?.contractVersion === 1 && capabilities?.backend === "modern") {
-    return {
-      kind: "modern",
-      createMethod: "terminal.session.create",
-      listMethod: "terminal.session.list",
-      closeMethod: "terminal.session.close",
-    };
+    return terminalTransportForKind("modern");
   }
   if (capabilities?.contractVersion === 0 && capabilities?.backend === "legacy") {
-    return {
-      kind: "legacy",
-      createMethod: "terminal.create",
-      listMethod: "terminal.listActive",
-      closeMethod: "terminal.kill",
-    };
+    return terminalTransportForKind("legacy");
   }
   throw new Error("terminal.capabilities did not select a supported Terminal client");
+}
+
+function terminalTransportForKind(kind) {
+  const transport = TERMINAL_TRANSPORTS.get(kind);
+  return transport ? { ...transport } : null;
 }
 
 /** Normalizes the selected Terminal client's list response without changing its lifecycle RPCs. */
@@ -176,18 +252,27 @@ export function normalizeTerminalSessions(transport, sessions) {
 /** Extracts only Mcode server stall entries from JSONL server diagnostics. */
 export function parseServerStallEntries(contents, startedAtMs, endedAtMs) {
   if (typeof contents !== "string") return [];
-  return contents.split(/\r?\n/).flatMap((line) => {
-    if (!line) return [];
-    try {
-      const entry = JSON.parse(line);
-      const timestampMs = Date.parse(entry?.timestamp);
-      if (entry?.message !== "Event loop stalled" || !Number.isFinite(timestampMs)
-        || timestampMs < startedAtMs || timestampMs > endedAtMs || !Number.isFinite(entry?.stalledMs)) return [];
-      return [{ timestamp: entry.timestamp, stalledMs: entry.stalledMs }];
-    } catch {
-      return [];
-    }
-  });
+  return contents.split(/\r?\n/).flatMap((line) => parseServerStallLine(line, startedAtMs, endedAtMs));
+}
+
+function parseServerStallLine(line, startedAtMs, endedAtMs) {
+  if (!line) return [];
+  try {
+    const entry = JSON.parse(line);
+    if (!isValidServerStall(entry, startedAtMs, endedAtMs)) return [];
+    return [{ timestamp: entry.timestamp, stalledMs: entry.stalledMs }];
+  } catch {
+    return [];
+  }
+}
+
+function isValidServerStall(entry, startedAtMs, endedAtMs) {
+  const timestampMs = Date.parse(entry?.timestamp);
+  return entry?.message === "Event loop stalled"
+    && Number.isFinite(timestampMs)
+    && timestampMs >= startedAtMs
+    && timestampMs <= endedAtMs
+    && Number.isFinite(entry?.stalledMs);
 }
 
 /** Creates the stable names used to prove that only this harness owns a thread. */
@@ -197,6 +282,20 @@ export function expectedThreadTitle(runId, ordinal) {
 
 /** Runs the fixed seven-thread workload and writes its recovery-capable receipt. */
 export async function runLiveHarness({ repoRoot = resolveRepoRoot(), label }) {
+  const context = createLiveHarnessContext(repoRoot, label);
+  startLiveHarness(context);
+  try {
+    await executeLiveHarness(context);
+  } catch (error) {
+    recordHarnessFailure(context, error);
+  } finally {
+    await finishLiveHarness(context);
+  }
+  if (context.primaryError) throw context.primaryError;
+  return { receiptPath: context.run.receiptPath, receipt: context.receipt };
+}
+
+function createLiveHarnessContext(repoRoot, label) {
   const paths = getRuntimePaths(repoRoot);
   const ports = requireLocalRuntime(repoRoot);
   const run = createRun(repoRoot, label);
@@ -207,195 +306,308 @@ export async function runLiveHarness({ repoRoot = resolveRepoRoot(), label }) {
   const eventState = new Map();
   const terminalEvents = new TerminalEventWaiter(eventState);
   const turnStarts = new TurnStartWaiter(eventState);
-  let socket = null;
-  let primaryError = null;
+  return {
+    repoRoot,
+    paths,
+    ports,
+    run,
+    receipt,
+    eventLoop,
+    serverStalls,
+    healthSampler,
+    eventState,
+    terminalEvents,
+    turnStarts,
+    socket: null,
+    primaryError: null,
+    workspace: null,
+  };
+}
 
+function startLiveHarness(context) {
+  const { run, receipt, paths, eventLoop, serverStalls } = context;
   writeReceipt(run.receiptPath, receipt, paths.devDir);
   eventLoop.start();
   serverStalls.start();
+}
+
+async function executeLiveHarness(context) {
+  await prepareLiveHarness(context);
+  await configureFixture(context);
+  await startWorkloadMeasurement(context);
+  await createAndSubscribeThreads(context);
+  const terminal = await preflightTerminalTransport(context);
+  const completed = await dispatchFixtureTurns(context);
+  await sampleActiveControls(context, terminal);
+  context.receipt.state.phase = "waiting-for-events";
+  await completed;
+  await readDurableConversations(context);
+  await verifyCompletedWorkload(context);
+}
+
+async function prepareLiveHarness(context) {
+  const { ports, receipt } = context;
+  const initialHealth = await sampleHealth(ports.healthUrl);
+  receipt.metrics.health.samples.push(initialHealth.durationMs);
+  assertHealthyRuntime(initialHealth);
+  context.socket = await openRuntimeVerificationSocket(context.repoRoot, (push) => capturePush(push, context.eventState, context.terminalEvents, context.turnStarts));
+  await assertRuntimeIdle(context);
+  await selectFixtureWorkspace(context);
+}
+
+function assertHealthyRuntime(health) {
+  if (health.status !== "ok") throw new Error("The worktree runtime health endpoint did not return status=ok");
+}
+
+async function assertRuntimeIdle(context) {
+  const activeAgents = await measuredRpc(context.socket, context.receipt.metrics.rpc, "agent.activeCount", {});
+  const assertion = {
+    phase: "before-dispatch",
+    activeAgents,
+    active: activeAgents > 0,
+    observedAt: new Date().toISOString(),
+  };
+  context.receipt.state.activeTurnAssertions.push(assertion);
+  if (assertion.active) throw new Error("The worktree runtime is busy; the harness will not change the Codex CLI setting while agents are active");
+}
+
+async function selectFixtureWorkspace(context) {
+  const workspace = await requireFixtureWorkspace(context.socket, context.paths.fixtureRepoDir);
+  context.workspace = workspace;
+  context.receipt.workspace = { id: workspace.id, path: relativePath(context.repoRoot, context.paths.fixtureRepoDir) };
+  context.receipt.state.phase = "fixture-setup";
+  const settings = await measuredRpc(context.socket, context.receipt.metrics.rpc, "settings.get", {});
+  context.receipt.state.originalCodexCli = settings?.provider?.cli?.codex ?? "";
+}
+
+async function configureFixture(context) {
+  if (process.platform !== "win32") throw new Error("The controlled Codex fixture currently requires the Windows command wrapper");
   try {
-    const initialHealth = await sampleHealth(ports.healthUrl);
-    receipt.metrics.health.samples.push(initialHealth.durationMs);
-    if (initialHealth.status !== "ok") throw new Error("The worktree runtime health endpoint did not return status=ok");
-
-    socket = await openRuntimeVerificationSocket(repoRoot, (push) => capturePush(push, eventState, terminalEvents, turnStarts));
-    const activeAgents = await measuredRpc(socket, receipt.metrics.rpc, "agent.activeCount", {});
-    const preflightActiveCount = {
-      phase: "before-dispatch",
-      activeAgents,
-      active: activeAgents > 0,
-      observedAt: new Date().toISOString(),
-    };
-    receipt.state.activeTurnAssertions.push(preflightActiveCount);
-    if (preflightActiveCount.active) throw new Error("The worktree runtime is busy; the harness will not change the Codex CLI setting while agents are active");
-
-    const workspace = await requireFixtureWorkspace(socket, paths.fixtureRepoDir);
-    receipt.workspace = { id: workspace.id, path: relativePath(repoRoot, paths.fixtureRepoDir) };
-    receipt.state.phase = "fixture-setup";
-    const settings = await measuredRpc(socket, receipt.metrics.rpc, "settings.get", {});
-    receipt.state.originalCodexCli = settings?.provider?.cli?.codex ?? "";
-
-    if (process.platform !== "win32") throw new Error("The controlled Codex fixture currently requires the Windows command wrapper");
-    try {
-      createFixtureWrapper(run.fixtureWrapperPath, repoRoot, paths.devDir);
-      receipt.state.fixtureWrapper = relativePath(repoRoot, run.fixtureWrapperPath);
-      receipt.state.fixtureSettingMayBeChanged = true;
-      writeReceipt(run.receiptPath, receipt, paths.devDir);
-      await measuredRpc(socket, receipt.metrics.rpc, "settings.update", {
-        provider: { cli: { codex: run.fixtureWrapperPath } },
-      });
-    } catch (error) {
-      throw new Error(`The controlled Codex fixture could not be configured: ${safeError(error)}. No real Codex fallback was attempted; explicit approval is required before one can be used.`);
-    }
-    receipt.state.fixtureConfigured = true;
-    writeReceipt(run.receiptPath, receipt, paths.devDir);
-
-    healthSampler.start();
-    receipt.metrics.memory.push(await readMemorySnapshot(paths));
-
-    const branch = currentFixtureBranch(paths.fixtureRepoDir);
-    receipt.state.phase = "creating-threads";
-    const threadCreation = await Promise.allSettled(Array.from({ length: THREAD_COUNT }, async (_, index) => {
-      const ordinal = index + 1;
-      const title = expectedThreadTitle(run.id, ordinal);
-      const thread = await measuredRpc(socket, receipt.metrics.rpc, "thread.create", {
-        workspaceId: workspace.id,
-        title,
-        mode: "direct",
-        branch,
-      });
-      const record = { id: thread?.id, title, ordinal, events: [], ptyId: null, sentAtMs: null, startedAtMs: null, completedAtMs: null, persistedAtMs: null, durable: null };
-      if (typeof record.id !== "string" || record.id.length === 0) throw new Error(`Thread ${ordinal} did not return an ID`);
-      receipt.state.threads.push(record);
-      eventState.set(record.id, record);
-      writeReceipt(run.receiptPath, receipt, paths.devDir);
-      return record;
-    }));
-    throwFirstRejected(threadCreation, "Creating verifier-owned direct threads failed");
-    if (receipt.state.threads.length !== THREAD_COUNT) throw new Error("The harness did not create exactly seven threads");
-
-    const threadIds = receipt.state.threads.map((thread) => thread.id);
-    await measuredRpc(socket, receipt.metrics.rpc, "push.setThreadSubscriptions", {
-      threadIds,
-      cursors: Object.fromEntries(threadIds.map((threadId) => [threadId, 0])),
-    });
-    receipt.state.phase = "preflighting-terminal-transport";
-    const preflightTerminalCapabilities = await measuredRpc(socket, receipt.metrics.rpc, "terminal.capabilities", {}, "terminal.capabilities.preflight", CONTROL_RPC_TIMEOUT_MS);
-    const terminalTransport = selectTerminalTransport(preflightTerminalCapabilities);
-    receipt.state.terminalTransport = terminalTransport;
-    writeReceipt(run.receiptPath, receipt, paths.devDir);
-
-    const completed = terminalEvents.wait(TURN_TIMEOUT_MS);
-    const started = turnStarts.wait(TURN_TIMEOUT_MS);
-    receipt.state.phase = "sending-turns";
-    const sends = await Promise.allSettled(receipt.state.threads.map(async (thread) => {
-      thread.sentAtMs = performance.now();
-      await measuredRpc(socket, receipt.metrics.rpc, "agent.send", {
-        threadId: thread.id,
-        content: FIXTURE_PROMPT,
-        messageId: NodeCrypto.randomUUID(),
-        provider: PROVIDER_ID,
-        model: WORKLOAD_MODEL,
-        permissionMode: "full",
-      });
-    }));
-    throwFirstRejected(sends, "Dispatching the controlled fixture turns failed");
-    await started;
-
-    receipt.state.phase = "sampling-active-controls";
-    const controlLaunch = createControlLaunch(receipt.state.threads);
-    receipt.state.activeControlLaunch = controlLaunch;
-    receipt.state.terminalCreateInconclusive = controlLaunch.inconclusive;
-    writeReceipt(run.receiptPath, receipt, paths.devDir);
-
-    // This starts the model, capability, and one user terminal request before awaiting any of
-    // them. The preflight above chose the same lifecycle family the web client
-    // would use, without making terminal creation wait on an overloaded RPC.
-    const controlRequests = launchActiveControlRequests({
-      socket,
-      metrics: receipt.metrics.rpc,
-      workspaceId: workspace.id,
-      terminalTransport,
-      threads: receipt.state.threads.slice(0, TERMINAL_CONTROL_COUNT),
-      persistTerminal: (thread, terminal) => {
-        if (typeof terminal?.ptyId !== "string" || terminal.ptyId.length === 0) throw new Error(`Terminal create did not return a PTY for thread ${thread.ordinal}`);
-        thread.ptyId = terminal.ptyId;
-        writeReceipt(run.receiptPath, receipt, paths.devDir);
-      },
-    });
-    const controlResults = await Promise.allSettled(controlRequests.map((request) => request.promise));
-    throwFirstRejected(controlResults, "Sampling active controls and creating verifier-owned terminal PTYs failed");
-    const models = controlResults[0].value;
-    const activeTerminalCapabilities = controlResults[1].value;
-    const activeTerminalTransport = selectTerminalTransport(activeTerminalCapabilities);
-    if (activeTerminalTransport.kind !== terminalTransport.kind) {
-      throw new Error("terminal.capabilities selected a different Terminal client after dispatch");
-    }
-    receipt.modelList = { ...summarizeModelList(models), activeTurnAssertion: controlLaunch, inconclusive: controlLaunch.inconclusive };
-    receipt.terminalCapabilities = {
-      ...summarizeTerminalCapabilities(activeTerminalCapabilities, activeTerminalTransport),
-      preflight: summarizeTerminalCapabilities(preflightTerminalCapabilities, terminalTransport),
-      activeTurnAssertion: controlLaunch,
-      inconclusive: controlLaunch.inconclusive,
-    };
-    if (receipt.state.threads.slice(0, TERMINAL_CONTROL_COUNT).some((thread) => typeof thread.ptyId !== "string")) {
-      throw new Error("The harness did not create the user terminal during the seven active turns");
-    }
-    receipt.state.phase = "waiting-for-events";
-    await completed;
-
-    receipt.state.phase = "reading-durable-conversations";
-    const durableReads = await Promise.allSettled(receipt.state.threads.map(async (thread) => {
-      const tail = await measuredRpc(socket, receipt.metrics.rpc, "conversation.tail", { threadId: thread.id, limit: 2 });
-      thread.durable = auditConversationTail(tail);
-      if (!thread.durable.ok) throw new Error(`Durable conversation proof failed for thread ${thread.ordinal}`);
-    }));
-    throwFirstRejected(durableReads, "Reading durable conversation tails failed");
-    receipt.metrics.memory.push(await readMemorySnapshot(paths));
-
-    const finalActiveAgents = await measuredRpc(socket, receipt.metrics.rpc, "agent.activeCount", {});
-    if (finalActiveAgents !== 0) throw new Error("The controlled turns completed but the runtime still reports active agents");
-    if (receipt.modelList?.inconclusive || receipt.terminalCapabilities?.inconclusive || receipt.state.terminalCreateInconclusive) {
-      throw new Error("The active-turn control samples were inconclusive because all fixture turns finished before a required RPC could begin");
-    }
-    if (!auditRun(receipt)) throw new Error("The controlled workload completed with event-loss, order, completion, or durability failures");
+    configureFixtureSetting(context);
+    await updateFixtureSetting(context);
   } catch (error) {
-    primaryError = error instanceof Error ? error : new Error(String(error));
-    receipt.failure = safeError(primaryError);
-  } finally {
-    await healthSampler.stop();
-    eventLoop.stop();
-    if (socket) {
-      const cleanup = await cleanupOwnedResources(socket, receipt, paths, repoRoot);
-      receipt.cleanup = cleanup;
-      if (!cleanup.ok && !primaryError) primaryError = new Error("The workload completed but owned-resource cleanup was incomplete");
-    }
-    receipt.metrics.memory.push(await readMemorySnapshot(paths));
-    receipt.metrics.health.summary = summarizeLatency(receipt.metrics.health.samples);
-    receipt.metrics.rpc = Object.fromEntries(Object.entries(receipt.metrics.rpc).map(([method, samples]) => [method, summarizeLatency(samples)]));
-    receipt.metrics.turnCompletion = summarizeLatency(receipt.state.threads.map((thread) => elapsedSinceSend(thread, "completedAtMs")));
-    receipt.metrics.turnDurability = summarizeLatency(receipt.state.threads.map((thread) => elapsedSinceSend(thread, "persistedAtMs")));
-    receipt.state.activeControlLaunch = attributeControlLaunchToTurnCompletion(receipt.state.activeControlLaunch, receipt.state.threads);
-    receipt.metrics.events = summarizeEventAudits(receipt.state.threads);
-    receipt.metrics.harnessEventLoopStalls = {
-      scope: "harness-process",
-      intervalMs: EVENT_LOOP_INTERVAL_MS,
-      summary: eventLoop.summary(),
-    };
-    receipt.metrics.serverEventLoopStalls = serverStalls.collect();
-    receipt.metrics.memorySummary = summarizeMemory(receipt.metrics.memory);
-    receipt.completedAt = new Date().toISOString();
-    receipt.state.phase = primaryError ? "failed" : "complete";
-    receipt.ok = primaryError === null && receipt.cleanup?.ok === true && receipt.metrics.events.ok;
-    if (receipt.cleanup?.settingsRestored === true) {
-      delete receipt.state.originalCodexCli;
-      receipt.state.fixtureSettingMayBeChanged = false;
-    }
-    writeReceipt(run.receiptPath, receipt, paths.devDir);
-    if (socket) await socket.close().catch(() => undefined);
+    throw new Error(`The controlled Codex fixture could not be configured: ${safeError(error)}. No real Codex fallback was attempted; explicit approval is required before one can be used.`);
   }
-  if (primaryError) throw primaryError;
-  return { receiptPath: run.receiptPath, receipt };
+  context.receipt.state.fixtureConfigured = true;
+  writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
+}
+
+function configureFixtureSetting(context) {
+  createFixtureWrapper(context.run.fixtureWrapperPath, context.repoRoot, context.paths.devDir);
+  context.receipt.state.fixtureWrapper = relativePath(context.repoRoot, context.run.fixtureWrapperPath);
+  context.receipt.state.fixtureSettingMayBeChanged = true;
+  writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
+}
+
+async function updateFixtureSetting(context) {
+  await measuredRpc(context.socket, context.receipt.metrics.rpc, "settings.update", {
+    provider: { cli: { codex: context.run.fixtureWrapperPath } },
+  });
+}
+
+async function startWorkloadMeasurement(context) {
+  context.healthSampler.start();
+  context.receipt.metrics.memory.push(await readMemorySnapshot(context.paths));
+}
+
+async function createAndSubscribeThreads(context) {
+  const branch = currentFixtureBranch(context.paths.fixtureRepoDir);
+  context.receipt.state.phase = "creating-threads";
+  const creations = await Promise.allSettled(Array.from({ length: THREAD_COUNT }, (_, index) => createOwnedThread(context, branch, index + 1)));
+  throwFirstRejected(creations, "Creating verifier-owned direct threads failed");
+  assertCreatedThreadCount(context.receipt);
+  await subscribeToThreadEvents(context);
+}
+
+async function createOwnedThread(context, branch, ordinal) {
+  const title = expectedThreadTitle(context.run.id, ordinal);
+  const thread = await measuredRpc(context.socket, context.receipt.metrics.rpc, "thread.create", {
+    workspaceId: context.workspace.id,
+    title,
+    mode: "direct",
+    branch,
+  });
+  const record = { id: thread?.id, title, ordinal, events: [], ptyId: null, sentAtMs: null, startedAtMs: null, completedAtMs: null, persistedAtMs: null, durable: null };
+  if (typeof record.id !== "string" || record.id.length === 0) throw new Error(`Thread ${ordinal} did not return an ID`);
+  context.receipt.state.threads.push(record);
+  context.eventState.set(record.id, record);
+  writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
+  return record;
+}
+
+function assertCreatedThreadCount(receipt) {
+  if (receipt.state.threads.length !== THREAD_COUNT) throw new Error("The harness did not create exactly seven threads");
+}
+
+async function subscribeToThreadEvents(context) {
+  const threadIds = context.receipt.state.threads.map((thread) => thread.id);
+  await measuredRpc(context.socket, context.receipt.metrics.rpc, "push.setThreadSubscriptions", {
+    threadIds,
+    cursors: Object.fromEntries(threadIds.map((threadId) => [threadId, 0])),
+  });
+}
+
+async function preflightTerminalTransport(context) {
+  context.receipt.state.phase = "preflighting-terminal-transport";
+  const capabilities = await measuredRpc(context.socket, context.receipt.metrics.rpc, "terminal.capabilities", {}, "terminal.capabilities.preflight", CONTROL_RPC_TIMEOUT_MS);
+  const transport = selectTerminalTransport(capabilities);
+  context.receipt.state.terminalTransport = transport;
+  writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
+  return { capabilities, transport };
+}
+
+async function dispatchFixtureTurns(context) {
+  const completed = context.terminalEvents.wait(TURN_TIMEOUT_MS);
+  const started = context.turnStarts.wait(TURN_TIMEOUT_MS);
+  context.receipt.state.phase = "sending-turns";
+  const sends = await Promise.allSettled(context.receipt.state.threads.map((thread) => sendFixtureTurn(context, thread)));
+  throwFirstRejected(sends, "Dispatching the controlled fixture turns failed");
+  await started;
+  return completed;
+}
+
+async function sendFixtureTurn(context, thread) {
+  thread.sentAtMs = NodePerfHooks.performance.now();
+  await measuredRpc(context.socket, context.receipt.metrics.rpc, "agent.send", {
+    threadId: thread.id,
+    content: FIXTURE_PROMPT,
+    messageId: NodeCrypto.randomUUID(),
+    provider: PROVIDER_ID,
+    model: WORKLOAD_MODEL,
+    permissionMode: "full",
+  });
+}
+
+async function sampleActiveControls(context, terminal) {
+  context.receipt.state.phase = "sampling-active-controls";
+  const controlLaunch = createControlLaunch(context.receipt.state.threads);
+  context.receipt.state.activeControlLaunch = controlLaunch;
+  context.receipt.state.terminalCreateInconclusive = controlLaunch.inconclusive;
+  writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
+  const requests = launchActiveControlRequests({
+    socket: context.socket,
+    metrics: context.receipt.metrics.rpc,
+    workspaceId: context.workspace.id,
+    terminalTransport: terminal.transport,
+    threads: context.receipt.state.threads.slice(0, TERMINAL_CONTROL_COUNT),
+    persistTerminal: (thread, created) => persistCreatedTerminal(context, thread, created),
+  });
+  const results = await Promise.allSettled(requests.map((request) => request.promise));
+  throwFirstRejected(results, "Sampling active controls and creating verifier-owned terminal PTYs failed");
+  recordControlResults(context.receipt, results, terminal, controlLaunch);
+  assertTerminalCreated(context.receipt);
+}
+
+function persistCreatedTerminal(context, thread, terminal) {
+  if (typeof terminal?.ptyId !== "string" || terminal.ptyId.length === 0) throw new Error(`Terminal create did not return a PTY for thread ${thread.ordinal}`);
+  thread.ptyId = terminal.ptyId;
+  writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
+}
+
+function recordControlResults(receipt, results, terminal, controlLaunch) {
+  const models = results[0].value;
+  const activeCapabilities = results[1].value;
+  const activeTransport = selectTerminalTransport(activeCapabilities);
+  assertMatchingTerminalTransport(activeTransport, terminal.transport);
+  receipt.modelList = { ...summarizeModelList(models), activeTurnAssertion: controlLaunch, inconclusive: controlLaunch.inconclusive };
+  receipt.terminalCapabilities = {
+    ...summarizeTerminalCapabilities(activeCapabilities, activeTransport),
+    preflight: summarizeTerminalCapabilities(terminal.capabilities, terminal.transport),
+    activeTurnAssertion: controlLaunch,
+    inconclusive: controlLaunch.inconclusive,
+  };
+}
+
+function assertMatchingTerminalTransport(activeTransport, preflightTransport) {
+  if (activeTransport.kind !== preflightTransport.kind) throw new Error("terminal.capabilities selected a different Terminal client after dispatch");
+}
+
+function assertTerminalCreated(receipt) {
+  if (receipt.state.threads.slice(0, TERMINAL_CONTROL_COUNT).some((thread) => typeof thread.ptyId !== "string")) {
+    throw new Error("The harness did not create the user terminal during the seven active turns");
+  }
+}
+
+async function readDurableConversations(context) {
+  context.receipt.state.phase = "reading-durable-conversations";
+  const reads = await Promise.allSettled(context.receipt.state.threads.map((thread) => readDurableConversation(context, thread)));
+  throwFirstRejected(reads, "Reading durable conversation tails failed");
+  context.receipt.metrics.memory.push(await readMemorySnapshot(context.paths));
+}
+
+async function readDurableConversation(context, thread) {
+  const tail = await measuredRpc(context.socket, context.receipt.metrics.rpc, "conversation.tail", { threadId: thread.id, limit: 2 });
+  thread.durable = auditConversationTail(tail);
+  if (!thread.durable.ok) throw new Error(`Durable conversation proof failed for thread ${thread.ordinal}`);
+}
+
+async function verifyCompletedWorkload(context) {
+  const activeAgents = await measuredRpc(context.socket, context.receipt.metrics.rpc, "agent.activeCount", {});
+  if (activeAgents !== 0) throw new Error("The controlled turns completed but the runtime still reports active agents");
+  assertConclusiveControlSamples(context.receipt);
+  if (!auditRun(context.receipt)) throw new Error("The controlled workload completed with event-loss, order, completion, or durability failures");
+}
+
+function assertConclusiveControlSamples(receipt) {
+  if (receipt.modelList?.inconclusive || receipt.terminalCapabilities?.inconclusive || receipt.state.terminalCreateInconclusive) {
+    throw new Error("The active-turn control samples were inconclusive because all fixture turns finished before a required RPC could begin");
+  }
+}
+
+function recordHarnessFailure(context, error) {
+  context.primaryError = error instanceof Error ? error : new Error(String(error));
+  context.receipt.failure = safeError(context.primaryError);
+}
+
+async function finishLiveHarness(context) {
+  await context.healthSampler.stop();
+  context.eventLoop.stop();
+  await cleanUpLiveHarness(context);
+  await recordFinalReceiptMetrics(context);
+  writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
+  await closeLiveHarnessSocket(context.socket);
+}
+
+async function cleanUpLiveHarness(context) {
+  if (!context.socket) return;
+  const cleanup = await cleanupOwnedResources(context.socket, context.receipt, context.paths, context.repoRoot);
+  context.receipt.cleanup = cleanup;
+  if (!cleanup.ok && !context.primaryError) {
+    context.primaryError = new Error("The workload completed but owned-resource cleanup was incomplete");
+  }
+}
+
+async function recordFinalReceiptMetrics(context) {
+  const { receipt, eventLoop, serverStalls, paths } = context;
+  receipt.metrics.memory.push(await readMemorySnapshot(paths));
+  receipt.metrics.health.summary = summarizeLatency(receipt.metrics.health.samples);
+  receipt.metrics.rpc = Object.fromEntries(Object.entries(receipt.metrics.rpc).map(([method, samples]) => [method, summarizeLatency(samples)]));
+  receipt.metrics.turnCompletion = summarizeLatency(receipt.state.threads.map((thread) => elapsedSinceSend(thread, "completedAtMs")));
+  receipt.metrics.turnDurability = summarizeLatency(receipt.state.threads.map((thread) => elapsedSinceSend(thread, "persistedAtMs")));
+  receipt.state.activeControlLaunch = attributeControlLaunchToTurnCompletion(receipt.state.activeControlLaunch, receipt.state.threads);
+  receipt.metrics.events = summarizeEventAudits(receipt.state.threads);
+  receipt.metrics.harnessEventLoopStalls = {
+    scope: "harness-process",
+    intervalMs: EVENT_LOOP_INTERVAL_MS,
+    summary: eventLoop.summary(),
+  };
+  receipt.metrics.serverEventLoopStalls = serverStalls.collect();
+  receipt.metrics.memorySummary = summarizeMemory(receipt.metrics.memory);
+  receipt.completedAt = new Date().toISOString();
+  receipt.state.phase = context.primaryError ? "failed" : "complete";
+  receipt.ok = context.primaryError === null && receipt.cleanup?.ok === true && receipt.metrics.events.ok;
+  clearRestoredFixtureSetting(receipt);
+}
+
+function clearRestoredFixtureSetting(receipt) {
+  if (receipt.cleanup?.settingsRestored === true) {
+    delete receipt.state.originalCodexCli;
+    receipt.state.fixtureSettingMayBeChanged = false;
+  }
+}
+
+async function closeLiveHarnessSocket(socket) {
+  if (socket) await socket.close().catch(() => undefined);
 }
 
 /** Cleans a stopped or interrupted receipt without creating a new workload. */
@@ -567,22 +779,24 @@ export function launchActiveControlRequests({ socket, metrics, workspaceId, term
 function terminalTransportFromReceipt(receipt) {
   const transport = receipt?.state?.terminalTransport;
   if (!transport || typeof transport !== "object") throw new Error("The cleanup receipt has no selected Terminal transport");
-  if (transport.kind === "legacy"
-    && transport.createMethod === "terminal.create"
-    && transport.listMethod === "terminal.listActive"
-    && transport.closeMethod === "terminal.kill") return transport;
-  if (transport.kind === "modern"
-    && transport.createMethod === "terminal.session.create"
-    && transport.listMethod === "terminal.session.list"
-    && transport.closeMethod === "terminal.session.close") return transport;
+  const expected = terminalTransportForKind(transport.kind);
+  if (matchesTerminalTransport(transport, expected)) return transport;
   throw new Error("The cleanup receipt has an invalid Terminal transport");
 }
 
+function matchesTerminalTransport(transport, expected) {
+  return expected !== null
+    && transport.kind === expected.kind
+    && transport.createMethod === expected.createMethod
+    && transport.listMethod === expected.listMethod
+    && transport.closeMethod === expected.closeMethod;
+}
+
 async function measuredRpc(socket, metrics, method, params, metricName = method, timeoutMs) {
-  const started = performance.now();
+  const started = NodePerfHooks.performance.now();
   const deadline = Number.isFinite(timeoutMs) ? Date.now() + timeoutMs : undefined;
   const result = await socket.rpc(method, params, deadline);
-  recordMetric(metrics, metricName, performance.now() - started);
+  recordMetric(metrics, metricName, NodePerfHooks.performance.now() - started);
   return result;
 }
 
@@ -593,27 +807,39 @@ function recordMetric(metrics, name, durationMs) {
 }
 
 function capturePush(push, state, terminalEvents, turnStarts) {
-  if (push?.type !== "push") return;
-  const data = push.data;
-  if (!data || typeof data !== "object" || typeof data.threadId !== "string") return;
-  const thread = state.get(data.threadId);
+  const thread = threadForPush(push, state);
   if (!thread) return;
-  const now = performance.now();
-  if (push.channel === "agent.event") {
-    thread.events.push({ sequence: data.sequence, type: data.type, atMs: now });
-    if (data.type === "turnStarted") {
-      thread.startedAtMs ??= now;
-      turnStarts.notify();
-    }
-    if (data.type === "turnComplete") thread.completedAtMs ??= now;
-  } else if (push.channel === "turn.persisted") {
-    thread.persistedAtMs ??= now;
-  }
+  recordThreadPush(push, thread, turnStarts);
   terminalEvents.notify();
 }
 
+function threadForPush(push, state) {
+  if (push?.type !== "push") return null;
+  const data = push.data;
+  if (!data || typeof data !== "object" || typeof data.threadId !== "string") return null;
+  return state.get(data.threadId) ?? null;
+}
+
+function recordThreadPush(push, thread, turnStarts) {
+  const now = NodePerfHooks.performance.now();
+  if (push.channel === "agent.event") {
+    recordAgentEvent(push.data, thread, now, turnStarts);
+  } else if (push.channel === "turn.persisted") {
+    thread.persistedAtMs ??= now;
+  }
+}
+
+function recordAgentEvent(event, thread, now, turnStarts) {
+  thread.events.push({ sequence: event.sequence, type: event.type, atMs: now });
+  if (event.type === "turnStarted") {
+      thread.startedAtMs ??= now;
+      turnStarts.notify();
+  }
+  if (event.type === "turnComplete") thread.completedAtMs ??= now;
+}
+
 /** Records whether public turn events still show work in flight when controls launch. */
-export function createControlLaunch(threads, launchedAtMs = performance.now()) {
+export function createControlLaunch(threads, launchedAtMs = NodePerfHooks.performance.now()) {
   const activeThreadOrdinals = threads
     .filter((thread) => Number.isFinite(thread.startedAtMs)
       && thread.startedAtMs <= launchedAtMs
@@ -740,75 +966,112 @@ function summarizeEventAudits(threads) {
 async function cleanupOwnedResources(socket, receipt, paths, repoRoot) {
   const cleanup = { ok: true, ptys: [], threads: [], settingsRestored: false, wrapperRemoved: false, failures: [] };
   const threads = Array.isArray(receipt?.state?.threads) ? receipt.state.threads : [];
-  const workspace = receipt?.workspace;
-  let terminalTransport = null;
-  try {
-    const fixture = await requireFixtureWorkspace(socket, paths.fixtureRepoDir, cleanupDeadline());
-    if (!workspace || fixture.id !== workspace.id) throw new Error("The cleanup receipt does not belong to this worktree fixture workspace");
-  } catch (error) {
-    cleanup.failures.push(safeError(error));
-  }
-  if (threads.length > 0 && receipt?.state?.terminalTransport) {
-    try {
-      terminalTransport = terminalTransportFromReceipt(receipt);
-    } catch (error) {
-      cleanup.failures.push(safeError(error));
-    }
-  }
-  if (cleanup.failures.length === 0) {
-    if (terminalTransport) await cleanupPtys(socket, threads, terminalTransport, cleanup);
-    await cleanupThreads(socket, threads, workspace.id, receipt.runId, cleanup);
-  }
+  const workspace = await verifyCleanupWorkspace(socket, receipt, paths, cleanup);
+  const terminalTransport = resolveCleanupTransport(receipt, threads, cleanup);
+  await cleanupWorkloadResources(socket, receipt, threads, workspace, terminalTransport, cleanup);
   await restoreFixtureSetting(socket, receipt, cleanup);
   removeFixtureWrapper(receipt, repoRoot, paths.devDir, cleanup);
   cleanup.ok = cleanup.failures.length === 0;
   return cleanup;
 }
 
-async function cleanupPtys(socket, threads, transport, cleanup) {
-  let active = [];
+async function verifyCleanupWorkspace(socket, receipt, paths, cleanup) {
   try {
-    active = normalizeTerminalSessions(transport, await cleanupRpc(socket, transport.listMethod, {}));
+    const fixture = await requireFixtureWorkspace(socket, paths.fixtureRepoDir, cleanupDeadline());
+    const workspace = receipt?.workspace;
+    if (!workspace || fixture.id !== workspace.id) throw new Error("The cleanup receipt does not belong to this worktree fixture workspace");
+    return workspace;
+  } catch (error) {
+    cleanup.failures.push(safeError(error));
+    return null;
+  }
+}
+
+function resolveCleanupTransport(receipt, threads, cleanup) {
+  if (threads.length === 0 || !receipt?.state?.terminalTransport) return null;
+  try {
+    return terminalTransportFromReceipt(receipt);
+  } catch (error) {
+    cleanup.failures.push(safeError(error));
+    return null;
+  }
+}
+
+async function cleanupWorkloadResources(socket, receipt, threads, workspace, terminalTransport, cleanup) {
+  if (cleanup.failures.length > 0) return;
+  if (terminalTransport) await cleanupPtys(socket, threads, terminalTransport, cleanup);
+  await cleanupThreads(socket, threads, workspace.id, receipt.runId, cleanup);
+}
+
+async function cleanupPtys(socket, threads, transport, cleanup) {
+  const active = await activeTerminalSessions(socket, transport, cleanup);
+  if (active === null) return;
+  for (const thread of threads) {
+    await cleanupThreadPtys(socket, transport, active, thread, cleanup);
+  }
+  await verifyPtysRemoved(socket, transport, threads, cleanup);
+}
+
+async function activeTerminalSessions(socket, transport, cleanup) {
+  try {
+    return normalizeTerminalSessions(transport, await cleanupRpc(socket, transport.listMethod, {}));
   } catch (error) {
     cleanup.failures.push(`${transport.listMethod}: ${safeError(error)}`);
+    return null;
+  }
+}
+
+async function cleanupThreadPtys(socket, transport, active, thread, cleanup) {
+  if (typeof thread?.id !== "string") return;
+  const ownedPtys = active.filter((pty) => pty?.threadId === thread.id);
+  if (ownedPtys.length === 0) {
+    recordAlreadyClosedPty(thread, cleanup);
     return;
   }
-  for (const thread of threads) {
-    if (typeof thread?.id !== "string") continue;
-    const ownedPtys = active.filter((pty) => pty?.threadId === thread.id);
-    if (ownedPtys.length === 0) {
-      if (typeof thread.ptyId === "string") cleanup.ptys.push({ ptyId: thread.ptyId, outcome: "already-closed" });
-      continue;
-    }
-    for (const current of ownedPtys) {
-      if (typeof current.ptyId !== "string") {
-        cleanup.failures.push(`Refusing to kill a PTY with no ID for verifier thread ${thread.id}`);
-        continue;
-      }
-      thread.ptyId ??= current.ptyId;
-      if (current.state === "exited" || current.state === "failed") {
-        cleanup.ptys.push({ ptyId: current.ptyId, outcome: "already-closed" });
-        continue;
-      }
-      try {
-        await closeTerminal(socket, transport, current.ptyId);
-        cleanup.ptys.push({ ptyId: current.ptyId, outcome: "killed" });
-      } catch (error) {
-        cleanup.failures.push(`${transport.closeMethod} ${current.ptyId}: ${safeError(error)}`);
-      }
-    }
+  for (const current of ownedPtys) {
+    await cleanupPty(socket, transport, current, thread, cleanup);
   }
+}
+
+function recordAlreadyClosedPty(thread, cleanup) {
+  if (typeof thread.ptyId === "string") cleanup.ptys.push({ ptyId: thread.ptyId, outcome: "already-closed" });
+}
+
+async function cleanupPty(socket, transport, current, thread, cleanup) {
+  if (typeof current.ptyId !== "string") {
+    cleanup.failures.push(`Refusing to kill a PTY with no ID for verifier thread ${thread.id}`);
+    return;
+  }
+  thread.ptyId ??= current.ptyId;
+  if (current.state === "exited" || current.state === "failed") {
+    cleanup.ptys.push({ ptyId: current.ptyId, outcome: "already-closed" });
+    return;
+  }
+  try {
+    await closeTerminal(socket, transport, current.ptyId);
+    cleanup.ptys.push({ ptyId: current.ptyId, outcome: "killed" });
+  } catch (error) {
+    cleanup.failures.push(`${transport.closeMethod} ${current.ptyId}: ${safeError(error)}`);
+  }
+}
+
+async function verifyPtysRemoved(socket, transport, threads, cleanup) {
   try {
     const remaining = normalizeTerminalSessions(transport, await cleanupRpc(socket, transport.listMethod, {}));
     if (!Array.isArray(remaining)) throw new Error("terminal.listActive did not return a list");
     for (const thread of threads) {
-      if (typeof thread?.id === "string" && remaining.some((pty) => pty?.threadId === thread.id && pty.state === "running")) {
+      if (hasRunningPty(remaining, thread)) {
         cleanup.failures.push(`An owned PTY remains active for verifier thread ${thread.id} after cleanup`);
       }
     }
   } catch (error) {
     cleanup.failures.push(`${transport.listMethod} after cleanup: ${safeError(error)}`);
   }
+}
+
+function hasRunningPty(ptys, thread) {
+  if (typeof thread?.id !== "string") return false;
+  return ptys.some((pty) => pty?.threadId === thread.id && pty.state === "running");
 }
 
 async function closeTerminal(socket, transport, ptyId) {
@@ -828,36 +1091,56 @@ function cleanupRpc(socket, method, params) {
 }
 
 async function cleanupThreads(socket, threads, workspaceId, runId, cleanup) {
-  let current;
+  const current = await currentWorkspaceThreads(socket, workspaceId, cleanup);
+  if (current === null) return;
+  for (const thread of threads) {
+    await cleanupThread(socket, current, thread, runId, cleanup);
+  }
+  await verifyThreadsRemoved(socket, threads, workspaceId, cleanup);
+}
+
+async function currentWorkspaceThreads(socket, workspaceId, cleanup) {
   try {
-    current = await cleanupRpc(socket, "thread.list", { workspaceId });
+    return await cleanupRpc(socket, "thread.list", { workspaceId });
   } catch (error) {
     cleanup.failures.push(`thread.list: ${safeError(error)}`);
+    return null;
+  }
+}
+
+async function cleanupThread(socket, current, thread, runId, cleanup) {
+  if (!isReceiptThread(thread)) return;
+  const found = current.find((candidate) => candidate?.id === thread.id);
+  if (!found) {
+    cleanup.threads.push({ threadId: thread.id, outcome: "already-deleted" });
     return;
   }
-  for (const thread of threads) {
-    if (typeof thread?.id !== "string" || !Number.isInteger(thread?.ordinal)) continue;
-    const found = current.find((candidate) => candidate?.id === thread.id);
-    if (!found) {
-      cleanup.threads.push({ threadId: thread.id, outcome: "already-deleted" });
-      continue;
-    }
-    if (found.title !== expectedThreadTitle(runId, thread.ordinal) || found.title !== thread.title) {
-      cleanup.failures.push(`Refusing to delete thread ${thread.id}: title does not match this receipt`);
-      continue;
-    }
-    try {
-      const deleted = await cleanupRpc(socket, "thread.delete", { threadId: thread.id, cleanupWorktree: false });
-      if (deleted !== true) throw new Error("thread.delete did not confirm deletion");
-      cleanup.threads.push({ threadId: thread.id, outcome: "deleted" });
-    } catch (error) {
-      cleanup.failures.push(`thread.delete ${thread.id}: ${safeError(error)}`);
-    }
+  if (!matchesReceiptThread(found, thread, runId)) {
+    cleanup.failures.push(`Refusing to delete thread ${thread.id}: title does not match this receipt`);
+    return;
   }
+  try {
+    const deleted = await cleanupRpc(socket, "thread.delete", { threadId: thread.id, cleanupWorktree: false });
+    if (deleted !== true) throw new Error("thread.delete did not confirm deletion");
+    cleanup.threads.push({ threadId: thread.id, outcome: "deleted" });
+  } catch (error) {
+    cleanup.failures.push(`thread.delete ${thread.id}: ${safeError(error)}`);
+  }
+}
+
+function isReceiptThread(thread) {
+  return typeof thread?.id === "string" && Number.isInteger(thread?.ordinal);
+}
+
+function matchesReceiptThread(found, thread, runId) {
+  return found.title === expectedThreadTitle(runId, thread.ordinal) && found.title === thread.title;
+}
+
+async function verifyThreadsRemoved(socket, threads, workspaceId, cleanup) {
   try {
     const remaining = await cleanupRpc(socket, "thread.list", { workspaceId });
     for (const thread of threads) {
-      if (typeof thread?.id === "string" && remaining.some((candidate) => candidate?.id === thread.id)) {
+      if (isOwnedThread(remaining, thread)) {
         cleanup.failures.push(`Owned thread ${thread.id} remains after cleanup`);
       }
     }
@@ -866,30 +1149,37 @@ async function cleanupThreads(socket, threads, workspaceId, runId, cleanup) {
   }
 }
 
+function isOwnedThread(threads, thread) {
+  return typeof thread?.id === "string" && threads.some((candidate) => candidate?.id === thread.id);
+}
+
 async function restoreFixtureSetting(socket, receipt, cleanup) {
   if (receipt?.state?.fixtureSettingMayBeChanged !== true) {
     cleanup.settingsRestored = true;
     return;
   }
   try {
-    const current = await cleanupRpc(socket, "settings.get", {});
-    const configured = current?.provider?.cli?.codex;
-    const fixturePath = receipt?.state?.fixtureWrapper;
-    if (typeof fixturePath !== "string") throw new Error("The cleanup receipt has no fixture wrapper path");
-    const absoluteFixturePath = NodePath.resolve(resolveRepoRoot(), fixturePath);
-    if (configured === receipt.state.originalCodexCli) {
-      cleanup.settingsRestored = true;
-      return;
-    }
-    if (configured !== absoluteFixturePath) {
+    const outcome = await restoreOwnedFixtureSetting(socket, receipt);
+    if (outcome === "changed") {
       cleanup.failures.push("Codex CLI setting changed after this harness run; refusing to overwrite it during cleanup");
       return;
     }
-    await cleanupRpc(socket, "settings.update", { provider: { cli: { codex: receipt.state.originalCodexCli ?? "" } } });
     cleanup.settingsRestored = true;
   } catch (error) {
     cleanup.failures.push(`settings restore: ${safeError(error)}`);
   }
+}
+
+async function restoreOwnedFixtureSetting(socket, receipt) {
+  const current = await cleanupRpc(socket, "settings.get", {});
+  const configured = current?.provider?.cli?.codex;
+  const fixturePath = receipt?.state?.fixtureWrapper;
+  if (typeof fixturePath !== "string") throw new Error("The cleanup receipt has no fixture wrapper path");
+  const absoluteFixturePath = NodePath.resolve(resolveRepoRoot(), fixturePath);
+  if (configured === receipt.state.originalCodexCli) return "restored";
+  if (configured !== absoluteFixturePath) return "changed";
+  await cleanupRpc(socket, "settings.update", { provider: { cli: { codex: receipt.state.originalCodexCli ?? "" } } });
+  return "restored";
 }
 
 function removeFixtureWrapper(receipt, repoRoot, devDir, cleanup) {
@@ -911,10 +1201,10 @@ function removeFixtureWrapper(receipt, repoRoot, devDir, cleanup) {
 }
 
 async function sampleHealth(healthUrl) {
-  const started = performance.now();
+  const started = NodePerfHooks.performance.now();
   const response = await fetch(healthUrl, { signal: AbortSignal.timeout(15_000) });
   const payload = await response.json();
-  return { durationMs: performance.now() - started, status: response.ok ? payload?.status : `http-${response.status}` };
+  return { durationMs: NodePerfHooks.performance.now() - started, status: response.ok ? payload?.status : `http-${response.status}` };
 }
 
 class HealthSampler {
@@ -953,12 +1243,12 @@ class EventLoopStallSampler {
   }
 
   start() {
-    this.expectedAt = performance.now() + this.intervalMs;
+    this.expectedAt = NodePerfHooks.performance.now() + this.intervalMs;
     const tick = () => {
-      const now = performance.now();
+      const now = NodePerfHooks.performance.now();
       this.samples.push(Math.max(0, now - this.expectedAt));
       this.expectedAt += this.intervalMs;
-      this.timer = setTimeout(tick, Math.max(0, this.expectedAt - performance.now()));
+      this.timer = setTimeout(tick, Math.max(0, this.expectedAt - NodePerfHooks.performance.now()));
     };
     this.timer = setTimeout(tick, this.intervalMs);
   }
