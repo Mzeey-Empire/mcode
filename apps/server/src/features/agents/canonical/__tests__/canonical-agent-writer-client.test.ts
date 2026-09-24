@@ -8,12 +8,34 @@ import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import type { CanonicalWriterResponse } from "../canonical-agent-writer-protocol.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 
 const THREAD_ID = "writer-thread";
 const TURN_ID = "writer-turn";
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000176";
 const NOW = "2026-09-24T12:00:00.000Z";
+
+function workerDroppingReply(kind: CanonicalWriterResponse["kind"]): Worker {
+  const worker = new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
+  return new Proxy(worker, {
+    set(target, property, value) {
+      if (property !== "onmessage" || typeof value !== "function") return Reflect.set(target, property, value);
+      target.onmessage = (message) => {
+        if (message.data.kind === kind) {
+          target.terminate();
+          return;
+        }
+        value(message);
+      };
+      return true;
+    },
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
 
 function events(): CanonicalAgentEventDraft[] {
   const sourceIdentities = [{ providerId: "codex" as const, scope: "thread" as const, value: "native-writer-thread", provenance: "native" as const }];
@@ -125,7 +147,7 @@ describe("canonical SQLite writer", () => {
     await NodeFSPromises.rm(tempDir, { recursive: true, force: true });
   });
 
-  it("acknowledges only committed events and deduplicates a replay", async () => {
+  it("replays the original committed receipt and full envelopes", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);
     const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
     const first = await writer.commit("writer-operation-1", batch);
@@ -135,8 +157,9 @@ describe("canonical SQLite writer", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 3 });
 
     const replay = await writer.commit("writer-operation-1", batch);
-    expect(replay).toMatchObject({ outcome: "duplicate", acceptedThrough: 3, durableThrough: 3, events: [] });
+    expect(replay).toEqual(first);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 3 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 1 });
   });
 
   it("rejects a database failure without reporting a durable receipt", async () => {
@@ -177,6 +200,11 @@ describe("canonical SQLite writer", () => {
     })).toEqual({ recorded: true });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
       .get("toolCall:writer-recovery-tool")).toEqual({ count: 0 });
+    expect(await writer.recordParentNarrativeRecovery("narrative-discard", {
+      executionId: EXECUTION_ID,
+      items: [],
+      discardedItemIds: ["toolCall:writer-recovery-tool"],
+    })).toEqual({ recorded: true });
   });
 
   it("rejects a failed recovery write without a durability acknowledgement", async () => {
@@ -216,8 +244,8 @@ describe("canonical SQLite writer", () => {
       .get(EXECUTION_ID)).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
       .get("toolCall:writer-recovery-tool")).toEqual({ count: 1 });
-    await expect(writer.classifyParentNarrativeRecovery("classification-1", input))
-      .rejects.toThrow("Canonical writer write-failed");
+    expect(await writer.classifyParentNarrativeRecovery("classification-1", input))
+      .toEqual({ recorded: true, reset: true });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
       .get("toolCall:writer-recovery-tool")).toEqual({ count: 1 });
   });
@@ -262,7 +290,7 @@ describe("canonical SQLite writer", () => {
     }
   });
 
-  it("rejects future writes if the worker exits", async () => {
+  it("restarts a closed worker and accepts later writes", async () => {
     let worker: Worker | undefined;
     writer = new CanonicalAgentWriterClient(dbPath, () => {
       worker = new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
@@ -273,6 +301,115 @@ describe("canonical SQLite writer", () => {
     const closed = new Promise((resolve) => worker?.addEventListener("close", resolve, { once: true }));
     worker?.terminate();
     await closed;
-    await expect(writer.commit("writer-operation-4", batch)).rejects.toThrow("Canonical writer worker closed");
+    expect(await writer.commit("writer-operation-4", batch)).toMatchObject({ outcome: "duplicate" });
   });
+
+  it("replays the committed envelope after a response is lost with the worker", async () => {
+    let created = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => {
+      return created++ === 0 ? workerDroppingReply("committed")
+        : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
+    });
+    const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
+    const receipt = await writer.commit("lost-committed-response", batch);
+    expect(receipt).toMatchObject({ outcome: "committed", acceptedThrough: 3 });
+    expect(receipt.events.map((event) => event.eventId)).toEqual(batch.events.map((event) => event.eventId));
+    expect(created).toBe(2);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 3 });
+  });
+
+  it("replays a classification after its reset committed but the reply was lost", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("classification-start", {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
+    });
+    new ParentAssistantTextCheckpointService(db).appendChunk([{
+      executionId: EXECUTION_ID, threadId: THREAD_ID, turnId: TURN_ID, sequence: 1, text: "provisional",
+    }]);
+    await writer.close();
+    let created = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => {
+      return created++ === 0 ? workerDroppingReply("parent-narrative-recovery-classified")
+        : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
+    });
+    expect(await writer.classifyParentNarrativeRecovery("lost-classification", {
+      executionId: EXECUTION_ID, items: [recoveryToolCall()],
+    })).toEqual({ recorded: true, reset: true });
+    expect(created).toBe(2);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM parent_assistant_text_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get("toolCall:writer-recovery-tool")).toEqual({ count: 1 });
+  });
+
+  it("replays a recovery discard after its reply was lost", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("recovery-start", {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
+    });
+    await writer.recordParentNarrativeRecovery("recovery-record", {
+      executionId: EXECUTION_ID, items: [recoveryToolCall()],
+    });
+    await writer.close();
+    let created = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => created++ === 0
+      ? workerDroppingReply("parent-narrative-recovery-recorded")
+      : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+    expect(await writer.recordParentNarrativeRecovery("lost-recovery-discard", {
+      executionId: EXECUTION_ID, items: [], discardedItemIds: ["toolCall:writer-recovery-tool"],
+    })).toEqual({ recorded: true });
+    expect(created).toBe(2);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get("toolCall:writer-recovery-tool")).toEqual({ count: 0 });
+  });
+
+  it("stops after three lost replies and permits explicit replay later", async () => {
+    let created = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => {
+      created++;
+      return workerDroppingReply("committed");
+    });
+    const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
+    await expect(writer.commit("lost-three-times", batch)).rejects.toThrow("Canonical writer worker closed");
+    expect(created).toBe(3);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 3 });
+    await writer.close();
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect(await writer.commit("lost-three-times", batch)).toMatchObject({ outcome: "committed" });
+  });
+
+  it("rejects reused operation IDs with changed phase or native cursor", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
+    await writer.commit("same-id", batch);
+    await expect(writer.commit("same-id", { ...batch, phase: "finalizing" }))
+      .rejects.toThrow("Canonical writer operation-conflict");
+    await expect(writer.commit("same-id", { ...batch, nativeCursor: "later" }))
+      .rejects.toThrow("Canonical writer operation-conflict");
+  });
+
+  it("caps outstanding receipts and resumes after acknowledgement", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const batch = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events() };
+    await writer.commit("capacity-start", batch);
+    const insert = db.prepare(`INSERT INTO canonical_writer_operation_receipts
+      (execution_id, operation_id, kind, input_hash, receipt_json, created_at)
+      VALUES (?, ?, 'commit', ?, '{}', ?)`);
+    db.transaction(() => {
+      for (let index = 1; index < 16_384; index++) {
+        insert.run(EXECUTION_ID, `seed-${index}`, "seed", NOW);
+      }
+    })();
+    const before = db.prepare("SELECT COUNT(*) AS count, SUM(LENGTH(receipt_json)) AS bytes FROM canonical_writer_operation_receipts").get();
+    expect(before).toEqual({ count: 16_384, bytes: expect.any(Number) });
+    await expect(writer.commit("capacity-over", batch)).rejects.toThrow("Canonical writer receipt-capacity");
+    await writer.acknowledgeOperation(EXECUTION_ID, "capacity-start");
+    await writer.acknowledgeOperation(EXECUTION_ID, "capacity-start");
+    expect(await writer.commit("capacity-over", batch)).toMatchObject({ outcome: "duplicate" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get())
+      .toEqual({ count: 16_384 });
+    db.prepare("DELETE FROM canonical_agent_turns WHERE execution_id = ?").run(EXECUTION_ID);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get())
+      .toEqual({ count: 0 });
+  }, 30_000);
 });

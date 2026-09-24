@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
+import { CanonicalAgentWriterReceipts, CanonicalWriterOperationConflict, CanonicalWriterReceiptCapacity } from "./canonical-agent-writer-receipts.js";
 import type {
   CanonicalParentNarrativeClassificationReceipt,
   CanonicalProviderWriteInput,
@@ -16,6 +17,7 @@ import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-bound
 let db: Database | undefined;
 let boundary: CanonicalAgentBoundary | undefined;
 let assistantTextCheckpoints: ParentAssistantTextCheckpointService | undefined;
+let receipts: CanonicalAgentWriterReceipts | undefined;
 
 function openDatabase(dbPath: string): void {
   if (boundary || !NodePath.isAbsolute(dbPath) || !NodeFS.existsSync(dbPath)) {
@@ -26,10 +28,12 @@ function openDatabase(dbPath: string): void {
     applySQLiteConnectionPolicy(connection, true);
     boundary = new CanonicalAgentBoundary(connection, () => {});
     assistantTextCheckpoints = new ParentAssistantTextCheckpointService(connection);
+    receipts = new CanonicalAgentWriterReceipts(connection);
     db = connection;
   } catch (error) {
     boundary = undefined;
     assistantTextCheckpoints = undefined;
+    receipts = undefined;
     connection.close(true);
     throw error;
   }
@@ -88,9 +92,19 @@ function handle(request: CanonicalWriterRequest): CanonicalWriterResponse {
   if (request.kind === "close") {
     boundary = undefined;
     assistantTextCheckpoints = undefined;
+    receipts = undefined;
     db?.close(true);
     db = undefined;
     return { ...correlation, kind: "closed" };
+  }
+  if (request.kind === "ack-operation") {
+    try {
+      if (!receipts) throw new Error("Canonical writer has not opened its database");
+      receipts.acknowledge(request.executionId, request.operationId);
+      return { ...correlation, kind: "operation-acknowledged" };
+    } catch {
+      return { ...correlation, kind: "failed", reason: "write-failed" };
+    }
   }
   return handleWrite(request, correlation);
 }
@@ -100,36 +114,46 @@ function handleWrite(
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
 ): CanonicalWriterResponse {
   try {
-    if (!boundary) throw new Error("Canonical writer has not opened its database");
-    if (request.kind === "classify-parent-narrative-recovery") {
-      if (request.input.executionId !== request.executionId) {
-        throw new Error("Canonical writer classification execution mismatch");
-      }
-      const receipt = classifyParentNarrativeRecovery(request.input);
-      return { ...correlation, kind: "parent-narrative-recovery-classified", receipt };
-    }
-    if (request.kind === "record-parent-narrative-recovery") {
-      if (request.input.executionId !== request.executionId) {
-        throw new Error("Canonical writer recovery execution mismatch");
-      }
-      const recorded = boundary.recordParentNarrativeRecovery(request.input);
-      return {
-        ...correlation,
-        kind: "parent-narrative-recovery-recorded",
-        receipt: { recorded },
-      };
-    }
-    assertRouting(request.input, request.executionId);
-    const result = boundary.commit(request.input);
-    const { outcome, conversationRevision, rosterRevision, acceptedThrough, durableThrough, events } = result;
+    const canonical = boundary;
+    if (!canonical || !receipts) throw new Error("Canonical writer has not opened its database");
+    return receipts.execute(request, () => applyWrite(request, correlation, canonical));
+  } catch (error) {
     return {
       ...correlation,
-      kind: "committed",
-      receipt: { outcome, conversationRevision, rosterRevision, acceptedThrough, durableThrough, events },
+      kind: "failed",
+      reason: error instanceof CanonicalWriterOperationConflict ? "operation-conflict"
+        : error instanceof CanonicalWriterReceiptCapacity ? "receipt-capacity" : "write-failed",
     };
-  } catch {
-    return { ...correlation, kind: "failed", reason: "write-failed" };
   }
+}
+
+function applyWrite(
+  request: Extract<CanonicalWriterRequest, { kind: "commit" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery" }>,
+  correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
+  canonical: CanonicalAgentBoundary,
+): Extract<CanonicalWriterResponse, { kind: "committed" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified" }> {
+  if (request.kind === "classify-parent-narrative-recovery") {
+    if (request.input.executionId !== request.executionId) {
+      throw new Error("Canonical writer classification execution mismatch");
+    }
+    const receipt = classifyParentNarrativeRecovery(request.input);
+    return { ...correlation, kind: "parent-narrative-recovery-classified", receipt };
+  }
+  if (request.kind === "record-parent-narrative-recovery") {
+    if (request.input.executionId !== request.executionId) {
+      throw new Error("Canonical writer recovery execution mismatch");
+    }
+    const recorded = canonical.recordParentNarrativeRecovery(request.input);
+    return { ...correlation, kind: "parent-narrative-recovery-recorded", receipt: { recorded } };
+  }
+  assertRouting(request.input, request.executionId);
+  const result = canonical.commit(request.input);
+  const { outcome, conversationRevision, rosterRevision, acceptedThrough, durableThrough, events } = result;
+  return {
+    ...correlation,
+    kind: "committed",
+    receipt: { outcome, conversationRevision, rosterRevision, acceptedThrough, durableThrough, events },
+  };
 }
 
 globalThis.onmessage = (message: MessageEvent<CanonicalWriterRequest>): void => {
