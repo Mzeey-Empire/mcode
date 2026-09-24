@@ -1,5 +1,6 @@
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
 import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execution/execution-worker-handler.js";
+import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 import type {
   CanonicalAgentCommitInput,
   CanonicalAgentCommitResult,
@@ -50,6 +51,7 @@ export type CanonicalWriterRequest =
   | (Correlation & { kind: "open"; dbPath: string })
   | (Correlation & { kind: "commit"; input: CanonicalProviderWriteInput })
   | (Correlation & { kind: "semantic-transact"; operation: ExecutionSemanticOperation })
+  | (Correlation & { kind: "semantic-worker-loss"; input: LostExecutionInterruption })
   | (Correlation & { kind: "record-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
   | (Correlation & { kind: "classify-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
   | (Correlation & { kind: "ack-operation" })

@@ -116,24 +116,29 @@ async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterR
       return { ...correlation, kind: "failed", reason: "write-failed" };
     }
   }
-  if (request.kind === "semantic-transact") {
+  if (request.kind === "semantic-transact" || request.kind === "semantic-worker-loss") {
     return handleSemanticWrite(request, correlation);
   }
   return handleWrite(request, correlation);
 }
 
 async function handleSemanticWrite(
-  request: Extract<CanonicalWriterRequest, { kind: "semantic-transact" }>,
+  request: Extract<CanonicalWriterRequest, { kind: "semantic-transact" | "semantic-worker-loss" }>,
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
 ): Promise<CanonicalWriterResponse> {
   try {
     if (!semanticWriter || semanticPublication) throw new Error("Semantic writer is not ready");
-    if (request.operation.operationId !== request.operationId
-      || request.operation.execution.executionId !== request.executionId) {
+    if (request.kind === "semantic-transact"
+      ? request.operation.operationId !== request.operationId
+        || request.operation.execution.executionId !== request.executionId
+      : `${request.input.lease.leaseId}:worker-lost` !== request.operationId
+        || request.input.execution.executionId !== request.executionId) {
       throw new Error("Semantic writer request identity mismatch");
     }
     semanticPublication = [];
-    const receipt = await semanticWriter.transact(request.operation);
+    const receipt = request.kind === "semantic-transact"
+      ? await semanticWriter.transact(request.operation)
+      : semanticWriter.interruptWorkerLoss(request.input);
     const events = semanticPublication;
     return { ...correlation, kind: "semantic-transacted", result: { receipt, events } };
   } catch {

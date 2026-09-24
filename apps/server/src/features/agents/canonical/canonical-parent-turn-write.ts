@@ -14,6 +14,7 @@ import { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js"
 import { PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-repo.js";
 import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";
+import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
 import type {
   ParentTurnFinishInput,
   ParentTurnProjection,
@@ -111,6 +112,15 @@ export interface StagedParentTerminalProjection {
   toolCallCount: number;
 }
 
+/** Recovery data for an execution whose owning worker has been lost. */
+export interface LostParentExecutionInput {
+  threadId: string;
+  turnId: string;
+  executionId: string;
+  reason: string;
+  recoveryIncidentId: string;
+}
+
 /** Writer-local semantic operations with cloneable inputs and durable receipts. */
 export class CanonicalParentTurnWrite {
   private readonly db: Database;
@@ -120,6 +130,7 @@ export class CanonicalParentTurnWrite {
   private readonly threads: ThreadRepo;
   private readonly planAnswers: PlanQuestionAnswersRepo;
   private readonly stagedAssistant: ReturnType<Database["prepare"]>;
+  private readonly assistantTextCheckpoints: ParentAssistantTextCheckpointService;
 
   constructor(db: Database, publish: CanonicalAgentEventPublisher) {
     this.db = db;
@@ -135,6 +146,61 @@ export class CanonicalParentTurnWrite {
     this.threads = new ThreadRepo(db);
     this.planAnswers = new PlanQuestionAnswersRepo(db);
     this.stagedAssistant = db.prepare("SELECT role, content FROM messages WHERE id = ? AND thread_id = ?");
+    this.assistantTextCheckpoints = new ParentAssistantTextCheckpointService(db);
+  }
+
+  /** Import fsynced text before the interruption transaction reads its durable prefix. */
+  importRecoveryJournals(): void {
+    this.assistantTextCheckpoints.importRecoveryJournals();
+  }
+
+  /** Apply the existing interrupted-turn contract on the writer connection. Caller owns the transaction. */
+  interruptLostExecution(input: LostParentExecutionInput): CanonicalAgentCommitResult {
+    const turn = this.canonical.loadTurnByExecution(input.executionId);
+    const checkpoint = this.canonical.loadCheckpoint(input.executionId);
+    if (!isUnfinishedLostTurn(turn, checkpoint, input)) {
+      throw new Error(`Unfinished parent execution not found: ${input.executionId}`);
+    }
+    const existingAssistant = this.canonical.loadTerminalProjection(input.turnId).message;
+    const recoveredNarrative = this.canonical.loadParentNarrativeRecovery(input.turnId);
+    const text = existingAssistant ? "" : this.assistantTextCheckpoints.restore(input.executionId);
+    const assistant = existingAssistant ?? this.stageRecoveredAssistant(input, text, recoveredNarrative.length);
+    this.canonical.markUnresolvedCodexChildDeliveriesUnknown(input.executionId);
+    const result = this.canonical.interruptUnfinishedExecution(
+      input.executionId,
+      input.reason,
+      assistant ?? undefined,
+      recoveredNarrative.length > 0
+        ? (message, narrative) => this.narrative.persistRecoveredNarrative(message.id, narrative)
+        : undefined,
+      recoveredNarrative,
+      input.recoveryIncidentId,
+    );
+    if (result.outcome !== "committed") throw new Error(`Parent interruption did not commit: ${input.executionId}`);
+    this.threads.updateStatus(input.threadId, "interrupted");
+    return result;
+  }
+
+  /** Retire provisional text only after the canonical interruption and receipt commit. */
+  retireInterruptedText(executionId: string): void {
+    if (!this.assistantTextCheckpoints.retire(executionId)) {
+      throw new Error(`Interrupted assistant text checkpoint was not retired: ${executionId}`);
+    }
+  }
+
+  private stageRecoveredAssistant(input: LostParentExecutionInput, text: string, narrativeCount: number) {
+    if (text.length === 0 && narrativeCount === 0) return null;
+    const id = deriveTurnAssistantMessageId(input.threadId, `recovery:${input.executionId}`);
+    const existing = this.messages.findByIdInThreadIncludingInternal(input.threadId, id);
+    if (existing) return existing;
+    return this.messages.createAssistantIdempotent({
+      id,
+      threadId: input.threadId,
+      content: text,
+      sequence: this.messages.getLatestSequenceIncludingInternal(input.threadId) + 1,
+      model: this.threads.findById(input.threadId)?.model ?? null,
+      isInternal: true,
+    });
   }
 
   /** Commit the user message, optional thread reopen and plan answer with canonical start. */
@@ -295,6 +361,16 @@ export class CanonicalParentTurnWrite {
       throw new Error(`Staged assistant projection not found: ${projected.id}`);
     }
   }
+}
+
+function isUnfinishedLostTurn(
+  turn: ReturnType<CanonicalAgentBoundary["loadTurnByExecution"]>,
+  checkpoint: ReturnType<CanonicalAgentBoundary["loadCheckpoint"]>,
+  input: LostParentExecutionInput,
+): boolean {
+  return Boolean(turn && checkpoint && turn.id === input.turnId
+    && checkpoint.threadId === input.threadId && checkpoint.turnId === input.turnId
+    && checkpoint.terminalOutcome === null);
 }
 
 function settleTerminalNarrative(

@@ -42,6 +42,7 @@ export interface ExecutionSemanticOperation {
     | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
     | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
     | { readonly kind: "stage-terminal"; readonly input: DataOnlyParentTerminalProjectionInput }
+    | { readonly kind: "worker-lost"; readonly reason: string; readonly recoveryIncidentId: string }
     | { readonly kind: "finish"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput };
 }
 

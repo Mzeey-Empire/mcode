@@ -74,6 +74,14 @@ type StoredOperation = z.infer<typeof storedOperationSchema>;
 
 class SemanticConflict extends Error {}
 
+/** The revoked ownership and recovery incident for a worker that cannot prove its live turn. */
+export interface LostExecutionInterruption {
+  readonly execution: ExecutionIdentity;
+  readonly lease: ExecutionLease;
+  readonly reason: string;
+  readonly recoveryIncidentId: string;
+}
+
 /** Adapts the supported execution mutations to one writer-local canonical SQLite connection. */
 export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter {
   private readonly turns: CanonicalParentTurnWrite;
@@ -114,6 +122,50 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       if (error instanceof SemanticConflict) return conflict(operation);
       throw error;
     }
+  }
+
+  /** Fence a lost worker and apply the existing interrupted-turn recovery contract. */
+  interruptWorkerLoss(input: LostExecutionInterruption): ExecutionWriteReceipt {
+    const operation = workerLossOperation(input);
+    if (!validLostExecutionInput(input, operation)) return conflict(operation);
+    const hash = fingerprint(input);
+    const existing = this.loadOperation(input.execution.executionId, operation.operationId);
+    if (existing) {
+      const receipt = this.replay(operation, hash, existing);
+      if (receipt.kind === "committed") this.turns.retireInterruptedText(input.execution.executionId);
+      return receipt;
+    }
+    const head = this.loadHead(input.execution.executionId);
+    if (!head || head.terminal || !sameExecutionAndLease(head, input)) return conflict(operation);
+    this.turns.importRecoveryJournals();
+    try {
+      const receipt = this.withBufferedPublication(() => this.db.transaction(
+        () => this.writeLostInterruption(input, operation, hash),
+      )());
+      this.turns.retireInterruptedText(input.execution.executionId);
+      return receipt;
+    } catch (error) {
+      if (error instanceof SemanticConflict) return conflict(operation);
+      throw error;
+    }
+  }
+
+  private writeLostInterruption(
+    input: LostExecutionInterruption,
+    operation: ExecutionSemanticOperation,
+    hash: string,
+  ): ExecutionWriteReceipt {
+    const current = this.loadHead(input.execution.executionId);
+    if (!current || current.terminal || !sameExecutionAndLease(current, input)) throw new SemanticConflict();
+    const result = this.turns.interruptLostExecution({ ...input.execution,
+      reason: input.reason, recoveryIncidentId: input.recoveryIncidentId });
+    const receipt = committed(operation, result.durableThrough);
+    const sequences = this.bufferedPublication?.flatMap((batch) => batch.map((event) => event.acceptedSequence)) ?? [];
+    this.storePublicationChunks(input.execution.executionId, hash, sequences);
+    this.storeHead({ ...current, ordinal: current.ordinal + 1,
+      durableRevision: receipt.durableRevision, terminal: true });
+    this.storeReceipt(operation, hash, receipt);
+    return receipt;
   }
 
   private async applySupported(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
@@ -448,6 +500,27 @@ function nextHead(head: SemanticHead, operation: ExecutionSemanticOperation): bo
     && head.ordinal + 1 === operation.ordinal
     && lease.ownerEpoch === candidate.ownerEpoch && lease.workerIndex === candidate.workerIndex
     && lease.workerGeneration === candidate.workerGeneration && lease.leaseId === candidate.leaseId;
+}
+
+function validLostExecutionInput(input: LostExecutionInterruption, operation: ExecutionSemanticOperation): boolean {
+  return validIdentity(input.execution) && validLease(input.lease)
+    && Boolean(input.reason && input.recoveryIncidentId) && operation.operationId.length <= 256;
+}
+
+function sameExecutionAndLease(head: SemanticHead, input: LostExecutionInterruption): boolean {
+  return head.execution.threadId === input.execution.threadId
+    && head.execution.turnId === input.execution.turnId
+    && head.execution.executionId === input.execution.executionId
+    && head.lease.ownerEpoch === input.lease.ownerEpoch
+    && head.lease.workerIndex === input.lease.workerIndex
+    && head.lease.workerGeneration === input.lease.workerGeneration
+    && head.lease.leaseId === input.lease.leaseId;
+}
+
+function workerLossOperation(input: LostExecutionInterruption): ExecutionSemanticOperation {
+  return { operationId: `${input.lease.leaseId}:worker-lost`, execution: input.execution,
+    lease: input.lease, ordinal: 0,
+    mutation: { kind: "worker-lost", reason: input.reason, recoveryIncidentId: input.recoveryIncidentId } };
 }
 
 function committed(

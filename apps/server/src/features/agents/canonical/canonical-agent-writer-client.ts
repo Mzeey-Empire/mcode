@@ -11,6 +11,7 @@ import type {
 } from "./canonical-agent-writer-protocol.js";
 import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 import type { ExecutionSemanticOperation } from "../execution/execution-worker-handler.js";
+import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 
 const MAX_PENDING_WRITES = 64;
 const MAX_WORKER_ATTEMPTS = 3;
@@ -76,6 +77,18 @@ export class CanonicalAgentWriterClient {
     const response = await this.sendWithRetry({
       kind: "semantic-transact", requestId: NodeCrypto.randomUUID(),
       operationId: operation.operationId, executionId: operation.execution.executionId, operation,
+    });
+    if (response.kind !== "semantic-transacted") throw new Error("Canonical writer returned an unexpected response");
+    return response.result;
+  }
+
+  /** Reconcile a lost execution on the writer, then return committed envelopes for publication. */
+  async interruptWorkerLoss(input: LostExecutionInterruption): Promise<CanonicalSemanticWriteResult> {
+    const operationId = `${input.lease.leaseId}:worker-lost`;
+    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    const response = await this.sendWithRetry({
+      kind: "semantic-worker-loss", requestId: NodeCrypto.randomUUID(), operationId,
+      executionId: input.execution.executionId, input,
     });
     if (response.kind !== "semantic-transacted") throw new Error("Canonical writer returned an unexpected response");
     return response.result;

@@ -93,6 +93,30 @@ describe("execution semantic writer transport", () => {
     expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
   });
 
+  it("commits and replays worker-loss interruption through the SQLite writer worker", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const published: string[] = [];
+    const port = new CanonicalExecutionWriterPort(writer, (events) => {
+      published.push(...events.map((event) => event.eventId));
+    });
+    expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
+    const input = { execution, lease, reason: "Execution worker exited", recoveryIncidentId: "incident-1" };
+    expect(await port.interruptWorkerLoss({ ...input, lease: { ...lease, ownerEpoch: 2 } }))
+      .toEqual({ kind: "conflict", operationId: `${lease.leaseId}:worker-lost` });
+    const first = await port.interruptWorkerLoss(input);
+    expect(first).toMatchObject({ kind: "committed", operationId: `${lease.leaseId}:worker-lost` });
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ terminal_outcome: "interrupted" });
+    expect(published).toContain(`${EXECUTION_ID}:recovery-interrupted`);
+    published.length = 0;
+    expect(await port.interruptWorkerLoss(input)).toEqual(first);
+    expect(published).toContain(`${EXECUTION_ID}:recovery-interrupted`);
+    expect(await port.transact({
+      operationId: `${lease.leaseId}:2`, execution, lease, ordinal: 2,
+      mutation: { kind: "checkpoint", phase: "running", nativeCursor: null },
+    })).toEqual({ kind: "conflict", operationId: `${lease.leaseId}:2` });
+  });
+
   it("replays a durable semantic receipt after the writer loses its reply", async () => {
     let dropReply = true;
     const createWorker = (): Worker => {

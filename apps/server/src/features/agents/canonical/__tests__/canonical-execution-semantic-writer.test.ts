@@ -9,6 +9,7 @@ import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 import { ExecutionWorkerHandler } from "../../execution/execution-worker-handler.js";
+import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
 
@@ -111,6 +112,72 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
   async function send(ordinal: number, command: Parameters<ExecutionWorkerHandler["handle"]>[0]["command"]) {
     return (await handler.handle({ requestId: ordinal, execution, lease, ordinal, command })).result;
   }
+
+  const loss = {
+    execution, lease,
+    reason: "The execution worker exited before its provider turn could be proved live.",
+    recoveryIncidentId: "incident-1",
+  };
+
+  it("fences a lost worker while retaining durable text and narrative", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const text = new ParentAssistantTextCheckpointService(db);
+    expect(text.appendChunk([{ ...execution, sequence: 1, text: "Partial answer" }]).outcome).toBe("committed");
+    text.recoveryJournal.append([{ ...execution, sequence: 2, text: " from journal" }]);
+    const { CanonicalAgentBoundary } = await import("../canonical-agent-boundary.js");
+    const canonical = new CanonicalAgentBoundary(db, () => {});
+    expect(canonical.recordParentNarrativeRecovery({
+      executionId: EXECUTION_ID, items: toolNarrative("", 1),
+    })).toBe(true);
+
+    const receipt = writer.interruptWorkerLoss(loss);
+    expect(receipt).toMatchObject({ kind: "committed", operationId: "lease-1:worker-lost" });
+    expect(canonical.loadTurn(TURN_ID)).toMatchObject({ status: "Interrupted" });
+    expect(canonical.loadCheckpoint(EXECUTION_ID)).toMatchObject({ phase: "interrupted", terminalOutcome: "interrupted" });
+    expect(new MessageRepo(db).listIncludingInternal(THREAD_ID)).toContainEqual(expect.objectContaining({
+      role: "assistant", content: "Partial answer from journal", outcome: "interrupted", is_internal: false,
+    }));
+    expect(db.prepare("SELECT id, status, message_id FROM tool_call_records WHERE id = ?").get("tool-0"))
+      .toMatchObject({ id: "tool-0", status: "completed",
+        message_id: canonical.loadTerminalProjection(TURN_ID).message?.id });
+    expect(published).toContain(`${EXECUTION_ID}:recovery-interrupted`);
+    expect(await writer.transact(operation(2, { kind: "append-events", phase: "running", nativeCursor: null, events: [event()] })))
+      .toEqual({ kind: "conflict", operationId: "lease-1:2" });
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    published = [];
+    writer = new CanonicalExecutionSemanticWriter(db, (events) => published.push(...events.map((item) => item.eventId)));
+    expect(writer.interruptWorkerLoss(loss)).toEqual(receipt);
+    expect(published).toContain(`${EXECUTION_ID}:recovery-interrupted`);
+  });
+
+  it("rejects stale worker-loss leases without changing the unfinished turn", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    expect(writer.interruptWorkerLoss({ ...loss, lease: { ...lease, ownerEpoch: 2 } }))
+      .toEqual({ kind: "conflict", operationId: "lease-1:worker-lost" });
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ terminal_outcome: null });
+    expect(published).not.toContain(`${EXECUTION_ID}:recovery-interrupted`);
+  });
+
+  it("rolls back worker-loss interruption and publication when its receipt cannot commit", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const text = new ParentAssistantTextCheckpointService(db);
+    text.appendChunk([{ ...execution, sequence: 1, text: "Keep me" }]);
+    text.recoveryJournal.append([{ ...execution, sequence: 2, text: " through failure" }]);
+    db.run("CREATE TRIGGER fail_loss_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:worker-lost' BEGIN SELECT RAISE(ABORT, 'loss receipt unavailable'); END");
+    expect(() => writer.interruptWorkerLoss(loss)).toThrow("loss receipt unavailable");
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ terminal_outcome: null });
+    expect(new MessageRepo(db).listIncludingInternal(THREAD_ID).some((message) => message.role === "assistant")).toBe(false);
+    expect(text.restore(EXECUTION_ID)).toBe("Keep me through failure");
+    expect(published).not.toContain(`${EXECUTION_ID}:recovery-interrupted`);
+    db.run("DROP TRIGGER fail_loss_receipt");
+    expect(writer.interruptWorkerLoss(loss).kind).toBe("committed");
+    expect(db.prepare("SELECT content FROM messages WHERE role = 'assistant'").get())
+      .toEqual({ content: "Keep me through failure" });
+  });
 
   it("commits start, event, and finalization with durable receipts across a database reload", async () => {
     const begin = operation(1, { kind: "begin", providerId: "codex", input: startInput() });
