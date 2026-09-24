@@ -99,6 +99,38 @@ describe("execution semantic writer transport", () => {
       .toEqual({ count: 1 });
   });
 
+  it("delivers a large committed event batch in bounded publication pages", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const pageSizes: number[] = [];
+    const published: string[] = [];
+    const port = new CanonicalExecutionWriterPort(writer, (events) => {
+      pageSizes.push(events.length);
+      published.push(...events.map((event) => event.eventId));
+    });
+    expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
+    pageSizes.length = 0;
+    published.length = 0;
+    const events = Array.from({ length: 130 }, (_, index) => runtimeDraft(index + 1, {
+      type: AgentEventType.TextDelta,
+      threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID,
+      delta: "x",
+      isFinalResponse: true,
+    }));
+    const operation: ExecutionSemanticOperation = {
+      operationId: `${lease.leaseId}:2`, execution, lease, ordinal: 2,
+      mutation: { kind: "append-events", phase: "running", nativeCursor: null, events },
+    };
+    expect(await port.transact(operation)).toMatchObject({ kind: "committed" });
+    expect(pageSizes).toEqual([64, 64, 2]);
+    expect(published).toEqual(events.map((event) => event.eventId));
+    pageSizes.length = 0;
+    published.length = 0;
+    expect(await port.transact(operation)).toMatchObject({ kind: "committed" });
+    expect(pageSizes).toEqual([64, 64, 2]);
+    expect(published).toEqual(events.map((event) => event.eventId));
+  });
+
   it("does not acknowledge a failed database write and accepts a clean retry", async () => {
     writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
     const port = new CanonicalExecutionWriterPort(writer, () => {});

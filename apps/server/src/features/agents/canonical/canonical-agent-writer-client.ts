@@ -1,16 +1,16 @@
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
 import type {
   CanonicalParentNarrativeClassificationReceipt,
   CanonicalParentNarrativeRecoveryReceipt,
   CanonicalProviderWriteInput,
   CanonicalProviderWriteReceipt,
-  CanonicalSemanticWriteResult,
   CanonicalWriterRequest,
   CanonicalWriterResponse,
 } from "./canonical-agent-writer-protocol.js";
 import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
-import type { ExecutionSemanticOperation } from "../execution/execution-worker-handler.js";
+import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execution/execution-worker-handler.js";
 import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 
 const MAX_PENDING_WRITES = 64;
@@ -22,6 +22,7 @@ const WRITER_EXECUTION_ID = "writer:init";
 
 interface PendingRequest {
   request: CanonicalWriterRequest;
+  onPublication?: (events: readonly CanonicalAgentEventEnvelope[]) => void;
   resolve(response: CanonicalWriterResponse): void;
   reject(error: Error): void;
 }
@@ -69,29 +70,35 @@ export class CanonicalAgentWriterClient {
     return response.receipt;
   }
 
-  /** Commits one execution semantic operation on the writer worker and returns envelopes for publication. */
-  async transactSemantic(operation: ExecutionSemanticOperation): Promise<CanonicalSemanticWriteResult> {
+  /** Commits one execution operation and delivers bounded pages after each durable write. */
+  async transactSemantic(
+    operation: ExecutionSemanticOperation,
+    onPublication: (events: readonly CanonicalAgentEventEnvelope[]) => void,
+  ): Promise<ExecutionWriteReceipt> {
     if (!operation.operationId || !operation.execution.executionId) {
       throw new Error("Semantic writer operation and execution IDs are required");
     }
     const response = await this.sendWithRetry({
       kind: "semantic-transact", requestId: NodeCrypto.randomUUID(),
       operationId: operation.operationId, executionId: operation.execution.executionId, operation,
-    });
+    }, false, onPublication);
     if (response.kind !== "semantic-transacted") throw new Error("Canonical writer returned an unexpected response");
-    return response.result;
+    return response.receipt;
   }
 
-  /** Reconcile a lost execution on the writer, then return committed envelopes for publication. */
-  async interruptWorkerLoss(input: LostExecutionInterruption): Promise<CanonicalSemanticWriteResult> {
+  /** Reconcile a lost execution and deliver bounded committed publication pages. */
+  async interruptWorkerLoss(
+    input: LostExecutionInterruption,
+    onPublication: (events: readonly CanonicalAgentEventEnvelope[]) => void,
+  ): Promise<ExecutionWriteReceipt> {
     const operationId = `${input.lease.leaseId}:worker-lost`;
     await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
     const response = await this.sendWithRetry({
       kind: "semantic-worker-loss", requestId: NodeCrypto.randomUUID(), operationId,
       executionId: input.execution.executionId, input,
-    });
+    }, false, onPublication);
     if (response.kind !== "semantic-transacted") throw new Error("Canonical writer returned an unexpected response");
-    return response.result;
+    return response.receipt;
   }
 
   /** Resolves after recovery writes finish; a lost reply replays the durable receipt. */
@@ -215,13 +222,22 @@ export class CanonicalAgentWriterClient {
   private async sendWithRetry(
     request: CanonicalWriterRequest,
     allowDuringClose = false,
+    onPublication?: (events: readonly CanonicalAgentEventEnvelope[]) => void,
   ): Promise<CanonicalWriterResponse> {
+    let publishedCount = 0;
     for (let attempt = 1; attempt <= MAX_WORKER_ATTEMPTS; attempt++) {
       this.assertCanSend(allowDuringClose);
       try {
         await this.workerReady;
         this.assertCanSend(allowDuringClose);
-        return await this.sendRaw(request);
+        let attemptCount = 0;
+        const deliver = onPublication ? (events: readonly CanonicalAgentEventEnvelope[]) => {
+          const skipped = Math.min(events.length, Math.max(0, publishedCount - attemptCount));
+          if (skipped < events.length) onPublication(events.slice(skipped));
+          attemptCount += events.length;
+          publishedCount = Math.max(publishedCount, attemptCount);
+        } : undefined;
+        return await this.sendRaw(request, deliver);
       } catch (error) {
         if (!(error instanceof CanonicalWriterWorkerLost) || attempt === MAX_WORKER_ATTEMPTS) throw error;
         await this.restartAfterLoss(allowDuringClose);
@@ -271,14 +287,17 @@ export class CanonicalAgentWriterClient {
     if (response.kind !== "opened") throw new Error("Canonical writer did not open its database");
   }
 
-  private sendRaw(request: CanonicalWriterRequest): Promise<CanonicalWriterResponse> {
+  private sendRaw(
+    request: CanonicalWriterRequest,
+    onPublication?: (events: readonly CanonicalAgentEventEnvelope[]) => void,
+  ): Promise<CanonicalWriterResponse> {
     const worker = this.worker;
     if (!worker) return Promise.reject(new CanonicalWriterWorkerLost("Canonical writer worker closed"));
     if (request.kind !== "open" && request.kind !== "close" && this.pending.size >= MAX_PENDING_WRITES) {
       return Promise.reject(new Error("Canonical writer admission is full"));
     }
     return new Promise((resolve, reject) => {
-      this.pending.set(request.requestId, { request, resolve, reject });
+      this.pending.set(request.requestId, { request, onPublication, resolve, reject });
       try {
         worker.postMessage(request);
       } catch {
@@ -295,12 +314,32 @@ export class CanonicalAgentWriterClient {
       this.loseWorker(new Error("Canonical writer response identity mismatch"));
       return;
     }
+    if (response.kind === "semantic-publication") {
+      this.receivePublication(pending, response);
+      return;
+    }
     this.pending.delete(response.requestId);
     if (response.kind === "failed") {
       pending.reject(new Error(`Canonical writer ${response.reason}`));
       return;
     }
     pending.resolve(response);
+  }
+
+  private receivePublication(
+    pending: PendingRequest,
+    response: Extract<CanonicalWriterResponse, { kind: "semantic-publication" }>,
+  ): void {
+    if (!pending.onPublication || response.events.length === 0 || response.events.length > 64) {
+      this.loseWorker(new Error("Canonical writer publication page is invalid"));
+      return;
+    }
+    try {
+      pending.onPublication(response.events);
+    } catch (error) {
+      this.pending.delete(response.requestId);
+      pending.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   private loseWorker(error: Error, generation = this.generation): void {

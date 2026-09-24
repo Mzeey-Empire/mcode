@@ -2,7 +2,6 @@ import "reflect-metadata";
 import { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
@@ -21,7 +20,8 @@ let boundary: CanonicalAgentBoundary | undefined;
 let assistantTextCheckpoints: ParentAssistantTextCheckpointService | undefined;
 let receipts: CanonicalAgentWriterReceipts | undefined;
 let semanticWriter: CanonicalExecutionSemanticWriter | undefined;
-let semanticPublication: CanonicalAgentEventEnvelope[] | undefined;
+const PUBLICATION_PAGE_SIZE = 64;
+let semanticPublication: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId"> | undefined;
 
 function openDatabase(dbPath: string): void {
   if (boundary || !NodePath.isAbsolute(dbPath) || !NodeFS.existsSync(dbPath)) {
@@ -34,8 +34,15 @@ function openDatabase(dbPath: string): void {
     assistantTextCheckpoints = new ParentAssistantTextCheckpointService(connection);
     receipts = new CanonicalAgentWriterReceipts(connection);
     semanticWriter = new CanonicalExecutionSemanticWriter(connection, (events) => {
-      if (!semanticPublication) throw new Error("Semantic publication has no active request");
-      semanticPublication.push(...events);
+      const correlation = semanticPublication;
+      if (!correlation) throw new Error("Semantic publication has no active request");
+      for (let offset = 0; offset < events.length; offset += PUBLICATION_PAGE_SIZE) {
+        globalThis.postMessage({
+          ...correlation,
+          kind: "semantic-publication",
+          events: events.slice(offset, offset + PUBLICATION_PAGE_SIZE),
+        } satisfies CanonicalWriterResponse);
+      }
     });
     db = connection;
   } catch (error) {
@@ -135,12 +142,11 @@ async function handleSemanticWrite(
         || request.input.execution.executionId !== request.executionId) {
       throw new Error("Semantic writer request identity mismatch");
     }
-    semanticPublication = [];
+    semanticPublication = correlation;
     const receipt = request.kind === "semantic-transact"
       ? await semanticWriter.transact(request.operation)
       : semanticWriter.interruptWorkerLoss(request.input);
-    const events = semanticPublication;
-    return { ...correlation, kind: "semantic-transacted", result: { receipt, events } };
+    return { ...correlation, kind: "semantic-transacted", receipt };
   } catch {
     return { ...correlation, kind: "failed", reason: "write-failed" };
   } finally {

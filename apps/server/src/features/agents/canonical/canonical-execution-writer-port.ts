@@ -16,15 +16,11 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
 
   /** Resolve after the durable writer receipt and its canonical event publication. */
   async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
-    const { receipt, events } = await this.writer.transactSemantic(operation);
-    if (receipt.kind === "committed" && events.length > 0) this.publish(events);
-    return receipt;
+    return this.writer.transactSemantic(operation, this.publish);
   }
 
   /** Reconcile a lost worker through the sole writer and publish its committed interruption. */
   async interruptWorkerLoss(input: LostExecutionInterruption): Promise<ExecutionWriteReceipt> {
-    const { receipt, events } = await this.writer.interruptWorkerLoss(input);
-    if (receipt.kind === "committed" && events.length > 0) this.publish(events);
-    return receipt;
+    return this.writer.interruptWorkerLoss(input, this.publish);
   }
 }

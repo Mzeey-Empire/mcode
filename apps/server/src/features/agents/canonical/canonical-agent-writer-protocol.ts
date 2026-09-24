@@ -35,12 +35,6 @@ export interface CanonicalParentNarrativeClassificationReceipt {
   reset: true;
 }
 
-/** A semantic transaction and the committed envelopes awaiting publication. */
-export interface CanonicalSemanticWriteResult {
-  receipt: ExecutionWriteReceipt;
-  events: readonly CanonicalAgentEventEnvelope[];
-}
-
 interface Correlation {
   requestId: string;
   operationId: string;
@@ -60,7 +54,8 @@ export type CanonicalWriterRequest =
 export type CanonicalWriterResponse =
   | (Correlation & { kind: "opened" })
   | (Correlation & { kind: "committed"; receipt: CanonicalProviderWriteReceipt })
-  | (Correlation & { kind: "semantic-transacted"; result: CanonicalSemanticWriteResult })
+  | (Correlation & { kind: "semantic-publication"; events: readonly CanonicalAgentEventEnvelope[] })
+  | (Correlation & { kind: "semantic-transacted"; receipt: ExecutionWriteReceipt })
   | (Correlation & { kind: "parent-narrative-recovery-recorded"; receipt: CanonicalParentNarrativeRecoveryReceipt })
   | (Correlation & { kind: "parent-narrative-recovery-classified"; receipt: CanonicalParentNarrativeClassificationReceipt })
   | (Correlation & { kind: "operation-acknowledged" })
