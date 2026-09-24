@@ -1,15 +1,18 @@
 import type { Database } from "bun:sqlite";
+import * as NodeUtil from "node:util";
 import type { AgentEvent } from "@mcode/contracts";
 
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { CodexLiveReduction, CodexLiveWriterIntent } from "../execution/codex-live-event-reducer.js";
+import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import type { DataOnlyParentTerminalProjectionInput } from "./canonical-parent-turn-write.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 
 type Reduced = Extract<CodexLiveReduction, { kind: "reduced" }>;
 type SystemEvent = Extract<AgentEvent, { type: "system" }>;
-type SystemIntent = Extract<CodexLiveWriterIntent, { kind: "notice-session" | "system-notice" | "session-cursor" }>;
+/** System intents accepted by the execution-bound live writer. */
+export type CodexSystemWriterIntent = Extract<CodexLiveWriterIntent, { kind: "notice-session" | "system-notice" | "session-cursor" }>;
 type ErrorTerminalIntent = Extract<CodexLiveWriterIntent, { kind: "terminal-projection" }>;
 
 function errorTerminalIntent(reduction: Reduced, event: Extract<AgentEvent, { type: "error" }>): ErrorTerminalIntent {
@@ -24,8 +27,30 @@ function errorTerminalIntent(reduction: Reduced, event: Extract<AgentEvent, { ty
 
 /** Cloneable result of writer-local system projection or error terminal preparation. */
 export type CanonicalCodexSystemErrorResult =
-  | { readonly kind: "system"; readonly event: SystemEvent; readonly after: "writer" | "terminal" }
+  | SystemProjectionResult
   | { readonly kind: "error-terminal"; readonly event: Extract<AgentEvent, { type: "error" }>; readonly after: "terminal"; readonly input: DataOnlyParentTerminalProjectionInput };
+
+type SystemProjectionResult = { readonly kind: "system"; readonly event: SystemEvent; readonly after: "writer" | "terminal" };
+
+function expectedSystemIntentKind(event: SystemEvent): CodexSystemWriterIntent["kind"] | null {
+  if (event.subtype === "provider.session.started") return "notice-session";
+  if (event.subtype.startsWith("provider.notice.") && event.message) return "system-notice";
+  if (event.subtype.startsWith("sdk_session_id:") || event.subtype === "sdk_session_invalidated") return "session-cursor";
+  return null;
+}
+
+/** Check that a bound system event carries exactly its reducer-owned projection intent. */
+export function matchesCodexSystemIntents(event: SystemEvent, intents: readonly CodexSystemWriterIntent[]): boolean {
+  const expected = expectedSystemIntentKind(event);
+  if (!Array.isArray(intents) || intents.length !== (expected ? 1 : 0)) return false;
+  if (!expected) return true;
+  return intents[0]?.kind === expected && NodeUtil.isDeepStrictEqual(intents[0].event, event)
+    && (expected !== "system-notice" || !event.messageId);
+}
+
+function isSystemWriterIntent(intent: CodexLiveWriterIntent): intent is CodexSystemWriterIntent {
+  return intent.kind === "notice-session" || intent.kind === "system-notice" || intent.kind === "session-cursor";
+}
 
 /** Projects only execution-bound Codex system events and prepares errors for the terminal owner. */
 export class CanonicalCodexSystemErrorProjection {
@@ -46,29 +71,37 @@ export class CanonicalCodexSystemErrorProjection {
     if (event.threadId !== reduction.execution.threadId || event.turnExecutionId !== reduction.execution.executionId) {
       throw new Error("Codex event lacks exact execution ownership");
     }
-    if (event.type === "system") return this.projectSystem(reduction, event);
+    if (event.type === "system") {
+      if (!reduction.writer.every(isSystemWriterIntent)) throw new Error("Codex system has a non-system intent");
+      return this.projectBoundSystem(reduction.execution, event, reduction.writer, reduction.publication.after);
+    }
     if (event.type === "error") return this.prepareError(reduction, event, endedAt);
     throw new Error(`Codex ${event.type} needs another feature owner`);
   }
 
-  private projectSystem(reduction: Reduced, event: SystemEvent): CanonicalCodexSystemErrorResult {
+  /** Apply one bound system event and return the event that the committed receipt must publish. */
+  projectBoundSystem(
+    execution: ExecutionIdentity,
+    event: SystemEvent,
+    intents: readonly CodexSystemWriterIntent[],
+    after: "writer" | "terminal",
+  ): SystemProjectionResult {
+    if (event.threadId !== execution.threadId || event.turnExecutionId !== execution.executionId) {
+      throw new Error("Codex system event lacks exact execution ownership");
+    }
+    if (!matchesCodexSystemIntents(event, intents)) {
+      throw new Error("Codex system intents do not match the event");
+    }
     return this.db.transaction(() => {
       let published: SystemEvent = { ...event };
-      for (const intent of reduction.writer) {
-        if (!this.isSystemIntent(intent) || JSON.stringify(intent.event) !== JSON.stringify(event)) {
-          throw new Error("Codex system intent does not match its publication");
-        }
-        published = this.applySystemIntent(reduction, intent, published);
+      for (const intent of intents) {
+        published = this.applySystemIntent(execution.executionId, intent, published);
       }
-      return structuredClone({ kind: "system", event: published, after: reduction.publication.after } satisfies CanonicalCodexSystemErrorResult);
+      return structuredClone({ kind: "system", event: published, after } satisfies SystemProjectionResult);
     })();
   }
 
-  private isSystemIntent(intent: CodexLiveWriterIntent): intent is SystemIntent {
-    return intent.kind === "notice-session" || intent.kind === "system-notice" || intent.kind === "session-cursor";
-  }
-
-  private applySystemIntent(reduction: Reduced, intent: SystemIntent, event: SystemEvent): SystemEvent {
+  private applySystemIntent(executionId: string, intent: CodexSystemWriterIntent, event: SystemEvent): SystemEvent {
     switch (intent.kind) {
       case "notice-session":
         if (event.subtype !== "provider.session.started") throw new Error("Codex notice session subtype is invalid");
@@ -81,7 +114,7 @@ export class CanonicalCodexSystemErrorProjection {
         return { ...event, messageId: message.id };
       }
       case "session-cursor":
-        this.applyCursor(reduction.execution.executionId, event);
+        this.applyCursor(executionId, event);
         return event;
     }
   }

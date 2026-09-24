@@ -24,6 +24,7 @@ import type {
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
+import { CanonicalCodexSystemErrorProjection, matchesCodexSystemIntents } from "./canonical-codex-system-error-projection.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
 import { CanonicalParentTurnWrite } from "./canonical-parent-turn-write.js";
 import { TaskRepo } from "../orchestration/persistence/task-repo.js";
@@ -170,6 +171,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private readonly turns: CanonicalParentTurnWrite;
   private readonly providerProjector: CanonicalCommittedProviderProjector;
   private readonly contextCompaction: CanonicalContextCompactionProjection;
+  private readonly systemProjection: CanonicalCodexSystemErrorProjection;
   private readonly tasks: TaskRepo;
   private readonly assistantText: ParentAssistantTextCheckpointService;
   private readonly canonical: CanonicalAgentBoundary;
@@ -197,6 +199,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.canonical = codexBoundary;
     this.providerProjector = new CanonicalCommittedProviderProjector(codexBoundary);
     this.contextCompaction = new CanonicalContextCompactionProjection(db);
+    this.systemProjection = new CanonicalCodexSystemErrorProjection(db);
     this.tasks = new TaskRepo(db);
     this.assistantText = new ParentAssistantTextCheckpointService(db);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
@@ -424,7 +427,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       if (mutation.text.kind === "reclassify" && !this.assistantText.resetInTransaction(operation.execution.executionId)) {
         throw new SemanticConflict();
       }
-      const committedReceipt = committed(operation, head.durableRevision, undefined, undefined, textResult);
+      const livePublication = this.projectLiveSystem(operation);
+      const committedReceipt = committed(operation, head.durableRevision, undefined, undefined, textResult, livePublication);
       this.storeHead({ ...head, ordinal: operation.ordinal });
       this.storeReceipt(operation, hash, committedReceipt);
       return committedReceipt;
@@ -433,6 +437,17 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.assistantText.discardRecoveryJournal(operation.execution.executionId);
     }
     return receipt;
+  }
+
+  private projectLiveSystem(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationReceipt[] | undefined {
+    const mutation = operation.mutation;
+    if (mutation.kind !== "live-event" || mutation.systemIntents === undefined) return undefined;
+    const publication = liveEventPublication(operation);
+    if (publication?.event.type !== "system") throw new SemanticConflict();
+    const result = this.systemProjection.projectBoundSystem(
+      operation.execution, publication.event, mutation.systemIntents, publication.after,
+    );
+    return [{ publicationId: `${operation.operationId}:0`, after: result.after, event: result.event }];
   }
 
   private applyLiveText(
@@ -670,12 +685,34 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       throw new Error("Live publication receipt exceeds its size limit");
     }
     const receipt = storedReceiptSchema.parse(JSON.parse(stored.receipt_json));
-    if (fingerprint(receipt.livePublication ?? null) !== fingerprint(livePublicationFor(operation) ?? null)) {
+    if (!this.matchesLivePublicationReceipt(operation, receipt.livePublication)) {
       throw new Error("Live publication receipt does not match its operation");
     }
     return receipt.operationId === operation.operationId && Number.isSafeInteger(receipt.durableRevision)
       ? committed(operation, receipt.durableRevision, receipt.providerCommit, receipt.providerEvents,
         receipt.assistantTextCheckpoint, receipt.livePublication) : conflict(operation);
+  }
+
+  private matchesLivePublicationReceipt(
+    operation: ExecutionSemanticOperation,
+    actual: readonly ExecutionLivePublicationReceipt[] | undefined,
+  ): boolean {
+    const mutation = operation.mutation;
+    if (mutation.kind === "live-event" && mutation.systemIntents?.[0]?.kind === "system-notice") {
+      return this.matchesGeneratedNoticeReceipt(operation, actual);
+    }
+    return fingerprint(actual ?? null) === fingerprint(livePublicationFor(operation) ?? null);
+  }
+
+  private matchesGeneratedNoticeReceipt(
+    operation: ExecutionSemanticOperation,
+    actual: readonly ExecutionLivePublicationReceipt[] | undefined,
+  ): boolean {
+    const expected = livePublicationFor(operation)?.[0];
+    const published = actual?.[0];
+    if (actual?.length !== 1 || expected?.event.type !== "system" || expected.event.messageId
+      || !isGeneratedNoticePublication(published)) return false;
+    return fingerprint({ ...published, event: { ...published.event, messageId: undefined } }) === fingerprint(expected);
   }
 
   private publishStoredEvents(executionId: string, hash: string): void {
@@ -800,11 +837,22 @@ function validLiveEventInput(operation: ExecutionSemanticOperation): boolean {
   const publication = liveEventPublication(operation);
   if (!publication) return false;
   const event = publication.event;
+  if (!validLiveSystemMutation(mutation, event)) return false;
   if (!validLiveTextPayload(mutation, operation.execution)
     || !AgentEventSchema().safeParse(event).success || !validLiveTextAssociation(mutation.text, event)) return false;
   if (mutation.narrative && !validNarrativeDeltaInput(mutation.narrative, operation.execution)) return false;
   if (!validLiveTaskIntents(mutation.taskIntents, event)) return false;
   return validLiveEventBudget(operation, mutation);
+}
+
+function validLiveSystemMutation(
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>,
+  event: ExecutionLivePublicationIntent["event"],
+): boolean {
+  if (event.type !== "system") return mutation.systemIntents === undefined;
+  return Array.isArray(mutation.systemIntents) && mutation.systemIntents.length <= 1
+    && mutation.text.kind === "unchanged" && mutation.narrative === undefined && mutation.taskIntents === undefined
+    && matchesCodexSystemIntents(event, mutation.systemIntents);
 }
 
 function validLiveTaskIntents(
@@ -860,7 +908,7 @@ function validLiveTextAssociation(
   event: ExecutionLivePublicationIntent["event"],
 ): boolean {
   switch (text.kind) {
-    case "unchanged": return validNarrativeEvent(event);
+    case "unchanged": return event.type === "system" || validNarrativeEvent(event);
     case "append": return validAppendEvent(event, text.inputs);
     case "reclassify": return event.type === "assistantMessageBoundary" && event.isFinalResponse === false
       && text.expectedText.length > 0;
@@ -997,6 +1045,13 @@ function livePublicationFor(operation: ExecutionSemanticOperation): readonly Exe
     publicationId: `${operation.operationId}:${index}`, after: intent.after,
     event: AgentEventSchema().parse(intent.event),
   }));
+}
+
+function isGeneratedNoticePublication(
+  receipt: ExecutionLivePublicationReceipt | undefined,
+): receipt is ExecutionLivePublicationReceipt & { readonly event: Extract<ExecutionLivePublicationIntent["event"], { type: "system" }> & { readonly messageId: string } } {
+  return receipt?.event.type === "system" && typeof receipt.event.messageId === "string"
+    && z.string().uuid().safeParse(receipt.event.messageId).success;
 }
 
 function conflict(operation: ExecutionSemanticOperation): Extract<ExecutionWriteReceipt, { kind: "conflict" }> {

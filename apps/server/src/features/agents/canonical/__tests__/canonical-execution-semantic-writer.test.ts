@@ -9,11 +9,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { TaskRepo } from "../../orchestration/persistence/task-repo.js";
+import { CodexLiveEventReducer } from "../../execution/codex-live-event-reducer.js";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 import { ExecutionWorkerHandler } from "../../execution/execution-worker-handler.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { NarrativeRecoveryDelta } from "../../turns/narrative-recovery-delta.js";
 import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
+import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-projection.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
 
@@ -105,6 +107,18 @@ function toolNarrative(messageId: string, count: number) {
 
 function operation(ordinal: number, mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation {
   return { operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation };
+}
+
+function systemLiveOperation(ordinal: number, systemEvent: Extract<AgentEvent, { type: "system" }>): ExecutionSemanticOperation {
+  const reduction = new CodexLiveEventReducer(execution).reduce(systemEvent);
+  if (reduction.kind !== "reduced" || reduction.publication.after !== "writer") throw new Error("Expected a bound live system event");
+  const systemIntents = reduction.writer.filter((intent): intent is CodexSystemWriterIntent =>
+    intent.kind === "notice-session" || intent.kind === "system-notice" || intent.kind === "session-cursor");
+  if (systemIntents.length !== reduction.writer.length) throw new Error("Unexpected system reducer intent");
+  return {
+    ...operation(ordinal, { kind: "live-event", text: { kind: "unchanged" }, systemIntents }),
+    livePublication: [reduction.publication],
+  };
 }
 
 describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () => {
@@ -510,6 +524,83 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(await writer.transact(op)).toEqual(receipt);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
       .get(EXECUTION_ID, "lease-1:2")).toEqual({ count: 1 });
+  });
+
+  it("commits a system notice and its generated message ID in one replayable live receipt", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const notice: Extract<AgentEvent, { type: "system" }> = {
+      type: "system", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+      subtype: "provider.notice.unknown-event", message: "Codex reported an update.",
+      systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "turn", noticeKey: "notice-1" },
+    };
+    const op = systemLiveOperation(2, notice);
+    const publishedBefore = [...published];
+    db.run("CREATE TRIGGER fail_system_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:live-event' BEGIN SELECT RAISE(ABORT, 'system receipt unavailable'); END");
+    await expect(writer.transact(op)).rejects.toThrow("system receipt unavailable");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE thread_id = ? AND role = 'system'").get(THREAD_ID))
+      .toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, op.operationId)).toEqual({ count: 0 });
+    expect(published).toEqual(publishedBefore);
+    db.run("DROP TRIGGER fail_system_receipt");
+
+    const receipt = await writer.transact(op);
+    expect(receipt).toMatchObject({ kind: "committed", livePublication: [{ publicationId: "lease-1:2:0",
+      after: "writer", event: { ...notice, messageId: expect.any(String) } }] });
+    if (receipt.kind !== "committed") return;
+    const messageId = receipt.livePublication?.[0]?.event.type === "system"
+      ? receipt.livePublication[0].event.messageId : undefined;
+    expect(messageId).toBeDefined();
+    if (!messageId) return;
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, messageId))
+      .toMatchObject({ role: "system", content: notice.message });
+    expect(await writer.transact(op)).toEqual(receipt);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE thread_id = ? AND role = 'system'").get(THREAD_ID))
+      .toEqual({ count: 1 });
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalExecutionSemanticWriter(db, () => {});
+    expect(await writer.transact(op)).toEqual(receipt);
+    const stored = db.prepare("SELECT receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, op.operationId) as { receipt_json: string };
+    const corrupted = JSON.parse(stored.receipt_json) as { livePublication: { event: { messageId: string } }[] };
+    corrupted.livePublication[0]!.event.messageId = "not-a-message-id";
+    db.prepare("UPDATE canonical_writer_operation_receipts SET receipt_json = ? WHERE execution_id = ? AND operation_id = ?")
+      .run(JSON.stringify(corrupted), EXECUTION_ID, op.operationId);
+    await expect(writer.transact(op)).rejects.toThrow("Invalid uuid");
+    const altered = JSON.parse(stored.receipt_json) as { livePublication: { event: { message: string } }[] };
+    altered.livePublication[0]!.event.message = "Different notice";
+    db.prepare("UPDATE canonical_writer_operation_receipts SET receipt_json = ? WHERE execution_id = ? AND operation_id = ?")
+      .run(JSON.stringify(altered), EXECUTION_ID, op.operationId);
+    await expect(writer.transact(op)).rejects.toThrow("Live publication receipt does not match");
+  });
+
+  it("fences session cursors to the selected execution in the compound live writer", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const cursor: Extract<AgentEvent, { type: "system" }> = {
+      type: "system", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, subtype: "sdk_session_id:native-cursor",
+    };
+    const unbound = { ...cursor, turnExecutionId: undefined };
+    expect(await send(2, { kind: "live-event", text: { kind: "unchanged" },
+      systemIntents: [{ kind: "session-cursor", event: unbound }], publication: { event: unbound, after: "writer" },
+    })).toEqual({ kind: "rejected", reason: "writer-conflict" });
+    expect(db.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(THREAD_ID))
+      .toEqual({ sdk_session_id: null });
+    expect(await send(2, { kind: "live-event", text: { kind: "unchanged" },
+      systemIntents: [{ kind: "session-cursor", event: { ...cursor, turnExecutionId: "other-execution" } }],
+      publication: { event: cursor, after: "writer" },
+    })).toEqual({ kind: "rejected", reason: "writer-conflict" });
+    expect(db.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(THREAD_ID))
+      .toEqual({ sdk_session_id: null });
+    const receipt = await send(2, { kind: "live-event", text: { kind: "unchanged" },
+      systemIntents: [{ kind: "session-cursor", event: cursor }], publication: { event: cursor, after: "writer" },
+    });
+    expect(receipt).toMatchObject({ kind: "committed", livePublication: [{ event: cursor }] });
+    expect(db.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(THREAD_ID))
+      .toEqual({ sdk_session_id: "native-cursor" });
+    expect(new CanonicalAgentBoundary(db, () => {}).loadCheckpoint(EXECUTION_ID))
+      .toMatchObject({ nativeCursor: { providerId: "codex", scope: "thread", value: "native-cursor" } });
   });
 
   it("stores task-tool rows before the matching live tool publication", async () => {

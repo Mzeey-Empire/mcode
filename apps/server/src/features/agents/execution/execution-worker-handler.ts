@@ -6,6 +6,7 @@ import type {
   DataOnlyParentTurnFinishInput,
   DataOnlyParentTurnStartInput,
 } from "../canonical/canonical-parent-turn-write.js";
+import type { CodexSystemWriterIntent } from "../canonical/canonical-codex-system-error-projection.js";
 import type { CanonicalAgentCommitResult } from "../canonical/canonical-agent-boundary.js";
 import type { ProviderEventIngressEvent } from "../../providers/composition/provider-event-ingress.js";
 import type {
@@ -38,6 +39,7 @@ export type ExecutionWorkCommand =
       | { readonly kind: "promote"; readonly input: ParentAssistantTextCheckpointInput };
     readonly narrative?: ParentNarrativeRecoveryCommit;
     readonly taskIntents?: readonly TaskToolWriteIntent[];
+    readonly systemIntents?: readonly CodexSystemWriterIntent[];
     readonly publication: ExecutionLivePublicationIntent;
   }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
@@ -66,6 +68,7 @@ export interface ExecutionSemanticOperation {
       readonly text: Extract<ExecutionWorkCommand, { readonly kind: "live-event" }>["text"];
       readonly narrative?: ParentNarrativeRecoveryCommit;
       readonly taskIntents?: readonly TaskToolWriteIntent[];
+      readonly systemIntents?: readonly CodexSystemWriterIntent[];
     }
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
@@ -293,6 +296,7 @@ function liveEventMutation(
     kind: "live-event", text: command.text,
     ...(command.narrative ? { narrative: command.narrative } : {}),
     ...(command.taskIntents ? { taskIntents: command.taskIntents } : {}),
+    ...(command.systemIntents ? { systemIntents: command.systemIntents } : {}),
   };
 }
 
