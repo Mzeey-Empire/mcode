@@ -71,4 +71,57 @@ describe("execution semantic writer transport", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = ?").get("semantic-worker-user"))
       .toEqual({ count: 1 });
   });
+
+  it("does not acknowledge a failed database write and accepts a clean retry", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const port = new CanonicalExecutionWriterPort(writer, () => {});
+    db.run(`CREATE TRIGGER reject_semantic_start BEFORE INSERT ON canonical_agent_events
+      BEGIN SELECT RAISE(FAIL, 'injected write failure'); END`);
+
+    await expect(port.transact(beginOperation())).rejects.toThrow("Canonical writer write-failed");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = ?").get("semantic-worker-user"))
+      .toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ count: 0 });
+
+    db.run("DROP TRIGGER reject_semantic_start");
+    expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
+  });
+
+  it("replays a durable semantic receipt after the writer loses its reply", async () => {
+    let dropReply = true;
+    const createWorker = (): Worker => {
+      const worker = new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
+      return new Proxy(worker, {
+        set(target, property, value) {
+          if (property !== "onmessage" || typeof value !== "function") return Reflect.set(target, property, value);
+          target.onmessage = (message) => {
+            if (dropReply && message.data.kind === "semantic-transacted") {
+              dropReply = false;
+              target.terminate();
+              return;
+            }
+            value(message);
+          };
+          return true;
+        },
+        get(target, property) {
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    };
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"), createWorker);
+    const published: string[] = [];
+    const port = new CanonicalExecutionWriterPort(writer, (events) => {
+      published.push(...events.map((event) => event.eventId));
+    });
+
+    expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
+    expect(dropReply).toBe(false);
+    expect(published.length).toBeGreaterThan(0);
+    expect(new Set(published).size).toBe(published.length);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = ?").get("semantic-worker-user"))
+      .toEqual({ count: 1 });
+  });
 });
