@@ -7,6 +7,7 @@ import type {
   DataOnlyParentTurnStartInput,
 } from "../canonical/canonical-parent-turn-write.js";
 import type { CanonicalAgentCommitResult } from "../canonical/canonical-agent-boundary.js";
+import type { ProviderEventIngressEvent } from "../../providers/composition/provider-event-ingress.js";
 import type {
   ExecutionIdentity,
   ExecutionLease,
@@ -52,9 +53,18 @@ export type ExecutionProviderCommitReceipt = Pick<
   "outcome" | "conversationRevision" | "rosterRevision" | "acceptedThrough" | "durableThrough"
 > & { readonly eventCount: number };
 
+/** A committed runtime event after writer-local provider interpretation. */
+export type ProjectedCommittedProviderEvent = Omit<
+  ProviderEventIngressEvent,
+  "sourceKind" | "canonicalReceipt" | "runtimeExtension"
+> & {
+  readonly sourceKind: "canonical-commit";
+  readonly canonicalReceipt: NonNullable<ProviderEventIngressEvent["canonicalReceipt"]>;
+};
+
 /** A writer reply is valid only after the semantic operation commits durably. */
 export type ExecutionWriteReceipt =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[] }
   | { readonly kind: "conflict"; readonly operationId: string };
 
 /**
@@ -68,7 +78,7 @@ export interface ExecutionSemanticWriter {
 
 /** A command result that never calls an uncommitted mutation successful. */
 export type ExecutionWorkerResult =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[] }
   | { readonly kind: "released" }
   | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-stop-watermark" | "writer-conflict" };
 
@@ -306,6 +316,7 @@ function committedResult(receipt: Extract<ExecutionWriteReceipt, { kind: "commit
   return {
     kind: "committed", operationId: receipt.operationId, durableRevision: receipt.durableRevision,
     ...(receipt.providerCommit ? { providerCommit: receipt.providerCommit } : {}),
+    ...(receipt.providerEvents ? { providerEvents: receipt.providerEvents } : {}),
   };
 }
 

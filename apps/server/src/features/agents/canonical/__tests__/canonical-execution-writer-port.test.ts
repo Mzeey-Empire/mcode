@@ -361,4 +361,92 @@ describe("execution semantic writer transport", () => {
       scheduler.shutdown();
     }
   });
+  it("projects Codex parent and child events on the writer and replays without repeating child writes", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const published: string[] = [];
+    const port = new CanonicalExecutionWriterPort(writer, (events) => {
+      published.push(...events.map((event) => event.eventId));
+    });
+    const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
+      workerCount: 1,
+      limits: {
+        maxPending: 16, maxPendingBytes: 64_000, reservedControl: 4, reservedControlBytes: 16_000,
+        maxPerExecutionPending: 12, maxPerExecutionBytes: 48_000,
+        reservedPerExecutionControl: 3, reservedPerExecutionControlBytes: 12_000,
+      },
+      createWorker: () => new ExecutionThreadWorkerPort(port),
+      onWorkerLost: () => { throw new Error("Execution worker was lost"); },
+    });
+    try {
+      const claim = scheduler.claim(execution, 1);
+      if (claim.kind !== "claimed") throw new Error(`Execution claim failed: ${claim.kind}`);
+      const send = (command: Parameters<typeof scheduler.submit>[0]["command"]) => {
+        const admission = scheduler.submit({ execution, lease: claim.lease, command, byteLength: 1_000 });
+        if (admission.kind !== "admitted") throw new Error(`Execution admission failed: ${admission.kind}`);
+        return admission.completion;
+      };
+      const start = beginOperation().mutation;
+      if (start.kind !== "begin") throw new Error("Unexpected begin operation");
+      await expect(send({ kind: "start", providerId: "codex", input: start.input }))
+        .resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+
+      const parent = runtimeDraft(1, {
+        type: AgentEventType.ToolUse, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+        toolCallId: "spawn-1", toolName: "Agent", toolInput: {},
+      }, {
+        providerId: "codex", kind: "codex-collaboration",
+        collaboration: { kind: "spawnAgent", receiverThreadIds: ["native-child"], prompt: "Inspect the task" },
+      });
+      const parentCommand = { kind: "event" as const, phase: "running", nativeCursor: null, events: [parent] };
+      await expect(send(parentCommand)).resolves.toMatchObject({
+        kind: "reply", result: { kind: "committed", providerEvents: [{
+          event: { type: AgentEventType.ToolUse, toolInput: {}, subagentPresentation: {
+            detail: { kind: "canonical-child" },
+          } },
+        }] },
+      });
+      const delegation = db.prepare("SELECT target_thread_id FROM canonical_collaboration_actions WHERE source_item_id = ?")
+        .get("toolCall:spawn-1");
+      expect(delegation).toMatchObject({ target_thread_id: expect.any(String) });
+      const parentOperation: ExecutionSemanticOperation = {
+        operationId: `${claim.lease.leaseId}:2`, execution, lease: claim.lease, ordinal: 2,
+        mutation: { kind: "append-events", phase: "running", nativeCursor: null, events: [parent] },
+      };
+      const replayedParent = await port.transact(parentOperation);
+      expect(replayedParent).toMatchObject({ kind: "committed", providerEvents: [{
+        event: { toolInput: {}, subagentPresentation: { detail: { kind: "canonical-child" } } },
+      }] });
+      expect(replayedParent).toMatchObject(db.prepare("SELECT last_durable_sequence AS durableRevision FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+        .get(EXECUTION_ID));
+      expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_collaboration_actions WHERE source_item_id = ?")
+        .get("toolCall:spawn-1")).toEqual({ count: 1 });
+
+      const child = runtimeDraft(2, {
+        type: AgentEventType.TurnStarted, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+      }, {
+        providerId: "codex", kind: "codex-collaboration",
+        child: { nativeThreadId: "native-child", nativeTurnId: "native-turn", parentCollaborationItemId: "spawn-1" },
+      });
+      await expect(send({ kind: "event", phase: "running", nativeCursor: null, events: [child] }))
+        .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", providerEvents: [] } });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_turns WHERE thread_id = (SELECT target_thread_id FROM canonical_collaboration_actions WHERE source_item_id = ?)")
+        .get("toolCall:spawn-1")).toEqual({ count: 1 });
+      const childEventsBefore = db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE thread_id = (SELECT target_thread_id FROM canonical_collaboration_actions WHERE source_item_id = ?)")
+        .get("toolCall:spawn-1");
+      expect(childEventsBefore).toMatchObject({ count: expect.any(Number) });
+      const publishedBeforeReplay = published.length;
+      expect(await port.transact({
+        operationId: `${claim.lease.leaseId}:3`, execution, lease: claim.lease, ordinal: 3,
+        mutation: { kind: "append-events", phase: "running", nativeCursor: null, events: [child] },
+      })).toMatchObject({ kind: "committed", providerEvents: [] });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE thread_id = (SELECT target_thread_id FROM canonical_collaboration_actions WHERE source_item_id = ?)")
+        .get("toolCall:spawn-1")).toEqual(childEventsBefore);
+      expect(published.length).toBeGreaterThan(publishedBeforeReplay);
+      expect(published).toContain(parent.eventId);
+      expect(published).toContain(child.eventId);
+    } finally {
+      scheduler.shutdown();
+    }
+  });
+
 });

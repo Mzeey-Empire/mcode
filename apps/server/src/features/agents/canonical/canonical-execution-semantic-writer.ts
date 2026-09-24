@@ -1,16 +1,25 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
-import { CanonicalAgentEventEnvelopeSchema, TurnOutcomeSchema, type TurnOutcome } from "@mcode/contracts";
+import {
+  AgentEventSchema,
+  CanonicalAgentEventEnvelopeSchema,
+  ProviderIdSchema,
+  TurnOutcomeSchema,
+  type TurnOutcome,
+} from "@mcode/contracts";
 import { z } from "zod";
 
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import type {
   ExecutionProviderCommitReceipt,
+  ProjectedCommittedProviderEvent,
   ExecutionSemanticOperation,
   ExecutionSemanticWriter,
   ExecutionWriteReceipt,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
+import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
 import { CanonicalParentTurnWrite } from "./canonical-parent-turn-write.js";
 
 const HEAD_ID = "semantic:head";
@@ -18,8 +27,24 @@ const HEAD_KIND = "semantic-head";
 const PUBLICATION_KIND = "semantic-publication";
 const PENDING_FINISH_KIND = "semantic:finish-pending";
 const PUBLICATION_CHUNK_SIZE = 64;
-const storedPublicationSequencesSchema = z.array(z.number().int().positive().max(Number.MAX_SAFE_INTEGER))
+const MAX_BUFFERED_PUBLICATION_EVENTS = 2_048;
+const storedPublicationSequencesSchema = z.array(z.union([
+  z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  z.object({ executionId: z.string(), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
+]))
   .min(1).max(PUBLICATION_CHUNK_SIZE);
+const projectedProviderEventSchema = z.object({
+  providerId: ProviderIdSchema,
+  sourceKind: z.literal("canonical-commit"),
+  event: AgentEventSchema(),
+  canonicalReceipt: z.object({
+    eventId: z.string(),
+    sourceSequence: z.number().int().optional(),
+    acceptedSequence: z.number().int(),
+    durableRevision: z.number().int(),
+    serverTimestamps: z.object({ acceptedAt: z.string(), persistedAt: z.string().optional() }),
+  }),
+});
 const storedHeadSchema = z.object({
   execution: z.object({ threadId: z.string(), turnId: z.string(), executionId: z.string() }),
   providerId: z.string(),
@@ -49,6 +74,7 @@ const storedReceiptSchema = z.object({
     durableThrough: z.number().int(),
     eventCount: z.number().int().nonnegative(),
   }).optional(),
+  providerEvents: z.array(projectedProviderEventSchema).optional(),
 });
 const storedOperationSchema = z.object({
   kind: z.string(),
@@ -57,6 +83,7 @@ const storedOperationSchema = z.object({
 });
 const storedOperationListSchema = z.array(storedOperationSchema);
 const storedEnvelopeRowSchema = z.object({ envelope_json: z.string() });
+const durableSequenceRowSchema = z.object({ last_durable_sequence: z.number().int() });
 
 interface SemanticHead {
   readonly execution: ExecutionIdentity;
@@ -85,24 +112,33 @@ export interface LostExecutionInterruption {
 /** Adapts the supported execution mutations to one writer-local canonical SQLite connection. */
 export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter {
   private readonly turns: CanonicalParentTurnWrite;
+  private readonly providerProjector: CanonicalCommittedProviderProjector;
   private readonly findOperation: ReturnType<Database["prepare"]>;
   private readonly listPublicationChunks: ReturnType<Database["prepare"]>;
   private readonly findPublishedEvent: ReturnType<Database["prepare"]>;
+  private readonly findDurableSequence: ReturnType<Database["prepare"]>;
   private readonly insertOperation: ReturnType<Database["prepare"]>;
   private readonly commitPendingFinish: ReturnType<Database["prepare"]>;
   private readonly updateHead: ReturnType<Database["prepare"]>;
   private readonly updateCheckpointPhase: ReturnType<Database["prepare"]>;
   private readonly updateCheckpoint: ReturnType<Database["prepare"]>;
   private bufferedPublication: Parameters<CanonicalAgentEventPublisher>[0][] | null = null;
+  private bufferedPublicationCount = 0;
 
   constructor(private readonly db: Database, private readonly publish: CanonicalAgentEventPublisher) {
     this.turns = new CanonicalParentTurnWrite(db, (events) => {
-      if (this.bufferedPublication) this.bufferedPublication.push(events);
+      if (this.bufferedPublication) this.bufferPublication(events);
       else this.publish(events);
     });
+    const codexBoundary = new CanonicalAgentBoundary(db, (events) => {
+      if (!this.bufferedPublication) throw new Error("Codex projection requires a semantic transaction");
+      this.bufferPublication(events);
+    });
+    this.providerProjector = new CanonicalCommittedProviderProjector(codexBoundary);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
     this.listPublicationChunks = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id >= ? AND operation_id < ? ORDER BY operation_id");
     this.findPublishedEvent = db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE execution_id = ? AND accepted_sequence = ?");
+    this.findDurableSequence = db.prepare("SELECT last_durable_sequence FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?");
     this.insertOperation = db.prepare("INSERT INTO canonical_writer_operation_receipts (execution_id, operation_id, kind, input_hash, receipt_json) VALUES (?, ?, ?, ?, ?)");
     this.commitPendingFinish = db.prepare("UPDATE canonical_writer_operation_receipts SET kind = ?, receipt_json = ? WHERE execution_id = ? AND operation_id = ? AND kind = ? AND input_hash = ?");
     this.updateHead = db.prepare("UPDATE canonical_writer_operation_receipts SET receipt_json = ? WHERE execution_id = ? AND operation_id = ? AND kind = ?");
@@ -236,6 +272,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         events: mutation.events,
       });
       if (result.outcome !== "committed") throw new SemanticConflict();
+      const providerEvents = this.providerProjector.project(result.events);
+      const checkpoint = durableSequenceRowSchema.parse(this.findDurableSequence.get(operation.execution.executionId));
       const providerCommit: ExecutionProviderCommitReceipt = {
         outcome: result.outcome,
         conversationRevision: result.conversationRevision,
@@ -244,9 +282,14 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         durableThrough: result.durableThrough,
         eventCount: result.events.length,
       };
-      const receipt = committed(operation, result.durableThrough, providerCommit);
+      const receipt = committed(operation, checkpoint.last_durable_sequence, providerCommit, providerEvents);
       this.storeHead({ ...head, ordinal: operation.ordinal, durableRevision: receipt.durableRevision });
-      this.storePublicationChunks(operation.execution.executionId, hash, result.events.map((event) => event.acceptedSequence));
+      const publication = this.bufferedPublication?.flat() ?? [];
+      // A Codex child write has its own execution sequence, even when the parent event caused it.
+      this.storePublicationChunks(operation.execution.executionId, hash, publication.map((event) => ({
+        executionId: event.routing.executionId,
+        sequence: event.acceptedSequence,
+      })));
       this.storeReceipt(operation, hash, receipt);
       return receipt;
     })());
@@ -383,12 +426,16 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.insertOperation.run(operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash, "{}");
   }
 
-  private storePublicationChunks(executionId: string, hash: string, sequences: readonly number[]): void {
+  private storePublicationChunks(
+    executionId: string,
+    hash: string,
+    sequences: readonly (number | { executionId: string; sequence: number })[],
+  ): void {
     for (let offset = 0; offset < sequences.length; offset += PUBLICATION_CHUNK_SIZE) {
       const chunk = sequences.slice(offset, offset + PUBLICATION_CHUNK_SIZE);
       const first = chunk[0];
       if (first === undefined) continue;
-      const id = publicationChunkId(hash, first);
+      const id = publicationChunkId(hash, typeof first === "number" ? first : offset + 1);
       const json = JSON.stringify(chunk);
       const existing = this.loadOperation(executionId, id);
       if (existing) {
@@ -429,7 +476,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (stored.kind !== `semantic:${operation.mutation.kind}` || stored.input_hash !== hash) return conflict(operation);
     const receipt = storedReceiptSchema.parse(JSON.parse(stored.receipt_json));
     return receipt.operationId === operation.operationId && Number.isSafeInteger(receipt.durableRevision)
-      ? committed(operation, receipt.durableRevision, receipt.providerCommit) : conflict(operation);
+      ? committed(operation, receipt.durableRevision, receipt.providerCommit, receipt.providerEvents) : conflict(operation);
   }
 
   private publishStoredEvents(executionId: string, hash: string): void {
@@ -438,7 +485,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     for (const chunk of chunks) {
       if (chunk.kind !== PUBLICATION_KIND || chunk.input_hash !== hash) throw new Error("Semantic publication chunk mismatch");
       const sequences = storedPublicationSequencesSchema.parse(JSON.parse(chunk.receipt_json));
-      const events = sequences.map((sequence) => this.loadPublishedEvent(executionId, sequence));
+      const events = sequences.map((sequence) => typeof sequence === "number"
+        ? this.loadPublishedEvent(executionId, sequence)
+        : this.loadPublishedEvent(sequence.executionId, sequence.sequence));
       this.publish(events);
     }
   }
@@ -450,10 +499,19 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   }
 
   // Only the synchronous begin and append transactions use this buffer. Finish publishes after each committed batch.
+  private bufferPublication(events: Parameters<CanonicalAgentEventPublisher>[0]): void {
+    if (!this.bufferedPublication || this.bufferedPublicationCount + events.length > MAX_BUFFERED_PUBLICATION_EVENTS) {
+      throw new Error("Semantic publication buffer exceeded its limit");
+    }
+    this.bufferedPublication.push(events);
+    this.bufferedPublicationCount += events.length;
+  }
+
   private withBufferedPublication(write: () => ExecutionWriteReceipt): ExecutionWriteReceipt {
     if (this.bufferedPublication) throw new Error("Nested semantic publication buffer");
     const pending: Parameters<CanonicalAgentEventPublisher>[0][] = [];
     this.bufferedPublication = pending;
+    this.bufferedPublicationCount = 0;
     try {
       const result = write();
       this.bufferedPublication = null;
@@ -461,6 +519,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       return result;
     } finally {
       this.bufferedPublication = null;
+      this.bufferedPublicationCount = 0;
     }
   }
 }
@@ -527,10 +586,12 @@ function committed(
   operation: ExecutionSemanticOperation,
   durableRevision: number,
   providerCommit?: ExecutionProviderCommitReceipt,
+  providerEvents?: readonly ProjectedCommittedProviderEvent[],
 ): Extract<ExecutionWriteReceipt, { kind: "committed" }> {
   return {
     kind: "committed", operationId: operation.operationId, durableRevision,
     ...(providerCommit ? { providerCommit } : {}),
+    ...(providerEvents ? { providerEvents } : {}),
   };
 }
 
