@@ -17,6 +17,14 @@ import {
   type ProviderEventIngressEvent,
 } from "../provider-event-ingress.js";
 import type { ProviderEventAdapter } from "../provider-event-adapter.js";
+import type {
+  ProviderEventWorkerCallbacks,
+  ProviderEventWorkerPool,
+} from "../provider-event-worker-pool.js";
+import {
+  processProviderEventWorkerTask,
+  type ProviderEventWorkerTask,
+} from "../provider-event-worker-protocol.js";
 import { CodexCollaborationEventAdapter } from "../../../agents/collaboration/adapters/codex-collaboration-event-adapter.js";
 import type { CodexCollaborationDurability } from "../../../agents/collaboration/codex-collaboration-durability.js";
 
@@ -94,9 +102,71 @@ function createProvider(id: ProviderId): IAgentProvider {
   return Object.assign(new NodeEvents.EventEmitter(), { id }) as unknown as IAgentProvider;
 }
 
+class DeferredWorkerPool implements ProviderEventWorkerPool {
+  private readonly pending: Array<{
+    threadId: string;
+    task: ProviderEventWorkerTask;
+    callbacks: ProviderEventWorkerCallbacks;
+  }> = [];
+  private readonly idleWaitersByThread = new Map<string, Array<() => void>>();
+
+  start(): void {}
+
+  submit(threadId: string, task: ProviderEventWorkerTask, callbacks: ProviderEventWorkerCallbacks): boolean {
+    this.pending.push({ threadId, task, callbacks });
+    return true;
+  }
+
+  waitForThread(threadId: string): Promise<void> {
+    if (!this.pending.some((pending) => pending.threadId === threadId)) return Promise.resolve();
+    return new Promise((resolve) => {
+      const waiters = this.idleWaitersByThread.get(threadId) ?? [];
+      waiters.push(resolve);
+      this.idleWaitersByThread.set(threadId, waiters);
+    });
+  }
+
+  shutdown(): void {
+    this.pending.length = 0;
+    for (const waiters of this.idleWaitersByThread.values()) {
+      for (const resolve of waiters) resolve();
+    }
+    this.idleWaitersByThread.clear();
+  }
+
+  settleNext(): void {
+    const pending = this.pending.shift();
+    if (!pending) throw new Error("Expected a pending worker event");
+    pending.callbacks.onOutcome(processProviderEventWorkerTask(pending.task));
+    if (this.pending.some((item) => item.threadId === pending.threadId)) return;
+    const waiters = this.idleWaitersByThread.get(pending.threadId) ?? [];
+    this.idleWaitersByThread.delete(pending.threadId);
+    for (const resolve of waiters) resolve();
+  }
+
+  settleAll(): void {
+    while (this.pending.length > 0) this.settleNext();
+  }
+}
+
+class CapacityRejectedWorkerPool implements ProviderEventWorkerPool {
+  start(): void {}
+
+  submit(_threadId: string, _task: ProviderEventWorkerTask, _callbacks: ProviderEventWorkerCallbacks): boolean {
+    return false;
+  }
+
+  waitForThread(_threadId: string): Promise<void> {
+    return Promise.resolve();
+  }
+
+  shutdown(): void {}
+}
+
 function createIngress(
   providers: IAgentProvider[] = [createProvider("claude")],
   adapter?: ProviderEventAdapter,
+  workerPool?: ProviderEventWorkerPool,
 ) {
   const diagnostics: ProviderEventIngressDiagnostic[] = [];
   const received: ProviderEventIngressEvent[] = [];
@@ -105,6 +175,7 @@ function createIngress(
   const ingress = new ProviderEventIngress(
     (diagnostic) => diagnostics.push(diagnostic),
     adapter,
+    workerPool,
   );
   ingress.start(registry, {
       handleProviderEvent: (event) => received.push(event),
@@ -200,6 +271,41 @@ describe("ProviderEventIngress", () => {
     expect(received).toEqual([
       expect.objectContaining({ event: expect.objectContaining({ delta: "deferred" }) }),
     ]);
+  });
+
+  it("holds its thread fence until a settled worker result leaves the fair queue", async () => {
+    const workerPool = new DeferredWorkerPool();
+    const { ingress, received } = createIngress(undefined, undefined, workerPool);
+    for (let index = 0; index < 64; index += 1) {
+      ingress.acceptProviderRuntime("claude", runtimeEvent(`queued-${index}`, `queued-thread-${index}`));
+    }
+    workerPool.settleAll();
+
+    ingress.acceptProviderRuntime("claude", runtimeEvent("target", "target-thread"));
+    const fence = ingress.waitForThread("target-thread");
+    let completed = false;
+    void fence.then(() => { completed = true; });
+    workerPool.settleNext();
+
+    await Promise.resolve();
+    expect(received).toHaveLength(64);
+    expect(completed).toBe(false);
+
+    await flushIngress();
+    await fence;
+    expect(received).toHaveLength(65);
+  });
+
+  it("stops one affected execution once when worker capacity rejects its events", () => {
+    const { ingress, overflowed } = createIngress(undefined, undefined, new CapacityRejectedWorkerPool());
+
+    ingress.acceptProviderRuntime("claude", runtimeEvent("first", "worker-overflow-thread"));
+    ingress.acceptProviderRuntime("claude", runtimeEvent("second", "worker-overflow-thread"));
+
+    expect(overflowed).toEqual([
+      expect.objectContaining({ event: expect.objectContaining({ threadId: "worker-overflow-thread" }) }),
+    ]);
+    expect(ingress.queueMetrics()).toMatchObject({ rejectedQueueEvents: 2 });
   });
 
   it("takes turns between seven queued threads while preserving each thread order", async () => {

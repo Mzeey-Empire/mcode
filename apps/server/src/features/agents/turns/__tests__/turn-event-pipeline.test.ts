@@ -6,6 +6,7 @@ import {
   TurnEventPipeline,
   TURN_EVENT_QUEUE_RETAINED_LIMITS,
   type TurnEventApplication,
+  type TurnEventIngressFence,
   type TurnLifecycleControl,
 } from "../turn-event-pipeline.js";
 import type { ProviderEventIngressEvent } from "../../../providers/composition/provider-event-ingress.js";
@@ -55,6 +56,7 @@ function createPipeline(
   finalize = vi.fn(async () => true),
   previousFileFinalization: TurnEventApplication["previousFileFinalization"] = () => undefined,
   rejectForQueueCapacity = vi.fn(),
+  ingressFence?: TurnEventIngressFence,
 ): {
   pipeline: TurnEventPipeline;
   finalize: ReturnType<typeof vi.fn>;
@@ -73,7 +75,7 @@ function createPipeline(
     observeToolUse: vi.fn(),
     observeToolResult: vi.fn(),
   };
-  return { pipeline: new TurnEventPipeline(lifecycle, application), finalize, rejectForQueueCapacity };
+  return { pipeline: new TurnEventPipeline(lifecycle, application, undefined, ingressFence), finalize, rejectForQueueCapacity };
 }
 
 describe("TurnEventPipeline", () => {
@@ -124,6 +126,26 @@ describe("TurnEventPipeline", () => {
     pipeline.resume("thread-1");
     await expect(finalization).resolves.toBe(true);
 
+    expect(finalize).toHaveBeenCalledOnce();
+  });
+
+  it("holds finalization until its thread-affine ingress worker is idle", async () => {
+    let releaseIngress!: () => void;
+    const ingressIdle = new Promise<void>((resolve) => { releaseIngress = resolve; });
+    const ingressFence: TurnEventIngressFence = { waitForThread: () => ingressIdle };
+    const { pipeline, finalize } = createPipeline(() => true, undefined, undefined, undefined, ingressFence);
+
+    const finalization = pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "completed",
+      source: "provider",
+    });
+
+    await Promise.resolve();
+    expect(finalize).not.toHaveBeenCalled();
+    releaseIngress();
+    await expect(finalization).resolves.toBe(true);
     expect(finalize).toHaveBeenCalledOnce();
   });
 

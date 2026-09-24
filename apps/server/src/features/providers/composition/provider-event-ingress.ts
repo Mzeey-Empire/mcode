@@ -2,9 +2,7 @@ import { logger } from "@mcode/shared";
 import {
   AgentEventType,
   isTurnDiffSource,
-  CanonicalAgentEventEnvelopeSchema,
   ProviderIdSchema,
-  ProviderRuntimeEventSchema,
   type AgentEvent,
   type CanonicalAgentEventEnvelope,
   type IProviderRegistry,
@@ -19,6 +17,18 @@ import {
   CODEX_PROVIDER_EVENT_ADAPTER,
   type ProviderEventAdapter,
 } from "./provider-event-adapter.js";
+import {
+  InlineProviderEventWorkerPool,
+  PROVIDER_EVENT_WORKER_POOL,
+  type ProviderEventWorkerPool,
+} from "./provider-event-worker-pool.js";
+import {
+  canonicalEventIdentity,
+  processProviderEventWorkerTask,
+  providerEventWorkerThreadId,
+  type ProviderEventWorkerOutcome,
+  type ProviderEventWorkerTask,
+} from "./provider-event-worker-protocol.js";
 import { normalizeProviderError } from "./provider-error-normalize.js";
 
 const MAX_PENDING_NON_TERMINAL_EVENTS = 8_192;
@@ -74,7 +84,7 @@ export interface ProviderEventIngressConsumer {
 
 /** Content-free diagnostic recorded when ingress rejects an event or reaches queue pressure. */
 export interface ProviderEventIngressDiagnostic {
-  reason: "invalid-canonical-envelope" | "invalid-runtime-event" | "provider-identity-mismatch" | "runtime-extension-mismatch" | "duplicate-event" | "queue-capacity" | "queue-pressure" | "adapter-rejected";
+  reason: "invalid-canonical-envelope" | "invalid-runtime-event" | "provider-identity-mismatch" | "runtime-extension-mismatch" | "duplicate-event" | "queue-capacity" | "queue-pressure" | "adapter-rejected" | "worker-failure" | "worker-shutdown";
   sourceKind: ProviderEventSourceKind;
   providerId?: string;
   eventId?: string;
@@ -86,7 +96,7 @@ export interface ProviderEventIngressDiagnostic {
   rejectedQueueEvents?: number;
   queueBytes?: number;
   threadQueueBytes?: number;
-  queueCapacity?: "global" | "thread" | "global-bytes" | "thread-bytes" | "terminal";
+  queueCapacity?: "global" | "thread" | "global-bytes" | "thread-bytes" | "terminal" | "worker";
 }
 
 /** Receives content-free ingress diagnostics. */
@@ -115,27 +125,6 @@ export function logProviderEventIngressDiagnostic(diagnostic: ProviderEventIngre
   logger.warn("Provider event ingress diagnostic", diagnostic);
 }
 
-function canonicalReceipt(envelope: CanonicalAgentEventEnvelope): CanonicalProviderEventReceipt {
-  return {
-    eventId: envelope.eventId,
-    sourceSequence: envelope.sourceSequence,
-    acceptedSequence: envelope.acceptedSequence,
-    durableRevision: envelope.durableRevision,
-    serverTimestamps: envelope.serverTimestamps,
-  };
-}
-
-function agentEventMatchesProvider(event: AgentEvent, providerId: ProviderId): boolean {
-  return !("providerId" in event) || event.providerId === undefined || event.providerId === providerId;
-}
-
-/** Removes presentation data that only server-side provider adapters may create. */
-function withoutUntrustedSubagentPresentation(event: AgentEvent): AgentEvent {
-  if (event.type !== AgentEventType.ToolUse && event.type !== AgentEventType.ToolResult) return event;
-  const { subagentPresentation: _subagentPresentation, ...sanitized } = event;
-  return sanitized;
-}
-
 function isTerminalLifecycleEvent(event: AgentEvent): boolean {
   return event.type === AgentEventType.TurnComplete
     || event.type === AgentEventType.Error
@@ -155,15 +144,19 @@ function serializedEventByteLength(event: AgentEvent): number {
 @injectable()
 export class ProviderEventIngress {
   private readonly seenLegacyEvents = new WeakSet<object>();
+  private readonly pendingLegacyEvents = new WeakSet<object>();
   private readonly seenCanonicalEventIds = new Map<string, true>();
+  private readonly pendingCanonicalEventIds = new Set<string>();
   private readonly pendingByThread = new Map<string, QueuedProviderEvent[]>();
   private readonly pendingBytesByThread = new Map<string, number>();
   private readonly pendingTerminalEventsByThread = new Map<string, number>();
   private readonly readyThreadIds: string[] = [];
   private readonly lastQueueDiagnosticAt = new Map<"queue-capacity" | "queue-pressure", number>();
   private readonly overflowedExecutionsByTurn = new Map<string, string>();
+  private readonly queueDrainedWaitersByThread = new Map<string, Array<() => void>>();
   private consumer: ProviderEventIngressConsumer | undefined;
   private started = false;
+  private stopped = false;
   private drainScheduled = false;
   private pendingEventCount = 0;
   private pendingByteCount = 0;
@@ -175,6 +168,8 @@ export class ProviderEventIngress {
     private readonly diagnostics: ProviderEventIngressDiagnosticSink = logProviderEventIngressDiagnostic,
     @inject(CODEX_PROVIDER_EVENT_ADAPTER, { isOptional: true })
     private readonly codexAdapter?: ProviderEventAdapter,
+    @inject(PROVIDER_EVENT_WORKER_POOL, { isOptional: true })
+    private readonly workerPool: ProviderEventWorkerPool = new InlineProviderEventWorkerPool(),
   ) {}
 
   /** Subscribe once after providers and the downstream event consumer exist. */
@@ -182,6 +177,7 @@ export class ProviderEventIngress {
     if (this.started) return;
     this.started = true;
     this.consumer = consumer;
+    this.workerPool.start();
     for (const provider of providerRegistry.resolveAll()) {
       provider.on("file_mutation_start", (event) => consumer.handleProviderFileMutation(event));
       if (isTurnDiffSource(provider)) provider.onTurnDiff((event) => consumer.handleProviderTurnDiff(event));
@@ -225,32 +221,17 @@ export class ProviderEventIngress {
       this.report({ reason: "invalid-runtime-event", sourceKind: "provider-runtime", providerId: parsedProviderId.data });
       return;
     }
-    const parsedRuntimeEvent = this.parseLegacyRuntimeEvent(parsedProviderId.data, runtimeEvent);
-    if (!parsedRuntimeEvent) return;
-    this.seenLegacyEvents.add(runtimeEvent);
-    this.acceptRuntimeEvent({
-      providerId: parsedProviderId.data,
-      sourceKind: "provider-runtime",
-      event: parsedRuntimeEvent.event,
-      ...(parsedRuntimeEvent.extension ? { runtimeExtension: parsedRuntimeEvent.extension } : {}),
-    });
-  }
-
-  private parseLegacyRuntimeEvent(providerId: ProviderId, runtimeEvent: object): ProviderRuntimeEvent | undefined {
-    if (this.seenLegacyEvents.has(runtimeEvent)) {
+    if (this.seenLegacyEvents.has(runtimeEvent) || this.pendingLegacyEvents.has(runtimeEvent)) {
       this.report({ reason: "duplicate-event", sourceKind: "provider-runtime", providerId });
-      return undefined;
+      return;
     }
-    const parsed = ProviderRuntimeEventSchema().safeParse(runtimeEvent);
-    if (!parsed.success || !agentEventMatchesProvider(parsed.data.event, providerId)) {
-      this.report({ reason: "invalid-runtime-event", sourceKind: "provider-runtime", providerId });
-      return undefined;
-    }
-    if (parsed.data.extension?.providerId !== undefined && parsed.data.extension.providerId !== providerId) {
-      this.report({ reason: "runtime-extension-mismatch", sourceKind: "provider-runtime", providerId });
-      return undefined;
-    }
-    return parsed.data;
+    const task: ProviderEventWorkerTask = { kind: "provider-runtime", providerId: parsedProviderId.data, runtimeEvent };
+    this.pendingLegacyEvents.add(runtimeEvent);
+    if (!this.submit(task, (outcome) => {
+      this.pendingLegacyEvents.delete(runtimeEvent);
+      if (outcome.status === "accepted") this.seenLegacyEvents.add(runtimeEvent);
+      this.handleWorkerOutcome(outcome);
+    })) this.pendingLegacyEvents.delete(runtimeEvent);
   }
 
   /** Accept one committed canonical batch and queue its runtime events in receipt order. */
@@ -259,114 +240,93 @@ export class ProviderEventIngress {
   }
 
   private acceptCanonicalEnvelope(envelope: unknown): void {
-    const parsedEnvelope = CanonicalAgentEventEnvelopeSchema.safeParse(envelope);
-    if (!parsedEnvelope.success) {
-      this.report({ reason: "invalid-canonical-envelope", sourceKind: "canonical-commit" });
-      return;
-    }
-    const parsedProviderId = ProviderIdSchema.safeParse(parsedEnvelope.data.sourceProviderId);
-    if (!parsedProviderId.success) {
-      this.report({
-        reason: "provider-identity-mismatch",
-        sourceKind: "canonical-commit",
-        providerId: parsedEnvelope.data.sourceProviderId,
-        eventId: parsedEnvelope.data.eventId,
-      });
-      return;
-    }
-    const runtimeEvent = this.projectCanonicalRuntimeEvent(parsedEnvelope.data, parsedProviderId.data);
-    if (!runtimeEvent) return;
-    if (this.seenCanonicalEventIds.has(parsedEnvelope.data.eventId)) {
+    const task: ProviderEventWorkerTask = { kind: "canonical-commit", envelope };
+    const eventId = canonicalEventIdentity(task);
+    if (eventId && (this.seenCanonicalEventIds.has(eventId) || this.pendingCanonicalEventIds.has(eventId))) {
       this.report({
         reason: "duplicate-event",
         sourceKind: "canonical-commit",
-        providerId: parsedProviderId.data,
-        eventId: parsedEnvelope.data.eventId,
+        eventId,
       });
       return;
     }
-    const accepted = this.acceptRuntimeEvent({
-      providerId: parsedProviderId.data,
-      sourceKind: "canonical-commit",
-      event: runtimeEvent.event,
-      ...(runtimeEvent.extension ? { runtimeExtension: runtimeEvent.extension } : {}),
-      canonicalReceipt: canonicalReceipt(parsedEnvelope.data),
-    });
-    if (accepted) this.rememberCanonicalEvent(parsedEnvelope.data.eventId);
+    if (eventId) this.pendingCanonicalEventIds.add(eventId);
+    if (!this.submit(task, (outcome) => {
+      if (eventId) this.pendingCanonicalEventIds.delete(eventId);
+      const delivered = this.handleWorkerOutcome(outcome);
+      if (eventId && outcome.status === "accepted" && delivered) this.rememberCanonicalEvent(eventId);
+    }) && eventId) this.pendingCanonicalEventIds.delete(eventId);
   }
 
-  private projectCanonicalRuntimeEvent(
-    envelope: CanonicalAgentEventEnvelope,
-    providerId: ProviderId,
-  ): ProviderRuntimeEvent | undefined {
-    if (!this.isProviderRuntimeItem(envelope)) return undefined;
-    const { item } = envelope.payload;
-    const parsedRuntimeEvent = ProviderRuntimeEventSchema().safeParse(item.payload.runtimeEvent);
-    if (!parsedRuntimeEvent.success || !this.matchesCanonicalRouting(envelope, item, parsedRuntimeEvent.data, providerId)) {
-      this.report({
-        reason: "invalid-runtime-event",
-        sourceKind: "canonical-commit",
-        providerId: envelope.sourceProviderId,
-        eventId: envelope.eventId,
-      });
-      return undefined;
+  /** Resolve after a worker and the fair ingress queue have drained one thread. */
+  async waitForThread(threadId: string): Promise<void> {
+    await this.workerPool.waitForThread(threadId);
+    await this.waitForQueuedThread(threadId);
+  }
+
+  /** Reject retained worker payloads during orderly server shutdown. */
+  shutdown(): void {
+    this.stopped = true;
+    this.workerPool.shutdown();
+    this.pendingByThread.clear();
+    this.pendingBytesByThread.clear();
+    this.pendingTerminalEventsByThread.clear();
+    this.readyThreadIds.length = 0;
+    this.pendingEventCount = 0;
+    this.pendingByteCount = 0;
+    this.pendingTerminalEventCount = 0;
+    this.drainScheduled = false;
+    for (const waiters of this.queueDrainedWaitersByThread.values()) {
+      for (const resolve of waiters) resolve();
     }
-    return parsedRuntimeEvent.data;
+    this.queueDrainedWaitersByThread.clear();
   }
 
-  private isProviderRuntimeItem(
-    envelope: CanonicalAgentEventEnvelope,
-  ): envelope is CanonicalAgentEventEnvelope & {
-    payload: Extract<CanonicalAgentEventEnvelope["payload"], { type: "item.recorded" }>;
-  } {
-    return envelope.payload.type === "item.recorded"
-      && envelope.payload.item.payload.projection === "providerRuntimeEvent";
+  private submit(task: ProviderEventWorkerTask, onOutcome: (outcome: ProviderEventWorkerOutcome) => void): boolean {
+    if (this.stopped) {
+      this.report({ reason: "worker-shutdown", sourceKind: task.kind, eventId: canonicalEventIdentity(task) });
+      return false;
+    }
+    const accepted = this.workerPool.submit(providerEventWorkerThreadId(task), task, { onOutcome });
+    if (!accepted) this.rejectForWorkerCapacity(task);
+    return accepted;
   }
 
-  private matchesCanonicalRouting(
-    envelope: CanonicalAgentEventEnvelope,
-    item: Extract<CanonicalAgentEventEnvelope["payload"], { type: "item.recorded" }>['item'],
-    runtimeEvent: ProviderRuntimeEvent,
-    providerId: ProviderId,
-  ): boolean {
-    return this.matchesItemRouting(envelope, item)
-      && runtimeEvent.event.threadId === envelope.routing.threadId
-      && runtimeEvent.event.turnExecutionId === envelope.routing.executionId
-      && agentEventMatchesProvider(runtimeEvent.event, providerId)
-      && this.matchesRuntimeExtension(runtimeEvent, providerId);
+  private rejectForWorkerCapacity(task: ProviderEventWorkerTask): void {
+    const outcome = processProviderEventWorkerTask(task);
+    if (outcome.status === "rejected") {
+      this.report(outcome.diagnostic);
+      return;
+    }
+    const event = outcome.event;
+    this.rejectedQueueEvents += 1;
+    if (!this.rememberOverflowedTurn(event)) return;
+    this.reportQueueDiagnostic("queue-capacity", event, this.pendingByThread.get(event.event.threadId)?.length ?? 0, "worker");
+    this.discardPendingExecution(event);
+    this.consumer?.handleProviderIngressOverflow?.(event);
   }
 
-  private matchesItemRouting(
-    envelope: CanonicalAgentEventEnvelope,
-    item: Extract<CanonicalAgentEventEnvelope["payload"], { type: "item.recorded" }>['item'],
-  ): boolean {
-    return envelope.routing.threadId === item.threadId
-      && envelope.routing.turnId === item.turnId
-      && envelope.routing.itemId === item.id;
-  }
-
-  private matchesRuntimeExtension(runtimeEvent: ProviderRuntimeEvent, providerId: ProviderId): boolean {
-    return runtimeEvent.extension?.providerId === undefined || runtimeEvent.extension.providerId === providerId;
-  }
-
-  private acceptRuntimeEvent(event: ProviderEventIngressEvent): boolean {
-    const trustedEvent = { ...event, event: withoutUntrustedSubagentPresentation(event.event) };
-    const projection = this.adapterFor(trustedEvent.providerId)?.project(trustedEvent)
-      ?? { status: "forward" as const, event: trustedEvent.event };
+  private handleWorkerOutcome(outcome: ProviderEventWorkerOutcome): boolean {
+    if (outcome.status === "rejected") {
+      this.report(outcome.diagnostic);
+      return false;
+    }
+    const projection = this.adapterFor(outcome.event.providerId)?.project(outcome.event)
+      ?? { status: "forward" as const, event: outcome.event.event };
     if (projection.status === "consumed") return true;
     if (projection.status === "rejected") {
       this.report({
         reason: "adapter-rejected",
-        sourceKind: event.sourceKind,
-        providerId: event.providerId,
-        eventId: event.canonicalReceipt?.eventId,
+        sourceKind: outcome.event.sourceKind,
+        providerId: outcome.event.providerId,
+        eventId: outcome.event.canonicalReceipt?.eventId,
       });
       return true;
     }
     const normalized = projection.event.type === "error"
-      ? { ...projection.event, error: normalizeProviderError(event.providerId, projection.event.error ?? "") }
+      ? { ...projection.event, error: normalizeProviderError(outcome.event.providerId, projection.event.error ?? "") }
       : projection.event;
-    return this.enqueue({ ...trustedEvent, event: normalized });
+    return this.enqueue({ ...outcome.event, event: normalized });
   }
 
   private adapterFor(providerId: ProviderId): ProviderEventAdapter | undefined {
@@ -416,6 +376,15 @@ export class ProviderEventIngress {
     queueMicrotask(() => this.drain());
   }
 
+  private waitForQueuedThread(threadId: string): Promise<void> {
+    if (!this.pendingByThread.has(threadId)) return Promise.resolve();
+    return new Promise((resolve) => {
+      const waiters = this.queueDrainedWaitersByThread.get(threadId) ?? [];
+      waiters.push(resolve);
+      this.queueDrainedWaitersByThread.set(threadId, waiters);
+    });
+  }
+
   private scheduleYieldedDrain(): void {
     if (this.drainScheduled) return;
     this.drainScheduled = true;
@@ -444,11 +413,19 @@ export class ProviderEventIngress {
       this.pendingByteCount -= queued.byteLength;
       this.decrementThreadBytes(threadId, queued.byteLength);
       if (queued.terminal) this.decrementTerminalEvents(threadId);
-      if (queue.length === 0) this.pendingByThread.delete(threadId);
-      else this.readyThreadIds.push(threadId);
+      if (queue.length === 0) {
+        this.pendingByThread.delete(threadId);
+        this.completeQueuedThread(threadId);
+      } else this.readyThreadIds.push(threadId);
       return queued;
     }
     return undefined;
+  }
+
+  private completeQueuedThread(threadId: string): void {
+    const waiters = this.queueDrainedWaitersByThread.get(threadId) ?? [];
+    this.queueDrainedWaitersByThread.delete(threadId);
+    for (const resolve of waiters) resolve();
   }
 
   private reportQueuePressure(event: ProviderEventIngressEvent, threadQueueDepth: number): void {
@@ -460,7 +437,7 @@ export class ProviderEventIngress {
     reason: "queue-capacity" | "queue-pressure",
     event: ProviderEventIngressEvent,
     threadQueueDepth: number,
-    queueCapacity?: "global" | "thread" | "global-bytes" | "thread-bytes" | "terminal",
+    queueCapacity?: "global" | "thread" | "global-bytes" | "thread-bytes" | "terminal" | "worker",
   ): void {
     const now = Date.now();
     const lastReportedAt = this.lastQueueDiagnosticAt.get(reason);
@@ -563,6 +540,7 @@ export class ProviderEventIngress {
     for (let index = this.readyThreadIds.length - 1; index >= 0; index -= 1) {
       if (this.readyThreadIds[index] === threadId) this.readyThreadIds.splice(index, 1);
     }
+    this.completeQueuedThread(threadId);
   }
 
   private rememberOverflowedTurn(event: ProviderEventIngressEvent): boolean {

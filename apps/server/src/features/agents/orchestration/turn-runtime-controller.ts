@@ -221,7 +221,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     @inject(TurnDiffService) turnDiffs: TurnDiffService,
   ) {
     this.turnDiffs = turnDiffs;
-    this.turnEventPipeline = new TurnEventPipeline(this, eventApplication, turnDiffs);
+    this.turnEventPipeline = new TurnEventPipeline(this, eventApplication, turnDiffs, providerEventIngress);
     runtimeCommands.bind({
       sendMessage: (command) => this.sendMessage(command),
       runtimeSnapshots: () => this.runtimeSnapshots(),
