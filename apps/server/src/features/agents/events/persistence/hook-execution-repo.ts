@@ -5,7 +5,9 @@
 
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
-import type { Database, Statement } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { asc, eq, inArray, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { HookExecutionRecord } from "@mcode/contracts";
 import {
   ACTIVE_TURN_WRITE_BATCH_LIMITS,
@@ -13,21 +15,10 @@ import {
   type WriteBatchLimits,
   type WriteBatchResult,
 } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
+import { hookExecutions } from "../../../../runtime/persistence/sqlite/schema.js";
 
-/** Row shape returned by SQLite for the hook_executions table. */
-interface HookExecutionRow {
-  id: string;
-  message_id: string;
-  hook_name: string;
-  tool_name: string | null;
-  phase: string;
-  payload: string;
-  duration_ms: number | null;
-  did_block: number;
-  started_at: string;
-  ended_at: string | null;
-  sort_order: number;
-}
+/** Row shape returned by drizzle for the hook_executions table. */
+type HookExecutionRow = typeof hookExecutions.$inferSelect;
 
 /** Input for creating a new hook execution record. */
 export interface CreateHookExecutionInput {
@@ -48,61 +39,48 @@ export interface CreateHookExecutionInput {
 function rowToRecord(row: HookExecutionRow): HookExecutionRecord {
   return {
     id: row.id,
-    message_id: row.message_id,
-    hook_name: row.hook_name,
-    tool_name: row.tool_name,
+    message_id: row.messageId,
+    hook_name: row.hookName,
+    tool_name: row.toolName,
     phase: row.phase,
     payload: row.payload,
-    duration_ms: row.duration_ms,
-    did_block: row.did_block === 1,
-    started_at: row.started_at,
-    ended_at: row.ended_at,
-    sort_order: row.sort_order,
+    duration_ms: row.durationMs,
+    did_block: row.didBlock === 1,
+    started_at: row.startedAt,
+    ended_at: row.endedAt,
+    sort_order: row.sortOrder,
   };
 }
-
-const COLUMNS =
-  "id, message_id, hook_name, tool_name, phase, payload, duration_ms, did_block, started_at, ended_at, sort_order";
 
 /** Repository for hook execution creation and retrieval against SQLite. */
 @injectable()
 export class HookExecutionRepo {
-  private readonly stmtInsert: Statement;
-  private readonly stmtUpsert: Statement;
-  private readonly stmtListByMessage: Statement;
-  private readonly stmtCountByMessage: Statement;
+  private readonly orm: BunSQLiteDatabase;
 
   constructor(@inject("Database") private readonly db: Database) {
-    this.stmtInsert = db.prepare(
-      "INSERT OR IGNORE INTO hook_executions (id, message_id, hook_name, tool_name, phase, payload, duration_ms, did_block, started_at, ended_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    );
-    this.stmtUpsert = db.prepare(
-      "INSERT INTO hook_executions (id, message_id, hook_name, tool_name, phase, payload, duration_ms, did_block, started_at, ended_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET message_id = excluded.message_id, hook_name = excluded.hook_name, tool_name = excluded.tool_name, phase = excluded.phase, payload = excluded.payload, duration_ms = excluded.duration_ms, did_block = excluded.did_block, started_at = excluded.started_at, ended_at = excluded.ended_at, sort_order = excluded.sort_order",
-    );
-    this.stmtListByMessage = db.prepare(
-      `SELECT ${COLUMNS} FROM hook_executions WHERE message_id = ? ORDER BY sort_order ASC`,
-    );
-    this.stmtCountByMessage = db.prepare(
-      "SELECT COUNT(*) as count FROM hook_executions WHERE message_id = ?",
-    );
+    this.orm = drizzle(db);
   }
 
   /** Create a single hook execution record and return the fully-populated record. */
   create(input: CreateHookExecutionInput): HookExecutionRecord {
     const id = input.id ?? NodeCrypto.randomUUID();
-    this.stmtInsert.run(
-      id,
-      input.messageId,
-      input.hookName,
-      input.toolName,
-      input.phase,
-      input.payload,
-      input.durationMs,
-      input.didBlock ? 1 : 0,
-      input.startedAt,
-      input.endedAt,
-      input.sortOrder,
-    );
+    this.orm
+      .insert(hookExecutions)
+      .values({
+        id,
+        messageId: input.messageId,
+        hookName: input.hookName,
+        toolName: input.toolName,
+        phase: input.phase,
+        payload: input.payload,
+        durationMs: input.durationMs,
+        didBlock: input.didBlock ? 1 : 0,
+        startedAt: input.startedAt,
+        endedAt: input.endedAt,
+        sortOrder: input.sortOrder,
+      })
+      .onConflictDoNothing()
+      .run();
     return {
       id,
       message_id: input.messageId,
@@ -121,24 +99,26 @@ export class HookExecutionRepo {
   /** Insert multiple hook execution records in a single transaction. */
   bulkCreate(inputs: CreateHookExecutionInput[]): void {
     if (inputs.length === 0) return;
-    const tx = this.db.transaction((items: CreateHookExecutionInput[]) => {
-      for (const item of items) {
-        this.stmtInsert.run(
-          item.id ?? NodeCrypto.randomUUID(),
-          item.messageId,
-          item.hookName,
-          item.toolName,
-          item.phase,
-          item.payload,
-          item.durationMs,
-          item.didBlock ? 1 : 0,
-          item.startedAt,
-          item.endedAt,
-          item.sortOrder,
-        );
+    this.orm.transaction((tx) => {
+      for (const item of inputs) {
+        tx.insert(hookExecutions)
+          .values({
+            id: item.id ?? NodeCrypto.randomUUID(),
+            messageId: item.messageId,
+            hookName: item.hookName,
+            toolName: item.toolName,
+            phase: item.phase,
+            payload: item.payload,
+            durationMs: item.durationMs,
+            didBlock: item.didBlock ? 1 : 0,
+            startedAt: item.startedAt,
+            endedAt: item.endedAt,
+            sortOrder: item.sortOrder,
+          })
+          .onConflictDoNothing()
+          .run();
       }
     });
-    tx(inputs);
   }
 
   /** Insert hook rows in bounded transactions with an event-loop yield between commits. */
@@ -153,26 +133,39 @@ export class HookExecutionRepo {
       limits,
       byteLength: (item) => Buffer.byteLength(JSON.stringify(item), "utf8"),
       write: (item) => {
-        (replaceExisting ? this.stmtUpsert : this.stmtInsert).run(
-          item.id ?? NodeCrypto.randomUUID(),
-          item.messageId,
-          item.hookName,
-          item.toolName,
-          item.phase,
-          item.payload,
-          item.durationMs,
-          item.didBlock ? 1 : 0,
-          item.startedAt,
-          item.endedAt,
-          item.sortOrder,
-        );
+        const { id, ...rest } = {
+          id: item.id ?? NodeCrypto.randomUUID(),
+          messageId: item.messageId,
+          hookName: item.hookName,
+          toolName: item.toolName,
+          phase: item.phase,
+          payload: item.payload,
+          durationMs: item.durationMs,
+          didBlock: item.didBlock ? 1 : 0,
+          startedAt: item.startedAt,
+          endedAt: item.endedAt,
+          sortOrder: item.sortOrder,
+        };
+        const builder = this.orm.insert(hookExecutions).values({ id, ...rest });
+        if (replaceExisting) {
+          builder
+            .onConflictDoUpdate({ target: hookExecutions.id, set: rest })
+            .run();
+        } else {
+          builder.onConflictDoNothing().run();
+        }
       },
     });
   }
 
   /** List all hook executions for a message, ordered by sort_order ascending. */
   listByMessage(messageId: string): HookExecutionRecord[] {
-    const rows = this.stmtListByMessage.all(messageId) as HookExecutionRow[];
+    const rows = this.orm
+      .select()
+      .from(hookExecutions)
+      .where(eq(hookExecutions.messageId, messageId))
+      .orderBy(asc(hookExecutions.sortOrder))
+      .all();
     return rows.map(rowToRecord);
   }
 
@@ -181,12 +174,12 @@ export class HookExecutionRepo {
     const grouped = new Map<string, HookExecutionRecord[]>();
     if (messageIds.length === 0) return grouped;
 
-    const placeholders = messageIds.map(() => "?").join(", ");
-    const rows = this.db
-      .prepare(
-        `SELECT ${COLUMNS} FROM hook_executions WHERE message_id IN (${placeholders}) ORDER BY message_id ASC, sort_order ASC`,
-      )
-      .all(...messageIds) as HookExecutionRow[];
+    const rows = this.orm
+      .select()
+      .from(hookExecutions)
+      .where(inArray(hookExecutions.messageId, [...messageIds]))
+      .orderBy(asc(hookExecutions.messageId), asc(hookExecutions.sortOrder))
+      .all();
 
     for (const row of rows) {
       const record = rowToRecord(row);
@@ -199,7 +192,11 @@ export class HookExecutionRepo {
 
   /** Count the number of hook executions for a message. */
   countByMessage(messageId: string): number {
-    const row = this.stmtCountByMessage.get(messageId) as { count: number };
-    return row.count;
+    const row = this.orm
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(hookExecutions)
+      .where(eq(hookExecutions.messageId, messageId))
+      .get();
+    return row?.count ?? 0;
   }
 }

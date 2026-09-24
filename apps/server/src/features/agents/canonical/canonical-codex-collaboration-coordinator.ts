@@ -1,5 +1,13 @@
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import {
+  canonicalAgentItems,
+  canonicalAgentTurns,
+  canonicalCollaborationActions,
+  threads,
+} from "../../../runtime/persistence/sqlite/schema.js";
 import {
   CANONICAL_SUBAGENT_TASK_MAX_LENGTH,
   resolveSubagentDisplayName,
@@ -69,44 +77,50 @@ interface ResolvedDiagnosticTurn {
 
 /** Owns Codex-native child delegation lookup and later lifecycle coordination. */
 export class CanonicalCodexCollaborationCoordinator {
+  private readonly orm: BunSQLiteDatabase;
+
   constructor(
     private readonly db: Database,
     private readonly operations: CanonicalCodexCollaborationOperations,
-  ) {}
+  ) {
+    this.orm = drizzle(db);
+  }
 
   /** Loads the one Codex child delegation sourced by a canonical parent item. */
   loadDelegation(parentThreadId: string, parentItemId: string): CodexChildDelegation | null {
-    const row = this.db.prepare(`
-      SELECT *
-      FROM canonical_collaboration_actions
-      WHERE source_thread_id = ?
-        AND source_item_id = ?
-        AND kind = 'delegate'
-      ORDER BY created_at ASC, id ASC
-      LIMIT 1
-    `).get(parentThreadId, parentItemId) as Record<string, unknown> | undefined;
+    const row = this.orm
+      .select()
+      .from(canonicalCollaborationActions)
+      .where(and(
+        eq(canonicalCollaborationActions.sourceThreadId, parentThreadId),
+        eq(canonicalCollaborationActions.sourceItemId, parentItemId),
+        eq(canonicalCollaborationActions.kind, "delegate"),
+      ))
+      .orderBy(asc(canonicalCollaborationActions.createdAt), asc(canonicalCollaborationActions.id))
+      .limit(1)
+      .get();
     return row ? this.toDelegation(row, parentItemId) : null;
   }
 
   /** Loads the unique Codex child delegation registered for one native receiver thread. */
   loadDelegationByReceiverThreadId(nativeThreadId: string): CodexChildDelegation | null {
     const receiver = codexReceiverIdentity(nativeThreadId);
-    const rows = this.db.prepare(`
-      SELECT action.*
-      FROM canonical_collaboration_actions AS action
-      JOIN json_each(action.provider_identities_json) AS provider_identity
-        ON json_extract(provider_identity.value, '$.providerId') = ?
-       AND json_extract(provider_identity.value, '$.scope') = ?
-       AND json_extract(provider_identity.value, '$.value') = ?
-       AND json_extract(provider_identity.value, '$.provenance') = ?
-      WHERE action.kind = 'delegate'
-      LIMIT 2
-    `).all(
-      receiver.providerId,
-      receiver.scope,
-      receiver.value,
-      receiver.provenance,
-    ) as Record<string, unknown>[];
+    const rows = this.orm
+      .select()
+      .from(canonicalCollaborationActions)
+      .where(and(
+        eq(canonicalCollaborationActions.kind, "delegate"),
+        sql`EXISTS (
+          SELECT 1
+          FROM json_each(${canonicalCollaborationActions.providerIdentitiesJson}) AS provider_identity
+          WHERE json_extract(provider_identity.value, '$.providerId') = ${receiver.providerId}
+            AND json_extract(provider_identity.value, '$.scope') = ${receiver.scope}
+            AND json_extract(provider_identity.value, '$.value') = ${receiver.value}
+            AND json_extract(provider_identity.value, '$.provenance') = ${receiver.provenance}
+        )`,
+      ))
+      .limit(2)
+      .all();
     if (rows.length > 1) throw new Error(`Codex receiver identity is ambiguous: ${nativeThreadId}`);
     return rows[0] ? this.toDelegation(rows[0], nativeThreadId) : null;
   }
@@ -120,13 +134,16 @@ export class CanonicalCodexCollaborationCoordinator {
 
   /** Terminalizes the latest running canonical child turn by its durable thread identity. */
   finishLatestChildTurn(input: CanonicalChildTurnFinishInput): AgentTurn | null {
-    const row = this.db.prepare(`
-      SELECT *
-      FROM canonical_agent_turns
-      WHERE thread_id = ? AND status = 'Running'
-      ORDER BY updated_at DESC, id DESC
-      LIMIT 1
-    `).get(input.childThreadId) as Record<string, unknown> | undefined;
+    const row = this.orm
+      .select()
+      .from(canonicalAgentTurns)
+      .where(and(
+        eq(canonicalAgentTurns.threadId, input.childThreadId),
+        eq(canonicalAgentTurns.status, "Running"),
+      ))
+      .orderBy(desc(canonicalAgentTurns.updatedAt), desc(canonicalAgentTurns.id))
+      .limit(1)
+      .get();
     return row
       ? this.finishChildTurnRecord(this.operations.turnFromRow(row), input.outcome, input.error)
       : null;
@@ -166,17 +183,22 @@ export class CanonicalCodexCollaborationCoordinator {
 
   /** Marks dispatched child deliveries as uncertain when their owning execution cannot be resumed. */
   markUnresolvedDeliveriesUnknown(executionId: string, maximum: number): string[] {
-    const rows = this.db.prepare(`
-      SELECT action.*
-      FROM canonical_collaboration_actions action
-      JOIN canonical_agent_turns source_turn ON source_turn.id = action.source_turn_id
-      WHERE source_turn.execution_id = ?
-        AND action.status IN ('Pending', 'Dispatched')
-        AND action.target_turn_id IS NULL
-        AND action.delivery_unknown = 0
-      ORDER BY action.created_at ASC, action.id ASC
-      LIMIT ?
-    `).all(executionId, maximum + 1) as Record<string, unknown>[];
+    const rows = this.orm
+      .select({ ...getTableColumns(canonicalCollaborationActions) })
+      .from(canonicalCollaborationActions)
+      .innerJoin(
+        canonicalAgentTurns,
+        eq(canonicalAgentTurns.id, canonicalCollaborationActions.sourceTurnId),
+      )
+      .where(and(
+        eq(canonicalAgentTurns.executionId, executionId),
+        inArray(canonicalCollaborationActions.status, ["Pending", "Dispatched"]),
+        isNull(canonicalCollaborationActions.targetTurnId),
+        eq(canonicalCollaborationActions.deliveryUnknown, 0),
+      ))
+      .orderBy(asc(canonicalCollaborationActions.createdAt), asc(canonicalCollaborationActions.id))
+      .limit(maximum + 1)
+      .all();
     if (rows.length > maximum) throw new Error(`Canonical unresolved child delivery count exceeds ${maximum}`);
     const actionIds: string[] = [];
     for (const row of rows) {
@@ -688,20 +710,19 @@ export class CanonicalCodexCollaborationCoordinator {
   }
 
   private ensureCompatibilityThread(thread: AgentThread): void {
-    this.db.prepare(`
-      INSERT OR IGNORE INTO threads (
-        id, workspace_id, title, status, mode, branch, created_at, updated_at,
-        deleted_at, provider, parent_thread_id
-      ) VALUES (?, ?, ?, 'active', 'direct', '', ?, ?, ?, 'codex', ?)
-    `).run(
-      thread.id,
-      thread.workspaceId,
-      "Sub-agent",
-      thread.createdAt,
-      thread.updatedAt,
-      null,
-      thread.parentThreadId ?? null,
-    );
+    this.orm.insert(threads).values({
+      id: thread.id,
+      workspaceId: thread.workspaceId,
+      title: "Sub-agent",
+      status: "active",
+      mode: "direct",
+      branch: "",
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      deletedAt: null,
+      provider: "codex",
+      parentThreadId: thread.parentThreadId ?? null,
+    }).onConflictDoNothing().run();
   }
 
   private recordLatePrompt(delegation: CodexChildDelegation, prompt: string | undefined): void {
@@ -897,12 +918,12 @@ export class CanonicalCodexCollaborationCoordinator {
   }
 
   private loadChildTurn(childThreadId: string, nativeTurnId: string): AgentTurn | null {
-    const rows = this.db.prepare(`
-      SELECT *
-      FROM canonical_agent_turns
-      WHERE thread_id = ?
-      ORDER BY created_at ASC, id ASC
-    `).all(childThreadId) as Record<string, unknown>[];
+    const rows = this.orm
+      .select()
+      .from(canonicalAgentTurns)
+      .where(eq(canonicalAgentTurns.threadId, childThreadId))
+      .orderBy(asc(canonicalAgentTurns.createdAt), asc(canonicalAgentTurns.id))
+      .all();
     for (const row of rows) {
       const turn = this.operations.turnFromRow(row);
       if (hasNativeTurnIdentity(turn, nativeTurnId)) return turn;
@@ -1081,14 +1102,16 @@ export class CanonicalCodexCollaborationCoordinator {
   }
 
   private nextChildMessageSequence(childThreadId: string): number {
-    const row = this.db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM canonical_agent_items
-      WHERE thread_id = ?
-        AND kind = 'message'
-        AND json_extract(payload_json, '$.projection') = 'message'
-    `).get(childThreadId) as { count: number };
-    return Number(row.count);
+    const row = this.orm
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(canonicalAgentItems)
+      .where(and(
+        eq(canonicalAgentItems.threadId, childThreadId),
+        eq(canonicalAgentItems.kind, "message"),
+        eq(sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection')`, "message"),
+      ))
+      .get();
+    return Number(row!.count);
   }
 
   private childItemConflict(itemId: string): Error {

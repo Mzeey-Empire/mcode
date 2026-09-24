@@ -471,11 +471,11 @@ describe("CanonicalAgentEventSink", () => {
     });
 
     const retainedTargets = [
-      "INSERT INTO canonical_agent_threads",
-      "INSERT INTO canonical_agent_turns",
-      "INSERT INTO canonical_agent_items",
-      "INSERT INTO canonical_agent_events",
-      "INSERT INTO canonical_agent_ingest_checkpoints",
+      'insert into "canonical_agent_threads"',
+      'insert into "canonical_agent_turns"',
+      'insert into "canonical_agent_items"',
+      'insert into "canonical_agent_events"',
+      'insert into "canonical_agent_ingest_checkpoints"',
     ];
     expect(retainedTargets.map((target) =>
       preparedSql.filter((sql) => sql.includes(target)).length

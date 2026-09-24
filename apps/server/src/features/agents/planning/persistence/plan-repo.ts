@@ -7,46 +7,20 @@
 
 import { injectable, inject } from "tsyringe";
 import type { Database } from "bun:sqlite";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import * as NodeCrypto from "node:crypto";
 import type { PlanRecord, PlanStatus } from "@mcode/contracts";
+import { plans } from "../../../../runtime/persistence/sqlite/schema.js";
+
+type Row = typeof plans.$inferSelect;
 
 @injectable()
 export class PlanRepo {
-  private readonly stmtInsert;
-  private readonly stmtNextVersion;
-  private readonly stmtSupersedeDrafts;
-  private readonly stmtListByThread;
-  private readonly stmtGetById;
-  private readonly stmtUpdateStatus;
-  private readonly stmtGetLatest;
+  private readonly orm: BunSQLiteDatabase;
 
   constructor(@inject("Database") db: Database) {
-    this.stmtInsert = db.prepare(`
-      INSERT INTO plans (id, thread_id, message_id, version, title, content_md, sections_json, change_summary, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    this.stmtNextVersion = db.prepare(
-      "SELECT COALESCE(MAX(version), 0) + 1 AS next FROM plans WHERE thread_id = ?",
-    );
-
-    this.stmtSupersedeDrafts = db.prepare(
-      "UPDATE plans SET status = 'superseded' WHERE thread_id = ? AND status = 'draft'",
-    );
-
-    this.stmtListByThread = db.prepare(
-      "SELECT * FROM plans WHERE thread_id = ? ORDER BY version ASC",
-    );
-
-    this.stmtGetById = db.prepare("SELECT * FROM plans WHERE id = ?");
-
-    this.stmtUpdateStatus = db.prepare(
-      "UPDATE plans SET status = ? WHERE id = ?",
-    );
-
-    this.stmtGetLatest = db.prepare(
-      "SELECT * FROM plans WHERE thread_id = ? AND status != 'superseded' ORDER BY version DESC LIMIT 1",
-    );
+    this.orm = drizzle(db);
   }
 
   /** Insert a new plan, auto-assigning the next version number. */
@@ -59,74 +33,96 @@ export class PlanRepo {
     changeSummary: string | null,
   ): PlanRecord {
     const id = NodeCrypto.randomUUID();
-    const version = (this.stmtNextVersion.get(threadId) as { next: number })
-      .next;
+    const versionRow = this.orm
+      .select({ next: sql<number>`COALESCE(MAX(${plans.version}), 0) + 1` })
+      .from(plans)
+      .where(eq(plans.threadId, threadId))
+      .get();
+    const version = versionRow?.next ?? 1;
 
-    this.stmtSupersedeDrafts.run(threadId);
+    this.orm
+      .update(plans)
+      .set({ status: "superseded" })
+      .where(and(eq(plans.threadId, threadId), eq(plans.status, "draft")))
+      .run();
 
-    this.stmtInsert.run(
-      id,
-      threadId,
-      messageId,
-      version,
-      title,
-      contentMd,
-      sectionsJson,
-      changeSummary,
-      "draft",
-    );
+    this.orm
+      .insert(plans)
+      .values({
+        id,
+        threadId,
+        messageId,
+        version,
+        title,
+        contentMd,
+        sectionsJson,
+        changeSummary,
+        status: "draft",
+      })
+      .run();
 
-    return this.toRecord(this.stmtGetById.get(id) as Row);
+    const row = this.orm
+      .select()
+      .from(plans)
+      .where(eq(plans.id, id))
+      .get();
+    return this.toRecord(row as Row);
   }
 
   /** Update a plan's status (draft -> accepted, etc.). */
   updateStatus(planId: string, status: PlanStatus): void {
-    this.stmtUpdateStatus.run(status, planId);
+    this.orm
+      .update(plans)
+      .set({ status })
+      .where(eq(plans.id, planId))
+      .run();
   }
 
   /** All plan versions for a thread, oldest first. */
   listByThread(threadId: string): PlanRecord[] {
-    const rows = this.stmtListByThread.all(threadId) as Row[];
+    const rows = this.orm
+      .select()
+      .from(plans)
+      .where(eq(plans.threadId, threadId))
+      .orderBy(asc(plans.version))
+      .all();
     return rows.map(this.toRecord);
   }
 
   /** Most recent non-superseded plan for a thread, or null. */
   getLatestForThread(threadId: string): PlanRecord | null {
-    const row = this.stmtGetLatest.get(threadId) as Row | undefined;
+    const row = this.orm
+      .select()
+      .from(plans)
+      .where(and(eq(plans.threadId, threadId), ne(plans.status, "superseded")))
+      .orderBy(desc(plans.version))
+      .limit(1)
+      .get();
     return row ? this.toRecord(row) : null;
   }
 
   /** Single plan by ID. */
   getById(planId: string): PlanRecord | null {
-    const row = this.stmtGetById.get(planId) as Row | undefined;
+    const row = this.orm
+      .select()
+      .from(plans)
+      .where(eq(plans.id, planId))
+      .get();
     return row ? this.toRecord(row) : null;
   }
 
   private toRecord(row: Row): PlanRecord {
     return {
       id: row.id,
-      threadId: row.thread_id,
-      messageId: row.message_id,
+      threadId: row.threadId,
+      messageId: row.messageId,
       version: row.version,
       title: row.title,
-      contentMd: row.content_md,
-      sectionsJson: row.sections_json ? JSON.parse(row.sections_json) : null,
-      changeSummary: row.change_summary,
+      contentMd: row.contentMd,
+      sectionsJson: row.sectionsJson ? JSON.parse(row.sectionsJson) : null,
+      changeSummary: row.changeSummary,
       status: row.status as PlanRecord["status"],
-      createdAt: row.created_at,
+      createdAt: row.createdAt,
     };
   }
-}
-
-interface Row {
-  id: string;
-  thread_id: string;
-  message_id: string;
-  version: number;
-  title: string;
-  content_md: string;
-  sections_json: string | null;
-  change_summary: string | null;
-  status: string;
-  created_at: string;
 }

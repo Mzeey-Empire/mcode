@@ -6,42 +6,34 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
 import type { Database } from "bun:sqlite";
+import { and, asc, count, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { Workspace } from "@mcode/contracts";
+import { threads, workspaces } from "../../../runtime/persistence/sqlite/schema.js";
+import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 
-interface WorkspaceRow {
-  id: string;
-  name: string;
-  path: string;
-  provider_config: string;
-  is_git_repo: number;
-  created_at: string;
-  updated_at: string;
-  pinned: number;
-  last_opened_at: number | string | null;
-  sort_order: number;
-  deleted_at: string | null;
-}
+type WorkspaceRow = typeof workspaces.$inferSelect;
 
 function rowToWorkspace(row: WorkspaceRow): Workspace {
   return {
     id: row.id,
     name: row.name,
     path: row.path,
-    provider_config: JSON.parse(row.provider_config) as Record<
+    provider_config: JSON.parse(row.providerConfig) as Record<
       string,
       unknown
     >,
-    is_git_repo: row.is_git_repo === 1,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
+    is_git_repo: row.isGitRepo === 1,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
     pinned: row.pinned === 1,
-    last_opened_at: normalizeLastOpenedAt(row.last_opened_at),
-    sort_order: row.sort_order,
-    deleted_at: row.deleted_at ?? null,
+    last_opened_at: normalizeLastOpenedAt(row.lastOpenedAt),
+    sort_order: row.sortOrder,
+    deleted_at: row.deletedAt ?? null,
   };
 }
 
-function normalizeLastOpenedAt(value: WorkspaceRow["last_opened_at"]): number | null {
+function normalizeLastOpenedAt(value: number | string | null): number | null {
   if (value === null || typeof value === "number") return value;
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) throw new Error("Workspace last_opened_at is not a Unix timestamp or ISO date.");
@@ -51,38 +43,53 @@ function normalizeLastOpenedAt(value: WorkspaceRow["last_opened_at"]): number | 
 /** Repository for workspace CRUD operations against SQLite. */
 @injectable()
 export class WorkspaceRepo {
-  constructor(@inject("Database") private readonly db: Database) {}
+  private readonly orm: BunSQLiteDatabase;
+
+  constructor(@inject("Database") db: Database) {
+    this.orm = drizzle(db);
+  }
 
   /** Create a new workspace and return the fully-populated record. */
   create(name: string, path: string, isGitRepo = true): Workspace {
     const id = NodeCrypto.randomUUID();
     const now = new Date().toISOString();
 
-    const trx = this.db.transaction(() => {
+    this.orm.transaction((tx) => {
       // Evict a soft-deleted row occupying this path only if it has no remaining
       // child threads (i.e. async cleanup already finished). If threads still
       // exist the CleanupWorker will hard-delete the workspace once done.
-      const stale = this.db
-        .prepare("SELECT id FROM workspaces WHERE path = ? AND deleted_at IS NOT NULL")
-        .get(path) as { id: string } | undefined;
+      const stale = tx
+        .select({ id: workspaces.id })
+        .from(workspaces)
+        .where(and(eq(workspaces.path, path), isNotNull(workspaces.deletedAt)))
+        .get();
       if (stale) {
-        const threadCount = this.db
-          .prepare("SELECT COUNT(*) AS n FROM threads WHERE workspace_id = ?")
-          .get(stale.id) as { n: number };
-        if (threadCount.n === 0) {
-          this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(stale.id);
+        const threadCount = tx
+          .select({ n: count() })
+          .from(threads)
+          .where(eq(threads.workspaceId, stale.id))
+          .get();
+        if (threadCount?.n === 0) {
+          tx.delete(workspaces).where(eq(workspaces.id, stale.id)).run();
         }
       }
-      this.db
-        .prepare("UPDATE workspaces SET sort_order = sort_order + 1")
+      tx
+        .update(workspaces)
+        .set({ sortOrder: sql`${workspaces.sortOrder} + 1` })
         .run();
-      this.db
-        .prepare(
-          "INSERT INTO workspaces (id, name, path, is_git_repo, created_at, updated_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, 0)",
-        )
-        .run(id, name, path, isGitRepo ? 1 : 0, now, now);
+      tx
+        .insert(workspaces)
+        .values({
+          id,
+          name,
+          path,
+          isGitRepo: isGitRepo ? 1 : 0,
+          createdAt: now,
+          updatedAt: now,
+          sortOrder: 0,
+        })
+        .run();
     });
-    trx();
 
     return {
       id,
@@ -101,20 +108,25 @@ export class WorkspaceRepo {
 
   /** Move an existing workspace to the top of the sidebar (sort_order 0). */
   prependToSortOrder(id: string): void {
-    const row = this.db
-      .prepare("SELECT sort_order FROM workspaces WHERE id = ?")
-      .get(id) as { sort_order: number } | undefined;
-    if (!row || row.sort_order === 0) return;
+    const row = this.orm
+      .select({ sortOrder: workspaces.sortOrder })
+      .from(workspaces)
+      .where(eq(workspaces.id, id))
+      .get();
+    if (!row || row.sortOrder === 0) return;
 
-    const trx = this.db.transaction(() => {
-      this.db
-        .prepare(
-          "UPDATE workspaces SET sort_order = sort_order + 1 WHERE sort_order < ?",
-        )
-        .run(row.sort_order);
-      this.db.prepare("UPDATE workspaces SET sort_order = 0 WHERE id = ?").run(id);
+    this.orm.transaction((tx) => {
+      tx
+        .update(workspaces)
+        .set({ sortOrder: sql`${workspaces.sortOrder} + 1` })
+        .where(lt(workspaces.sortOrder, row.sortOrder))
+        .run();
+      tx
+        .update(workspaces)
+        .set({ sortOrder: 0 })
+        .where(eq(workspaces.id, id))
+        .run();
     });
-    trx();
   }
 
   /**
@@ -122,11 +134,11 @@ export class WorkspaceRepo {
    * Rebuilds sequential sort_order values to handle duplicates from legacy migrations.
    */
   reorderToIndex(id: string, newIndex: number): void {
-    const rows = this.db
-      .prepare(
-        "SELECT id FROM workspaces ORDER BY sort_order ASC, id ASC",
-      )
-      .all() as Array<{ id: string }>;
+    const rows = this.orm
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .orderBy(asc(workspaces.sortOrder), asc(workspaces.id))
+      .all();
 
     const oldIdx = rows.findIndex((r) => r.id === id);
     if (oldIdx < 0) return;
@@ -139,46 +151,47 @@ export class WorkspaceRepo {
     const [moved] = ids.splice(oldIdx, 1);
     ids.splice(idx, 0, moved!);
 
-    const stmt = this.db.prepare(
-      "UPDATE workspaces SET sort_order = ? WHERE id = ?",
-    );
-    const trx = this.db.transaction(() => {
+    this.orm.transaction((tx) => {
       for (let i = 0; i < ids.length; i++) {
-        stmt.run(i, ids[i]);
+        tx
+          .update(workspaces)
+          .set({ sortOrder: i })
+          .where(eq(workspaces.id, ids[i]!))
+          .run();
       }
     });
-    trx();
   }
 
   /** Find a workspace by its primary key. Returns null if not found or soft-deleted. */
   findById(id: string): Workspace | null {
-    const row = this.db
-      .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE id = ? AND deleted_at IS NULL",
-      )
-      .get(id) as WorkspaceRow | undefined;
+    const row = this.orm
+      .select()
+      .from(workspaces)
+      .where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt)))
+      .get();
 
     return row ? rowToWorkspace(row) : null;
   }
 
   /** Find a workspace by its filesystem path. Returns null if not found or soft-deleted. */
   findByPath(path: string): Workspace | null {
-    const row = this.db
-      .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE path = ? AND deleted_at IS NULL",
-      )
-      .get(path) as WorkspaceRow | undefined;
+    const row = this.orm
+      .select()
+      .from(workspaces)
+      .where(and(eq(workspaces.path, path), isNull(workspaces.deletedAt)))
+      .get();
 
     return row ? rowToWorkspace(row) : null;
   }
 
   /** List all non-deleted workspaces ordered by ascending sidebar sort_order. */
   listAll(): Workspace[] {
-    const rows = this.db
-      .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE deleted_at IS NULL ORDER BY sort_order ASC, id ASC",
-      )
-      .all() as WorkspaceRow[];
+    const rows = this.orm
+      .select()
+      .from(workspaces)
+      .where(isNull(workspaces.deletedAt))
+      .orderBy(asc(workspaces.sortOrder), asc(workspaces.id))
+      .all();
 
     return rows.map(rowToWorkspace);
   }
@@ -187,92 +200,143 @@ export class WorkspaceRepo {
   search(query: string, limit: number): Workspace[] {
     const normalized = query.trim();
     if (!normalized) {
-      return this.db.prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE deleted_at IS NULL ORDER BY last_opened_at DESC NULLS LAST, updated_at DESC, id ASC LIMIT ?",
-      ).all(limit).map((row) => rowToWorkspace(row as WorkspaceRow));
+      return this.orm
+        .select()
+        .from(workspaces)
+        .where(isNull(workspaces.deletedAt))
+        .orderBy(
+          sql`${workspaces.lastOpenedAt} DESC NULLS LAST`,
+          desc(workspaces.updatedAt),
+          asc(workspaces.id),
+        )
+        .limit(limit)
+        .all()
+        .map(rowToWorkspace);
     }
     const pattern = `%${normalized.replace(/[\\%_]/g, "\\$&")}%`;
-    return this.db.prepare(
-      "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE deleted_at IS NULL AND (name LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\') ORDER BY last_opened_at DESC NULLS LAST, updated_at DESC, id ASC LIMIT ?",
-    ).all(pattern, pattern, limit).map((row) => rowToWorkspace(row as WorkspaceRow));
+    return this.orm
+      .select()
+      .from(workspaces)
+      .where(
+        and(
+          isNull(workspaces.deletedAt),
+          or(
+            sql`${workspaces.name} LIKE ${pattern} ESCAPE '\\'`,
+            sql`${workspaces.path} LIKE ${pattern} ESCAPE '\\'`,
+          ),
+        ),
+      )
+      .orderBy(
+        sql`${workspaces.lastOpenedAt} DESC NULLS LAST`,
+        desc(workspaces.updatedAt),
+        asc(workspaces.id),
+      )
+      .limit(limit)
+      .all()
+      .map(rowToWorkspace);
   }
 
   /** Rename a non-deleted workspace and return its updated record. */
   rename(id: string, name: string): Workspace | null {
-    const result = this.db
-      .prepare("UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
-      .run(name, new Date().toISOString(), id);
+    const result = runChanges(this.orm
+      .update(workspaces)
+      .set({ name, updatedAt: new Date().toISOString() })
+      .where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt)))
+      );
     return result.changes > 0 ? this.findById(id) : null;
   }
 
   /** Set the pinned flag for a workspace. Pinned workspaces always sort above recents. */
   setPinned(id: string, pinned: boolean): void {
-    this.db.prepare("UPDATE workspaces SET pinned = ? WHERE id = ?").run(pinned ? 1 : 0, id);
+    this.orm
+      .update(workspaces)
+      .set({ pinned: pinned ? 1 : 0 })
+      .where(eq(workspaces.id, id))
+      .run();
   }
 
   /** Update last_opened_at to now without touching updated_at. Used to track recency separately from edits. */
   touchLastOpened(id: string): void {
-    this.db.prepare("UPDATE workspaces SET last_opened_at = ? WHERE id = ?").run(Date.now(), id);
+    this.orm
+      .update(workspaces)
+      .set({ lastOpenedAt: Date.now() })
+      .where(eq(workspaces.id, id))
+      .run();
   }
 
   /** Clear last_opened_at and pinned, removing the workspace from the recents/pinned list. */
   removeRecent(id: string): void {
-    this.db.prepare("UPDATE workspaces SET last_opened_at = NULL, pinned = 0 WHERE id = ?").run(id);
+    this.orm
+      .update(workspaces)
+      .set({ lastOpenedAt: null, pinned: 0 })
+      .where(eq(workspaces.id, id))
+      .run();
   }
 
   /** Soft-delete a workspace by setting deleted_at. Returns true if a row was changed. */
   softDelete(id: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare("UPDATE workspaces SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
-      .run(now, now, id);
+    const result = runChanges(this.orm
+      .update(workspaces)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt)))
+      );
     return result.changes > 0;
   }
 
   /** Permanently remove a workspace and all its children (via FK cascade). */
   hardDelete(id: string): boolean {
-    const result = this.db
-      .prepare("DELETE FROM workspaces WHERE id = ?")
-      .run(id);
+    const result = runChanges(this.orm
+      .delete(workspaces)
+      .where(eq(workspaces.id, id))
+      );
     return result.changes > 0;
   }
 
   /** Find all workspaces currently in the soft-deleted (deleting) state. */
   findDeleting(): Array<{ id: string; path: string; deletedAt: string }> {
-    return this.db
-      .prepare("SELECT id, path, deleted_at AS deletedAt FROM workspaces WHERE deleted_at IS NOT NULL")
+    return this.orm
+      .select({ id: workspaces.id, path: workspaces.path, deletedAt: workspaces.deletedAt })
+      .from(workspaces)
+      .where(isNotNull(workspaces.deletedAt))
       .all() as Array<{ id: string; path: string; deletedAt: string }>;
   }
 
   /** Find a single soft-deleted workspace by path. O(1) lookup for finalization. */
   findDeletingByPath(path: string): { id: string; path: string; deletedAt: string } | null {
-    const row = this.db
-      .prepare("SELECT id, path, deleted_at AS deletedAt FROM workspaces WHERE path = ? AND deleted_at IS NOT NULL")
-      .get(path) as { id: string; path: string; deletedAt: string } | undefined;
-    return row ?? null;
+    const row = this.orm
+      .select({ id: workspaces.id, path: workspaces.path, deletedAt: workspaces.deletedAt })
+      .from(workspaces)
+      .where(and(eq(workspaces.path, path), isNotNull(workspaces.deletedAt)))
+      .get();
+    return (row ?? null) as { id: string; path: string; deletedAt: string } | null;
   }
 
   /** Find a workspace by ID regardless of deletion status. Used during cleanup. */
   findByIdIncludeDeleted(id: string): Workspace | null {
-    const row = this.db
-      .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE id = ?",
-      )
-      .get(id) as WorkspaceRow | undefined;
+    const row = this.orm
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.id, id))
+      .get();
     return row ? rowToWorkspace(row) : null;
   }
 
   /** Bump updated_at to the current time so the workspace sorts to the top of the recent list. */
   touch(id: string): void {
-    this.db
-      .prepare("UPDATE workspaces SET updated_at = ? WHERE id = ?")
-      .run(new Date().toISOString(), id);
+    this.orm
+      .update(workspaces)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(workspaces.id, id))
+      .run();
   }
 
   /** Update the is_git_repo flag (e.g. after the user runs `git init`). */
   setIsGitRepo(id: string, isGitRepo: boolean): void {
-    this.db
-      .prepare("UPDATE workspaces SET is_git_repo = ? WHERE id = ?")
-      .run(isGitRepo ? 1 : 0, id);
+    this.orm
+      .update(workspaces)
+      .set({ isGitRepo: isGitRepo ? 1 : 0 })
+      .where(eq(workspaces.id, id))
+      .run();
   }
 }

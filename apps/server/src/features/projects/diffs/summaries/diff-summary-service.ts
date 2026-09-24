@@ -6,7 +6,9 @@
 
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
-import type { Database, Statement } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { eq } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { logger } from "@mcode/shared";
 import { UtilityCompletionService } from "../../../../shared/completion/utility-completion-service.js";
 import { SnapshotService } from "../snapshots/snapshot-service.js";
@@ -14,6 +16,7 @@ import type { GitExecutor } from "../../git/execution/index.js";
 import { ThreadDiffSource } from "./diff-summary-source.js";
 import type { TurnSnapshotRow } from "./diff-summary-source.js";
 import { buildDiffSummaryPrompt } from "./diff-summary-prompt.js";
+import { diffSummaries } from "../../../../runtime/persistence/sqlite/schema.js";
 
 /** A persisted diff summary record. */
 export interface DiffSummaryRecord {
@@ -26,27 +29,18 @@ export interface DiffSummaryRecord {
   createdAt: string;
 }
 
-/** Row shape as stored in the diff_summaries table. */
-interface DiffSummaryRow {
-  id: string;
-  thread_id: string;
-  content: string;
-  turn_count: number;
-  last_turn_id: string | null;
-  model: string;
-  created_at: string;
-}
+type DiffSummaryRow = typeof diffSummaries.$inferSelect;
 
 /** Maps a raw DB row to the public DiffSummaryRecord shape. */
 function rowToRecord(row: DiffSummaryRow): DiffSummaryRecord {
   return {
     id: row.id,
-    threadId: row.thread_id,
+    threadId: row.threadId,
     content: row.content,
-    turnCount: row.turn_count,
-    lastTurnId: row.last_turn_id,
+    turnCount: row.turnCount,
+    lastTurnId: row.lastTurnId,
     model: row.model,
-    createdAt: row.created_at,
+    createdAt: row.createdAt,
   };
 }
 
@@ -55,8 +49,7 @@ function rowToRecord(row: DiffSummaryRow): DiffSummaryRecord {
  */
 @injectable()
 export class DiffSummaryService {
-  private readonly stmtGet: Statement;
-  private readonly stmtInsert: Statement;
+  private readonly orm: BunSQLiteDatabase;
 
   constructor(
     @inject(UtilityCompletionService)
@@ -68,17 +61,17 @@ export class DiffSummaryService {
     @inject("Database")
     db: Database,
   ) {
-    this.stmtGet = db.prepare(
-      "SELECT id, thread_id, content, turn_count, last_turn_id, model, created_at FROM diff_summaries WHERE thread_id = ? LIMIT 1",
-    );
-    this.stmtInsert = db.prepare(
-      "INSERT OR REPLACE INTO diff_summaries (id, thread_id, content, turn_count, last_turn_id, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    );
+    this.orm = drizzle(db);
   }
 
   /** Get the stored summary for a thread, if one exists. */
   get(threadId: string): DiffSummaryRecord | null {
-    const row = this.stmtGet.get(threadId) as DiffSummaryRow | undefined;
+    const row = this.orm
+      .select()
+      .from(diffSummaries)
+      .where(eq(diffSummaries.threadId, threadId))
+      .limit(1)
+      .get();
     return row ? rowToRecord(row) : null;
   }
 
@@ -118,15 +111,29 @@ export class DiffSummaryService {
     };
 
     // Atomic upsert via INSERT OR REPLACE (unique index on thread_id)
-    this.stmtInsert.run(
-      record.id,
-      record.threadId,
-      record.content,
-      record.turnCount,
-      record.lastTurnId,
-      record.model,
-      record.createdAt,
-    );
+    this.orm
+      .insert(diffSummaries)
+      .values({
+        id: record.id,
+        threadId: record.threadId,
+        content: record.content,
+        turnCount: record.turnCount,
+        lastTurnId: record.lastTurnId,
+        model: record.model,
+        createdAt: record.createdAt,
+      })
+      .onConflictDoUpdate({
+        target: diffSummaries.threadId,
+        set: {
+          id: record.id,
+          content: record.content,
+          turnCount: record.turnCount,
+          lastTurnId: record.lastTurnId,
+          model: record.model,
+          createdAt: record.createdAt,
+        },
+      })
+      .run();
 
     logger.info(`Generated diff summary for thread ${threadId} (${payload.turnCount} turns)`);
 

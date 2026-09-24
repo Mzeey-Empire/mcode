@@ -69,7 +69,7 @@ describe("MessageRepo", () => {
     const localRepo = new MessageRepo(localDb);
 
     localRepo.listByThread("thread-1", 10);
-    expect(preparedSql.some((sql) => sql.startsWith("INSERT"))).toBe(false);
+    expect(preparedSql.some((sql) => sql.toLowerCase().startsWith("insert"))).toBe(false);
 
     localRepo.create("thread-1", "user", "one", 1);
     localRepo.create("thread-1", "user", "two", 2);
@@ -90,9 +90,10 @@ describe("MessageRepo", () => {
     localRepo.publishAssistant("assistant-1");
     localRepo.publishAssistant("assistant-1");
 
-    expect(preparedSql.filter((sql) => sql.startsWith("INSERT INTO messages")).length).toBe(1);
-    expect(preparedSql.filter((sql) => sql.startsWith("INSERT OR IGNORE INTO messages")).length).toBe(1);
-    expect(preparedSql.filter((sql) => sql.startsWith("UPDATE messages SET is_internal")).length).toBe(1);
+    const inserts = preparedSql.filter((sql) => sql.toLowerCase().startsWith('insert into "messages"'));
+    expect(inserts.filter((sql) => !sql.includes("on conflict")).length).toBe(1);
+    expect(inserts.filter((sql) => sql.includes("on conflict")).length).toBe(1);
+    expect(preparedSql.filter((sql) => sql.toLowerCase().startsWith('update "messages" set "is_internal"')).length).toBe(1);
     localDb.close();
   });
 

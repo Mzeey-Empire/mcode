@@ -5,7 +5,9 @@
 
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
-import type { Database, Statement } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { asc, eq, inArray, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { ThoughtSegmentRecord } from "@mcode/contracts";
 import {
   ACTIVE_TURN_WRITE_BATCH_LIMITS,
@@ -13,17 +15,10 @@ import {
   type WriteBatchLimits,
   type WriteBatchResult,
 } from "../../../../../runtime/persistence/sqlite/bounded-write-batches.js";
+import { thoughtSegments } from "../../../../../runtime/persistence/sqlite/schema.js";
 
-/** Row shape returned by SQLite for the thought_segments table. */
-interface ThoughtSegmentRow {
-  id: string;
-  message_id: string;
-  text: string;
-  started_at: string;
-  ended_at: string | null;
-  sort_order: number;
-  is_final_response: number;
-}
+/** Row shape returned by drizzle for the thought_segments table. */
+type ThoughtSegmentRow = typeof thoughtSegments.$inferSelect;
 
 /** Input for creating a new thought segment record. */
 export interface CreateThoughtSegmentInput {
@@ -41,53 +36,41 @@ export interface CreateThoughtSegmentInput {
 function rowToRecord(row: ThoughtSegmentRow): ThoughtSegmentRecord {
   return {
     id: row.id,
-    message_id: row.message_id,
+    message_id: row.messageId,
     text: row.text,
-    started_at: row.started_at,
-    ended_at: row.ended_at,
-    sort_order: row.sort_order,
-    is_final_response: row.is_final_response,
+    started_at: row.startedAt,
+    ended_at: row.endedAt,
+    sort_order: row.sortOrder,
+    is_final_response: row.isFinalResponse,
   };
 }
-
-const COLUMNS = "id, message_id, text, started_at, ended_at, sort_order, is_final_response";
 
 /** Repository for thought segment creation and retrieval against SQLite. */
 @injectable()
 export class ThoughtSegmentRepo {
-  private readonly stmtInsert: Statement;
-  private readonly stmtUpsert: Statement;
-  private readonly stmtListByMessage: Statement;
-  private readonly stmtCountByMessage: Statement;
+  private readonly orm: BunSQLiteDatabase;
 
   constructor(@inject("Database") private readonly db: Database) {
-    this.stmtInsert = db.prepare(
-      "INSERT OR IGNORE INTO thought_segments (id, message_id, text, started_at, ended_at, sort_order, is_final_response) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    );
-    this.stmtUpsert = db.prepare(
-      "INSERT INTO thought_segments (id, message_id, text, started_at, ended_at, sort_order, is_final_response) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET message_id = excluded.message_id, text = excluded.text, started_at = excluded.started_at, ended_at = excluded.ended_at, sort_order = excluded.sort_order, is_final_response = excluded.is_final_response",
-    );
-    this.stmtListByMessage = db.prepare(
-      `SELECT ${COLUMNS} FROM thought_segments WHERE message_id = ? ORDER BY sort_order ASC`,
-    );
-    this.stmtCountByMessage = db.prepare(
-      "SELECT COUNT(*) as count FROM thought_segments WHERE message_id = ?",
-    );
+    this.orm = drizzle(db);
   }
 
   /** Create a single thought segment record and return the fully-populated record. */
   create(input: CreateThoughtSegmentInput): ThoughtSegmentRecord {
     const id = input.id ?? NodeCrypto.randomUUID();
     const isFinalResponse = input.isFinalResponse ?? 0;
-    this.stmtInsert.run(
-      id,
-      input.messageId,
-      input.text,
-      input.startedAt,
-      input.endedAt,
-      input.sortOrder,
-      isFinalResponse,
-    );
+    this.orm
+      .insert(thoughtSegments)
+      .values({
+        id,
+        messageId: input.messageId,
+        text: input.text,
+        startedAt: input.startedAt,
+        endedAt: input.endedAt,
+        sortOrder: input.sortOrder,
+        isFinalResponse,
+      })
+      .onConflictDoNothing()
+      .run();
     return {
       id,
       message_id: input.messageId,
@@ -102,20 +85,22 @@ export class ThoughtSegmentRepo {
   /** Insert multiple thought segment records in a single transaction. */
   bulkCreate(inputs: CreateThoughtSegmentInput[]): void {
     if (inputs.length === 0) return;
-    const tx = this.db.transaction((items: CreateThoughtSegmentInput[]) => {
-      for (const item of items) {
-        this.stmtInsert.run(
-          item.id ?? NodeCrypto.randomUUID(),
-          item.messageId,
-          item.text,
-          item.startedAt,
-          item.endedAt,
-          item.sortOrder,
-          item.isFinalResponse ?? 0,
-        );
+    this.orm.transaction((tx) => {
+      for (const item of inputs) {
+        tx.insert(thoughtSegments)
+          .values({
+            id: item.id ?? NodeCrypto.randomUUID(),
+            messageId: item.messageId,
+            text: item.text,
+            startedAt: item.startedAt,
+            endedAt: item.endedAt,
+            sortOrder: item.sortOrder,
+            isFinalResponse: item.isFinalResponse ?? 0,
+          })
+          .onConflictDoNothing()
+          .run();
       }
     });
-    tx(inputs);
   }
 
   /** Insert thought rows in bounded transactions with an event-loop yield between commits. */
@@ -130,22 +115,35 @@ export class ThoughtSegmentRepo {
       limits,
       byteLength: (item) => Buffer.byteLength(JSON.stringify(item), "utf8"),
       write: (item) => {
-        (replaceExisting ? this.stmtUpsert : this.stmtInsert).run(
-          item.id ?? NodeCrypto.randomUUID(),
-          item.messageId,
-          item.text,
-          item.startedAt,
-          item.endedAt,
-          item.sortOrder,
-          item.isFinalResponse ?? 0,
-        );
+        const { id, ...rest } = {
+          id: item.id ?? NodeCrypto.randomUUID(),
+          messageId: item.messageId,
+          text: item.text,
+          startedAt: item.startedAt,
+          endedAt: item.endedAt,
+          sortOrder: item.sortOrder,
+          isFinalResponse: item.isFinalResponse ?? 0,
+        };
+        const builder = this.orm.insert(thoughtSegments).values({ id, ...rest });
+        if (replaceExisting) {
+          builder
+            .onConflictDoUpdate({ target: thoughtSegments.id, set: rest })
+            .run();
+        } else {
+          builder.onConflictDoNothing().run();
+        }
       },
     });
   }
 
   /** List all thought segments for a message, ordered by sort_order ascending. */
   listByMessage(messageId: string): ThoughtSegmentRecord[] {
-    const rows = this.stmtListByMessage.all(messageId) as ThoughtSegmentRow[];
+    const rows = this.orm
+      .select()
+      .from(thoughtSegments)
+      .where(eq(thoughtSegments.messageId, messageId))
+      .orderBy(asc(thoughtSegments.sortOrder))
+      .all();
     return rows.map(rowToRecord);
   }
 
@@ -154,12 +152,12 @@ export class ThoughtSegmentRepo {
     const grouped = new Map<string, ThoughtSegmentRecord[]>();
     if (messageIds.length === 0) return grouped;
 
-    const placeholders = messageIds.map(() => "?").join(", ");
-    const rows = this.db
-      .prepare(
-        `SELECT ${COLUMNS} FROM thought_segments WHERE message_id IN (${placeholders}) ORDER BY message_id ASC, sort_order ASC`,
-      )
-      .all(...messageIds) as ThoughtSegmentRow[];
+    const rows = this.orm
+      .select()
+      .from(thoughtSegments)
+      .where(inArray(thoughtSegments.messageId, [...messageIds]))
+      .orderBy(asc(thoughtSegments.messageId), asc(thoughtSegments.sortOrder))
+      .all();
 
     for (const row of rows) {
       const record = rowToRecord(row);
@@ -172,7 +170,11 @@ export class ThoughtSegmentRepo {
 
   /** Count the number of thought segments for a message. */
   countByMessage(messageId: string): number {
-    const row = this.stmtCountByMessage.get(messageId) as { count: number };
-    return row.count;
+    const row = this.orm
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(thoughtSegments)
+      .where(eq(thoughtSegments.messageId, messageId))
+      .get();
+    return row?.count ?? 0;
   }
 }

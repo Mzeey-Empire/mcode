@@ -23,7 +23,7 @@ vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn()
 
 const THREAD = "thread-1";
 const IDEMPOTENT_SQL =
-  "UPDATE threads SET has_file_changes = 1 WHERE id = ? AND has_file_changes = 0";
+  'update "threads" set "has_file_changes" = ? where ("threads"."id" = ? and "threads"."has_file_changes" = ?)';
 
 /** Seed a workspace + thread so message/record foreign keys are satisfied. */
 function seedThread(db: Database): void {
@@ -824,7 +824,7 @@ describe("TurnFinalizer.finalize — git snapshot write", () => {
     await finalizer.finalize(THREAD, "completed");
 
     expect(db.prepare).toHaveBeenCalledWith(IDEMPOTENT_SQL);
-    expect(runSpy).toHaveBeenCalledWith(THREAD);
+    expect(runSpy).toHaveBeenCalledWith(1, THREAD, 0);
   });
 
   it("does not touch the has_file_changes flag when nothing changed", async () => {
@@ -889,7 +889,7 @@ describe("TurnFinalizer.finalize — git snapshot write", () => {
       filesChanged: [],
       fileEffects,
     }));
-    expect(runSpy).toHaveBeenCalledWith(THREAD);
+    expect(runSpy).toHaveBeenCalledWith(1, THREAD, 0);
   });
 
   it("uses a late ref update pinned before finalization waits", async () => {

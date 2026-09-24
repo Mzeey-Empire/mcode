@@ -36,6 +36,14 @@
 import { injectable, inject } from "tsyringe";
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { and, asc, desc, eq, gt, gte, lt, ne, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import {
+  hookExecutions,
+  messages,
+  thoughtSegments,
+  toolCallRecords,
+} from "../../../../runtime/persistence/sqlite/schema.js";
 import { logger } from "@mcode/shared";
 import {
   NarrativeEntrySchema,
@@ -76,16 +84,12 @@ const DEFAULT_LOAD_LIMIT = 200;
 const DEFAULT_DETAIL_LOAD_LIMIT = 100;
 const ASSISTANT_BODY_SORT_ORDER = Number.MAX_SAFE_INTEGER;
 
-type NarrativeDetailRow = { entry_json: string };
-
 type SelectedNarrativeMessageRow = {
   id: string;
   sequence: number;
   role: string;
   content: string;
 };
-
-type FinalResponseSortOrderRow = { sort_order: number };
 
 function narrativeKindOrder(kind: NarrativeDetailCursor["kind"]): number {
   switch (kind) {
@@ -246,6 +250,13 @@ export class NarrativeStore {
     @inject("Database") private readonly db?: Database,
   ) {}
 
+  private ormInstance: BunSQLiteDatabase | null = null;
+
+  private requireOrm(): BunSQLiteDatabase {
+    if (!this.db) throw new Error("NarrativeStore detail loading requires the SQLite database");
+    return (this.ormInstance ??= drizzle(this.db));
+  }
+
   /**
    * Load a thread's persisted narrative as one chronologically-ordered list.
    *
@@ -297,23 +308,23 @@ export class NarrativeStore {
     messageLimit: number,
     before: number | undefined,
   ): SelectedNarrativeMessageRow[] {
-    if (!this.db) throw new Error("NarrativeStore detail loading requires the SQLite database");
+    const orm = this.requireOrm();
     const pageLimit = Math.max(1, Math.min(DEFAULT_LOAD_LIMIT, messageLimit));
-    const pageBefore = before == null ? "" : "AND m.sequence < ?";
-    return this.db.prepare(`
-      SELECT m.id, m.sequence, m.role, m.content
-      FROM messages m
-      WHERE m.thread_id = ?
-        AND m.is_internal = 0
-        AND json_extract(m.system_notice, '$.scope') IS NOT 'session'
-        ${pageBefore}
-      ORDER BY m.sequence DESC
-      LIMIT ?
-    `).all(
-      threadId,
-      ...(before == null ? [] : [before]),
-      pageLimit,
-    ) as SelectedNarrativeMessageRow[];
+    return orm.select({
+      id: messages.id,
+      sequence: messages.sequence,
+      role: messages.role,
+      content: messages.content,
+    }).from(messages)
+      .where(and(
+        eq(messages.threadId, threadId),
+        eq(messages.isInternal, 0),
+        sql`json_extract(${messages.systemNotice}, '$.scope') IS NOT 'session'`,
+        before == null ? undefined : lt(messages.sequence, before),
+      ))
+      .orderBy(desc(messages.sequence))
+      .limit(pageLimit)
+      .all();
   }
 
   /**
@@ -326,118 +337,132 @@ export class NarrativeStore {
     limit: number,
     after: NarrativeDetailCursor | undefined,
   ): NarrativeEntry[] {
-    if (!this.db) throw new Error("NarrativeStore detail loading requires the SQLite database");
-    const bodySortOrder = this.db.prepare(`
-      SELECT sort_order
-      FROM thought_segments
-      WHERE message_id = ?
-        AND is_final_response <> 0
-      ORDER BY sort_order ASC, id ASC
-      LIMIT 1
-    `).get(message.id) as FinalResponseSortOrderRow | null;
+    const orm = this.requireOrm();
+    const bodySortOrder = orm.select({ sortOrder: thoughtSegments.sortOrder })
+      .from(thoughtSegments)
+      .where(and(
+        eq(thoughtSegments.messageId, message.id),
+        ne(thoughtSegments.isFinalResponse, 0),
+      ))
+      .orderBy(asc(thoughtSegments.sortOrder), asc(thoughtSegments.id))
+      .limit(1)
+      .get();
     const body: NarrativeEntry = {
       kind: "assistantMessage",
       messageId: message.id,
       sequence: message.sequence,
       body: message.content,
-      sortOrder: bodySortOrder?.sort_order ?? ASSISTANT_BODY_SORT_ORDER,
+      sortOrder: bodySortOrder?.sortOrder ?? ASSISTANT_BODY_SORT_ORDER,
     };
-    const toolCursor = this.detailCursorClause(after, "toolCall");
-    const toolRows = this.db.prepare(`
-      SELECT json_object(
-        'kind', 'toolCall', 'sequence', ?, 'sortOrder', tool.sort_order,
-        'record', json_object(
-          'id', tool.id, 'message_id', tool.message_id,
-          'parent_tool_call_id', tool.parent_tool_call_id, 'tool_name', tool.tool_name,
-          'display_name', tool.display_name, 'provider_agent_key', tool.provider_agent_key,
-          'subagent_identity_key', tool.subagent_identity_key,
-          'subagent_provider_name', tool.subagent_provider_name,
-          'subagent_prompt', tool.subagent_prompt, 'subagent_type', tool.subagent_type,
-          'subagent_agent_id', tool.subagent_agent_id,
-          'subagent_duration_ms', tool.subagent_duration_ms, 'model', tool.model,
-          'reasoning_effort', tool.reasoning_effort, 'input_summary', tool.input_summary,
-          'output_summary', tool.output_summary, 'output_truncated', tool.output_truncated,
-          'output_total_bytes', tool.output_total_bytes,
-          'output_artifact_path', tool.output_artifact_path, 'exit_code', tool.exit_code,
-          'status', tool.status, 'started_at', tool.started_at,
-          'completed_at', tool.completed_at, 'sort_order', tool.sort_order
-        )
-      ) AS entry_json
-      FROM tool_call_records tool
-      WHERE tool.message_id = ?
-      ${toolCursor.sql}
-      ORDER BY tool.sort_order ASC, tool.id ASC
-      LIMIT ?
-    `).all(message.sequence, message.id, ...toolCursor.args, limit) as NarrativeDetailRow[];
+    const toolRows = orm.select().from(toolCallRecords)
+      .where(and(
+        eq(toolCallRecords.messageId, message.id),
+        this.detailCursorCondition(after, "toolCall", toolCallRecords.sortOrder, toolCallRecords.id),
+      ))
+      .orderBy(asc(toolCallRecords.sortOrder), asc(toolCallRecords.id))
+      .limit(limit)
+      .all();
 
-    const thoughtCursor = this.detailCursorClause(after, "narrationSegment");
-    const thoughtRows = this.db.prepare(`
-      SELECT json_object(
-        'kind', 'narrationSegment', 'sequence', ?, 'sortOrder', thought.sort_order,
-        'record', json_object(
-          'id', thought.id, 'message_id', thought.message_id, 'text', thought.text,
-          'started_at', thought.started_at, 'ended_at', thought.ended_at,
-          'sort_order', thought.sort_order, 'is_final_response', thought.is_final_response
-        )
-      ) AS entry_json
-      FROM thought_segments thought
-      WHERE thought.message_id = ?
-        AND thought.is_final_response = 0
-      ${thoughtCursor.sql}
-      ORDER BY thought.sort_order ASC, thought.id ASC
-      LIMIT ?
-    `).all(message.sequence, message.id, ...thoughtCursor.args, limit) as NarrativeDetailRow[];
+    const thoughtRows = orm.select().from(thoughtSegments)
+      .where(and(
+        eq(thoughtSegments.messageId, message.id),
+        eq(thoughtSegments.isFinalResponse, 0),
+        this.detailCursorCondition(after, "narrationSegment", thoughtSegments.sortOrder, thoughtSegments.id),
+      ))
+      .orderBy(asc(thoughtSegments.sortOrder), asc(thoughtSegments.id))
+      .limit(limit)
+      .all();
 
-    const hookCursor = this.detailCursorClause(after, "hook");
-    const hookRows = this.db.prepare(`
-      SELECT json_object(
-        'kind', 'hook', 'sequence', ?, 'sortOrder', hook.sort_order,
-        'record', json_object(
-          'id', hook.id, 'message_id', hook.message_id, 'hook_name', hook.hook_name,
-          'tool_name', hook.tool_name, 'phase', hook.phase, 'payload', hook.payload,
-          'duration_ms', hook.duration_ms,
-          'did_block', json(CASE WHEN hook.did_block = 1 THEN 'true' ELSE 'false' END),
-          'started_at', hook.started_at, 'ended_at', hook.ended_at,
-          'sort_order', hook.sort_order
-        )
-      ) AS entry_json
-      FROM hook_executions hook
-      WHERE hook.message_id = ?
-      ${hookCursor.sql}
-      ORDER BY hook.sort_order ASC, hook.id ASC
-      LIMIT ?
-    `).all(message.sequence, message.id, ...hookCursor.args, limit) as NarrativeDetailRow[];
+    const hookRows = orm.select().from(hookExecutions)
+      .where(and(
+        eq(hookExecutions.messageId, message.id),
+        this.detailCursorCondition(after, "hook", hookExecutions.sortOrder, hookExecutions.id),
+      ))
+      .orderBy(asc(hookExecutions.sortOrder), asc(hookExecutions.id))
+      .limit(limit)
+      .all();
 
     const entries = [
       ...(this.isAfterDetailCursor(body, after) ? [body] : []),
-      ...toolRows,
-      ...thoughtRows,
-      ...hookRows,
-    ].map((entry) => (
-      "entry_json" in entry
-        ? NarrativeEntrySchema().parse(JSON.parse(entry.entry_json))
-        : entry
-    ));
+      ...toolRows.map((tool) => NarrativeEntrySchema().parse({
+        kind: "toolCall",
+        sequence: message.sequence,
+        sortOrder: tool.sortOrder,
+        record: {
+          id: tool.id,
+          message_id: tool.messageId,
+          parent_tool_call_id: tool.parentToolCallId,
+          tool_name: tool.toolName,
+          display_name: tool.displayName,
+          provider_agent_key: tool.providerAgentKey,
+          subagent_identity_key: tool.subagentIdentityKey,
+          subagent_provider_name: tool.subagentProviderName,
+          subagent_prompt: tool.subagentPrompt,
+          subagent_type: tool.subagentType,
+          subagent_agent_id: tool.subagentAgentId,
+          subagent_duration_ms: tool.subagentDurationMs,
+          model: tool.model,
+          reasoning_effort: tool.reasoningEffort,
+          input_summary: tool.inputSummary,
+          output_summary: tool.outputSummary,
+          output_truncated: tool.outputTruncated,
+          output_total_bytes: tool.outputTotalBytes,
+          output_artifact_path: tool.outputArtifactPath,
+          exit_code: tool.exitCode,
+          status: tool.status,
+          started_at: tool.startedAt,
+          completed_at: tool.completedAt,
+          sort_order: tool.sortOrder,
+        },
+      })),
+      ...thoughtRows.map((thought) => NarrativeEntrySchema().parse({
+        kind: "narrationSegment",
+        sequence: message.sequence,
+        sortOrder: thought.sortOrder,
+        record: {
+          id: thought.id,
+          message_id: thought.messageId,
+          text: thought.text,
+          started_at: thought.startedAt,
+          ended_at: thought.endedAt,
+          sort_order: thought.sortOrder,
+          is_final_response: thought.isFinalResponse,
+        },
+      })),
+      ...hookRows.map((hook) => NarrativeEntrySchema().parse({
+        kind: "hook",
+        sequence: message.sequence,
+        sortOrder: hook.sortOrder,
+        record: {
+          id: hook.id,
+          message_id: hook.messageId,
+          hook_name: hook.hookName,
+          tool_name: hook.toolName,
+          phase: hook.phase,
+          payload: hook.payload,
+          duration_ms: hook.durationMs,
+          did_block: hook.didBlock === 1,
+          started_at: hook.startedAt,
+          ended_at: hook.endedAt,
+          sort_order: hook.sortOrder,
+        },
+      })),
+    ];
     return entries.sort(compareNarrativeEntries);
   }
 
-  private detailCursorClause(
+  private detailCursorCondition(
     after: NarrativeDetailCursor | undefined,
     kind: NarrativeDetailCursor["kind"],
-  ): { sql: string; args: Array<number | string> } {
-    if (!after) return { sql: "", args: [] };
+    sortOrder: SQLWrapper,
+    id: SQLWrapper,
+  ): SQL | undefined {
+    if (!after) return undefined;
     const kindOrder = narrativeKindOrder(kind);
     const afterKindOrder = narrativeKindOrder(after.kind);
-    if (kindOrder > afterKindOrder) {
-      return { sql: "AND sort_order >= ?", args: [after.sortOrder] };
-    }
-    if (kindOrder < afterKindOrder) {
-      return { sql: "AND sort_order > ?", args: [after.sortOrder] };
-    }
-    return {
-      sql: "AND (sort_order, id) > (?, ?)",
-      args: [after.sortOrder, after.id],
-    };
+    if (kindOrder > afterKindOrder) return gte(sortOrder, after.sortOrder);
+    if (kindOrder < afterKindOrder) return gt(sortOrder, after.sortOrder);
+    return sql`(${sortOrder}, ${id}) > (${after.sortOrder}, ${after.id})`;
   }
 
   private isAfterDetailCursor(entry: NarrativeEntry, after: NarrativeDetailCursor | undefined): boolean {
