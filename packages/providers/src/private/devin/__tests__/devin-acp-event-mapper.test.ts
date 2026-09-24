@@ -272,6 +272,22 @@ describe("mapDevinAcpSessionNotification", () => {
       {
         type: "toolUse",
         threadId: THREAD,
+        toolCallId: "tc-parent",
+        toolName: "Agent",
+        toolInput: {
+          task: "survey",
+          title: "Survey repo",
+          profile: "scout",
+          description: "survey",
+          subagentType: "scout",
+          is_background: false,
+          agentId: "agent-1",
+          nativeThreadId: "agent-1",
+        },
+      },
+      {
+        type: "toolUse",
+        threadId: THREAD,
         toolCallId: "agent-1",
         toolName: "Agent",
         toolInput: {
@@ -334,8 +350,10 @@ describe("mapDevinAcpSessionNotification", () => {
     const first = mapDevinAcpSessionNotification(subagentStarted("agent-1"), THREAD, state);
     const second = mapDevinAcpSessionNotification(subagentStarted("agent-2"), THREAD, state);
 
-    expect(first[0]).toMatchObject({ toolCallId: "agent-1", parentToolCallId: "call-a" });
-    expect(second[0]).toMatchObject({ toolCallId: "agent-2", parentToolCallId: "call-b" });
+    expect(first[0]).toMatchObject({ toolCallId: "call-a", toolInput: { nativeThreadId: "agent-1" } });
+    expect(first[1]).toMatchObject({ toolCallId: "agent-1", parentToolCallId: "call-a" });
+    expect(second[0]).toMatchObject({ toolCallId: "call-b", toolInput: { nativeThreadId: "agent-2" } });
+    expect(second[1]).toMatchObject({ toolCallId: "agent-2", parentToolCallId: "call-b" });
   });
 
   it("copies task to description on run_subagent markers so narrative extractors find it", () => {
@@ -387,7 +405,7 @@ describe("mapDevinAcpSessionNotification", () => {
       THREAD,
       state,
     );
-    expect(started[0]).toMatchObject({ type: "toolUse", toolCallId: "agent-1" });
+    expect(started[1]).toMatchObject({ type: "toolUse", toolCallId: "agent-1" });
     expect(state.accumulator.pendingToolCalls.has("agent-1")).toBe(false);
 
     mapDevinAcpSessionNotification(

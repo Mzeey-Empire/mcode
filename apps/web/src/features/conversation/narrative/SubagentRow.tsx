@@ -44,6 +44,7 @@ interface SubagentParticipantView {
 
 interface SubagentParticipantProps extends VisibleSubagentParticipant {
   unavailableDetailId: string | undefined;
+  allToolCalls: readonly ToolCall[] | undefined;
   onSubagentSelect: SubagentRowProps["onSubagentSelect"];
   onUnavailableDetail: (id: string) => void;
 }
@@ -131,14 +132,23 @@ function participantTitle(participant: ToolCall): string {
   return task ? formatSubagentDisplayName(task) : participantIdentity(participant);
 }
 
-function participantHasDetailTarget(participant: ToolCall): boolean {
-  return participantDetailTarget(participant) !== undefined;
-}
-
-function participantDetailTarget(participant: ToolCall): string | undefined {
+function participantDetailTarget(participant: ToolCall, allToolCalls: readonly ToolCall[] | undefined): string | undefined {
   const detail = participant.subagentPresentation?.detail;
   if (detail?.kind === "canonical-child") return detail.threadId;
-  return detail?.kind === "canonical-alias" ? detail.identityKey : undefined;
+  if (detail?.kind === "canonical-alias") return detail.identityKey;
+  return narrativeRowTarget(participant, allToolCalls);
+}
+
+/**
+ * In-thread providers stamp the subagent's identity on a child lifecycle call
+ * that lands after the invocation marker, so a top-level marker resolves
+ * through its own roster row once it has an in-thread subtree.
+ */
+function narrativeRowTarget(participant: ToolCall, allToolCalls: readonly ToolCall[] | undefined): string | undefined {
+  if (participant.parentToolCallId || !allToolCalls) return undefined;
+  return allToolCalls.some((call) => call.parentToolCallId === participant.id)
+    ? participant.id
+    : undefined;
 }
 
 function participantStatus(participant: ToolCall, lifecycle: SubagentLifecycle): string {
@@ -148,13 +158,15 @@ function participantStatus(participant: ToolCall, lifecycle: SubagentLifecycle):
 function projectSubagentParticipant(
   participant: ToolCall,
   lifecycle: SubagentLifecycle,
+  allToolCalls: readonly ToolCall[] | undefined,
 ): SubagentParticipantView {
+  const detailTarget = participantDetailTarget(participant, allToolCalls);
   return {
     identity: participantIdentity(participant),
     title: participantTitle(participant),
-    paletteSeed: participantDetailTarget(participant) ?? participantIdentityKey(participant),
-    detailTarget: participantDetailTarget(participant),
-    hasDetailTarget: participantHasDetailTarget(participant),
+    paletteSeed: detailTarget ?? participantIdentityKey(participant),
+    detailTarget,
+    hasDetailTarget: detailTarget !== undefined,
     hasExplicitIdentity: participant.subagentPresentation?.hasExplicitIdentity ?? false,
     status: participantStatus(participant, lifecycle),
     unavailableMessage: participantTranscriptUnavailableMessage(participant),
@@ -200,10 +212,11 @@ function SubagentParticipant({
   participant,
   lifecycle,
   unavailableDetailId,
+  allToolCalls,
   onSubagentSelect,
   onUnavailableDetail,
 }: SubagentParticipantProps) {
-  const view = projectSubagentParticipant(participant, lifecycle);
+  const view = projectSubagentParticipant(participant, lifecycle, allToolCalls);
 
   return (
     <span className="flex min-w-0 shrink items-center gap-1">
@@ -273,6 +286,7 @@ function AggregateSubagentButton({
 export function SubagentRow({
   participants,
   lifecycle,
+  allToolCalls,
   onSubagentSelect,
   onOpenSubagents,
   activities,
@@ -297,6 +311,7 @@ export function SubagentRow({
             participant={participant}
             lifecycle={participantLifecycle}
             unavailableDetailId={unavailableDetailId}
+            allToolCalls={allToolCalls}
             onSubagentSelect={onSubagentSelect}
             onUnavailableDetail={setUnavailableDetailId}
           />
