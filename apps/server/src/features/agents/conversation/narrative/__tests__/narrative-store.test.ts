@@ -70,7 +70,7 @@ function traceStatements(db: Database, captured: CapturedStatement[]): Database 
         return new Proxy(statement, {
           get(statementTarget, statementProperty) {
             const value = Reflect.get(statementTarget, statementProperty);
-            if (statementProperty !== "all" && statementProperty !== "get") {
+            if (statementProperty !== "all" && statementProperty !== "get" && statementProperty !== "values") {
               return typeof value === "function" ? value.bind(statementTarget) : value;
             }
             return (...parameters: unknown[]) => {
@@ -574,10 +574,9 @@ describe("NarrativeStore.load (read seam)", () => {
     });
 
     const detailStatements = captured.filter(({ sql }) => (
-      sql.includes("FROM tool_call_records tool")
-      || sql.includes("FROM thought_segments thought")
-      || sql.includes("FROM hook_executions hook")
-      || sql.includes("FROM thought_segments\n      WHERE message_id")
+      sql.includes('from "tool_call_records"')
+      || sql.includes('from "thought_segments"')
+      || sql.includes('from "hook_executions"')
     ));
     expect(detailStatements).toHaveLength(12);
     const plans = detailStatements.map(({ sql, parameters }) => ({
@@ -596,7 +595,7 @@ describe("NarrativeStore.load (read seam)", () => {
     expect(allPlanDetails).not.toContain("SCAN hook");
     expect(allPlanDetails.some((detail) => detail.includes("USE TEMP B-TREE"))).toBe(false);
     const tiedCursorPlans = plans
-      .filter(({ sql }) => sql.includes("(sort_order, id) > (?, ?)"))
+      .filter(({ sql }) => sql.includes('"sort_order",') && sql.includes('"id") > (?, ?)'))
       .map(({ plan }) => plan);
     expect(tiedCursorPlans).toHaveLength(2);
     for (const tiedCursorPlan of tiedCursorPlans) {

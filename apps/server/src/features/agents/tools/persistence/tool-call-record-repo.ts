@@ -5,7 +5,9 @@
 
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
-import type { Database, Statement } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { ToolCallRecord, ToolCallStatus } from "@mcode/contracts";
 import {
   ACTIVE_TURN_WRITE_BATCH_LIMITS,
@@ -13,34 +15,11 @@ import {
   type WriteBatchLimits,
   type WriteBatchResult,
 } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
+import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
+import { toolCallRecords } from "../../../../runtime/persistence/sqlite/schema.js";
 
-/** Row shape returned by SQLite for the tool_call_records table. */
-interface ToolCallRecordRow {
-  id: string;
-  message_id: string;
-  parent_tool_call_id: string | null;
-  tool_name: string;
-  display_name: string | null;
-  provider_agent_key: string | null;
-  subagent_identity_key: string | null;
-  subagent_provider_name: string | null;
-  subagent_prompt: string | null;
-  subagent_type: string | null;
-  subagent_agent_id: string | null;
-  subagent_duration_ms: number | null;
-  model: string | null;
-  reasoning_effort: string | null;
-  input_summary: string;
-  output_summary: string;
-  output_truncated: number;
-  output_total_bytes: number | null;
-  output_artifact_path: string | null;
-  exit_code: number | null;
-  status: string;
-  started_at: string;
-  completed_at: string | null;
-  sort_order: number;
-}
+/** Row shape returned by drizzle for the tool_call_records table. */
+type ToolCallRecordRow = typeof toolCallRecords.$inferSelect;
 
 /** Input for creating a new tool call record. */
 export interface CreateToolCallRecordInput {
@@ -132,60 +111,39 @@ function toolCallRecordFromInsert(
 function rowToToolCallRecord(row: ToolCallRecordRow): ToolCallRecord {
   return {
     id: row.id,
-    message_id: row.message_id,
-    parent_tool_call_id: row.parent_tool_call_id,
-    tool_name: row.tool_name,
-    display_name: row.display_name,
-    provider_agent_key: row.provider_agent_key,
-    subagent_identity_key: row.subagent_identity_key,
-    subagent_provider_name: row.subagent_provider_name,
-    subagent_prompt: row.subagent_prompt,
-    subagent_type: row.subagent_type,
-    subagent_agent_id: row.subagent_agent_id,
-    subagent_duration_ms: row.subagent_duration_ms,
+    message_id: row.messageId,
+    parent_tool_call_id: row.parentToolCallId,
+    tool_name: row.toolName,
+    display_name: row.displayName,
+    provider_agent_key: row.providerAgentKey,
+    subagent_identity_key: row.subagentIdentityKey,
+    subagent_provider_name: row.subagentProviderName,
+    subagent_prompt: row.subagentPrompt,
+    subagent_type: row.subagentType,
+    subagent_agent_id: row.subagentAgentId,
+    subagent_duration_ms: row.subagentDurationMs,
     model: row.model,
-    reasoning_effort: row.reasoning_effort,
-    input_summary: row.input_summary,
-    output_summary: row.output_summary,
-    output_truncated: row.output_truncated,
-    output_total_bytes: row.output_total_bytes,
-    output_artifact_path: row.output_artifact_path,
-    exit_code: row.exit_code,
+    reasoning_effort: row.reasoningEffort,
+    input_summary: row.inputSummary,
+    output_summary: row.outputSummary,
+    output_truncated: row.outputTruncated,
+    output_total_bytes: row.outputTotalBytes,
+    output_artifact_path: row.outputArtifactPath,
+    exit_code: row.exitCode,
     status: row.status as ToolCallStatus,
-    started_at: row.started_at,
-    completed_at: row.completed_at,
-    sort_order: row.sort_order,
+    started_at: row.startedAt,
+    completed_at: row.completedAt,
+    sort_order: row.sortOrder,
   };
 }
-
-const TOOL_CALL_RECORD_COLUMNS =
-  "id, message_id, parent_tool_call_id, tool_name, display_name, provider_agent_key, subagent_identity_key, subagent_provider_name, subagent_prompt, subagent_type, subagent_agent_id, subagent_duration_ms, model, reasoning_effort, input_summary, output_summary, output_truncated, output_total_bytes, output_artifact_path, exit_code, status, started_at, completed_at, sort_order";
 
 /** Repository for tool call record creation and retrieval against SQLite. */
 @injectable()
 export class ToolCallRecordRepo {
-  private readonly stmtInsert: Statement;
-  private readonly stmtUpsert: Statement;
-  private readonly stmtListByMessage: Statement;
-  private readonly stmtListByParent: Statement;
-  private readonly stmtCountByMessage: Statement;
+  private readonly orm: BunSQLiteDatabase;
 
   constructor(@inject("Database") private readonly db: Database) {
-    this.stmtInsert = db.prepare(
-      "INSERT OR IGNORE INTO tool_call_records (id, message_id, parent_tool_call_id, tool_name, display_name, provider_agent_key, subagent_identity_key, subagent_provider_name, subagent_prompt, subagent_type, subagent_agent_id, subagent_duration_ms, model, reasoning_effort, input_summary, output_summary, output_truncated, output_total_bytes, output_artifact_path, exit_code, status, started_at, completed_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    );
-    this.stmtUpsert = db.prepare(
-      "INSERT INTO tool_call_records (id, message_id, parent_tool_call_id, tool_name, display_name, provider_agent_key, subagent_identity_key, subagent_provider_name, subagent_prompt, subagent_type, subagent_agent_id, subagent_duration_ms, model, reasoning_effort, input_summary, output_summary, output_truncated, output_total_bytes, output_artifact_path, exit_code, status, started_at, completed_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET message_id = excluded.message_id, parent_tool_call_id = excluded.parent_tool_call_id, tool_name = excluded.tool_name, display_name = excluded.display_name, provider_agent_key = excluded.provider_agent_key, subagent_identity_key = excluded.subagent_identity_key, subagent_provider_name = excluded.subagent_provider_name, subagent_prompt = excluded.subagent_prompt, subagent_type = excluded.subagent_type, subagent_agent_id = excluded.subagent_agent_id, subagent_duration_ms = excluded.subagent_duration_ms, model = excluded.model, reasoning_effort = excluded.reasoning_effort, input_summary = excluded.input_summary, output_summary = excluded.output_summary, output_truncated = excluded.output_truncated, output_total_bytes = excluded.output_total_bytes, output_artifact_path = excluded.output_artifact_path, exit_code = excluded.exit_code, status = excluded.status, started_at = excluded.started_at, completed_at = excluded.completed_at, sort_order = excluded.sort_order",
-    );
-    this.stmtListByMessage = db.prepare(
-      `SELECT ${TOOL_CALL_RECORD_COLUMNS} FROM tool_call_records WHERE message_id = ? ORDER BY sort_order ASC`,
-    );
-    this.stmtListByParent = db.prepare(
-      `SELECT ${TOOL_CALL_RECORD_COLUMNS} FROM tool_call_records WHERE parent_tool_call_id = ? ORDER BY sort_order ASC`,
-    );
-    this.stmtCountByMessage = db.prepare(
-      "SELECT COUNT(*) as count FROM tool_call_records WHERE message_id = ?",
-    );
+    this.orm = drizzle(db);
   }
 
   /** Create a new tool call record and return the fully-populated record. */
@@ -198,14 +156,16 @@ export class ToolCallRecordRepo {
 
   /** Create multiple tool call records in a single transaction. */
   bulkCreate(inputs: CreateToolCallRecordInput[]): void {
-    const tx = this.db.transaction((items: CreateToolCallRecordInput[]) => {
+    this.orm.transaction((tx) => {
       const now = new Date().toISOString();
-      for (const item of items) {
-        this.write(item, prepareToolCallRecordInsert(item, now));
+      for (const item of inputs) {
+        const insert = prepareToolCallRecordInsert(item, now);
+        tx.insert(toolCallRecords)
+          .values(this.insertValues(item, insert))
+          .onConflictDoNothing()
+          .run();
       }
     });
-
-    tx(inputs);
   }
 
   /** Insert tool-call rows in bounded transactions with an event-loop yield between commits. */
@@ -223,47 +183,67 @@ export class ToolCallRecordRepo {
       write: (item) => this.write(
         item,
         prepareToolCallRecordInsert(item, now),
-        replaceExisting ? this.stmtUpsert : this.stmtInsert,
+        replaceExisting,
       ),
     });
+  }
+
+  private insertValues(
+    input: CreateToolCallRecordInput,
+    insert: ToolCallRecordInsert,
+  ) {
+    return {
+      id: insert.id,
+      messageId: input.messageId,
+      parentToolCallId: nullIfUndefined(input.parentToolCallId),
+      toolName: input.toolName,
+      displayName: nullIfUndefined(input.displayName),
+      providerAgentKey: nullIfUndefined(input.providerAgentKey),
+      subagentIdentityKey: nullIfUndefined(input.subagentIdentityKey),
+      subagentProviderName: nullIfUndefined(input.subagentProviderName),
+      subagentPrompt: nullIfUndefined(input.subagentPrompt),
+      subagentType: nullIfUndefined(input.subagentType),
+      subagentAgentId: nullIfUndefined(input.subagentAgentId),
+      subagentDurationMs: nullIfUndefined(input.subagentDurationMs),
+      model: nullIfUndefined(input.model),
+      reasoningEffort: nullIfUndefined(input.reasoningEffort),
+      inputSummary: input.inputSummary,
+      outputSummary: input.outputSummary,
+      outputTruncated: sqliteBoolean(input.outputTruncated),
+      outputTotalBytes: nullIfUndefined(input.outputTotalBytes),
+      outputArtifactPath: nullIfUndefined(input.outputArtifactPath),
+      exitCode: nullIfUndefined(input.exitCode),
+      status: input.status,
+      startedAt: insert.startedAt,
+      completedAt: insert.completedAt,
+      sortOrder: input.sortOrder,
+    };
   }
 
   private write(
     input: CreateToolCallRecordInput,
     insert: ToolCallRecordInsert,
-    statement = this.stmtInsert,
+    replaceExisting = false,
   ): void {
-    statement.run(
-      insert.id,
-      input.messageId,
-      nullIfUndefined(input.parentToolCallId),
-      input.toolName,
-      nullIfUndefined(input.displayName),
-      nullIfUndefined(input.providerAgentKey),
-      nullIfUndefined(input.subagentIdentityKey),
-      nullIfUndefined(input.subagentProviderName),
-      nullIfUndefined(input.subagentPrompt),
-      nullIfUndefined(input.subagentType),
-      nullIfUndefined(input.subagentAgentId),
-      nullIfUndefined(input.subagentDurationMs),
-      nullIfUndefined(input.model),
-      nullIfUndefined(input.reasoningEffort),
-      input.inputSummary,
-      input.outputSummary,
-      sqliteBoolean(input.outputTruncated),
-      nullIfUndefined(input.outputTotalBytes),
-      nullIfUndefined(input.outputArtifactPath),
-      nullIfUndefined(input.exitCode),
-      input.status,
-      insert.startedAt,
-      insert.completedAt,
-      input.sortOrder,
-    );
+    const { id, ...rest } = this.insertValues(input, insert);
+    const builder = this.orm.insert(toolCallRecords).values({ id, ...rest });
+    if (replaceExisting) {
+      builder
+        .onConflictDoUpdate({ target: toolCallRecords.id, set: rest })
+        .run();
+    } else {
+      builder.onConflictDoNothing().run();
+    }
   }
 
   /** List all tool call records for a message, ordered by sort_order ascending. */
   listByMessage(messageId: string): ToolCallRecord[] {
-    const rows = this.stmtListByMessage.all(messageId) as ToolCallRecordRow[];
+    const rows = this.orm
+      .select()
+      .from(toolCallRecords)
+      .where(eq(toolCallRecords.messageId, messageId))
+      .orderBy(asc(toolCallRecords.sortOrder))
+      .all();
     return rows.map(rowToToolCallRecord);
   }
 
@@ -273,13 +253,18 @@ export class ToolCallRecordRepo {
     messageId: string,
     subagentIdentityKey: string,
   ): boolean {
-    const result = this.db.prepare(`
-      UPDATE tool_call_records
-      SET subagent_identity_key = ?
-      WHERE id = ?
-        AND message_id = ?
-        AND subagent_identity_key IS NULL
-    `).run(subagentIdentityKey, toolCallId, messageId);
+    const result = runChanges(
+      this.orm
+        .update(toolCallRecords)
+        .set({ subagentIdentityKey })
+        .where(
+          and(
+            eq(toolCallRecords.id, toolCallId),
+            eq(toolCallRecords.messageId, messageId),
+            isNull(toolCallRecords.subagentIdentityKey),
+          ),
+        ),
+    );
     return result.changes > 0;
   }
 
@@ -288,12 +273,12 @@ export class ToolCallRecordRepo {
     const grouped = new Map<string, ToolCallRecord[]>();
     if (messageIds.length === 0) return grouped;
 
-    const placeholders = messageIds.map(() => "?").join(", ");
-    const rows = this.db
-      .prepare(
-        `SELECT ${TOOL_CALL_RECORD_COLUMNS} FROM tool_call_records WHERE message_id IN (${placeholders}) ORDER BY message_id ASC, sort_order ASC`,
-      )
-      .all(...messageIds) as ToolCallRecordRow[];
+    const rows = this.orm
+      .select()
+      .from(toolCallRecords)
+      .where(inArray(toolCallRecords.messageId, [...messageIds]))
+      .orderBy(asc(toolCallRecords.messageId), asc(toolCallRecords.sortOrder))
+      .all();
 
     for (const row of rows) {
       const record = rowToToolCallRecord(row);
@@ -306,13 +291,22 @@ export class ToolCallRecordRepo {
 
   /** List child tool call records for a parent, ordered by sort_order ascending. */
   listByParent(parentToolCallId: string): ToolCallRecord[] {
-    const rows = this.stmtListByParent.all(parentToolCallId) as ToolCallRecordRow[];
+    const rows = this.orm
+      .select()
+      .from(toolCallRecords)
+      .where(eq(toolCallRecords.parentToolCallId, parentToolCallId))
+      .orderBy(asc(toolCallRecords.sortOrder))
+      .all();
     return rows.map(rowToToolCallRecord);
   }
 
   /** Count the number of tool call records for a message. */
   countByMessage(messageId: string): number {
-    const row = this.stmtCountByMessage.get(messageId) as { count: number };
-    return row.count;
+    const row = this.orm
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(toolCallRecords)
+      .where(eq(toolCallRecords.messageId, messageId))
+      .get();
+    return row?.count ?? 0;
   }
 }

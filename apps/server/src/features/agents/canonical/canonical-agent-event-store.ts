@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { eq } from "drizzle-orm";
+import { canonicalAgentEvents } from "../../../runtime/persistence/sqlite/schema.js";
 import {
   CanonicalAgentEventEnvelopeSchema,
   reduceAgentEventBatch,
@@ -91,10 +94,14 @@ interface CommitContext {
 
 /** Commits canonical state atomically, then separates durable state from publication. */
 export class CanonicalAgentEventStore {
+  private readonly orm: BunSQLiteDatabase;
+
   constructor(
     private readonly db: Database,
     private readonly operations: CanonicalAgentEventStoreOperations,
-  ) {}
+  ) {
+    this.orm = drizzle(db);
+  }
 
   /** Applies one semantic batch in a SQLite transaction and publishes only after it commits. */
   commit(input: CanonicalAgentEventStoreInput): CanonicalAgentCommitResult {
@@ -263,10 +270,12 @@ export class CanonicalAgentEventStore {
   private existingEvents(events: readonly CanonicalAgentEventDraft[]): ReadonlySet<string> {
     const existing = new Set<string>();
     for (const draft of events) {
-      const row = this.db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE event_id = ?")
-        .get(draft.eventId) as { envelope_json: string } | undefined;
+      const row = this.orm.select({ envelopeJson: canonicalAgentEvents.envelopeJson })
+        .from(canonicalAgentEvents)
+        .where(eq(canonicalAgentEvents.eventId, draft.eventId))
+        .get();
       if (!row) continue;
-      this.operations.assertDuplicate(draft, CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelope_json)));
+      this.operations.assertDuplicate(draft, CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelopeJson)));
       existing.add(draft.eventId);
     }
     return existing;

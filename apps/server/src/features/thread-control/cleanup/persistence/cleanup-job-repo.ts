@@ -8,7 +8,10 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
 import type { Database } from "bun:sqlite";
-import type { Statement } from "bun:sqlite";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { cleanupJobs, threads, workspaces } from "../../../../runtime/persistence/sqlite/schema.js";
+import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
 
 /** Max persisted retry attempts before a cleanup job requires user action. */
 export const MAX_CLEANUP_ATTEMPTS = 5;
@@ -45,8 +48,22 @@ export interface RequeuedRetentionBatch {
   hasMore: boolean;
 }
 
-const SELECT_COLS =
-  "id, thread_id, workspace_path, worktree_path, branch, kind, attempts, next_retry_at, last_error, created_at";
+type CleanupJobRow = typeof cleanupJobs.$inferSelect;
+
+function rowToJob(row: CleanupJobRow): CleanupJob {
+  return {
+    id: row.id,
+    thread_id: row.threadId,
+    workspace_path: row.workspacePath,
+    worktree_path: row.worktreePath,
+    branch: row.branch,
+    kind: row.kind as CleanupJob["kind"],
+    attempts: row.attempts,
+    next_retry_at: row.nextRetryAt,
+    last_error: row.lastError,
+    created_at: row.createdAt,
+  };
+}
 
 function calculateDueLimits(
   counts: CleanupJobDueCounts,
@@ -87,53 +104,10 @@ function appendJobAt(target: CleanupJob[], source: CleanupJob[], index: number, 
 /** Repository for worktree cleanup job persistence. */
 @injectable()
 export class CleanupJobRepo {
-  private readonly stmtInsert: Statement;
-  private readonly stmtFindDueByKind: Statement;
-  private readonly stmtFindDueCounts: Statement;
-  private readonly stmtRecordFailure: Statement;
-  private readonly stmtDelete: Statement;
-  private readonly stmtResetAttempts: Statement;
-  private readonly stmtFindById: Statement;
-  private readonly stmtFindByThreadId: Statement;
-  private readonly stmtCount: Statement;
+  private readonly orm: BunSQLiteDatabase;
 
   constructor(@inject("Database") private readonly db: Database) {
-    this.stmtInsert = db.prepare(
-      `INSERT OR IGNORE INTO cleanup_jobs
-        (id, thread_id, workspace_path, worktree_path, branch, kind, attempts, next_retry_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)`,
-    );
-    this.stmtFindDueByKind = db.prepare(
-      `SELECT ${SELECT_COLS} FROM cleanup_jobs
-          WHERE next_retry_at <= ? AND attempts < ?
-            AND kind = ?
-          ORDER BY created_at ASC
-          LIMIT ?`,
-    );
-    this.stmtFindDueCounts = db.prepare(
-      `SELECT kind, COUNT(*) AS count FROM cleanup_jobs
-         WHERE next_retry_at <= ? AND attempts < ?
-           AND kind IN ('explicit', 'retention')
-         GROUP BY kind`,
-    );
-    this.stmtRecordFailure = db.prepare(
-      `UPDATE cleanup_jobs
-          SET attempts = attempts + 1,
-              next_retry_at = ? + (CAST(POW(2, attempts + 1) AS INTEGER) * 1000),
-              last_error = ?
-        WHERE id = ?`,
-    );
-    this.stmtDelete = db.prepare("DELETE FROM cleanup_jobs WHERE id = ?");
-    this.stmtResetAttempts = db.prepare(
-      "UPDATE cleanup_jobs SET attempts = 0, next_retry_at = 0",
-    );
-    this.stmtFindById = db.prepare(
-      `SELECT ${SELECT_COLS} FROM cleanup_jobs WHERE id = ?`,
-    );
-    this.stmtFindByThreadId = db.prepare(
-      `SELECT ${SELECT_COLS} FROM cleanup_jobs WHERE thread_id = ?`,
-    );
-    this.stmtCount = db.prepare("SELECT COUNT(*) as n FROM cleanup_jobs");
+    this.orm = drizzle(db);
   }
 
   /**
@@ -152,20 +126,27 @@ export class CleanupJobRepo {
     const now = Date.now();
     const kind = job.kind ?? "explicit";
 
-    const result = this.stmtInsert.run(
-      id,
-      job.thread_id,
-      job.workspace_path,
-      job.worktree_path,
-      job.branch ?? null,
-      kind,
-      now,
+    const result = runChanges(
+      this.orm
+        .insert(cleanupJobs)
+        .values({
+          id,
+          threadId: job.thread_id,
+          workspacePath: job.workspace_path,
+          worktreePath: job.worktree_path,
+          branch: job.branch ?? null,
+          kind,
+          attempts: 0,
+          nextRetryAt: 0,
+          createdAt: now,
+        })
+        .onConflictDoNothing(),
     );
 
     if (result.changes === 0) {
       // A job for this thread already exists (UNIQUE constraint). Return the
       // persisted row so callers always get a valid, DB-backed object.
-      return this.stmtFindByThreadId.get(job.thread_id) as CleanupJob;
+      return this.findByThreadId(job.thread_id) as CleanupJob;
     }
 
     return {
@@ -209,65 +190,82 @@ export class CleanupJobRepo {
   }
 
   private findDueByKind(nowMs: number, kind: CleanupJob["kind"], limit: number): CleanupJob[] {
-    return this.stmtFindDueByKind.all(
-      nowMs,
-      MAX_CLEANUP_ATTEMPTS,
-      kind,
-      limit,
-    ) as CleanupJob[];
+    const rows = this.orm
+      .select()
+      .from(cleanupJobs)
+      .where(and(
+        lte(cleanupJobs.nextRetryAt, nowMs),
+        lt(cleanupJobs.attempts, MAX_CLEANUP_ATTEMPTS),
+        eq(cleanupJobs.kind, kind),
+      ))
+      .orderBy(asc(cleanupJobs.createdAt))
+      .limit(limit)
+      .all();
+    return rows.map(rowToJob);
   }
 
   /** Return due cleanup job counts grouped by processing kind. */
   getDueCounts(nowMs: number): CleanupJobDueCounts {
     const counts: CleanupJobDueCounts = { explicit: 0, retention: 0 };
-    const rows = this.stmtFindDueCounts.all(nowMs, MAX_CLEANUP_ATTEMPTS) as Array<{
-      kind: CleanupJob["kind"];
-      count: number;
-    }>;
-    for (const row of rows) counts[row.kind] = row.count;
+    const rows = this.orm
+      .select({ kind: cleanupJobs.kind, count: sql<number>`COUNT(*)` })
+      .from(cleanupJobs)
+      .where(and(
+        lte(cleanupJobs.nextRetryAt, nowMs),
+        lt(cleanupJobs.attempts, MAX_CLEANUP_ATTEMPTS),
+        inArray(cleanupJobs.kind, ["explicit", "retention"]),
+      ))
+      .groupBy(cleanupJobs.kind)
+      .all();
+    for (const row of rows) counts[row.kind as CleanupJob["kind"]] = row.count;
     return counts;
   }
 
   /** Queue a bounded set of expired completed threads in one database transaction. */
   enqueueExpiredCompleted(nowIso: string, limit = CLEANUP_BATCH_LIMIT): number {
     const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
-    const due = this.db.prepare(
-      `SELECT t.id, w.path AS workspace_path, t.worktree_path, t.branch
-       FROM threads t
-       JOIN workspaces w ON w.id = t.workspace_id
-       WHERE t.deleted_at IS NULL
-         AND w.deleted_at IS NULL
-         AND t.user_completed_at IS NOT NULL
-         AND t.scheduled_deletion_at IS NOT NULL
-         AND t.scheduled_deletion_at <= ?
-         AND t.cleanup_state IS NULL
-       ORDER BY t.scheduled_deletion_at ASC, t.id ASC
-       LIMIT ?`,
-    ).all(nowIso, boundedLimit) as Array<{
-      id: string;
-      workspace_path: string;
-      worktree_path: string | null;
-      branch: string | null;
-    }>;
+    const due = this.orm
+      .select({
+        id: threads.id,
+        workspacePath: workspaces.path,
+        worktreePath: threads.worktreePath,
+        branch: threads.branch,
+      })
+      .from(threads)
+      .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
+      .where(and(
+        isNull(threads.deletedAt),
+        isNull(workspaces.deletedAt),
+        isNotNull(threads.userCompletedAt),
+        isNotNull(threads.scheduledDeletionAt),
+        lte(threads.scheduledDeletionAt, nowIso),
+        isNull(threads.cleanupState),
+      ))
+      .orderBy(asc(threads.scheduledDeletionAt), asc(threads.id))
+      .limit(boundedLimit)
+      .all();
 
     return this.db.transaction(() => {
       let queued = 0;
       for (const thread of due) {
-        const claimed = this.db.prepare(
-          `UPDATE threads
-           SET cleanup_state = 'queued', cleanup_reason = NULL
-           WHERE id = ?
-             AND deleted_at IS NULL
-             AND user_completed_at IS NOT NULL
-             AND scheduled_deletion_at IS NOT NULL
-             AND scheduled_deletion_at <= ?
-             AND cleanup_state IS NULL`,
-        ).run(thread.id, nowIso);
+        const claimed = runChanges(
+          this.orm
+            .update(threads)
+            .set({ cleanupState: "queued", cleanupReason: null })
+            .where(and(
+              eq(threads.id, thread.id),
+              isNull(threads.deletedAt),
+              isNotNull(threads.userCompletedAt),
+              isNotNull(threads.scheduledDeletionAt),
+              lte(threads.scheduledDeletionAt, nowIso),
+              isNull(threads.cleanupState),
+            )),
+        );
         if (claimed.changes === 0) continue;
         this.insert({
           thread_id: thread.id,
-          workspace_path: thread.workspace_path,
-          worktree_path: thread.worktree_path,
+          workspace_path: thread.workspacePath,
+          worktree_path: thread.worktreePath,
           branch: thread.branch,
           kind: "retention",
         });
@@ -284,13 +282,23 @@ export class CleanupJobRepo {
    */
   recordFailure(id: string, error: string): CleanupJob | null {
     const truncated = error.slice(0, MAX_ERROR_LENGTH);
-    this.stmtRecordFailure.run(Date.now(), truncated, id);
+    this.orm
+      .update(cleanupJobs)
+      .set({
+        attempts: sql`${cleanupJobs.attempts} + 1`,
+        nextRetryAt: sql`${Date.now()} + (CAST(POW(2, ${cleanupJobs.attempts} + 1) AS INTEGER) * 1000)`,
+        lastError: truncated,
+      })
+      .where(eq(cleanupJobs.id, id))
+      .run();
     return this.findById(id);
   }
 
   /** Remove a completed cleanup job. */
   delete(id: string): boolean {
-    const result = this.stmtDelete.run(id);
+    const result = runChanges(
+      this.orm.delete(cleanupJobs).where(eq(cleanupJobs.id, id)),
+    );
     return result.changes > 0;
   }
 
@@ -299,7 +307,7 @@ export class CleanupJobRepo {
    * Retained for explicit administrative recovery. Startup does not call this.
    */
   resetAttempts(): void {
-    this.stmtResetAttempts.run();
+    this.orm.update(cleanupJobs).set({ attempts: 0, nextRetryAt: 0 }).run();
   }
 
   /**
@@ -309,34 +317,46 @@ export class CleanupJobRepo {
    * the worker deletes explicit jobs whose thread is gone.
    */
   requeueExhaustedJobs(): number {
-    const result = this.db.prepare(
-      "UPDATE cleanup_jobs SET attempts = 0, next_retry_at = 0 WHERE attempts >= ?",
-    ).run(MAX_CLEANUP_ATTEMPTS);
+    const result = runChanges(
+      this.orm
+        .update(cleanupJobs)
+        .set({ attempts: 0, nextRetryAt: 0 })
+        .where(gte(cleanupJobs.attempts, MAX_CLEANUP_ATTEMPTS)),
+    );
     return result.changes;
   }
 
   /** Find a single job by its primary key. Returns null if not found. */
   findById(id: string): CleanupJob | null {
-    const row = this.stmtFindById.get(id) as CleanupJob | undefined;
-    return row ?? null;
+    const row = this.orm
+      .select()
+      .from(cleanupJobs)
+      .where(eq(cleanupJobs.id, id))
+      .get();
+    return row ? rowToJob(row) : null;
   }
 
   /** Return the total number of pending cleanup jobs. */
   count(): number {
-    const row = this.stmtCount.get() as { n: number };
-    return row.n;
+    const row = this.orm
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(cleanupJobs)
+      .get();
+    return row?.n ?? 0;
   }
 
   /** Count completed retention candidates that are waiting for user retry. */
   countBlockedRetentionCandidates(): number {
-    const row = this.db.prepare(
-      `SELECT COUNT(*) AS count
-         FROM threads
-        WHERE deleted_at IS NULL
-          AND user_completed_at IS NOT NULL
-          AND cleanup_state = 'blocked'`,
-    ).get() as { count: number };
-    return row.count;
+    const row = this.orm
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(threads)
+      .where(and(
+        isNull(threads.deletedAt),
+        isNotNull(threads.userCompletedAt),
+        eq(threads.cleanupState, "blocked"),
+      ))
+      .get();
+    return row?.count ?? 0;
   }
 
   /**
@@ -346,54 +366,61 @@ export class CleanupJobRepo {
    */
   requeueBlockedRetentionBatch(limit = CLEANUP_BATCH_LIMIT): RequeuedRetentionBatch {
     const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
-    const rows = this.db.prepare(
-      `SELECT t.id, w.path AS workspace_path, t.worktree_path, t.branch
-         FROM threads t
-         JOIN workspaces w ON w.id = t.workspace_id
-        WHERE t.deleted_at IS NULL
-          AND t.user_completed_at IS NOT NULL
-          AND t.cleanup_state = 'blocked'
-        ORDER BY t.id
-        LIMIT ?`,
-    ).all(boundedLimit) as Array<{
-      id: string;
-      workspace_path: string;
-      worktree_path: string | null;
-      branch: string | null;
-    }>;
+    const rows = this.orm
+      .select({
+        id: threads.id,
+        workspacePath: workspaces.path,
+        worktreePath: threads.worktreePath,
+        branch: threads.branch,
+      })
+      .from(threads)
+      .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
+      .where(and(
+        isNull(threads.deletedAt),
+        isNotNull(threads.userCompletedAt),
+        eq(threads.cleanupState, "blocked"),
+      ))
+      .orderBy(asc(threads.id))
+      .limit(boundedLimit)
+      .all();
 
     if (rows.length === 0) return { threadIds: [], hasMore: false };
 
-    const update = this.db.prepare(
-      `UPDATE threads
-          SET cleanup_state = 'queued', cleanup_reason = NULL
-        WHERE id = ?
-          AND deleted_at IS NULL
-          AND user_completed_at IS NOT NULL
-          AND cleanup_state = 'blocked'`,
-    );
-    const deleteRetentionJob = this.db.prepare(
-      "DELETE FROM cleanup_jobs WHERE thread_id = ? AND kind = 'retention'",
-    );
-    const insertRetentionJob = this.db.prepare(
-      `INSERT OR IGNORE INTO cleanup_jobs
-        (id, thread_id, workspace_path, worktree_path, branch, kind, attempts, next_retry_at, created_at)
-       VALUES (?, ?, ?, ?, ?, 'retention', 0, 0, ?)`,
-    );
     const now = Date.now();
     const threadIds = this.db.transaction(() => {
       const changed: string[] = [];
       for (const row of rows) {
-        if (update.run(row.id).changes === 0) continue;
-        deleteRetentionJob.run(row.id);
-        insertRetentionJob.run(
-          NodeCrypto.randomUUID(),
-          row.id,
-          row.workspace_path,
-          row.worktree_path,
-          row.branch,
-          now,
+        const claimed = runChanges(
+          this.orm
+            .update(threads)
+            .set({ cleanupState: "queued", cleanupReason: null })
+            .where(and(
+              eq(threads.id, row.id),
+              isNull(threads.deletedAt),
+              isNotNull(threads.userCompletedAt),
+              eq(threads.cleanupState, "blocked"),
+            )),
         );
+        if (claimed.changes === 0) continue;
+        this.orm
+          .delete(cleanupJobs)
+          .where(and(eq(cleanupJobs.threadId, row.id), eq(cleanupJobs.kind, "retention")))
+          .run();
+        this.orm
+          .insert(cleanupJobs)
+          .values({
+            id: NodeCrypto.randomUUID(),
+            threadId: row.id,
+            workspacePath: row.workspacePath,
+            worktreePath: row.worktreePath,
+            branch: row.branch,
+            kind: "retention",
+            attempts: 0,
+            nextRetryAt: 0,
+            createdAt: now,
+          })
+          .onConflictDoNothing()
+          .run();
         changed.push(row.id);
       }
       return changed;
@@ -406,59 +433,68 @@ export class CleanupJobRepo {
   }
 
   private hasRequeueableBlockedRetentionCandidates(): boolean {
-    const row = this.db.prepare(
-      `SELECT 1
-         FROM threads t
-         JOIN workspaces w ON w.id = t.workspace_id
-        WHERE t.deleted_at IS NULL
-          AND t.user_completed_at IS NOT NULL
-          AND t.cleanup_state = 'blocked'
-        LIMIT 1`,
-    ).get() as { 1: number } | undefined;
+    const row = this.orm
+      .select({ id: threads.id })
+      .from(threads)
+      .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
+      .where(and(
+        isNull(threads.deletedAt),
+        isNotNull(threads.userCompletedAt),
+        eq(threads.cleanupState, "blocked"),
+      ))
+      .limit(1)
+      .get();
     return row !== undefined;
   }
 
   /** Atomically rebuild one blocked thread's retention job and queue it. */
   requeueBlockedRetention(threadId: string): boolean {
     return this.db.transaction(() => {
-      const row = this.db.prepare(
-        `SELECT t.id, w.path AS workspace_path, t.worktree_path, t.branch
-           FROM threads t
-           JOIN workspaces w ON w.id = t.workspace_id
-          WHERE t.id = ?
-            AND t.deleted_at IS NULL
-            AND t.user_completed_at IS NOT NULL
-            AND t.cleanup_state = 'blocked'`,
-      ).get(threadId) as {
-        id: string;
-        workspace_path: string;
-        worktree_path: string | null;
-        branch: string | null;
-      } | undefined;
+      const row = this.orm
+        .select({
+          id: threads.id,
+          workspacePath: workspaces.path,
+          worktreePath: threads.worktreePath,
+          branch: threads.branch,
+        })
+        .from(threads)
+        .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
+        .where(and(
+          eq(threads.id, threadId),
+          isNull(threads.deletedAt),
+          isNotNull(threads.userCompletedAt),
+          eq(threads.cleanupState, "blocked"),
+        ))
+        .get();
       if (!row) return false;
 
-      const changed = this.db.prepare(
-        `UPDATE threads
-            SET cleanup_state = 'queued', cleanup_reason = NULL
-          WHERE id = ? AND cleanup_state = 'blocked'`,
-      ).run(threadId);
+      const changed = runChanges(
+        this.orm
+          .update(threads)
+          .set({ cleanupState: "queued", cleanupReason: null })
+          .where(and(eq(threads.id, threadId), eq(threads.cleanupState, "blocked"))),
+      );
       if (changed.changes === 0) return false;
 
-      this.db.prepare(
-        "DELETE FROM cleanup_jobs WHERE thread_id = ? AND kind = 'retention'",
-      ).run(threadId);
-      this.db.prepare(
-        `INSERT OR IGNORE INTO cleanup_jobs
-          (id, thread_id, workspace_path, worktree_path, branch, kind, attempts, next_retry_at, created_at)
-         VALUES (?, ?, ?, ?, ?, 'retention', 0, 0, ?)`,
-      ).run(
-        NodeCrypto.randomUUID(),
-        row.id,
-        row.workspace_path,
-        row.worktree_path,
-        row.branch,
-        Date.now(),
-      );
+      this.orm
+        .delete(cleanupJobs)
+        .where(and(eq(cleanupJobs.threadId, threadId), eq(cleanupJobs.kind, "retention")))
+        .run();
+      this.orm
+        .insert(cleanupJobs)
+        .values({
+          id: NodeCrypto.randomUUID(),
+          threadId: row.id,
+          workspacePath: row.workspacePath,
+          worktreePath: row.worktreePath,
+          branch: row.branch,
+          kind: "retention",
+          attempts: 0,
+          nextRetryAt: 0,
+          createdAt: Date.now(),
+        })
+        .onConflictDoNothing()
+        .run();
       return true;
     })();
   }
@@ -470,17 +506,27 @@ export class CleanupJobRepo {
   insertBatch(jobs: Array<{ thread_id: string; workspace_path: string; worktree_path: string | null; branch: string | null }>): number {
     if (jobs.length === 0) return 0;
 
-    const insert = this.db.prepare(
-      `INSERT OR IGNORE INTO cleanup_jobs (id, thread_id, workspace_path, worktree_path, branch, kind, attempts, next_retry_at, created_at)
-       VALUES (?, ?, ?, ?, ?, 'explicit', 0, 0, ?)`,
-    );
-
     let inserted = 0;
     const now = Date.now();
 
     const tx = this.db.transaction(() => {
       for (const job of jobs) {
-        const result = insert.run(NodeCrypto.randomUUID(), job.thread_id, job.workspace_path, job.worktree_path, job.branch, now);
+        const result = runChanges(
+          this.orm
+            .insert(cleanupJobs)
+            .values({
+              id: NodeCrypto.randomUUID(),
+              threadId: job.thread_id,
+              workspacePath: job.workspace_path,
+              worktreePath: job.worktree_path,
+              branch: job.branch,
+              kind: "explicit",
+              attempts: 0,
+              nextRetryAt: 0,
+              createdAt: now,
+            })
+            .onConflictDoNothing(),
+        );
         if (result.changes > 0) inserted++;
       }
     });
@@ -491,16 +537,22 @@ export class CleanupJobRepo {
 
   /** Count pending cleanup jobs for a given workspace path. */
   countByWorkspacePath(workspacePath: string): number {
-    const row = this.db
-      .prepare("SELECT COUNT(*) AS count FROM cleanup_jobs WHERE workspace_path = ?")
-      .get(workspacePath) as { count: number };
-    return row.count;
+    const row = this.orm
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(cleanupJobs)
+      .where(eq(cleanupJobs.workspacePath, workspacePath))
+      .get();
+    return row?.count ?? 0;
   }
 
   /** Find a cleanup job by thread ID. Returns null if no job exists. */
   findByThreadId(threadId: string): CleanupJob | null {
-    const row = this.stmtFindByThreadId.get(threadId) as CleanupJob | undefined;
-    return row ?? null;
+    const row = this.orm
+      .select()
+      .from(cleanupJobs)
+      .where(eq(cleanupJobs.threadId, threadId))
+      .get();
+    return row ? rowToJob(row) : null;
   }
 
   /** Delete a cleanup job by its associated thread ID. Returns true if a row was removed. */
@@ -512,22 +564,26 @@ export class CleanupJobRepo {
 
   /** Count jobs that still have retries remaining for a workspace path. */
   countRetriableByWorkspacePath(workspacePath: string): number {
-    const row = this.db
-      .prepare("SELECT COUNT(*) AS count FROM cleanup_jobs WHERE workspace_path = ? AND attempts < 5")
-      .get(workspacePath) as { count: number };
-    return row.count;
+    const row = this.orm
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(cleanupJobs)
+      .where(and(eq(cleanupJobs.workspacePath, workspacePath), lt(cleanupJobs.attempts, 5)))
+      .get();
+    return row?.count ?? 0;
   }
 
   /** Get the most recent error message from cleanup jobs for a workspace path. */
   getLastErrorByWorkspacePath(workspacePath: string): string | null {
-    const row = this.db
-      .prepare(
-        `SELECT last_error FROM cleanup_jobs
-          WHERE workspace_path = ? AND last_error IS NOT NULL
-          ORDER BY next_retry_at DESC, created_at DESC
-          LIMIT 1`,
-      )
-      .get(workspacePath) as { last_error: string | null } | undefined;
-    return row?.last_error ?? null;
+    const row = this.orm
+      .select({ lastError: cleanupJobs.lastError })
+      .from(cleanupJobs)
+      .where(and(
+        eq(cleanupJobs.workspacePath, workspacePath),
+        isNotNull(cleanupJobs.lastError),
+      ))
+      .orderBy(desc(cleanupJobs.nextRetryAt), desc(cleanupJobs.createdAt))
+      .limit(1)
+      .get();
+    return row?.lastError ?? null;
   }
 }

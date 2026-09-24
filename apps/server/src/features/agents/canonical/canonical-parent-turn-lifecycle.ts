@@ -1,4 +1,11 @@
 import type { Database } from "bun:sqlite";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { and, eq, inArray } from "drizzle-orm";
+import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import {
+  canonicalAgentIngestCheckpoints,
+  messages,
+} from "../../../runtime/persistence/sqlite/schema.js";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
 import type {
   AgentThread,
@@ -74,10 +81,14 @@ export type CanonicalParentTurnInterruptionInput = ParentTurnInterruptionInput;
 
 /** Coordinates start and terminal decisions for one parent execution. */
 export class CanonicalParentTurnLifecycle {
+  private readonly orm: BunSQLiteDatabase;
+
   constructor(
-    private readonly db: Database,
+    db: Database,
     private readonly operations: CanonicalParentTurnLifecycleOperations,
-  ) {}
+  ) {
+    this.orm = drizzle(db);
+  }
 
   /** Starts one parent execution and atomically projects its user message. */
   start(input: CanonicalParentTurnStartInput): CanonicalAgentCommitResult {
@@ -389,11 +400,9 @@ export class CanonicalParentTurnLifecycle {
     narrative: readonly ParentNarrativeRecoveryItem[],
   ): void {
     if (!assistant) return;
-    const updated = this.db.prepare(`
-      UPDATE messages
-      SET is_internal = 0, outcome = ?, outcome_execution_id = ?
-      WHERE id = ? AND role = 'assistant'
-    `).run("interrupted", input.executionId, assistant.id);
+    const updated = runChanges(this.orm.update(messages)
+      .set({ isInternal: 0, outcome: "interrupted", outcomeExecutionId: input.executionId })
+      .where(and(eq(messages.id, assistant.id), eq(messages.role, "assistant"))));
     if (input.stagedAssistant && updated.changes !== 1) {
       throw new Error(`Recovered assistant message was not staged: ${assistant.id}`);
     }
@@ -537,13 +546,13 @@ export class CanonicalParentTurnLifecycle {
 
   private consumeRetry(retryOfExecutionId: string | undefined, updatedAt: string): void {
     if (!retryOfExecutionId) return;
-    const consumed = this.db.prepare(`
-      UPDATE canonical_agent_ingest_checkpoints
-      SET phase = 'retried', updated_at = ?
-      WHERE execution_id = ?
-        AND phase IN ('interrupted', 'errored')
-        AND terminal_outcome IN ('interrupted', 'errored')
-    `).run(updatedAt, retryOfExecutionId);
+    const consumed = runChanges(this.orm.update(canonicalAgentIngestCheckpoints)
+      .set({ phase: "retried", updatedAt })
+      .where(and(
+        eq(canonicalAgentIngestCheckpoints.executionId, retryOfExecutionId),
+        inArray(canonicalAgentIngestCheckpoints.phase, ["interrupted", "errored"]),
+        inArray(canonicalAgentIngestCheckpoints.terminalOutcome, ["interrupted", "errored"]),
+      )));
     if (consumed.changes !== 1) throw new Error(`Interrupted execution not found: ${retryOfExecutionId}`);
   }
 }

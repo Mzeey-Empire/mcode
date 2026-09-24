@@ -1,5 +1,17 @@
 import * as NodeCrypto from "node:crypto";
-import type { Database, Statement } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { and, asc, count, eq, inArray, isNotNull, like, or, placeholder, sql } from "drizzle-orm";
+import {
+  canonicalAgentIngestCheckpoints,
+  canonicalAgentItems,
+  canonicalConversationDisplayMappings,
+  conversationDisplayMaterializationState,
+  hookExecutions,
+  messages,
+  thoughtSegments,
+  toolCallRecords,
+} from "../../../../runtime/persistence/sqlite/schema.js";
 import type { Message } from "@mcode/contracts";
 
 const MATERIALIZATION_STATE_ID = 1;
@@ -8,11 +20,11 @@ const MATERIALIZATION_BATCH_BYTES = 1_048_576;
 
 interface CanonicalItemRow {
   id: string;
-  thread_id: string;
-  turn_id: string;
-  payload_json: string;
-  created_at: string;
-  updated_at: string;
+  threadId: string;
+  turnId: string;
+  payloadJson: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface NarrativePayload {
@@ -30,13 +42,13 @@ interface NarrativePayload {
 
 interface DisplayToolRecord {
   id: string;
-  tool_name: string;
-  input_summary: string;
-  output_summary: string;
+  toolName: string;
+  inputSummary: string;
+  outputSummary: string;
   status: string;
-  started_at: string;
-  completed_at: string | null;
-  sort_order: number;
+  startedAt: string;
+  completedAt: string | null;
+  sortOrder: number;
 }
 
 /**
@@ -45,153 +57,243 @@ interface DisplayToolRecord {
  * provenance remains the single durable source for materialized rows.
  */
 export class ConversationDisplayMaterializer {
-  private readonly insertMessage: Statement;
-  private readonly insertTool: Statement;
-  private readonly insertThought: Statement;
-  private readonly insertHook: Statement;
-  private readonly mapSource: Statement;
+  private readonly orm: BunSQLiteDatabase;
+  private readonly insertMessage: ReturnType<ConversationDisplayMaterializer["buildInsertMessage"]>;
+  private readonly insertTool: ReturnType<ConversationDisplayMaterializer["buildInsertTool"]>;
+  private readonly insertThought: ReturnType<ConversationDisplayMaterializer["buildInsertThought"]>;
+  private readonly insertHook: ReturnType<ConversationDisplayMaterializer["buildInsertHook"]>;
+  private readonly mapSource: ReturnType<ConversationDisplayMaterializer["buildMapSource"]>;
 
   constructor(private readonly db: Database) {
-    this.insertMessage = db.prepare(`
-      INSERT INTO messages (
-        id, thread_id, role, content, tool_calls, files_changed, cost_usd,
-        tokens_used, timestamp, sequence, attachments, preview_annotations,
-        mentions, selected_text_comments, reply_to_message_id, quoted_text,
-        model, origin_type, source_thread_id, source_turn_id, source_provider_id,
-        legacy_provenance, parent_agent_provenance, is_internal, outcome, outcome_execution_id, system_notice
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        role = excluded.role,
-        content = excluded.content,
-        tool_calls = excluded.tool_calls,
-        files_changed = excluded.files_changed,
-        cost_usd = excluded.cost_usd,
-        tokens_used = excluded.tokens_used,
-        timestamp = excluded.timestamp,
-        sequence = excluded.sequence,
-        attachments = excluded.attachments,
-        preview_annotations = excluded.preview_annotations,
-        mentions = excluded.mentions,
-        selected_text_comments = COALESCE(excluded.selected_text_comments, messages.selected_text_comments),
-        reply_to_message_id = excluded.reply_to_message_id,
-        quoted_text = excluded.quoted_text,
-        model = excluded.model,
-        origin_type = CASE
-          WHEN excluded.origin_type = 'canonical' AND messages.origin_type <> 'canonical'
-            THEN messages.origin_type
+    this.orm = drizzle(db);
+    this.insertMessage = this.buildInsertMessage();
+    this.insertTool = this.buildInsertTool();
+    this.insertThought = this.buildInsertThought();
+    this.insertHook = this.buildInsertHook();
+    this.mapSource = this.buildMapSource();
+  }
+
+  private buildInsertMessage() {
+    return this.orm.insert(messages).values({
+      id: placeholder("id"),
+      threadId: placeholder("threadId"),
+      role: placeholder("role"),
+      content: placeholder("content"),
+      toolCalls: placeholder("toolCalls"),
+      filesChanged: placeholder("filesChanged"),
+      costUsd: placeholder("costUsd"),
+      tokensUsed: placeholder("tokensUsed"),
+      timestamp: placeholder("timestamp"),
+      sequence: placeholder("sequence"),
+      attachments: placeholder("attachments"),
+      previewAnnotations: placeholder("previewAnnotations"),
+      mentions: placeholder("mentions"),
+      selectedTextComments: placeholder("selectedTextComments"),
+      replyToMessageId: placeholder("replyToMessageId"),
+      quotedText: placeholder("quotedText"),
+      model: placeholder("model"),
+      originType: placeholder("originType"),
+      sourceThreadId: placeholder("sourceThreadId"),
+      sourceTurnId: placeholder("sourceTurnId"),
+      sourceProviderId: placeholder("sourceProviderId"),
+      legacyProvenance: placeholder("legacyProvenance"),
+      parentAgentProvenance: placeholder("parentAgentProvenance"),
+      isInternal: placeholder("isInternal"),
+      outcome: placeholder("outcome"),
+      outcomeExecutionId: placeholder("outcomeExecutionId"),
+      systemNotice: placeholder("systemNotice"),
+    }).onConflictDoUpdate({
+      target: messages.id,
+      set: {
+        role: sql`excluded.role`,
+        content: sql`excluded.content`,
+        toolCalls: sql`excluded.tool_calls`,
+        filesChanged: sql`excluded.files_changed`,
+        costUsd: sql`excluded.cost_usd`,
+        tokensUsed: sql`excluded.tokens_used`,
+        timestamp: sql`excluded.timestamp`,
+        sequence: sql`excluded.sequence`,
+        attachments: sql`excluded.attachments`,
+        previewAnnotations: sql`excluded.preview_annotations`,
+        mentions: sql`excluded.mentions`,
+        selectedTextComments: sql`COALESCE(excluded.selected_text_comments, ${messages.selectedTextComments})`,
+        replyToMessageId: sql`excluded.reply_to_message_id`,
+        quotedText: sql`excluded.quoted_text`,
+        model: sql`excluded.model`,
+        originType: sql`CASE
+          WHEN excluded.origin_type = 'canonical' AND ${messages.originType} <> 'canonical'
+            THEN ${messages.originType}
           ELSE excluded.origin_type
-        END,
-        source_thread_id = COALESCE(excluded.source_thread_id, messages.source_thread_id),
-        source_turn_id = COALESCE(excluded.source_turn_id, messages.source_turn_id),
-        source_provider_id = COALESCE(excluded.source_provider_id, messages.source_provider_id),
-        legacy_provenance = COALESCE(excluded.legacy_provenance, messages.legacy_provenance),
-        is_internal = excluded.is_internal,
-        parent_agent_provenance = COALESCE(excluded.parent_agent_provenance, messages.parent_agent_provenance),
-        outcome = COALESCE(excluded.outcome, messages.outcome),
-        outcome_execution_id = COALESCE(excluded.outcome_execution_id, messages.outcome_execution_id),
-        system_notice = COALESCE(excluded.system_notice, messages.system_notice)
-    `);
-    this.insertTool = db.prepare(`
-      INSERT INTO tool_call_records (
-        id, message_id, parent_tool_call_id, tool_name, display_name,
-        provider_agent_key, subagent_identity_key, subagent_provider_name,
-        subagent_prompt, subagent_type, subagent_agent_id, subagent_duration_ms,
-        model, reasoning_effort, input_summary, output_summary, output_truncated,
-        output_total_bytes, output_artifact_path, exit_code, status, started_at,
-        completed_at, sort_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        CASE WHEN ? THEN char(65279) || ? ELSE ? END, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        message_id = excluded.message_id,
-        parent_tool_call_id = excluded.parent_tool_call_id,
-        tool_name = excluded.tool_name,
-        display_name = excluded.display_name,
-        provider_agent_key = excluded.provider_agent_key,
-        subagent_identity_key = excluded.subagent_identity_key,
-        subagent_provider_name = excluded.subagent_provider_name,
-        subagent_prompt = excluded.subagent_prompt,
-        subagent_type = excluded.subagent_type,
-        subagent_agent_id = excluded.subagent_agent_id,
-        subagent_duration_ms = excluded.subagent_duration_ms,
-        model = excluded.model,
-        reasoning_effort = excluded.reasoning_effort,
-        input_summary = excluded.input_summary,
-        output_summary = excluded.output_summary,
-        output_truncated = excluded.output_truncated,
-        output_total_bytes = excluded.output_total_bytes,
-        output_artifact_path = excluded.output_artifact_path,
-        exit_code = excluded.exit_code,
-        status = excluded.status,
-        started_at = excluded.started_at,
-        completed_at = excluded.completed_at,
-        sort_order = excluded.sort_order
-    `);
-    this.insertThought = db.prepare(`
-      INSERT INTO thought_segments (
-        id, message_id, text, started_at, ended_at, sort_order, is_final_response
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        message_id = excluded.message_id,
-        text = excluded.text,
-        started_at = excluded.started_at,
-        ended_at = excluded.ended_at,
-        sort_order = excluded.sort_order,
-        is_final_response = excluded.is_final_response
-    `);
-    this.insertHook = db.prepare(`
-      INSERT INTO hook_executions (
-        id, message_id, hook_name, tool_name, phase, payload, duration_ms,
-        did_block, started_at, ended_at, sort_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        message_id = excluded.message_id,
-        hook_name = excluded.hook_name,
-        tool_name = excluded.tool_name,
-        phase = excluded.phase,
-        payload = excluded.payload,
-        duration_ms = excluded.duration_ms,
-        did_block = excluded.did_block,
-        started_at = excluded.started_at,
-        ended_at = excluded.ended_at,
-        sort_order = excluded.sort_order
-    `);
-    this.mapSource = db.prepare(`
-      INSERT INTO canonical_conversation_display_mappings (
-        source_item_id, target_kind, target_id, source_updated_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(source_item_id) DO UPDATE SET
-        target_kind = excluded.target_kind,
-        target_id = excluded.target_id,
-        source_updated_at = excluded.source_updated_at,
-        updated_at = excluded.updated_at
-    `);
+        END`,
+        sourceThreadId: sql`COALESCE(excluded.source_thread_id, ${messages.sourceThreadId})`,
+        sourceTurnId: sql`COALESCE(excluded.source_turn_id, ${messages.sourceTurnId})`,
+        sourceProviderId: sql`COALESCE(excluded.source_provider_id, ${messages.sourceProviderId})`,
+        legacyProvenance: sql`COALESCE(excluded.legacy_provenance, ${messages.legacyProvenance})`,
+        isInternal: sql`excluded.is_internal`,
+        parentAgentProvenance: sql`COALESCE(excluded.parent_agent_provenance, ${messages.parentAgentProvenance})`,
+        outcome: sql`COALESCE(excluded.outcome, ${messages.outcome})`,
+        outcomeExecutionId: sql`COALESCE(excluded.outcome_execution_id, ${messages.outcomeExecutionId})`,
+        systemNotice: sql`COALESCE(excluded.system_notice, ${messages.systemNotice})`,
+      },
+    }).prepare();
+  }
+
+  private buildInsertTool() {
+    return this.orm.insert(toolCallRecords).values({
+      id: placeholder("id"),
+      messageId: placeholder("messageId"),
+      parentToolCallId: placeholder("parentToolCallId"),
+      toolName: placeholder("toolName"),
+      displayName: placeholder("displayName"),
+      providerAgentKey: placeholder("providerAgentKey"),
+      subagentIdentityKey: placeholder("subagentIdentityKey"),
+      subagentProviderName: placeholder("subagentProviderName"),
+      subagentPrompt: placeholder("subagentPrompt"),
+      subagentType: placeholder("subagentType"),
+      subagentAgentId: placeholder("subagentAgentId"),
+      subagentDurationMs: placeholder("subagentDurationMs"),
+      model: placeholder("model"),
+      reasoningEffort: placeholder("reasoningEffort"),
+      inputSummary: placeholder("inputSummary"),
+      // Bun strips a leading BOM from bound text. The old display table can
+      // contain one, so construct that first character inside SQLite.
+      outputSummary: sql`CASE WHEN ${placeholder("outputStartsWithBom")} THEN char(65279) || ${placeholder("outputSummaryTail")} ELSE ${placeholder("outputSummary")} END`,
+      outputTruncated: placeholder("outputTruncated"),
+      outputTotalBytes: placeholder("outputTotalBytes"),
+      outputArtifactPath: placeholder("outputArtifactPath"),
+      exitCode: placeholder("exitCode"),
+      status: placeholder("status"),
+      startedAt: placeholder("startedAt"),
+      completedAt: placeholder("completedAt"),
+      sortOrder: placeholder("sortOrder"),
+    }).onConflictDoUpdate({
+      target: toolCallRecords.id,
+      set: {
+        messageId: sql`excluded.message_id`,
+        parentToolCallId: sql`excluded.parent_tool_call_id`,
+        toolName: sql`excluded.tool_name`,
+        displayName: sql`excluded.display_name`,
+        providerAgentKey: sql`excluded.provider_agent_key`,
+        subagentIdentityKey: sql`excluded.subagent_identity_key`,
+        subagentProviderName: sql`excluded.subagent_provider_name`,
+        subagentPrompt: sql`excluded.subagent_prompt`,
+        subagentType: sql`excluded.subagent_type`,
+        subagentAgentId: sql`excluded.subagent_agent_id`,
+        subagentDurationMs: sql`excluded.subagent_duration_ms`,
+        model: sql`excluded.model`,
+        reasoningEffort: sql`excluded.reasoning_effort`,
+        inputSummary: sql`excluded.input_summary`,
+        outputSummary: sql`excluded.output_summary`,
+        outputTruncated: sql`excluded.output_truncated`,
+        outputTotalBytes: sql`excluded.output_total_bytes`,
+        outputArtifactPath: sql`excluded.output_artifact_path`,
+        exitCode: sql`excluded.exit_code`,
+        status: sql`excluded.status`,
+        startedAt: sql`excluded.started_at`,
+        completedAt: sql`excluded.completed_at`,
+        sortOrder: sql`excluded.sort_order`,
+      },
+    }).prepare();
+  }
+
+  private buildInsertThought() {
+    return this.orm.insert(thoughtSegments).values({
+      id: placeholder("id"),
+      messageId: placeholder("messageId"),
+      text: placeholder("text"),
+      startedAt: placeholder("startedAt"),
+      endedAt: placeholder("endedAt"),
+      sortOrder: placeholder("sortOrder"),
+      isFinalResponse: placeholder("isFinalResponse"),
+    }).onConflictDoUpdate({
+      target: thoughtSegments.id,
+      set: {
+        messageId: sql`excluded.message_id`,
+        text: sql`excluded.text`,
+        startedAt: sql`excluded.started_at`,
+        endedAt: sql`excluded.ended_at`,
+        sortOrder: sql`excluded.sort_order`,
+        isFinalResponse: sql`excluded.is_final_response`,
+      },
+    }).prepare();
+  }
+
+  private buildInsertHook() {
+    return this.orm.insert(hookExecutions).values({
+      id: placeholder("id"),
+      messageId: placeholder("messageId"),
+      hookName: placeholder("hookName"),
+      toolName: placeholder("toolName"),
+      phase: placeholder("phase"),
+      payload: placeholder("payload"),
+      durationMs: placeholder("durationMs"),
+      didBlock: placeholder("didBlock"),
+      startedAt: placeholder("startedAt"),
+      endedAt: placeholder("endedAt"),
+      sortOrder: placeholder("sortOrder"),
+    }).onConflictDoUpdate({
+      target: hookExecutions.id,
+      set: {
+        messageId: sql`excluded.message_id`,
+        hookName: sql`excluded.hook_name`,
+        toolName: sql`excluded.tool_name`,
+        phase: sql`excluded.phase`,
+        payload: sql`excluded.payload`,
+        durationMs: sql`excluded.duration_ms`,
+        didBlock: sql`excluded.did_block`,
+        startedAt: sql`excluded.started_at`,
+        endedAt: sql`excluded.ended_at`,
+        sortOrder: sql`excluded.sort_order`,
+      },
+    }).prepare();
+  }
+
+  private buildMapSource() {
+    return this.orm.insert(canonicalConversationDisplayMappings).values({
+      sourceItemId: placeholder("sourceItemId"),
+      targetKind: placeholder("targetKind"),
+      targetId: placeholder("targetId"),
+      sourceUpdatedAt: placeholder("sourceUpdatedAt"),
+      updatedAt: placeholder("updatedAt"),
+    }).onConflictDoUpdate({
+      target: canonicalConversationDisplayMappings.sourceItemId,
+      set: {
+        targetKind: sql`excluded.target_kind`,
+        targetId: sql`excluded.target_id`,
+        sourceUpdatedAt: sql`excluded.source_updated_at`,
+        updatedAt: sql`excluded.updated_at`,
+      },
+    }).prepare();
   }
 
   /** Materializes every canonical row in bounded, restart-safe transactions. */
   async runToCompletion(): Promise<void> {
-    this.db.prepare(`
-      INSERT OR IGNORE INTO conversation_display_materialization_state (id, completed)
-      VALUES (?, 0)
-    `).run(MATERIALIZATION_STATE_ID);
+    this.orm.insert(conversationDisplayMaterializationState)
+      .values({ id: MATERIALIZATION_STATE_ID, completed: 0 })
+      .onConflictDoNothing()
+      .run();
 
     while (true) {
       const batch = this.nextBatch();
       if (batch.length === 0) {
-        this.db.prepare(`
-          UPDATE conversation_display_materialization_state
-          SET completed = 1, updated_at = ?
-          WHERE id = ?
-        `).run(new Date().toISOString(), MATERIALIZATION_STATE_ID);
+        this.orm.update(conversationDisplayMaterializationState)
+          .set({ completed: 1, updatedAt: new Date().toISOString() })
+          .where(eq(conversationDisplayMaterializationState.id, MATERIALIZATION_STATE_ID))
+          .run();
         return;
       }
       this.db.transaction(() => {
         for (const row of batch) this.materializeRow(row);
         const last = batch.at(-1)!;
-        this.db.prepare(`
-          UPDATE conversation_display_materialization_state
-          SET last_source_created_at = ?, last_source_id = ?, completed = 0, updated_at = ?
-          WHERE id = ?
-        `).run(last.created_at, last.id, new Date().toISOString(), MATERIALIZATION_STATE_ID);
+        this.orm.update(conversationDisplayMaterializationState)
+          .set({
+            lastSourceCreatedAt: last.createdAt,
+            lastSourceId: last.id,
+            completed: 0,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(conversationDisplayMaterializationState.id, MATERIALIZATION_STATE_ID))
+          .run();
       })();
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
@@ -200,61 +302,74 @@ export class ConversationDisplayMaterializer {
   /** Writes newly persisted canonical items in the caller's existing transaction. */
   materializeItems(itemIds: readonly string[]): void {
     if (itemIds.length === 0) return;
-    const rows = this.db.prepare(`
-      SELECT id, thread_id, turn_id, payload_json, created_at, updated_at
-      FROM canonical_agent_items
-      WHERE id IN (${itemIds.map(() => "?").join(", ")})
-      ORDER BY created_at ASC, id ASC
-    `).all(...itemIds) as CanonicalItemRow[];
+    const rows = this.orm.select({
+      id: canonicalAgentItems.id,
+      threadId: canonicalAgentItems.threadId,
+      turnId: canonicalAgentItems.turnId,
+      payloadJson: canonicalAgentItems.payloadJson,
+      createdAt: canonicalAgentItems.createdAt,
+      updatedAt: canonicalAgentItems.updatedAt,
+    }).from(canonicalAgentItems)
+      .where(inArray(canonicalAgentItems.id, itemIds))
+      .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
+      .all();
     for (const row of rows) this.materializeRow(row);
   }
 
   /** Removes a discarded canonical recovery projection and its orphaned display row. */
   discardItem(itemId: string): void {
-    const mapping = this.db.prepare(`
-      SELECT target_kind, target_id
-      FROM canonical_conversation_display_mappings
-      WHERE source_item_id = ?
-    `).get(itemId) as { target_kind: string; target_id: string } | undefined;
+    const mapping = this.orm.select({
+      targetKind: canonicalConversationDisplayMappings.targetKind,
+      targetId: canonicalConversationDisplayMappings.targetId,
+    }).from(canonicalConversationDisplayMappings)
+      .where(eq(canonicalConversationDisplayMappings.sourceItemId, itemId))
+      .get();
     if (!mapping) return;
-    this.db.prepare("DELETE FROM canonical_conversation_display_mappings WHERE source_item_id = ?").run(itemId);
-    const remaining = this.db.prepare(`
-      SELECT 1 FROM canonical_conversation_display_mappings
-      WHERE target_kind = ? AND target_id = ?
-      LIMIT 1
-    `).get(mapping.target_kind, mapping.target_id);
+    this.orm.delete(canonicalConversationDisplayMappings)
+      .where(eq(canonicalConversationDisplayMappings.sourceItemId, itemId))
+      .run();
+    const remaining = this.orm.select({ sourceItemId: canonicalConversationDisplayMappings.sourceItemId })
+      .from(canonicalConversationDisplayMappings)
+      .where(and(
+        eq(canonicalConversationDisplayMappings.targetKind, mapping.targetKind),
+        eq(canonicalConversationDisplayMappings.targetId, mapping.targetId),
+      ))
+      .limit(1)
+      .get();
     if (remaining) return;
-    const table = displayTableFor(mapping.target_kind);
-    if (table) this.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(mapping.target_id);
+    const table = displayTableFor(mapping.targetKind);
+    if (table) this.orm.delete(table).where(eq(table.id, mapping.targetId)).run();
   }
 
   private nextBatch(): CanonicalItemRow[] {
-    const state = this.db.prepare(`
-      SELECT last_source_created_at, last_source_id
-      FROM conversation_display_materialization_state
-      WHERE id = ?
-    `).get(MATERIALIZATION_STATE_ID) as {
-      last_source_created_at: string | null;
-      last_source_id: string | null;
-    } | undefined;
-    const rows = state?.last_source_created_at && state.last_source_id
-      ? this.db.prepare(`
-        SELECT id, thread_id, turn_id, payload_json, created_at, updated_at
-        FROM canonical_agent_items
-        WHERE (created_at, id) > (?, ?)
-        ORDER BY created_at ASC, id ASC
-        LIMIT ?
-      `).all(state.last_source_created_at, state.last_source_id, MATERIALIZATION_BATCH_ITEMS) as CanonicalItemRow[]
-      : this.db.prepare(`
-        SELECT id, thread_id, turn_id, payload_json, created_at, updated_at
-        FROM canonical_agent_items
-        ORDER BY created_at ASC, id ASC
-        LIMIT ?
-      `).all(MATERIALIZATION_BATCH_ITEMS) as CanonicalItemRow[];
+    const state = this.orm.select({
+      lastSourceCreatedAt: conversationDisplayMaterializationState.lastSourceCreatedAt,
+      lastSourceId: conversationDisplayMaterializationState.lastSourceId,
+    }).from(conversationDisplayMaterializationState)
+      .where(eq(conversationDisplayMaterializationState.id, MATERIALIZATION_STATE_ID))
+      .get();
+    const itemColumns = {
+      id: canonicalAgentItems.id,
+      threadId: canonicalAgentItems.threadId,
+      turnId: canonicalAgentItems.turnId,
+      payloadJson: canonicalAgentItems.payloadJson,
+      createdAt: canonicalAgentItems.createdAt,
+      updatedAt: canonicalAgentItems.updatedAt,
+    };
+    const rows = state?.lastSourceCreatedAt && state.lastSourceId
+      ? this.orm.select(itemColumns).from(canonicalAgentItems)
+        .where(sql`(${canonicalAgentItems.createdAt}, ${canonicalAgentItems.id}) > (${state.lastSourceCreatedAt}, ${state.lastSourceId})`)
+        .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
+        .limit(MATERIALIZATION_BATCH_ITEMS)
+        .all()
+      : this.orm.select(itemColumns).from(canonicalAgentItems)
+        .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
+        .limit(MATERIALIZATION_BATCH_ITEMS)
+        .all();
     let byteLength = 0;
     const bounded: CanonicalItemRow[] = [];
     for (const row of rows) {
-      const itemBytes = Buffer.byteLength(row.payload_json, "utf8");
+      const itemBytes = Buffer.byteLength(row.payloadJson, "utf8");
       if (bounded.length > 0 && byteLength + itemBytes > MATERIALIZATION_BATCH_BYTES) break;
       bounded.push(row);
       byteLength += itemBytes;
@@ -266,7 +381,13 @@ export class ConversationDisplayMaterializer {
     const payload = parsePayload(row);
     const target = this.materializePayload(row, payload);
     if (!target) return;
-    this.mapSource.run(row.id, target.kind, target.id, row.updated_at, new Date().toISOString());
+    this.mapSource.run({
+      sourceItemId: row.id,
+      targetKind: target.kind,
+      targetId: target.id,
+      sourceUpdatedAt: row.updatedAt,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   private materializePayload(
@@ -352,63 +473,97 @@ export class ConversationDisplayMaterializer {
 
   private materializeMessage(message: Message): void {
     const origin = message.legacyProvenance ? "legacy" : "canonical";
-    this.insertMessage.run(
-      message.id, message.thread_id, message.role, message.content,
-      jsonValue(message.tool_calls), jsonValue(message.files_changed), message.cost_usd,
-      message.tokens_used, message.timestamp, message.sequence, jsonValue(message.attachments),
-      jsonValue(message.previewAnnotations), jsonValue(message.mentions), jsonValue(message.selectedTextComments),
-      message.reply_to_message_id ?? null, message.quoted_text ?? null, message.model ?? null,
-      origin, null, null, null,
-      jsonValue(message.legacyProvenance),
-      jsonValue(message.parentAgentProvenance),
-      message.is_internal ? 1 : 0, message.outcome ?? null, message.outcomeExecutionId ?? null,
-      jsonValue(message.systemNotice),
-    );
+    this.insertMessage.run({
+      id: message.id,
+      threadId: message.thread_id,
+      role: message.role,
+      content: message.content,
+      toolCalls: jsonValue(message.tool_calls),
+      filesChanged: jsonValue(message.files_changed),
+      costUsd: message.cost_usd,
+      tokensUsed: message.tokens_used,
+      timestamp: message.timestamp,
+      sequence: message.sequence,
+      attachments: jsonValue(message.attachments),
+      previewAnnotations: jsonValue(message.previewAnnotations),
+      mentions: jsonValue(message.mentions),
+      selectedTextComments: jsonValue(message.selectedTextComments),
+      replyToMessageId: message.reply_to_message_id ?? null,
+      quotedText: message.quoted_text ?? null,
+      model: message.model ?? null,
+      originType: origin,
+      sourceThreadId: null,
+      sourceTurnId: null,
+      sourceProviderId: null,
+      legacyProvenance: jsonValue(message.legacyProvenance),
+      parentAgentProvenance: jsonValue(message.parentAgentProvenance),
+      isInternal: message.is_internal ? 1 : 0,
+      outcome: message.outcome ?? null,
+      outcomeExecutionId: message.outcomeExecutionId ?? null,
+      systemNotice: jsonValue(message.systemNotice),
+    });
   }
 
   private materializeTool(record: Record<string, unknown>): void {
     const id = requiredString(record.id, "toolCall id");
     const outputSummary = stringValue(record.output_summary);
-    // Bun strips a leading BOM from bound text. The old display table can
-    // contain one, so construct that first character inside SQLite.
     const outputStartsWithBom = outputSummary.startsWith("\uFEFF");
-    this.insertTool.run(
-      id, requiredString(record.message_id, "toolCall message_id"),
-      nullableString(record.parent_tool_call_id), requiredString(record.tool_name, "toolCall tool_name"),
-      nullableString(record.display_name), nullableString(record.provider_agent_key),
-      nullableString(record.subagent_identity_key), nullableString(record.subagent_provider_name),
-      nullableString(record.subagent_prompt), nullableString(record.subagent_type),
-      nullableString(record.subagent_agent_id), nullableNumber(record.subagent_duration_ms),
-      nullableString(record.model), nullableString(record.reasoning_effort),
-      stringValue(record.input_summary), outputStartsWithBom ? 1 : 0,
-      outputStartsWithBom ? outputSummary.slice(1) : "", outputSummary,
-      numberValue(record.output_truncated),
-      nullableNumber(record.output_total_bytes), nullableString(record.output_artifact_path),
-      nullableNumber(record.exit_code), requiredString(record.status, "toolCall status"),
-      requiredString(record.started_at, "toolCall started_at"), nullableString(record.completed_at),
-      numberValue(record.sort_order),
-    );
+    this.insertTool.run({
+      id,
+      messageId: requiredString(record.message_id, "toolCall message_id"),
+      parentToolCallId: nullableString(record.parent_tool_call_id),
+      toolName: requiredString(record.tool_name, "toolCall tool_name"),
+      displayName: nullableString(record.display_name),
+      providerAgentKey: nullableString(record.provider_agent_key),
+      subagentIdentityKey: nullableString(record.subagent_identity_key),
+      subagentProviderName: nullableString(record.subagent_provider_name),
+      subagentPrompt: nullableString(record.subagent_prompt),
+      subagentType: nullableString(record.subagent_type),
+      subagentAgentId: nullableString(record.subagent_agent_id),
+      subagentDurationMs: nullableNumber(record.subagent_duration_ms),
+      model: nullableString(record.model),
+      reasoningEffort: nullableString(record.reasoning_effort),
+      inputSummary: stringValue(record.input_summary),
+      outputStartsWithBom: outputStartsWithBom ? 1 : 0,
+      outputSummaryTail: outputStartsWithBom ? outputSummary.slice(1) : "",
+      outputSummary,
+      outputTruncated: numberValue(record.output_truncated),
+      outputTotalBytes: nullableNumber(record.output_total_bytes),
+      outputArtifactPath: nullableString(record.output_artifact_path),
+      exitCode: nullableNumber(record.exit_code),
+      status: requiredString(record.status, "toolCall status"),
+      startedAt: requiredString(record.started_at, "toolCall started_at"),
+      completedAt: nullableString(record.completed_at),
+      sortOrder: numberValue(record.sort_order),
+    });
   }
 
   private materializeThought(record: Record<string, unknown>): void {
-    const id = requiredString(record.id, "thought id");
-    this.insertThought.run(
-      id, requiredString(record.message_id, "thought message_id"),
-      stringValue(record.text), requiredString(record.started_at, "thought started_at"),
-      nullableString(record.ended_at), numberValue(record.sort_order), numberValue(record.is_final_response),
-    );
+    this.insertThought.run({
+      id: requiredString(record.id, "thought id"),
+      messageId: requiredString(record.message_id, "thought message_id"),
+      text: stringValue(record.text),
+      startedAt: requiredString(record.started_at, "thought started_at"),
+      endedAt: nullableString(record.ended_at),
+      sortOrder: numberValue(record.sort_order),
+      isFinalResponse: numberValue(record.is_final_response),
+    });
   }
 
   private materializeHook(record: Record<string, unknown>): void {
-    const id = requiredString(record.id, "hook id");
-    this.insertHook.run(
-      id, requiredString(record.message_id, "hook message_id"),
-      requiredString(record.hook_name, "hook hook_name"), nullableString(record.tool_name),
-      requiredString(record.phase, "hook phase"), stringValue(record.payload, "{}"),
-      nullableNumber(record.duration_ms), record.did_block === true ? 1 : 0,
-      requiredString(record.started_at, "hook started_at"), nullableString(record.ended_at),
-      numberValue(record.sort_order),
-    );
+    this.insertHook.run({
+      id: requiredString(record.id, "hook id"),
+      messageId: requiredString(record.message_id, "hook message_id"),
+      hookName: requiredString(record.hook_name, "hook hook_name"),
+      toolName: nullableString(record.tool_name),
+      phase: requiredString(record.phase, "hook phase"),
+      payload: stringValue(record.payload, "{}"),
+      durationMs: nullableNumber(record.duration_ms),
+      didBlock: record.did_block === true ? 1 : 0,
+      startedAt: requiredString(record.started_at, "hook started_at"),
+      endedAt: nullableString(record.ended_at),
+      sortOrder: numberValue(record.sort_order),
+    });
   }
 
   private materializeChildReasoning(
@@ -417,15 +572,21 @@ export class ConversationDisplayMaterializer {
   ): { kind: string; id: string } | null {
     const messageId = this.childAnchor(row);
     if (!messageId) return null;
-    const id = `codex-child-reasoning:${hashCodexKey(`${payload.nativeItemId ?? row.payload_json}:${row.id}`)}`;
-    const existing = this.db.prepare("SELECT sort_order FROM thought_segments WHERE id = ?").get(id) as
-      | { sort_order: number }
-      | undefined;
-    const sortOrder = existing?.sort_order ?? this.nextChildThoughtSortOrder(messageId);
-    this.insertThought.run(
-      id, messageId, typeof payload.content === "string" ? payload.content : "",
-      row.created_at, row.updated_at, sortOrder, 0,
-    );
+    const id = `codex-child-reasoning:${hashCodexKey(`${payload.nativeItemId ?? row.payloadJson}:${row.id}`)}`;
+    const existing = this.orm.select({ sortOrder: thoughtSegments.sortOrder })
+      .from(thoughtSegments)
+      .where(eq(thoughtSegments.id, id))
+      .get();
+    const sortOrder = existing?.sortOrder ?? this.nextChildThoughtSortOrder(messageId);
+    this.insertThought.run({
+      id,
+      messageId,
+      text: typeof payload.content === "string" ? payload.content : "",
+      startedAt: row.createdAt,
+      endedAt: row.updatedAt,
+      sortOrder,
+      isFinalResponse: 0,
+    });
     return { kind: "narrationSegment", id };
   }
 
@@ -435,13 +596,21 @@ export class ConversationDisplayMaterializer {
   ): { kind: string; id: string } | null {
     const messageId = this.childAnchor(row);
     if (!messageId) return null;
-    const nativeItemId = payload.nativeItemId ?? row.payload_json;
+    const nativeItemId = payload.nativeItemId ?? row.payloadJson;
     const id = `codex-child-tool:${hashCodexKey(nativeItemId)}`;
-    const existing = this.db.prepare(`
-      SELECT id, tool_name, input_summary, output_summary, status, started_at, completed_at, sort_order
-      FROM tool_call_records WHERE id = ?
-    `).get(id) as DisplayToolRecord | undefined;
-    const sortOrder = existing?.sort_order ?? this.nextChildToolSortOrder(messageId);
+    const existing = this.orm.select({
+      id: toolCallRecords.id,
+      toolName: toolCallRecords.toolName,
+      inputSummary: toolCallRecords.inputSummary,
+      outputSummary: toolCallRecords.outputSummary,
+      status: toolCallRecords.status,
+      startedAt: toolCallRecords.startedAt,
+      completedAt: toolCallRecords.completedAt,
+      sortOrder: toolCallRecords.sortOrder,
+    }).from(toolCallRecords)
+      .where(eq(toolCallRecords.id, id))
+      .get() as DisplayToolRecord | undefined;
+    const sortOrder = existing?.sortOrder ?? this.nextChildToolSortOrder(messageId);
     const record = this.childToolRecord(id, messageId, row, payload, existing, sortOrder);
     this.materializeTool(record);
     return { kind: "toolCall", id };
@@ -464,23 +633,23 @@ export class ConversationDisplayMaterializer {
       input_summary: this.childToolInput(payload, existing, isResult),
       output_summary: this.childToolOutput(payload, existing, isResult),
       status: this.childToolStatus(payload, existing, isResult),
-      started_at: existing?.started_at ?? row.created_at,
-      completed_at: isResult ? row.updated_at : existing?.completed_at ?? null,
+      started_at: existing?.startedAt ?? row.createdAt,
+      completed_at: isResult ? row.updatedAt : existing?.completedAt ?? null,
       sort_order: sortOrder,
     };
   }
 
   private childToolName(payload: NarrativePayload, existing: DisplayToolRecord | undefined, isResult: boolean): string {
-    if (isResult) return existing?.tool_name ?? "Tool";
+    if (isResult) return existing?.toolName ?? "Tool";
     return typeof payload.toolName === "string" ? payload.toolName : "Tool";
   }
 
   private childToolInput(payload: NarrativePayload, existing: DisplayToolRecord | undefined, isResult: boolean): string {
-    return isResult ? existing?.input_summary ?? "" : formatToolInput(payload.toolInput);
+    return isResult ? existing?.inputSummary ?? "" : formatToolInput(payload.toolInput);
   }
 
   private childToolOutput(payload: NarrativePayload, existing: DisplayToolRecord | undefined, isResult: boolean): string {
-    if (!isResult) return existing?.output_summary ?? "";
+    if (!isResult) return existing?.outputSummary ?? "";
     return typeof payload.output === "string" ? payload.output : "";
   }
 
@@ -490,25 +659,36 @@ export class ConversationDisplayMaterializer {
   }
 
   private childAnchor(row: CanonicalItemRow): string | null {
-    const childMessage = this.db.prepare(`
-      SELECT id, thread_id, turn_id, payload_json, created_at, updated_at
-      FROM canonical_agent_items
-      WHERE thread_id = ? AND turn_id = ? AND kind = 'message'
-        AND json_extract(payload_json, '$.projection') = 'message'
-        AND COALESCE(json_extract(payload_json, '$.message.is_internal'), 0) = 0
-        AND (
-          json_extract(payload_json, '$.message.role') <> 'assistant'
-          OR EXISTS (
+    const childMessage = this.orm.select({
+      id: canonicalAgentItems.id,
+      threadId: canonicalAgentItems.threadId,
+      turnId: canonicalAgentItems.turnId,
+      payloadJson: canonicalAgentItems.payloadJson,
+      createdAt: canonicalAgentItems.createdAt,
+      updatedAt: canonicalAgentItems.updatedAt,
+    }).from(canonicalAgentItems)
+      .where(and(
+        eq(canonicalAgentItems.threadId, row.threadId),
+        eq(canonicalAgentItems.turnId, row.turnId),
+        eq(canonicalAgentItems.kind, "message"),
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
+        sql`COALESCE(json_extract(${canonicalAgentItems.payloadJson}, '$.message.is_internal'), 0) = 0`,
+        or(
+          sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.role') <> 'assistant'`,
+          sql`EXISTS (
             SELECT 1 FROM canonical_agent_ingest_checkpoints checkpoint
-            WHERE checkpoint.turn_id = canonical_agent_items.turn_id
+            WHERE checkpoint.turn_id = ${canonicalAgentItems.turnId}
               AND checkpoint.terminal_outcome IS NOT NULL
-          )
-        )
-      ORDER BY CASE WHEN json_extract(payload_json, '$.message.role') = 'assistant' THEN 0 ELSE 1 END,
-        json_extract(payload_json, '$.message.sequence') ASC,
-        json_extract(payload_json, '$.message.id') ASC
-      LIMIT 1
-    `).get(row.thread_id, row.turn_id) as CanonicalItemRow | undefined;
+          )`,
+        ),
+      ))
+      .orderBy(
+        sql`CASE WHEN json_extract(${canonicalAgentItems.payloadJson}, '$.message.role') = 'assistant' THEN 0 ELSE 1 END`,
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.sequence') ASC`,
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.id') ASC`,
+      )
+      .limit(1)
+      .get();
     // Historical child events may be complete while their provider never
     // emitted a visible message. They have no display projection yet, but the
     // canonical row remains intact and a later terminal message reanchors it.
@@ -529,14 +709,24 @@ export class ConversationDisplayMaterializer {
 
   private displayMessageId(value: unknown, row: CanonicalItemRow): string | null {
     const messageId = requiredString(value, "narrative message_id");
-    const exists = this.db.prepare("SELECT 1 FROM messages WHERE id = ?").get(messageId);
-    const source = this.db.prepare(`
-      SELECT id, thread_id, turn_id, payload_json, created_at, updated_at
-      FROM canonical_agent_items
-      WHERE thread_id = ? AND json_extract(payload_json, '$.projection') = 'message'
-        AND json_extract(payload_json, '$.message.id') = ?
-      LIMIT 1
-    `).get(row.thread_id, messageId) as CanonicalItemRow | undefined;
+    const exists = this.orm.select({ id: messages.id }).from(messages)
+      .where(eq(messages.id, messageId))
+      .get();
+    const source = this.orm.select({
+      id: canonicalAgentItems.id,
+      threadId: canonicalAgentItems.threadId,
+      turnId: canonicalAgentItems.turnId,
+      payloadJson: canonicalAgentItems.payloadJson,
+      createdAt: canonicalAgentItems.createdAt,
+      updatedAt: canonicalAgentItems.updatedAt,
+    }).from(canonicalAgentItems)
+      .where(and(
+        eq(canonicalAgentItems.threadId, row.threadId),
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.id') = ${messageId}`,
+      ))
+      .limit(1)
+      .get();
     if (!source) {
       if (exists) return messageId;
       throw new Error(`Canonical narrative item ${row.id} references missing message ${messageId}`);
@@ -552,60 +742,77 @@ export class ConversationDisplayMaterializer {
   }
 
   private nextChildThoughtSortOrder(messageId: string): number {
-    return (this.db.prepare(`
-      SELECT COUNT(*) AS count FROM thought_segments
-      WHERE message_id = ? AND id LIKE 'codex-child-reasoning:%'
-    `).get(messageId) as { count: number }).count;
+    return this.orm.select({ count: count() }).from(thoughtSegments)
+      .where(and(
+        eq(thoughtSegments.messageId, messageId),
+        like(thoughtSegments.id, "codex-child-reasoning:%"),
+      ))
+      .get()?.count ?? 0;
   }
 
   private nextChildToolSortOrder(messageId: string): number {
-    return (this.db.prepare(`
-      SELECT COUNT(*) AS count FROM tool_call_records
-      WHERE message_id = ? AND id LIKE 'codex-child-tool:%'
-    `).get(messageId) as { count: number }).count;
+    return this.orm.select({ count: count() }).from(toolCallRecords)
+      .where(and(
+        eq(toolCallRecords.messageId, messageId),
+        like(toolCallRecords.id, "codex-child-tool:%"),
+      ))
+      .get()?.count ?? 0;
   }
 
   private isDisplayableMessage(row: CanonicalItemRow, message: Message): boolean {
     if (message.is_internal) return false;
     if (message.role !== "assistant") return true;
-    return this.turnHasTerminalCheckpoint(row.turn_id);
+    return this.turnHasTerminalCheckpoint(row.turnId);
   }
 
   private turnHasTerminalCheckpoint(turnId: string): boolean {
-    return this.db.prepare(`
-      SELECT 1 FROM canonical_agent_ingest_checkpoints
-      WHERE turn_id = ? AND terminal_outcome IS NOT NULL
-      LIMIT 1
-    `).get(turnId) != null;
+    return this.orm.select({ executionId: canonicalAgentIngestCheckpoints.executionId })
+      .from(canonicalAgentIngestCheckpoints)
+      .where(and(
+        eq(canonicalAgentIngestCheckpoints.turnId, turnId),
+        isNotNull(canonicalAgentIngestCheckpoints.terminalOutcome),
+      ))
+      .limit(1)
+      .get() != null;
   }
 
   private reanchorTurnChildren(row: CanonicalItemRow): void {
-    if (!this.turnHasTerminalCheckpoint(row.turn_id)) return;
-    const children = this.db.prepare(`
-      SELECT id, thread_id, turn_id, payload_json, created_at, updated_at
-      FROM canonical_agent_items
-      WHERE thread_id = ? AND turn_id = ?
-        AND json_extract(payload_json, '$.projection') IN (
+    if (!this.turnHasTerminalCheckpoint(row.turnId)) return;
+    const children = this.orm.select({
+      id: canonicalAgentItems.id,
+      threadId: canonicalAgentItems.threadId,
+      turnId: canonicalAgentItems.turnId,
+      payloadJson: canonicalAgentItems.payloadJson,
+      createdAt: canonicalAgentItems.createdAt,
+      updatedAt: canonicalAgentItems.updatedAt,
+    }).from(canonicalAgentItems)
+      .where(and(
+        eq(canonicalAgentItems.threadId, row.threadId),
+        eq(canonicalAgentItems.turnId, row.turnId),
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') IN (
           'toolCall', 'narrationSegment', 'hook',
           'codexChildReasoning', 'codexChildToolCall', 'codexChildToolResult', 'narrativeRecovery'
-        )
-      ORDER BY created_at ASC, id ASC
-    `).all(row.thread_id, row.turn_id) as CanonicalItemRow[];
+        )`,
+      ))
+      .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
+      .all();
     for (const child of children) this.materializeRow(child);
   }
 }
 
-function displayTableFor(kind: string): "messages" | "tool_call_records" | "thought_segments" | "hook_executions" | null {
-  if (kind === "message") return "messages";
-  if (kind === "toolCall") return "tool_call_records";
-  if (kind === "narrationSegment") return "thought_segments";
-  if (kind === "hook") return "hook_executions";
+function displayTableFor(
+  kind: string,
+): typeof messages | typeof toolCallRecords | typeof thoughtSegments | typeof hookExecutions | null {
+  if (kind === "message") return messages;
+  if (kind === "toolCall") return toolCallRecords;
+  if (kind === "narrationSegment") return thoughtSegments;
+  if (kind === "hook") return hookExecutions;
   return null;
 }
 
 function parsePayload(row: CanonicalItemRow): NarrativePayload {
   try {
-    const payload = JSON.parse(row.payload_json) as unknown;
+    const payload = JSON.parse(row.payloadJson) as unknown;
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       throw new Error("payload must be an object");
     }

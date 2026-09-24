@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import { and, asc, eq, isNull } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   TerminalProfileReferenceSchema,
   WorkspaceTerminalPreferenceSchema,
@@ -6,12 +8,13 @@ import {
   type WorkspaceTerminalPreference,
 } from "@mcode/contracts";
 import { inject, injectable } from "tsyringe";
+import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import {
+  workspaceTerminalPreferences,
+  workspaces,
+} from "../../../runtime/persistence/sqlite/schema.js";
 
-interface WorkspaceTerminalPreferenceRow {
-  workspace_id: string;
-  default_profile_id: string;
-  updated_at: string;
-}
+type WorkspaceTerminalPreferenceRow = typeof workspaceTerminalPreferences.$inferSelect;
 
 /** Raised when a Terminal preference targets a missing workspace. */
 export class TerminalWorkspaceNotFoundError extends Error {
@@ -26,14 +29,20 @@ export class TerminalWorkspaceNotFoundError extends Error {
 /** Persists explicit workspace-only Terminal default-profile overrides. */
 @injectable()
 export class WorkspaceTerminalPreferencesService {
-  constructor(@inject("Database") private readonly db: Database) {}
+  private readonly orm: BunSQLiteDatabase;
+
+  constructor(@inject("Database") db: Database) {
+    this.orm = drizzle(db);
+  }
 
   /** Returns the explicit override, or null when the workspace inherits the global default. */
   get(workspaceId: string): WorkspaceTerminalPreference | null {
     this.assertWorkspaceExists(workspaceId);
-    const row = this.db.prepare(
-      "SELECT workspace_id, default_profile_id, updated_at FROM workspace_terminal_preferences WHERE workspace_id = ?",
-    ).get(workspaceId) as WorkspaceTerminalPreferenceRow | undefined;
+    const row = this.orm
+      .select()
+      .from(workspaceTerminalPreferences)
+      .where(eq(workspaceTerminalPreferences.workspaceId, workspaceId))
+      .get();
     return row ? this.parseRow(row) : null;
   }
 
@@ -45,13 +54,18 @@ export class WorkspaceTerminalPreferencesService {
     this.assertWorkspaceExists(workspaceId);
     const profileId = TerminalProfileReferenceSchema().parse(defaultProfileId);
     const updatedAt = new Date().toISOString();
-    this.db.prepare(`
-      INSERT INTO workspace_terminal_preferences (workspace_id, default_profile_id, updated_at)
-      VALUES (?, ?, ?)
-      ON CONFLICT(workspace_id) DO UPDATE SET
-        default_profile_id = excluded.default_profile_id,
-        updated_at = excluded.updated_at
-    `).run(workspaceId, profileId, updatedAt);
+    this.orm
+      .insert(workspaceTerminalPreferences)
+      .values({
+        workspaceId,
+        defaultProfileId: profileId,
+        updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: workspaceTerminalPreferences.workspaceId,
+        set: { defaultProfileId: profileId, updatedAt },
+      })
+      .run();
     return WorkspaceTerminalPreferenceSchema().parse({
       workspaceId,
       defaultProfileId: profileId,
@@ -62,23 +76,33 @@ export class WorkspaceTerminalPreferencesService {
   /** Deletes one explicit override so the workspace inherits the global default. */
   reset(workspaceId: string): boolean {
     this.assertWorkspaceExists(workspaceId);
-    return this.db.prepare(
-      "DELETE FROM workspace_terminal_preferences WHERE workspace_id = ?",
-    ).run(workspaceId).changes > 0;
+    return (
+      runChanges(
+        this.orm
+          .delete(workspaceTerminalPreferences)
+          .where(eq(workspaceTerminalPreferences.workspaceId, workspaceId)),
+      ).changes > 0
+    );
   }
 
   /** Lists workspace IDs that currently use the given profile as their default. */
   listReferences(profileId: TerminalProfileReference): string[] {
     const validated = TerminalProfileReferenceSchema().parse(profileId);
-    return (this.db.prepare(
-      "SELECT workspace_id FROM workspace_terminal_preferences WHERE default_profile_id = ? ORDER BY workspace_id",
-    ).all(validated) as Array<{ workspace_id: string }>).map((row) => row.workspace_id);
+    return this.orm
+      .select({ workspaceId: workspaceTerminalPreferences.workspaceId })
+      .from(workspaceTerminalPreferences)
+      .where(eq(workspaceTerminalPreferences.defaultProfileId, validated))
+      .orderBy(asc(workspaceTerminalPreferences.workspaceId))
+      .all()
+      .map((row) => row.workspaceId);
   }
 
   private assertWorkspaceExists(workspaceId: string): void {
-    const workspace = this.db.prepare(
-      "SELECT id FROM workspaces WHERE id = ? AND deleted_at IS NULL",
-    ).get(workspaceId);
+    const workspace = this.orm
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(and(eq(workspaces.id, workspaceId), isNull(workspaces.deletedAt)))
+      .get();
     if (!workspace) {
       throw new TerminalWorkspaceNotFoundError(workspaceId);
     }
@@ -86,9 +110,9 @@ export class WorkspaceTerminalPreferencesService {
 
   private parseRow(row: WorkspaceTerminalPreferenceRow): WorkspaceTerminalPreference {
     return WorkspaceTerminalPreferenceSchema().parse({
-      workspaceId: row.workspace_id,
-      defaultProfileId: row.default_profile_id,
-      updatedAt: row.updated_at,
+      workspaceId: row.workspaceId,
+      defaultProfileId: row.defaultProfileId,
+      updatedAt: row.updatedAt,
     });
   }
 }

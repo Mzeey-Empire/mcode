@@ -5,60 +5,28 @@
 
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
-import type { Database, SQLQueryBindings } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { DevinModeSchema, ReasoningLevelSchema } from "@mcode/contracts";
 import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
+import {
+  canonicalAgentThreads,
+  cleanupJobs,
+  pullRequestReviewLinks,
+  threads,
+  workspaces,
+} from "../../../runtime/persistence/sqlite/schema.js";
+import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 
-interface ThreadRow {
-  id: string;
-  workspace_id: string;
-  title: string;
-  status: string;
-  mode: string;
-  worktree_path: string | null;
-  branch: string;
-  checkout_state: string;
-  base_branch: string | null;
-  worktree_managed: number;
-  issue_number: number | null;
-  pr_number: number | null;
-  pr_status: string | null;
-  sdk_session_id: string | null;
-  model: string | null;
-  provider: string;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
-  user_completed_at: string | null;
-  scheduled_deletion_at: string | null;
-  cleanup_state: string | null;
-  cleanup_reason: string | null;
-  last_context_tokens: number | null;
-  context_window: number | null;
-  reasoning_level: string | null;
-  interaction_mode: string | null;
-  orchestration_mode: string | null;
-  permission_mode: string | null;
-  context_window_mode: string | null;
-    thinking: number | null;
-    codex_fast_mode: number | null;
-    copilot_agent: string | null;
-    devin_mode: string | null;
-  default_open_in_app: string | null;
-  parent_thread_id: string | null;
-  forked_from_message_id: string | null;
-  last_compact_summary: string | null;
-  has_file_changes: number;
-}
+type ThreadRow = typeof threads.$inferSelect;
 
-function canonicalChildVisibilityClause(alias: string): string {
-  return `NOT EXISTS (
-    SELECT 1
-    FROM canonical_agent_threads canonical_child
-    WHERE canonical_child.id = ${alias}.id
-      AND canonical_child.parent_thread_id IS NOT NULL
-  )`;
-}
+const canonicalChildVisibility = sql`NOT EXISTS (
+  SELECT 1
+  FROM ${canonicalAgentThreads} canonical_child
+  WHERE canonical_child.id = ${threads.id}
+    AND canonical_child.parent_thread_id IS NOT NULL
+)`;
 
 function independentThreadClause(alias: string): string {
   return `NOT EXISTS (
@@ -110,23 +78,23 @@ function rowToThreadIdentity(row: ThreadRow): Pick<Thread,
 > {
   return {
     id: row.id,
-    workspace_id: row.workspace_id,
+    workspace_id: row.workspaceId,
     title: row.title,
     status: row.status as ThreadStatus,
     mode: row.mode as ThreadMode,
-    worktree_path: row.worktree_path,
+    worktree_path: row.worktreePath,
     branch: row.branch,
-    checkout_state: row.checkout_state === "branchless" ? "branchless" : "named",
-    base_branch: row.base_branch ?? null,
-    worktree_managed: row.worktree_managed === 1,
-    issue_number: row.issue_number,
-    pr_number: row.pr_number,
-    pr_status: row.pr_status,
-    sdk_session_id: row.sdk_session_id,
+    checkout_state: row.checkoutState === "branchless" ? "branchless" : "named",
+    base_branch: row.baseBranch ?? null,
+    worktree_managed: row.worktreeManaged === 1,
+    issue_number: row.issueNumber,
+    pr_number: row.prNumber,
+    pr_status: row.prStatus,
+    sdk_session_id: row.sdkSessionId,
     model: row.model ?? null,
     provider: row.provider,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
   };
 }
 
@@ -136,17 +104,17 @@ function rowToThreadLifecycle(row: ThreadRow): Pick<Thread,
   | "last_compact_summary" | "has_file_changes"
 > {
   return {
-    deleted_at: row.deleted_at,
-    user_completed_at: row.user_completed_at,
-    scheduled_deletion_at: row.scheduled_deletion_at,
-    cleanup_state: parseCleanupState(row.cleanup_state),
-    cleanup_reason: row.cleanup_reason,
-    last_context_tokens: row.last_context_tokens ?? null,
-    context_window: row.context_window ?? null,
-    parent_thread_id: row.parent_thread_id,
-    forked_from_message_id: row.forked_from_message_id,
-    last_compact_summary: row.last_compact_summary,
-    has_file_changes: row.has_file_changes === 1,
+    deleted_at: row.deletedAt,
+    user_completed_at: row.userCompletedAt,
+    scheduled_deletion_at: row.scheduledDeletionAt,
+    cleanup_state: parseCleanupState(row.cleanupState),
+    cleanup_reason: row.cleanupReason,
+    last_context_tokens: row.lastContextTokens ?? null,
+    context_window: row.contextWindow ?? null,
+    parent_thread_id: row.parentThreadId,
+    forked_from_message_id: row.forkedFromMessageId,
+    last_compact_summary: row.lastCompactSummary,
+    has_file_changes: row.hasFileChanges === 1,
   };
 }
 
@@ -154,12 +122,12 @@ function rowToThreadPreferences(row: ThreadRow): Pick<Thread,
   "reasoning_level" | "interaction_mode" | "orchestration_mode" | "permission_mode" | "context_window_mode"
 > {
   return {
-    reasoning_level: parseStoredReasoningLevel(row.reasoning_level),
-    interaction_mode: (row.interaction_mode ?? null) as InteractionMode | null,
-    orchestration_mode: (row.orchestration_mode ?? null) as OrchestrationMode | null,
-    permission_mode: (row.permission_mode ?? null) as PermissionMode | null,
+    reasoning_level: parseStoredReasoningLevel(row.reasoningLevel),
+    interaction_mode: (row.interactionMode ?? null) as InteractionMode | null,
+    orchestration_mode: (row.orchestrationMode ?? null) as OrchestrationMode | null,
+    permission_mode: (row.permissionMode ?? null) as PermissionMode | null,
     context_window_mode:
-      (row.context_window_mode ?? null) as ContextWindowMode | null,
+      (row.contextWindowMode ?? null) as ContextWindowMode | null,
   };
 }
 
@@ -169,10 +137,10 @@ function rowToThreadProviderSettings(row: ThreadRow): Pick<Thread,
   return {
     thinking: row.thinking == null ? null : row.thinking === 1,
     codex_fast_mode:
-      row.codex_fast_mode == null ? null : row.codex_fast_mode === 1,
-    copilot_agent: (row.copilot_agent ?? null) as string | null,
-    devin_mode: parseStoredDevinMode(row.devin_mode),
-    default_open_in_app: row.default_open_in_app ?? null,
+      row.codexFastMode == null ? null : row.codexFastMode === 1,
+    copilot_agent: (row.copilotAgent ?? null) as string | null,
+    devin_mode: parseStoredDevinMode(row.devinMode),
+    default_open_in_app: row.defaultOpenInApp ?? null,
   };
 }
 
@@ -182,9 +150,6 @@ function parseStoredDevinMode(value: string | null): DevinMode | null {
   const parsed = DevinModeSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
-
-const THREAD_COLUMNS =
-  "id, workspace_id, title, status, mode, worktree_path, branch, checkout_state, base_branch, worktree_managed, issue_number, pr_number, pr_status, sdk_session_id, model, provider, created_at, updated_at, deleted_at, user_completed_at, scheduled_deletion_at, cleanup_state, cleanup_reason, last_context_tokens, context_window, reasoning_level, interaction_mode, orchestration_mode, permission_mode, context_window_mode, thinking, codex_fast_mode, copilot_agent, devin_mode, default_open_in_app, parent_thread_id, forked_from_message_id, last_compact_summary, has_file_changes";
 
 type ThreadCreateLineage = {
   parentThreadId: string;
@@ -259,64 +224,69 @@ type ThreadSearchOptions = {
   limit?: number;
 };
 
-function appendSearchQuery(conditions: string[], params: SQLQueryBindings[], query: string): void {
-  if (!query) return;
+function searchQueryCondition(query: string): SQL | undefined {
+  if (!query) return undefined;
   const escapedQuery = query.replace(/[%_]/g, "\\$&");
   const pattern = `%${escapedQuery}%`;
-  conditions.push(`(
-    t.title LIKE ? ESCAPE '\\' COLLATE NOCASE OR
-    w.name LIKE ? ESCAPE '\\' COLLATE NOCASE OR
-    w.path LIKE ? ESCAPE '\\' COLLATE NOCASE OR
-    t.provider LIKE ? ESCAPE '\\' COLLATE NOCASE OR
-    t.branch LIKE ? ESCAPE '\\' COLLATE NOCASE OR
-    COALESCE(t.worktree_path, '') LIKE ? ESCAPE '\\' COLLATE NOCASE
-  )`);
-  params.push(pattern, pattern, pattern, pattern, pattern, pattern);
+  return or(
+    sql`${threads.title} LIKE ${pattern} ESCAPE '\\' COLLATE NOCASE`,
+    sql`${workspaces.name} LIKE ${pattern} ESCAPE '\\' COLLATE NOCASE`,
+    sql`${workspaces.path} LIKE ${pattern} ESCAPE '\\' COLLATE NOCASE`,
+    sql`${threads.provider} LIKE ${pattern} ESCAPE '\\' COLLATE NOCASE`,
+    sql`${threads.branch} LIKE ${pattern} ESCAPE '\\' COLLATE NOCASE`,
+    sql`COALESCE(${threads.worktreePath}, '') LIKE ${pattern} ESCAPE '\\' COLLATE NOCASE`,
+  );
 }
 
-function appendArraySearchFilter(
-  conditions: string[],
-  params: SQLQueryBindings[],
-  column: "status" | "provider" | "workspace_id",
-  values: string[] | undefined,
-): void {
-  if (!values?.length) return;
-  const placeholders = values.map(() => "?").join(", ");
-  conditions.push(`t.${column} IN (${placeholders})`);
-  params.push(...values);
-}
+const SEARCH_SORT_COLUMNS = {
+  updated_at: threads.updatedAt,
+  created_at: threads.createdAt,
+  title: threads.title,
+} as const;
 
-function appendSearchValue(
-  conditions: string[],
-  params: SQLQueryBindings[],
-  condition: string,
-  value: string | undefined,
-): void {
-  if (value === undefined) return;
-  conditions.push(condition);
-  params.push(value);
-}
-
-function resolveSearchOrder(sort: ThreadSearchOptions["sort"]): string {
-  const sortField = sort?.field ?? "updated_at";
-  const sortDirection = sort?.direction ?? "desc";
-  const validFields = new Set(["updated_at", "created_at", "title"]);
-  const validDirections = new Set(["asc", "desc"]);
-  if (!validFields.has(sortField) || !validDirections.has(sortDirection)) {
-    throw new Error(`Invalid sort parameters: ${sortField} ${sortDirection}`);
+function validatedSearchSort(sort: ThreadSearchOptions["sort"]): { field: keyof typeof SEARCH_SORT_COLUMNS; direction: "asc" | "desc" } {
+  const field = sort?.field ?? "updated_at";
+  const direction = sort?.direction ?? "desc";
+  if (!SEARCH_SORT_COLUMNS[field] || (direction !== "asc" && direction !== "desc")) {
+    throw new Error(`Invalid sort parameters: ${field} ${direction}`);
   }
-  return sortField === "updated_at" && sortDirection === "desc"
-    ? "t.updated_at DESC, t.id ASC"
-    : `t.${sortField} ${sortDirection.toUpperCase()}`;
+  return { field, direction };
+}
+
+function resolveSearchOrder(sort: ThreadSearchOptions["sort"]): SQL[] {
+  const { field, direction } = validatedSearchSort(sort);
+  const order = direction === "asc" ? asc(SEARCH_SORT_COLUMNS[field]) : desc(SEARCH_SORT_COLUMNS[field]);
+  return field === "updated_at" && direction === "desc" ? [order, asc(threads.id)] : [order];
+}
+
+function searchScopeConditions(opts: ThreadSearchOptions): (SQL | undefined)[] {
+  return [
+    opts.workspaceIds?.length ? inArray(threads.workspaceId, opts.workspaceIds) : undefined,
+    opts.excludeThreadId ? ne(threads.id, opts.excludeThreadId) : undefined,
+    opts.createdByIntegrationId === undefined ? undefined : eq(threads.createdByIntegrationId, opts.createdByIntegrationId),
+  ];
+}
+
+function searchConditions(opts: ThreadSearchOptions): (SQL | undefined)[] {
+  const filters = opts.filters ?? {};
+  return [
+    isNull(threads.deletedAt),
+    isNull(workspaces.deletedAt),
+    canonicalChildVisibility,
+    searchQueryCondition(opts.query),
+    filters.status?.length ? inArray(threads.status, filters.status) : undefined,
+    filters.provider?.length ? inArray(threads.provider, filters.provider) : undefined,
+    ...searchScopeConditions(opts),
+  ];
 }
 
 function createSearchResult(
-  rows: Array<ThreadRow & { w_id: string; w_name: string; w_path: string }>,
+  rows: Array<ThreadRow & { wId: string; wName: string; wPath: string }>,
 ): { threads: Thread[]; workspaces: { id: string; name: string; path: string }[] } {
   const workspaceMap = new Map<string, { id: string; name: string; path: string }>();
   for (const row of rows) {
-    if (!workspaceMap.has(row.w_id)) {
-      workspaceMap.set(row.w_id, { id: row.w_id, name: row.w_name, path: row.w_path });
+    if (!workspaceMap.has(row.wId)) {
+      workspaceMap.set(row.wId, { id: row.wId, name: row.wName, path: row.wPath });
     }
   }
   return { threads: rows.map(rowToThread), workspaces: [...workspaceMap.values()] };
@@ -332,20 +302,50 @@ function resolveNextBaseBranch(
     : baseBranch;
 }
 
-function appendThreadSetting<T extends SQLQueryBindings>(
-  fields: string[],
-  values: SQLQueryBindings[],
-  column: string,
-  value: T | undefined,
-  serialize: (value: T) => SQLQueryBindings = (entry) => entry,
-): void {
-  if (value === undefined) return;
-  fields.push(`${column} = ?`);
-  values.push(serialize(value));
-}
-
 function serializeBooleanOverride(value: boolean | null): number | null {
   return value == null ? null : value ? 1 : 0;
+}
+
+type ThreadSettings = {
+  reasoning_level?: string;
+  interaction_mode?: string;
+  orchestration_mode?: string;
+  permission_mode?: string;
+  context_window_mode?: ContextWindowMode | null;
+  thinking?: boolean | null;
+  codex_fast_mode?: boolean | null;
+  copilot_agent?: string | null;
+  devin_mode?: string | null;
+  default_open_in_app?: string | null;
+};
+
+const TEXT_SETTING_COLUMNS = [
+  ["reasoning_level", "reasoningLevel"],
+  ["interaction_mode", "interactionMode"],
+  ["orchestration_mode", "orchestrationMode"],
+  ["permission_mode", "permissionMode"],
+  ["context_window_mode", "contextWindowMode"],
+  ["copilot_agent", "copilotAgent"],
+  ["devin_mode", "devinMode"],
+  ["default_open_in_app", "defaultOpenInApp"],
+] as const satisfies readonly (readonly [keyof ThreadSettings, keyof typeof threads.$inferInsert])[];
+
+const BOOLEAN_SETTING_COLUMNS = [
+  ["thinking", "thinking"],
+  ["codex_fast_mode", "codexFastMode"],
+] as const satisfies readonly (readonly [keyof ThreadSettings, keyof typeof threads.$inferInsert])[];
+
+function buildSettingsSet(settings: ThreadSettings): Partial<typeof threads.$inferInsert> {
+  const set: Record<string, unknown> = {};
+  for (const [key, column] of TEXT_SETTING_COLUMNS) {
+    const value = settings[key];
+    if (value !== undefined) set[column] = value;
+  }
+  for (const [key, column] of BOOLEAN_SETTING_COLUMNS) {
+    const value = settings[key];
+    if (value !== undefined) set[column] = serializeBooleanOverride(value as boolean | null);
+  }
+  return set as Partial<typeof threads.$inferInsert>;
 }
 
 /** Maximum active sibling paths considered during one worktree ownership decision. */
@@ -372,7 +372,11 @@ export interface CompletedThreadDeadlineUpdate extends CompletedThreadRetentionR
 /** Repository for thread lifecycle operations against SQLite. */
 @injectable()
 export class ThreadRepo {
-  constructor(@inject("Database") private readonly db: Database) {}
+  private readonly orm: BunSQLiteDatabase;
+
+  constructor(@inject("Database") private readonly db: Database) {
+    this.orm = drizzle(db);
+  }
 
   /** Create a new thread and return the fully-populated record. */
   create(
@@ -393,26 +397,22 @@ export class ThreadRepo {
     const now = new Date().toISOString();
     const managedInt = worktreeManaged ? 1 : 0;
 
-    this.db
-      .prepare(
-        "INSERT INTO threads (id, workspace_id, title, status, mode, branch, checkout_state, base_branch, worktree_managed, provider, parent_thread_id, forked_from_message_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-      .run(
-        id,
-        workspaceId,
-        title,
-        "active",
-        mode,
-        branch,
-        checkoutState,
-        baseBranch,
-        managedInt,
-        provider,
-        lineage?.parentThreadId ?? null,
-        lineage?.forkedFromMessageId ?? null,
-        now,
-        now,
-      );
+    this.orm.insert(threads).values({
+      id,
+      workspaceId,
+      title,
+      status: "active",
+      mode,
+      branch,
+      checkoutState,
+      baseBranch,
+      worktreeManaged: managedInt,
+      provider,
+      parentThreadId: lineage?.parentThreadId ?? null,
+      forkedFromMessageId: lineage?.forkedFromMessageId ?? null,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
 
     return createThreadRecord({
       id,
@@ -431,12 +431,16 @@ export class ThreadRepo {
 
   /** Find a thread by its primary key, optionally constrained to one external owner. */
   findById(id: string, options: { createdByIntegrationId?: string } = {}): Thread | null {
-    const ownershipClause = options.createdByIntegrationId === undefined
-      ? ""
-      : " AND created_by_integration_id = ?";
-    const row = this.db
-      .prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE id = ?${ownershipClause}`)
-      .get(id, ...(options.createdByIntegrationId === undefined ? [] : [options.createdByIntegrationId])) as ThreadRow | undefined;
+    const row = this.orm
+      .select()
+      .from(threads)
+      .where(and(
+        eq(threads.id, id),
+        options.createdByIntegrationId === undefined
+          ? undefined
+          : eq(threads.createdByIntegrationId, options.createdByIntegrationId),
+      ))
+      .get();
 
     return row ? rowToThread(row) : null;
   }
@@ -445,15 +449,17 @@ export class ThreadRepo {
   listByWorkspace(workspaceId: string, limit = 100): Thread[] {
     const clampedLimit = Math.max(1, Math.min(1000, limit));
 
-    const rows = this.db
-      .prepare(
-        `SELECT ${THREAD_COLUMNS} FROM threads
-         WHERE workspace_id = ?
-           AND deleted_at IS NULL
-           AND ${canonicalChildVisibilityClause("threads")}
-         ORDER BY created_at DESC LIMIT ?`,
-      )
-      .all(workspaceId, clampedLimit) as ThreadRow[];
+    const rows = this.orm
+      .select()
+      .from(threads)
+      .where(and(
+        eq(threads.workspaceId, workspaceId),
+        isNull(threads.deletedAt),
+        canonicalChildVisibility,
+      ))
+      .orderBy(desc(threads.createdAt))
+      .limit(clampedLimit)
+      .all();
 
     return rows.map(rowToThread);
   }
@@ -470,60 +476,47 @@ export class ThreadRepo {
   listRecent(limit = 12): RecentThread[] {
     const clampedLimit = Math.max(1, Math.min(50, limit));
 
-    const rows = this.db
-      .prepare(
-        `SELECT ${THREAD_COLUMNS.split(", ").map((c) => `t.${c}`).join(", ")},
-                w.name AS workspace_name, w.path AS workspace_path
-         FROM threads t
-         JOIN workspaces w ON w.id = t.workspace_id
-         WHERE t.deleted_at IS NULL
-           AND t.user_completed_at IS NULL
-           AND ${canonicalChildVisibilityClause("t")}
-         ORDER BY t.updated_at DESC
-         LIMIT ?`,
-      )
-      .all(clampedLimit) as Array<ThreadRow & { workspace_name: string; workspace_path: string }>;
+    const rows = this.orm
+      .select({
+        ...getTableColumns(threads),
+        workspaceName: workspaces.name,
+        workspacePath: workspaces.path,
+      })
+      .from(threads)
+      .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
+      .where(and(
+        isNull(threads.deletedAt),
+        isNull(threads.userCompletedAt),
+        canonicalChildVisibility,
+      ))
+      .orderBy(desc(threads.updatedAt))
+      .limit(clampedLimit)
+      .all();
 
     return rows.map((row) => ({
       ...rowToThread(row),
-      workspace_name: row.workspace_name,
-      workspace_path: row.workspace_path,
+      workspace_name: row.workspaceName,
+      workspace_path: row.workspacePath,
     }));
   }
 
   /** Search non-deleted threads across title, project, provider, and checkout metadata. */
   search(opts: ThreadSearchOptions): { threads: Thread[]; workspaces: { id: string; name: string; path: string }[] } {
     const clampedLimit = Math.max(1, Math.min(200, opts.limit ?? 100));
-    const conditions: string[] = [
-      "t.deleted_at IS NULL",
-      "w.deleted_at IS NULL",
-      canonicalChildVisibilityClause("t"),
-    ];
-    const params: SQLQueryBindings[] = [];
 
-    appendSearchQuery(conditions, params, opts.query);
-    appendArraySearchFilter(conditions, params, "status", opts.filters?.status);
-    appendArraySearchFilter(conditions, params, "provider", opts.filters?.provider);
-    appendArraySearchFilter(conditions, params, "workspace_id", opts.workspaceIds);
-    if (opts.excludeThreadId) appendSearchValue(conditions, params, "t.id != ?", opts.excludeThreadId);
-    appendSearchValue(conditions, params, "t.created_by_integration_id = ?", opts.createdByIntegrationId);
-
-    const orderBy = resolveSearchOrder(opts.sort);
-
-    const threadCols = THREAD_COLUMNS.split(", ").map((c) => `t.${c}`).join(", ");
-    const sql = `
-      SELECT ${threadCols}, w.id AS w_id, w.name AS w_name, w.path AS w_path
-      FROM threads t
-      JOIN workspaces w ON w.id = t.workspace_id
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY ${orderBy}
-      LIMIT ?
-    `;
-    params.push(clampedLimit);
-
-    const rows = this.db.prepare(sql).all(...params) as Array<
-      ThreadRow & { w_id: string; w_name: string; w_path: string }
-    >;
+    const rows = this.orm
+      .select({
+        ...getTableColumns(threads),
+        wId: workspaces.id,
+        wName: workspaces.name,
+        wPath: workspaces.path,
+      })
+      .from(threads)
+      .innerJoin(workspaces, eq(workspaces.id, threads.workspaceId))
+      .where(and(...searchConditions(opts)))
+      .orderBy(...resolveSearchOrder(opts.sort))
+      .limit(clampedLimit)
+      .all();
 
     return createSearchResult(rows);
   }
@@ -531,25 +524,29 @@ export class ThreadRepo {
   /** Update a thread's lifecycle status. Returns true if a row was changed. */
   updateStatus(id: string, status: ThreadStatus): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare("UPDATE threads SET status = ?, updated_at = ? WHERE id = ?")
-      .run(status, now, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({ status, updatedAt: now })
+      .where(eq(threads.id, id))
+      );
 
     return result.changes > 0;
   }
 
   /** Persist the first user-completion timestamp and its deletion deadline. */
   complete(id: string, completedAt: string, scheduledDeletionAt: string | null): Thread | null {
-    this.db.prepare(
-      `UPDATE threads
-       SET user_completed_at = COALESCE(user_completed_at, ?),
-           scheduled_deletion_at = CASE
-             WHEN user_completed_at IS NULL THEN ?
-             ELSE scheduled_deletion_at
-           END,
-           updated_at = CASE WHEN user_completed_at IS NULL THEN ? ELSE updated_at END
-       WHERE id = ? AND deleted_at IS NULL`,
-    ).run(completedAt, scheduledDeletionAt, completedAt, id);
+    this.orm
+      .update(threads)
+      .set({
+        userCompletedAt: sql`COALESCE(${threads.userCompletedAt}, ${completedAt})`,
+        scheduledDeletionAt: sql`CASE
+          WHEN ${threads.userCompletedAt} IS NULL THEN ${scheduledDeletionAt}
+          ELSE ${threads.scheduledDeletionAt}
+        END`,
+        updatedAt: sql`CASE WHEN ${threads.userCompletedAt} IS NULL THEN ${completedAt} ELSE ${threads.updatedAt} END`,
+      })
+      .where(and(eq(threads.id, id), isNull(threads.deletedAt)))
+      .run();
     return this.findById(id);
   }
 
@@ -559,155 +556,175 @@ export class ThreadRepo {
     limit = 100,
   ): CompletedThreadRetentionRecord[] {
     const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
-    const rows = this.db.prepare(
-      `SELECT id, user_completed_at, scheduled_deletion_at
-       FROM threads
-       WHERE user_completed_at IS NOT NULL
-         AND deleted_at IS NULL
-         AND (? IS NULL OR id > ?)
-       ORDER BY id
-       LIMIT ?`,
-    ).all(afterId, afterId, boundedLimit) as Array<{
-      id: string;
-      user_completed_at: string;
-      scheduled_deletion_at: string | null;
-    }>;
+    const rows = this.orm
+      .select({
+        id: threads.id,
+        userCompletedAt: threads.userCompletedAt,
+        scheduledDeletionAt: threads.scheduledDeletionAt,
+      })
+      .from(threads)
+      .where(and(
+        isNotNull(threads.userCompletedAt),
+        isNull(threads.deletedAt),
+        afterId === null ? undefined : gt(threads.id, afterId),
+      ))
+      .orderBy(asc(threads.id))
+      .limit(boundedLimit)
+      .all();
     return rows.map((row) => ({
       id: row.id,
-      userCompletedAt: row.user_completed_at,
-      scheduledDeletionAt: row.scheduled_deletion_at,
+      userCompletedAt: row.userCompletedAt!,
+      scheduledDeletionAt: row.scheduledDeletionAt,
     }));
   }
 
   /** Apply deadline changes only while each completion record still matches its source state. */
   updateCompletedThreadDeadlines(updates: readonly CompletedThreadDeadlineUpdate[]): Thread[] {
     if (updates.length === 0) return [];
-    const update = this.db.prepare(
-      `UPDATE threads
-       SET scheduled_deletion_at = ?,
-           cleanup_state = CASE WHEN cleanup_state = 'blocked' THEN 'blocked' ELSE NULL END,
-           cleanup_reason = CASE WHEN cleanup_state = 'blocked' THEN cleanup_reason ELSE NULL END
-       WHERE id = ?
-         AND user_completed_at = ?
-         AND scheduled_deletion_at IS ?
-         AND deleted_at IS NULL
-         AND cleanup_state IS NOT 'running'`,
-    );
-    const apply = this.db.transaction(() => {
-      const changedIds: string[] = [];
+    const changedIds = this.orm.transaction((tx) => {
+      const changed: string[] = [];
       for (const entry of updates) {
-        const result = update.run(
-          entry.nextScheduledDeletionAt,
-          entry.id,
-          entry.userCompletedAt,
-          entry.scheduledDeletionAt,
-        );
-        if (result.changes > 0) changedIds.push(entry.id);
+        const result = runChanges(tx.update(threads)
+          .set({
+            scheduledDeletionAt: entry.nextScheduledDeletionAt,
+            cleanupState: sql`CASE WHEN ${threads.cleanupState} = 'blocked' THEN 'blocked' ELSE NULL END`,
+            cleanupReason: sql`CASE WHEN ${threads.cleanupState} = 'blocked' THEN ${threads.cleanupReason} ELSE NULL END`,
+          })
+          .where(and(
+            eq(threads.id, entry.id),
+            eq(threads.userCompletedAt, entry.userCompletedAt),
+            sql`${threads.scheduledDeletionAt} IS ${entry.scheduledDeletionAt}`,
+            isNull(threads.deletedAt),
+            sql`${threads.cleanupState} IS NOT 'running'`,
+          )));
+        if (result.changes > 0) changed.push(entry.id);
       }
-      for (const id of changedIds) {
-        this.db.prepare(
-          "DELETE FROM cleanup_jobs WHERE thread_id = ? AND kind = 'retention'",
-        ).run(id);
+      for (const id of changed) {
+        tx.delete(cleanupJobs)
+          .where(and(eq(cleanupJobs.threadId, id), eq(cleanupJobs.kind, "retention")))
+          .run();
       }
-      return changedIds;
+      return changed;
     });
-    return apply()
+    return changedIds
       .map((id) => this.findById(id))
       .filter((thread): thread is Thread => thread !== null);
   }
 
   /** Clear user-completion metadata in one transaction-safe statement. */
   reopen(id: string, reopenedAt = new Date().toISOString()): Thread | null {
-    return this.db.transaction(() => {
-      const result = this.db.prepare(
-        `UPDATE threads
-         SET user_completed_at = NULL,
-             scheduled_deletion_at = NULL,
-             cleanup_state = NULL,
-             cleanup_reason = NULL,
-             updated_at = CASE WHEN user_completed_at IS NULL THEN updated_at ELSE ? END
-         WHERE id = ?
-           AND deleted_at IS NULL
-           AND cleanup_state IS NOT 'running'
-           AND NOT (
-             cleanup_state = 'blocked'
-             AND EXISTS (
-               SELECT 1 FROM cleanup_jobs
-               WHERE cleanup_jobs.thread_id = threads.id
-                 AND cleanup_jobs.kind = 'retention'
-             )
-           )`,
-      ).run(reopenedAt, id);
+    return this.orm.transaction((tx) => {
+      const result = runChanges(tx.update(threads)
+        .set({
+          userCompletedAt: null,
+          scheduledDeletionAt: null,
+          cleanupState: null,
+          cleanupReason: null,
+          updatedAt: sql`CASE WHEN ${threads.userCompletedAt} IS NULL THEN ${threads.updatedAt} ELSE ${reopenedAt} END`,
+        })
+        .where(and(
+          eq(threads.id, id),
+          isNull(threads.deletedAt),
+          sql`${threads.cleanupState} IS NOT 'running'`,
+          sql`NOT (
+            ${threads.cleanupState} = 'blocked'
+            AND EXISTS (
+              SELECT 1 FROM ${cleanupJobs}
+              WHERE ${cleanupJobs.threadId} = ${threads.id}
+                AND ${cleanupJobs.kind} = 'retention'
+            )
+          )`,
+        ))
+        );
       if (result.changes === 0) return null;
-      this.db.prepare("DELETE FROM cleanup_jobs WHERE thread_id = ? AND kind = 'retention'").run(id);
+      tx.delete(cleanupJobs)
+        .where(and(eq(cleanupJobs.threadId, id), eq(cleanupJobs.kind, "retention")))
+        .run();
       return this.findById(id);
-    })();
+    });
   }
 
   /** Claim one queued retention cleanup immediately before destructive work starts. */
   claimRetentionCleanup(id: string, nowIso: string): Thread | null {
-    const result = this.db.prepare(
-      `UPDATE threads
-       SET cleanup_state = 'running', cleanup_reason = NULL
-       WHERE id = ?
-         AND deleted_at IS NULL
-         AND user_completed_at IS NOT NULL
-         AND scheduled_deletion_at IS NOT NULL
-         AND scheduled_deletion_at <= ?
-         AND cleanup_state IN ('queued', 'retrying', 'running')`,
-    ).run(id, nowIso);
+    const result = runChanges(this.orm.update(threads)
+      .set({ cleanupState: "running", cleanupReason: null })
+      .where(and(
+        eq(threads.id, id),
+        isNull(threads.deletedAt),
+        isNotNull(threads.userCompletedAt),
+        isNotNull(threads.scheduledDeletionAt),
+        lte(threads.scheduledDeletionAt, nowIso),
+        inArray(threads.cleanupState, ["queued", "retrying", "running"]),
+      ))
+      );
     return result.changes > 0 ? this.findById(id) : null;
   }
 
   /** Clear a stale queued state after its deadline or completion state changed. */
   releaseRetentionCleanup(id: string): void {
-    this.db.prepare(
-      `UPDATE threads
-       SET cleanup_state = NULL, cleanup_reason = NULL
-       WHERE id = ? AND cleanup_state IN ('queued', 'retrying')`,
-    ).run(id);
+    this.orm.update(threads)
+      .set({ cleanupState: null, cleanupReason: null })
+      .where(and(
+        eq(threads.id, id),
+        inArray(threads.cleanupState, ["queued", "retrying"]),
+      ))
+      .run();
   }
 
   /** Persist a user-safe terminal reason while retaining the completed thread. */
   blockRetentionCleanup(id: string, reason: string): Thread | null {
-    this.db.prepare(
-      `UPDATE threads
-       SET cleanup_state = 'blocked', cleanup_reason = ?
-       WHERE id = ? AND deleted_at IS NULL AND user_completed_at IS NOT NULL`,
-    ).run(reason.slice(0, 240), id);
+    this.orm.update(threads)
+      .set({ cleanupState: "blocked", cleanupReason: reason.slice(0, 240) })
+      .where(and(
+        eq(threads.id, id),
+        isNull(threads.deletedAt),
+        isNotNull(threads.userCompletedAt),
+      ))
+      .run();
     return this.findById(id);
   }
 
   /** Return a failed retention cleanup to the persisted retry queue. */
   retryRetentionCleanup(id: string, reason: string): Thread | null {
-    this.db.prepare(
-      `UPDATE threads
-       SET cleanup_state = CASE
-             WHEN cleanup_state = 'running' THEN 'running'
-             ELSE 'retrying'
-           END,
-           cleanup_reason = ?
-       WHERE id = ? AND deleted_at IS NULL AND user_completed_at IS NOT NULL`,
-    ).run(reason.slice(0, 240), id);
+    this.orm.update(threads)
+      .set({
+        cleanupState: sql`CASE
+          WHEN ${threads.cleanupState} = 'running' THEN 'running'
+          ELSE 'retrying'
+        END`,
+        cleanupReason: reason.slice(0, 240),
+      })
+      .where(and(
+        eq(threads.id, id),
+        isNull(threads.deletedAt),
+        isNotNull(threads.userCompletedAt),
+      ))
+      .run();
     return this.findById(id);
   }
 
   /** Check whether blocked finalization still owns a persisted retention job. */
   hasRetentionCleanupJob(id: string): boolean {
-    const row = this.db.prepare(
-      "SELECT 1 AS found FROM cleanup_jobs WHERE thread_id = ? AND kind = 'retention' LIMIT 1",
-    ).get(id) as { found: number } | undefined;
+    const row = this.orm
+      .select({ found: sql<number>`1` })
+      .from(cleanupJobs)
+      .where(and(eq(cleanupJobs.threadId, id), eq(cleanupJobs.kind, "retention")))
+      .limit(1)
+      .get();
     return row?.found === 1;
   }
 
   /** Set the worktree filesystem path for a thread unless cleanup owns the thread. */
   updateWorktreePath(id: string, worktreePath: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        "UPDATE threads SET worktree_path = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL AND cleanup_state IS NOT 'running'",
-      )
-      .run(worktreePath, now, id);
+    const result = runChanges(this.orm.update(threads)
+      .set({ worktreePath, updatedAt: now })
+      .where(and(
+        eq(threads.id, id),
+        isNull(threads.deletedAt),
+        sql`${threads.cleanupState} IS NOT 'running'`,
+      ))
+      );
 
     return result.changes > 0;
   }
@@ -715,11 +732,14 @@ export class ThreadRepo {
   /** Clear a thread's worktree filesystem path unless cleanup owns the thread. */
   clearWorktreePath(id: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        "UPDATE threads SET worktree_path = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NULL AND cleanup_state IS NOT 'running'",
-      )
-      .run(now, id);
+    const result = runChanges(this.orm.update(threads)
+      .set({ worktreePath: null, updatedAt: now })
+      .where(and(
+        eq(threads.id, id),
+        isNull(threads.deletedAt),
+        sql`${threads.cleanupState} IS NOT 'running'`,
+      ))
+      );
 
     return result.changes > 0;
   }
@@ -727,11 +747,10 @@ export class ThreadRepo {
   /** Mark a thread as a named-branch checkout after creating a branch in place. */
   updateCheckoutToNamedBranch(id: string, branch: string): Thread | null {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        "UPDATE threads SET branch = ?, checkout_state = 'named', updated_at = ? WHERE id = ?",
-      )
-      .run(branch, now, id);
+    const result = runChanges(this.orm.update(threads)
+      .set({ branch, checkoutState: "named", updatedAt: now })
+      .where(eq(threads.id, id))
+      );
     if (result.changes === 0) return null;
     return this.findById(id);
   }
@@ -760,18 +779,18 @@ export class ThreadRepo {
     }
 
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE threads
-         SET branch = ?,
-             checkout_state = ?,
-             base_branch = ?,
-             pr_number = CASE WHEN ? THEN NULL ELSE pr_number END,
-             pr_status = CASE WHEN ? THEN NULL ELSE pr_status END,
-             updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(branch, checkoutState, nextBaseBranch, changed ? 1 : 0, changed ? 1 : 0, now, id);
+    this.orm
+      .update(threads)
+      .set({
+        branch,
+        checkoutState,
+        baseBranch: nextBaseBranch,
+        prNumber: sql`CASE WHEN ${changed ? 1 : 0} THEN NULL ELSE ${threads.prNumber} END`,
+        prStatus: sql`CASE WHEN ${changed ? 1 : 0} THEN NULL ELSE ${threads.prStatus} END`,
+        updatedAt: now,
+      })
+      .where(eq(threads.id, id))
+      .run();
 
     const thread = this.findById(id);
     return thread ? { thread, changed } : null;
@@ -780,28 +799,34 @@ export class ThreadRepo {
   /** Soft-delete a thread by setting deleted_at and status to "deleted". */
   softDelete(id: string): boolean {
     const now = new Date().toISOString();
-    return this.db.transaction(() => {
-      const result = this.db
-        .prepare(
-          "UPDATE threads SET deleted_at = ?, status = ?, updated_at = ? WHERE id = ?",
-        )
-        .run(now, "deleted", now, id);
+    return this.orm.transaction((tx) => {
+      const result = runChanges(tx
+        .update(threads)
+        .set({ deletedAt: now, status: "deleted", updatedAt: now })
+        .where(eq(threads.id, id))
+        );
       if (result.changes > 0) {
-        this.db.prepare(
-          "UPDATE pull_request_review_links SET primary_thread_id = NULL, updated_at = ? WHERE primary_thread_id = ?",
-        ).run(now, id);
-        this.db.prepare(
-          "UPDATE threads SET delegation_coordinator_thread_id = NULL, updated_at = ? WHERE delegation_coordinator_thread_id = ? AND workspace_id != (SELECT workspace_id FROM threads WHERE id = ?)",
-        ).run(now, id, id);
+        tx.update(pullRequestReviewLinks)
+          .set({ primaryThreadId: null, updatedAt: now })
+          .where(eq(pullRequestReviewLinks.primaryThreadId, id))
+          .run();
+        tx.update(threads)
+          .set({ delegationCoordinatorThreadId: null, updatedAt: now })
+          .where(and(
+            eq(threads.delegationCoordinatorThreadId, id),
+            sql`${threads.workspaceId} != (SELECT workspace_id FROM threads WHERE id = ${id})`,
+          ))
+          .run();
       }
       return result.changes > 0;
-    })();
+    });
   }
 
   /** Permanently remove a thread record from the database. */
   hardDelete(id: string, options: { preserveActiveDescendants?: boolean } = {}): boolean {
     return this.db.transaction(() => {
       if (options.preserveActiveDescendants) this.detachActiveDescendants(id);
+      // TEMP queue lives only on this connection, so it stays outside the drizzle schema.
       this.db.exec(`
         DROP TABLE IF EXISTS canonical_thread_delete_queue;
         CREATE TEMP TABLE canonical_thread_delete_queue (
@@ -865,6 +890,7 @@ export class ThreadRepo {
     })();
   }
 
+  // Self-referencing recursive CTE stays raw; drizzle has no readable equivalent.
   private detachActiveDescendants(rootThreadId: string): void {
     const activeDescendants = this.db.prepare(
       `WITH RECURSIVE descendants(id) AS (
@@ -889,26 +915,30 @@ export class ThreadRepo {
     if (activeDescendants.length === 0) return;
 
     const ids = activeDescendants.map((thread) => thread.id);
-    const placeholders = ids.map(() => "?").join(", ");
     const now = new Date().toISOString();
-    this.db.prepare(
-      `UPDATE threads
-       SET parent_thread_id = NULL, forked_from_message_id = NULL, updated_at = ?
-       WHERE id IN (${placeholders})`,
-    ).run(now, ...ids);
-    this.db.prepare(
-      `UPDATE canonical_agent_threads
-       SET parent_thread_id = NULL, root_thread_id = id, owning_parent_thread_id = NULL, updated_at = ?
-       WHERE id IN (${placeholders})`,
-    ).run(now, ...ids);
+    this.orm.update(threads)
+      .set({ parentThreadId: null, forkedFromMessageId: null, updatedAt: now })
+      .where(inArray(threads.id, ids))
+      .run();
+    this.orm.update(canonicalAgentThreads)
+      .set({
+        parentThreadId: null,
+        rootThreadId: sql`${canonicalAgentThreads.id}`,
+        owningParentThreadId: null,
+        updatedAt: now,
+      })
+      .where(inArray(canonicalAgentThreads.id, ids))
+      .run();
   }
 
   /** Update the provider associated with a thread. Returns true if a row was changed. */
   updateProvider(id: string, provider: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare("UPDATE threads SET provider = ?, updated_at = ? WHERE id = ?")
-      .run(provider, now, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({ provider, updatedAt: now })
+      .where(eq(threads.id, id))
+      );
 
     return result.changes > 0;
   }
@@ -916,9 +946,11 @@ export class ThreadRepo {
   /** Update the model associated with a thread. Returns true if a row was changed. */
   updateModel(id: string, model: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare("UPDATE threads SET model = ?, updated_at = ? WHERE id = ?")
-      .run(model, now, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({ model, updatedAt: now })
+      .where(eq(threads.id, id))
+      );
 
     return result.changes > 0;
   }
@@ -926,11 +958,11 @@ export class ThreadRepo {
   /** Store the SDK-assigned session ID for later resume. Returns true if a row was changed. */
   updateSdkSessionId(id: string, sdkSessionId: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        "UPDATE threads SET sdk_session_id = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(sdkSessionId, now, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({ sdkSessionId, updatedAt: now })
+      .where(eq(threads.id, id))
+      );
 
     return result.changes > 0;
   }
@@ -938,11 +970,11 @@ export class ThreadRepo {
   /** Clear the SDK session ID for a thread. Returns true if a row was changed. */
   clearSdkSessionId(id: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        "UPDATE threads SET sdk_session_id = NULL, updated_at = ? WHERE id = ?",
-      )
-      .run(now, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({ sdkSessionId: null, updatedAt: now })
+      .where(eq(threads.id, id))
+      );
 
     return result.changes > 0;
   }
@@ -950,11 +982,11 @@ export class ThreadRepo {
   /** Link a GitHub PR to a thread. Returns true if a row was changed. */
   updatePr(id: string, prNumber: number, prStatus: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        "UPDATE threads SET pr_number = ?, pr_status = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(prNumber, prStatus, now, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({ prNumber, prStatus, updatedAt: now })
+      .where(eq(threads.id, id))
+      );
 
     return result.changes > 0;
   }
@@ -963,77 +995,50 @@ export class ThreadRepo {
    * Always updates last_context_tokens. Only updates context_window when provided. */
   updateContextUsage(id: string, lastContextTokens: number, contextWindow?: number): boolean {
     const now = new Date().toISOString();
-    if (contextWindow !== undefined) {
-      const result = this.db
-        .prepare(
-          "UPDATE threads SET last_context_tokens = ?, context_window = ?, updated_at = ? WHERE id = ?",
-        )
-        .run(lastContextTokens, contextWindow, now, id);
-      return result.changes > 0;
-    }
-    const result = this.db
-      .prepare(
-        "UPDATE threads SET last_context_tokens = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(lastContextTokens, now, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({
+        lastContextTokens,
+        ...(contextWindow === undefined ? {} : { contextWindow }),
+        updatedAt: now,
+      })
+      .where(eq(threads.id, id))
+      );
     return result.changes > 0;
   }
 
   /** Persist per-thread composer settings (reasoning, mode, permission, copilot agent). */
-  updateSettings(
-    id: string,
-    settings: {
-      reasoning_level?: string;
-      interaction_mode?: string;
-      orchestration_mode?: string;
-      permission_mode?: string;
-      context_window_mode?: ContextWindowMode | null;
-      thinking?: boolean | null;
-      codex_fast_mode?: boolean | null;
-      copilot_agent?: string | null;
-      devin_mode?: string | null;
-      default_open_in_app?: string | null;
-    },
-  ): boolean {
-    const fields: string[] = [];
-    const values: SQLQueryBindings[] = [];
-    appendThreadSetting(fields, values, "reasoning_level", settings.reasoning_level);
-    appendThreadSetting(fields, values, "interaction_mode", settings.interaction_mode);
-    appendThreadSetting(fields, values, "orchestration_mode", settings.orchestration_mode);
-    appendThreadSetting(fields, values, "permission_mode", settings.permission_mode);
-    appendThreadSetting(fields, values, "context_window_mode", settings.context_window_mode);
-    appendThreadSetting(fields, values, "thinking", settings.thinking, serializeBooleanOverride);
-    appendThreadSetting(fields, values, "codex_fast_mode", settings.codex_fast_mode, serializeBooleanOverride);
-    appendThreadSetting(fields, values, "copilot_agent", settings.copilot_agent);
-    appendThreadSetting(fields, values, "devin_mode", settings.devin_mode);
-    appendThreadSetting(fields, values, "default_open_in_app", settings.default_open_in_app);
-    if (fields.length === 0) return false;
+  updateSettings(id: string, settings: ThreadSettings): boolean {
+    const set = buildSettingsSet(settings);
+    if (Object.keys(set).length === 0) return false;
 
-    const now = new Date().toISOString();
-    fields.push("updated_at = ?");
-    values.push(now);
-
-    const result = this.db
-      .prepare(`UPDATE threads SET ${fields.join(", ")} WHERE id = ?`)
-      .run(...values, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({ ...set, updatedAt: new Date().toISOString() })
+      .where(eq(threads.id, id))
+      );
     return result.changes > 0;
   }
 
   /** Update a thread's display title. Returns true if a row was changed. */
   updateTitle(id: string, title: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare("UPDATE threads SET title = ?, updated_at = ? WHERE id = ?")
-      .run(title, now, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({ title, updatedAt: now })
+      .where(eq(threads.id, id))
+      );
 
     return result.changes > 0;
   }
 
   /** Persist the latest compaction summary for a thread. Overwrites any previous value. */
   updateCompactSummary(threadId: string, summary: string): void {
-    this.db
-      .prepare("UPDATE threads SET last_compact_summary = ?, updated_at = ? WHERE id = ?")
-      .run(summary, new Date().toISOString(), threadId);
+    this.orm
+      .update(threads)
+      .set({ lastCompactSummary: summary, updatedAt: new Date().toISOString() })
+      .where(eq(threads.id, threadId))
+      .run();
   }
 
   /**
@@ -1042,25 +1047,28 @@ export class ThreadRepo {
    */
   countActiveByWorkspaceIds(ids: string[]): Map<string, number> {
     if (ids.length === 0) return new Map();
-    const placeholders = ids.map(() => "?").join(",");
-    const rows = this.db.prepare(
-      `SELECT workspace_id AS id, COUNT(*) AS n
-       FROM threads
-       WHERE workspace_id IN (${placeholders})
-         AND deleted_at IS NULL
-         AND user_completed_at IS NULL
-         AND ${canonicalChildVisibilityClause("threads")}
-       GROUP BY workspace_id`,
-    ).all(...ids) as { id: string; n: number }[];
+    const rows = this.orm
+      .select({ id: threads.workspaceId, n: sql<number>`COUNT(*)` })
+      .from(threads)
+      .where(and(
+        inArray(threads.workspaceId, ids),
+        isNull(threads.deletedAt),
+        isNull(threads.userCompletedAt),
+        canonicalChildVisibility,
+      ))
+      .groupBy(threads.workspaceId)
+      .all();
     return new Map(rows.map((r) => [r.id, r.n]));
   }
 
   /** Set lineage fields on a thread. Used when thread creation is handled by ThreadService. */
   updateLineage(id: string, parentThreadId: string, forkedFromMessageId: string): boolean {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare("UPDATE threads SET parent_thread_id = ?, forked_from_message_id = ?, updated_at = ? WHERE id = ?")
-      .run(parentThreadId, forkedFromMessageId, now, id);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({ parentThreadId, forkedFromMessageId, updatedAt: now })
+      .where(eq(threads.id, id))
+      );
     return result.changes > 0;
   }
 
@@ -1075,38 +1083,39 @@ export class ThreadRepo {
       integrationId?: string;
     },
   ): boolean {
-    const result = this.db
-      .prepare(
-        "UPDATE threads SET delegation_coordinator_thread_id = ?, delegation_creator_turn_id = ?, delegation_creator_tool_call_id = ?, delegation_creation_kind = ?, created_by_integration_id = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(
-        lineage.coordinatorThreadId,
-        lineage.creatorTurnId,
-        lineage.creatorToolCallId,
-        lineage.creationKind,
-        lineage.integrationId ?? null,
-        new Date().toISOString(),
-        id,
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({
+        delegationCoordinatorThreadId: lineage.coordinatorThreadId,
+        delegationCreatorTurnId: lineage.creatorTurnId,
+        delegationCreatorToolCallId: lineage.creatorToolCallId,
+        delegationCreationKind: lineage.creationKind,
+        createdByIntegrationId: lineage.integrationId ?? null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(threads.id, id))
       );
     return result.changes > 0;
   }
 
   /** Read persisted delegation provenance without exposing raw database columns. */
   findDelegationLineage(id: string): ThreadDelegationLineageRecord | null {
-    const row = this.db.prepare(
-      "SELECT delegation_coordinator_thread_id, delegation_creator_turn_id, delegation_creator_tool_call_id, delegation_creation_kind FROM threads WHERE id = ?",
-    ).get(id) as {
-      delegation_coordinator_thread_id: string | null;
-      delegation_creator_turn_id: string | null;
-      delegation_creator_tool_call_id: string | null;
-      delegation_creation_kind: string | null;
-    } | undefined;
+    const row = this.orm
+      .select({
+        delegationCoordinatorThreadId: threads.delegationCoordinatorThreadId,
+        delegationCreatorTurnId: threads.delegationCreatorTurnId,
+        delegationCreatorToolCallId: threads.delegationCreatorToolCallId,
+        delegationCreationKind: threads.delegationCreationKind,
+      })
+      .from(threads)
+      .where(eq(threads.id, id))
+      .get();
     if (!row) return null;
     return {
-      coordinatorThreadId: row.delegation_coordinator_thread_id,
-      creatorTurnId: row.delegation_creator_turn_id,
-      creatorToolCallId: row.delegation_creator_tool_call_id,
-      creationKind: row.delegation_creation_kind === "thread_delegation" ? "thread_delegation" : null,
+      coordinatorThreadId: row.delegationCoordinatorThreadId,
+      creatorTurnId: row.delegationCreatorTurnId,
+      creatorToolCallId: row.delegationCreatorToolCallId,
+      creationKind: row.delegationCreationKind === "thread_delegation" ? "thread_delegation" : null,
     };
   }
 
@@ -1115,34 +1124,28 @@ export class ThreadRepo {
     thread: Thread;
     lineage: ThreadDelegationLineageRecord;
   }> {
-    const rows = this.db.prepare(
-      `SELECT ${THREAD_COLUMNS},
-              t.delegation_coordinator_thread_id,
-              t.delegation_creator_turn_id,
-              t.delegation_creator_tool_call_id,
-              t.delegation_creation_kind
-       FROM threads t
-       WHERE t.deleted_at IS NULL AND t.delegation_coordinator_thread_id = ?
-       ORDER BY t.updated_at DESC, t.id ASC`,
-    ).all(coordinatorThreadId) as Array<ThreadRow & {
-      delegation_coordinator_thread_id: string | null;
-      delegation_creator_turn_id: string | null;
-      delegation_creator_tool_call_id: string | null;
-      delegation_creation_kind: string | null;
-    }>;
+    const rows = this.orm
+      .select()
+      .from(threads)
+      .where(and(
+        isNull(threads.deletedAt),
+        eq(threads.delegationCoordinatorThreadId, coordinatorThreadId),
+      ))
+      .orderBy(desc(threads.updatedAt), asc(threads.id))
+      .all();
     return rows.flatMap((row) => {
       if (
-        row.delegation_creation_kind !== "thread_delegation"
-        || !row.delegation_coordinator_thread_id
-        || !row.delegation_creator_turn_id
-        || !row.delegation_creator_tool_call_id
+        row.delegationCreationKind !== "thread_delegation"
+        || !row.delegationCoordinatorThreadId
+        || !row.delegationCreatorTurnId
+        || !row.delegationCreatorToolCallId
       ) return [];
       return [{
         thread: rowToThread(row),
         lineage: {
-          coordinatorThreadId: row.delegation_coordinator_thread_id,
-          creatorTurnId: row.delegation_creator_turn_id,
-          creatorToolCallId: row.delegation_creator_tool_call_id,
+          coordinatorThreadId: row.delegationCoordinatorThreadId,
+          creatorTurnId: row.delegationCreatorTurnId,
+          creatorToolCallId: row.delegationCreatorToolCallId,
           creationKind: "thread_delegation" as const,
         },
       }];
@@ -1151,22 +1154,25 @@ export class ThreadRepo {
 
   /** Persist ownership for a thread created by a paired external integration. */
   updateExternalCreator(id: string, integrationId: string): boolean {
-    return this.db.prepare(
-      "UPDATE threads SET created_by_integration_id = ?, updated_at = ? WHERE id = ?",
-    ).run(integrationId, new Date().toISOString(), id).changes > 0;
+    return runChanges(this.orm
+      .update(threads)
+      .set({ createdByIntegrationId: integrationId, updatedAt: new Date().toISOString() })
+      .where(eq(threads.id, id))).changes > 0;
   }
 
   /** Count active capacity owned by one paired external integration. */
   countActiveByIntegration(integrationId: string): number {
-    const row = this.db.prepare(
-      `SELECT COUNT(*) AS count
-       FROM threads
-       WHERE created_by_integration_id = ?
-         AND deleted_at IS NULL
-         AND status IN ('active', 'paused')
-         AND ${canonicalChildVisibilityClause("threads")}`,
-    ).get(integrationId) as { count: number };
-    return row.count;
+    const row = this.orm
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(threads)
+      .where(and(
+        eq(threads.createdByIntegrationId, integrationId),
+        isNull(threads.deletedAt),
+        inArray(threads.status, ["active", "paused"]),
+        canonicalChildVisibility,
+      ))
+      .get();
+    return row!.count;
   }
 
   /**
@@ -1174,11 +1180,11 @@ export class ThreadRepo {
    * Used during workspace deletion to know which threads need filesystem cleanup.
    */
   findWorktreeThreadsByWorkspace(workspaceId: string): Thread[] {
-    const rows = this.db
-      .prepare(
-        `SELECT ${THREAD_COLUMNS} FROM threads WHERE workspace_id = ? AND worktree_path IS NOT NULL`,
-      )
-      .all(workspaceId) as ThreadRow[];
+    const rows = this.orm
+      .select()
+      .from(threads)
+      .where(and(eq(threads.workspaceId, workspaceId), isNotNull(threads.worktreePath)))
+      .all();
     return rows.map(rowToThread);
   }
 
@@ -1187,11 +1193,11 @@ export class ThreadRepo {
    * Used during workspace hard-delete reconciliation.
    */
   listAllByWorkspace(workspaceId: string): Thread[] {
-    const rows = this.db
-      .prepare(
-        `SELECT ${THREAD_COLUMNS} FROM threads WHERE workspace_id = ?`,
-      )
-      .all(workspaceId) as ThreadRow[];
+    const rows = this.orm
+      .select()
+      .from(threads)
+      .where(eq(threads.workspaceId, workspaceId))
+      .all();
     return rows.map(rowToThread);
   }
 
@@ -1201,13 +1207,19 @@ export class ThreadRepo {
    * when a workspace is deleted.
    */
   nullifyExternalLineage(workspaceId: string): number {
-    const result = this.db
-      .prepare(
-        `UPDATE threads SET parent_thread_id = NULL, forked_from_message_id = NULL, delegation_coordinator_thread_id = NULL, updated_at = ?
-         WHERE parent_thread_id IN (SELECT id FROM threads WHERE workspace_id = ?)
-         AND workspace_id != ?`,
-      )
-      .run(new Date().toISOString(), workspaceId, workspaceId);
+    const result = runChanges(this.orm
+      .update(threads)
+      .set({
+        parentThreadId: null,
+        forkedFromMessageId: null,
+        delegationCoordinatorThreadId: null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(
+        sql`${threads.parentThreadId} IN (SELECT id FROM threads WHERE workspace_id = ${workspaceId})`,
+        ne(threads.workspaceId, workspaceId),
+      ))
+      );
     return result.changes;
   }
 
@@ -1216,17 +1228,18 @@ export class ThreadRepo {
    * excluding a specific thread. Used to decide whether a branch is safe to delete.
    */
   countActiveByBranch(threadId: string, branch: string): number {
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count FROM threads
-         WHERE workspace_id = (SELECT workspace_id FROM threads WHERE id = ?)
-         AND branch = ?
-         AND id != ?
-         AND deleted_at IS NULL
-         AND ${canonicalChildVisibilityClause("threads")}`,
-      )
-      .get(threadId, branch, threadId) as { count: number };
-    return row.count;
+    const row = this.orm
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(threads)
+      .where(and(
+        sql`${threads.workspaceId} = (SELECT workspace_id FROM threads WHERE id = ${threadId})`,
+        eq(threads.branch, branch),
+        ne(threads.id, threadId),
+        isNull(threads.deletedAt),
+        canonicalChildVisibility,
+      ))
+      .get();
+    return row!.count;
   }
 
   /** List bounded active sibling worktree paths for canonical ownership checks. */
@@ -1238,19 +1251,19 @@ export class ThreadRepo {
       1,
       Math.min(MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS, Math.trunc(limit)),
     );
-    const rows = this.db
-      .prepare(
-        `SELECT worktree_path
-         FROM threads
-         WHERE workspace_id = (SELECT workspace_id FROM threads WHERE id = ?)
-         AND id != ?
-         AND deleted_at IS NULL
-         AND worktree_path IS NOT NULL
-         LIMIT ?`,
-      )
-      .all(threadId, threadId, boundedLimit + 1) as Array<{ worktree_path: string }>;
+    const rows = this.orm
+      .select({ worktreePath: threads.worktreePath })
+      .from(threads)
+      .where(and(
+        sql`${threads.workspaceId} = (SELECT workspace_id FROM threads WHERE id = ${threadId})`,
+        ne(threads.id, threadId),
+        isNull(threads.deletedAt),
+        isNotNull(threads.worktreePath),
+      ))
+      .limit(boundedLimit + 1)
+      .all();
     return {
-      paths: rows.slice(0, boundedLimit).map((row) => row.worktree_path),
+      paths: rows.slice(0, boundedLimit).map((row) => row.worktreePath!),
       truncated: rows.length > boundedLimit,
     };
   }

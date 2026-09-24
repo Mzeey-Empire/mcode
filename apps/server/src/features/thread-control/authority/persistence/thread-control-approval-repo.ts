@@ -1,6 +1,8 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
 import type { Database } from "bun:sqlite";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   ResolvedExecutionSchema,
   ThreadPlacementSchema,
@@ -8,6 +10,8 @@ import {
   type ThreadPlacement,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import { threadControlApprovals } from "../../../../runtime/persistence/sqlite/schema.js";
+import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
 
 /** Persisted input needed to resume a protected delegated-thread creation. */
 export interface PendingThreadCreateApproval {
@@ -70,21 +74,24 @@ export type RecoverableThreadCreateApproval = PendingThreadControlApproval | Mal
 /** Durable operation identifiers stored with thread-control approvals. */
 export type ThreadControlApprovalOperation = "thread_create_batch" | "thread_send" | "thread_stop";
 
-interface ApprovalRow {
-  id: string;
-  thread_id: string;
-  workspace_id: string;
-  prompt: string;
-  execution_json: string;
-  placement_json: string;
-  turn_id: string;
-  operation_phase: PendingThreadCreateApproval["operationPhase"];
-  caller_id: string | null;
-  source_thread_id: string | null;
-  source_turn_id: string | null;
-  source_provider_id: string | null;
-  operation: string | null;
-}
+/** Columns read by approval recovery queries; status and timestamps are intentionally omitted. */
+const APPROVAL_COLUMNS = {
+  id: threadControlApprovals.id,
+  threadId: threadControlApprovals.threadId,
+  workspaceId: threadControlApprovals.workspaceId,
+  prompt: threadControlApprovals.prompt,
+  executionJson: threadControlApprovals.executionJson,
+  placementJson: threadControlApprovals.placementJson,
+  turnId: threadControlApprovals.turnId,
+  operationPhase: threadControlApprovals.operationPhase,
+  callerId: threadControlApprovals.callerId,
+  sourceThreadId: threadControlApprovals.sourceThreadId,
+  sourceTurnId: threadControlApprovals.sourceTurnId,
+  sourceProviderId: threadControlApprovals.sourceProviderId,
+  operation: threadControlApprovals.operation,
+} as const;
+
+type ApprovalRow = Pick<typeof threadControlApprovals.$inferSelect, keyof typeof APPROVAL_COLUMNS>;
 
 function parseOperation(value: string | null | undefined): ThreadControlApprovalOperation | undefined {
   return value === "thread_create_batch" || value === "thread_send" || value === "thread_stop" ? value : undefined;
@@ -93,24 +100,29 @@ function parseOperation(value: string | null | undefined): ThreadControlApproval
 /** Durable repository for protected thread-control creation approvals. */
 @injectable()
 export class ThreadControlApprovalRepo {
-  constructor(@inject("Database") private readonly db: Database) {}
+  private readonly orm: BunSQLiteDatabase;
+
+  constructor(@inject("Database") db: Database) {
+    this.orm = drizzle(db);
+  }
 
   /** Persist one pending approval and return its opaque identity. */
   create(input: Omit<PendingThreadCreateApproval, "approvalId" | "operation" | "operationPhase">): string {
     const approvalId = NodeCrypto.randomUUID();
-    this.db.prepare(
-      "INSERT INTO thread_control_approvals (id, thread_id, workspace_id, prompt, execution_json, placement_json, turn_id, caller_id, source_thread_id, operation, operation_phase, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'thread_create_batch', 'pre_provision', 'pending')",
-    ).run(
-      approvalId,
-      input.threadId,
-      input.workspaceId,
-      input.prompt,
-      JSON.stringify(input.execution),
-      JSON.stringify(input.placement),
-      input.turnId,
-      input.callerId,
-      input.sourceThreadId ?? null,
-    );
+    this.orm.insert(threadControlApprovals).values({
+      id: approvalId,
+      threadId: input.threadId,
+      workspaceId: input.workspaceId,
+      prompt: input.prompt,
+      executionJson: JSON.stringify(input.execution),
+      placementJson: JSON.stringify(input.placement),
+      turnId: input.turnId,
+      callerId: input.callerId,
+      sourceThreadId: input.sourceThreadId ?? null,
+      operation: "thread_create_batch",
+      operationPhase: "pre_provision",
+      status: "pending",
+    }).run();
     return approvalId;
   }
 
@@ -149,45 +161,48 @@ export class ThreadControlApprovalRepo {
     approvalId?: string;
   }): string {
     const approvalId = input.approvalId ?? NodeCrypto.randomUUID();
-    this.db.prepare(
-      "INSERT INTO thread_control_approvals (id, thread_id, workspace_id, prompt, execution_json, placement_json, turn_id, caller_id, source_thread_id, source_turn_id, source_provider_id, operation, operation_phase, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pre_dispatch', 'pending')",
-    ).run(
-      approvalId,
-      input.threadId,
-      input.workspaceId,
-      input.prompt,
-      JSON.stringify(input.execution),
-      JSON.stringify(input.placement),
-      input.turnId,
-      input.callerId,
-      input.sourceThreadId ?? null,
-      input.sourceTurnId ?? null,
-      input.sourceProviderId ?? null,
-      input.operation,
-    );
+    this.orm.insert(threadControlApprovals).values({
+      id: approvalId,
+      threadId: input.threadId,
+      workspaceId: input.workspaceId,
+      prompt: input.prompt,
+      executionJson: JSON.stringify(input.execution),
+      placementJson: JSON.stringify(input.placement),
+      turnId: input.turnId,
+      callerId: input.callerId,
+      sourceThreadId: input.sourceThreadId ?? null,
+      sourceTurnId: input.sourceTurnId ?? null,
+      sourceProviderId: input.sourceProviderId ?? null,
+      operation: input.operation,
+      operationPhase: "pre_dispatch",
+      status: "pending",
+    }).run();
     return approvalId;
   }
 
   /** Atomically claim one pending approval so repeated decisions cannot resume it twice. */
   claim(approvalId: string): PendingThreadControlApproval | null {
-    const claim = this.db.transaction(() => {
-      const row = this.db.prepare(
-        "SELECT id, thread_id, workspace_id, prompt, execution_json, placement_json, turn_id, operation_phase, caller_id, source_thread_id, source_turn_id, source_provider_id, operation FROM thread_control_approvals WHERE id = ? AND status = 'pending'",
-      ).get(approvalId) as ApprovalRow | undefined;
+    const row = this.orm.transaction((tx) => {
+      const row = tx
+        .select(APPROVAL_COLUMNS)
+        .from(threadControlApprovals)
+        .where(and(eq(threadControlApprovals.id, approvalId), eq(threadControlApprovals.status, "pending")))
+        .get();
       if (!row) return null;
-      const updated = this.db.prepare(
-        "UPDATE thread_control_approvals SET status = 'processing', processing_started_at = ? WHERE id = ? AND status = 'pending'",
-      ).run(new Date().toISOString(), approvalId);
+      const updated = runChanges(tx
+        .update(threadControlApprovals)
+        .set({ status: "processing", processingStartedAt: new Date().toISOString() })
+        .where(and(eq(threadControlApprovals.id, approvalId), eq(threadControlApprovals.status, "pending")))
+        );
       return updated.changes === 1 ? row : null;
     });
-    const row = claim();
     if (!row) return null;
     try {
       return this.parse(row);
     } catch (error) {
       logger.error("Failed to parse claimed thread-control approval", {
         approvalId: row.id,
-        threadId: row.thread_id,
+        threadId: row.threadId,
         error: error instanceof Error ? error.message : String(error),
       });
       this.settle(row.id, "failed");
@@ -197,12 +212,21 @@ export class ThreadControlApprovalRepo {
 
   /** Persist a completed side-effect boundary before the next operation begins. */
   setOperationPhase(approvalId: string, phase: PendingThreadCreateApproval["operationPhase"] | "pre_dispatch"): boolean {
-    return this.db.prepare("UPDATE thread_control_approvals SET operation_phase = ? WHERE id = ? AND status = 'processing'").run(phase, approvalId).changes === 1;
+    return runChanges(this.orm
+      .update(threadControlApprovals)
+      .set({ operationPhase: phase })
+      .where(and(eq(threadControlApprovals.id, approvalId), eq(threadControlApprovals.status, "processing")))
+      ).changes === 1;
   }
 
   /** Return approvals stranded by a process exit without letting one malformed payload block recovery. */
   listProcessing(): RecoverableThreadCreateApproval[] {
-    const rows = this.db.prepare("SELECT id, thread_id, workspace_id, prompt, execution_json, placement_json, turn_id, operation_phase, caller_id, source_thread_id, source_turn_id, source_provider_id, operation FROM thread_control_approvals WHERE status = 'processing' ORDER BY processing_started_at, id").all() as ApprovalRow[];
+    const rows = this.orm
+      .select(APPROVAL_COLUMNS)
+      .from(threadControlApprovals)
+      .where(eq(threadControlApprovals.status, "processing"))
+      .orderBy(asc(threadControlApprovals.processingStartedAt), asc(threadControlApprovals.id))
+      .all();
     return rows.map((row) => {
       try {
         return this.parse(row);
@@ -212,10 +236,10 @@ export class ThreadControlApprovalRepo {
           invalid: true,
           ...(operation ? { operation } : {}),
           approvalId: row.id,
-          threadId: row.thread_id,
-          workspaceId: row.workspace_id,
-          callerId: row.caller_id ?? "unknown",
-          ...(row.source_thread_id ? { sourceThreadId: row.source_thread_id } : {}),
+          threadId: row.threadId,
+          workspaceId: row.workspaceId,
+          callerId: row.callerId ?? "unknown",
+          ...(row.sourceThreadId ? { sourceThreadId: row.sourceThreadId } : {}),
         };
       }
     });
@@ -223,27 +247,50 @@ export class ThreadControlApprovalRepo {
 
   /** Return a pre-side-effect accepted operation to the visible pending state. */
   requeue(approvalId: string): boolean {
-    return this.db.prepare("UPDATE thread_control_approvals SET status = 'pending', processing_started_at = NULL WHERE id = ? AND status = 'processing' AND operation_phase = 'pre_provision'").run(approvalId).changes === 1;
+    return runChanges(this.orm
+      .update(threadControlApprovals)
+      .set({ status: "pending", processingStartedAt: null })
+      .where(and(
+        eq(threadControlApprovals.id, approvalId),
+        eq(threadControlApprovals.status, "processing"),
+        eq(threadControlApprovals.operationPhase, "pre_provision"),
+      ))
+      ).changes === 1;
   }
 
   /** Return a recovered provisioning approval to the pre-provision pending state. */
   requeueRecoveredProvisioning(approvalId: string): boolean {
-    return this.db.prepare("UPDATE thread_control_approvals SET status = 'pending', processing_started_at = NULL, operation_phase = 'pre_provision' WHERE id = ? AND status = 'processing' AND operation_phase = 'provisioning'").run(approvalId).changes === 1;
+    return runChanges(this.orm
+      .update(threadControlApprovals)
+      .set({ status: "pending", processingStartedAt: null, operationPhase: "pre_provision" })
+      .where(and(
+        eq(threadControlApprovals.id, approvalId),
+        eq(threadControlApprovals.status, "processing"),
+        eq(threadControlApprovals.operationPhase, "provisioning"),
+      ))
+      ).changes === 1;
   }
 
   /** Mark a processing approval with its terminal outcome, or fail malformed pending data. */
   settle(approvalId: string, status: "approved" | "rejected" | "failed"): boolean {
-    const query = status === "failed"
-      ? "UPDATE thread_control_approvals SET status = ?, resolved_at = ? WHERE id = ? AND status IN ('pending', 'processing')"
-      : "UPDATE thread_control_approvals SET status = ?, resolved_at = ? WHERE id = ? AND status = 'processing'";
-    return this.db.prepare(query).run(status, new Date().toISOString(), approvalId).changes === 1;
+    const where = status === "failed"
+      ? and(eq(threadControlApprovals.id, approvalId), inArray(threadControlApprovals.status, ["pending", "processing"]))
+      : and(eq(threadControlApprovals.id, approvalId), eq(threadControlApprovals.status, "processing"));
+    return runChanges(this.orm
+      .update(threadControlApprovals)
+      .set({ status, resolvedAt: new Date().toISOString() })
+      .where(where)
+      ).changes === 1;
   }
 
   /** Return pending approval cards for one visible thread, skipping malformed payloads. */
   listPendingByThread(threadId: string): PendingThreadControlApproval[] {
-    const rows = this.db.prepare(
-      "SELECT id, thread_id, workspace_id, prompt, execution_json, placement_json, turn_id, operation_phase, caller_id, source_thread_id, source_turn_id, source_provider_id, operation FROM thread_control_approvals WHERE thread_id = ? AND status = 'pending' ORDER BY created_at, id",
-    ).all(threadId) as ApprovalRow[];
+    const rows = this.orm
+      .select(APPROVAL_COLUMNS)
+      .from(threadControlApprovals)
+      .where(and(eq(threadControlApprovals.threadId, threadId), eq(threadControlApprovals.status, "pending")))
+      .orderBy(asc(threadControlApprovals.createdAt), asc(threadControlApprovals.id))
+      .all();
     const parsed: PendingThreadControlApproval[] = [];
     for (const row of rows) {
       try {
@@ -251,7 +298,7 @@ export class ThreadControlApprovalRepo {
       } catch (error) {
         logger.error("Skipping malformed pending thread-control approval", {
           approvalId: row.id,
-          threadId: row.thread_id,
+          threadId: row.threadId,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -261,9 +308,12 @@ export class ThreadControlApprovalRepo {
 
   /** Return pending mutation approvals created by one source thread. */
   listPendingBySourceThread(sourceThreadId: string): PendingThreadControlApproval[] {
-    const rows = this.db.prepare(
-      "SELECT id, thread_id, workspace_id, prompt, execution_json, placement_json, turn_id, operation_phase, caller_id, source_thread_id, source_turn_id, source_provider_id, operation FROM thread_control_approvals WHERE source_thread_id = ? AND status = 'pending' ORDER BY created_at, id",
-    ).all(sourceThreadId) as ApprovalRow[];
+    const rows = this.orm
+      .select(APPROVAL_COLUMNS)
+      .from(threadControlApprovals)
+      .where(and(eq(threadControlApprovals.sourceThreadId, sourceThreadId), eq(threadControlApprovals.status, "pending")))
+      .orderBy(asc(threadControlApprovals.createdAt), asc(threadControlApprovals.id))
+      .all();
     const parsed: PendingThreadControlApproval[] = [];
     for (const row of rows) {
       try {
@@ -271,7 +321,7 @@ export class ThreadControlApprovalRepo {
       } catch (error) {
         logger.error("Skipping malformed pending source-thread approval", {
           approvalId: row.id,
-          threadId: row.thread_id,
+          threadId: row.threadId,
           sourceThreadId,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -283,15 +333,18 @@ export class ThreadControlApprovalRepo {
   private parse(row: ApprovalRow): PendingThreadControlApproval {
     const operation = parseOperation(row.operation);
     if (!operation) throw new Error("Stored thread-control approval has invalid operation");
-    const execution = ResolvedExecutionSchema().parse(JSON.parse(row.execution_json));
+    const execution = ResolvedExecutionSchema().parse(JSON.parse(row.executionJson));
     return parseApprovalByOperation(operation, row, execution);
   }
 
   /** Return all durable pending approvals so mutation reservations can rehydrate before ingress. */
   listPending(): RecoverableThreadCreateApproval[] {
-    const rows = this.db.prepare(
-      "SELECT id, thread_id, workspace_id, prompt, execution_json, placement_json, turn_id, operation_phase, caller_id, source_thread_id, source_turn_id, source_provider_id, operation FROM thread_control_approvals WHERE status = 'pending' ORDER BY created_at, id",
-    ).all() as ApprovalRow[];
+    const rows = this.orm
+      .select(APPROVAL_COLUMNS)
+      .from(threadControlApprovals)
+      .where(eq(threadControlApprovals.status, "pending"))
+      .orderBy(asc(threadControlApprovals.createdAt), asc(threadControlApprovals.id))
+      .all();
     return rows.map((row) => {
       try {
         return this.parse(row);
@@ -301,10 +354,10 @@ export class ThreadControlApprovalRepo {
           invalid: true,
           ...(operation ? { operation } : {}),
           approvalId: row.id,
-          threadId: row.thread_id,
-          workspaceId: row.workspace_id,
-          callerId: row.caller_id ?? "unknown",
-          ...(row.source_thread_id ? { sourceThreadId: row.source_thread_id } : {}),
+          threadId: row.threadId,
+          workspaceId: row.workspaceId,
+          callerId: row.callerId ?? "unknown",
+          ...(row.sourceThreadId ? { sourceThreadId: row.sourceThreadId } : {}),
         };
       }
     });
@@ -312,7 +365,15 @@ export class ThreadControlApprovalRepo {
 
   /** Requeue a mutation that had not crossed its external dispatch boundary. */
   requeueDispatch(approvalId: string): boolean {
-    return this.db.prepare("UPDATE thread_control_approvals SET status = 'pending', processing_started_at = NULL, operation_phase = 'pre_dispatch' WHERE id = ? AND status = 'processing' AND operation_phase = 'pre_dispatch'").run(approvalId).changes === 1;
+    return runChanges(this.orm
+      .update(threadControlApprovals)
+      .set({ status: "pending", processingStartedAt: null, operationPhase: "pre_dispatch" })
+      .where(and(
+        eq(threadControlApprovals.id, approvalId),
+        eq(threadControlApprovals.status, "processing"),
+        eq(threadControlApprovals.operationPhase, "pre_dispatch"),
+      ))
+      ).changes === 1;
   }
 }
 
@@ -325,15 +386,15 @@ function approvalIdentity(row: ApprovalRow): {
 } {
   return {
     approvalId: row.id,
-    threadId: row.thread_id,
-    workspaceId: row.workspace_id,
-    turnId: row.turn_id,
-    callerId: row.caller_id ?? "unknown",
+    threadId: row.threadId,
+    workspaceId: row.workspaceId,
+    turnId: row.turnId,
+    callerId: row.callerId ?? "unknown",
   };
 }
 
 function sourceThreadFields(row: ApprovalRow): Pick<PendingThreadCreateApproval, "sourceThreadId"> {
-  return row.source_thread_id ? { sourceThreadId: row.source_thread_id } : {};
+  return row.sourceThreadId ? { sourceThreadId: row.sourceThreadId } : {};
 }
 
 function sourceSendFields(row: ApprovalRow): Pick<
@@ -342,8 +403,8 @@ function sourceSendFields(row: ApprovalRow): Pick<
 > {
   return {
     ...sourceThreadFields(row),
-    ...(row.source_turn_id ? { sourceTurnId: row.source_turn_id } : {}),
-    ...(row.source_provider_id ? { sourceProviderId: row.source_provider_id } : {}),
+    ...(row.sourceTurnId ? { sourceTurnId: row.sourceTurnId } : {}),
+    ...(row.sourceProviderId ? { sourceProviderId: row.sourceProviderId } : {}),
   };
 }
 
@@ -361,7 +422,7 @@ function parseApprovalByOperation(
 }
 
 function parseCreateApproval(row: ApprovalRow, execution: ResolvedExecution): PendingThreadCreateApproval {
-  const placement = ThreadPlacementSchema().parse(JSON.parse(row.placement_json));
+  const placement = ThreadPlacementSchema().parse(JSON.parse(row.placementJson));
   if (placement.type !== "new_worktree") throw new Error("Stored thread-control approval has invalid placement");
   return {
     operation: "thread_create_batch",
@@ -369,7 +430,7 @@ function parseCreateApproval(row: ApprovalRow, execution: ResolvedExecution): Pe
     prompt: row.prompt,
     execution,
     placement,
-    operationPhase: row.operation_phase as PendingThreadCreateApproval["operationPhase"],
+    operationPhase: row.operationPhase as PendingThreadCreateApproval["operationPhase"],
     ...sourceThreadFields(row),
   };
 }
@@ -380,7 +441,7 @@ function parseSendApproval(row: ApprovalRow, execution: ResolvedExecution): Pend
     ...approvalIdentity(row),
     message: row.prompt,
     execution,
-    operationPhase: row.operation_phase as PendingThreadSendApproval["operationPhase"],
+    operationPhase: row.operationPhase as PendingThreadSendApproval["operationPhase"],
     ...sourceSendFields(row),
   };
 }
@@ -390,7 +451,7 @@ function parseStopApproval(row: ApprovalRow, execution: ResolvedExecution): Pend
     operation: "thread_stop",
     ...approvalIdentity(row),
     execution,
-    operationPhase: row.operation_phase as PendingThreadStopApproval["operationPhase"],
+    operationPhase: row.operationPhase as PendingThreadStopApproval["operationPhase"],
     ...sourceThreadFields(row),
   };
 }
