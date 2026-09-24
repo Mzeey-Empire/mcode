@@ -246,6 +246,46 @@ describe("PtyHostSupervisor", () => {
     }
   });
 
+  it("accepts a running session beyond five seconds under the default create deadline", async () => {
+    vi.useFakeTimers();
+    const child = new FakeHostChild();
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => child,
+    });
+    try {
+      await supervisor.start();
+      const creating = supervisor.create(createRequest);
+      const settled = vi.fn();
+      void creating.then(settled, settled);
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(settled).not.toHaveBeenCalled();
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "heartbeat",
+        hostGeneration: "1",
+        monotonicMs: "2",
+        activeSessions: 0,
+        queueBytes: 0,
+        rssBytes: "1",
+      });
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "running",
+        sessionId: UUID,
+        hostGeneration: "1",
+        rootPid: 123,
+        processGroupId: "job-123",
+        containment: "job-object",
+      });
+      await expect(creating).resolves.toMatchObject({ state: "running" });
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a live host through a four-second server stall", async () => {
     vi.useFakeTimers();
     const child = new FakeHostChild();

@@ -33,6 +33,7 @@ const REPLACEMENT_DELAY_MS = 250;
 const HEARTBEAT_DEGRADED_MS = 5_000;
 const HEARTBEAT_UNHEALTHY_MS = 10_000;
 const OPERATION_TIMEOUT_MS = 5_000;
+const CREATE_TIMEOUT_MS = 15_000;
 const MAX_IPC_QUEUE_BYTES = 1_048_576;
 const CONTAINMENT_SETTLE_TIMEOUT_MS = 500;
 
@@ -182,7 +183,7 @@ export class PtyHostSupervisor implements PtyHostAdapter {
       );
     }
     const result = new Promise<PtyHostRunning>((resolve, reject) => {
-      const timeoutMs = this.operationTimeoutMs();
+      const timeoutMs = this.options.operationTimeoutMs ?? CREATE_TIMEOUT_MS;
       const deadline = Date.now() + timeoutMs;
       const rejectCreate = () => {
         this.pendingCreates.delete(input.sessionId);
