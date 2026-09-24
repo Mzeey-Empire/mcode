@@ -27,6 +27,12 @@ export interface CanonicalParentNarrativeRecoveryReceipt {
   recorded: boolean;
 }
 
+/** Both writes are acknowledged only after their shared transaction commits. */
+export interface CanonicalParentNarrativeClassificationReceipt {
+  recorded: true;
+  reset: true;
+}
+
 interface Correlation {
   requestId: string;
   operationId: string;
@@ -37,11 +43,13 @@ export type CanonicalWriterRequest =
   | (Correlation & { kind: "open"; dbPath: string })
   | (Correlation & { kind: "commit"; input: CanonicalProviderWriteInput })
   | (Correlation & { kind: "record-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
+  | (Correlation & { kind: "classify-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
   | (Correlation & { kind: "close" });
 
 export type CanonicalWriterResponse =
   | (Correlation & { kind: "opened" })
   | (Correlation & { kind: "committed"; receipt: CanonicalProviderWriteReceipt })
   | (Correlation & { kind: "parent-narrative-recovery-recorded"; receipt: CanonicalParentNarrativeRecoveryReceipt })
+  | (Correlation & { kind: "parent-narrative-recovery-classified"; receipt: CanonicalParentNarrativeClassificationReceipt })
   | (Correlation & { kind: "closed" })
   | (Correlation & { kind: "failed"; reason: "open-failed" | "write-failed" });

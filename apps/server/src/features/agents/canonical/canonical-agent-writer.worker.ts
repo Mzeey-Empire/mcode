@@ -4,14 +4,18 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
 import type {
+  CanonicalParentNarrativeClassificationReceipt,
   CanonicalProviderWriteInput,
   CanonicalWriterRequest,
   CanonicalWriterResponse,
 } from "./canonical-agent-writer-protocol.js";
+import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 
 let db: Database | undefined;
 let boundary: CanonicalAgentBoundary | undefined;
+let assistantTextCheckpoints: ParentAssistantTextCheckpointService | undefined;
 
 function openDatabase(dbPath: string): void {
   if (boundary || !NodePath.isAbsolute(dbPath) || !NodeFS.existsSync(dbPath)) {
@@ -21,11 +25,30 @@ function openDatabase(dbPath: string): void {
   try {
     applySQLiteConnectionPolicy(connection, true);
     boundary = new CanonicalAgentBoundary(connection, () => {});
+    assistantTextCheckpoints = new ParentAssistantTextCheckpointService(connection);
     db = connection;
   } catch (error) {
+    boundary = undefined;
+    assistantTextCheckpoints = undefined;
     connection.close(true);
     throw error;
   }
+}
+
+function classifyParentNarrativeRecovery(
+  input: ParentNarrativeRecoveryCommitInput,
+): CanonicalParentNarrativeClassificationReceipt {
+  const connection = db;
+  const canonical = boundary;
+  const checkpoints = assistantTextCheckpoints;
+  if (!connection || !canonical || !checkpoints) throw new Error("Canonical writer has not opened its database");
+  return connection.transaction(() => {
+    const recorded = canonical.recordParentNarrativeRecovery(input);
+    if (!recorded) throw new Error("Canonical parent turn was not found");
+    const reset = checkpoints.resetInTransaction(input.executionId);
+    if (!reset) throw new Error("Provisional assistant text checkpoint was not reset");
+    return { recorded, reset };
+  })();
 }
 
 function assertRouting(input: CanonicalProviderWriteInput, executionId: string): void {
@@ -64,12 +87,27 @@ function handle(request: CanonicalWriterRequest): CanonicalWriterResponse {
   }
   if (request.kind === "close") {
     boundary = undefined;
+    assistantTextCheckpoints = undefined;
     db?.close(true);
     db = undefined;
     return { ...correlation, kind: "closed" };
   }
+  return handleWrite(request, correlation);
+}
+
+function handleWrite(
+  request: Extract<CanonicalWriterRequest, { kind: "commit" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery" }>,
+  correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
+): CanonicalWriterResponse {
   try {
     if (!boundary) throw new Error("Canonical writer has not opened its database");
+    if (request.kind === "classify-parent-narrative-recovery") {
+      if (request.input.executionId !== request.executionId) {
+        throw new Error("Canonical writer classification execution mismatch");
+      }
+      const receipt = classifyParentNarrativeRecovery(request.input);
+      return { ...correlation, kind: "parent-narrative-recovery-classified", receipt };
+    }
     if (request.kind === "record-parent-narrative-recovery") {
       if (request.input.executionId !== request.executionId) {
         throw new Error("Canonical writer recovery execution mismatch");

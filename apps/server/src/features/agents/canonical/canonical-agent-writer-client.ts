@@ -1,6 +1,7 @@
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import type {
+  CanonicalParentNarrativeClassificationReceipt,
   CanonicalParentNarrativeRecoveryReceipt,
   CanonicalProviderWriteInput,
   CanonicalProviderWriteReceipt,
@@ -86,6 +87,26 @@ export class CanonicalAgentWriterClient {
       input,
     });
     if (response.kind !== "parent-narrative-recovery-recorded") {
+      throw new Error("Canonical writer returned an unexpected response");
+    }
+    return response.receipt;
+  }
+
+  /** Atomically persists recovery and resets provisional assistant text; the caller retires its journal after receipt. */
+  async classifyParentNarrativeRecovery(
+    operationId: string,
+    input: ParentNarrativeRecoveryCommitInput,
+  ): Promise<CanonicalParentNarrativeClassificationReceipt> {
+    if (!operationId || !input.executionId) throw new Error("Canonical writer operation and execution IDs are required");
+    await this.ready;
+    const response = await this.send({
+      kind: "classify-parent-narrative-recovery",
+      requestId: NodeCrypto.randomUUID(),
+      operationId,
+      executionId: input.executionId,
+      input,
+    });
+    if (response.kind !== "parent-narrative-recovery-classified") {
       throw new Error("Canonical writer returned an unexpected response");
     }
     return response.receipt;

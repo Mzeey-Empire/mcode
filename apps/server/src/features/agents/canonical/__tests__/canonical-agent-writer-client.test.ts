@@ -8,6 +8,7 @@ import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 
 const THREAD_ID = "writer-thread";
 const TURN_ID = "writer-turn";
@@ -197,6 +198,41 @@ describe("canonical SQLite writer", () => {
       items: [recoveryToolCall()],
     })).toEqual({ recorded: false });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items").get()).toEqual({ count: 0 });
+  });
+
+  it("commits recovery and assistant-text reset together", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("classification-start", {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
+    });
+    const checkpoints = new ParentAssistantTextCheckpointService(db);
+    checkpoints.appendChunk([{
+      executionId: EXECUTION_ID, threadId: THREAD_ID, turnId: TURN_ID, sequence: 1, text: "provisional text",
+    }]);
+    const input = { executionId: EXECUTION_ID, items: [recoveryToolCall()] };
+    expect(await writer.classifyParentNarrativeRecovery("classification-1", input))
+      .toEqual({ recorded: true, reset: true });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM parent_assistant_text_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get("toolCall:writer-recovery-tool")).toEqual({ count: 1 });
+    await expect(writer.classifyParentNarrativeRecovery("classification-1", input))
+      .rejects.toThrow("Canonical writer write-failed");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get("toolCall:writer-recovery-tool")).toEqual({ count: 1 });
+  });
+
+  it("rolls back recovery when the assistant-text checkpoint is missing", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("classification-start", {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
+    });
+    await expect(writer.classifyParentNarrativeRecovery("classification-missing", {
+      executionId: EXECUTION_ID,
+      items: [recoveryToolCall()],
+    })).rejects.toThrow("Canonical writer write-failed");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get("toolCall:writer-recovery-tool")).toEqual({ count: 0 });
   });
 
   it("rejects an unmigrated path without creating a second database", async () => {
