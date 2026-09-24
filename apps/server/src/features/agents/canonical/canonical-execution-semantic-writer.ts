@@ -26,6 +26,8 @@ import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
 import { CanonicalParentTurnWrite } from "./canonical-parent-turn-write.js";
+import { TaskRepo } from "../orchestration/persistence/task-repo.js";
+import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import {
   ParentAssistantTextCheckpointService,
   PARENT_ASSISTANT_TEXT_QUEUE_POLICY,
@@ -51,6 +53,21 @@ const narrativeDeltaSchema = z.object({
   items: z.array(ParentNarrativeRecoveryItemSchema()),
   discardedItemIds: z.array(z.string().regex(/^(toolCall|narrationSegment|hook):.+$/)).optional(),
 });
+const storedTaskSchema = z.object({
+  id: z.string().max(256).optional(),
+  content: z.string().min(1).max(16 * 1024),
+  status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
+  activeForm: z.string().max(4096).optional(),
+  group: z.string().max(128).optional(),
+}).strict();
+const taskIntentsSchema = z.array(z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("upsert-group"), group: z.string().max(128),
+    tasks: z.array(storedTaskSchema).max(256) }).strict(),
+  z.object({ kind: z.literal("append-task"), task: storedTaskSchema }).strict(),
+  z.object({ kind: z.literal("update-task"), id: z.string().min(1).max(256),
+    group: z.string().max(128), patch: storedTaskSchema.pick({ status: true, content: true, activeForm: true }).partial() }).strict(),
+  z.object({ kind: z.literal("remove-task"), id: z.string().min(1).max(256), group: z.string().max(128) }).strict(),
+])).max(16);
 const storedPublicationSequencesSchema = z.array(z.union([
   z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   z.object({ executionId: z.string(), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
@@ -153,6 +170,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private readonly turns: CanonicalParentTurnWrite;
   private readonly providerProjector: CanonicalCommittedProviderProjector;
   private readonly contextCompaction: CanonicalContextCompactionProjection;
+  private readonly tasks: TaskRepo;
   private readonly assistantText: ParentAssistantTextCheckpointService;
   private readonly canonical: CanonicalAgentBoundary;
   private readonly findOperation: ReturnType<Database["prepare"]>;
@@ -179,6 +197,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.canonical = codexBoundary;
     this.providerProjector = new CanonicalCommittedProviderProjector(codexBoundary);
     this.contextCompaction = new CanonicalContextCompactionProjection(db);
+    this.tasks = new TaskRepo(db);
     this.assistantText = new ParentAssistantTextCheckpointService(db);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
     this.listPublicationChunks = db.prepare("SELECT operation_id, kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id > ? AND operation_id < ? ORDER BY operation_id LIMIT ?");
@@ -401,6 +420,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.requireUnfinishedCheckpoint(operation.execution);
       const textResult = this.applyLiveText(mutation.text, operation.execution.executionId);
       if (mutation.narrative) this.persistNarrativeDelta(mutation.narrative);
+      if (mutation.taskIntents) this.applyTaskIntents(operation.execution.threadId, mutation.taskIntents);
       if (mutation.text.kind === "reclassify" && !this.assistantText.resetInTransaction(operation.execution.executionId)) {
         throw new SemanticConflict();
       }
@@ -427,6 +447,17 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const result = this.assistantText.appendChunk(text.kind === "append" ? text.inputs : [text.input]);
     if (result.outcome !== "committed") throw new SemanticConflict();
     return result;
+  }
+
+  private applyTaskIntents(threadId: string, intents: readonly TaskToolWriteIntent[]): void {
+    for (const intent of intents) {
+      switch (intent.kind) {
+        case "upsert-group": this.tasks.upsertGroup(threadId, intent.group, intent.tasks); break;
+        case "append-task": this.tasks.appendTask(threadId, intent.task); break;
+        case "update-task": this.tasks.updateTask(threadId, intent.id, intent.patch, intent.group); break;
+        case "remove-task": this.tasks.removeTask(threadId, intent.id, intent.group); break;
+      }
+    }
   }
 
   private requireUnfinishedCheckpoint(execution: ExecutionIdentity): void {
@@ -772,7 +803,17 @@ function validLiveEventInput(operation: ExecutionSemanticOperation): boolean {
   if (!validLiveTextPayload(mutation, operation.execution)
     || !AgentEventSchema().safeParse(event).success || !validLiveTextAssociation(mutation.text, event)) return false;
   if (mutation.narrative && !validNarrativeDeltaInput(mutation.narrative, operation.execution)) return false;
+  if (!validLiveTaskIntents(mutation.taskIntents, event)) return false;
   return validLiveEventBudget(operation, mutation);
+}
+
+function validLiveTaskIntents(
+  intents: readonly TaskToolWriteIntent[] | undefined,
+  event: ExecutionLivePublicationIntent["event"],
+): boolean {
+  if (!intents) return true;
+  if (!taskIntentsSchema.safeParse(intents).success) return false;
+  return intents.length === 0 || event.type === "toolUse" || event.type === "toolResult";
 }
 
 function liveEventPublication(operation: ExecutionSemanticOperation): ExecutionLivePublicationIntent | null {
@@ -789,7 +830,8 @@ function validLiveEventBudget(
     ? mutation.narrative.items.length + (mutation.narrative.discardedItemIds?.length ?? 0) : 0;
   const textRows = mutation.text.kind === "append" ? mutation.text.inputs.length
     : mutation.text.kind === "unchanged" ? 0 : 1;
-  if (textRows + narrativeRows > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
+  if (textRows + narrativeRows + (mutation.taskIntents?.length ?? 0)
+    > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
   return Buffer.byteLength(JSON.stringify(operation), "utf8") <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes;
 }
 

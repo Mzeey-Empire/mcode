@@ -13,6 +13,7 @@ import type {
   ParentAssistantTextCheckpointResult,
 } from "../turns/parent-assistant-text-checkpoint-service.js";
 import type { ParentNarrativeRecoveryCommit } from "../turns/parent-turn-durability.js";
+import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import type {
   ExecutionIdentity,
   ExecutionLease,
@@ -36,6 +37,7 @@ export type ExecutionWorkCommand =
       | { readonly kind: "reclassify"; readonly expectedText: string }
       | { readonly kind: "promote"; readonly input: ParentAssistantTextCheckpointInput };
     readonly narrative?: ParentNarrativeRecoveryCommit;
+    readonly taskIntents?: readonly TaskToolWriteIntent[];
     readonly publication: ExecutionLivePublicationIntent;
   }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
@@ -63,6 +65,7 @@ export interface ExecutionSemanticOperation {
       readonly kind: "live-event";
       readonly text: Extract<ExecutionWorkCommand, { readonly kind: "live-event" }>["text"];
       readonly narrative?: ParentNarrativeRecoveryCommit;
+      readonly taskIntents?: readonly TaskToolWriteIntent[];
     }
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
@@ -289,6 +292,7 @@ function liveEventMutation(
   return {
     kind: "live-event", text: command.text,
     ...(command.narrative ? { narrative: command.narrative } : {}),
+    ...(command.taskIntents ? { taskIntents: command.taskIntents } : {}),
   };
 }
 

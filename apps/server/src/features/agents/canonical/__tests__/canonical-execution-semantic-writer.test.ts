@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { TaskRepo } from "../../orchestration/persistence/task-repo.js";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 import { ExecutionWorkerHandler } from "../../execution/execution-worker-handler.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -509,6 +510,28 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(await writer.transact(op)).toEqual(receipt);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
       .get(EXECUTION_ID, "lease-1:2")).toEqual({ count: 1 });
+  });
+
+  it("stores task-tool rows before the matching live tool publication", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const toolUse = { type: AgentEventType.ToolUse, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+      toolCallId: "todo-1", toolName: "TodoWrite", toolInput: { todos: [{ content: "Ship task" }] } };
+    const op = { ...operation(2, { kind: "live-event", text: { kind: "unchanged" },
+      taskIntents: [{ kind: "upsert-group", group: "Tasks",
+        tasks: [{ content: "Ship task", status: "pending", group: "Tasks" }] }],
+    }), livePublication: [{ after: "writer" as const, event: toolUse }] };
+    db.run("CREATE TRIGGER fail_task_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:live-event' BEGIN SELECT RAISE(ABORT, 'task receipt unavailable'); END");
+    await expect(writer.transact(op)).rejects.toThrow("task receipt unavailable");
+    expect(new TaskRepo(db).get(THREAD_ID)).toBeNull();
+    db.run("DROP TRIGGER fail_task_receipt");
+    const receipt = await writer.transact(op);
+    expect(receipt).toMatchObject({ kind: "committed", livePublication: [
+      { publicationId: "lease-1:2:0", event: toolUse },
+    ] });
+    expect(new TaskRepo(db).get(THREAD_ID)).toEqual([
+      { content: "Ship task", status: "pending", group: "Tasks" },
+    ]);
+    expect(await writer.transact(op)).toEqual(receipt);
   });
 
   it("rejects a compound live event that exceeds its shared row or byte budget", async () => {
