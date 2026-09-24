@@ -176,3 +176,17 @@ NodeTest.test("keeps only server diagnostic stall entries inside the workload wi
   ].join("\n"), Date.parse("2026-09-24T10:00:00.500Z"), Date.parse("2026-09-24T10:00:02.500Z"));
   NodeAssertStrict.deepEqual(entries, [{ timestamp: "2026-09-24T10:00:02.000Z", stalledMs: 750 }]);
 });
+
+NodeTest.test("reads structured server work stalls and prefers them over duplicate legacy warnings", () => {
+  const entries = parseServerStallEntries([
+    JSON.stringify({ timestamp: "2026-09-24T19:07:27.116Z", message: "Event loop stalled", stalledMs: 240 }),
+    JSON.stringify({ timestamp: "2026-09-24T19:07:27.116Z", message: "Server work trace", kind: "server-work-stall", delayMs: 260.15 }),
+    JSON.stringify({ timestamp: "2026-09-24T19:07:37.927Z", message: "Server work trace", kind: "server-work-stall", delayMs: 3639.19 }),
+    JSON.stringify({ timestamp: "2026-09-24T19:07:39.550Z", message: "Server work trace", kind: "other", delayMs: 1603 }),
+    JSON.stringify({ timestamp: "2026-09-24T19:07:50.000Z", message: "Server work trace", kind: "server-work-stall", delayMs: 9000 }),
+  ].join("\n"), Date.parse("2026-09-24T19:07:26.326Z"), Date.parse("2026-09-24T19:07:46.625Z"));
+  NodeAssertStrict.deepEqual(entries, [
+    { timestamp: "2026-09-24T19:07:27.116Z", stalledMs: 260.15 },
+    { timestamp: "2026-09-24T19:07:37.927Z", stalledMs: 3639.19 },
+  ]);
+});

@@ -259,27 +259,41 @@ export function normalizeTerminalSessions(transport, sessions) {
 /** Extracts only Mcode server stall entries from JSONL server diagnostics. */
 export function parseServerStallEntries(contents, startedAtMs, endedAtMs) {
   if (typeof contents !== "string") return [];
-  return contents.split(/\r?\n/).flatMap((line) => parseServerStallLine(line, startedAtMs, endedAtMs));
+  const byTimestamp = new Map();
+  for (const line of contents.split(/\r?\n/)) {
+    const sample = parseServerStallLine(line, startedAtMs, endedAtMs);
+    if (!sample) continue;
+    const previous = byTimestamp.get(sample.timestamp);
+    if (!previous || sample.source === "server-work-stall") byTimestamp.set(sample.timestamp, sample);
+  }
+  return [...byTimestamp.values()].map(({ timestamp, stalledMs }) => ({ timestamp, stalledMs }));
 }
 
 function parseServerStallLine(line, startedAtMs, endedAtMs) {
-  if (!line) return [];
+  if (!line) return null;
   try {
     const entry = JSON.parse(line);
-    if (!isValidServerStall(entry, startedAtMs, endedAtMs)) return [];
-    return [{ timestamp: entry.timestamp, stalledMs: entry.stalledMs }];
+    const sample = serverStallSample(entry);
+    if (!sample || !isValidServerStallTime(entry.timestamp, startedAtMs, endedAtMs)) return null;
+    return { timestamp: entry.timestamp, ...sample };
   } catch {
-    return [];
+    return null;
   }
 }
 
-function isValidServerStall(entry, startedAtMs, endedAtMs) {
-  const timestampMs = Date.parse(entry?.timestamp);
-  return entry?.message === "Event loop stalled"
-    && Number.isFinite(timestampMs)
-    && timestampMs >= startedAtMs
-    && timestampMs <= endedAtMs
-    && Number.isFinite(entry?.stalledMs);
+function serverStallSample(entry) {
+  if (entry?.kind === "server-work-stall" && entry.message === "Server work trace" && Number.isFinite(entry.delayMs)) {
+    return { source: "server-work-stall", stalledMs: entry.delayMs };
+  }
+  if (entry?.message === "Event loop stalled" && Number.isFinite(entry.stalledMs)) {
+    return { source: "event-loop-stalled", stalledMs: entry.stalledMs };
+  }
+  return null;
+}
+
+function isValidServerStallTime(timestamp, startedAtMs, endedAtMs) {
+  const timestampMs = Date.parse(timestamp);
+  return Number.isFinite(timestampMs) && timestampMs >= startedAtMs && timestampMs <= endedAtMs;
 }
 
 /** Creates the stable names used to prove that only this harness owns a thread. */
