@@ -802,8 +802,68 @@ async function installFixtureRuntime(page) {
     const workspaceStore = modules.workspaceStore;
     const threadStore = modules.threadStore;
     const diffStore = modules.diffStore;
-    const workspace = workspaceStore.getState().workspaces[0];
+    const workspace = workspaceStore.getState().workspaces.find((item) =>
+      /[\\/]\.dev[\\/]fixture-repo$/i.test(item.path));
     if (!workspace) throw new Error("The performance fixture needs one seeded workspace.");
+
+    const serverUrl = await (async () => {
+      if (window.desktopBridge?.getServerUrl) {
+        const connection = await window.desktopBridge.getServerUrl();
+        if (connection.url) return connection.url;
+      }
+      const response = await fetch("/__mcode_runtime/ports.json", { cache: "no-store" });
+      if (!response.ok) throw new Error(`The performance fixture runtime contract is unavailable: ${response.status}`);
+      const contract = await response.json();
+      const url = new URL(`ws://127.0.0.1:${contract.serverPort}`);
+      url.searchParams.set("token", contract.seedLogin.token);
+      url.searchParams.set("instanceToken", contract.instanceToken);
+      url.searchParams.set("worktree", contract.worktreeIdentity);
+      return url.toString();
+    })();
+
+    let rpcSequence = 0;
+    const rpc = (method, params) => new Promise((resolve, reject) => {
+      const requestId = `frontend-performance-${++rpcSequence}`;
+      const socket = new WebSocket(serverUrl);
+      const timeout = window.setTimeout(() => {
+        socket.close();
+        reject(new Error(`Frontend performance fixture RPC timed out: ${method}`));
+      }, 10_000);
+      const settle = (callback) => (value) => {
+        window.clearTimeout(timeout);
+        socket.close();
+        callback(value);
+      };
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({ id: requestId, method, params }));
+      }, { once: true });
+      socket.addEventListener("message", (event) => {
+        const response = JSON.parse(event.data);
+        if (response.id !== requestId) return;
+        if (response.error) {
+          settle(reject)(new Error(response.error.message ?? `Frontend performance fixture RPC failed: ${method}`));
+          return;
+        }
+        settle(resolve)(response.result);
+      });
+      socket.addEventListener("error", settle(reject), { once: true });
+    });
+    const fixtureThreads = [];
+    try {
+      fixtureThreads.push(await rpc(
+        "thread.create",
+        { workspaceId: workspace.id, title: "Frontend performance fixture A", mode: "direct", branch: "main" },
+      ));
+      fixtureThreads.push(await rpc(
+        "thread.create",
+        { workspaceId: workspace.id, title: "Frontend performance fixture B", mode: "direct", branch: "main" },
+      ));
+    } catch (error) {
+      await Promise.allSettled(fixtureThreads.map((thread) =>
+        rpc("thread.delete", { threadId: thread.id, cleanupWorktree: false })));
+      throw error;
+    }
+    const [primaryThreadId, secondaryThreadId] = fixtureThreads.map((thread) => thread.id);
 
     const now = "2026-08-09T21:00:00.000Z";
     const baseThread = (id, title) => ({
@@ -873,7 +933,17 @@ async function installFixtureRuntime(page) {
         .map((item) => [item.id, { tools: [], thoughts: [], hooks: [] }]),
     );
 
+    const waitForVisibleMessages = async (threadId, maxFrames = 60) => {
+      for (let frame = 0; frame < maxFrames; frame += 1) {
+        const message = document.querySelector("[data-message-id]");
+        if (message?.getAttribute("data-thread-id") === threadId) return true;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      return document.querySelector("[data-message-id]")?.getAttribute("data-thread-id") === threadId;
+    };
+
     const activate = (threadId, title, messages, patch = {}) => {
+      const { narrativeByMessage = {}, ...recordPatch } = patch;
       const thread = baseThread(threadId, title);
       workspaceStore.setState((state) => ({
         ...state,
@@ -881,7 +951,6 @@ async function installFixtureRuntime(page) {
         activeThreadId: threadId,
         threads: [thread, ...state.threads.filter((item) => item.id !== threadId)],
       }));
-      const { narrativeByMessage = {}, ...recordPatch } = patch;
       const record = {
         ...modules.createEmptyThreadRecord(),
         messages,
@@ -915,6 +984,8 @@ async function installFixtureRuntime(page) {
 
     window.__issue1240 = {
       workspaceId: workspace.id,
+      primaryThreadId,
+      secondaryThreadId,
       workspaceStore,
       threadStore,
       diffStore,
@@ -923,7 +994,12 @@ async function installFixtureRuntime(page) {
       message,
       makeMessages,
       emptyNarrativeByMessage,
+      waitForVisibleMessages,
       activate,
+      dispose: async () => {
+        await Promise.all(fixtureThreads.map((thread) =>
+          rpc("thread.delete", { threadId: thread.id, cleanupWorktree: false })));
+      },
       snapshot: takeSnapshot,
       reset: resetSnapshot,
       revision: 0,
@@ -936,6 +1012,15 @@ async function snapshotFixtureRuntime(page) {
     const fixture = window.__issue1240;
     if (!fixture) throw new Error("The frontend performance fixture is unavailable.");
     fixture.snapshot();
+  });
+}
+
+async function disposeFixtureRuntime(page) {
+  await page.evaluate(async () => {
+    const fixture = window.__issue1240;
+    if (!fixture) return;
+    await fixture.dispose();
+    delete window.__issue1240;
   });
 }
 
@@ -1082,7 +1167,7 @@ const WORKLOAD_CHECK_VALIDATORS = {
   message100: (check) => validateMessageWorkload(check, 100),
   message1000: (check) => validateMessageWorkload(check, 1_000),
   threadSwitch: (check) => failuresForChecks(check, [[Boolean(check.activeThreadId) && check.activeThreadId === check.currentThreadId && check.currentThreadId === check.visibleThreadId, "resident thread switch selected the wrong thread"]]),
-  streaming: (check) => failuresForChecks(check, [[check.streamingText === check.expectedText, "streamed response text differs"], [check.storeUpdateCommits === 200, "streaming updates were batched before the store commit"], [check.visibleStreamingUpdates === 200, "streaming did not visibly commit 200 updates"], [check.visualStreamingCommitted === true, "streaming content did not commit to the rendered response"], [check.tailFollowed === true, "streaming did not keep the tail in view"], [check.userAwayPreserved === true, "streaming moved a user who left the tail"]]),
+  streaming: (check) => failuresForChecks(check, [[check.streamingText === check.expectedText, "streamed response text differs"], [check.storeUpdateCommits === 200, "streaming updates were batched before the store commit"], [check.visibleStreamingUpdates === 200, "streaming did not visibly commit 200 updates"], [check.visualStreamingCommitted === true, "streaming content did not commit to the rendered response"], [check.tailFollowed === true, "streaming did not keep the tail in view"], [check.readerLeftTail === true, "streaming did not register the reader leaving the tail"], [check.userAwayPreserved === true, "streaming moved a user who left the tail"]]),
   messageListBehavior: (check) => validateTruthyChecks(check, MESSAGE_LIST_BEHAVIOR_ASSERTIONS),
   denseNarrative: (check) => validateDenseNarrative(check),
   markdownShiki: validateMarkdownShiki,
@@ -1457,22 +1542,25 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
   const expectedPageUrl = page.url();
   await page.bringToFront();
   await installFixtureRuntime(page);
-  const signalCollector = await createPageSignalCollector(page);
-  const modeCollector = await createModeSignalCollector(page, mode);
+  let signalCollector;
+  let modeCollector;
+  try {
+  signalCollector = await createPageSignalCollector(page);
+  modeCollector = await createModeSignalCollector(page, mode);
 
   const message100 = await runSelectedWorkload(selectedWorkloads, "message100", () =>
     timeFixture(page, sampleCount, async (sample) => {
     const result = await page.evaluate(async (sampleIndex) => {
       const fixture = window.__issue1240;
       const revision = ++fixture.revision;
-      const threadId = `perf-message-100-${revision}`;
+      const threadId = fixture.primaryThreadId;
       const startedAt = performance.now();
       fixture.activate(
         threadId,
         `Message 100 sample ${sampleIndex}`,
         fixture.makeMessages(threadId, 100, String(revision)),
       );
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await fixture.waitForVisibleMessages(threadId);
       const list = document.querySelector('[data-testid="message-list"]');
       return {
         durationMs: performance.now() - startedAt,
@@ -1496,14 +1584,14 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
     return page.evaluate(async (sampleIndex) => {
       const fixture = window.__issue1240;
       const revision = ++fixture.revision;
-      const threadId = `perf-message-1000-${revision}`;
+      const threadId = fixture.primaryThreadId;
       const startedAt = performance.now();
       fixture.activate(
         threadId,
         `Message 1000 sample ${sampleIndex}`,
         fixture.makeMessages(threadId, 1000, String(revision)),
       );
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await fixture.waitForVisibleMessages(threadId);
       const list = document.querySelector('[data-testid="message-list"]');
       return {
         durationMs: performance.now() - startedAt,
@@ -1525,9 +1613,8 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
     timeFixture(page, sampleCount, async (sample) => {
     return page.evaluate(async (sampleIndex) => {
       const fixture = window.__issue1240;
-      const revision = ++fixture.revision;
-      const leftId = `perf-switch-left-${revision}`;
-      const rightId = `perf-switch-right-${revision}`;
+      const leftId = fixture.primaryThreadId;
+      const rightId = fixture.secondaryThreadId;
       fixture.activate(leftId, "Switch left", fixture.makeMessages(leftId, 1000, "left"));
       const rightThread = fixture.baseThread(rightId, "Switch right");
       const rightMessages = fixture.makeMessages(rightId, 1000, "right");
@@ -1545,7 +1632,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
         ...state,
         records: new Map(state.records).set(rightId, rightRecord),
       }));
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await fixture.waitForVisibleMessages(leftId);
       const startedAt = performance.now();
       fixture.workspaceStore.setState((state) => ({
         ...state,
@@ -1555,7 +1642,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
         ...state,
         currentThreadId: rightId,
       }));
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await fixture.waitForVisibleMessages(rightId);
       return {
         durationMs: performance.now() - startedAt,
         check: {
@@ -1573,8 +1660,9 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
     return page.evaluate(async (sampleIndex) => {
       const fixture = window.__issue1240;
       const revision = ++fixture.revision;
-      const threadId = `perf-stream-${revision}`;
+      const threadId = fixture.primaryThreadId;
       fixture.activate(threadId, "Streaming fixture", fixture.makeMessages(threadId, 100, "stream"));
+      await fixture.waitForVisibleMessages(threadId);
       fixture.threadStore.getState().handleAgentEvent({
         type: "turnStarted",
         threadId,
@@ -1635,13 +1723,30 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
         list.dispatchEvent(new Event("scroll", { bubbles: true }));
       };
       moveAwayFromTail();
+      const readerLeftTail = await (async () => {
+        for (let frame = 0; frame < 60; frame += 1) {
+          if (document.querySelector('button[aria-label="Scroll to bottom"]') !== null) return true;
+          await nextFrame();
+        }
+        return false;
+      })();
       fixture.threadStore.getState().handleAgentEvent({
         type: "textDelta",
         threadId,
         delta: "away-token ",
         isFinalResponse: true,
       });
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const userAwayPreserved = await (async () => {
+        for (let frame = 0; frame < 60; frame += 1) {
+          if (list instanceof HTMLElement
+            && list.scrollTop <= awayTop + 2
+            && document.querySelector('button[aria-label="New messages below"]') !== null) {
+            return true;
+          }
+          await nextFrame();
+        }
+        return false;
+      })();
       const record = fixture.threadStore.getState().records.get(threadId);
       return {
         durationMs: performance.now() - startedAt,
@@ -1652,9 +1757,8 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
           visibleStreamingUpdates,
           visualStreamingCommitted,
           tailFollowed,
-          userAwayPreserved: list instanceof HTMLElement
-            && list.scrollTop <= awayTop + 2
-            && document.querySelector('button[aria-label="New messages below"]') !== null,
+          readerLeftTail,
+          userAwayPreserved,
           sampleIndex,
         },
       };
@@ -1801,7 +1905,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
       };
       const startedAt = performance.now();
       const initialFixture = await (async function activateMessageListFixture() {
-      const threadId = `perf-message-list-behavior-${revision}`;
+      const threadId = fixture.primaryThreadId;
       const user = fixture.message(
         threadId,
         0,
@@ -1980,7 +2084,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
       })();
 
       const cacheFixture = await (async function positionCacheFixture() {
-      const cacheThreadId = `perf-message-list-cache-${revision}`;
+      const cacheThreadId = fixture.secondaryThreadId;
       const cacheMessages = fixture.makeMessages(cacheThreadId, 1_000, "cache");
       addThread(cacheThreadId, "Cache behavior fixture", cacheMessages);
       const cacheInitialSwitchIdentity = await switchThread(cacheThreadId);
@@ -2098,7 +2202,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
       })();
 
       const stickyBehavior = await (async function measureStickyUserMessage() {
-      const stickyThreadId = `perf-message-list-sticky-${revision}`;
+      const stickyThreadId = fixture.primaryThreadId;
       const stickyUser = fixture.message(
         stickyThreadId,
         0,
@@ -2207,7 +2311,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
       }
 
       async function measureVirtualItemIdentity() {
-        const identityThreadId = `perf-message-list-identity-${revision}`;
+        const identityThreadId = fixture.secondaryThreadId;
         const persistedId = `${identityThreadId}-persisted-response`;
         activateVirtualItemIdentityFixture(identityThreadId, persistedId);
         const responseKey = fixture.threadStore.getState().records.get(identityThreadId)?.currentTurnResponseKey;
@@ -2253,7 +2357,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
         constructor() {
           this.fixture = window.__issue1240;
           this.revision = ++this.fixture.revision;
-          this.threadId = `perf-narrative-${this.revision}`;
+          this.threadId = this.fixture.primaryThreadId;
           this.messageId = `${this.threadId}-assistant`;
           this.sampleIndex = sampleIndex;
           this.profileUpdate = profileUpdate;
@@ -2417,7 +2521,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
     return page.evaluate(async (sampleIndex) => {
       const fixture = window.__issue1240;
       const revision = ++fixture.revision;
-      const threadId = `perf-markdown-${revision}`;
+      const threadId = fixture.primaryThreadId;
       const blocks = Array.from({ length: 10 }, (_, block) => {
         const code = Array.from(
           { length: 100 },
@@ -2491,7 +2595,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
     return page.evaluate(async (sampleIndex) => {
       const fixture = window.__issue1240;
       const revision = ++fixture.revision;
-      const threadId = `perf-panel-${revision}`;
+      const threadId = fixture.primaryThreadId;
       fixture.activate(threadId, "Panel transition fixture", [
         fixture.message(threadId, 0, "Panel fixture prompt", "user"),
       ]);
@@ -2534,8 +2638,6 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
 
   await waitForFrames(page);
   const observations = await signalCollector.read();
-  signalCollector.dispose();
-  await modeCollector.dispose();
   const pageFailures = collectPageFailures(observations, expectedPageUrl);
 
   const metrics = Object.fromEntries(
@@ -2679,4 +2781,9 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
     observations,
     correctness,
   };
+  } finally {
+    signalCollector?.dispose();
+    await modeCollector?.dispose();
+    await disposeFixtureRuntime(page);
+  }
 }
