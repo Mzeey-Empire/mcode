@@ -620,7 +620,7 @@ export function countActiveSubagentCalls(calls: ToolCall[] | undefined): number 
 }
 
 /** Number of messages to fetch per directional pagination request. */
-export const HISTORY_PAGE_SIZE = 50;
+export const HISTORY_PAGE_SIZE = 25;
 
 /** Maximum messages kept in the in-memory sliding window. */
 export const MESSAGE_WINDOW_SIZE = 200;
