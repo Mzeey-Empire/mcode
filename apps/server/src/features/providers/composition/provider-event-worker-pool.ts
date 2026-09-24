@@ -2,6 +2,7 @@ import { logger } from "@mcode/shared";
 
 import type { ProviderEventIngressDiagnostic } from "./provider-event-ingress.js";
 import {
+  isProviderEventWorkerTerminalTask,
   processProviderEventWorkerTask,
   type ProviderEventWorkerOutcome,
   type ProviderEventWorkerRequest,
@@ -57,6 +58,7 @@ export interface ProviderEventWorkerPort {
 interface ScheduledTask {
   id: number;
   threadId: string;
+  terminal: boolean;
   task: ProviderEventWorkerTask;
   callbacks: ProviderEventWorkerCallbacks;
 }
@@ -80,12 +82,16 @@ interface WorkerSlot {
 /** Configures fixed-pool capacity and a test-only worker factory. */
 export interface ThreadEventWorkerPoolOptions {
   workerCount?: number;
+  /** Total retained tasks, including the terminal lifecycle reserve. */
   maxPending?: number;
+  /** Retained terminal lifecycle tasks protected from non-terminal admission. */
+  maxTerminalPending?: number;
   createWorker?: () => ProviderEventWorkerPort;
 }
 
 // Matches the fair ingress queue: 8,192 non-terminal events plus 32 reserved terminal events.
 const DEFAULT_MAX_PENDING = 8_224;
+const DEFAULT_MAX_TERMINAL_PENDING = 32;
 const DEFAULT_WORKER_COUNT = 2;
 const RESTART_DELAY_MS = 50;
 const MAX_RESTART_ATTEMPTS = 3;
@@ -102,20 +108,24 @@ export class ThreadEventWorkerPool implements ProviderEventWorkerPool {
   private readonly slotsByThread = new Map<string, WorkerSlot>();
   private readonly idleWaitersByThread = new Map<string, Array<() => void>>();
   private readonly maxPending: number;
+  private readonly maxNonTerminalPending: number;
   private readonly createWorker: () => ProviderEventWorkerPort;
   private pendingCount = 0;
+  private pendingNonTerminalCount = 0;
   private nextRequestId = 1;
   private stopped = false;
 
   constructor(options: ThreadEventWorkerPoolOptions = {}) {
-    const workerCount = options.workerCount ?? defaultWorkerCount();
-    if (!Number.isInteger(workerCount) || workerCount < 1) {
-      throw new Error("Provider event worker count must be a positive integer");
+    const workerCount = positiveInteger(options.workerCount ?? defaultWorkerCount(), "Provider event worker count");
+    this.maxPending = positiveInteger(options.maxPending ?? DEFAULT_MAX_PENDING, "Provider event worker capacity");
+    const maxTerminalPending = positiveInteger(
+      options.maxTerminalPending ?? DEFAULT_MAX_TERMINAL_PENDING,
+      "Provider event worker terminal capacity",
+    );
+    if (maxTerminalPending > this.maxPending) {
+      throw new Error("Provider event worker terminal capacity cannot exceed total capacity");
     }
-    this.maxPending = options.maxPending ?? DEFAULT_MAX_PENDING;
-    if (!Number.isInteger(this.maxPending) || this.maxPending < 1) {
-      throw new Error("Provider event worker capacity must be a positive integer");
-    }
+    this.maxNonTerminalPending = this.maxPending - maxTerminalPending;
     this.createWorker = options.createWorker ?? createProviderEventWorker;
     this.slots = Array.from({ length: workerCount }, (_, index) => ({
       index,
@@ -137,18 +147,20 @@ export class ThreadEventWorkerPool implements ProviderEventWorkerPool {
 
   /** Queue one payload on the slot selected for its active thread identity. */
   submit(threadId: string, task: ProviderEventWorkerTask, callbacks: ProviderEventWorkerCallbacks): boolean {
-    if (this.stopped || this.pendingCount >= this.maxPending) return false;
+    const terminal = isProviderEventWorkerTerminalTask(task);
+    if (this.stopped || !this.hasCapacityFor(terminal)) return false;
     this.start();
     const slot = this.slotFor(threadId);
     if (!slot) return false;
     const scheduled: ScheduledTask = {
       id: this.nextRequestId++,
       threadId,
+      terminal,
       task,
       callbacks,
     };
     this.enqueue(slot, scheduled);
-    this.incrementThreadPending(threadId);
+    this.incrementPending(scheduled);
     this.dispatch(slot);
     return true;
   }
@@ -296,7 +308,7 @@ export class ThreadEventWorkerPool implements ProviderEventWorkerPool {
     try {
       scheduled.callbacks.onOutcome(outcome);
     } finally {
-      this.decrementThreadPending(scheduled.threadId);
+      this.decrementPending(scheduled);
     }
   }
 
@@ -358,22 +370,29 @@ export class ThreadEventWorkerPool implements ProviderEventWorkerPool {
     slot.readyThreadIds.length = 0;
   }
 
-  private incrementThreadPending(threadId: string): void {
-    this.pendingCount += 1;
-    this.pendingByThread.set(threadId, (this.pendingByThread.get(threadId) ?? 0) + 1);
+  private hasCapacityFor(terminal: boolean): boolean {
+    if (this.pendingCount >= this.maxPending) return false;
+    return terminal || this.pendingNonTerminalCount < this.maxNonTerminalPending;
   }
 
-  private decrementThreadPending(threadId: string): void {
+  private incrementPending(scheduled: ScheduledTask): void {
+    this.pendingCount += 1;
+    if (!scheduled.terminal) this.pendingNonTerminalCount += 1;
+    this.pendingByThread.set(scheduled.threadId, (this.pendingByThread.get(scheduled.threadId) ?? 0) + 1);
+  }
+
+  private decrementPending(scheduled: ScheduledTask): void {
     this.pendingCount -= 1;
-    const remaining = (this.pendingByThread.get(threadId) ?? 1) - 1;
+    if (!scheduled.terminal) this.pendingNonTerminalCount -= 1;
+    const remaining = (this.pendingByThread.get(scheduled.threadId) ?? 1) - 1;
     if (remaining > 0) {
-      this.pendingByThread.set(threadId, remaining);
+      this.pendingByThread.set(scheduled.threadId, remaining);
       return;
     }
-    this.pendingByThread.delete(threadId);
-    this.slotsByThread.delete(threadId);
-    const waiters = this.idleWaitersByThread.get(threadId) ?? [];
-    this.idleWaitersByThread.delete(threadId);
+    this.pendingByThread.delete(scheduled.threadId);
+    this.slotsByThread.delete(scheduled.threadId);
+    const waiters = this.idleWaitersByThread.get(scheduled.threadId) ?? [];
+    this.idleWaitersByThread.delete(scheduled.threadId);
     for (const resolve of waiters) resolve();
   }
 }
@@ -393,6 +412,11 @@ function matchesWorkerResponse(batch: ScheduledBatch, response: ProviderEventWor
 
 function defaultWorkerCount(): number {
   return DEFAULT_WORKER_COUNT;
+}
+
+function positiveInteger(value: number, description: string): number {
+  if (!Number.isInteger(value) || value < 1) throw new Error(`${description} must be a positive integer`);
+  return value;
 }
 
 function createProviderEventWorker(): ProviderEventWorkerPort {

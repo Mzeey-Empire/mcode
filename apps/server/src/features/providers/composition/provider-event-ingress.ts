@@ -44,6 +44,18 @@ const MAX_PENDING_PROVIDER_EVENT_BYTES = 8 * 1_024 * 1_024;
 const RESERVED_TERMINAL_EVENT_BYTES = MAX_PENDING_TERMINAL_EVENTS * MAX_PENDING_TERMINAL_EVENT_BYTES;
 const RESERVED_TERMINAL_EVENT_BYTES_PER_THREAD =
   MAX_PENDING_TERMINAL_EVENTS_PER_THREAD * MAX_PENDING_TERMINAL_EVENT_BYTES;
+const TERMINAL_QUEUE_LIMITS = {
+  eventCount: MAX_PENDING_PROVIDER_EVENTS,
+  threadEventCount: MAX_PENDING_PROVIDER_EVENTS_PER_THREAD,
+  byteCount: MAX_PENDING_PROVIDER_EVENT_BYTES,
+  threadByteCount: MAX_PENDING_PROVIDER_EVENT_BYTES_PER_THREAD,
+};
+const NON_TERMINAL_QUEUE_LIMITS = {
+  eventCount: MAX_PENDING_NON_TERMINAL_EVENTS,
+  threadEventCount: MAX_PENDING_NON_TERMINAL_EVENTS_PER_THREAD,
+  byteCount: MAX_PENDING_PROVIDER_EVENT_BYTES - RESERVED_TERMINAL_EVENT_BYTES,
+  threadByteCount: MAX_PENDING_PROVIDER_EVENT_BYTES_PER_THREAD - RESERVED_TERMINAL_EVENT_BYTES_PER_THREAD,
+};
 const MAX_PROVIDER_EVENTS_PER_DRAIN = 64;
 const QUEUE_DIAGNOSTIC_INTERVAL_MS = 1_000;
 const MAX_CANONICAL_EVENT_IDENTITIES = 16_384;
@@ -335,8 +347,7 @@ export class ProviderEventIngress {
 
   private enqueue(event: ProviderEventIngressEvent): boolean {
     if (this.isOverflowedTurn(event)) {
-      this.rejectedQueueEvents += 1;
-      return false;
+      return this.rejectOverflowedEvent();
     }
     const threadId = event.event.threadId;
     const queue = this.pendingByThread.get(threadId);
@@ -344,14 +355,38 @@ export class ProviderEventIngress {
     const byteLength = serializedEventByteLength(event.event);
     const queueCapacity = this.queueCapacity({ event, queue, terminal, byteLength });
     if (queueCapacity) {
-      this.rejectedQueueEvents += 1;
-      if (this.rememberOverflowedTurn(event)) {
-        this.reportQueueDiagnostic("queue-capacity", event, queue?.length ?? 0, queueCapacity);
-        this.discardPendingExecution(event);
-        this.consumer?.handleProviderIngressOverflow?.(event);
-      }
-      return false;
+      return this.rejectForQueueCapacity(event, queue, queueCapacity);
     }
+    this.retainQueuedEvent({ event, queue, terminal, byteLength });
+    return true;
+  }
+
+  private rejectOverflowedEvent(): false {
+    this.rejectedQueueEvents += 1;
+    return false;
+  }
+
+  private rejectForQueueCapacity(
+    event: ProviderEventIngressEvent,
+    queue: QueuedProviderEvent[] | undefined,
+    queueCapacity: "global" | "thread" | "global-bytes" | "thread-bytes" | "terminal",
+  ): false {
+    this.rejectedQueueEvents += 1;
+    if (!this.rememberOverflowedTurn(event)) return false;
+    this.reportQueueDiagnostic("queue-capacity", event, queue?.length ?? 0, queueCapacity);
+    this.discardPendingExecution(event);
+    this.consumer?.handleProviderIngressOverflow?.(event);
+    return false;
+  }
+
+  private retainQueuedEvent(input: {
+    event: ProviderEventIngressEvent;
+    queue: QueuedProviderEvent[] | undefined;
+    terminal: boolean;
+    byteLength: number;
+  }): void {
+    const threadId = input.event.event.threadId;
+    const { event, queue, terminal, byteLength } = input;
     const queued = queue ?? [];
     if (!queue) {
       this.pendingByThread.set(threadId, queued);
@@ -367,7 +402,6 @@ export class ProviderEventIngress {
     }
     this.reportQueuePressure(event, queued.length);
     this.scheduleDrain();
-    return true;
   }
 
   private scheduleDrain(): void {
@@ -467,29 +501,38 @@ export class ProviderEventIngress {
     terminal: boolean;
     byteLength: number;
   }): "global" | "thread" | "global-bytes" | "thread-bytes" | "terminal" | undefined {
+    return this.terminalQueueCapacity(input) ?? this.nonTerminalOrSharedQueueCapacity(input);
+  }
+
+  private terminalQueueCapacity(input: {
+    event: ProviderEventIngressEvent;
+    queue: QueuedProviderEvent[] | undefined;
+    terminal: boolean;
+    byteLength: number;
+  }): "terminal" | undefined {
+    if (!input.terminal) return undefined;
+    const threadId = input.event.event.threadId;
+    const terminalCount = this.pendingTerminalEventsByThread.get(threadId) ?? 0;
+    if (this.pendingTerminalEventCount >= MAX_PENDING_TERMINAL_EVENTS) return "terminal";
+    if (terminalCount >= MAX_PENDING_TERMINAL_EVENTS_PER_THREAD) return "terminal";
+    if (input.byteLength > MAX_PENDING_TERMINAL_EVENT_BYTES) return "terminal";
+    return undefined;
+  }
+
+  private nonTerminalOrSharedQueueCapacity(input: {
+    event: ProviderEventIngressEvent;
+    queue: QueuedProviderEvent[] | undefined;
+    terminal: boolean;
+    byteLength: number;
+  }): "global" | "thread" | "global-bytes" | "thread-bytes" | undefined {
     const threadId = input.event.event.threadId;
     const threadCount = input.queue?.length ?? 0;
     const threadBytes = this.pendingBytesByThread.get(threadId) ?? 0;
-    const terminalCount = this.pendingTerminalEventsByThread.get(threadId) ?? 0;
-    if (input.terminal && (
-      this.pendingTerminalEventCount >= MAX_PENDING_TERMINAL_EVENTS
-      || terminalCount >= MAX_PENDING_TERMINAL_EVENTS_PER_THREAD
-      || input.byteLength > MAX_PENDING_TERMINAL_EVENT_BYTES
-    )) return "terminal";
-    const eventLimit = input.terminal ? MAX_PENDING_PROVIDER_EVENTS : MAX_PENDING_NON_TERMINAL_EVENTS;
-    if (this.pendingEventCount >= eventLimit) return "global";
-    const threadEventLimit = input.terminal
-      ? MAX_PENDING_PROVIDER_EVENTS_PER_THREAD
-      : MAX_PENDING_NON_TERMINAL_EVENTS_PER_THREAD;
-    if (threadCount >= threadEventLimit) return "thread";
-    const byteLimit = input.terminal
-      ? MAX_PENDING_PROVIDER_EVENT_BYTES
-      : MAX_PENDING_PROVIDER_EVENT_BYTES - RESERVED_TERMINAL_EVENT_BYTES;
-    if (this.pendingByteCount + input.byteLength > byteLimit) return "global-bytes";
-    const threadByteLimit = input.terminal
-      ? MAX_PENDING_PROVIDER_EVENT_BYTES_PER_THREAD
-      : MAX_PENDING_PROVIDER_EVENT_BYTES_PER_THREAD - RESERVED_TERMINAL_EVENT_BYTES_PER_THREAD;
-    if (threadBytes + input.byteLength > threadByteLimit) return "thread-bytes";
+    const limits = input.terminal ? TERMINAL_QUEUE_LIMITS : NON_TERMINAL_QUEUE_LIMITS;
+    if (this.pendingEventCount >= limits.eventCount) return "global";
+    if (threadCount >= limits.threadEventCount) return "thread";
+    if (this.pendingByteCount + input.byteLength > limits.byteCount) return "global-bytes";
+    if (threadBytes + input.byteLength > limits.threadByteCount) return "thread-bytes";
     return undefined;
   }
 

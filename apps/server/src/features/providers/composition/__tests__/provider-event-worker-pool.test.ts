@@ -53,6 +53,24 @@ function runtimeTask(threadId: string): ProviderEventWorkerTask {
   };
 }
 
+function terminalTask(threadId: string): ProviderEventWorkerTask {
+  return {
+    kind: "provider-runtime",
+    providerId: "claude",
+    runtimeEvent: {
+      event: {
+        type: "turnComplete",
+        threadId,
+        turnExecutionId: EXECUTION_ID,
+        reason: "end_turn",
+        costUsd: null,
+        tokensIn: 0,
+        tokensOut: 0,
+      },
+    },
+  };
+}
+
 function rejectedOutcome(task: ProviderEventWorkerTask): ProviderEventWorkerOutcome {
   return {
     status: "rejected",
@@ -165,6 +183,46 @@ describe("ThreadEventWorkerPool", () => {
         expect(pool.submit(`thread-${index % 7}`, runtimeTask(`thread-${index % 7}`), { onOutcome: vi.fn() })).toBe(true);
       }
       expect(workers).toHaveLength(2);
+    } finally {
+      pool.shutdown();
+    }
+  });
+
+  it("reserves terminal capacity after non-terminal tasks and finalizes the thread in order", async () => {
+    const workers: FakeWorker[] = [];
+    const completed: string[] = [];
+    const pool = new ThreadEventWorkerPool({
+      workerCount: 1,
+      createWorker: () => {
+        const worker = new FakeWorker();
+        workers.push(worker);
+        return worker;
+      },
+    });
+    const threadId = "thread-a";
+    const expected = [
+      ...Array.from({ length: 8_192 }, (_, index) => `event-${index}`),
+      ...Array.from({ length: 32 }, (_, index) => `terminal-${index}`),
+    ];
+
+    try {
+      for (const label of expected.slice(0, 8_192)) {
+        expect(pool.submit(threadId, runtimeTask(threadId), { onOutcome: () => completed.push(label) })).toBe(true);
+      }
+      for (const label of expected.slice(8_192)) {
+        expect(pool.submit(threadId, terminalTask(threadId), { onOutcome: () => completed.push(label) })).toBe(true);
+      }
+      expect(pool.submit(threadId, runtimeTask(threadId), { onOutcome: vi.fn() })).toBe(false);
+
+      const idle = pool.waitForThread(threadId);
+      const worker = requiredWorker(workers, 0);
+      for (let requestIndex = 0; requestIndex < worker.requests.length; requestIndex += 1) {
+        const request = requiredRequest(worker, requestIndex);
+        worker.respond(request, request.tasks.map(rejectedOutcome));
+      }
+
+      await expect(idle).resolves.toBeUndefined();
+      expect(completed).toEqual(expected);
     } finally {
       pool.shutdown();
     }

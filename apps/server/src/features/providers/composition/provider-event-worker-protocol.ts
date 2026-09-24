@@ -53,6 +53,19 @@ export function providerEventWorkerThreadId(task: ProviderEventWorkerTask): stri
   return threadId ?? "__invalid-provider-event__";
 }
 
+/**
+ * Identify terminal lifecycle payloads for bounded worker admission without
+ * treating this shallow lookup as validation.
+ */
+export function isProviderEventWorkerTerminalTask(task: ProviderEventWorkerTask): boolean {
+  const eventType = task.kind === "canonical-commit"
+    ? nestedString(task.envelope, "payload", "item", "payload", "runtimeEvent", "event", "type")
+    : nestedString(task.runtimeEvent, "event", "type");
+  return eventType === AgentEventType.TurnComplete
+    || eventType === AgentEventType.Error
+    || eventType === AgentEventType.Ended;
+}
+
 /** Return a canonical identity early enough to coalesce duplicate in-flight work. */
 export function canonicalEventIdentity(task: ProviderEventWorkerTask): string | undefined {
   return task.kind === "canonical-commit" ? directString(task.envelope, "eventId") : undefined;
