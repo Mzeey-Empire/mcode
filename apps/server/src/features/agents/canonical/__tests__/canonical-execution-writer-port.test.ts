@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
+import { AgentEventType, type AgentEvent, type ProviderRuntimeExtension } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
@@ -33,6 +34,27 @@ function beginOperation(): ExecutionSemanticOperation {
         userMessage: { kind: "create", messageId: "semantic-worker-user", content: "Question", sequence: 1 },
       },
     },
+  };
+}
+
+function runtimeDraft(
+  sequence: number,
+  event: AgentEvent,
+  extension?: ProviderRuntimeExtension,
+): Extract<ExecutionSemanticOperation["mutation"], { kind: "append-events" }>["events"][number] {
+  const itemId = `runtime-item-${sequence}`;
+  return {
+    eventId: `${EXECUTION_ID}:runtime-${sequence}`,
+    routing: { ...execution, itemId },
+    sourceProviderId: "codex", sourceIdentities: [], sourceSequence: sequence,
+    payload: { type: "item.recorded", item: {
+      id: itemId, threadId: THREAD_ID, turnId: TURN_ID, kind: "system",
+      providerIdentities: [],
+      payload: { projection: "providerRuntimeEvent", runtimeEvent: {
+        event, ...(extension ? { extension } : {}),
+      } },
+      createdAt: NOW, updatedAt: NOW,
+    } },
   };
 }
 
@@ -361,6 +383,7 @@ describe("execution semantic writer transport", () => {
       scheduler.shutdown();
     }
   });
+
   it("projects Codex parent and child events on the writer and replays without repeating child writes", async () => {
     writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
     const published: string[] = [];
