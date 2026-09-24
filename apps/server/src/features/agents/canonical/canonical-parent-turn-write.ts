@@ -92,7 +92,7 @@ export interface DataOnlyParentEventInput extends Omit<CanonicalAgentCommitInput
 
 /** A staged assistant and narrative to confirm in the terminal transaction. */
 export interface DataOnlyParentTurnFinishInput extends Omit<ParentTurnFinishInput, "projectTurn" | "finalizeCompatibility"> {
-  projection: ParentTurnProjection | { readonly kind: "writer-staged" };
+  projection: ParentTurnProjection | { readonly kind: "writer-staged"; readonly messageId?: string };
 }
 
 /** Cloneable terminal data whose compatibility rows are staged on the writer connection. */
@@ -101,7 +101,7 @@ export interface DataOnlyParentTerminalProjectionInput {
   executionId: string;
   outcome: TurnOutcome;
   endedAt: string;
-  assistant: { content: string; model: string | null; attachments: readonly StoredAttachment[] };
+  assistant: { content: string; model: string | null; attachments: readonly StoredAttachment[]; messageId?: string };
   narrative: readonly ParentNarrativeRecoveryItem[];
 }
 
@@ -230,6 +230,9 @@ export class CanonicalParentTurnWrite {
     if (!input.threadId || !input.executionId || !Number.isFinite(Date.parse(input.endedAt))) {
       throw new Error("Invalid parent terminal projection identity or end time");
     }
+    if (input.assistant.messageId !== undefined && !/^[0-9a-f]{64}$/.test(input.assistant.messageId)) {
+      throw new Error("Invalid parent assistant message identity");
+    }
     const narrative = input.narrative.map((item) => ParentNarrativeRecoveryItemSchema().parse(item));
     return this.db.transaction(() => this.stageTerminalProjectionInTransaction(input, narrative))();
   }
@@ -263,6 +266,9 @@ export class CanonicalParentTurnWrite {
 
   private persistedTerminalProjection(input: DataOnlyParentTerminalProjectionInput, turnId: string): StagedParentTerminalProjection {
     const persisted = this.canonical.loadTerminalProjection(turnId);
+    if (input.assistant.messageId && persisted.message?.id !== input.assistant.messageId) {
+      throw new Error(`Canonical terminal projection has a different assistant identity: ${input.executionId}`);
+    }
     if (!persisted.message) {
       if (input.assistant.content.trim() || input.assistant.attachments.length > 0 || input.narrative.length > 0) {
         throw new Error(`Canonical terminal projection is empty: ${input.executionId}`);
@@ -274,7 +280,7 @@ export class CanonicalParentTurnWrite {
   }
 
   private stageAssistant(input: DataOnlyParentTerminalProjectionInput) {
-    const id = deriveTurnAssistantMessageId(input.threadId, `execution:${input.executionId}`);
+    const id = input.assistant.messageId ?? deriveTurnAssistantMessageId(input.threadId, `execution:${input.executionId}`);
     const existing = this.messages.findByIdInThreadIncludingInternal(input.threadId, id);
     if (existing) {
       this.assertAssistantMatches(existing, input);
@@ -318,7 +324,7 @@ export class CanonicalParentTurnWrite {
     onBatchWrite?: (batch: CanonicalTerminalBatchWrite) => void,
   ): Promise<CanonicalAgentBatchedCommitResult> {
     const staged = "kind" in input.projection
-      ? this.loadStagedTerminalProjection(input.threadId, input.executionId)
+      ? this.loadStagedTerminalProjection(input.threadId, input.executionId, input.projection.messageId)
       : input.projection;
     this.assertStagedAssistant(input.threadId, staged);
     const projection: ParentTurnProjection = {
@@ -343,9 +349,13 @@ export class CanonicalParentTurnWrite {
     }, onBatchWrite);
   }
 
-  private loadStagedTerminalProjection(threadId: string, executionId: string): ParentTurnProjection {
-    const id = deriveTurnAssistantMessageId(threadId, `execution:${executionId}`);
+  private loadStagedTerminalProjection(threadId: string, executionId: string, messageId?: string): ParentTurnProjection {
+    if (messageId !== undefined && !/^[0-9a-f]{64}$/.test(messageId)) {
+      throw new Error("Invalid staged assistant message identity");
+    }
+    const id = messageId ?? deriveTurnAssistantMessageId(threadId, `execution:${executionId}`);
     const message = this.messages.findByIdInThreadIncludingInternal(threadId, id);
+    if (!message && messageId) throw new Error(`Staged assistant projection not found: ${messageId}`);
     if (!message) return { message: null, narrative: [] };
     if (message.role !== "assistant" || !message.is_internal) {
       throw new Error(`Staged assistant projection is not private: ${id}`);

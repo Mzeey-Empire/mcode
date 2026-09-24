@@ -10,6 +10,7 @@ import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
+import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
 import {
   CanonicalParentTurnWrite,
   type DataOnlyParentTerminalProjectionInput,
@@ -247,6 +248,31 @@ describe("CanonicalParentTurnWrite", () => {
     expect(new MessageRepo(db).findByIdInThread(THREAD_ID, first.messageId!))
       .toMatchObject({ is_internal: false, outcome: "completed", attachments: input.assistant.attachments });
     expect(writer.stageTerminalProjection(input).messageId).toBe(first.messageId);
+  });
+
+  it("keeps an assigned public assistant identity through writer staging and reload", async () => {
+    writer.start(startInput());
+    const messageId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
+    const input = terminalProjectionInput();
+    input.assistant.messageId = messageId;
+    const staged = writer.stageTerminalProjection(input);
+    expect(staged.messageId).toBe(messageId);
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalParentTurnWrite(db, (events) => {
+      published.push(events.map((event) => event.eventId));
+    });
+    expect(writer.stageTerminalProjection(input).messageId).toBe(messageId);
+    const finish = { ...finishInput(staged.projection.message!), projection: { kind: "writer-staged" as const, messageId } };
+    expect(() => writer.finish({ ...finish, projection: { kind: "writer-staged", messageId: "0".repeat(64) } }))
+      .toThrow("Staged assistant projection not found");
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ terminal_outcome: null });
+    expect((await writer.finish(finish)).outcome).toBe("committed");
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, messageId)).toMatchObject({
+      is_internal: false, outcome: "completed", content: input.assistant.content,
+    });
   });
 
   it("rolls back all staged rows when a narrative write fails", async () => {
