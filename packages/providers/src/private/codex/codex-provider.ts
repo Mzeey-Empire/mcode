@@ -42,6 +42,7 @@ import type {
   ProviderModelInfo,
   ProviderUsageInfo,
   ProviderRuntimeEvent,
+  ProviderFileMutationStart,
   ProviderTurnDiffUpdate,
   ProviderCapabilityName,
 } from "@mcode/contracts";
@@ -1283,7 +1284,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const mcodeInstructions = this.codexSpawnInstructions(context);
 
     const server = this.createCodexAppServer(context, mcodeInstructions, browserTokenEnvName);
-    const mapper = this.createCodexEventMapper(threadId);
+    const mapper = this.createCodexEventMapper(threadId, context.sessionId);
 
     this.attachCodexServerEvents(context, server, mapper);
     const internalMcpStartup = internalMcp ? observeCodexInternalMcpStartup(server) : undefined;
@@ -1405,8 +1406,21 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return [...(context.internalMcp?.configOverrides ?? []), ...browserOverrides];
   }
 
-  private createCodexEventMapper(threadId: string): CodexEventMapper {
-    const mapper = new CodexEventMapper(threadId, undefined, (event) => this.emit("file_mutation_start", event));
+  private createCodexEventMapper(threadId: string, sessionId: string): CodexEventMapper {
+    const mapper = new CodexEventMapper(threadId, undefined, (event) => {
+      const state = this.runtime.get(sessionId);
+      const nativeTurnId = event.nativeTurnId;
+      const turnExecutionId = nativeTurnId && state?.mapper === mapper
+        && !state.nativeExecutionConflictKeys.has(nativeTurnId)
+        ? state.turnExecutionIdsByNativeTurn.get(nativeTurnId) : undefined;
+      const deliveryAttempt = turnExecutionId && state?.turnDiffRouting?.turnExecutionId === turnExecutionId
+        ? state.turnDiffRouting.deliveryAttempt : undefined;
+      this.emit("file_mutation_start", {
+        threadId: event.threadId, ...(deliveryAttempt ? { turnExecutionId, deliveryAttempt } : {}),
+        toolCallId: event.toolCallId,
+        toolName: event.toolName, toolInput: event.toolInput,
+      } satisfies ProviderFileMutationStart);
+    });
     mapper.setOutputTruncationMode(this.outputTruncationMode);
     this.emitRuntimeEvent(mapper.sessionStartedEvent());
     return mapper;

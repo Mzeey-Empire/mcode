@@ -3065,6 +3065,21 @@ describe("CodexEventMapper", () => {
     ]);
   });
 
+  it("reports native turn identity synchronously with an early child file mutation start", () => {
+    const observed: Array<{ nativeThreadId?: string; nativeTurnId?: string; toolCallId: string }> = [];
+    mapper = new CodexEventMapper("test-thread", "parent-thread", (event) => observed.push(event));
+    mapper.mapNotification({
+      jsonrpc: "2.0", method: "item/started",
+      params: { threadId: "child-thread", turnId: "native-turn", item: {
+        type: "fileChange", id: "file-child", changes: [{ path: "src/child.ts", kind: "edit" }],
+      } },
+    });
+    expect(observed).toEqual([{ nativeThreadId: "child-thread", nativeTurnId: "native-turn",
+      toolCallId: "file-child", threadId: "test-thread", toolName: "file_change",
+      toolInput: expect.objectContaining({ changes: [{ path: "src/child.ts", kind: "edit" }] }),
+    }]);
+  });
+
   it("drops an unrelated unknown-thread notification instead of replaying it", () => {
     mapper = new CodexEventMapper("test-thread", "parent-thread");
     const unknown = mapper.mapNotification({
