@@ -2,9 +2,10 @@ import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeProvider, toOpenCodeModelRef } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
+import type { OpenCodeHttpClient } from "../opencode-http-client.js";
 import type { TurnRequest } from "@mcode/contracts";
 
-function testProvider(http: never, pool: OpenCodeServerPool) {
+function testProvider(http: OpenCodeHttpClient | undefined, pool: OpenCodeServerPool) {
   const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" } } }) };
   const envService = { getEnv: () => ({}) };
   const submitted: unknown[] = [];
@@ -20,7 +21,7 @@ function testProvider(http: never, pool: OpenCodeServerPool) {
   const provider = new OpenCodeProvider(settingsService as never, envService as never, host as never);
   provider.configureTestSeams({
     pool,
-    http: http as never,
+    ...(http ? { http } : {}),
     probeCli: async () => ({ binaryPath: "opencode", version: "test" }),
     idleConfirm: { intervalMs: 5, requiredPolls: 2, timeoutMs: 500, maxPollErrors: 2 },
   });
@@ -59,6 +60,35 @@ describe("toOpenCodeModelRef", () => {
 });
 
 describe("OpenCodeProvider minimal turn", () => {
+  it("does not finish shutdown until its server has terminated", async () => {
+    let releaseTermination = () => {};
+    let signalTerminationStarted = () => {};
+    const terminationStarted = new Promise<void>((resolve) => { signalTerminationStarted = resolve; });
+    const terminationAllowed = new Promise<void>((resolve) => { releaseTermination = resolve; });
+    const pool = new OpenCodeServerPool({
+      spawn: () => ({ pid: 4242, on: () => {}, off: () => {}, kill: () => true }),
+      waitForHealth: async () => {},
+      terminateTree: async () => {
+        signalTerminationStarted();
+        await terminationAllowed;
+      },
+      findFreePort: async () => 4096,
+      now: () => Date.now(),
+      env: () => ({}),
+    });
+    await pool.acquire({ binaryPath: "opencode", cwd: "/w/a", hostname: "127.0.0.1" });
+    const { provider } = testProvider(undefined, pool);
+
+    let completed = false;
+    const shutdown = provider.shutdown().then(() => { completed = true; });
+    await terminationStarted;
+    expect(completed).toBe(false);
+
+    releaseTermination();
+    await shutdown;
+    expect(completed).toBe(true);
+  });
+
   it("streams a reply to completion and returns the pool server warm", async () => {
     const pool = new OpenCodeServerPool({
       spawn: () => ({ pid: 1, on: () => {}, off: () => {}, kill: () => true }) as never,
@@ -92,7 +122,7 @@ describe("OpenCodeProvider minimal turn", () => {
     });
     expect(pool.size).toBe(1);
     expect(submitted.length).toBeGreaterThan(0);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("stop aborts the upstream session and settles as cancelled with no further output", async () => {
@@ -129,7 +159,7 @@ describe("OpenCodeProvider minimal turn", () => {
     await sending;
     expect(http.abortSession).toHaveBeenCalledTimes(1);
     expect(pool.size).toBe(1);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("starts fresh once when the adopted upstream session is gone (404)", async () => {
@@ -166,7 +196,7 @@ describe("OpenCodeProvider minimal turn", () => {
       .turns.get("mcode-thread-1")!.upstreamSessionId = "ses_stale";
     await provider.sendTurn(turnRequest());
     expect(http.createSession).toHaveBeenCalledTimes(2);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("discardSession drops the adopted upstream session", async () => {
@@ -194,6 +224,6 @@ describe("OpenCodeProvider minimal turn", () => {
     await provider.discardSession("mcode-thread-1");
     await provider.sendTurn(turnRequest());
     expect(http.createSession).toHaveBeenCalledTimes(2);
-    provider.shutdown();
+    await provider.shutdown();
   });
 });

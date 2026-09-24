@@ -173,7 +173,7 @@ describe("OpenCodeProvider permission flow", () => {
       .filter((event) => event.type === "ended")
       .map((event) => event.outcome);
     expect(outcomes).toEqual(["completed"]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("relays reject and resolves unknown ids as false", async () => {
@@ -191,7 +191,7 @@ describe("OpenCodeProvider permission flow", () => {
     );
     expect(resolved).toEqual([{ requestId: "per_1", decision: "deny" }]);
     expect(provider.resolvePermission("nope", "allow")).toBe(false);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("relays exact question selections, rejects invalid answers locally, and rejects on deny", async () => {
@@ -245,7 +245,7 @@ describe("OpenCodeProvider permission flow", () => {
       "http://127.0.0.1:4096", "ses_1", "que_2", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(http.rejectQuestion).toHaveBeenCalledTimes(1);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("keeps a failed reply answerable instead of stalling the turn", async () => {
@@ -263,7 +263,7 @@ describe("OpenCodeProvider permission flow", () => {
     await sending;
     expect(http.replyPermission).toHaveBeenCalledTimes(2);
     expect(provider.listPendingPermissions("thread-1")).toHaveLength(0);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("drains pending cards as cancelled on stop", async () => {
@@ -287,7 +287,7 @@ describe("OpenCodeProvider permission flow", () => {
     await sending;
     expect(resolved).toEqual([{ requestId: "per_1", decision: "cancelled" }]);
     expect(provider.listPendingPermissions("thread-1")).toHaveLength(0);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("cancels an in-flight reply without a second local settlement", async () => {
@@ -320,7 +320,7 @@ describe("OpenCodeProvider permission flow", () => {
     expect(resolved).toEqual([{ requestId: "per_1", decision: "cancelled" }]);
     expect(provider.resolvePermission("per_1", "allow")).toBe(false);
     expect(http.replyPermission).toHaveBeenCalledTimes(1);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("drains a replayed ask after stream termination so it can card again", async () => {
@@ -346,7 +346,7 @@ describe("OpenCodeProvider permission flow", () => {
       { requestId: "per_1", decision: "cancelled" },
       { requestId: "per_1", decision: "cancelled" },
     ]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("drains a pending ask on provider failure and shutdown", async () => {
@@ -361,7 +361,7 @@ describe("OpenCodeProvider permission flow", () => {
 
     const retry = provider.sendTurn({ ...turnRequest(), turnId: "turn-2", turnExecutionId: "66666666-6666-4666-8666-666666666666" });
     await vi.waitFor(() => expect(provider.listPendingPermissions("thread-1")).toHaveLength(1));
-    provider.shutdown();
+    await provider.shutdown();
     await retry;
     expect(resolved).toEqual([
       { requestId: "per_1", decision: "cancelled" },
@@ -385,7 +385,7 @@ describe("OpenCodeProvider permission flow", () => {
     const events = submittedEvents(submitted);
     expect(events.filter((event) => event.type === "system" && event.subtype === "sdk_session_invalidated")).toHaveLength(1);
     expect(events.filter((event) => event.type === "ended").map((event) => event.outcome)).toEqual(["cancelled"]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 });
 
@@ -410,7 +410,7 @@ describe("OpenCodeProvider notice dedup", () => {
       && event.requestedModel === "anthropic/claude-sonnet-4-6"
       && event.actualModel === "anthropic/claude-sonnet-4-6"
     ))).toHaveLength(1);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("surfaces one diagnostic row for a malformed ask without carding", async () => {
@@ -429,6 +429,6 @@ describe("OpenCodeProvider notice dedup", () => {
       .filter((event) => event.type === "system")
       .map((event) => event.subtype);
     expect(subtypes.filter((subtype) => subtype === "provider.notice.malformed-request")).toHaveLength(1);
-    provider.shutdown();
+    await provider.shutdown();
   });
 });
