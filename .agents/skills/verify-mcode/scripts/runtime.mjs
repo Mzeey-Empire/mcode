@@ -1711,10 +1711,23 @@ function hasStoppedStatus(events) {
 
 function hasSharedStopResult(stopResults, threadId) {
   if (!Array.isArray(stopResults) || stopResults.length !== 2) return false;
-  const [first, second] = stopResults;
-  return isCancelledStopResult(first, threadId)
-    && isCancelledStopResult(second, threadId)
-    && sharedStopMetadata(first, second, threadId);
+  const cancelled = cancelledStopResult(stopResults, threadId);
+  return cancelled !== null
+    && stopResults.every((result) => result === cancelled || isTerminalStopPeer(result, cancelled, threadId));
+}
+
+function cancelledStopResult(stopResults, threadId) {
+  if (!Array.isArray(stopResults)) return null;
+  return stopResults.find((result) => isCancelledStopResult(result, threadId)) ?? null;
+}
+
+// agent.stop terminalizes the turn synchronously, so a concurrent peer can only
+// observe the same execution as already terminal rather than win the same stop.
+function isTerminalStopPeer(result, cancelled, threadId) {
+  return result?.status === "already-terminal"
+    && result.threadId === threadId
+    && result.turnExecutionId === cancelled.turnExecutionId
+    && result.snapshot?.phase === "cancelled";
 }
 
 function isCancelledStopResult(result, threadId) {
@@ -1726,20 +1739,8 @@ function isCancelledStopResult(result, threadId) {
     && result.snapshot.turnExecutionId === result.turnExecutionId;
 }
 
-function sharedStopMetadata(first, second, threadId) {
-  return first.turnExecutionId === second.turnExecutionId
-    && first.dispatchState === second.dispatchState
-    && snapshotsMatch(first.snapshot, second.snapshot)
-    && first.snapshot.threadId === threadId;
-}
-
-function snapshotsMatch(first, second) {
-  if (!first || !second) return false;
-  return ["threadId", "turnExecutionId", "phase", "savingStatus"].every((key) => first[key] === second[key]);
-}
-
 async function requireCancelledRuntimeState(socket, threadId, report, deadline) {
-  const turnExecutionId = report.stopResults[0].turnExecutionId;
+  const turnExecutionId = cancelledStopResult(report.stopResults, threadId).turnExecutionId;
   const verified = await waitForAsync(async () => {
     const [activeCount, snapshots] = await Promise.all([
       socket.rpc("agent.activeCount", {}, deadline),
