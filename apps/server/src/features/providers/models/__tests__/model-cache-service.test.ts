@@ -17,9 +17,9 @@ import { ModelCacheRepo } from "../persistence/model-cache-repo.js";
 import { ModelCacheService } from "../model-cache-service.js";
 import type { ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
 
-function makeProvider(models: ProviderModelInfo[]) {
+function makeProvider(models: ProviderModelInfo[], id = "test-provider") {
   return {
-    id: "test-provider",
+    id,
     listModels: vi.fn().mockResolvedValue(models),
     sendTurn: vi.fn(),
     cancelSession: vi.fn(),
@@ -53,6 +53,18 @@ describe("ModelCacheService", () => {
 
   afterEach(() => {
     db.close();
+  });
+
+  it("warms only the selected providers", async () => {
+    const claude = makeProvider([{ id: "claude-model", name: "Claude Model" }], "claude");
+    const opencode = makeProvider([{ id: "open-model", name: "Open Model" }], "opencode");
+    const registry = makeRegistry(new Map([["claude", claude], ["opencode", opencode]]));
+    const service = new ModelCacheService(repo, registry);
+
+    await service.refreshProviders(["claude"]);
+
+    expect(service.getCached("claude")).toEqual([{ id: "claude-model", name: "Claude Model" }]);
+    expect(service.getCached("opencode")).toBeUndefined();
   });
 
   it("returns cached models without calling provider when cache is fresh", async () => {

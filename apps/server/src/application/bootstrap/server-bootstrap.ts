@@ -571,11 +571,12 @@ providerAvailability
     // blocking `codex --version` spawnSync.
     warmCodexVersionGate();
     providerUsageWarmup.warmEnabledProviders(true);
-    // Warm the model cache once after CLI verification has gated which providers
-    // are usable. Triggering this per WS connect would spam refreshes; running
-    // it once at startup is sufficient because ModelCacheService also refreshes
-    // lazily on stale reads (stale-while-revalidate).
-    void modelCacheService.refreshAll().catch((err: unknown) => {
+    // Warm only enabled providers. Disabled adapters remain registered but
+    // their model listing can start a provider process.
+    const modelProviders = providerAvailability.listAvailability()
+      .filter((provider) => provider.enabled && provider.hasAdapter && !provider.comingSoon && provider.cli.status !== "not_found")
+      .map((provider) => provider.id);
+    void modelCacheService.refreshProviders(modelProviders).catch((err: unknown) => {
       logger.warn("Model cache startup refresh failed", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -940,17 +941,6 @@ async function shutdown(): Promise<void> {
   shutdownCoordinator.setPhase("stop agent sessions");
   await agentService.stopAll();
 
-  // 2. Shutdown provider registry
-  shutdownCoordinator.setPhase("shutdown providers");
-  await providerRegistry.shutdown();
-  shutdownCoordinator.setPhase("shutdown provider event workers");
-  providerEventIngress.shutdown();
-  browserAutomationBroker.shutdown();
-  browserAutomationSessionLease.shutdown();
-
-  // 3. Dispose settings file watcher
-  settingsService.dispose();
-
   let shutdownFailure: unknown = null;
   const captureCleanupFailure = async (cleanup: () => Promise<void> | void): Promise<void> => {
     try {
@@ -959,6 +949,17 @@ async function shutdown(): Promise<void> {
       shutdownFailure ??= error;
     }
   };
+
+  // 2. Shutdown provider registry
+  shutdownCoordinator.setPhase("shutdown providers");
+  await captureCleanupFailure(() => providerRegistry.shutdown());
+  shutdownCoordinator.setPhase("shutdown provider event workers");
+  providerEventIngress.shutdown();
+  browserAutomationBroker.shutdown();
+  browserAutomationSessionLease.shutdown();
+
+  // 3. Dispose settings file watcher
+  settingsService.dispose();
 
   // 6. Contain Project command sessions before their Terminal dependency shuts down.
   shutdownCoordinator.setPhase("shutdown Project commands");

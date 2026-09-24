@@ -10,7 +10,7 @@
 
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import type { ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+import type { ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
 import { broadcast } from "../../../application/transport/push.js";
 import { ModelCacheRepo } from "./persistence/model-cache-repo.js";
 
@@ -147,15 +147,11 @@ export class ModelCacheService {
     }
   }
 
-  /**
-   * Refreshes all providers that support model listing.
-   * Called on WS connect to ensure the cache stays warm.
-   */
-  async refreshAll(): Promise<void> {
-    const providers = this.registry.resolveAll();
-    const promises = providers.map((p) =>
-      this.refreshProvider(p.id).catch((err) => {
-        logger.warn("Model refresh failed", { providerId: p.id, err: String(err) });
+  /** Refresh model lists for the providers selected by the caller. */
+  async refreshProviders(providerIds: readonly ProviderId[]): Promise<void> {
+    const promises = providerIds.map((providerId) =>
+      this.refreshProvider(providerId).catch((err) => {
+        logger.warn("Model refresh failed", { providerId, err: String(err) });
       }),
     );
     await Promise.allSettled(promises);
