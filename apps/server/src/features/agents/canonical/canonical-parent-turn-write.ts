@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import * as NodeCrypto from "node:crypto";
 import {
   ParentNarrativeRecoveryItemSchema,
   type ParentNarrativeRecoveryItem,
@@ -15,6 +16,9 @@ import { PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-a
 import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
+import { TURN_DIFF_MAX_BYTES, parseTurnDiff } from "../turns/turn-diff-patch.js";
+import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
+import type { SelectedTurnDiff } from "../turns/turn-diff-service.js";
 import type {
   ParentTurnFinishInput,
   ParentTurnProjection,
@@ -93,6 +97,7 @@ export interface DataOnlyParentEventInput extends Omit<CanonicalAgentCommitInput
 /** A staged assistant and narrative to confirm in the terminal transaction. */
 export interface DataOnlyParentTurnFinishInput extends Omit<ParentTurnFinishInput, "projectTurn" | "finalizeCompatibility"> {
   projection: ParentTurnProjection | { readonly kind: "writer-staged"; readonly messageId?: string };
+  selectedTurnDiff?: SelectedTurnDiff;
 }
 
 /** Cloneable terminal data whose compatibility rows are staged on the writer connection. */
@@ -131,6 +136,7 @@ export class CanonicalParentTurnWrite {
   private readonly planAnswers: PlanQuestionAnswersRepo;
   private readonly stagedAssistant: ReturnType<Database["prepare"]>;
   private readonly assistantTextCheckpoints: ParentAssistantTextCheckpointService;
+  private readonly turnDiffs: TurnDiffRepo;
 
   constructor(db: Database, publish: CanonicalAgentEventPublisher) {
     this.db = db;
@@ -147,6 +153,7 @@ export class CanonicalParentTurnWrite {
     this.planAnswers = new PlanQuestionAnswersRepo(db);
     this.stagedAssistant = db.prepare("SELECT role, content FROM messages WHERE id = ? AND thread_id = ?");
     this.assistantTextCheckpoints = new ParentAssistantTextCheckpointService(db);
+    this.turnDiffs = new TurnDiffRepo(db);
   }
 
   /** Import fsynced text before the interruption transaction reads its durable prefix. */
@@ -328,6 +335,10 @@ export class CanonicalParentTurnWrite {
       ? this.loadStagedTerminalProjection(input.threadId, input.executionId, input.projection.messageId)
       : input.projection;
     this.assertStagedAssistant(input.threadId, staged);
+    if (input.selectedTurnDiff && (input.outcome !== "completed" || !staged.message
+      || !validSelectedTurnDiff(input.selectedTurnDiff, input.threadId))) {
+      throw new Error("Invalid selected turn diff for terminal assistant");
+    }
     const projection: ParentTurnProjection = {
       message: staged.message
         ? {
@@ -346,6 +357,9 @@ export class CanonicalParentTurnWrite {
         if (!projection.message) return;
         this.messages.setAssistantOutcome(projection.message.id, input.outcome, input.executionId);
         this.messages.publishAssistant(projection.message.id);
+        if (input.selectedTurnDiff) this.turnDiffs.create({
+          id: NodeCrypto.randomUUID(), message_id: projection.message.id, ...input.selectedTurnDiff,
+        });
       },
     }, onBatchWrite);
   }
@@ -372,6 +386,18 @@ export class CanonicalParentTurnWrite {
       throw new Error(`Staged assistant projection not found: ${projected.id}`);
     }
   }
+}
+
+function validSelectedTurnDiff(selected: SelectedTurnDiff, threadId: string): boolean {
+  if (selected.thread_id !== threadId || !Number.isSafeInteger(selected.revision) || selected.revision < 0) return false;
+  if (selected.source === "git") return selected.patch === null;
+  if (selected.source !== "native" && selected.source !== "tracked") return false;
+  return validSelectedPatch(selected.source, selected.patch);
+}
+
+function validSelectedPatch(source: "native" | "tracked", patch: string | null): boolean {
+  if (typeof patch !== "string" || Buffer.byteLength(patch, "utf8") > TURN_DIFF_MAX_BYTES) return false;
+  return source === "native" && patch.length === 0 || parseTurnDiff(patch) !== null;
 }
 
 function isUnfinishedLostTurn(

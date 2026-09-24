@@ -275,6 +275,32 @@ describe("CanonicalParentTurnWrite", () => {
     });
   });
 
+  it("commits selected diff evidence with the assigned terminal assistant", async () => {
+    writer.start(startInput());
+    const messageId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
+    const input = terminalProjectionInput();
+    input.assistant.messageId = messageId;
+    writer.stageTerminalProjection(input);
+    const patch = "diff --git a/a.txt b/a.txt\nindex 1..2\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n";
+    const finish: DataOnlyParentTurnFinishInput = {
+      ...finishInput(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, messageId)!),
+      projection: { kind: "writer-staged", messageId },
+      selectedTurnDiff: { thread_id: THREAD_ID, source: "native", patch, revision: 2 },
+    };
+    expect(() => writer.finish({ ...finish, selectedTurnDiff: { ...finish.selectedTurnDiff!, thread_id: "other" } }))
+      .toThrow("Invalid selected turn diff");
+    db.run("CREATE TRIGGER fail_turn_diff BEFORE INSERT ON turn_diff_snapshots BEGIN SELECT RAISE(ABORT, 'diff unavailable'); END");
+    await expect(writer.finish(finish)).rejects.toThrow("diff unavailable");
+    expect(db.prepare("SELECT is_internal FROM messages WHERE id = ?").get(messageId)).toEqual({ is_internal: 1 });
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ terminal_outcome: null });
+    db.run("DROP TRIGGER fail_turn_diff");
+    expect((await writer.finish(finish)).outcome).toBe("committed");
+    expect(db.prepare("SELECT message_id, source, patch, revision FROM turn_diff_snapshots WHERE message_id = ?")
+      .get(messageId)).toEqual({ message_id: messageId, source: "native", patch, revision: 2 });
+    expect(db.prepare("SELECT count(*) AS count FROM turn_diff_snapshots").get()).toEqual({ count: 1 });
+  });
+
   it("refuses to reuse a public assistant row as a staged turn projection", () => {
     writer.start(startInput());
     const input = terminalProjectionInput();
