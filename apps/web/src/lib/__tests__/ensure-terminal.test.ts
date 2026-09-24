@@ -39,7 +39,7 @@ describe("createTerminalForScope", () => {
     );
   });
 
-  it("frees the scope when the create RPC never answers", async () => {
+  it("keeps the scope locked until terminalCreate reports its failure", async () => {
     vi.useFakeTimers();
     terminalCreate.mockReturnValue(new Promise(() => {}));
 
@@ -49,52 +49,6 @@ describe("createTerminalForScope", () => {
 
     await vi.advanceTimersByTimeAsync(20_000);
     createTerminalForScope("scope-b");
-    expect(terminalCreate).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps a retried scope locked when the stale request resolves", async () => {
-    vi.useFakeTimers();
-    let resolveStale: ((value: { ptyId: string; shell: string }) => void) | undefined;
-    terminalCreate
-      .mockImplementationOnce(
-        () =>
-          new Promise<{ ptyId: string; shell: string }>((resolve) => {
-            resolveStale = resolve;
-          }),
-      )
-      .mockImplementationOnce(() => new Promise(() => {}));
-
-    createTerminalForScope("scope-c");
-    await vi.advanceTimersByTimeAsync(20_000);
-    createTerminalForScope("scope-c");
-    expect(terminalCreate).toHaveBeenCalledTimes(2);
-
-    // The stale request resolves after the retry re-acquired the scope lock:
-    // its release must not unlock the in-flight retry.
-    resolveStale?.({ ptyId: "pty-stale", shell: "pwsh" });
-    await vi.advanceTimersByTimeAsync(0);
-    createTerminalForScope("scope-c");
-    expect(terminalCreate).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not toast a stale rejection once a retry owns the scope", async () => {
-    vi.useFakeTimers();
-    let rejectStale: ((error: Error) => void) | undefined;
-    terminalCreate
-      .mockImplementationOnce(
-        () =>
-          new Promise<never>((_, reject) => {
-            rejectStale = reject;
-          }),
-      )
-      .mockImplementationOnce(() => new Promise(() => {}));
-
-    createTerminalForScope("scope-d");
-    await vi.advanceTimersByTimeAsync(20_000);
-    createTerminalForScope("scope-d");
-    rejectStale?.(new Error("PTY host is unhealthy"));
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(useToastStore.getState().toasts).toHaveLength(0);
+    expect(terminalCreate).toHaveBeenCalledTimes(1);
   });
 });
