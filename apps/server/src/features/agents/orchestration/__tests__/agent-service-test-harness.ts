@@ -68,6 +68,7 @@ const testFinalizers = new WeakMap<AgentService, TurnFinalizer>();
 const testMessageRepos = new WeakMap<AgentService, MessageRepo>();
 const testTrackers = new WeakMap<AgentService, TurnFileTracker>();
 const testTurnDiffs = new WeakMap<AgentService, TurnDiffService>();
+const testProviderEventIngresses = new WeakMap<AgentService, ProviderEventIngress>();
 
 /** Read the real native evidence service wired through the test runtime and ingress. */
 export function turnDiffsForAgentServiceTest(service: AgentService): TurnDiffService {
@@ -104,6 +105,13 @@ export function startAgentServiceIngressForTest(
   if (publisher) publication.bind(publisher);
   else if (!publication.isBound()) publication.bind(() => undefined);
   publication.start();
+}
+
+/** Resolve after the test service has applied every ingress event already accepted for a thread. */
+export async function waitForAgentServiceIngressForTest(service: AgentService, threadId: string): Promise<void> {
+  const ingress = testProviderEventIngresses.get(service);
+  if (!ingress) throw new Error("AgentService test provider ingress is unavailable");
+  await ingress.waitForThread(threadId);
 }
 
 /** Stream deterministic assistant text through the test-owned reliability port. */
@@ -330,6 +338,7 @@ export function createAgentServiceForTest(
   testProviderTurnStarts.set(service, (threadId) => runtimeController.beginProviderTurn(threadId));
   testTrackers.set(service, tracker);
   testTurnDiffs.set(service, turnDiffs);
+  testProviderEventIngresses.set(service, eventIngress);
   testGoalLifecycles.set(service, resolvedGoals);
   return service;
 }

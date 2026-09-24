@@ -53,6 +53,11 @@ export interface TurnEventApplication {
   observeToolResult(event: Extract<AgentEvent, { type: "toolResult" }>): void;
 }
 
+/** Waits until the thread-affine ingress worker has emitted its retained events. */
+export interface TurnEventIngressFence {
+  waitForThread(threadId: string): Promise<void>;
+}
+
 interface QueuedTurnEvent {
   input: ProviderEventIngressEvent;
   event: AgentEvent;
@@ -78,6 +83,7 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     private readonly lifecycle: TurnLifecycleControl,
     private readonly application: TurnEventApplication,
     private readonly turnDiffs?: Pick<TurnDiffService, "push">,
+    private readonly ingressFence?: TurnEventIngressFence,
   ) {}
 
   /** Accept an ingress envelope and preserve its source receipt through the turn queue. */
@@ -87,6 +93,12 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     this.recordTurnLifecycle(event);
     if (!this.enqueue(input, event, true)) return;
     this.drain(event.threadId);
+  }
+
+  /** Stop only the affected turn when provider ingress cannot retain one of its events. */
+  handleProviderIngressOverflow(input: ProviderEventIngressEvent): void {
+    this.application.rejectForQueueCapacity(input.event);
+    this.discard(input.event.threadId, input.event.turnExecutionId);
   }
 
   /** Observe one provider file mutation before public event attribution is available. */
@@ -104,13 +116,19 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     if (cancelsDeferredWork(command.source)) this.discard(command.threadId, command.executionId);
     const existing = this.finalizations.get(command.threadId);
     if (existing) return existing;
-    this.drain(command.threadId);
-    const pending = this.isReadyForFinalization(command.threadId)
-      ? this.startFinalization(command)
-      : this.waitForQueue(command.threadId).then(() => this.startFinalization(command));
+    const pending = this.ingressFence
+      ? this.ingressFence.waitForThread(command.threadId).then(() => this.finalizeAfterIngress(command))
+      : this.finalizeAfterIngress(command);
     this.finalizations.set(command.threadId, pending);
     void pending.finally(() => this.finalizations.delete(command.threadId));
     return pending;
+  }
+
+  private finalizeAfterIngress(command: FinalizeTurnCommand): Promise<boolean> {
+    this.drain(command.threadId);
+    return this.isReadyForFinalization(command.threadId)
+      ? this.startFinalization(command)
+      : this.waitForQueue(command.threadId).then(() => this.startFinalization(command));
   }
 
   /** Resume an event queue after a durable checkpoint becomes available. */

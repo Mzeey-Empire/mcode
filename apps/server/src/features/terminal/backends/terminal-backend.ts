@@ -40,6 +40,11 @@ export type TerminalReattachResult =
   | { mode: "checkpoint"; checkpoint: string; checkpointThrough: number }
   | { mode: "reset"; discardThrough: number };
 
+/** A Terminal create that completed after its owning WebSocket disconnected. */
+export type DisconnectedTerminalCreate =
+  | { readonly method: "terminal.create"; readonly ptyId: string }
+  | { readonly method: "terminal.session.create"; readonly sessionId: string };
+
 /** Exit observation for a private prepared terminal command session. */
 export interface PreparedTerminalCommandExit {
   readonly exitCode: number | null;
@@ -127,4 +132,16 @@ export abstract class TerminalBackend {
 
   /** Releases controller leases and uploads owned by a disconnected client. */
   disconnectClient(_client: WebSocket): void {}
+
+  /** Reclaims a Terminal that was created after its requesting WebSocket disconnected. */
+  async cleanupDisconnectedCreate(create: DisconnectedTerminalCreate, client: WebSocket): Promise<void> {
+    if (create.method === "terminal.create") {
+      await this.kill(create.ptyId);
+      return;
+    }
+    await this.routeV1("terminal.session.close", {
+      sessionId: create.sessionId,
+      reason: "user",
+    }, client);
+  }
 }

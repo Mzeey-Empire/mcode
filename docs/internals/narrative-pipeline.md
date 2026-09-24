@@ -127,7 +127,10 @@ Provider-native event
 Provider runtime event keeps native evidence separate from AgentEvent data
     │
     ▼
-Provider ingress validates, queues, and selects a provider adapter
+Provider ingress selects a thread-affine worker for cloneable validation
+    │
+    ▼
+Provider ingress queues accepted results fairly and selects a provider adapter
     │
     ▼
 Adapter forwards a provider-neutral AgentEvent or consumes private provider work

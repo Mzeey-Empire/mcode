@@ -7,8 +7,19 @@
 import * as NodeHTTP from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { logger } from "@mcode/shared";
-import { TerminalBackendError } from "../../features/terminal/backends/terminal-backend.js";
-import { BinaryUploadHeaderSchema, TERMINAL_BINARY_MAGIC, type BinaryUploadHeader } from "@mcode/contracts";
+import {
+  TerminalBackendError,
+  type DisconnectedTerminalCreate,
+} from "../../features/terminal/backends/terminal-backend.js";
+import {
+  BinaryUploadHeaderSchema,
+  TERMINAL_BINARY_MAGIC,
+  TERMINAL_V1_METHODS,
+  WebSocketRequestSchema,
+  WS_METHODS,
+  type BinaryUploadHeader,
+  type WebSocketResponse,
+} from "@mcode/contracts";
 import { routeMessage, type RouterDeps } from "./ws-router.js";
 import { addClient, removeClient } from "./push.js";
 import { handleBinaryUpload } from "../../features/attachments/transport/binary-upload.js";
@@ -513,9 +524,22 @@ function handleFileUploadFailure(id: string | number | null, error: unknown, ws:
   sendWsJson(ws, { id, error: { code: "UPLOAD_FAILED", message } });
 }
 
-/** Sends JSON only while the WebSocket remains open. */
-function sendWsJson(ws: WebSocket, value: unknown): void {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value));
+/** Sends JSON only while the WebSocket remains open. Returns whether delivery was accepted for sending. */
+function sendWsJson(
+  ws: WebSocket,
+  value: unknown,
+  onSendComplete?: (error?: Error) => void,
+): boolean {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  try {
+    const payload = JSON.stringify(value);
+    if (onSendComplete) ws.send(payload, onSendComplete);
+    else ws.send(payload);
+    return true;
+  } catch (error) {
+    logger.warn("WebSocket response send failed", { error: describeError(error) });
+    return false;
+  }
 }
 
 /** Routes a text upload header or a regular JSON-RPC message. */
@@ -553,10 +577,91 @@ function replacePendingUploadHeader(header: BinaryUploadHeader, context: WsMessa
 
 /** Routes a regular JSON-RPC frame and returns its response to the same client. */
 function routeWsMessage(raw: string, context: WsMessageContext): void {
+  const terminalCreateMethod = parseTerminalCreateMethod(raw);
   void routeMessage(raw, context.deps, {
     client: context.ws,
     browserAutomationAuthorization: context.resolveCurrentBrowserAutomationAuthorization(),
   })
-    .then((response) => sendWsJson(context.ws, response))
+    .then((response) => sendWsResponse(terminalCreateMethod, response, context))
     .catch((error: unknown) => logger.error("Unexpected router error", { error: describeError(error) }));
+}
+
+type TerminalCreateMethod = DisconnectedTerminalCreate["method"];
+
+/** Reads the only create methods that may allocate a Terminal resource. */
+function parseTerminalCreateMethod(raw: string): TerminalCreateMethod | null {
+  try {
+    const parsed = WebSocketRequestSchema().safeParse(JSON.parse(raw));
+    if (!parsed.success) return null;
+    return isTerminalCreateMethod(parsed.data.method) ? parsed.data.method : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTerminalCreateMethod(method: string): method is TerminalCreateMethod {
+  return method === "terminal.create" || method === "terminal.session.create";
+}
+
+/** Delivers an RPC response and reclaims a Terminal create only when response delivery fails. */
+function sendWsResponse(
+  method: TerminalCreateMethod | null,
+  response: WebSocketResponse,
+  context: WsMessageContext,
+): void {
+  if (!method) {
+    sendWsJson(context.ws, response);
+    return;
+  }
+  const create = disconnectedTerminalCreateFromResponse(method, response);
+  if (!create) {
+    sendWsJson(context.ws, response);
+    return;
+  }
+  let cleanupStarted = false;
+  const cleanup = () => {
+    if (cleanupStarted) return;
+    cleanupStarted = true;
+    void cleanupDisconnectedTerminalCreate(create, context);
+  };
+  const accepted = sendWsJson(context.ws, response, (error) => {
+    if (error) cleanup();
+  });
+  if (!accepted) cleanup();
+}
+
+/** Closes a Terminal resource that was created for a response the client did not receive. */
+async function cleanupDisconnectedTerminalCreate(
+  create: DisconnectedTerminalCreate,
+  context: WsMessageContext,
+): Promise<void> {
+  try {
+    await context.deps.terminalService.cleanupDisconnectedCreate(create, context.ws);
+  } catch (error) {
+    logger.error("Failed to clean up a Terminal created after WebSocket disconnect", {
+      error: describeError(error),
+      method: create.method,
+    });
+  }
+}
+
+function disconnectedTerminalCreateFromResponse(
+  method: TerminalCreateMethod,
+  response: WebSocketResponse,
+): DisconnectedTerminalCreate | null {
+  if (response.error || response.result === undefined) return null;
+  if (method === "terminal.create") {
+    const parsed = WS_METHODS()[method].result.safeParse(response.result);
+    const ptyId = parsed.success ? readStringField(parsed.data, "ptyId") : null;
+    return ptyId ? { method, ptyId } : null;
+  }
+  const parsed = TERMINAL_V1_METHODS[method].result.safeParse(response.result);
+  const sessionId = parsed.success ? readStringField(parsed.data, "sessionId") : null;
+  return sessionId ? { method, sessionId } : null;
+}
+
+function readStringField(value: unknown, field: "ptyId" | "sessionId"): string | null {
+  if (!value || typeof value !== "object" || !Object.hasOwn(value, field)) return null;
+  const candidate = Reflect.get(value, field);
+  return typeof candidate === "string" ? candidate : null;
 }

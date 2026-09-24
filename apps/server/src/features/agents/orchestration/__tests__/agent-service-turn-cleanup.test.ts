@@ -37,6 +37,7 @@ import {
   fileTrackerForAgentServiceTest,
   startAgentServiceIngressForTest,
   startProviderTurnForTest,
+  waitForAgentServiceIngressForTest,
   wrapProviderEmitterForRuntimeEvents,
 } from "./agent-service-test-harness.js";
 import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
@@ -362,7 +363,7 @@ describe("AgentService turn cleanup", () => {
     vi.clearAllMocks();
   });
 
-  it("retains provider subscriptions through the provider ingress", () => {
+  it("retains provider subscriptions through the provider ingress", async () => {
     const legacyProvider = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
       id: "claude" as ProviderId,
     })) as unknown as IAgentProvider;
@@ -384,6 +385,7 @@ describe("AgentService turn cleanup", () => {
       reason: "disabled",
     } satisfies AgentEvent;
     (legacyProvider as unknown as NodeEvents.EventEmitter).emit("event", providerEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenLastCalledWith(providerEvent);
@@ -410,6 +412,7 @@ describe("AgentService turn cleanup", () => {
       turnExecutionId: executionId,
     } satisfies AgentEvent;
     providerEmitter.emit("event", event);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenCalledWith(event);
@@ -445,6 +448,7 @@ describe("AgentService turn cleanup", () => {
       totalProcessedTokens: 150,
       providerId: "claude",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     // Thread should no longer be active
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
@@ -1061,6 +1065,7 @@ describe("AgentService turn cleanup", () => {
       totalProcessedTokens: 150,
       providerId: "claude",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
     providerEmitter.emit("event", {
@@ -1070,6 +1075,7 @@ describe("AgentService turn cleanup", () => {
       content: "Goal achieved in 1s.",
       tokens: null,
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(messageRepo.create).toHaveBeenCalledWith(
       THREAD_ID,
@@ -1111,6 +1117,7 @@ describe("AgentService turn cleanup", () => {
       totalProcessedTokens: 150,
       providerId: "claude",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
 
@@ -1151,6 +1158,7 @@ describe("AgentService turn cleanup", () => {
       turnExecutionId: resumedExecutionId,
       outcome: "cancelled",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
     expect(mutationReservations.owns(THREAD_ID, "pending-approval", "pendingApproval")).toBe(true);
   });
@@ -1288,6 +1296,7 @@ describe("AgentService turn cleanup", () => {
         totalProcessedTokens: 2,
         providerId: "claude",
       } satisfies AgentEvent);
+      await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
       const secondExecutionId = startProviderTurn(service);
       providerEmitter.emit("event", {
@@ -1303,6 +1312,8 @@ describe("AgentService turn cleanup", () => {
         toolName: "Edit",
         toolInput: { file_path: "second.txt" },
       } satisfies AgentEvent);
+      await vi.waitFor(() => expect(observeToolUse).toHaveBeenCalledTimes(2));
+      await observeToolUse.mock.results[1]!.value;
       await NodeFSPromises.writeFile(NodePath.join(root, "second.txt"), "after second\n");
       providerEmitter.emit("event", {
         type: AgentEventType.Message,
@@ -1331,7 +1342,7 @@ describe("AgentService turn cleanup", () => {
         totalProcessedTokens: 2,
         providerId: "claude",
       } satisfies AgentEvent);
-      await vi.waitFor(() => expect(observeToolUse).toHaveBeenCalledTimes(2));
+      await waitForAgentServiceIngressForTest(service, THREAD_ID);
       expect(turnSnapshotRepo.create).not.toHaveBeenCalled();
 
       releaseFirstResult();
@@ -1387,6 +1398,7 @@ describe("AgentService turn cleanup", () => {
       providerId: "claude",
     } satisfies AgentEvent);
 
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
 
     // Error event should not re-add the thread
@@ -1397,6 +1409,7 @@ describe("AgentService turn cleanup", () => {
       turnExecutionId: executionId,
       error: "Something went wrong",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
     expect(memoryPressureService.markActive).not.toHaveBeenCalled();
@@ -1423,6 +1436,7 @@ describe("AgentService turn cleanup", () => {
       turnExecutionId: executionId,
       outcome: "completed",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
     expect(memoryPressureService.markIdle).toHaveBeenCalled();
@@ -1570,9 +1584,11 @@ describe("AgentService Ended finalization", () => {
       type: AgentEventType.ContextEstimate, threadId: thread.id, turnExecutionId,
       tokensIn: 100, tokensOut: 20, totalProcessedTokens: 120, cacheReadTokens: 40, contextWindow: 200_000,
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, thread.id);
     expect(service.runtimeAccess().activeThreadIds()).toContain(thread.id);
     expect(threadRepo.findById(thread.id)).toMatchObject({ last_context_tokens: 100, context_window: 200_000 });
     providerEmitter.emit("event", { type: AgentEventType.Ended, threadId: thread.id, turnExecutionId, outcome } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, thread.id);
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(thread.id);
     expect(threadRepo.findById(thread.id)).toMatchObject({ last_context_tokens: 100, context_window: 200_000 });
   });
@@ -1700,6 +1716,7 @@ describe("AgentService Ended finalization", () => {
         turnExecutionId: executionId,
         error: "provider failed",
       } satisfies AgentEvent);
+      await waitForAgentServiceIngressForTest(service, thread.id);
 
       expect(service.runtimeAccess().runtimeSnapshots())
         .toContainEqual(expect.objectContaining({ threadId: thread.id, phase: "errored" }));
