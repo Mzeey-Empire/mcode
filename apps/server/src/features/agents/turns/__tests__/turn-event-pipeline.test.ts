@@ -129,6 +129,130 @@ describe("TurnEventPipeline", () => {
     expect(finalize).toHaveBeenCalledOnce();
   });
 
+  it("waits for an asynchronous application without holding another thread", async () => {
+    let acknowledge!: (accepted: boolean) => void;
+    const durable = new Promise<boolean>((resolve) => { acknowledge = resolve; });
+    const applied: string[] = [];
+    const { pipeline, finalize } = createPipeline((_input, event) => {
+      const delta = (event as Extract<AgentEvent, { type: "textDelta" }>).delta;
+      applied.push(delta);
+      return delta === "first" ? durable : true;
+    });
+
+    pipeline.handleProviderEvent(textDelta("first"));
+    pipeline.handleProviderEvent(textDelta("second"));
+    pipeline.handleProviderEvent(textDelta("other", "thread-2"));
+    const finalization = pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "completed",
+      source: "provider",
+    });
+
+    expect(applied).toEqual(["first", "other"]);
+    expect(finalize).not.toHaveBeenCalled();
+    acknowledge(true);
+    await expect(finalization).resolves.toBe(true);
+    expect(applied).toEqual(["first", "other", "second"]);
+  });
+
+  it("waits for an in-flight acknowledgement before finalizing Stop", async () => {
+    let acknowledge!: (accepted: boolean) => void;
+    const durable = new Promise<boolean>((resolve) => { acknowledge = resolve; });
+    const apply = vi.fn(() => durable);
+    const { pipeline, finalize } = createPipeline(apply);
+
+    pipeline.handleProviderEvent(textDelta("in flight"));
+    pipeline.handleProviderEvent(textDelta("discarded"));
+    const finalization = pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "cancelled",
+      source: "user-stop",
+    });
+
+    expect(finalize).not.toHaveBeenCalled();
+    acknowledge(true);
+    await expect(finalization).resolves.toBe(true);
+    expect(apply).toHaveBeenCalledOnce();
+    expect(finalize).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an asynchronous blocked event at the queue head until resume", async () => {
+    let acknowledge!: (accepted: boolean) => void;
+    const durable = new Promise<boolean>((resolve) => { acknowledge = resolve; });
+    const applied: string[] = [];
+    let ready = false;
+    const { pipeline } = createPipeline((_input, event) => {
+      const delta = (event as Extract<AgentEvent, { type: "textDelta" }>).delta;
+      applied.push(delta);
+      return delta === "first" && !ready ? durable : true;
+    });
+
+    pipeline.handleProviderEvent(textDelta("first"));
+    pipeline.handleProviderEvent(textDelta("second"));
+    acknowledge(false);
+    await Promise.resolve();
+    expect(applied).toEqual(["first"]);
+
+    ready = true;
+    pipeline.resume("thread-1");
+    expect(applied).toEqual(["first", "first", "second"]);
+  });
+
+  it("does not let a discarded acknowledgement consume the next execution's event", async () => {
+    const firstExecution = "00000000-0000-4000-8000-000000000010";
+    const nextExecution = "00000000-0000-4000-8000-000000000011";
+    let acknowledge!: (accepted: boolean) => void;
+    const durable = new Promise<boolean>((resolve) => { acknowledge = resolve; });
+    const applied: string[] = [];
+    const { pipeline } = createPipeline((_input, event) => {
+      applied.push(`${event.turnExecutionId}:${event.type}`);
+      return event.type === AgentEventType.TextDelta && event.turnExecutionId === firstExecution
+        ? durable
+        : true;
+    });
+
+    pipeline.handleProviderEvent(turnStarted(firstExecution));
+    pipeline.handleProviderEvent({
+      ...textDelta("old"),
+      event: { ...textDelta("old").event, turnExecutionId: firstExecution },
+    });
+    pipeline.discard("thread-1", firstExecution);
+    pipeline.handleProviderEvent(turnStarted(nextExecution));
+    expect(applied).toEqual([`${firstExecution}:turnStarted`, `${firstExecution}:textDelta`]);
+
+    acknowledge(true);
+    await vi.waitFor(() => {
+      expect(applied).toEqual([
+        `${firstExecution}:turnStarted`,
+        `${firstExecution}:textDelta`,
+        `${nextExecution}:turnStarted`,
+      ]);
+    });
+  });
+
+  it("does not finalize after an asynchronous application fails", async () => {
+    let fail!: (error: Error) => void;
+    const durable = new Promise<boolean>((_resolve, reject) => { fail = reject; });
+    const apply = vi.fn(() => durable);
+    const { pipeline, finalize } = createPipeline(apply);
+
+    pipeline.handleProviderEvent(textDelta("write failure"));
+    const finalization = pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "completed",
+      source: "provider",
+    });
+
+    fail(new Error("checkpoint failed"));
+    await expect(finalization).rejects.toThrow("checkpoint failed");
+    pipeline.resume("thread-1");
+    expect(apply).toHaveBeenCalledOnce();
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
   it("holds finalization until its thread-affine ingress worker is idle", async () => {
     let releaseIngress!: () => void;
     const ingressIdle = new Promise<void>((resolve) => { releaseIngress = resolve; });
