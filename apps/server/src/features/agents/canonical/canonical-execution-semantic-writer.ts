@@ -79,6 +79,7 @@ const storedHeadSchema = z.object({
   stopRequestId: z.string().nullable(),
   stopWatermark: z.number().int().nullable(),
   providerOutcome: TurnOutcomeSchema.nullable(),
+  assignedMessageId: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
 });
 const storedReceiptSchema = z.object({
   kind: z.literal("committed"),
@@ -126,6 +127,7 @@ interface SemanticHead {
   readonly stopRequestId: string | null;
   readonly stopWatermark: number | null;
   readonly providerOutcome: TurnOutcome | null;
+  readonly assignedMessageId?: string | null;
 }
 
 type StoredOperation = z.infer<typeof storedOperationSchema>;
@@ -407,7 +409,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       if (head.providerOutcome !== mutation.input.outcome) throw new SemanticConflict();
       this.turns.stageTerminalProjection(mutation.input);
       const receipt = committed(operation, head.durableRevision);
-      this.storeHead({ ...head, ordinal: operation.ordinal });
+      this.storeHead({ ...head, ordinal: operation.ordinal,
+        assignedMessageId: mutation.input.assistant.messageId ?? null });
       this.storeReceipt(operation, hash, receipt);
       return receipt;
     })();
@@ -473,7 +476,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private validStagedFinish(operation: ExecutionSemanticOperation, head: SemanticHead): boolean {
     const mutation = operation.mutation;
     if (mutation.kind !== "finish" || !("kind" in mutation.input.projection)) return true;
-    return head.providerOutcome === mutation.outcome && this.hasStagedTerminalPredecessor(operation);
+    if (head.providerOutcome !== mutation.outcome || !this.hasStagedTerminalPredecessor(operation)) return false;
+    return head.assignedMessageId
+      ? head.assignedMessageId === mutation.input.projection.messageId
+      : mutation.input.projection.messageId === undefined;
   }
 
   private validFinishHead(operation: ExecutionSemanticOperation, providerId: string): boolean {

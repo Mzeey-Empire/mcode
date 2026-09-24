@@ -212,6 +212,35 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect((await writer.transact(finish)).kind).toBe("committed");
   });
 
+  it("publishes the assigned live assistant ID only when finish names the staged ID", async () => {
+    const assignedId = "a".repeat(64);
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    expect((await send(2, { kind: "provider-outcome", outcome: "completed" })).kind).toBe("committed");
+    expect((await send(3, { kind: "stage-terminal", input: {
+      threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
+      assistant: { content: "Live answer", model: null, attachments: [], messageId: assignedId }, narrative: [],
+    } })).kind).toBe("committed");
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalExecutionSemanticWriter(db, () => {});
+    const finishInput = {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+      providerId: "codex" as const, providerIdentities: [], outcome: "completed" as const,
+      projection: { kind: "writer-staged" as const, messageId: assignedId },
+    };
+    expect(await writer.transact(operation(4, { kind: "finish", outcome: "completed",
+      input: { ...finishInput, projection: { kind: "writer-staged" } } })))
+      .toEqual({ kind: "conflict", operationId: "lease-1:4" });
+    expect(await writer.transact(operation(4, { kind: "finish", outcome: "completed",
+      input: { ...finishInput, projection: { kind: "writer-staged", messageId: "b".repeat(64) } } })))
+      .toEqual({ kind: "conflict", operationId: "lease-1:4" });
+    expect((await writer.transact(operation(4, { kind: "finish", outcome: "completed", input: finishInput }))).kind)
+      .toBe("committed");
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, assignedId))
+      .toMatchObject({ id: assignedId, content: "Live answer", is_internal: false });
+  });
+
   it("fences assistant-text routing, lease, ordinal, input size, and conflicting replay", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const inputs = [{ ...execution, sequence: 1, text: "Saved text" }];
