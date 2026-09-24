@@ -776,7 +776,7 @@ function validLivePublicationIntent(
 }
 
 function isTerminalLiveEvent(type: ExecutionLivePublicationIntent["event"]["type"]): boolean {
-  return type === "turnComplete" || type === "ended";
+  return type === "turnComplete" || type === "error" || type === "ended";
 }
 
 function validPublicationProvider(operation: ExecutionSemanticOperation, providerId: string): boolean {

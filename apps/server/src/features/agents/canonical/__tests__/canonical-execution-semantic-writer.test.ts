@@ -547,6 +547,17 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       .get(TURN_ID)).toEqual({ count: 0 });
   });
 
+  it("rejects an error publication before terminal durability", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const error: AgentEvent = { type: AgentEventType.Error, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, error: "failed" };
+    const op = { ...operation(2, { kind: "append-events", phase: "running", nativeCursor: null,
+      events: [runtimeEvent(2, error)] }), livePublication: [{ after: "writer" as const, event: error }] };
+    expect(await writer.transact(op)).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, "lease-1:2")).toEqual({ count: 0 });
+  });
+
   it("rejects a compound live event that exceeds its shared row or byte budget", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const event = { type: AgentEventType.TextDelta, threadId: THREAD_ID,
