@@ -128,6 +128,88 @@ describe("disconnected Terminal creates", () => {
       }
     },
   );
+
+  it("keeps a legacy Terminal when the create response is delivered before disconnect", async () => {
+    const kill = vi.fn(async () => undefined);
+    const terminalService = {
+      create: vi.fn(async () => ({ ptyId: "pty-delivered", shell: "pwsh" })),
+      kill,
+      cleanupDisconnectedCreate: TerminalBackend.prototype.cleanupDisconnectedCreate,
+      disconnectClient: vi.fn(),
+    };
+
+    ({ httpServer: server, wss: websocketServer } = createWsServer({
+      authToken: "test-token",
+      singleInstance: false,
+      shutdown: () => undefined,
+      agentService: { runtimeAccess: () => ({ activeCount: () => 0 }) },
+      terminalService,
+      resolveBrowserAutomationHostAuthorization: () => null,
+    } as never));
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+
+    const client = await openClient(server!);
+    const response = new Promise<unknown>((resolve) => {
+      client.once("message", (data) => resolve(JSON.parse(data.toString())));
+    });
+    client.send(JSON.stringify({
+      id: "terminal-create",
+      method: "terminal.create",
+      params: { threadId: "thread-1" },
+    }));
+
+    await expect(response).resolves.toEqual({
+      id: "terminal-create",
+      result: { ptyId: "pty-delivered", shell: "pwsh" },
+    });
+    await closeClient(client);
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("closes a legacy Terminal when response delivery fails before disconnect", async () => {
+    const createStarted = createDeferred<void>();
+    const cleanupCompleted = createDeferred<void>();
+    const created = createDeferred<unknown>();
+    const kill = vi.fn(async () => { cleanupCompleted.resolve(); });
+    const terminalService = {
+      create: vi.fn(() => {
+        createStarted.resolve();
+        return created.promise;
+      }),
+      kill,
+      cleanupDisconnectedCreate: TerminalBackend.prototype.cleanupDisconnectedCreate,
+      disconnectClient: vi.fn(),
+    };
+
+    ({ httpServer: server, wss: websocketServer } = createWsServer({
+      authToken: "test-token",
+      singleInstance: false,
+      shutdown: () => undefined,
+      agentService: { runtimeAccess: () => ({ activeCount: () => 0 }) },
+      terminalService,
+      resolveBrowserAutomationHostAuthorization: () => null,
+    } as never));
+    websocketServer.on("connection", (serverClient) => {
+      vi.spyOn(serverClient, "send").mockImplementation((...args) => {
+        const completion = args.find((argument) => typeof argument === "function");
+        if (typeof completion === "function") completion(new Error("response write failed"));
+      });
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+
+    const client = await openClient(server!);
+    client.send(JSON.stringify({
+      id: "terminal-create",
+      method: "terminal.create",
+      params: { threadId: "thread-1" },
+    }));
+    await createStarted.promise;
+    created.resolve({ ptyId: "pty-send-failed", shell: "pwsh" });
+    await cleanupCompleted.promise;
+
+    expect(kill).toHaveBeenCalledExactlyOnceWith("pty-send-failed");
+    await closeClient(client);
+  });
 });
 
 function openClient(server: NodeHTTP.Server): Promise<WebSocket> {

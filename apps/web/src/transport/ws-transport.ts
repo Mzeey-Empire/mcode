@@ -308,7 +308,7 @@ export function parseLateTerminalCreateId(
 }
 
 function readTerminalCreateId(value: unknown, field: "ptyId" | "sessionId"): string | null {
-  if (!value || typeof value !== "object" || !Object.hasOwn(value, field)) return null;
+  if (!value || typeof value !== "object" || !Object.prototype.hasOwnProperty.call(value, field)) return null;
   const id = Reflect.get(value, field);
   return typeof id === "string" ? id : null;
 }
