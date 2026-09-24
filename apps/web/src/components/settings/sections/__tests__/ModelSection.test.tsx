@@ -193,6 +193,23 @@ describe("ModelSection reasoning options", () => {
     expect(screen.getByText("Reasoning effort")).toBeInTheDocument();
   });
 
+  it("renders the Devin family's declared levels for SWE-2", () => {
+    renderWithModel("devin", "swe-2");
+
+    const row = getReasoningRow();
+    const labels = within(row)
+      .getAllByRole("radio")
+      .map((r) => r.textContent?.trim());
+
+    expect(labels).toEqual(["Medium", "High", "Max"]);
+  });
+
+  it("hides Reasoning effort for a Devin model without declared levels", () => {
+    renderWithModel("devin", "unlisted-devin-model");
+
+    expect(screen.queryByText("Reasoning effort")).not.toBeInTheDocument();
+  });
+
   it("persists the selected reasoning level", () => {
     const { state } = renderWithModel("claude", "claude-opus-4-7");
 
