@@ -157,7 +157,12 @@ function collapseSubagentCall(state: LiveSubagentCollapseState, call: ToolCall):
 function rebaseLiveCall(call: ToolCall, aliases: ReadonlyMap<string, string>): ToolCall {
   const rebasedMarker = rebaseLiveMarker(call, aliases);
   const parentId = rebasedMarker.parentToolCallId ? resolveAlias(rebasedMarker.parentToolCallId, aliases) : undefined;
-  return parentId === rebasedMarker.parentToolCallId ? rebasedMarker : { ...rebasedMarker, parentToolCallId: parentId };
+  // A merged pair can leave the canonical pointing at itself when the alias
+  // record was its own child; a self-parent drops the call from top level.
+  const safeParentId = parentId === rebasedMarker.id ? undefined : parentId;
+  return safeParentId === rebasedMarker.parentToolCallId
+    ? rebasedMarker
+    : { ...rebasedMarker, parentToolCallId: safeParentId };
 }
 
 interface PersistedSubagentIdentity {
@@ -312,6 +317,9 @@ function rebasePersistedRecordParent(
   const parentId = record.parent_tool_call_id;
   if (!parentId) return record;
   const canonicalParentId = resolveAlias(parentId, aliases);
+  // A merged pair can leave the canonical pointing at itself when the alias
+  // record was its own child; a self-parent drops the record from top level.
+  if (canonicalParentId === record.id) return { ...record, parent_tool_call_id: null };
   if (canonicalParentId === parentId) return record;
   return { ...record, parent_tool_call_id: canonicalParentId };
 }
