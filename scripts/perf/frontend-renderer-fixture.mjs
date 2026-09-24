@@ -2520,7 +2520,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
     timeFixture(page, sampleCount, async (sample) => {
     return page.evaluate(async (sampleIndex) => {
       const fixture = window.__issue1240;
-      const revision = ++fixture.revision;
+      fixture.revision += 1;
       const threadId = fixture.primaryThreadId;
       const blocks = Array.from({ length: 10 }, (_, block) => {
         const code = Array.from(
@@ -2594,7 +2594,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
     timeFixture(page, sampleCount, async (sample) => {
     return page.evaluate(async (sampleIndex) => {
       const fixture = window.__issue1240;
-      const revision = ++fixture.revision;
+      fixture.revision += 1;
       const threadId = fixture.primaryThreadId;
       fixture.activate(threadId, "Panel transition fixture", [
         fixture.message(threadId, 0, "Panel fixture prompt", "user"),
