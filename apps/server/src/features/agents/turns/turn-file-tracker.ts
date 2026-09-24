@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import { createTextPatch } from "@mcode/shared";
 import type { FileEffect, TurnFileEffectSummary } from "@mcode/contracts";
 import { MAX_TURN_FILE_EFFECTS } from "@mcode/contracts";
+import { z } from "zod";
 import { normalizeFilesystemPath } from "../../../shared/filesystem/path-identity.js";
 
 const MAX_FILE_BYTES = 1_048_576;
@@ -41,6 +42,7 @@ interface CandidateObservation {
 /** Plain, bounded pre-edit evidence that can cross a worker message boundary. */
 export interface CapturedToolUseObservation {
   readonly threadId: string;
+  readonly executionId: string | null;
   readonly toolCallId: string;
   readonly generation: number;
   readonly generationToken: string;
@@ -83,11 +85,13 @@ interface TrackedPath {
 
 interface TurnState {
   reconstructionRejected?: boolean;
+  executionId: string | null;
   generation: number;
   generationToken: string;
   cwd: string;
   canonicalRoot: string;
   baselineRef: string | null;
+  initialBaselineRef: string | null;
   revision: number;
   tracked: Map<string, TrackedPath>;
   summary: TurnFileEffectSummary;
@@ -111,6 +115,27 @@ export type TurnBaselineReader = (
 /** Injection token for the composed live file-effect tracker. */
 export const TURN_FILE_TRACKER = "TurnFileTracker";
 
+const fileTurnHandoffSchema = z.object({
+  threadId: z.string().min(1),
+  executionId: z.string().min(1),
+  cwd: z.string().min(1).max(4096),
+  canonicalRoot: z.string().min(1).max(4096),
+  baselineRef: z.string().nullable(),
+  generation: z.number().int().positive().max(Number.MAX_SAFE_INTEGER - 1),
+  generationToken: z.string().uuid(),
+}).strict();
+
+/** One execution's cloneable file-tracker start state, with no other turn data. */
+export type FileTurnHandoff = Readonly<z.infer<typeof fileTurnHandoffSchema>>;
+type FileTurnStart = Omit<FileTurnHandoff, "executionId"> & { readonly executionId: string | null };
+
+/** Identity supplied by the scheduler, independently of the handoff payload. */
+export interface ExpectedFileExecution {
+  readonly threadId: string;
+  readonly executionId: string;
+  readonly cwd: string;
+}
+
 /**
  * Tracks bounded, explicit agent file mutations and reduces them to net turn effects.
  * Git supplies the immutable in-project baseline; external paths use the state observed
@@ -131,28 +156,60 @@ export class TurnFileTracker {
 
   /** Start a fresh tracker scope for an agent turn. */
   beginTurn(threadId: string, cwd: string, baselineRef: string | null): number {
-    const canonicalRoot = normalizeFilesystemPath(NodeFS.realpathSync.native(cwd), this.platform);
-    const generation = this.nextGeneration++;
-    const generations = this.turns.get(threadId) ?? new Map<number, TurnState>();
-    generations.set(generation, {
-      generation,
-      generationToken: NodeCrypto.randomUUID(),
-      cwd,
-      canonicalRoot,
-      baselineRef,
-      revision: 0,
-      tracked: new Map(),
-      summary: EMPTY_SUMMARY,
-      chain: Promise.resolve(),
+    return this.openTurn(threadId, cwd, baselineRef, null).generation;
+  }
+
+  /** Start one execution and return only the identity needed by its worker tracker. */
+  beginExecutionTurn(input: ExpectedFileExecution & { readonly baselineRef: string | null }): FileTurnHandoff {
+    if (!input.threadId || !input.executionId) throw new Error("File turn execution identity is required");
+    const turn = this.openTurn(input.threadId, input.cwd, input.baselineRef, input.executionId);
+    return Object.freeze({
+      threadId: input.threadId, executionId: input.executionId, cwd: turn.cwd,
+      canonicalRoot: turn.canonicalRoot, baselineRef: turn.baselineRef,
+      generation: turn.generation, generationToken: turn.generationToken,
     });
+  }
+
+  /** Open the same execution in a separate tracker after checking its scheduled identity and root. */
+  beginTurnFromHandoff(value: unknown, expected: ExpectedFileExecution): boolean {
+    const parsed = fileTurnHandoffSchema.safeParse(value);
+    if (!parsed.success) return false;
+    const handoff = parsed.data;
+    if (handoff.threadId !== expected.threadId || handoff.executionId !== expected.executionId) return false;
+    const canonicalRoot = canonicalWorkingRoot(expected.cwd, this.platform);
+    if (!canonicalRoot || canonicalRoot !== handoff.canonicalRoot
+      || canonicalWorkingRoot(handoff.cwd, this.platform) !== canonicalRoot) return false;
+    const current = this.getTurn(handoff.threadId);
+    if (current) return sameFileTurnHandoff(current, handoff);
+    if (this.turns.get(handoff.threadId)?.has(handoff.generation)) return false;
+    this.installTurn(handoff.threadId, newTurnState(handoff));
+    this.nextGeneration = Math.max(this.nextGeneration, handoff.generation + 1);
+    return true;
+  }
+
+  private openTurn(threadId: string, cwd: string, baselineRef: string | null, executionId: string | null): TurnState {
+    const canonicalRoot = normalizeFilesystemPath(NodeFS.realpathSync.native(cwd), this.platform);
+    const start = {
+      threadId, executionId, cwd, canonicalRoot, baselineRef,
+      generation: this.nextGeneration, generationToken: NodeCrypto.randomUUID(),
+    };
+    if (executionId !== null) fileTurnHandoffSchema.parse(start);
+    this.nextGeneration += 1;
+    const turn = newTurnState(start);
+    this.installTurn(threadId, turn);
+    return turn;
+  }
+
+  private installTurn(threadId: string, turn: TurnState): void {
+    const generations = this.turns.get(threadId) ?? new Map<number, TurnState>();
+    generations.set(turn.generation, turn);
     while (generations.size > 4) {
       const oldest = generations.keys().next().value as number | undefined;
       if (oldest === undefined) break;
       generations.delete(oldest);
     }
     this.turns.set(threadId, generations);
-    this.currentGeneration.set(threadId, generation);
-    return generation;
+    this.currentGeneration.set(threadId, turn.generation);
   }
 
   /** Return the authoritative tracker generation for the active turn. */
@@ -194,7 +251,8 @@ export class TurnFileTracker {
     if (candidates.length === 0) return null;
     const observations = this.synchronousObservations(turn, candidates).map(freezeCandidateObservation);
     return Object.freeze({
-      threadId, toolCallId, generation, generationToken: turn.generationToken,
+      threadId, toolCallId, executionId: turn.executionId,
+      generation, generationToken: turn.generationToken,
       canonicalRoot: turn.canonicalRoot,
       candidateIdentity: mutationCandidateIdentity(toolName, candidates),
       observations: Object.freeze(observations),
@@ -724,6 +782,36 @@ function boundedMutationCandidates(toolName: string, toolInput: Record<string, u
   return dedupeMutationCandidates(extractMutationCandidates(toolName, toolInput)).slice(0, MAX_TURN_FILE_EFFECTS);
 }
 
+function newTurnState(start: FileTurnStart): TurnState {
+  return {
+    executionId: start.executionId,
+    generation: start.generation,
+    generationToken: start.generationToken,
+    cwd: start.cwd,
+    canonicalRoot: start.canonicalRoot,
+    baselineRef: start.baselineRef,
+    initialBaselineRef: start.baselineRef,
+    revision: 0,
+    tracked: new Map(),
+    summary: EMPTY_SUMMARY,
+    chain: Promise.resolve(),
+  };
+}
+
+function canonicalWorkingRoot(cwd: string, platform: NodeJS.Platform): string | null {
+  try {
+    return normalizeFilesystemPath(NodeFS.realpathSync.native(cwd), platform);
+  } catch {
+    return null;
+  }
+}
+
+function sameFileTurnHandoff(turn: TurnState, handoff: FileTurnHandoff): boolean {
+  return turn.executionId === handoff.executionId && turn.generation === handoff.generation
+    && turn.generationToken === handoff.generationToken && turn.canonicalRoot === handoff.canonicalRoot
+    && turn.cwd === handoff.cwd && turn.initialBaselineRef === handoff.baselineRef;
+}
+
 function capturedMatchesTurn(
   captured: CapturedToolUseObservation,
   turn: TurnState,
@@ -731,6 +819,7 @@ function capturedMatchesTurn(
   toolCallId: string,
 ): boolean {
   return captured.threadId === threadId && captured.toolCallId === toolCallId
+    && captured.executionId === turn.executionId
     && captured.generation === turn.generation && captured.generationToken === turn.generationToken
     && captured.canonicalRoot === turn.canonicalRoot;
 }

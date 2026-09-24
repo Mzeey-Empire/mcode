@@ -108,6 +108,53 @@ describe("TurnFileTracker", () => {
     expect(updates.at(-1)).toEqual(summary);
   });
 
+  it("transfers one execution's pre-edit capture to a separate tracker after a real edit", async () => {
+    const root = await tempDir("mcode-transferred-file-observation-");
+    const path = NodePath.join(root, "tracked.txt");
+    await NodeFSPromises.writeFile(path, "before\n");
+    const baseline = async () => ({ kind: "unavailable" as const });
+    const host = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const worker = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const expected = { threadId: "t", executionId: "execution-1", cwd: root };
+    const handoff = host.beginExecutionTurn({ ...expected, baselineRef: null });
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { file_path: "tracked.txt" } };
+    const captured = host.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected a pre-edit capture");
+
+    await NodeFSPromises.writeFile(path, "after\nextra\n");
+    expect(worker.beginTurnFromHandoff(structuredClone(handoff), expected)).toBe(true);
+    expect(worker.beginTurnFromHandoff({ ...handoff, baselineRef: "other-ref" }, expected)).toBe(false);
+    await worker.setBaselineRef("t", handoff.generation, "later-ref");
+    expect(worker.beginTurnFromHandoff(structuredClone(handoff), expected)).toBe(true);
+    expect(await worker.observeCapturedToolUse(event, { ...captured, executionId: "other-execution" })).toBe(false);
+    expect(await worker.observeCapturedToolUse(event, structuredClone(captured))).toBe(true);
+    await worker.observeToolResult("t", "edit");
+    expect(await worker.finalizeTurn("t")).toMatchObject({ fileCount: 1, additions: 2, deletions: 1 });
+  });
+
+  it("rejects a handoff or capture for another execution or root", async () => {
+    const root = await tempDir("mcode-transferred-file-stale-");
+    const otherRoot = await tempDir("mcode-transferred-file-other-root-");
+    const baseline = async () => ({ kind: "unavailable" as const });
+    const oldHost = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const currentHost = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const worker = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { file_path: "tracked.txt" } };
+    oldHost.beginExecutionTurn({ threadId: "t", executionId: "old-execution", cwd: root, baselineRef: null });
+    const oldCapture = oldHost.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!oldCapture) throw new Error("Expected an old capture");
+    const expected = { threadId: "t", executionId: "current-execution", cwd: root };
+    const handoff = currentHost.beginExecutionTurn({ ...expected, baselineRef: null });
+
+    expect(worker.beginTurnFromHandoff(handoff, { ...expected, executionId: "old-execution" })).toBe(false);
+    expect(worker.beginTurnFromHandoff(handoff, { ...expected, cwd: otherRoot })).toBe(false);
+    expect(worker.beginTurnFromHandoff({ ...handoff, unrelatedThread: "secret" }, expected)).toBe(false);
+    expect(worker.beginTurnFromHandoff(handoff, expected)).toBe(true);
+    expect(await worker.observeCapturedToolUse(event, oldCapture)).toBe(false);
+    expect(await worker.observeCapturedToolUse(event, { ...oldCapture, executionId: expected.executionId })).toBe(false);
+    expect(await worker.finalizeTurn("t")).toMatchObject({ fileCount: 0 });
+  });
+
   it("rejects a captured baseline from another tool, root, or turn generation", async () => {
     const root = await tempDir("mcode-stale-observation-");
     const path = NodePath.join(root, "tracked.txt");
