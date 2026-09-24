@@ -163,6 +163,7 @@ export const threadStartups = sqliteTable(
     transcriptJson: text("transcript_json").notNull(),
     cancellation: text("cancellation").notNull().default("none"),
     revision: integer("revision").notNull(),
+    requestFingerprint: text("request_fingerprint"),
     threadId: text("thread_id").references(() => threads.id, { onDelete: "set null" }),
     errorJson: text("error_json"),
     blockJson: text("block_json"),

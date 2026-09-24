@@ -2,8 +2,10 @@ import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { ThreadBranchingService, type BranchedThreadLifecycle, type CreateBranchedThreadInput } from "../../../projects/worktrees/thread-branching-service.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { ThreadService } from "../../../thread-control/index.js";
+import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import { ThreadCreationCoordinator } from "../thread-creation-coordinator.js";
@@ -38,7 +40,265 @@ function harness() {
   return { db, workspace, threads, startups, threadService, admissions, gitRepository, coordinator };
 }
 
+function branchHarness() {
+  const base = harness();
+  const messages = new MessageRepo(base.db);
+  const parent = base.threads.create(base.workspace.id, "Parent", "direct", "main", true, "claude");
+  const fork = messages.create(parent.id, "user", "Start here", 1);
+  const handoffs = { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "Parent handoff" })) };
+  const branching = new ThreadBranchingService(
+    base.threads,
+    messages,
+    base.threadService,
+    { listWorktrees: vi.fn(async () => []) } as never,
+    handoffs as never,
+    { platform: "win32" } as never,
+  );
+  const makeCoordinator = (startupService = base.startups) => new ThreadCreationCoordinator(
+    base.threads, () => base.threadService, base.admissions as never, base.gitRepository,
+    () => branching, undefined, () => startupService,
+  );
+  return { ...base, parent, fork, handoffs, makeCoordinator };
+}
+
 describe("ThreadCreationCoordinator startup lifecycle", () => {
+  it("binds a managed branch before checkout provisioning can be interrupted", async () => {
+    const { db, workspace, threads, threadService, startups, parent, fork, makeCoordinator } = branchHarness();
+    let failProvision: ((error: Error) => void) | undefined;
+    vi.mocked(threadService.create).mockImplementation(async (workspaceId, title, _mode, branch, options) => {
+      const child = threads.create(workspaceId, title, "worktree", branch, true, "claude");
+      options.lifecycle?.onThreadPersisted(child);
+      await new Promise<void>((_resolve, reject) => { failProvision = reject; });
+      return child;
+    });
+    const command = {
+      workspaceId: workspace.id, content: "Branch while checkout runs", mode: "worktree" as const,
+      branch: "feature/child", parentThreadId: parent.id, forkedFromMessageId: fork.id,
+      startupId: managedStartupId,
+    };
+    const pending = makeCoordinator().createInitialTurn(command);
+    const rejected = expect(pending).rejects.toThrow("Checkout interrupted");
+    await vi.waitFor(() => expect(startups.get(managedStartupId)?.phase).toBe("worktree"));
+    const childId = startups.get(managedStartupId)?.threadId;
+    if (!childId) throw new Error("Managed branch child was not bound");
+    expect(threads.findById(childId)).toMatchObject({ parent_thread_id: parent.id, provider: "claude" });
+    startups.interruptNonterminalOnStartup();
+    failProvision?.(new Error("Checkout interrupted"));
+    await rejected;
+
+    const restarted = makeCoordinator(new ThreadStartupService(new ThreadStartupRepo(db)));
+    await expect(restarted.createInitialTurn(command)).rejects.toThrow("was interrupted");
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(2);
+    expect(threadService.create).toHaveBeenCalledOnce();
+    db.close();
+  });
+
+  it("rolls back a direct branch child when its startup binding fails", async () => {
+    const { db, workspace, threads, startups, parent, fork, makeCoordinator } = branchHarness();
+    vi.spyOn(startups, "bindThread").mockImplementationOnce(() => { throw new Error("Binding failed"); });
+    await expect(makeCoordinator().createInitialTurn({
+      workspaceId: workspace.id, content: "Branch directly", parentThreadId: parent.id,
+      forkedFromMessageId: fork.id, startupId: directStartupId,
+    })).rejects.toThrow("Binding failed");
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(1);
+    expect(startups.get(directStartupId)).toMatchObject({ state: "failed", phase: "thread" });
+    db.close();
+  });
+
+  it("clears a managed branch binding when checkout failure deletes its child", async () => {
+    const { db, workspace, threads, threadService, startups, parent, fork, makeCoordinator } = branchHarness();
+    vi.mocked(threadService.create).mockImplementation(async (workspaceId, title, _mode, branch, options) => {
+      const child = threads.create(workspaceId, title, "worktree", branch, true, "claude");
+      options.lifecycle?.onThreadPersisted(child);
+      threads.hardDelete(child.id);
+      throw new Error("Checkout failed");
+    });
+    await expect(makeCoordinator().createInitialTurn({
+      workspaceId: workspace.id, content: "Branch in a worktree", mode: "worktree",
+      branch: "feature/child", parentThreadId: parent.id, forkedFromMessageId: fork.id,
+      startupId: managedStartupId,
+    })).rejects.toThrow("Checkout failed");
+    expect(startups.get(managedStartupId)).toMatchObject({ state: "failed", phase: "worktree" });
+    expect(startups.get(managedStartupId)?.threadId).toBeUndefined();
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(1);
+    db.close();
+  });
+
+  it("keeps a failed branch bound when its child still exists", async () => {
+    const { db, workspace, threads, startups, parent, fork, handoffs, makeCoordinator } = branchHarness();
+    handoffs.deliverHandoff.mockRejectedValueOnce(new Error("Handoff failed"));
+    await expect(makeCoordinator().createInitialTurn({
+      workspaceId: workspace.id, content: "Branch directly", parentThreadId: parent.id,
+      forkedFromMessageId: fork.id, startupId: directStartupId,
+    })).rejects.toThrow("Handoff failed");
+    const startup = startups.get(directStartupId);
+    expect(startup).toMatchObject({ state: "failed", phase: "thread" });
+    if (!startup?.threadId) throw new Error("Persisted child lost its startup binding");
+    expect(threads.findById(startup.threadId)).toMatchObject({ parent_thread_id: parent.id });
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(2);
+    db.close();
+  });
+
+  it("creates one child for concurrent branch retries and replays it after reconstruction", async () => {
+    const { db, workspace, threads, threadService, admissions, gitRepository, startups } = harness();
+    const parent = threads.create(workspace.id, "Parent", "direct", "main", true, "claude");
+    let finishBranch: (() => void) | undefined;
+    const branching = { create: vi.fn(async (_input: CreateBranchedThreadInput, lifecycle?: BranchedThreadLifecycle) => {
+      await new Promise<void>((resolve) => { finishBranch = resolve; });
+      return {
+        thread: lifecycle ? lifecycle.createAndBindDirectThread(() => threads.create(workspace.id, "Child", "direct", "main", true, "claude", {
+          parentThreadId: parent.id,
+        })) : threads.create(workspace.id, "Child", "direct", "main", true, "claude", { parentThreadId: parent.id }),
+        providerWireOverride: "Parent handoff",
+      };
+    }) };
+    const makeCoordinator = (startupService = startups) => new ThreadCreationCoordinator(
+      threads, () => threadService, admissions as never, gitRepository,
+      () => branching as never, undefined, () => startupService,
+    );
+    const coordinator = makeCoordinator();
+    const command = {
+      workspaceId: workspace.id,
+      content: "Branch this conversation",
+      parentThreadId: parent.id,
+      startupId: directStartupId,
+    };
+
+    const first = coordinator.createInitialTurn(command);
+    const second = coordinator.createInitialTurn(command);
+    await vi.waitFor(() => expect(finishBranch).toBeDefined());
+    await expect(coordinator.createInitialTurn({ ...command, content: "Different branch request" }))
+      .rejects.toThrow("already assigned to a different request");
+    finishBranch?.();
+    const [created, concurrentReplay] = await Promise.all([first, second]);
+    expect(created).toMatchObject({
+      kind: "dispatch", startupId: directStartupId,
+      command: { threadId: created.thread.id, providerWireOverride: "Parent handoff" },
+    });
+    expect(concurrentReplay).toMatchObject({ kind: "replay", thread: { id: created.thread.id } });
+    coordinator.startInitialAgent(directStartupId);
+    coordinator.completeInitialAgent(directStartupId);
+    expect(startups.get(directStartupId)).toMatchObject({ state: "completed", threadId: created.thread.id });
+
+    const restarted = makeCoordinator(new ThreadStartupService(new ThreadStartupRepo(db)));
+    const restartedReplay = await restarted.createInitialTurn(command);
+    expect(restartedReplay).toMatchObject({
+      kind: "replay", startupId: directStartupId, thread: { id: created.thread.id },
+    });
+    await expect(restarted.createInitialTurn({ ...command, content: "Different branch request" }))
+      .rejects.toThrow("already assigned to a different request");
+    expect(branching.create).toHaveBeenCalledOnce();
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(2);
+    db.close();
+  });
+
+  it("skips Setup for a managed branch and rejects replay of an interrupted first turn", async () => {
+    const { db, workspace, threads, threadService, admissions, gitRepository, startups } = harness();
+    const parent = threads.create(workspace.id, "Parent", "direct", "main", true, "claude");
+    const branching = { create: vi.fn(async (_input: CreateBranchedThreadInput, lifecycle?: BranchedThreadLifecycle) => {
+      const thread = threads.create(workspace.id, "Child", "worktree", "feature/child", true, "claude", {
+        parentThreadId: parent.id,
+      });
+      lifecycle?.onManagedThreadPersisted(thread);
+      return { thread, providerWireOverride: "Parent handoff" };
+    }) };
+    const makeCoordinator = (startupService = startups) => new ThreadCreationCoordinator(
+      threads, () => threadService, admissions as never, gitRepository,
+      () => branching as never, undefined, () => startupService,
+    );
+    const command = {
+      workspaceId: workspace.id, content: "Branch in a worktree", mode: "worktree" as const,
+      branch: "feature/child", parentThreadId: parent.id, startupId: managedStartupId,
+    };
+    const coordinator = makeCoordinator();
+    const created = await coordinator.createInitialTurn(command);
+    expect(created).toMatchObject({ kind: "dispatch", startupId: managedStartupId });
+    expect(startups.get(managedStartupId)).toMatchObject({
+      state: "running", phase: "agent", threadId: created.thread.id,
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "worktree", state: "completed" },
+        { phase: "setup", state: "skipped" },
+        { phase: "agent", state: "running" },
+      ],
+    });
+    startups.interruptNonterminalOnStartup();
+
+    const restarted = makeCoordinator(new ThreadStartupService(new ThreadStartupRepo(db)));
+    await expect(restarted.createInitialTurn(command))
+      .rejects.toThrow("was interrupted; inspect the workspace before retrying");
+    expect(branching.create).toHaveBeenCalledOnce();
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(2);
+    db.close();
+  });
+
+  it("replays the bound thread after startup service reconstruction without admitting another first turn", async () => {
+    const { db, workspace, threads, threadService, admissions, gitRepository, coordinator } = harness();
+    const command = { workspaceId: workspace.id, content: "Create once", startupId: directStartupId };
+    const first = await coordinator.createInitialTurn(command);
+    const restarted = new ThreadCreationCoordinator(
+      threads,
+      () => threadService,
+      admissions as never,
+      gitRepository,
+      undefined,
+      undefined,
+      () => new ThreadStartupService(new ThreadStartupRepo(db)),
+    );
+
+    const replay = await restarted.createInitialTurn(command);
+    expect(replay).toMatchObject({ kind: "replay", startupId: directStartupId, thread: { id: first.thread.id } });
+    expect(admissions.admitInitialAutomaticTurn).toHaveBeenCalledOnce();
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(1);
+    await expect(restarted.createInitialTurn({ ...command, content: "Different prompt" }))
+      .rejects.toThrow("already assigned to a different request");
+    db.close();
+  });
+
+  it("shares one creation for concurrent calls with the same startup ID", async () => {
+    const { db, workspace, threads, admissions, gitRepository, coordinator } = harness();
+    let finishFetch: (() => void) | undefined;
+    vi.mocked(gitRepository.fetchBranch).mockImplementation(() => new Promise<void>((resolve) => {
+      finishFetch = resolve;
+    }));
+    const command = {
+      workspaceId: workspace.id,
+      content: "Concurrent first turn",
+      pullRequestNumber: 42,
+      startupId: directStartupId,
+    };
+    const first = coordinator.createInitialTurn(command);
+    const second = coordinator.createInitialTurn(command);
+    await vi.waitFor(() => expect(finishFetch).toBeDefined());
+    await expect(coordinator.createInitialTurn({ ...command, content: "Different prompt" }))
+      .rejects.toThrow("already assigned to a different request");
+    finishFetch?.();
+
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.thread.id).toBe(b.thread.id);
+    expect(b.kind).toBe("replay");
+    expect(gitRepository.fetchBranch).toHaveBeenCalledOnce();
+    expect(admissions.admitInitialAutomaticTurn).toHaveBeenCalledOnce();
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(1);
+    db.close();
+  });
+
+  it("does not create another thread when an interrupted startup has no durable binding", async () => {
+    const { db, workspace, threads, startups, admissions, coordinator } = harness();
+    startups.start({ startupId: directStartupId, workspaceId: workspace.id, kind: "direct" });
+    startups.advance(directStartupId, "thread");
+    startups.interruptNonterminalOnStartup();
+
+    await expect(coordinator.createInitialTurn({
+      workspaceId: workspace.id,
+      content: "Retry after interruption",
+      startupId: directStartupId,
+    })).rejects.toThrow("inspect the workspace before retrying");
+    expect(threads.listByWorkspace(workspace.id)).toHaveLength(0);
+    expect(admissions.admitInitialAutomaticTurn).not.toHaveBeenCalled();
+    db.close();
+  });
+
   it("completes Direct startup only after first runtime admission and records a first-dispatch failure", async () => {
     const { db, workspace, startups, coordinator } = harness();
 
@@ -109,6 +369,15 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
         { phase: "agent", state: "pending" },
       ],
     });
+    expect(await coordinator.createInitialTurn({
+      workspaceId: workspace.id,
+      content: "Queue managed work",
+      mode: "worktree",
+      branch: "feature/managed",
+      startupId: managedStartupId,
+    })).toMatchObject({ kind: "replay", thread: { id: managed.id } });
+    expect(threadService.create).toHaveBeenCalledOnce();
+    expect(admissions.admitInitialAutomaticTurn).toHaveBeenCalledOnce();
     db.close();
   });
 
@@ -157,6 +426,15 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
       phase: "thread",
       error: { code: "THREAD_CREATE_FAILED", retryable: true },
     });
+    await expect(coordinator.createInitialTurn({
+      workspaceId: workspace.id,
+      content: "Review this PR",
+      mode: "worktree",
+      branch: "contributor/review",
+      pullRequestNumber: 42,
+      startupId: managedStartupId,
+    })).rejects.toThrow("retry with a new startup ID");
+    expect(threadService.create).not.toHaveBeenCalled();
     db.close();
   });
 

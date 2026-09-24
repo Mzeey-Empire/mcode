@@ -21,7 +21,7 @@ export class ThreadStartupRepo {
   }
 
   /** Insert one new startup snapshot. */
-  insert(startup: ThreadStartup): void {
+  insert(startup: ThreadStartup, requestFingerprint?: string): void {
     this.orm.insert(threadStartups).values({
       startupId: startup.startupId,
       workspaceId: startup.workspaceId,
@@ -32,12 +32,28 @@ export class ThreadStartupRepo {
       transcriptJson: JSON.stringify(startup.transcript),
       cancellation: startup.cancellation,
       revision: startup.revision,
+      requestFingerprint: requestFingerprint ?? null,
       threadId: startup.threadId ?? null,
       errorJson: startup.error ? JSON.stringify(startup.error) : null,
       blockJson: startup.block ? JSON.stringify(startup.block) : null,
       createdAt: startup.createdAt,
       updatedAt: startup.updatedAt,
     }).run();
+  }
+
+  /** Return the private request identity without exposing it in lifecycle snapshots. */
+  requestFingerprint(startupId: string): string | null {
+    const row = this.orm
+      .select({ requestFingerprint: threadStartups.requestFingerprint })
+      .from(threadStartups)
+      .where(eq(threadStartups.startupId, startupId))
+      .get();
+    return row?.requestFingerprint ?? null;
+  }
+
+  /** Commit direct thread creation and its startup binding together. */
+  transaction<T>(operation: () => T): T {
+    return this.orm.transaction(operation);
   }
 
   /** Return one startup snapshot by its client-generated identity. */

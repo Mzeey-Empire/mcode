@@ -70,6 +70,20 @@ describe("ThreadStartupService", () => {
     db.close();
   });
 
+  it("rejects a changed durable request identity after a new service instance opens the same database", () => {
+    const { db, service } = createHarness();
+    service.start(input(), "first-request");
+    const restarted = new ThreadStartupService(new ThreadStartupRepo(db));
+
+    expect(restarted.start(input(), "first-request").startupId).toBe(firstStartupId);
+    expect(() => restarted.start(input(), "changed-request")).toThrow(ThreadStartupConflictError);
+
+    // Rows created before the fingerprint migration remain readable and replayable.
+    service.start(input(secondStartupId));
+    expect(restarted.start(input(secondStartupId), "new-request").startupId).toBe(secondStartupId);
+    db.close();
+  });
+
   it("keeps terminal records stable", () => {
     const { db, service } = createHarness();
     service.start(input());

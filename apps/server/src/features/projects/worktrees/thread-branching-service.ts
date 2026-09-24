@@ -59,6 +59,12 @@ export interface ProvisionedBranchedThread {
   warnings?: string[];
 }
 
+/** Binds startup ownership immediately after the branched child is persisted. */
+export interface BranchedThreadLifecycle {
+  createAndBindDirectThread<T extends Thread>(create: () => T): T;
+  onManagedThreadPersisted(thread: Thread): void;
+}
+
 type Fork = {
   parent: Thread;
   message: Message;
@@ -87,10 +93,10 @@ export class ThreadBranchingService {
   ) {}
 
   /** Create the child and durable handoff before the runtime owner dispatches its first turn. */
-  async create(input: CreateBranchedThreadInput): Promise<ProvisionedBranchedThread> {
+  async create(input: CreateBranchedThreadInput, lifecycle?: BranchedThreadLifecycle): Promise<ProvisionedBranchedThread> {
     const fork = this.loadFork(input);
     const inherited = this.inheritSettings(fork.parent, input);
-    const created = await this.createChild(input, fork.messageId);
+    const created = await this.createChild(input, fork.messageId, lifecycle);
     const thread = this.configureChild(created.thread, input, inherited, fork.messageId);
     const handoff = await this.handoffs.deliverHandoff({
       parentThread: fork.parent,
@@ -146,46 +152,50 @@ export class ThreadBranchingService {
     };
   }
 
-  private async createChild(input: CreateBranchedThreadInput, messageId: string) {
+  private async createChild(input: CreateBranchedThreadInput, messageId: string, lifecycle?: BranchedThreadLifecycle) {
     if (input.existingWorktreePath) {
-      return { thread: await this.attachExisting(input, messageId) };
+      return { thread: await this.attachExisting(input, messageId, lifecycle) };
     }
-    if (input.mode === "worktree") return this.createManaged(input, messageId);
-    return { thread: this.threads.create(input.workspaceId, input.title, "direct", input.branch, true, input.provider, {
+    if (input.mode === "worktree") return this.createManaged(input, messageId, lifecycle);
+    const create = () => this.threads.create(input.workspaceId, input.title, "direct", input.branch, true, input.provider, {
       parentThreadId: input.parentThreadId,
       forkedFromMessageId: messageId,
-    }) };
+    });
+    return { thread: lifecycle ? lifecycle.createAndBindDirectThread(create) : create() };
   }
 
-  private async createManaged(input: CreateBranchedThreadInput, messageId: string) {
+  private async createManaged(input: CreateBranchedThreadInput, messageId: string, lifecycle?: BranchedThreadLifecycle) {
     const created = await this.threadService.create(input.workspaceId, input.title, "worktree", input.branch, {
       branchless: input.worktreeBranchMode !== "named",
+      lifecycle: {
+        onThreadPersisted: (thread) => {
+          this.threads.updateLineage(thread.id, input.parentThreadId, messageId);
+          this.threads.updateProvider(thread.id, input.provider);
+          lifecycle?.onManagedThreadPersisted(thread);
+        },
+      },
     });
-    try {
-      this.threads.updateLineage(created.id, input.parentThreadId, messageId);
-      this.threads.updateProvider(created.id, input.provider);
-    } catch (error) {
-      this.threads.softDelete(created.id);
-      throw error;
-    }
     return {
       thread: { ...created, provider: input.provider, parent_thread_id: input.parentThreadId, forked_from_message_id: messageId },
       warnings: created.warnings,
     };
   }
 
-  private async attachExisting(input: CreateBranchedThreadInput, messageId: string): Promise<Thread> {
+  private async attachExisting(input: CreateBranchedThreadInput, messageId: string, lifecycle?: BranchedThreadLifecycle): Promise<Thread> {
     const known = await this.worktrees.listWorktrees(input.workspaceId);
     const worktree = known.find((candidate) => this.samePath(candidate.path, input.existingWorktreePath!));
     if (!worktree) throw new Error("Path is not a recognized worktree");
     const branch = this.attachBranch(worktree.branch, input.existingWorktreeBaseBranch);
     const detached = worktree.branch === "(detached)";
-    const thread = this.threads.create(input.workspaceId, input.title, "worktree", branch, false, input.provider, {
-      parentThreadId: input.parentThreadId,
-      forkedFromMessageId: messageId,
-    }, detached ? "branchless" : "named", detached ? branch : null);
-    this.threads.updateWorktreePath(thread.id, worktree.path);
-    return { ...thread, worktree_path: worktree.path };
+    const create = () => {
+      const thread = this.threads.create(input.workspaceId, input.title, "worktree", branch, false, input.provider, {
+        parentThreadId: input.parentThreadId,
+        forkedFromMessageId: messageId,
+      }, detached ? "branchless" : "named", detached ? branch : null);
+      this.threads.updateWorktreePath(thread.id, worktree.path);
+      return { ...thread, worktree_path: worktree.path };
+    };
+    return lifecycle ? lifecycle.createAndBindDirectThread(create) : create();
   }
 
   private attachBranch(branch: string, baseBranch: string | undefined): string {
