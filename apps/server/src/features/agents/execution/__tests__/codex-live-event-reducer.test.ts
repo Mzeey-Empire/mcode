@@ -18,6 +18,53 @@ function boundByProvider(mapped: AgentEvent): AgentEvent {
 }
 
 describe("CodexLiveEventReducer", () => {
+  it("carries parsed plan questions as data on the completing text event", () => {
+    const reducer = new CodexLiveEventReducer(execution, "questions");
+    const question = { id: "q1", category: "AUTH", question: "Which login?", options: [
+      { id: "o1", title: "Passkey", description: "Use passkeys.", recommended: true },
+      { id: "o2", title: "Password", description: "Use passwords." },
+    ] };
+    const block = `\`\`\`plan-questions\n${JSON.stringify([question])}\n\`\`\``;
+    expect(reducer.reduce(event("turnStarted")).kind).toBe("reduced");
+    const first = reducer.reduce(event("textDelta", { delta: block.slice(0, 20) }));
+    expect(first.kind).toBe("reduced");
+    if (first.kind !== "reduced") return;
+    expect(first.writer).not.toContainEqual(expect.objectContaining({ kind: "plan-questions" }));
+    const second = reducer.reduce(event("textDelta", { delta: block.slice(20) }));
+    expect(second.kind).toBe("reduced");
+    if (second.kind !== "reduced") return;
+    expect(second.writer).toContainEqual({ kind: "plan-questions", questions: [question] });
+    expect(second.publication.after).toBe("writer");
+    expect(reducer.reduce(event("textDelta", { delta: block }))).toMatchObject({
+      kind: "reduced", writer: expect.not.arrayContaining([{ kind: "plan-questions", questions: [question] }]),
+    });
+  });
+
+  it("carries plan output data with the assistant body and bounds parser input", () => {
+    const reducer = new CodexLiveEventReducer(execution, "output");
+    const plan = { title: "Login plan", sections: [
+      { id: "s1", title: "Implementation", level: 1, content: "Add passkey login." },
+    ] };
+    const block = `\`\`\`plan-output\n${JSON.stringify(plan)}\n\`\`\``;
+    expect(reducer.reduce(event("turnStarted")).kind).toBe("reduced");
+    expect(reducer.reduce(event("textDelta", { delta: block })).kind).toBe("reduced");
+    const message = reducer.reduce(event("message", { content: "Provider prose", tokens: null }));
+    expect(message.kind).toBe("reduced");
+    if (message.kind !== "reduced") return;
+    expect(message.writer).toContainEqual({ kind: "plan-output", output: {
+      title: "Login plan", contentMd: "## Implementation\n\nAdd passkey login.",
+      sectionsJson: '[{"id":"s1","title":"Implementation","level":1}]', changeSummary: null,
+    } });
+    expect(message.writer[0]).toMatchObject({ kind: "assistant-body", content: "Provider prose" });
+
+    const bounded = new CodexLiveEventReducer(execution, "questions");
+    expect(bounded.reduce(event("turnStarted")).kind).toBe("reduced");
+    expect(bounded.reduce(event("textDelta", { delta: "x".repeat(256 * 1024) })).kind).toBe("reduced");
+    expect(bounded.reduce(event("textDelta", { delta: "x" }))).toEqual({
+      kind: "unsupported", eventType: "textDelta", reason: "plan text exceeds the execution projection limit",
+    });
+  });
+
   it("reduces a Codex notification sequence through tool narration and final answer", () => {
     const mapper = new CodexEventMapper(execution.threadId);
     const reducer = new CodexLiveEventReducer(execution);

@@ -1,6 +1,7 @@
-import type { AgentEvent, ParentNarrativeRecoveryItem, StoredAttachment } from "@mcode/contracts";
+import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, StoredAttachment } from "@mcode/contracts";
 import { NarrativeTurnState, type NarrativeTurnStateEffect } from "../conversation/narrative/narrative-turn-state.js";
 import { AssistantExecutionState, type AssistantMaterializationInput } from "../turns/assistant-execution-state.js";
+import { PlanExecutionState, type PlanPersistenceReady } from "../planning/plan-execution-state.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 
 type ToolUseEvent = Extract<AgentEvent, { type: "toolUse" }>;
@@ -9,6 +10,10 @@ type MessageEvent = Extract<AgentEvent, { type: "message" }>;
 type TextDeltaEvent = Extract<AgentEvent, { type: "textDelta" }>;
 type ContextEvent = Extract<AgentEvent, { type: "contextEstimate" | "turnComplete" }>;
 type SystemEvent = Extract<AgentEvent, { type: "system" }>;
+const MAX_PLAN_TEXT_BYTES = 256 * 1024;
+
+/** Which plan parser, if any, was armed when this execution began. */
+export type CodexPlanFeature = "none" | "questions" | "output";
 
 const BEFORE_START_EVENTS = new Set<AgentEvent["type"]>([
   "system", "quotaUpdate", "goalUpdated", "goalCleared", "mcpServerStartupStatus",
@@ -68,6 +73,8 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "narrative-recovery"; readonly items: ParentNarrativeRecoveryItem[] }
   | { readonly kind: "narrative-effect"; readonly effect: NarrativeTurnStateEffect }
   | { readonly kind: "feature-event"; readonly feature: "plan-text" | "assistant-message" | "task-tool" | "goal-refresh"; readonly event: AgentEvent }
+  | { readonly kind: "plan-questions"; readonly questions: readonly PlanQuestion[] }
+  | { readonly kind: "plan-output"; readonly output: PlanPersistenceReady }
   | { readonly kind: "context-usage"; readonly tokensIn: number; readonly contextWindow?: number }
   | { readonly kind: "compaction-started" }
   | { readonly kind: "compaction-divider" }
@@ -104,14 +111,20 @@ export class CodexLiveEventReducer {
   private unknownText = "";
   private knownFinalText = false;
   private compacting = false;
+  private readonly plan: PlanExecutionState | null;
+  private planTextBytes = 0;
+  private planQuestionsResolved = false;
 
-  constructor(readonly execution: ExecutionIdentity) {
+  constructor(readonly execution: ExecutionIdentity, readonly planFeature: CodexPlanFeature = "none") {
     this.narrative = new NarrativeTurnState(execution);
+    this.plan = planFeature === "none" ? null : new PlanExecutionState();
+    if (planFeature === "questions") this.plan?.beginQuestionGeneration();
+    if (planFeature === "output") this.plan?.beginOutputGeneration();
   }
 
   reduce(input: AgentEvent): CodexLiveReduction {
     const rejection = this.identityRejection(input) ?? UNSUPPORTED_FEATURE_REASON[input.type]
-      ?? this.phaseRejection(input) ?? this.textRejection(input);
+      ?? this.phaseRejection(input) ?? this.textRejection(input) ?? this.planTextRejection(input);
     if (rejection) return this.unsupported(input, rejection);
     let event: AgentEvent;
     try {
@@ -178,6 +191,12 @@ export class CodexLiveEventReducer {
     return undefined;
   }
 
+  private planTextRejection(event: AgentEvent): string | undefined {
+    if (!this.plan || this.planQuestionsResolved || event.type !== "textDelta") return undefined;
+    return this.planTextBytes + Buffer.byteLength(event.delta, "utf8") > MAX_PLAN_TEXT_BYTES
+      ? "plan text exceeds the execution projection limit" : undefined;
+  }
+
   private publicationEvent(event: AgentEvent): AgentEvent {
     return event.type === "ended" && event.outcome === "cancelled"
       ? { ...event, outcome: "interrupted" }
@@ -235,6 +254,14 @@ export class CodexLiveEventReducer {
 
   private textDelta(event: TextDeltaEvent): CodexLiveWriterIntent[] {
     const writer: CodexLiveWriterIntent[] = [{ kind: "feature-event", feature: "plan-text", event }];
+    if (this.plan && !this.planQuestionsResolved) {
+      this.planTextBytes += Buffer.byteLength(event.delta, "utf8");
+      const ready = this.plan.feedText(event.delta);
+      if (ready) {
+        this.planQuestionsResolved = true;
+        writer.push({ kind: "plan-questions", questions: ready.questions });
+      }
+    }
     if (event.isFinalResponse === false) {
       this.narrative.openOrExtendThought(event.threadId, event.delta);
       writer.push(this.recovery());
@@ -278,10 +305,15 @@ export class CodexLiveEventReducer {
     this.narrative.clearAgentStackOnMessage(event.threadId);
     this.knownFinalText = false;
     this.unknownText = "";
-    return [
+    const writer: CodexLiveWriterIntent[] = [
       { kind: "assistant-body", content: body.content, model: body.model, attachments: body.attachments, tokens: event.tokens },
       { kind: "feature-event", feature: "assistant-message", event },
     ];
+    if (this.plan && this.planFeature === "output") {
+      const output = this.plan.consumeAssistantMessage(event.content);
+      if (output) writer.push({ kind: "plan-output", output });
+    }
+    return writer;
   }
 
   private attachment(event: Extract<AgentEvent, { type: "generatedAttachment" }>): CodexLiveWriterIntent[] {
