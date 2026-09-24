@@ -2,8 +2,10 @@ import "reflect-metadata";
 import { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
 import { CanonicalAgentWriterReceipts, CanonicalWriterOperationConflict, CanonicalWriterReceiptCapacity } from "./canonical-agent-writer-receipts.js";
 import type {
@@ -18,6 +20,8 @@ let db: Database | undefined;
 let boundary: CanonicalAgentBoundary | undefined;
 let assistantTextCheckpoints: ParentAssistantTextCheckpointService | undefined;
 let receipts: CanonicalAgentWriterReceipts | undefined;
+let semanticWriter: CanonicalExecutionSemanticWriter | undefined;
+let semanticPublication: CanonicalAgentEventEnvelope[] | undefined;
 
 function openDatabase(dbPath: string): void {
   if (boundary || !NodePath.isAbsolute(dbPath) || !NodeFS.existsSync(dbPath)) {
@@ -29,11 +33,16 @@ function openDatabase(dbPath: string): void {
     boundary = new CanonicalAgentBoundary(connection, () => {});
     assistantTextCheckpoints = new ParentAssistantTextCheckpointService(connection);
     receipts = new CanonicalAgentWriterReceipts(connection);
+    semanticWriter = new CanonicalExecutionSemanticWriter(connection, (events) => {
+      if (!semanticPublication) throw new Error("Semantic publication has no active request");
+      semanticPublication.push(...events);
+    });
     db = connection;
   } catch (error) {
     boundary = undefined;
     assistantTextCheckpoints = undefined;
     receipts = undefined;
+    semanticWriter = undefined;
     connection.close(true);
     throw error;
   }
@@ -93,6 +102,7 @@ async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterR
     boundary = undefined;
     assistantTextCheckpoints = undefined;
     receipts = undefined;
+    semanticWriter = undefined;
     db?.close(true);
     db = undefined;
     return { ...correlation, kind: "closed" };
@@ -106,7 +116,31 @@ async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterR
       return { ...correlation, kind: "failed", reason: "write-failed" };
     }
   }
+  if (request.kind === "semantic-transact") {
+    return handleSemanticWrite(request, correlation);
+  }
   return handleWrite(request, correlation);
+}
+
+async function handleSemanticWrite(
+  request: Extract<CanonicalWriterRequest, { kind: "semantic-transact" }>,
+  correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
+): Promise<CanonicalWriterResponse> {
+  try {
+    if (!semanticWriter || semanticPublication) throw new Error("Semantic writer is not ready");
+    if (request.operation.operationId !== request.operationId
+      || request.operation.execution.executionId !== request.executionId) {
+      throw new Error("Semantic writer request identity mismatch");
+    }
+    semanticPublication = [];
+    const receipt = await semanticWriter.transact(request.operation);
+    const events = semanticPublication;
+    return { ...correlation, kind: "semantic-transacted", result: { receipt, events } };
+  } catch {
+    return { ...correlation, kind: "failed", reason: "write-failed" };
+  } finally {
+    semanticPublication = undefined;
+  }
 }
 
 async function handleWrite(

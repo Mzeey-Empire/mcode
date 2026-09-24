@@ -1,4 +1,5 @@
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execution/execution-worker-handler.js";
 import type {
   CanonicalAgentCommitInput,
   CanonicalAgentCommitResult,
@@ -33,6 +34,12 @@ export interface CanonicalParentNarrativeClassificationReceipt {
   reset: true;
 }
 
+/** A semantic transaction and the committed envelopes awaiting publication. */
+export interface CanonicalSemanticWriteResult {
+  receipt: ExecutionWriteReceipt;
+  events: readonly CanonicalAgentEventEnvelope[];
+}
+
 interface Correlation {
   requestId: string;
   operationId: string;
@@ -42,6 +49,7 @@ interface Correlation {
 export type CanonicalWriterRequest =
   | (Correlation & { kind: "open"; dbPath: string })
   | (Correlation & { kind: "commit"; input: CanonicalProviderWriteInput })
+  | (Correlation & { kind: "semantic-transact"; operation: ExecutionSemanticOperation })
   | (Correlation & { kind: "record-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
   | (Correlation & { kind: "classify-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
   | (Correlation & { kind: "ack-operation" })
@@ -50,6 +58,7 @@ export type CanonicalWriterRequest =
 export type CanonicalWriterResponse =
   | (Correlation & { kind: "opened" })
   | (Correlation & { kind: "committed"; receipt: CanonicalProviderWriteReceipt })
+  | (Correlation & { kind: "semantic-transacted"; result: CanonicalSemanticWriteResult })
   | (Correlation & { kind: "parent-narrative-recovery-recorded"; receipt: CanonicalParentNarrativeRecoveryReceipt })
   | (Correlation & { kind: "parent-narrative-recovery-classified"; receipt: CanonicalParentNarrativeClassificationReceipt })
   | (Correlation & { kind: "operation-acknowledged" })

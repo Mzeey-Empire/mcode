@@ -5,10 +5,12 @@ import type {
   CanonicalParentNarrativeRecoveryReceipt,
   CanonicalProviderWriteInput,
   CanonicalProviderWriteReceipt,
+  CanonicalSemanticWriteResult,
   CanonicalWriterRequest,
   CanonicalWriterResponse,
 } from "./canonical-agent-writer-protocol.js";
 import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
+import type { ExecutionSemanticOperation } from "../execution/execution-worker-handler.js";
 
 const MAX_PENDING_WRITES = 64;
 const MAX_WORKER_ATTEMPTS = 3;
@@ -64,6 +66,19 @@ export class CanonicalAgentWriterClient {
     });
     if (response.kind !== "committed") throw new Error("Canonical writer returned an unexpected response");
     return response.receipt;
+  }
+
+  /** Commits one execution semantic operation on the writer worker and returns envelopes for publication. */
+  async transactSemantic(operation: ExecutionSemanticOperation): Promise<CanonicalSemanticWriteResult> {
+    if (!operation.operationId || !operation.execution.executionId) {
+      throw new Error("Semantic writer operation and execution IDs are required");
+    }
+    const response = await this.sendWithRetry({
+      kind: "semantic-transact", requestId: NodeCrypto.randomUUID(),
+      operationId: operation.operationId, executionId: operation.execution.executionId, operation,
+    });
+    if (response.kind !== "semantic-transacted") throw new Error("Canonical writer returned an unexpected response");
+    return response.result;
   }
 
   /** Resolves after recovery writes finish; a lost reply replays the durable receipt. */
