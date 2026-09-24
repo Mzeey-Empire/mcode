@@ -18,7 +18,7 @@ import type { ExecutionMailboxCommand } from "./execution-mailbox-scheduler.js";
 export type ExecutionWorkCommand =
   | { readonly kind: "start"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput }
   | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
-  | { readonly kind: "event"; readonly events: readonly ProviderEventDraft[] }
+  | { readonly kind: "event"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[] }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
   | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
   | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
@@ -35,7 +35,7 @@ export interface ExecutionSemanticOperation {
   readonly mutation:
     | { readonly kind: "begin"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput }
     | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
-    | { readonly kind: "append-events"; readonly events: readonly ProviderEventDraft[] }
+    | { readonly kind: "append-events"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[] }
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
     | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
@@ -203,7 +203,7 @@ function eventMutation(
   state: ExecutionState,
 ): ExecutionSemanticOperation["mutation"] | undefined {
   if (state.phase !== "running" || !validEventRouting(command.events, execution)) return undefined;
-  return { kind: "append-events", events: command.events };
+  return { kind: "append-events", phase: command.phase, nativeCursor: command.nativeCursor, events: command.events };
 }
 
 function stopMutation(

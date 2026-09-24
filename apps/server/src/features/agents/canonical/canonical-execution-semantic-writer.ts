@@ -161,7 +161,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private append(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
     const mutation = operation.mutation;
-    if (mutation.kind !== "append-events" || mutation.events.length === 0
+    if (mutation.kind !== "append-events" || !mutation.phase || mutation.phase.length > 64
+      || mutation.events.length === 0
       || mutation.events.some((event) => event.routing.threadId !== operation.execution.threadId
         || event.routing.turnId !== operation.execution.turnId
         || event.routing.executionId !== operation.execution.executionId)) return conflict(operation);
@@ -169,7 +170,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const head = this.requireNextHead(operation);
       const result = this.turns.append({
         ...operation.execution,
-        phase: "running",
+        phase: mutation.phase,
+        nativeCursor: mutation.nativeCursor,
         events: mutation.events,
       });
       if (result.outcome !== "committed") throw new SemanticConflict();

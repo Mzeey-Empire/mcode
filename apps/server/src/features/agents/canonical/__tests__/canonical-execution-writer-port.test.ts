@@ -257,7 +257,8 @@ describe("execution semantic writer transport", () => {
       if (start.kind !== "begin") throw new Error("Unexpected begin operation");
       await expect(send(claim.lease, { kind: "start", providerId: "codex", input: start.input }))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
-      await expect(send(claim.lease, { kind: "event", events: [{
+      const nativeCursor = { providerId: "codex", scope: "thread", value: "native-worker-thread", provenance: "native" };
+      await expect(send(claim.lease, { kind: "event", phase: "running", nativeCursor, events: [{
         eventId: `${EXECUTION_ID}:worker-item`,
         routing: { ...execution, itemId: "worker-item" },
         sourceProviderId: "codex", sourceIdentities: [], sourceSequence: 1,
@@ -267,6 +268,8 @@ describe("execution semantic writer transport", () => {
           createdAt: NOW, updatedAt: NOW,
         } },
       }] })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      expect(db.prepare("SELECT native_cursor_json FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+        .get(EXECUTION_ID)).toEqual({ native_cursor_json: JSON.stringify(nativeCursor) });
       await expect(send(claim.lease, { kind: "provider-outcome", outcome: "completed" }))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
       await expect(send(claim.lease, { kind: "stage-terminal", input: {

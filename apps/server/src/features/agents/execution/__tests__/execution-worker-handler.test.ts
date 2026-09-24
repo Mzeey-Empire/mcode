@@ -151,12 +151,12 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
   it("runs one synthetic turn from start through Stop, checkpoint, and finalization", async () => {
     const { scheduler, worker, writer, lease } = fixture();
     await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
-    await committed(submit(scheduler, lease, { kind: "event", events: [eventDraft()] }), 2);
+    await committed(submit(scheduler, lease, { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] }), 2);
     const stop = submit(scheduler, lease, { kind: "stop", requestId: "stop-1" });
     expect(scheduler.submit({
       execution: EXECUTION,
       lease,
-      command: { kind: "event", events: [eventDraft()] },
+      command: { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] },
       byteLength: 1_000,
     })).toEqual({ kind: "stopping" });
     await committed(stop, 3);
@@ -189,7 +189,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     writer.beforeCommit = () => new Promise<void>((resolve) => { releaseWrite = resolve; });
     const { scheduler, worker, lease } = fixture(writer);
     const start = submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT });
-    const event = submit(scheduler, lease, { kind: "event", events: [eventDraft()] });
+    const event = submit(scheduler, lease, { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] });
     await Promise.resolve();
     expect(worker.requests).toHaveLength(1);
     expect(scheduler.depth()).toMatchObject({ pending: 2 });
@@ -225,7 +225,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     writer.conflictKind = "append-events";
     const { scheduler, lease } = fixture(writer);
     await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
-    await expect(submit(scheduler, lease, { kind: "event", events: [eventDraft()] }).completion).resolves.toEqual({
+    await expect(submit(scheduler, lease, { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] }).completion).resolves.toEqual({
       kind: "reply",
       result: { kind: "rejected", reason: "writer-conflict" },
     });
@@ -241,7 +241,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     };
     const { scheduler, worker, lost, lease } = fixture(writer);
     await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
-    await expect(submit(scheduler, lease, { kind: "event", events: [eventDraft()] }).completion)
+    await expect(submit(scheduler, lease, { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] }).completion)
       .resolves.toEqual({ kind: "worker-lost" });
     expect(lost).toEqual([[{ execution: EXECUTION, lease }]]);
     expect(worker.terminated).toBe(true);

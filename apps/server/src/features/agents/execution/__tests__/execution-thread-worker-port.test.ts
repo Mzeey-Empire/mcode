@@ -122,7 +122,7 @@ describe("ExecutionThreadWorkerPort", () => {
       await expect(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 1 } });
       await expect(port.whenReady()).resolves.toBe(true);
-      await expect(submit(scheduler, lease, { kind: "event", events: [eventDraft()] }))
+      await expect(submit(scheduler, lease, { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] }))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 2 } });
       await expect(submit(scheduler, lease, { kind: "stop", requestId: "stop-real-worker" }))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 3 } });

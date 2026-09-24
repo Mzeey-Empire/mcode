@@ -115,7 +115,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
   it("commits start, event, and finalization with durable receipts across a database reload", async () => {
     const begin = operation(1, { kind: "begin", providerId: "codex", input: startInput() });
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    expect((await send(2, { kind: "event", events: [event()] })).kind).toBe("committed");
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [event()] })).kind).toBe("committed");
     const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
     const finish = {
       threadId: THREAD_ID,
@@ -152,7 +152,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
   it("rejects stale leases and skipped ordinals while checkpointing without a new event", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const eventsBefore = db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?").get(EXECUTION_ID);
-    const append = operation(2, { kind: "append-events", events: [event()] });
+    const append = operation(2, { kind: "append-events", phase: "running", nativeCursor: null, events: [event()] });
     expect(await writer.transact({ ...append, lease: { ...lease, ownerEpoch: 2, leaseId: "lease-2" }, operationId: "lease-2:2" }))
       .toEqual({ kind: "conflict", operationId: "lease-2:2" });
     expect(await writer.transact({ ...append, ordinal: 3, operationId: "lease-1:3" }))
@@ -199,14 +199,14 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const before = db.prepare("SELECT last_durable_sequence FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(EXECUTION_ID);
     db.run("CREATE TRIGGER fail_semantic_event_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:append-events' BEGIN SELECT RAISE(ABORT, 'event receipt unavailable'); END");
-    await expect(send(2, { kind: "event", events: [event()] })).rejects.toThrow("event receipt unavailable");
+    await expect(send(2, { kind: "event", phase: "running", nativeCursor: null, events: [event()] })).rejects.toThrow("event receipt unavailable");
     expect(db.prepare("SELECT last_durable_sequence FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(EXECUTION_ID)).toEqual(before);
     expect(db.prepare("SELECT id FROM canonical_agent_items WHERE id = ?").get("item-1")).toBeNull();
     expect(published).not.toContain(event().eventId);
 
     db.run("DROP TRIGGER fail_semantic_event_receipt");
-    expect((await send(2, { kind: "event", events: [event()] })).kind).toBe("committed");
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [event()] })).kind).toBe("committed");
     expect(published).toContain(event().eventId);
   });
 
@@ -219,7 +219,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     handler = new ExecutionWorkerHandler(writer);
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     failPublication = true;
-    await expect(send(2, { kind: "event", events: [event()] })).rejects.toThrow("publisher unavailable");
+    await expect(send(2, { kind: "event", phase: "running", nativeCursor: null, events: [event()] })).rejects.toThrow("publisher unavailable");
     expect(db.prepare("SELECT event_id FROM canonical_agent_events WHERE event_id = ?").get(event().eventId))
       .toEqual({ event_id: event().eventId });
     const receipt = db.prepare("SELECT receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
@@ -232,7 +232,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     writer = new CanonicalExecutionSemanticWriter(db, (events) => {
       published.push(...events.map((item) => item.eventId));
     });
-    expect(await writer.transact(operation(2, { kind: "append-events", events: [event()] })))
+    expect(await writer.transact(operation(2, { kind: "append-events", phase: "running", nativeCursor: null, events: [event()] })))
       .toMatchObject({ kind: "committed", operationId: "lease-1:2" });
     expect(published).toContain(event().eventId);
   });
