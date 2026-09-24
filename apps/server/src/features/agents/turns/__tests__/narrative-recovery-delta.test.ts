@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
 
-import { NarrativeRecoveryDelta } from "../narrative-recovery-delta.js";
+import { NarrativeRecoveryDelta, splitNarrativeRecoveryDelta } from "../narrative-recovery-delta.js";
 
 const thought = {
   kind: "narrationSegment",
@@ -52,5 +52,39 @@ describe("NarrativeRecoveryDelta", () => {
     expect(firstExecution.prepare([thought])).toBeNull();
     expect(secondExecution.prepare([thought])).toMatchObject({ items: [thought] });
     expect(secondExecution.prepare([])).toBeNull();
+  });
+
+  it("splits a large delta without acknowledging any chunk early", () => {
+    const delta = new NarrativeRecoveryDelta();
+    const snapshot = Array.from({ length: 63 }, (_, index) => ({
+      ...thought,
+      record: { ...thought.record, id: `thought-${index}` },
+    }));
+    const prepared = delta.prepare(snapshot);
+    expect(prepared).not.toBeNull();
+    if (!prepared) return;
+
+    const chunks = splitNarrativeRecoveryDelta("execution-1", prepared);
+    expect(chunks.map((chunk) => chunk.items.length)).toEqual([62, 1]);
+    expect(chunks.flatMap((chunk) => chunk.items)).toEqual(snapshot);
+    expect(delta.prepare(snapshot)?.items).toHaveLength(63);
+    prepared.acknowledge();
+    expect(delta.prepare(snapshot)).toBeNull();
+  });
+
+  it("splits by serialized bytes and rejects an item larger than one command", () => {
+    const delta = new NarrativeRecoveryDelta();
+    const snapshot = ["first", "second"].map((id) => ({
+      ...thought,
+      record: { ...thought.record, id, text: "x".repeat(150_000) },
+    }));
+    const prepared = delta.prepare(snapshot);
+    expect(prepared).not.toBeNull();
+    if (!prepared) return;
+    expect(splitNarrativeRecoveryDelta("execution-1", prepared).map((chunk) => chunk.items.length)).toEqual([1, 1]);
+    const oversized = delta.prepare([{ ...thought, record: { ...thought.record, text: "x".repeat(300_000) } }]);
+    expect(oversized).not.toBeNull();
+    if (!oversized) return;
+    expect(() => splitNarrativeRecoveryDelta("execution-1", oversized)).toThrow("exceeds one writer command");
   });
 });

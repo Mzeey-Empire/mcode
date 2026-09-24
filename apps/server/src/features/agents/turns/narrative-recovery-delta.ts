@@ -1,4 +1,6 @@
 import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
+import type { ParentNarrativeRecoveryCommit } from "./parent-turn-durability.js";
 
 /** One full-snapshot difference awaiting confirmation of its durable write. */
 export interface PreparedNarrativeRecoveryDelta {
@@ -36,6 +38,40 @@ export class NarrativeRecoveryDelta {
       },
     };
   }
+}
+
+/** Split one prepared delta into writer-sized commands; acknowledge only after every command commits. */
+export function splitNarrativeRecoveryDelta(
+  executionId: string,
+  prepared: PreparedNarrativeRecoveryDelta,
+): ParentNarrativeRecoveryCommit[] {
+  if (!executionId) throw new Error("Narrative recovery requires an execution ID");
+  const chunks: ParentNarrativeRecoveryCommit[] = [];
+  let items: ParentNarrativeRecoveryItem[] = [];
+  let discardedItemIds: string[] = [];
+  const flush = (): void => {
+    if (items.length === 0 && discardedItemIds.length === 0) return;
+    chunks.push({ executionId, items, discardedItemIds });
+    items = [];
+    discardedItemIds = [];
+  };
+  const fits = (nextItems: ParentNarrativeRecoveryItem[], nextDiscarded: string[]): boolean => {
+    if (nextItems.length + nextDiscarded.length > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
+    return Buffer.byteLength(JSON.stringify({ executionId, items: nextItems, discardedItemIds: nextDiscarded }), "utf8")
+      <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes;
+  };
+  for (const item of prepared.items) {
+    if (!fits([...items, item], discardedItemIds)) flush();
+    if (!fits([item], [])) throw new Error("Narrative recovery item exceeds one writer command");
+    items.push(item);
+  }
+  for (const itemId of prepared.discardedItemIds) {
+    if (!fits(items, [...discardedItemIds, itemId])) flush();
+    if (!fits([], [itemId])) throw new Error("Narrative recovery discard exceeds one writer command");
+    discardedItemIds.push(itemId);
+  }
+  flush();
+  return chunks;
 }
 
 function canonicalItemId(key: string): string {
