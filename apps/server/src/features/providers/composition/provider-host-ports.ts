@@ -88,7 +88,12 @@ export function createProviderHostPorts(
     events: {
       submit: async (batch) => {
         const operationId = NodeCrypto.createHash("sha256")
-          .update(JSON.stringify([batch.executionId, batch.events.map((event) => event.eventId)]))
+          .update(JSON.stringify([
+            batch.executionId,
+            batch.phase,
+            batch.nativeCursor ?? null,
+            batch.events.map((event) => event.eventId),
+          ]))
           .digest("hex");
         const result = await dependencies.events.commit(operationId, {
           threadId: batch.threadId,

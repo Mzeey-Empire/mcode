@@ -148,4 +148,34 @@ describe("createProviderHostPorts", () => {
     await expect(ports.events.submit(batch)).rejects.toThrow("commit failed");
     expect(acceptCommitted).not.toHaveBeenCalled();
   });
+
+  it("uses one operation identity for a retry and distinct identities for other phases", async () => {
+    const commit = vi.fn(async () => ({
+      outcome: "duplicate" as const,
+      conversationRevision: 1,
+      rosterRevision: 0,
+      acceptedThrough: 1,
+      durableThrough: 1,
+      events: [],
+    }));
+    const ports = createProviderHostPorts({
+      runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
+      envService: { getEnv: () => ({}) },
+      jobObject: { isWindowsJob: false },
+      browser: {},
+      threadControl: {},
+      grants: {},
+      events: { commit },
+      publishCanonicalEvents: vi.fn(),
+      ingress: { acceptCommitted: vi.fn() },
+    } as never);
+    const batch = { threadId: "thread-1", turnId: "turn-1", executionId: EXECUTION_ID, phase: "streaming", events: [] };
+
+    await ports.events.submit(batch);
+    await ports.events.submit(batch);
+    await ports.events.submit({ ...batch, phase: "completed" });
+    const operationIds = commit.mock.calls.map(([operationId]) => operationId);
+    expect(operationIds[0]).toBe(operationIds[1]);
+    expect(operationIds[2]).not.toBe(operationIds[0]);
+  });
 });
