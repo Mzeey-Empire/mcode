@@ -59,6 +59,7 @@ class RecordingWriter implements ExecutionSemanticWriter {
 class InlineWorker implements ExecutionWorkerPort<Command, ExecutionWorkerResult> {
   onmessage: ((event: MessageEvent<ExecutionWorkerReply<ExecutionWorkerResult>>) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
+  onclose: (() => void) | null = null;
   readonly requests: ExecutionWorkerRequest<Command>[] = [];
   terminated = false;
 

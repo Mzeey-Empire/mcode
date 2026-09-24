@@ -349,6 +349,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     const worker = this.createWorker(slot.index);
     worker.onmessage = (event) => this.receive(slot, generation, event.data);
     worker.onerror = () => this.workerLost(slot, generation);
+    worker.onclose = () => this.workerLost(slot, generation);
     slot.worker = worker;
   }
 
@@ -366,9 +367,10 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
 
   private workerLost(slot: Slot<ExecutionMailboxCommand<Work>, Result>, generation: number): void {
     if (this.stopped || slot.generation !== generation) return;
-    slot.worker?.terminate();
+    const worker = slot.worker;
     slot.worker = undefined;
     slot.generation += 1;
+    worker?.terminate();
     const revoked = [...this.byThread.values()]
       .filter((assignment) => assignment.slot === slot)
       .map((assignment) => assignment.execution);

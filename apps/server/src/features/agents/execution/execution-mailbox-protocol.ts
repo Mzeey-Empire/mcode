@@ -43,6 +43,7 @@ export type ExecutionMailboxCompletion<Result> =
 export interface ExecutionWorkerPort<Command, Result> {
   onmessage: ((event: MessageEvent<ExecutionWorkerReply<Result>>) => void) | null;
   onerror: ((event: ErrorEvent) => void) | null;
+  onclose: (() => void) | null;
   postMessage(request: ExecutionWorkerRequest<Command>): void;
   terminate(): void;
 }

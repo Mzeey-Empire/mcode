@@ -574,13 +574,14 @@ export function findCopilotSdkPath(serverCjsOut, platform, arch) {
   return NodeFS.existsSync(copilotIndex) && NodeFS.existsSync(platformEntry) ? copilotIndex : undefined;
 }
 
-/** Bundle the server and its isolated PTY host from one compiled server tree. */
+/** Bundle the server and its isolated workers from one compiled server tree. */
 export async function buildServerRuntimeBundles({
   serverRoot,
   serverOutFile,
   ptyHostOutFile,
   providerEventWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "provider-event.worker.cjs"),
   canonicalWriterWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "canonical-agent-writer.worker.cjs"),
+  executionWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "execution.worker.cjs"),
   production = false,
 }) {
   const shared = {
@@ -626,6 +627,11 @@ export async function buildServerRuntimeBundles({
     entryPoints: [NodePath.resolve(serverRoot, "dist-tsc/features/agents/canonical/canonical-agent-writer.worker.js")],
     outfile: canonicalWriterWorkerOutFile,
   }));
+  bundles.push(build({
+    ...shared,
+    entryPoints: [NodePath.resolve(serverRoot, "dist-tsc/features/agents/execution/execution.worker.js")],
+    outfile: executionWorkerOutFile,
+  }));
   await Promise.all(bundles);
 }
 
@@ -663,5 +669,5 @@ export async function rebuildServerDevBundle(options = {}) {
     console.log(`[server-dev-bundle] Copied Drizzle migrations -> ${drizzleDst}`);
   }
 
-  console.log(`[server-dev-bundle] Complete: ${serverOutFile}, ${ptyHostOutFile}`);
+  console.log(`[server-dev-bundle] Complete: ${serverOutFile}, ${ptyHostOutFile}, execution.worker.cjs`);
 }

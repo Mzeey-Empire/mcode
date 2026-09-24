@@ -90,7 +90,7 @@ await buildServerRuntimeBundles({
   production: true,
 });
 
-console.log("Server bundles complete: dist/server/server.cjs, dist/server/pty-host.cjs");
+console.log("Server bundles complete: dist/server/server.cjs, dist/server/pty-host.cjs, dist/server/execution.worker.cjs");
 
 const drizzleSrc = NodePath.resolve(serverRoot, "drizzle");
 const drizzleDst = NodePath.resolve(desktopRoot, "dist/server/drizzle");

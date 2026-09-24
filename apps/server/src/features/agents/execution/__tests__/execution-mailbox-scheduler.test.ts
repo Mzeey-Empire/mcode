@@ -34,6 +34,7 @@ const LIMITS: ExecutionMailboxLimits = {
 class FakeWorker implements ExecutionWorkerPort<Command, Result> {
   onmessage: ((event: MessageEvent<ExecutionWorkerReply<Result>>) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
+  onclose: (() => void) | null = null;
   readonly requests: ExecutionWorkerRequest<Command>[] = [];
   terminated = false;
 
@@ -53,6 +54,10 @@ class FakeWorker implements ExecutionWorkerPort<Command, Result> {
 
   crash(): void {
     this.onerror?.(new ErrorEvent("error"));
+  }
+
+  close(): void {
+    this.onclose?.();
   }
 }
 
@@ -304,6 +309,18 @@ describe("ExecutionMailboxScheduler", () => {
     expect(lost).toEqual([[failed]]);
     const another = execution("another");
     expect(claimed(scheduler, another).workerIndex).toBe(1);
+    scheduler.shutdown();
+  });
+
+  it("revokes retained commands when a worker exits without an error", async () => {
+    const { scheduler, workers, lost } = fixture();
+    const identity = execution("closed");
+    const lease = claimed(scheduler, identity);
+    const event = admitted(scheduler, identity, lease, { kind: "event", sequence: 1 });
+    workers[0]?.close();
+    expect(await event.completion).toEqual({ kind: "worker-lost" });
+    expect(lost).toEqual([[identity]]);
+    expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 0 });
     scheduler.shutdown();
   });
 
