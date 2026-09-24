@@ -60,12 +60,18 @@ export interface ExecutionMailboxLimits {
   readonly reservedPerExecutionControlBytes: number;
 }
 
+/** Exact ownership that a host must revoke before replacing a lost worker. */
+export interface ExecutionLostAssignment {
+  readonly execution: ExecutionIdentity;
+  readonly lease: ExecutionLease;
+}
+
 /** The host supplies durable owner epochs and a worker factory for each fixed slot. */
 export interface ExecutionMailboxOptions<Work extends { readonly kind: string }, Result> {
   readonly workerCount: number;
   readonly limits: ExecutionMailboxLimits;
   readonly createWorker: (workerIndex: number) => ExecutionWorkerPort<ExecutionMailboxCommand<Work>, Result>;
-  readonly onWorkerLost: (executions: readonly ExecutionIdentity[]) => void;
+  readonly onWorkerLost: (assignments: readonly ExecutionLostAssignment[]) => void;
 }
 
 export type ExecutionClaim =
@@ -373,9 +379,9 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     worker?.terminate();
     const revoked = [...this.byThread.values()]
       .filter((assignment) => assignment.slot === slot)
-      .map((assignment) => assignment.execution);
+      .map((assignment) => ({ execution: assignment.execution, lease: assignment.lease }));
     this.settleSlot(slot, "worker-lost");
-    for (const execution of revoked) this.byThread.delete(execution.threadId);
+    for (const assignment of revoked) this.byThread.delete(assignment.execution.threadId);
     slot.activeCount = 0;
     this.onWorkerLost(revoked);
   }

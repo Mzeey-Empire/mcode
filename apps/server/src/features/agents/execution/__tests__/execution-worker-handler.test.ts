@@ -9,6 +9,7 @@ import {
   ExecutionMailboxScheduler,
   type ExecutionMailboxCommand,
   type ExecutionMailboxLimits,
+  type ExecutionLostAssignment,
 } from "../execution-mailbox-scheduler.js";
 import type {
   ExecutionIdentity,
@@ -102,7 +103,7 @@ class InlineWorker implements ExecutionWorkerPort<Command, ExecutionWorkerResult
 
 function fixture(writer = new RecordingWriter()) {
   const workers: InlineWorker[] = [];
-  const lost: ExecutionIdentity[][] = [];
+  const lost: ExecutionLostAssignment[][] = [];
   const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
     workerCount: 1,
     limits: LIMITS,
@@ -242,7 +243,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
     await expect(submit(scheduler, lease, { kind: "event", events: [eventDraft()] }).completion)
       .resolves.toEqual({ kind: "worker-lost" });
-    expect(lost).toEqual([[EXECUTION]]);
+    expect(lost).toEqual([[{ execution: EXECUTION, lease }]]);
     expect(worker.terminated).toBe(true);
     expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 0 });
     scheduler.shutdown();

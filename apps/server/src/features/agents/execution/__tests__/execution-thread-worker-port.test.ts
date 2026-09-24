@@ -5,7 +5,11 @@ import type {
   DataOnlyParentTurnFinishInput,
   DataOnlyParentTurnStartInput,
 } from "../../canonical/canonical-parent-turn-write.js";
-import { ExecutionMailboxScheduler, type ExecutionMailboxLimits } from "../execution-mailbox-scheduler.js";
+import {
+  ExecutionMailboxScheduler,
+  type ExecutionMailboxLimits,
+  type ExecutionLostAssignment,
+} from "../execution-mailbox-scheduler.js";
 import type { ExecutionIdentity, ExecutionLease } from "../execution-mailbox-protocol.js";
 import { ExecutionThreadWorkerPort } from "../execution-worker-port.js";
 import type {
@@ -63,7 +67,7 @@ class AcknowledgingWriter implements ExecutionSemanticWriter {
 
 function fixture(writer: ExecutionSemanticWriter, workerUrl?: URL) {
   const ports: ExecutionThreadWorkerPort[] = [];
-  const lost: ExecutionIdentity[][] = [];
+  const lost: ExecutionLostAssignment[][] = [];
   const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
     workerCount: 1,
     limits: LIMITS,
@@ -146,7 +150,7 @@ describe("ExecutionThreadWorkerPort", () => {
       await expect(port.whenReady()).resolves.toBe(true);
       await expect(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }))
         .resolves.toEqual({ kind: "worker-lost" });
-      expect(lost).toEqual([[EXECUTION]]);
+      expect(lost).toEqual([[{ execution: EXECUTION, lease }]]);
       expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 0 });
     } finally {
       scheduler.shutdown();

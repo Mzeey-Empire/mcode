@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ExecutionMailboxScheduler,
   type ExecutionMailboxLimits,
+  type ExecutionLostAssignment,
 } from "../execution-mailbox-scheduler.js";
 import type {
   ExecutionIdentity,
@@ -67,7 +68,7 @@ function execution(threadId: string, executionId = `execution-${threadId}`): Exe
 
 function fixture(workerCount = 1, limits = LIMITS) {
   const workers: FakeWorker[] = [];
-  const lost: ExecutionIdentity[][] = [];
+  const lost: ExecutionLostAssignment[][] = [];
   const scheduler = new ExecutionMailboxScheduler<Work, Result>({
     workerCount,
     limits,
@@ -258,7 +259,7 @@ describe("ExecutionMailboxScheduler", () => {
     workers[0]?.crash();
     expect(await first.completion).toEqual({ kind: "worker-lost" });
     expect(await queued.completion).toEqual({ kind: "worker-lost" });
-    expect(lost).toEqual([[oldExecution]]);
+    expect(lost).toEqual([[{ execution: oldExecution, lease: oldLease }]]);
     expect(workers[0]?.terminated).toBe(true);
     expect(scheduler.claim(execution("unavailable"), 2)).toEqual({ kind: "worker-unavailable" });
     expect(scheduler.submit({ execution: oldExecution, lease: oldLease, command: { kind: "stop", requestId: "stale" }, byteLength: 100 }))
@@ -267,13 +268,19 @@ describe("ExecutionMailboxScheduler", () => {
     expect(scheduler.replaceWorker(0)).toBe(true);
     expect(workers[1]?.requests).toHaveLength(0);
 
-    const newExecution = execution("same-thread", "new-execution");
+    const newExecution = oldExecution;
     const newLease = claimed(scheduler, newExecution, 2);
+    expect(newLease.workerGeneration).toBeGreaterThan(oldLease.workerGeneration);
     expect(scheduler.submit({ execution: newExecution, lease: oldLease, command: { kind: "start" }, byteLength: 100 }))
       .toEqual({ kind: "stale-execution" });
     const newEvent = admitted(scheduler, newExecution, newLease, { kind: "event", sequence: 1 });
+    let newEventSettled = false;
+    void newEvent.completion.then(() => { newEventSettled = true; });
     workers[0]?.reply(oldRequest, 99);
+    await Promise.resolve();
+    expect(newEventSettled).toBe(false);
     expect(scheduler.depth().pending).toBe(1);
+    expect(workers[1]?.terminated).toBe(false);
     workers[1]?.reply(request(workers[1]!, 0), 1);
     expect(await newEvent.completion).toEqual({ kind: "reply", result: { revision: 1 } });
     expect(scheduler.release(oldExecution, oldLease)).toBe(false);
@@ -290,7 +297,7 @@ describe("ExecutionMailboxScheduler", () => {
       data: { ...sent, execution: execution("other"), result: { revision: 1 } },
     }));
     expect(await admission.completion).toEqual({ kind: "worker-lost" });
-    expect(lost).toEqual([[identity]]);
+    expect(lost).toEqual([[{ execution: identity, lease }]]);
     scheduler.shutdown();
   });
 
@@ -298,15 +305,22 @@ describe("ExecutionMailboxScheduler", () => {
     const { scheduler, workers, lost } = fixture(2);
     const failed = execution("failed");
     const healthy = execution("healthy");
+    const alsoFailed = execution("also-failed");
     const failedLease = claimed(scheduler, failed);
     const healthyLease = claimed(scheduler, healthy);
+    const alsoFailedLease = claimed(scheduler, alsoFailed);
     const failedEvent = admitted(scheduler, failed, failedLease, { kind: "event", sequence: 1 });
     const healthyEvent = admitted(scheduler, healthy, healthyLease, { kind: "event", sequence: 1 });
+    const alsoFailedEvent = admitted(scheduler, alsoFailed, alsoFailedLease, { kind: "event", sequence: 1 });
     workers[0]?.crash();
     workers[1]?.reply(request(workers[1]!, 0), 1);
     expect(await failedEvent.completion).toEqual({ kind: "worker-lost" });
+    expect(await alsoFailedEvent.completion).toEqual({ kind: "worker-lost" });
     expect(await healthyEvent.completion).toEqual({ kind: "reply", result: { revision: 1 } });
-    expect(lost).toEqual([[failed]]);
+    expect(lost).toEqual([[
+      { execution: failed, lease: failedLease },
+      { execution: alsoFailed, lease: alsoFailedLease },
+    ]]);
     const another = execution("another");
     expect(claimed(scheduler, another).workerIndex).toBe(1);
     scheduler.shutdown();
@@ -319,7 +333,7 @@ describe("ExecutionMailboxScheduler", () => {
     const event = admitted(scheduler, identity, lease, { kind: "event", sequence: 1 });
     workers[0]?.close();
     expect(await event.completion).toEqual({ kind: "worker-lost" });
-    expect(lost).toEqual([[identity]]);
+    expect(lost).toEqual([[{ execution: identity, lease }]]);
     expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 0 });
     scheduler.shutdown();
   });
