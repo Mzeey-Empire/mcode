@@ -89,6 +89,12 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     this.drain(event.threadId);
   }
 
+  /** Stop only the affected turn when provider ingress cannot retain one of its events. */
+  handleProviderIngressOverflow(input: ProviderEventIngressEvent): void {
+    this.application.rejectForQueueCapacity(input.event);
+    this.discard(input.event.threadId, input.event.turnExecutionId);
+  }
+
   /** Observe one provider file mutation before public event attribution is available. */
   handleProviderFileMutation(event: ProviderFileMutationStart): void {
     this.application.observeFileMutation(event);

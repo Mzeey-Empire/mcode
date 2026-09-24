@@ -13,7 +13,7 @@ import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../parent-assistant-text-
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 
-function textDelta(delta: string): ProviderEventIngressEvent {
+function textDelta(delta: string, threadId = "thread-1"): ProviderEventIngressEvent {
   return {
     providerId: "claude",
     sourceKind: "canonical-bridge",
@@ -25,7 +25,7 @@ function textDelta(delta: string): ProviderEventIngressEvent {
     },
     event: {
       type: AgentEventType.TextDelta,
-      threadId: "thread-1",
+      threadId,
       turnExecutionId: EXECUTION_ID,
       delta,
     },
@@ -157,6 +157,23 @@ describe("TurnEventPipeline", () => {
 
     expect(apply).not.toHaveBeenCalled();
     expect(rejectForQueueCapacity).toHaveBeenCalledOnce();
+  });
+
+  it("signals the overflowed turn without blocking another thread", () => {
+    const appliedThreads: string[] = [];
+    const { pipeline, rejectForQueueCapacity } = createPipeline((_input, event) => {
+      appliedThreads.push(event.threadId);
+      return event.threadId === "healthy-thread";
+    });
+    const blocked = textDelta("blocked", "overflowed-thread");
+    const overflow = textDelta("overflow", "overflowed-thread");
+
+    pipeline.handleProviderEvent(blocked);
+    pipeline.handleProviderIngressOverflow(overflow);
+    pipeline.handleProviderEvent(textDelta("healthy", "healthy-thread"));
+
+    expect(rejectForQueueCapacity).toHaveBeenCalledWith(overflow.event);
+    expect(appliedThreads).toEqual(["overflowed-thread", "healthy-thread"]);
   });
 
   it("compacts an oversized tool result so its completion reaches the queue", () => {

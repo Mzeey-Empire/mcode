@@ -76,9 +76,9 @@ function cursorSessionIdentityEnvelope(
   };
 }
 
-/** Lets the asynchronous committed-event queue apply one canonical event batch. */
-async function flushCommittedEvents(): Promise<void> {
-  await new Promise<void>((resolve) => queueMicrotask(resolve));
+/** Lets the asynchronous provider ingress drain one queued event batch. */
+async function flushIngressEvents(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 /**
@@ -185,7 +185,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     startAgentServiceIngressForTest(svc, );
   });
 
-  it("nulls sdk_session_id when a sdk_session_invalidated event arrives", () => {
+  it("nulls sdk_session_id when a sdk_session_invalidated event arrives", async () => {
     const workspace = workspaceRepo.create("test-ws", process.cwd());
     const thread = threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
     threadRepo.updateSdkSessionId(thread.id, "poison-sid");
@@ -196,11 +196,12 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       threadId: thread.id,
       subtype: "sdk_session_invalidated",
     } satisfies AgentEvent);
+    await flushIngressEvents();
 
     expect(threadRepo.findById(thread.id)?.sdk_session_id).toBeNull();
   });
 
-  it("leaves sdk_session_id intact for an unrelated System subtype", () => {
+  it("leaves sdk_session_id intact for an unrelated System subtype", async () => {
     const workspace = workspaceRepo.create("test-ws", process.cwd());
     const thread = threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
     threadRepo.updateSdkSessionId(thread.id, "keep-sid");
@@ -210,6 +211,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       threadId: thread.id,
       subtype: "session_restarted",
     } satisfies AgentEvent);
+    await flushIngressEvents();
 
     expect(threadRepo.findById(thread.id)?.sdk_session_id).toBe("keep-sid");
   });
@@ -231,7 +233,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     providerEventIngress.acceptCommitted([
       cursorSessionIdentityEnvelope(thread.id, firstRequest.turnId, firstRequest.turnExecutionId),
     ]);
-    await flushCommittedEvents();
+    await flushIngressEvents();
 
     expect(threadRepo.findById(thread.id)?.sdk_session_id).toBe("cursor-session-1");
 
@@ -244,6 +246,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       tokensIn: 0,
       tokensOut: 0,
     } satisfies AgentEvent);
+    await flushIngressEvents();
 
     await svc.sendMessage({
       threadId: thread.id,
