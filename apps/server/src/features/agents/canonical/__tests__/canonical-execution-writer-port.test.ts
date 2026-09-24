@@ -267,7 +267,10 @@ describe("execution semantic writer transport", () => {
           providerIdentities: [], payload: { projection: "message", content: "Worker event" },
           createdAt: NOW, updatedAt: NOW,
         } },
-      }] })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      }] })).resolves.toMatchObject({
+        kind: "reply",
+        result: { kind: "committed", providerCommit: { outcome: "committed", eventCount: 1 } },
+      });
       expect(db.prepare("SELECT native_cursor_json FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
         .get(EXECUTION_ID)).toEqual({ native_cursor_json: JSON.stringify(nativeCursor) });
       await expect(send(claim.lease, { kind: "provider-outcome", outcome: "completed" }))

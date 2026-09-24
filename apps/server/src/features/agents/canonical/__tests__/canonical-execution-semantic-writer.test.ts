@@ -233,7 +233,10 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       published.push(...events.map((item) => item.eventId));
     });
     expect(await writer.transact(operation(2, { kind: "append-events", phase: "running", nativeCursor: null, events: [event()] })))
-      .toMatchObject({ kind: "committed", operationId: "lease-1:2" });
+      .toMatchObject({
+        kind: "committed", operationId: "lease-1:2",
+        providerCommit: { outcome: "committed", eventCount: 1 },
+      });
     expect(published).toContain(event().eventId);
   });
 

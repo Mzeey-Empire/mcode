@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import type {
+  ExecutionProviderCommitReceipt,
   ExecutionSemanticOperation,
   ExecutionSemanticWriter,
   ExecutionWriteReceipt,
@@ -40,6 +41,14 @@ const storedReceiptSchema = z.object({
   operationId: z.string(),
   durableRevision: z.number().int(),
   publicationVersion: z.literal(1),
+  providerCommit: z.object({
+    outcome: z.enum(["committed", "duplicate", "conflict", "terminal-outcome-confirmed", "ingest-overflow"]),
+    conversationRevision: z.number().int(),
+    rosterRevision: z.number().int(),
+    acceptedThrough: z.number().int(),
+    durableThrough: z.number().int(),
+    eventCount: z.number().int().nonnegative(),
+  }).optional(),
 });
 const storedOperationSchema = z.object({
   kind: z.string(),
@@ -175,7 +184,15 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         events: mutation.events,
       });
       if (result.outcome !== "committed") throw new SemanticConflict();
-      const receipt = committed(operation, result.durableThrough);
+      const providerCommit: ExecutionProviderCommitReceipt = {
+        outcome: result.outcome,
+        conversationRevision: result.conversationRevision,
+        rosterRevision: result.rosterRevision,
+        acceptedThrough: result.acceptedThrough,
+        durableThrough: result.durableThrough,
+        eventCount: result.events.length,
+      };
+      const receipt = committed(operation, result.durableThrough, providerCommit);
       this.storeHead({ ...head, ordinal: operation.ordinal, durableRevision: receipt.durableRevision });
       this.storePublicationChunks(operation.execution.executionId, hash, result.events.map((event) => event.acceptedSequence));
       this.storeReceipt(operation, hash, receipt);
@@ -360,7 +377,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (stored.kind !== `semantic:${operation.mutation.kind}` || stored.input_hash !== hash) return conflict(operation);
     const receipt = storedReceiptSchema.parse(JSON.parse(stored.receipt_json));
     return receipt.operationId === operation.operationId && Number.isSafeInteger(receipt.durableRevision)
-      ? committed(operation, receipt.durableRevision) : conflict(operation);
+      ? committed(operation, receipt.durableRevision, receipt.providerCommit) : conflict(operation);
   }
 
   private publishStoredEvents(executionId: string, hash: string): void {
@@ -436,8 +453,12 @@ function nextHead(head: SemanticHead, operation: ExecutionSemanticOperation): bo
 function committed(
   operation: ExecutionSemanticOperation,
   durableRevision: number,
+  providerCommit?: ExecutionProviderCommitReceipt,
 ): Extract<ExecutionWriteReceipt, { kind: "committed" }> {
-  return { kind: "committed", operationId: operation.operationId, durableRevision };
+  return {
+    kind: "committed", operationId: operation.operationId, durableRevision,
+    ...(providerCommit ? { providerCommit } : {}),
+  };
 }
 
 function conflict(operation: ExecutionSemanticOperation): ExecutionWriteReceipt {

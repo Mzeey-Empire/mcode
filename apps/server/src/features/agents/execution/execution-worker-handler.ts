@@ -6,6 +6,7 @@ import type {
   DataOnlyParentTurnFinishInput,
   DataOnlyParentTurnStartInput,
 } from "../canonical/canonical-parent-turn-write.js";
+import type { CanonicalAgentCommitResult } from "../canonical/canonical-agent-boundary.js";
 import type {
   ExecutionIdentity,
   ExecutionLease,
@@ -44,9 +45,15 @@ export interface ExecutionSemanticOperation {
     | { readonly kind: "finish"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput };
 }
 
+/** Provider-facing receipt values retained with the execution operation. */
+export type ExecutionProviderCommitReceipt = Pick<
+  CanonicalAgentCommitResult,
+  "outcome" | "conversationRevision" | "rosterRevision" | "acceptedThrough" | "durableThrough"
+> & { readonly eventCount: number };
+
 /** A writer reply is valid only after the semantic operation commits durably. */
 export type ExecutionWriteReceipt =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt }
   | { readonly kind: "conflict"; readonly operationId: string };
 
 /**
@@ -60,7 +67,7 @@ export interface ExecutionSemanticWriter {
 
 /** A command result that never calls an uncommitted mutation successful. */
 export type ExecutionWorkerResult =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number }
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt }
   | { readonly kind: "released" }
   | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-stop-watermark" | "writer-conflict" };
 
@@ -127,7 +134,7 @@ export class ExecutionWorkerHandler {
     state.durableRevision = receipt.durableRevision;
     if (request.command.kind === "stop") state.phase = "stopping";
     if (request.command.kind === "finalize") state.phase = "finalized";
-    return { kind: "committed", operationId: receipt.operationId, durableRevision: receipt.durableRevision };
+    return committedResult(receipt);
   }
 
   private async begin(
@@ -156,7 +163,7 @@ export class ExecutionWorkerHandler {
       phase: "running",
       durableRevision: receipt.durableRevision,
     });
-    return { kind: "committed", operationId: receipt.operationId, durableRevision: receipt.durableRevision };
+    return committedResult(receipt);
   }
 
   private release(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): ExecutionWorkerResult {
@@ -292,6 +299,13 @@ function isDurableReceipt(
 ): receipt is Extract<ExecutionWriteReceipt, { kind: "committed" }> {
   return receipt.kind === "committed" && receipt.operationId === operationId(request)
     && Number.isSafeInteger(receipt.durableRevision) && receipt.durableRevision >= previousRevision;
+}
+
+function committedResult(receipt: Extract<ExecutionWriteReceipt, { kind: "committed" }>): ExecutionWorkerResult {
+  return {
+    kind: "committed", operationId: receipt.operationId, durableRevision: receipt.durableRevision,
+    ...(receipt.providerCommit ? { providerCommit: receipt.providerCommit } : {}),
+  };
 }
 
 function sameIdentity(left: ExecutionIdentity, right: ExecutionIdentity): boolean {
