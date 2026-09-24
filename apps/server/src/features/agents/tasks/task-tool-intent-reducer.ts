@@ -122,7 +122,9 @@ function taskCreateIntent(command: Extract<TaskToolCommand, { kind: "tool-result
 
 function groupFor(calls: readonly TaskToolCall[], parentToolCallId: string): string {
   let current: string | undefined = parentToolCallId;
-  while (current) {
+  const seen = new Set<string>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
     const call = calls.find((item) => item.toolCallId === current);
     if (!call) break;
     if (call.toolName === "Agent") {

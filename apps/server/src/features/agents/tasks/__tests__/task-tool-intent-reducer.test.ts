@@ -172,6 +172,21 @@ describe("TaskToolIntentReducer", () => {
     expect(tasks.get(liveThread)).toBeNull();
   });
 
+  it("bounds malformed parent chains before selecting a sub-agent group", () => {
+    expect(reducer.reduce(execution, {
+      kind: "tool-use", toolName: "TodoWrite",
+      toolInput: { todos: [{ content: "Task" }] }, parentToolCallId: "first",
+      bufferedCalls: [
+        { toolCallId: "first", toolName: "Other", parentToolCallId: "second", _rawToolInput: {} },
+        { toolCallId: "second", toolName: "Other", parentToolCallId: "first", _rawToolInput: {} },
+      ],
+    })).toEqual({
+      kind: "intents", execution,
+      intents: [{ kind: "upsert-group", group: "Sub-agent",
+        tasks: [{ content: "Task", status: "pending", group: "Sub-agent" }] }],
+    });
+  });
+
   it("keeps colliding harness IDs scoped to their agent group", () => {
     toolUse("agent-a", "Agent", { description: "Agent A" });
     toolUse("agent-b", "Agent", { description: "Agent B" });
