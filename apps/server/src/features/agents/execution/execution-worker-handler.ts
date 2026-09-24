@@ -28,6 +28,16 @@ export type ExecutionWorkCommand =
   | { readonly kind: "event"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[]; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
   | { readonly kind: "assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
   | { readonly kind: "narrative-delta"; readonly input: ParentNarrativeRecoveryCommit }
+  | {
+    readonly kind: "live-event";
+    readonly text:
+      | { readonly kind: "unchanged" }
+      | { readonly kind: "append"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
+      | { readonly kind: "reclassify"; readonly expectedText: string }
+      | { readonly kind: "promote"; readonly input: ParentAssistantTextCheckpointInput };
+    readonly narrative?: ParentNarrativeRecoveryCommit;
+    readonly publication: ExecutionLivePublicationIntent;
+  }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
   | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
   | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
@@ -49,6 +59,11 @@ export interface ExecutionSemanticOperation {
     | { readonly kind: "append-events"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[] }
     | { readonly kind: "append-assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
     | { readonly kind: "narrative-delta"; readonly input: ParentNarrativeRecoveryCommit }
+    | {
+      readonly kind: "live-event";
+      readonly text: Extract<ExecutionWorkCommand, { readonly kind: "live-event" }>["text"];
+      readonly narrative?: ParentNarrativeRecoveryCommit;
+    }
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
     | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
@@ -216,6 +231,8 @@ function mutationFor(
       return eventMutation(command, request.execution, state);
     case "narrative-delta":
       return narrativeMutation(command, request.execution, state);
+    case "live-event":
+      return liveEventMutation(command, request.execution, state);
     case "stop":
       return stopMutation(command, request, state);
     case "finalize":
@@ -263,6 +280,18 @@ function narrativeMutation(
   return { kind: "narrative-delta", input: command.input };
 }
 
+function liveEventMutation(
+  command: Extract<WorkerCommand, { kind: "live-event" }>,
+  execution: ExecutionIdentity,
+  state: ExecutionState,
+): ExecutionSemanticOperation["mutation"] | undefined {
+  if (state.phase !== "running" || !validLiveEventRouting(command, execution)) return undefined;
+  return {
+    kind: "live-event", text: command.text,
+    ...(command.narrative ? { narrative: command.narrative } : {}),
+  };
+}
+
 function stopMutation(
   command: Extract<WorkerCommand, { kind: "stop" }>,
   request: ExecutionWorkerRequest<WorkerCommand>,
@@ -292,16 +321,35 @@ function commandRejection(
 
 function invalidReason(request: ExecutionWorkerRequest<WorkerCommand>): Extract<ExecutionWorkerResult, { kind: "rejected" }>["reason"] {
   if (request.command.kind === "stop" && request.stopWatermark !== request.ordinal - 1) return "invalid-stop-watermark";
-  if (request.command.kind === "event" && !validEventRouting(request.command.events, request.execution)) {
-    return "invalid-event-routing";
+  if (request.command.kind === "live-event") {
+    return invalidLiveEventReason(request.command, request.execution) ?? "invalid-transition";
   }
-  if (request.command.kind === "assistant-text" && !validTextRouting(request.command.inputs, request.execution)) {
-    return "invalid-text-routing";
+  return invalidRoutingReason(request.command, request.execution) ?? "invalid-transition";
+}
+
+function invalidRoutingReason(
+  command: Exclude<WorkerCommand, { kind: "live-event" }>,
+  execution: ExecutionIdentity,
+): "invalid-event-routing" | "invalid-text-routing" | "invalid-narrative-routing" | null {
+  switch (command.kind) {
+    case "event":
+      return validEventRouting(command.events, execution) ? null : "invalid-event-routing";
+    case "assistant-text":
+      return validTextRouting(command.inputs, execution) ? null : "invalid-text-routing";
+    case "narrative-delta":
+      return command.input?.executionId === execution.executionId ? null : "invalid-narrative-routing";
+    default:
+      return null;
   }
-  if (request.command.kind === "narrative-delta" && request.command.input?.executionId !== request.execution.executionId) {
-    return "invalid-narrative-routing";
-  }
-  return "invalid-transition";
+}
+
+function invalidLiveEventReason(
+  command: Extract<WorkerCommand, { kind: "live-event" }>,
+  execution: ExecutionIdentity,
+): "invalid-text-routing" | "invalid-narrative-routing" | null {
+  if (validLiveEventRouting(command, execution)) return null;
+  return command.narrative !== undefined && command.narrative?.executionId !== execution.executionId
+    ? "invalid-narrative-routing" : "invalid-text-routing";
 }
 
 function validEventRouting(events: readonly ProviderEventDraft[], execution: ExecutionIdentity): boolean {
@@ -313,6 +361,24 @@ function validTextRouting(inputs: readonly ParentAssistantTextCheckpointInput[],
   return Array.isArray(inputs) && inputs.length > 0 && inputs.every((input) => input
     && input.threadId === execution.threadId
     && input.turnId === execution.turnId && input.executionId === execution.executionId);
+}
+
+function validLiveEventRouting(
+  command: Extract<ExecutionWorkCommand, { kind: "live-event" }>,
+  execution: ExecutionIdentity,
+): boolean {
+  if (command.narrative !== undefined && command.narrative?.executionId !== execution.executionId) return false;
+  switch (command.text?.kind) {
+    case "unchanged":
+    case "reclassify":
+      return true;
+    case "append":
+      return validTextRouting(command.text.inputs, execution);
+    case "promote":
+      return validTextRouting([command.text.input], execution);
+    default:
+      return false;
+  }
 }
 
 function validStartInput(
@@ -357,6 +423,7 @@ function livePublicationFor(command: WorkerCommand): readonly ExecutionLivePubli
     case "start":
     case "event":
     case "finalize": return command.livePublication;
+    case "live-event": return [command.publication];
     default: return undefined;
   }
 }

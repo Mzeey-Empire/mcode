@@ -21,6 +21,7 @@ import type {
 } from "../execution-mailbox-protocol.js";
 import {
   ExecutionWorkerHandler,
+  type ExecutionLivePublicationIntent,
   type ExecutionSemanticOperation,
   type ExecutionSemanticWriter,
   type ExecutionWorkCommand,
@@ -64,6 +65,17 @@ const NARRATIVE_INPUT: ParentNarrativeRecoveryCommit = {
       started_at: "2026-09-24T12:00:00.000Z", ended_at: null, sort_order: 1,
     },
   }],
+};
+
+const PUBLICATION = {
+  after: "writer",
+  event: { type: "turnStarted", threadId: EXECUTION.threadId },
+} satisfies ExecutionLivePublicationIntent;
+
+const TEXT_INPUT = {
+  ...EXECUTION,
+  sequence: 1,
+  text: "Hello",
 };
 
 const LIMITS: ExecutionMailboxLimits = {
@@ -163,6 +175,69 @@ async function committed(admission: ReturnType<typeof submit>, revision: number)
 }
 
 describe("ExecutionWorkerHandler through its scheduler", () => {
+  it("commits one compound live event and forwards its publication receipt", async () => {
+    class PublicationWriter extends RecordingWriter {
+      override async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
+        const receipt = await super.transact(operation);
+        return receipt.kind === "committed" && operation.livePublication
+          ? { ...receipt, livePublication: operation.livePublication.map((intent) => ({
+            ...intent, publicationId: `${operation.operationId}:0`,
+          })) }
+          : receipt;
+      }
+    }
+
+    const { scheduler, writer, lease } = fixture(new PublicationWriter());
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    const admission = submit(scheduler, lease, {
+      kind: "live-event", text: { kind: "append", inputs: [TEXT_INPUT] },
+      narrative: NARRATIVE_INPUT, publication: PUBLICATION,
+    });
+    await expect(admission.completion).resolves.toMatchObject({
+      kind: "reply",
+      result: {
+        kind: "committed", operationId: `${lease.leaseId}:2`, durableRevision: 2,
+        livePublication: [{ ...PUBLICATION, publicationId: `${lease.leaseId}:2:0` }],
+      },
+    });
+    expect(writer.operations).toHaveLength(2);
+    expect(writer.operations[1]).toEqual({
+      operationId: `${lease.leaseId}:2`, execution: EXECUTION, lease, ordinal: 2,
+      mutation: {
+        kind: "live-event", text: { kind: "append", inputs: [TEXT_INPUT] }, narrative: NARRATIVE_INPUT,
+      },
+      livePublication: [PUBLICATION],
+    });
+    scheduler.shutdown();
+  });
+
+  it("rejects live-event text or narrative for a different execution before writing", async () => {
+    const { scheduler, handler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+
+    for (const command of [
+      { kind: "live-event", text: { kind: "append", inputs: [{ ...TEXT_INPUT, turnId: "other-turn" }] }, publication: PUBLICATION },
+      { kind: "live-event", text: { kind: "promote", input: { ...TEXT_INPUT, executionId: "other-execution" } }, publication: PUBLICATION },
+    ] as const) {
+      await expect(handler.handle({
+        requestId: 2, execution: EXECUTION, lease, ordinal: 2, command,
+      })).resolves.toMatchObject({
+        result: { kind: "rejected", reason: "invalid-text-routing" },
+      });
+    }
+    await expect(handler.handle({
+      requestId: 2, execution: EXECUTION, lease, ordinal: 2,
+      command: {
+        kind: "live-event", text: { kind: "unchanged" },
+        narrative: { ...NARRATIVE_INPUT, executionId: "other-execution" }, publication: PUBLICATION,
+      },
+    })).resolves.toMatchObject({
+      result: { kind: "rejected", reason: "invalid-narrative-routing" },
+    });
+    expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin"]);
+    scheduler.shutdown();
+  });
+
   it("maps a running narrative delta to one fenced semantic operation", async () => {
     const { scheduler, writer, lease } = fixture();
     await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
