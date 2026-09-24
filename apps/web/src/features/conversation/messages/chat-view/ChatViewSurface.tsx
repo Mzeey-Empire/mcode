@@ -1,4 +1,4 @@
-import { type ComponentProps, type ReactNode, useState } from "react";
+import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
 import type { RecoveryIncident, SelectedTextComment } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,7 @@ import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
 import { SavingDelayedDialog } from "../../saving/SavingDelayedDialog";
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
+import { tryGetConversationResidency } from "../../residency/conversation-residency";
 import type { ChatViewState } from "./useChatViewState";
 
 const NEW_THREAD_STARTERS = [
@@ -387,7 +388,59 @@ function getConversationStage(state: ChatViewState): ConversationStage {
   return "messages";
 }
 
-/** Renders one selected conversation stage without taking over MessageList scrolling. */
+/** Renders one retained transcript and holds a display lease while it is hidden. */
+function KeptAliveTranscript({
+  threadId,
+  selected,
+  visible,
+  leadingContent,
+  messageListProps,
+}: {
+  threadId: string;
+  selected: boolean;
+  visible: boolean;
+  leadingContent: ReactNode;
+  messageListProps: Omit<ComponentProps<typeof MessageList>, "leadingContent" | "displayThreadId">;
+}) {
+  // The lease keeps a hidden transcript's record resident and self-heals it after
+  // cache eviction; releasing on selection is a no-op while the thread is current.
+  useEffect(() => {
+    if (selected) return;
+    const residency = tryGetConversationResidency();
+    if (!residency) return;
+    void residency.mountDisplayConversation(threadId);
+    return () => residency.unmountDisplayConversation(threadId);
+  }, [selected, threadId]);
+  // display:none would collapse the virtualized viewport to zero height and make
+  // the virtualizer destroy every row, so hidden transcripts stay laid out but
+  // unpainted; revealing one is a style flip instead of a DOM rebuild.
+  return (
+    <div
+      className="absolute inset-0"
+      style={{ visibility: visible ? "visible" : "hidden" }}
+      inert={!visible}
+      aria-hidden={!visible}
+    >
+      <MessageList {...messageListProps} displayThreadId={threadId} leadingContent={leadingContent} />
+    </div>
+  );
+}
+
+/** Renders the hold, transition, or error overlay above the retained transcripts. */
+function ConversationStageOverlay({ stage, state, thread }: { stage: ConversationStage; state: ChatViewState; thread: WorkspaceThread }) {
+  switch (stage) {
+    case "hold":
+      return <ConversationHoldOverlay targetTitle={thread.title || "Conversation"} />;
+    case "transition":
+      return <ConversationTransitionState threadId={thread.id} threadTitle={thread.title || "Conversation"} />;
+    case "error":
+      return <ConversationErrorState error={state.sessionError ?? ""} />;
+    default:
+      return null;
+  }
+}
+
+/** Renders retained transcripts and swaps visibility instead of remounting on switches. */
 function ConversationStageContent({
   stage,
   state,
@@ -401,12 +454,26 @@ function ConversationStageContent({
   leadingContent: ReactNode;
   messageListProps: Omit<ComponentProps<typeof MessageList>, "leadingContent" | "displayThreadId">;
 }) {
-  if (stage === "hold") {
-    return <div className="relative h-full" aria-busy="true"><div className="pointer-events-none h-full" inert><MessageList {...messageListProps} displayThreadId={state.displayHoldThreadId!} /></div><ConversationHoldOverlay targetTitle={thread.title || "Conversation"} /></div>;
-  }
-  if (stage === "transition") return <ConversationTransitionState threadId={thread.id} threadTitle={thread.title || "Conversation"} />;
-  if (stage === "error") return <ConversationErrorState error={state.sessionError ?? ""} />;
-  return <MessageList {...messageListProps} leadingContent={leadingContent} />;
+  const visibleThreadId =
+    stage === "hold" ? state.displayHoldThreadId
+    : stage === "messages" ? state.activeThreadId
+    : null;
+  const transcripts = state.recentThreadIds.map((id) => (
+    <KeptAliveTranscript
+      key={id}
+      threadId={id}
+      selected={id === state.activeThreadId}
+      visible={id === visibleThreadId}
+      leadingContent={id === state.activeThreadId ? leadingContent : undefined}
+      messageListProps={messageListProps}
+    />
+  ));
+  return (
+    <div className="relative h-full" aria-busy={stage === "hold" || stage === "transition"}>
+      <div className={stage === "messages" ? "relative h-full" : "pointer-events-none relative h-full"} inert={stage !== "messages"}>{transcripts}</div>
+      <ConversationStageOverlay stage={stage} state={state} thread={thread} />
+    </div>
+  );
 }
 
 /** Renders the conversation stage without taking over MessageList scrolling. */

@@ -88,7 +88,7 @@ export interface ThreadHydratorDeps {
   ) => void;
   getWorkspaceThread: (threadId: string) => HydratorWorkspaceThread | undefined;
   flushPendingTextDeltas: () => void;
-  loadNarrativeForMessage: (messageId: string) => Promise<void>;
+  loadNarrativeForMessage: (messageId: string, threadId: string) => Promise<void>;
   setPlanQuestions: (threadId: string, questions: PlanQuestion[]) => void;
   extractPendingPlanQuestions: (
     messages: Message[],

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useSyncExternalStore } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { MAX_THREAD_SUBSCRIPTIONS } from "@mcode/contracts";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { overviewResponsivePaddingRight } from "@/lib/composer-layout";
@@ -11,10 +11,13 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useActiveWorkspaceThread, useParentThreadExists } from "@/features/projects/state/workspace-selectors";
 import { hasResidentContent } from "../../hydration/resident-content";
 import { getConversationResidency } from "../../residency/conversation-residency";
-import { useActiveThreadRecord } from "../../state";
+import { useActiveThreadRecord, useThreadRecord } from "../../state";
 import { useOutgoingTranscriptHold } from "./useOutgoingTranscriptHold";
 
 const EMPTY_DISPLAYED_THREAD_IDS: readonly string[] = [];
+
+/** Recently selected transcripts kept mounted so switching back skips a full rebuild. */
+export const KEPT_ALIVE_THREAD_COUNT = 5;
 
 /** Subscribes to retained conversations that remain visible after selection changes. */
 function subscribeDisplayedConversations(listener: () => void): () => void {
@@ -24,6 +27,21 @@ function subscribeDisplayedConversations(listener: () => void): () => void {
 /** Reads retained conversations that remain visible after selection changes. */
 function getDisplayedConversationSnapshot(): readonly string[] {
   return getConversationResidency().getDisplayConversationSnapshot();
+}
+
+/** Tracks the most recently selected thread IDs, capped for bounded transcript retention. */
+function useRecentThreadIds(activeThreadId: string | null | undefined): string[] {
+  const [recentThreadIds, setRecentThreadIds] = useState<string[]>([]);
+  const previousActiveThreadId = useRef<string | null>(null);
+  if (activeThreadId !== previousActiveThreadId.current) {
+    previousActiveThreadId.current = activeThreadId ?? null;
+    if (activeThreadId) {
+      setRecentThreadIds((ids) =>
+        [activeThreadId, ...ids.filter((id) => id !== activeThreadId)]
+          .slice(0, KEPT_ALIVE_THREAD_COUNT));
+    }
+  }
+  return recentThreadIds;
 }
 
 /** Selects bounded subscriptions for the active, visible, and running conversations. */
@@ -91,6 +109,10 @@ export function useChatViewState() {
   const threadPaneWidth = useElementWidth(chatPaneRef, activeThreadId);
   const reserveOverviewSpace = useOverviewStore((state) => state.reserveThreadId === activeThreadId);
   const isAgentRunning = activeThreadId ? runningThreadIds.has(activeThreadId) : false;
+  // A resident target record (kept-alive or previously hydrated) can paint
+  // immediately; gating on the hydration commit would hide already-rendered
+  // content behind the transition shell on every warm switch.
+  const targetResidentContent = useThreadRecord(activeThreadId, hasResidentContent);
   const { targetPaintable } = getConversationPaintState(
     activeThreadId,
     hydratedThreadId,
@@ -98,7 +120,9 @@ export function useChatViewState() {
     isAgentRunning,
     residentContent,
   );
-  const displayHoldThreadId = useOutgoingTranscriptHold(activeThreadId, targetPaintable);
+  const effectiveTargetPaintable = targetPaintable || targetResidentContent;
+  const displayHoldThreadId = useOutgoingTranscriptHold(activeThreadId, effectiveTargetPaintable);
+  const recentThreadIds = useRecentThreadIds(activeThreadId);
   const activeWorkspaceName = useMemo(
     () => workspaces.find((workspace) => workspace.id === (activeThread?.workspace_id ?? activeWorkspaceId))?.name ?? "",
     [workspaces, activeThread?.workspace_id, activeWorkspaceId],
@@ -126,6 +150,7 @@ export function useChatViewState() {
     isAgentRunning,
     messageCount,
     parentThreadExists,
+    recentThreadIds,
     reserveOverviewSpace,
     residentContent,
     runningThreadIds,
@@ -135,7 +160,7 @@ export function useChatViewState() {
     setActiveThread,
     setForkMode,
     sidebarCollapsed,
-    targetPaintable,
+    targetPaintable: effectiveTargetPaintable,
     threadPaneWidth,
     updateThreadTitle,
     overviewPaddingRight: reserveOverviewSpace ? overviewResponsivePaddingRight() : undefined,

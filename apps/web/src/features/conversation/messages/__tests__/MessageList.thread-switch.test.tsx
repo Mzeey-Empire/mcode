@@ -6,9 +6,6 @@ import { createAgentModelState, type AgentItem, type AgentTurn, type Message, ty
 const loadOlderMessagesSpy = vi.fn();
 const loadNewerMessagesSpy = vi.fn();
 const loadNarrativeForMessageSpy = vi.fn();
-const evictNarrativeForMessageSpy = vi.fn();
-const retainNarrativeForMessageSpy = vi.fn();
-const releaseNarrativeForMessageSpy = vi.fn();
 
 class LayoutObserver implements ResizeObserver {
   static instances: LayoutObserver[] = [];
@@ -146,9 +143,6 @@ vi.mock("@/stores/threadStore", () => ({
       loadOlderMessages: loadOlderMessagesSpy,
       loadNewerMessages: loadNewerMessagesSpy,
       loadNarrativeForMessage: loadNarrativeForMessageSpy,
-      retainNarrativeForMessage: retainNarrativeForMessageSpy,
-      releaseNarrativeForMessage: releaseNarrativeForMessageSpy,
-      evictNarrativeForMessage: evictNarrativeForMessageSpy,
       isNarrativeLoaded: () => false,
     });
   }),
@@ -225,9 +219,6 @@ beforeEach(() => {
   loadOlderMessagesSpy.mockClear();
   loadNewerMessagesSpy.mockClear();
   loadNarrativeForMessageSpy.mockClear();
-  retainNarrativeForMessageSpy.mockClear();
-  releaseNarrativeForMessageSpy.mockClear();
-  evictNarrativeForMessageSpy.mockClear();
   loadingValue = false;
   activeThreadIdValue = "thread-A";
   messagesValue = [{ id: "m1", sequence: 1 }];
@@ -273,7 +264,7 @@ describe("MessageList thread switch", () => {
     expect(rail).not.toHaveClass("overflow-x-hidden");
   });
 
-  it("hydrates a mounted assistant from its owning thread and releases its virtual lease after unmount", async () => {
+  it("hydrates a mounted assistant from its owning thread", async () => {
     activeThreadIdValue = "thread-A";
     currentThreadIdValue = "thread-A";
     messagesValue = [{
@@ -284,14 +275,11 @@ describe("MessageList thread switch", () => {
       content: "Child result",
     }];
 
-    const view = render(<MessageList displayThreadId="thread-B" />);
+    render(<MessageList displayThreadId="thread-B" />);
 
     await waitFor(() => {
       expect(loadNarrativeForMessageSpy).toHaveBeenCalledWith("child-answer", "thread-B");
-      expect(retainNarrativeForMessageSpy).toHaveBeenCalledWith("child-answer", "thread-B");
     });
-    view.unmount();
-    expect(releaseNarrativeForMessageSpy).toHaveBeenCalledWith("child-answer", "thread-B");
   });
 
   it("renders growing canonical child text before completion without duplicating its bubble", () => {
@@ -350,6 +338,8 @@ describe("MessageList thread switch", () => {
   it("loads and scrolls a virtualized source before it reconstructs the saved range", async () => {
     messagesValue = [{ id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" }];
     hasMoreMessagesValue = true;
+    // A tall viewport keeps the viewport-fill effect out of this scenario.
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
     const comment: SelectedTextComment = {
       id: "11111111-1111-4111-8111-111111111111",
       displayNumber: 1,
@@ -421,6 +411,7 @@ describe("MessageList thread switch", () => {
   it("marks a source unavailable after its required history page fails to load", async () => {
     messagesValue = [{ id: "m1", sequence: 2, thread_id: "thread-A", role: "assistant", content: "Current message" }];
     hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
     loadOlderMessagesSpy.mockResolvedValueOnce("failed");
     const comment: SelectedTextComment = {
       id: "11111111-1111-4111-8111-111111111111",
@@ -460,6 +451,7 @@ describe("MessageList thread switch", () => {
   it("keeps the latest source request active when an earlier history request fails", async () => {
     messagesValue = [{ id: "m1", sequence: 3, thread_id: "thread-A", role: "assistant", content: "Current message" }];
     hasMoreMessagesValue = true;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
     const commentA: SelectedTextComment = {
       id: "11111111-1111-4111-8111-111111111111",
       displayNumber: 1,
@@ -1326,8 +1318,34 @@ describe("MessageList thread switch", () => {
     expect(container.querySelector('[data-message-id="thread-A-11"]')).not.toBeNull();
   });
 
+  it("tops up an underfilled transcript with older history until it covers the viewport", async () => {
+    messagesValue = transcriptRows().slice(0, 8);
+    hasMoreMessagesValue = true;
+    loadOlderMessagesSpy.mockImplementation(async () => {
+      messagesValue = [
+        ...Array.from({ length: 10 }, (_, index) => ({
+          id: `older-${index}`, thread_id: "thread-A", sequence: -10 + index,
+          role: "assistant" as const, content: `Older ${index}`,
+        })),
+        ...messagesValue,
+      ];
+      hasMoreMessagesValue = false;
+      return "loaded";
+    });
+    const { container, rerender } = render(<MessageList />);
+    await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledWith("thread-A"));
+    act(() => rerender(<MessageList />));
+    await measureRows(container);
+    expect(loadOlderMessagesSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("loads older and newer history only after a gesture reaches its boundary", async () => {
-    messagesValue = transcriptRows();
+    // Tall content keeps the viewport-fill effect out and leaves room to sit
+    // more than one viewport-height away from the bottom boundary.
+    messagesValue = Array.from({ length: 30 }, (_, sequence) => ({
+      id: `thread-A-${sequence}`, thread_id: "thread-A", sequence,
+      role: "assistant" as const, content: `Message ${sequence}`,
+    }));
     hasMoreMessagesValue = hasNewerMessagesValue = true;
     const { container } = render(<MessageList />);
     await measureRows(container);
@@ -1338,7 +1356,7 @@ describe("MessageList thread switch", () => {
     expect(loadOlderMessagesSpy).toHaveBeenCalledExactlyOnceWith("thread-A");
     fireEvent.wheel(viewport, { deltaY: 100 });
     expect(loadNewerMessagesSpy).not.toHaveBeenCalled();
-    viewport.scrollTop = 350;
+    viewport.scrollTop = 2100;
     fireEvent.scroll(viewport);
     expect(loadNewerMessagesSpy).toHaveBeenCalledExactlyOnceWith("thread-A");
   });

@@ -304,6 +304,9 @@ export const MESSAGE_FETCH_SIZE = 2;
 /** Maximum messages retained across the tail and warmed older-history page. */
 export const BACKGROUND_PREFETCH_LIMIT = 100;
 
+/** Tail messages whose persisted narrative detail warms before their rows mount. */
+const NARRATIVE_PREFETCH_TAIL_MESSAGES = 10;
+
 /** Older messages warmed after first paint and held outside live React state. */
 export const HISTORY_PREFETCH_SIZE = BACKGROUND_PREFETCH_LIMIT - MESSAGE_FETCH_SIZE;
 
@@ -384,6 +387,7 @@ export class ThreadHydrator {
     const resident = this.deps.getState().records.get(threadId);
     if (resident && hasResidentContent(resident) && hasCommittedWindow(resident) && !opts.force) {
       this.synchronizeConversation(threadId);
+      this.prefetchVisibleNarrative(threadId);
       return true;
     }
     const cached = getCachedRecord(threadId);
@@ -394,6 +398,7 @@ export class ThreadHydrator {
       select: false,
     });
     this.synchronizeConversation(threadId);
+    this.prefetchVisibleNarrative(threadId);
     return true;
   }
 
@@ -502,7 +507,10 @@ export class ThreadHydrator {
         };
       });
       const committed = this.deps.getState().records.get(threadId);
-      if (committed && opts.isCurrent()) this.synchronizeConversation(threadId);
+      if (committed && opts.isCurrent()) {
+        this.synchronizeConversation(threadId);
+        this.prefetchVisibleNarrative(threadId);
+      }
     } catch (error) {
       if (!opts.isCurrent()) return;
       this.deps.setState((state: ThreadHydratorWriteState) => {
@@ -627,6 +635,28 @@ export class ThreadHydrator {
   synchronizeConversation(threadId: string): void {
     const record = this.deps.getState().records.get(threadId);
     if (record) cacheRecord(threadId, projectConversationCacheState(record));
+  }
+
+  /**
+   * Warm persisted narrative detail for the tail a display is about to paint.
+   * Without this, a thread switch renders each assistant response first and
+   * pops its reasoning/tool rows in above it once the visible-row fetch lands.
+   * Running threads are skipped: their newest turn's detail is still being
+   * persisted and the volatile timeline already covers it.
+   */
+  private prefetchVisibleNarrative(threadId: string): void {
+    const state = this.deps.getState();
+    const isDisplayed =
+      state.currentThreadId === threadId
+      || this.deps.isDisplayConversationVisible?.(threadId) === true;
+    if (!isDisplayed || state.runningThreadIds.has(threadId)) return;
+    const record = state.records.get(threadId);
+    if (!record) return;
+    for (const message of record.messages.slice(-NARRATIVE_PREFETCH_TAIL_MESSAGES)) {
+      if (message.role !== "assistant" || message.is_internal) continue;
+      if (record.narrativeByMessage[message.id]) continue;
+      void this.deps.loadNarrativeForMessage(message.id, threadId);
+    }
   }
 
   /** Merge delayed file metadata only when the current cache still retains those messages. */
@@ -985,6 +1015,7 @@ export class ThreadHydrator {
     ) {
       this.scheduleEarlierHistoryPrefetch(threadId, renderableCachedRecord);
     }
+    this.prefetchVisibleNarrative(threadId);
   }
 
   /** Run auxiliary fanout after the first paint, unless this selection is superseded. */
@@ -1256,6 +1287,9 @@ export class ThreadHydrator {
       if (!this.fetchCommitContextMatches(threadId, context)) return this.settleDiscardedFetch(threadId, context);
       this.commitFetchedConversation(threadId, loaded.page, context);
       recordThreadCommit(threadId, "network-fetch");
+      // Fires concurrently with the tail followup so detail lands as close to
+      // first paint as the transport allows.
+      this.prefetchVisibleNarrative(threadId);
       this.scheduleFetchedConversationAuxiliaries(threadId, opts, context.epoch);
       const tailFollowupInvalidated = loaded.usedTail && await this.hydrateTailNarrative(threadId, context);
       this.publishPendingPlanQuestions(threadId);
@@ -1285,11 +1319,20 @@ export class ThreadHydrator {
     const goalLookup = this.transport().getThreadGoal(threadId).catch(() => null);
     const requestedLimit = options?.fetchLimit ?? MESSAGE_FETCH_SIZE;
     const tailLoader = this.transport().loadConversationTail;
-    const usedTail = tailLoader != null && requestedLimit <= MESSAGE_FETCH_SIZE;
-    const page = usedTail && tailLoader
-      ? await this.loadConversationTail(threadId, requestedLimit, tailLoader)
-      : await this.transport().loadConversationPage(threadId, requestedLimit);
-    return { page, usedTail, snapshots, goalLookup };
+    if (tailLoader != null && requestedLimit <= MESSAGE_FETCH_SIZE) {
+      // The narrative page must land in the first commit: committing the bare
+      // tail paints each response ahead of its reasoning and visibly reorders
+      // the transcript. The tail call stays only as a fallback payload.
+      const [tailResult, pageResult] = await Promise.allSettled([
+        this.loadConversationTail(threadId, requestedLimit, tailLoader),
+        this.transport().loadConversationPage(threadId, requestedLimit),
+      ]);
+      if (pageResult.status === "fulfilled") return { page: pageResult.value, usedTail: false, snapshots, goalLookup };
+      if (tailResult.status === "fulfilled") return { page: tailResult.value, usedTail: true, snapshots, goalLookup };
+      throw pageResult.reason;
+    }
+    const page = await this.transport().loadConversationPage(threadId, requestedLimit);
+    return { page, usedTail: false, snapshots, goalLookup };
   }
 
   private async loadConversationTail(
@@ -1388,7 +1431,12 @@ export class ThreadHydrator {
       const retained = new Set(current.messages.map((message) => message.id));
       return {
         records: patchThreadRecord(state.records, threadId, {
-          narrativeByMessage: Object.fromEntries(Object.entries(page.narrativeByMessage).filter(([id]) => retained.has(id))),
+          // Merge over resident detail: the followup page may omit narrative for
+          // messages the visible-tail prefetch just warmed.
+          narrativeByMessage: {
+            ...current.narrativeByMessage,
+            ...Object.fromEntries(Object.entries(page.narrativeByMessage).filter(([id]) => retained.has(id))),
+          },
           answeredPlanMessageIds: new Set((page.answeredPlanMessageIds ?? []).filter((id) => retained.has(id))),
         }),
       };
