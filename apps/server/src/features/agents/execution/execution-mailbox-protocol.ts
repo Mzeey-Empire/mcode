@@ -19,6 +19,8 @@ export interface ExecutionWorkerRequest<Command> {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
   readonly ordinal: number;
+  /** Last admitted ordinal before Stop. Present only on a Stop request. */
+  readonly stopWatermark?: number;
   readonly command: Command;
 }
 

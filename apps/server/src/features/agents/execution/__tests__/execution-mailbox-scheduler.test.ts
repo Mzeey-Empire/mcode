@@ -11,19 +11,24 @@ import type {
   ExecutionWorkerRequest,
 } from "../execution-mailbox-protocol.js";
 
-type Work = { readonly kind: "start" } | { readonly kind: "event"; readonly sequence: number };
+type Work =
+  | { readonly kind: "start" }
+  | { readonly kind: "event"; readonly sequence: number }
+  | { readonly kind: "checkpoint"; readonly revision: number }
+  | { readonly kind: "effect-result"; readonly effectId: string }
+  | { readonly kind: "finalize" };
 type Command = Work | { readonly kind: "stop"; readonly requestId: string };
 type Result = { readonly revision: number };
 
 const LIMITS: ExecutionMailboxLimits = {
   maxPending: 8,
   maxPendingBytes: 800,
-  reservedStop: 2,
-  reservedStopBytes: 200,
-  maxPerExecutionPending: 4,
-  maxPerExecutionBytes: 400,
-  reservedPerExecutionStop: 1,
-  reservedPerExecutionStopBytes: 100,
+  reservedControl: 2,
+  reservedControlBytes: 200,
+  maxPerExecutionPending: 5,
+  maxPerExecutionBytes: 500,
+  reservedPerExecutionControl: 2,
+  reservedPerExecutionControlBytes: 200,
 };
 
 class FakeWorker implements ExecutionWorkerPort<Command, Result> {
@@ -131,7 +136,7 @@ describe("ExecutionMailboxScheduler", () => {
     scheduler.shutdown();
   });
 
-  it("reserves count and byte credits for Stop, including within one execution", async () => {
+  it("reserves count and byte credits for control commands within one execution", async () => {
     const { scheduler, workers } = fixture();
     const identity = execution("busy");
     const lease = claimed(scheduler, identity);
@@ -143,14 +148,53 @@ describe("ExecutionMailboxScheduler", () => {
     const stop = admitted(scheduler, identity, lease, { kind: "stop", requestId: "stop-1" });
     expect(scheduler.depth()).toMatchObject({ pending: 4, pendingBytes: 400 });
     expect(scheduler.submit({ execution: identity, lease, command: { kind: "stop", requestId: "stop-2" }, byteLength: 100 }))
-      .toEqual({ kind: "stop-pending" });
+      .toEqual({ kind: "stop-already-requested" });
+    const checkpoint = admitted(scheduler, identity, lease, { kind: "checkpoint", revision: 1 });
+    expect(scheduler.depth()).toMatchObject({ pending: 5, pendingBytes: 500 });
 
-    for (let index = 0; index < 4; index += 1) workers[0]?.reply(request(workers[0]!, index), index + 1);
+    for (let index = 0; index < 5; index += 1) workers[0]?.reply(request(workers[0]!, index), index + 1);
     expect((await stop.completion).kind).toBe("reply");
+    expect((await checkpoint.completion).kind).toBe("reply");
     expect((await first.completion).kind).toBe("reply");
     expect((await second.completion).kind).toBe("reply");
     expect((await third.completion).kind).toBe("reply");
-    expect(workers[0]?.requests.map((item) => item.command.kind)).toEqual(["event", "event", "event", "stop"]);
+    expect(workers[0]?.requests.map((item) => item.command.kind)).toEqual(["event", "event", "event", "stop", "checkpoint"]);
+    scheduler.shutdown();
+  });
+
+  it("closes ordinary admission at Stop's watermark while lifecycle controls still settle", async () => {
+    const { scheduler, workers } = fixture();
+    const identity = execution("stopping");
+    const lease = claimed(scheduler, identity);
+    const start = admitted(scheduler, identity, lease, { kind: "start" });
+    const event = admitted(scheduler, identity, lease, { kind: "event", sequence: 1 });
+    const stop = admitted(scheduler, identity, lease, { kind: "stop", requestId: "stop-now" });
+    expect(scheduler.submit({ execution: identity, lease, command: { kind: "event", sequence: 2 }, byteLength: 100 }))
+      .toEqual({ kind: "stopping" });
+    const checkpoint = admitted(scheduler, identity, lease, { kind: "checkpoint", revision: 2 });
+    const effect = admitted(scheduler, identity, lease, { kind: "effect-result", effectId: "file-1" });
+    expect(request(workers[0]!, 0).ordinal).toBe(1);
+    workers[0]?.reply(request(workers[0]!, 0), 1);
+    workers[0]?.reply(request(workers[0]!, 1), 2);
+    expect(request(workers[0]!, 2)).toMatchObject({
+      ordinal: 3,
+      stopWatermark: 2,
+      command: { kind: "stop", requestId: "stop-now" },
+    });
+    workers[0]?.reply(request(workers[0]!, 2), 3);
+    expect(await stop.completion).toEqual({ kind: "reply", result: { revision: 3 } });
+    expect(scheduler.submit({ execution: identity, lease, command: { kind: "event", sequence: 3 }, byteLength: 100 }))
+      .toEqual({ kind: "stopping" });
+    expect(scheduler.submit({ execution: identity, lease, command: { kind: "stop", requestId: "again" }, byteLength: 100 }))
+      .toEqual({ kind: "stop-already-requested" });
+    const finalize = admitted(scheduler, identity, lease, { kind: "finalize" });
+    for (let index = 3; index < 6; index += 1) workers[0]?.reply(request(workers[0]!, index), index + 1);
+    expect(await start.completion).toEqual({ kind: "reply", result: { revision: 1 } });
+    expect(await event.completion).toEqual({ kind: "reply", result: { revision: 2 } });
+    expect((await checkpoint.completion).kind).toBe("reply");
+    expect((await effect.completion).kind).toBe("reply");
+    expect((await finalize.completion).kind).toBe("reply");
+    expect(scheduler.release(identity, lease)).toBe(true);
     scheduler.shutdown();
   });
 
@@ -159,8 +203,8 @@ describe("ExecutionMailboxScheduler", () => {
       ...LIMITS,
       maxPending: 10,
       maxPendingBytes: 500,
-      reservedStop: 1,
-      reservedStopBytes: 100,
+      reservedControl: 1,
+      reservedControlBytes: 100,
       maxPerExecutionBytes: 500,
     };
     const { scheduler } = fixture(1, limits);

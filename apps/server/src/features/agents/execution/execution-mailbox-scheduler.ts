@@ -14,6 +14,11 @@ export type ExecutionMailboxCommand<Work extends { readonly kind: string }> =
   | Work
   | { readonly kind: "stop"; readonly requestId: string };
 
+/** Lifecycle results that must be allowed to settle after Stop is admitted. */
+export const EXECUTION_CONTROL_KINDS = ["checkpoint", "effect-result", "provider-outcome", "finalize"] as const;
+export type ExecutionControlKind = typeof EXECUTION_CONTROL_KINDS[number];
+const CONTROL_KINDS: ReadonlySet<string> = new Set(EXECUTION_CONTROL_KINDS);
+
 interface Pending<Command, Result> {
   readonly request: ExecutionWorkerRequest<Command>;
   readonly byteLength: number;
@@ -30,7 +35,7 @@ interface Assignment<Command, Result> {
   pendingBytes: number;
   normalCount: number;
   normalBytes: number;
-  stopPending: boolean;
+  stopping: boolean;
 }
 
 interface Slot<Command, Result> {
@@ -43,23 +48,23 @@ interface Slot<Command, Result> {
   activeCount: number;
 }
 
-/** Capacity includes posted work until its reply arrives. Stop has its own reserve. */
+/** Capacity includes posted work until its reply arrives. Control has a reserve. */
 export interface ExecutionMailboxLimits {
   readonly maxPending: number;
   readonly maxPendingBytes: number;
-  readonly reservedStop: number;
-  readonly reservedStopBytes: number;
+  readonly reservedControl: number;
+  readonly reservedControlBytes: number;
   readonly maxPerExecutionPending: number;
   readonly maxPerExecutionBytes: number;
-  readonly reservedPerExecutionStop: number;
-  readonly reservedPerExecutionStopBytes: number;
+  readonly reservedPerExecutionControl: number;
+  readonly reservedPerExecutionControlBytes: number;
 }
 
 /** The host supplies durable owner epochs and a worker factory for each fixed slot. */
-export interface ExecutionMailboxOptions<Command, Result> {
+export interface ExecutionMailboxOptions<Work extends { readonly kind: string }, Result> {
   readonly workerCount: number;
   readonly limits: ExecutionMailboxLimits;
-  readonly createWorker: (workerIndex: number) => ExecutionWorkerPort<Command, Result>;
+  readonly createWorker: (workerIndex: number) => ExecutionWorkerPort<ExecutionMailboxCommand<Work>, Result>;
   readonly onWorkerLost: (executions: readonly ExecutionIdentity[]) => void;
 }
 
@@ -69,7 +74,11 @@ export type ExecutionClaim =
 
 export type ExecutionAdmission<Result> =
   | { readonly kind: "admitted"; readonly ordinal: number; readonly completion: Promise<ExecutionMailboxCompletion<Result>> }
-  | { readonly kind: "stale-execution" | "overloaded" | "invalid-size" | "stop-pending" | "shutdown" };
+  | { readonly kind: "stale-execution" | "overloaded" | "invalid-size" | "stop-already-requested" | "stopping" | "shutdown" };
+
+type AdmissionDecision =
+  | { readonly kind: "accept"; readonly control: boolean; readonly stop: boolean }
+  | { readonly kind: "invalid-size" | "overloaded" | "stop-already-requested" | "stopping" };
 
 /** Bounded state visible to diagnostics without exposing command payloads. */
 export interface ExecutionMailboxDepth {
@@ -88,8 +97,8 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
   private readonly slots: Slot<ExecutionMailboxCommand<Work>, Result>[];
   private readonly byThread = new Map<string, Assignment<ExecutionMailboxCommand<Work>, Result>>();
   private readonly limits: ExecutionMailboxLimits;
-  private readonly createWorker: ExecutionMailboxOptions<ExecutionMailboxCommand<Work>, Result>["createWorker"];
-  private readonly onWorkerLost: ExecutionMailboxOptions<ExecutionMailboxCommand<Work>, Result>["onWorkerLost"];
+  private readonly createWorker: ExecutionMailboxOptions<Work, Result>["createWorker"];
+  private readonly onWorkerLost: ExecutionMailboxOptions<Work, Result>["onWorkerLost"];
   private pendingCount = 0;
   private pendingBytes = 0;
   private normalCount = 0;
@@ -98,7 +107,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
   private nextSlotIndex = 0;
   private stopped = false;
 
-  constructor(options: ExecutionMailboxOptions<ExecutionMailboxCommand<Work>, Result>) {
+  constructor(options: ExecutionMailboxOptions<Work, Result>) {
     validateOptions(options);
     this.limits = options.limits;
     this.createWorker = options.createWorker;
@@ -142,7 +151,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
       pendingBytes: 0,
       normalCount: 0,
       normalBytes: 0,
-      stopPending: false,
+      stopping: false,
     });
     slot.activeCount += 1;
     return { kind: "claimed", lease };
@@ -158,16 +167,15 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     if (this.stopped) return { kind: "shutdown" };
     const assignment = this.currentAssignment(input.execution, input.lease);
     if (!assignment) return { kind: "stale-execution" };
-    if (!positiveInteger(input.byteLength)) return { kind: "invalid-size" };
-    const control = input.command.kind === "stop";
-    if (control && assignment.stopPending) return { kind: "stop-pending" };
-    if (!this.hasCapacity(assignment, input.byteLength, control)) return { kind: "overloaded" };
+    const decision = this.admissionDecision(assignment, input.command, input.byteLength);
+    if (decision.kind !== "accept") return { kind: decision.kind };
     const ordinal = assignment.nextOrdinal++;
     const request: ExecutionWorkerRequest<ExecutionMailboxCommand<Work>> = {
       requestId: this.nextRequestId++,
       execution: assignment.execution,
       lease: assignment.lease,
       ordinal,
+      ...(decision.stop ? { stopWatermark: ordinal - 1 } : {}),
       command: input.command,
     };
     let resolveCompletion: (completion: ExecutionMailboxCompletion<Result>) => void = () => {};
@@ -177,10 +185,11 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     const pending: Pending<ExecutionMailboxCommand<Work>, Result> = {
       request,
       byteLength: input.byteLength,
-      control,
+      control: decision.control,
       resolve: resolveCompletion,
     };
     this.retain(assignment, pending);
+    if (decision.stop) assignment.stopping = true;
     this.enqueue(assignment.slot, pending);
     this.dispatch(assignment.slot);
     return { kind: "admitted", ordinal, completion };
@@ -250,16 +259,30 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     return assignment;
   }
 
+  private admissionDecision(
+    assignment: Assignment<ExecutionMailboxCommand<Work>, Result>,
+    command: ExecutionMailboxCommand<Work>,
+    bytes: number,
+  ): AdmissionDecision {
+    if (!positiveInteger(bytes)) return { kind: "invalid-size" };
+    const stop = command.kind === "stop";
+    const control = stop || CONTROL_KINDS.has(command.kind);
+    if (stop && assignment.stopping) return { kind: "stop-already-requested" };
+    if (assignment.stopping && !control) return { kind: "stopping" };
+    if (!this.hasCapacity(assignment, bytes, control)) return { kind: "overloaded" };
+    return { kind: "accept", control, stop };
+  }
+
   private hasCapacity(assignment: Assignment<ExecutionMailboxCommand<Work>, Result>, bytes: number, control: boolean): boolean {
     const limits = this.limits;
     if (this.pendingCount + 1 > limits.maxPending || this.pendingBytes + bytes > limits.maxPendingBytes) return false;
     if (assignment.pendingCount + 1 > limits.maxPerExecutionPending
       || assignment.pendingBytes + bytes > limits.maxPerExecutionBytes) return false;
     if (control) return true;
-    return this.normalCount + 1 <= limits.maxPending - limits.reservedStop
-      && this.normalBytes + bytes <= limits.maxPendingBytes - limits.reservedStopBytes
-      && assignment.normalCount + 1 <= limits.maxPerExecutionPending - limits.reservedPerExecutionStop
-      && assignment.normalBytes + bytes <= limits.maxPerExecutionBytes - limits.reservedPerExecutionStopBytes;
+    return this.normalCount + 1 <= limits.maxPending - limits.reservedControl
+      && this.normalBytes + bytes <= limits.maxPendingBytes - limits.reservedControlBytes
+      && assignment.normalCount + 1 <= limits.maxPerExecutionPending - limits.reservedPerExecutionControl
+      && assignment.normalBytes + bytes <= limits.maxPerExecutionBytes - limits.reservedPerExecutionControlBytes;
   }
 
   private retain(assignment: Assignment<ExecutionMailboxCommand<Work>, Result>, pending: Pending<ExecutionMailboxCommand<Work>, Result>): void {
@@ -267,10 +290,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     this.pendingBytes += pending.byteLength;
     assignment.pendingCount += 1;
     assignment.pendingBytes += pending.byteLength;
-    if (pending.control) {
-      assignment.stopPending = true;
-      return;
-    }
+    if (pending.control) return;
     this.normalCount += 1;
     this.normalBytes += pending.byteLength;
     assignment.normalCount += 1;
@@ -284,8 +304,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     if (assignment && sameLease(assignment.lease, pending.request.lease)) {
       assignment.pendingCount -= 1;
       assignment.pendingBytes -= pending.byteLength;
-      if (pending.control) assignment.stopPending = false;
-      else {
+      if (!pending.control) {
         assignment.normalCount -= 1;
         assignment.normalBytes -= pending.byteLength;
       }
@@ -390,15 +409,15 @@ function positiveInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
 }
 
-function validateOptions<Command, Result>(options: ExecutionMailboxOptions<Command, Result>): void {
+function validateOptions<Work extends { readonly kind: string }, Result>(options: ExecutionMailboxOptions<Work, Result>): void {
   const limits = options.limits;
   const values = [options.workerCount, limits.maxPending, limits.maxPendingBytes, limits.maxPerExecutionPending,
-    limits.maxPerExecutionBytes, limits.reservedStop, limits.reservedStopBytes,
-    limits.reservedPerExecutionStop, limits.reservedPerExecutionStopBytes];
+    limits.maxPerExecutionBytes, limits.reservedControl, limits.reservedControlBytes,
+    limits.reservedPerExecutionControl, limits.reservedPerExecutionControlBytes];
   if (values.some((value) => !positiveInteger(value))) throw new Error("Mailbox limits must be positive safe integers");
-  if (limits.reservedStop >= limits.maxPending || limits.reservedStopBytes >= limits.maxPendingBytes
-    || limits.reservedPerExecutionStop >= limits.maxPerExecutionPending
-    || limits.reservedPerExecutionStopBytes >= limits.maxPerExecutionBytes) {
-    throw new Error("Mailbox Stop reserves must leave normal capacity");
+  if (limits.reservedControl >= limits.maxPending || limits.reservedControlBytes >= limits.maxPendingBytes
+    || limits.reservedPerExecutionControl >= limits.maxPerExecutionPending
+    || limits.reservedPerExecutionControlBytes >= limits.maxPerExecutionBytes) {
+    throw new Error("Mailbox control reserves must leave normal capacity");
   }
 }
