@@ -51,6 +51,7 @@ import {
 } from "./parent-turn-durability.js";
 import { appendSelectedTextComments } from "./selected-text-comment-append.js";
 import { ApprovalReviewPolicy, type ApprovalReviewDecision } from "./approval-review-policy.js";
+import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 
 const FILE_INJECTION_SEPARATOR = "\n\n---\n";
 
@@ -125,6 +126,16 @@ export interface TurnRuntimeAdmissionAuthority {
   owns(lease: TurnRuntimeLease): boolean;
 }
 
+/** Commits a new parent turn through its exact execution mailbox. */
+export interface TurnParentStartOwner {
+  start(input: {
+    readonly execution: ExecutionIdentity;
+    readonly ownerEpoch: number;
+    readonly providerId: string;
+    readonly parentTurn: DataOnlyParentTurnStartInput;
+  }): Promise<void>;
+}
+
 /** The thread-control action selected during generic dispatch preparation. */
 export type ThreadControlLeaseDirective =
   | {
@@ -150,6 +161,7 @@ export interface PreparedTurnDispatch {
   readonly threadControl: ThreadControlLeaseDirective | null;
   readonly contextSeed: number;
   readonly contextWindow: number | null;
+  readonly workerOwned?: true;
 }
 
 /** The stable outcome of handling a complete send command. */
@@ -194,6 +206,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly environment: WorkspaceEnvironmentService | undefined,
     private readonly files: FileService | undefined,
     private readonly platform: NodeJS.Platform,
+    private readonly parentStartOwner?: TurnParentStartOwner,
   ) {}
 
   /** Admit one command and return an immutable package for the runtime owner. */
@@ -422,7 +435,19 @@ export class TurnAdmissionDispatchCoordinator {
     runtime.activate(lease);
     const attachmentData = await this.persistAttachments(prepared);
     const sourceTurnId = prepared.command.sourceTurnId ?? NodeCrypto.randomUUID();
-    const parentStartInput = this.startParentTurn(prepared, lease, sourceTurnId, attachmentData, review);
+    const parentStartInput = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachmentData, review);
+    if (this.parentStartOwner) {
+      await this.parentStartOwner.start({
+        execution: { threadId: lease.threadId, turnId: sourceTurnId, executionId: lease.turnExecutionId },
+        ownerEpoch: lease.generation,
+        providerId: prepared.providerId,
+        parentTurn: parentStartInput,
+      });
+      if (parentStartInput.reopenThread) {
+        const reopened = this.threads.findById(lease.threadId);
+        if (reopened) broadcast("thread.lifecycleChanged", { thread: reopened });
+      }
+    } else this.startParentTurn(parentStartInput);
     this.publishCommittedEffects(prepared, sourceTurnId);
     const wirePayload = this.buildWirePayload(prepared);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);
@@ -438,6 +463,7 @@ export class TurnAdmissionDispatchCoordinator {
       threadControl: this.threadControlDirective(prepared, sourceTurnId),
       contextSeed: prepared.thread.last_context_tokens ?? 0,
       contextWindow: prepared.thread.context_window,
+      ...(this.parentStartOwner ? { workerOwned: true as const } : {}),
     };
   }
 
@@ -689,14 +715,7 @@ export class TurnAdmissionDispatchCoordinator {
     return prepared.automaticAttachments ?? this.persistCommandAttachments(prepared.command);
   }
 
-  private startParentTurn(
-    prepared: PreparedCommand,
-    lease: TurnRuntimeLease,
-    sourceTurnId: string,
-    attachments: PersistedAttachmentData,
-    review: ApprovalReviewDecision,
-  ): DataOnlyParentTurnStartInput {
-    const input = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachments, review);
+  private startParentTurn(input: DataOnlyParentTurnStartInput): void {
     const { userMessage, reopenThread, answeredPlanQuestionMessageId, ...start } = input;
     let reopenedThread: Exclude<ReturnType<ThreadRepo["findById"]>, null> | null = null;
     this.parentTurns.startParentTurn({
@@ -709,7 +728,6 @@ export class TurnAdmissionDispatchCoordinator {
       },
     });
     if (reopenedThread) broadcast("thread.lifecycleChanged", { thread: reopenedThread });
-    return input;
   }
 
   private prepareParentTurnStartInput(
