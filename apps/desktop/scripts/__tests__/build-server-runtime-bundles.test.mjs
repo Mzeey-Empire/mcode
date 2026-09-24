@@ -24,6 +24,7 @@ describe("buildServerRuntimeBundles", () => {
     const serverOutFile = NodePath.join(outputRoot, "server.cjs");
     const ptyHostOutFile = NodePath.join(outputRoot, "pty-host.cjs");
     const providerEventWorkerOutFile = NodePath.join(outputRoot, "provider-event.worker.cjs");
+    const canonicalWriterWorkerOutFile = NodePath.join(outputRoot, "canonical-agent-writer.worker.cjs");
 
     try {
       compileServerWithSwc(serverRoot);
@@ -36,6 +37,7 @@ describe("buildServerRuntimeBundles", () => {
 
       expect(() => new NodeVM.Script(bundledEntry, { filename: "server.cjs" })).not.toThrow();
       await NodeFSPromises.access(providerEventWorkerOutFile);
+      await NodeFSPromises.access(canonicalWriterWorkerOutFile);
       expect(await NodeFSPromises.readFile(serverOutFile, "utf8")).toContain("provider-event.worker.cjs");
     } finally {
       await NodeFSPromises.rm(outputRoot, { recursive: true, force: true });
@@ -63,17 +65,28 @@ describe("buildServerRuntimeBundles", () => {
       "composition",
       "provider-event.worker.js",
     );
+    const canonicalWriterWorkerEntry = NodePath.join(
+      serverRoot,
+      "dist-tsc",
+      "features",
+      "agents",
+      "canonical",
+      "canonical-agent-writer.worker.js",
+    );
     const serverOutFile = NodePath.join(fixtureRoot, "dist", "server.cjs");
     const ptyHostOutFile = NodePath.join(fixtureRoot, "dist", "pty-host.cjs");
     const providerEventWorkerOutFile = NodePath.join(fixtureRoot, "dist", "provider-event.worker.cjs");
+    const canonicalWriterWorkerOutFile = NodePath.join(fixtureRoot, "dist", "canonical-agent-writer.worker.cjs");
 
     await Promise.all([
       NodeFSPromises.mkdir(NodePath.dirname(ptyHostEntry), { recursive: true }),
       NodeFSPromises.mkdir(NodePath.dirname(providerEventWorkerEntry), { recursive: true }),
+      NodeFSPromises.mkdir(NodePath.dirname(canonicalWriterWorkerEntry), { recursive: true }),
     ]);
     await NodeFSPromises.writeFile(serverEntry, 'console.log("server-entry");\n');
     await NodeFSPromises.writeFile(ptyHostEntry, 'console.log("pty-host-entry");\n');
     await NodeFSPromises.writeFile(providerEventWorkerEntry, 'console.log("provider-event-worker");\n');
+    await NodeFSPromises.writeFile(canonicalWriterWorkerEntry, 'console.log("canonical-writer-worker");\n');
 
     await buildServerRuntimeBundles({
       serverRoot,
@@ -85,8 +98,10 @@ describe("buildServerRuntimeBundles", () => {
     await NodeFSPromises.access(serverOutFile);
     await NodeFSPromises.access(ptyHostOutFile);
     await NodeFSPromises.access(providerEventWorkerOutFile);
+    await NodeFSPromises.access(canonicalWriterWorkerOutFile);
     expect(await NodeFSPromises.readFile(serverOutFile, "utf8")).toContain("server-entry");
     expect(await NodeFSPromises.readFile(ptyHostOutFile, "utf8")).toContain("pty-host-entry");
     expect(await NodeFSPromises.readFile(providerEventWorkerOutFile, "utf8")).toContain("provider-event-worker");
+    expect(await NodeFSPromises.readFile(canonicalWriterWorkerOutFile, "utf8")).toContain("canonical-writer-worker");
   }, 30_000);
 });
