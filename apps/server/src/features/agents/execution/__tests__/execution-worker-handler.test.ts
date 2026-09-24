@@ -5,6 +5,7 @@ import type {
   DataOnlyParentTurnFinishInput,
   DataOnlyParentTurnStartInput,
 } from "../../canonical/canonical-parent-turn-write.js";
+import type { ParentNarrativeRecoveryCommit } from "../../turns/parent-turn-durability.js";
 import {
   ExecutionMailboxScheduler,
   type ExecutionMailboxCommand,
@@ -52,6 +53,17 @@ const FINISH_INPUT: DataOnlyParentTurnFinishInput = {
   providerIdentities: [],
   outcome: "cancelled",
   projection: { message: null, narrative: [] },
+};
+
+const NARRATIVE_INPUT: ParentNarrativeRecoveryCommit = {
+  executionId: EXECUTION.executionId,
+  items: [{
+    kind: "narrationSegment",
+    record: {
+      id: "thought-1", message_id: "message-1", text: "Working",
+      started_at: "2026-09-24T12:00:00.000Z", ended_at: null, sort_order: 1,
+    },
+  }],
 };
 
 const LIMITS: ExecutionMailboxLimits = {
@@ -103,12 +115,15 @@ class InlineWorker implements ExecutionWorkerPort<Command, ExecutionWorkerResult
 
 function fixture(writer = new RecordingWriter()) {
   const workers: InlineWorker[] = [];
+  const handlers: ExecutionWorkerHandler[] = [];
   const lost: ExecutionLostAssignment[][] = [];
   const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
     workerCount: 1,
     limits: LIMITS,
     createWorker: () => {
-      const worker = new InlineWorker(new ExecutionWorkerHandler(writer));
+      const handler = new ExecutionWorkerHandler(writer);
+      const worker = new InlineWorker(handler);
+      handlers.push(handler);
       workers.push(worker);
       return worker;
     },
@@ -116,7 +131,7 @@ function fixture(writer = new RecordingWriter()) {
   });
   const claim = scheduler.claim(EXECUTION, 1);
   if (claim.kind !== "claimed") throw new Error(`Claim failed: ${claim.kind}`);
-  return { scheduler, worker: workers[0]!, writer, lost, lease: claim.lease };
+  return { scheduler, worker: workers[0]!, handler: handlers[0]!, writer, lost, lease: claim.lease };
 }
 
 function submit(
@@ -148,6 +163,43 @@ async function committed(admission: ReturnType<typeof submit>, revision: number)
 }
 
 describe("ExecutionWorkerHandler through its scheduler", () => {
+  it("maps a running narrative delta to one fenced semantic operation", async () => {
+    const { scheduler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await committed(submit(scheduler, lease, { kind: "narrative-delta", input: NARRATIVE_INPUT }), 2);
+
+    expect(writer.operations[1]).toMatchObject({
+      operationId: `${lease.leaseId}:2`, execution: EXECUTION, lease, ordinal: 2,
+      mutation: { kind: "narrative-delta", input: NARRATIVE_INPUT },
+    });
+    scheduler.shutdown();
+  });
+
+  it("rejects a narrative delta for another execution before it reaches the writer", async () => {
+    const { scheduler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await expect(submit(scheduler, lease, {
+      kind: "narrative-delta", input: { ...NARRATIVE_INPUT, executionId: "another-execution" },
+    }).completion).resolves.toEqual({
+      kind: "reply", result: { kind: "rejected", reason: "invalid-narrative-routing" },
+    });
+    expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin"]);
+    scheduler.shutdown();
+  });
+
+  it("rejects a narrative delta once the execution is stopping", async () => {
+    const { scheduler, handler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await committed(submit(scheduler, lease, { kind: "stop", requestId: "stop-1" }), 2);
+    const reply = await handler.handle({
+      requestId: 3, execution: EXECUTION, lease, ordinal: 3,
+      command: { kind: "narrative-delta", input: NARRATIVE_INPUT },
+    });
+    expect(reply.result).toEqual({ kind: "rejected", reason: "invalid-transition" });
+    expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin", "stop-requested"]);
+    scheduler.shutdown();
+  });
+
   it("runs one synthetic turn from start through Stop, checkpoint, and finalization", async () => {
     const { scheduler, worker, writer, lease } = fixture();
     await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);

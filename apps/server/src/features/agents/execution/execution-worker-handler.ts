@@ -12,6 +12,7 @@ import type {
   ParentAssistantTextCheckpointInput,
   ParentAssistantTextCheckpointResult,
 } from "../turns/parent-assistant-text-checkpoint-service.js";
+import type { ParentNarrativeRecoveryCommit } from "../turns/parent-turn-durability.js";
 import type {
   ExecutionIdentity,
   ExecutionLease,
@@ -26,6 +27,7 @@ export type ExecutionWorkCommand =
   | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
   | { readonly kind: "event"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[] }
   | { readonly kind: "assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
+  | { readonly kind: "narrative-delta"; readonly input: ParentNarrativeRecoveryCommit }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
   | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
   | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
@@ -44,6 +46,7 @@ export interface ExecutionSemanticOperation {
     | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
     | { readonly kind: "append-events"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[] }
     | { readonly kind: "append-assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
+    | { readonly kind: "narrative-delta"; readonly input: ParentNarrativeRecoveryCommit }
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
     | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
@@ -86,7 +89,7 @@ export interface ExecutionSemanticWriter {
 export type ExecutionWorkerResult =
   | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult }
   | { readonly kind: "released" }
-  | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-text-routing" | "invalid-stop-watermark" | "writer-conflict" };
+  | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-text-routing" | "invalid-narrative-routing" | "invalid-stop-watermark" | "writer-conflict" };
 
 type WorkerCommand = ExecutionMailboxCommand<ExecutionWorkCommand>;
 const METADATA_MUTATIONS: ReadonlySet<WorkerCommand["kind"]> = new Set([
@@ -198,6 +201,8 @@ function mutationFor(
   switch (command.kind) {
     case "event":
       return eventMutation(command, request.execution, state);
+    case "narrative-delta":
+      return narrativeMutation(command, request.execution, state);
     case "stop":
       return stopMutation(command, request, state);
     case "finalize":
@@ -236,6 +241,15 @@ function eventMutation(
   return { kind: "append-events", phase: command.phase, nativeCursor: command.nativeCursor, events: command.events };
 }
 
+function narrativeMutation(
+  command: Extract<WorkerCommand, { kind: "narrative-delta" }>,
+  execution: ExecutionIdentity,
+  state: ExecutionState,
+): ExecutionSemanticOperation["mutation"] | undefined {
+  if (state.phase !== "running" || command.input?.executionId !== execution.executionId) return undefined;
+  return { kind: "narrative-delta", input: command.input };
+}
+
 function stopMutation(
   command: Extract<WorkerCommand, { kind: "stop" }>,
   request: ExecutionWorkerRequest<WorkerCommand>,
@@ -270,6 +284,9 @@ function invalidReason(request: ExecutionWorkerRequest<WorkerCommand>): Extract<
   }
   if (request.command.kind === "assistant-text" && !validTextRouting(request.command.inputs, request.execution)) {
     return "invalid-text-routing";
+  }
+  if (request.command.kind === "narrative-delta" && request.command.input?.executionId !== request.execution.executionId) {
+    return "invalid-narrative-routing";
   }
   return "invalid-transition";
 }
