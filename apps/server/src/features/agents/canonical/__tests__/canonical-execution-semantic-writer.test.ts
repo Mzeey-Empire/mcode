@@ -500,4 +500,30 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE kind = 'semantic-head'").get())
       .toEqual({ count: 2 });
   });
+
+  it("replays terminal publication across multiple bounded receipt pages", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const staged = new MessageRepo(db).create(
+      THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true,
+    );
+    const input = {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
+      providerIdentities: [], outcome: "completed" as const,
+      projection: { message: staged, narrative: toolNarrative(staged.id, 1_025) },
+    };
+    published = [];
+    expect((await send(2, { kind: "finalize", outcome: "completed", input })).kind).toBe("committed");
+    const firstPublication = [...published];
+    expect(firstPublication).toContain(`${EXECUTION_ID}:turn.completed`);
+    expect((db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'semantic-publication'")
+      .get(EXECUTION_ID) as { count: number }).count).toBeGreaterThan(16);
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    published = [];
+    writer = new CanonicalExecutionSemanticWriter(db, (events) => published.push(...events.map((item) => item.eventId)));
+    expect(await writer.transact(operation(2, { kind: "finish", outcome: "completed", input })))
+      .toMatchObject({ kind: "committed" });
+    expect(published).toEqual(firstPublication);
+  }, 30_000);
 });

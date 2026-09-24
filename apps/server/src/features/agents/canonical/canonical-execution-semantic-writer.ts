@@ -27,6 +27,7 @@ const HEAD_KIND = "semantic-head";
 const PUBLICATION_KIND = "semantic-publication";
 const PENDING_FINISH_KIND = "semantic:finish-pending";
 const PUBLICATION_CHUNK_SIZE = 64;
+const PUBLICATION_CHUNK_PAGE_SIZE = 16;
 const MAX_BUFFERED_PUBLICATION_EVENTS = 2_048;
 const storedPublicationSequencesSchema = z.array(z.union([
   z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -81,7 +82,8 @@ const storedOperationSchema = z.object({
   input_hash: z.string(),
   receipt_json: z.string(),
 });
-const storedOperationListSchema = z.array(storedOperationSchema);
+const storedPublicationChunkPageSchema = z.array(storedOperationSchema.extend({ operation_id: z.string() }))
+  .max(PUBLICATION_CHUNK_PAGE_SIZE);
 const storedEnvelopeRowSchema = z.object({ envelope_json: z.string() });
 const durableSequenceRowSchema = z.object({ last_durable_sequence: z.number().int() });
 
@@ -136,7 +138,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     });
     this.providerProjector = new CanonicalCommittedProviderProjector(codexBoundary);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
-    this.listPublicationChunks = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id >= ? AND operation_id < ? ORDER BY operation_id");
+    this.listPublicationChunks = db.prepare("SELECT operation_id, kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id > ? AND operation_id < ? ORDER BY operation_id LIMIT ?");
     this.findPublishedEvent = db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE execution_id = ? AND accepted_sequence = ?");
     this.findDurableSequence = db.prepare("SELECT last_durable_sequence FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?");
     this.insertOperation = db.prepare("INSERT INTO canonical_writer_operation_receipts (execution_id, operation_id, kind, input_hash, receipt_json) VALUES (?, ?, ?, ?, ?)");
@@ -483,14 +485,21 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private publishStoredEvents(executionId: string, hash: string): void {
     const prefix = publicationChunkPrefix(hash);
-    const chunks = storedOperationListSchema.parse(this.listPublicationChunks.all(executionId, prefix, `${prefix}~`));
-    for (const chunk of chunks) {
-      if (chunk.kind !== PUBLICATION_KIND || chunk.input_hash !== hash) throw new Error("Semantic publication chunk mismatch");
-      const sequences = storedPublicationSequencesSchema.parse(JSON.parse(chunk.receipt_json));
-      const events = sequences.map((sequence) => typeof sequence === "number"
-        ? this.loadPublishedEvent(executionId, sequence)
-        : this.loadPublishedEvent(sequence.executionId, sequence.sequence));
-      this.publish(events);
+    let cursor = prefix;
+    while (true) {
+      const chunks = storedPublicationChunkPageSchema.parse(this.listPublicationChunks.all(
+        executionId, cursor, `${prefix}~`, PUBLICATION_CHUNK_PAGE_SIZE,
+      ));
+      if (chunks.length === 0) return;
+      for (const chunk of chunks) {
+        if (chunk.kind !== PUBLICATION_KIND || chunk.input_hash !== hash) throw new Error("Semantic publication chunk mismatch");
+        const sequences = storedPublicationSequencesSchema.parse(JSON.parse(chunk.receipt_json));
+        const events = sequences.map((sequence) => typeof sequence === "number"
+          ? this.loadPublishedEvent(executionId, sequence)
+          : this.loadPublishedEvent(sequence.executionId, sequence.sequence));
+        this.publish(events);
+      }
+      cursor = chunks[chunks.length - 1]!.operation_id;
     }
   }
 
