@@ -92,7 +92,10 @@ export class CanonicalParentTurnWrite {
   }
 
   /** Confirm the terminal checkpoint and publish the staged assistant in one transaction. */
-  finish(input: DataOnlyParentTurnFinishInput): Promise<CanonicalAgentBatchedCommitResult> {
+  finish(
+    input: DataOnlyParentTurnFinishInput,
+    onTerminalCommit?: (durableSequence: number) => void,
+  ): Promise<CanonicalAgentBatchedCommitResult> {
     this.assertStagedAssistant(input);
     const projection: ParentTurnProjection = {
       message: input.projection.message
@@ -113,7 +116,7 @@ export class CanonicalParentTurnWrite {
         this.messages.setAssistantOutcome(projection.message.id, input.outcome, input.executionId);
         this.messages.publishAssistant(projection.message.id);
       },
-    });
+    }, onTerminalCommit);
   }
 
   private projectUserMessage(input: DataOnlyParentTurnStartInput) {

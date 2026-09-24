@@ -2026,15 +2026,16 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     });
   }
 
-  /** Persist a terminal parent turn in bounded transactions and confirm it only in the final batch. */
+  /** Persist a terminal parent turn in bounded transactions; the writer-local hook joins its final transaction. */
   async finishParentTurnBatched(
     input: CanonicalParentTurnFinishInput,
+    onTerminalCommit?: (durableSequence: number) => void,
   ): Promise<CanonicalAgentBatchedCommitResult> {
     const checkpoint = this.loadCheckpoint(input.executionId);
     if (checkpoint?.terminalOutcome) {
       return this.confirmedParentTerminalBatch(checkpoint, input.threadId);
     }
-    return this.writeParentTerminalBatches(input, checkpoint);
+    return this.writeParentTerminalBatches(input, checkpoint, onTerminalCommit);
   }
 
   private confirmedParentTerminalBatch(
@@ -2057,6 +2058,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   private async writeParentTerminalBatches(
     input: CanonicalParentTurnFinishInput,
     checkpoint: CanonicalAgentCheckpoint | null,
+    onTerminalCommit?: (durableSequence: number) => void,
   ): Promise<CanonicalAgentBatchedCommitResult> {
     const projection = input.projectTurn();
     const endedAt = new Date().toISOString();
@@ -2084,7 +2086,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
         terminalRevision,
         terminalEventId,
       ),
-      onBatchFinishing: () => this.finishParentTerminalBatch(state, input, terminalRevision),
+      onBatchFinishing: () => this.finishParentTerminalBatch(state, input, terminalRevision, onTerminalCommit),
       onBatchCommitted: () => this.publishParentTerminalBatch(state),
     });
     return this.parentTerminalBatchResult(state, writeBatches);
@@ -2254,6 +2256,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     state: ParentTerminalBatchState,
     input: CanonicalParentTurnFinishInput,
     terminalRevision: number,
+    onTerminalCommit?: (durableSequence: number) => void,
   ): void {
     const modelState = this.parentTerminalBatchModelState(state);
     if (!state.wrote) {
@@ -2265,6 +2268,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     if (state.terminal) {
       this.displayMaterializer.materializeItems(this.parentAssistantItemIds(input.turnId));
       this.retireParentNarrativeRecovery(input.turnId);
+      onTerminalCommit?.(state.acceptedSequence);
     }
     state.latest = this.committedParentTerminalBatchResult(state, input.threadId, terminalRevision);
   }

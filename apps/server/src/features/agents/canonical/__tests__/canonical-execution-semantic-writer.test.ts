@@ -1,0 +1,188 @@
+import "reflect-metadata";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import type { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
+import { ExecutionWorkerHandler } from "../../execution/execution-worker-handler.js";
+import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
+import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
+
+const THREAD_ID = "thread-1";
+const TURN_ID = "turn-1";
+const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
+const NOW = "2026-09-24T10:00:00.000Z";
+const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID } as const;
+const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "lease-1" } as const;
+
+function seedThread(db: Database): void {
+  db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .run("workspace-1", "Workspace", "C:/fixture", NOW, NOW);
+  db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(THREAD_ID, "workspace-1", "Thread", "main", "codex", NOW, NOW);
+}
+
+function startInput(): DataOnlyParentTurnStartInput {
+  return {
+    thread: { id: THREAD_ID, workspaceId: "workspace-1", providerId: "codex", createdAt: NOW },
+    turnId: TURN_ID,
+    executionId: EXECUTION_ID,
+    permissionMode: "supervised",
+    providerIdentities: [],
+    userMessage: { kind: "create", messageId: "user-1", content: "Question", sequence: 1 },
+  };
+}
+
+function event() {
+  return {
+    eventId: `${EXECUTION_ID}:item-1`,
+    routing: { ...execution, itemId: "item-1" },
+    sourceProviderId: "codex",
+    sourceIdentities: [],
+    payload: {
+      type: "item.recorded" as const,
+      item: {
+        id: "item-1",
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        kind: "message" as const,
+        providerIdentities: [],
+        payload: { projection: "message", content: "Event" },
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    },
+  };
+}
+
+function operation(ordinal: number, mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation {
+  return { operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation };
+}
+
+describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () => {
+  let directory: string;
+  let path: string;
+  let db: Database;
+  let published: string[];
+  let writer: CanonicalExecutionSemanticWriter;
+  let handler: ExecutionWorkerHandler;
+
+  beforeEach(() => {
+    directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-semantic-write-"));
+    path = NodePath.join(directory, "mcode.db");
+    db = openDatabase({ dbPath: path });
+    seedThread(db);
+    published = [];
+    writer = new CanonicalExecutionSemanticWriter(db, (events) => {
+      published.push(...events.map((item) => item.eventId));
+    });
+    handler = new ExecutionWorkerHandler(writer);
+  });
+
+  afterEach(() => {
+    db.close(true);
+    NodeFS.rmSync(directory, { recursive: true, force: true });
+  });
+
+  async function send(ordinal: number, command: Parameters<ExecutionWorkerHandler["handle"]>[0]["command"]) {
+    return (await handler.handle({ requestId: ordinal, execution, lease, ordinal, command })).result;
+  }
+
+  it("commits start, event, and finalization with durable receipts across a database reload", async () => {
+    const begin = operation(1, { kind: "begin", providerId: "codex", input: startInput() });
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    expect((await send(2, { kind: "event", events: [event()] })).kind).toBe("committed");
+    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const finish = {
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      executionId: EXECUTION_ID,
+      providerId: "codex",
+      providerIdentities: [],
+      outcome: "completed" as const,
+      projection: { message: staged, narrative: [] },
+    };
+    const terminal = await send(3, { kind: "finalize", outcome: "completed", input: finish });
+    expect(terminal.kind).toBe("committed");
+    expect(published).toContain(`${EXECUTION_ID}:turn.completed`);
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalExecutionSemanticWriter(db, () => {});
+    expect(await writer.transact(begin)).toMatchObject({ kind: "committed", operationId: "lease-1:1" });
+    expect(await writer.transact(operation(1, {
+      kind: "begin",
+      providerId: "codex",
+      input: { ...startInput(), permissionMode: "full" },
+    }))).toEqual({ kind: "conflict", operationId: "lease-1:1" });
+    expect(await writer.transact(operation(3, { kind: "finish", outcome: "completed", input: finish })))
+      .toEqual(terminal);
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ terminal_outcome: "completed" });
+    expect(db.prepare("SELECT kind, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, "semantic:head")).toMatchObject({ kind: "semantic-head" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ count: 4 });
+  });
+
+  it("rejects stale leases, skipped ordinals and unsupported commands before canonical mutation", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const eventsBefore = db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?").get(EXECUTION_ID);
+    const append = operation(2, { kind: "append-events", events: [event()] });
+    expect(await writer.transact({ ...append, lease: { ...lease, ownerEpoch: 2, leaseId: "lease-2" }, operationId: "lease-2:2" }))
+      .toEqual({ kind: "conflict", operationId: "lease-2:2" });
+    expect(await writer.transact({ ...append, ordinal: 3, operationId: "lease-1:3" }))
+      .toEqual({ kind: "conflict", operationId: "lease-1:3" });
+    expect(await send(2, { kind: "checkpoint", phase: "running", nativeCursor: null }))
+      .toEqual({ kind: "rejected", reason: "writer-conflict" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual(eventsBefore);
+    expect(db.prepare("SELECT receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, "semantic:head")).toMatchObject({ receipt_json: expect.stringContaining('"ordinal":1') });
+  });
+
+  it("rolls back terminal checkpoint and semantic receipt together when receipt storage fails", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const finish = {
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      executionId: EXECUTION_ID,
+      providerId: "codex",
+      providerIdentities: [],
+      outcome: "completed" as const,
+      projection: { message: staged, narrative: [] },
+    };
+    db.run("CREATE TRIGGER fail_semantic_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:finish' BEGIN SELECT RAISE(ABORT, 'receipt unavailable'); END");
+    await expect(send(2, { kind: "finalize", outcome: "completed", input: finish })).rejects.toThrow("receipt unavailable");
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ terminal_outcome: null });
+    expect(db.prepare("SELECT operation_id FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, "lease-1:2")).toBeNull();
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, staged.id)).toBeNull();
+    expect(published).not.toContain(`${EXECUTION_ID}:turn.completed`);
+
+    db.run("DROP TRIGGER fail_semantic_receipt");
+    expect((await send(2, { kind: "finalize", outcome: "completed", input: finish })).kind).toBe("committed");
+  });
+
+  it("rolls back an event and its checkpoint when its semantic receipt cannot be stored", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const before = db.prepare("SELECT last_durable_sequence FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID);
+    db.run("CREATE TRIGGER fail_semantic_event_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:append-events' BEGIN SELECT RAISE(ABORT, 'event receipt unavailable'); END");
+    await expect(send(2, { kind: "event", events: [event()] })).rejects.toThrow("event receipt unavailable");
+    expect(db.prepare("SELECT last_durable_sequence FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual(before);
+    expect(db.prepare("SELECT id FROM canonical_agent_items WHERE id = ?").get("item-1")).toBeNull();
+    expect(published).not.toContain(event().eventId);
+
+    db.run("DROP TRIGGER fail_semantic_event_receipt");
+    expect((await send(2, { kind: "event", events: [event()] })).kind).toBe("committed");
+    expect(published).toContain(event().eventId);
+  });
+});
