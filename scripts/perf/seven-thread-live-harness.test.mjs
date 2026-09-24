@@ -20,6 +20,10 @@ NodeTest.test("requires an explicit before or after run confirmation", () => {
     parseArguments(["--run", "--confirm-run", "--label", "before"]),
     { command: "run", label: "before" },
   );
+  NodeAssertStrict.deepEqual(
+    parseArguments(["--run", "--confirm-run", "--label", "after", "--stop-one"]),
+    { command: "run", label: "after", stopOne: true },
+  );
   NodeAssertStrict.throws(
     () => parseArguments(["--run", "--label", "before"]),
     /requires --confirm-run/,
@@ -35,6 +39,10 @@ NodeTest.test("requires an explicit before or after run confirmation", () => {
   NodeAssertStrict.throws(
     () => parseArguments(["--cleanup-receipt", "receipt.json", "--confirm-cleanup"]),
     /requires --confirm-run/,
+  );
+  NodeAssertStrict.throws(
+    () => parseArguments(["--cleanup-receipt", "receipt.json", "--confirm-run", "--stop-one"]),
+    /cannot include run options/,
   );
 });
 
@@ -82,6 +90,7 @@ NodeTest.test("names each of the exact verifier-owned threads", () => {
   const names = Array.from({ length: THREAD_COUNT }, (_, index) => expectedThreadTitle("run-id", index + 1));
   NodeAssertStrict.equal(new Set(names).size, THREAD_COUNT);
   NodeAssertStrict.deepEqual(names.at(-1), "Seven-thread live performance run-id 7/7");
+  NodeAssertStrict.equal(expectedThreadTitle("run-id", 3, 6), "Six-thread Stop verification run-id 3/6");
 });
 
 NodeTest.test("uses the same legacy and modern Terminal lifecycle families as the web transport", () => {

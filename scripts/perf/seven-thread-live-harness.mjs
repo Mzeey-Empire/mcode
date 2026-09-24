@@ -26,6 +26,8 @@ import { renderFixtureWrapper } from "../../.agents/skills/verify-mcode/scripts/
 import { openRuntimeVerificationSocket } from "../../.agents/skills/verify-mcode/scripts/runtime.mjs";
 
 export const THREAD_COUNT = 7;
+const STOP_ONE_THREAD_COUNT = 6;
+const STOP_ONE_ORDINAL = 3;
 const TERMINAL_CONTROL_COUNT = 1;
 export const WORKLOAD_MODEL = "gpt-5.6-luna";
 const PROVIDER_ID = "codex";
@@ -37,7 +39,7 @@ const CLEANUP_RPC_TIMEOUT_MS = 30_000;
 const PERFORMANCE_DIRECTORY = [".dev", "verification", "performance", "seven-thread-live"];
 const FIXTURE_SOURCE = [".agents", "skills", "verify-mcode", "scripts", "transcript-provider-fixture.mjs"];
 const FIXTURE_PROMPT = "Seven concurrent performance verifier long narrative";
-const FLAG_OPTIONS = new Set(["--run", "--confirm-run", "--confirm-cleanup"]);
+const FLAG_OPTIONS = new Set(["--run", "--confirm-run", "--confirm-cleanup", "--stop-one"]);
 const VALUE_OPTIONS = new Set(["--label", "--cleanup", "--cleanup-receipt"]);
 const TERMINAL_TRANSPORTS = new Map([
   ["legacy", {
@@ -58,6 +60,7 @@ const HELP = `Seven concurrent thread live performance harness
 
 Usage:
   bun scripts/perf/seven-thread-live-harness.mjs --run --confirm-run --label <before|after>
+  bun scripts/perf/seven-thread-live-harness.mjs --run --confirm-run --label after --stop-one
   bun scripts/perf/seven-thread-live-harness.mjs --cleanup <receipt-path> --confirm-cleanup
   bun scripts/perf/seven-thread-live-harness.mjs --cleanup-receipt <receipt-path> --confirm-run
 
@@ -65,6 +68,8 @@ The run command creates exactly seven direct threads in this worktree's
 .dev/fixture-repo. It temporarily routes Codex through the checked-in
 transcript fixture and restores the previous setting during cleanup. It never
 falls back to a real Codex model or prints runtime credentials.
+--stop-one creates six fixture threads, stops the third while all six are
+active, and verifies the other five complete and reload durably.
 `;
 
 /** Parses the small explicit command surface before any runtime mutation. */
@@ -135,11 +140,13 @@ function parseRunCommand(flags, values) {
   }
   const label = values.get("--label");
   if (label !== "before" && label !== "after") throw new Error("--run requires --label before or --label after");
-  return { command: "run", label };
+  return flags.has("--stop-one")
+    ? { command: "run", label, stopOne: true }
+    : { command: "run", label };
 }
 
 function parseCleanupReceiptCommand(flags, values, receiptPath) {
-  if (!flags.has("--confirm-run") || flags.has("--confirm-cleanup") || values.has("--label")) {
+  if (!flags.has("--confirm-run") || flags.has("--confirm-cleanup") || flags.has("--stop-one") || values.has("--label")) {
     throw new Error("--cleanup-receipt requires --confirm-run and cannot include run options");
   }
   return { command: "cleanup", receiptPath };
@@ -147,7 +154,7 @@ function parseCleanupReceiptCommand(flags, values, receiptPath) {
 
 function parseCleanupCommand(flags, values, receiptPath) {
   if (!flags.has("--confirm-cleanup")) throw new Error("--cleanup requires --confirm-cleanup");
-  if (flags.has("--confirm-run") || values.has("--label")) throw new Error("--cleanup cannot include run options");
+  if (flags.has("--confirm-run") || flags.has("--stop-one") || values.has("--label")) throw new Error("--cleanup cannot include run options");
   return { command: "cleanup", receiptPath };
 }
 
@@ -276,13 +283,14 @@ function isValidServerStall(entry, startedAtMs, endedAtMs) {
 }
 
 /** Creates the stable names used to prove that only this harness owns a thread. */
-export function expectedThreadTitle(runId, ordinal) {
-  return `Seven-thread live performance ${runId} ${ordinal}/${THREAD_COUNT}`;
+export function expectedThreadTitle(runId, ordinal, threadCount = THREAD_COUNT) {
+  const name = threadCount === STOP_ONE_THREAD_COUNT ? "Six-thread Stop verification" : "Seven-thread live performance";
+  return `${name} ${runId} ${ordinal}/${threadCount}`;
 }
 
 /** Runs the fixed seven-thread workload and writes its recovery-capable receipt. */
-export async function runLiveHarness({ repoRoot = resolveRepoRoot(), label }) {
-  const context = createLiveHarnessContext(repoRoot, label);
+export async function runLiveHarness({ repoRoot = resolveRepoRoot(), label, stopOne = false }) {
+  const context = createLiveHarnessContext(repoRoot, label, stopOne);
   startLiveHarness(context);
   try {
     await executeLiveHarness(context);
@@ -295,16 +303,16 @@ export async function runLiveHarness({ repoRoot = resolveRepoRoot(), label }) {
   return { receiptPath: context.run.receiptPath, receipt: context.receipt };
 }
 
-function createLiveHarnessContext(repoRoot, label) {
+function createLiveHarnessContext(repoRoot, label, stopOne) {
   const paths = getRuntimePaths(repoRoot);
   const ports = requireLocalRuntime(repoRoot);
-  const run = createRun(repoRoot, label);
-  const receipt = createReceipt(run, label);
+  const run = createRun(repoRoot, stopOne ? `${label}-stop-one` : label);
+  const receipt = createReceipt(run, label, stopOne);
   const eventLoop = new EventLoopStallSampler(EVENT_LOOP_INTERVAL_MS);
   const serverStalls = new ServerLogStallReader(paths.logsDir);
   const healthSampler = new HealthSampler(ports.healthUrl, receipt.metrics.health);
   const eventState = new Map();
-  const terminalEvents = new TerminalEventWaiter(eventState);
+  const terminalEvents = new TerminalEventWaiter(eventState, stopOne);
   const turnStarts = new TurnStartWaiter(eventState);
   return {
     repoRoot,
@@ -321,6 +329,7 @@ function createLiveHarnessContext(repoRoot, label) {
     socket: null,
     primaryError: null,
     workspace: null,
+    stopOne,
   };
 }
 
@@ -338,7 +347,11 @@ async function executeLiveHarness(context) {
   await createAndSubscribeThreads(context);
   const terminal = await preflightTerminalTransport(context);
   const { completed, sends } = await dispatchFixtureTurns(context);
+  if (context.stopOne) await waitForAllSixActive(context);
+  const stop = context.stopOne ? stopOneActiveTurn(context) : null;
+  void stop?.catch(() => undefined);
   await sampleActiveControls(context, terminal);
+  if (stop) await stop;
   throwFirstRejected(await sends, "Dispatching the controlled fixture turns failed");
   context.receipt.state.phase = "waiting-for-events";
   await completed;
@@ -414,14 +427,14 @@ async function startWorkloadMeasurement(context) {
 async function createAndSubscribeThreads(context) {
   const branch = currentFixtureBranch(context.paths.fixtureRepoDir);
   context.receipt.state.phase = "creating-threads";
-  const creations = await Promise.allSettled(Array.from({ length: THREAD_COUNT }, (_, index) => createOwnedThread(context, branch, index + 1)));
+  const creations = await Promise.allSettled(Array.from({ length: context.receipt.workload.threadCount }, (_, index) => createOwnedThread(context, branch, index + 1)));
   throwFirstRejected(creations, "Creating verifier-owned direct threads failed");
   assertCreatedThreadCount(context.receipt);
   await subscribeToThreadEvents(context);
 }
 
 async function createOwnedThread(context, branch, ordinal) {
-  const title = expectedThreadTitle(context.run.id, ordinal);
+  const title = expectedThreadTitle(context.run.id, ordinal, context.receipt.workload.threadCount);
   const thread = await measuredRpc(context.socket, context.receipt.metrics.rpc, "thread.create", {
     workspaceId: context.workspace.id,
     title,
@@ -437,7 +450,7 @@ async function createOwnedThread(context, branch, ordinal) {
 }
 
 function assertCreatedThreadCount(receipt) {
-  if (receipt.state.threads.length !== THREAD_COUNT) throw new Error("The harness did not create exactly seven threads");
+  if (receipt.state.threads.length !== receipt.workload.threadCount) throw new Error("The harness did not create the requested fixture thread count");
 }
 
 async function subscribeToThreadEvents(context) {
@@ -465,6 +478,51 @@ async function dispatchFixtureTurns(context) {
   const sends = Promise.allSettled(context.receipt.state.threads.map((thread) => sendFixtureTurn(context, thread)));
   await started;
   return { completed, sends };
+}
+
+async function waitForAllSixActive(context) {
+  const deadline = Date.now() + TURN_TIMEOUT_MS;
+  const threads = context.receipt.state.threads;
+  while (Date.now() < deadline) {
+    if (threads.some((thread) => thread.completedAtMs !== null || thread.persistedAtMs !== null)) {
+      throw new Error("A fixture turn ended before all six became active; Stop proof is inconclusive");
+    }
+    const target = threads[STOP_ONE_ORDINAL - 1];
+    if (threads.every((thread) => thread.startedAtMs !== null)
+      && target.events.filter((event) => event.type === "assistantMessageBoundary").length >= 10) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("All six fixture turns and ten narrative boundaries in the stopped turn were not observed before the deadline");
+}
+
+async function stopOneActiveTurn(context) {
+  const target = context.receipt.state.threads[STOP_ONE_ORDINAL - 1];
+  const launchedAtMs = NodePerfHooks.performance.now();
+  const allSixActiveAtLaunch = context.receipt.state.threads.every(isActiveFixtureThread);
+  if (!allSixActiveAtLaunch) throw new Error("Stop did not launch while all six fixture turns were active");
+  context.receipt.state.stop = { ordinal: STOP_ONE_ORDINAL, threadId: target.id, launchedAtMs, allSixActiveAtLaunch };
+  writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
+  const result = await measuredRpc(context.socket, context.receipt.metrics.rpc, "agent.stop", { threadId: target.id }, undefined, CONTROL_RPC_TIMEOUT_MS);
+  context.receipt.state.stop = {
+    ...context.receipt.state.stop,
+    completedAtMs: NodePerfHooks.performance.now(),
+    status: result?.status,
+    dispatchState: result?.dispatchState,
+    turnExecutionId: result?.turnExecutionId,
+    snapshotPhase: result?.snapshot?.phase,
+  };
+  if (!isCancelledStopResult(result, target.id)) {
+    throw new Error("Stop did not return the targeted execution's cancelled outcome");
+  }
+  writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
+}
+
+function isActiveFixtureThread(thread) {
+  return thread.startedAtMs !== null && thread.completedAtMs === null && thread.persistedAtMs === null;
+}
+
+function isCancelledStopResult(result, threadId) {
+  return result?.status === "cancelled" && result?.snapshot?.phase === "cancelled" && result?.threadId === threadId;
 }
 
 async function sendFixtureTurn(context, thread) {
@@ -538,15 +596,32 @@ async function readDurableConversations(context) {
 
 async function readDurableConversation(context, thread) {
   const tail = await measuredRpc(context.socket, context.receipt.metrics.rpc, "conversation.tail", { threadId: thread.id, limit: 2 });
-  thread.durable = auditConversationTail(tail);
+  const expectedOutcome = context.stopOne && thread.ordinal === STOP_ONE_ORDINAL ? "cancelled" : "completed";
+  const page = expectedOutcome === "cancelled"
+    ? await measuredRpc(context.socket, context.receipt.metrics.rpc, "conversation.page", { threadId: thread.id, limit: 100 })
+    : null;
+  thread.durable = context.stopOne
+    ? auditConversationOutcome(tail, page, expectedOutcome, context.receipt.state.stop?.turnExecutionId)
+    : auditConversationTail(tail);
   if (!thread.durable.ok) throw new Error(`Durable conversation proof failed for thread ${thread.ordinal}`);
 }
 
 async function verifyCompletedWorkload(context) {
   const activeAgents = await measuredRpc(context.socket, context.receipt.metrics.rpc, "agent.activeCount", {});
   if (activeAgents !== 0) throw new Error("The controlled turns completed but the runtime still reports active agents");
+  if (context.stopOne) await verifyStoppedRuntimeSnapshot(context);
   assertConclusiveControlSamples(context.receipt);
   if (!auditRun(context.receipt)) throw new Error("The controlled workload completed with event-loss, order, completion, or durability failures");
+}
+
+async function verifyStoppedRuntimeSnapshot(context) {
+  const snapshots = await measuredRpc(context.socket, context.receipt.metrics.rpc, "agent.listRunning", {});
+  const stop = context.receipt.state.stop;
+  stop.reconnectSnapshot = Array.isArray(snapshots) && snapshots.some((snapshot) =>
+    snapshot?.threadId === stop.threadId
+    && snapshot?.turnExecutionId === stop.turnExecutionId
+    && snapshot?.phase === "cancelled");
+  if (!stop.reconnectSnapshot) throw new Error("The stopped execution did not retain its cancelled reconnect snapshot");
 }
 
 function assertConclusiveControlSamples(receipt) {
@@ -647,7 +722,7 @@ function createRun(repoRoot, label) {
   };
 }
 
-function createReceipt(run, label) {
+function createReceipt(run, label, stopOne) {
   return {
     schemaVersion: 1,
     runId: run.id,
@@ -656,7 +731,8 @@ function createReceipt(run, label) {
     completedAt: null,
     ok: false,
     workload: {
-      threadCount: THREAD_COUNT,
+      threadCount: stopOne ? STOP_ONE_THREAD_COUNT : THREAD_COUNT,
+      scenario: stopOne ? "stop-one" : "baseline",
       terminalControlCount: TERMINAL_CONTROL_COUNT,
       provider: PROVIDER_ID,
       model: WORKLOAD_MODEL,
@@ -678,6 +754,7 @@ function createReceipt(run, label) {
       activeTurnAssertions: [],
       activeControlLaunch: null,
       terminalCreateInconclusive: false,
+      stop: null,
       threads: [],
     },
     metrics: {
@@ -827,6 +904,9 @@ function recordThreadPush(push, thread, turnStarts) {
     recordAgentEvent(push.data, thread, now, turnStarts);
   } else if (push.channel === "turn.persisted") {
     thread.persistedAtMs ??= now;
+    thread.persistedOutcome ??= push.data.outcome ?? null;
+  } else if (push.channel === "thread.status") {
+    thread.status = push.data.status;
   }
 }
 
@@ -877,8 +957,9 @@ export function attributeControlLaunchToTurnCompletion(controlLaunch, threads) {
 }
 
 class TerminalEventWaiter {
-  constructor(state) {
+  constructor(state, stopOne = false) {
     this.state = state;
+    this.stopOne = stopOne;
     this.resolve = null;
   }
 
@@ -889,7 +970,10 @@ class TerminalEventWaiter {
         reject(new Error("Not every controlled thread produced both turn completion and durable persistence events before the deadline"));
       }, timeoutMs);
       this.resolve = () => {
-        if (![...this.state.values()].every((thread) => thread.completedAtMs !== null && thread.persistedAtMs !== null)) return;
+        if (![...this.state.values()].every((thread) =>
+          this.stopOne && thread.ordinal === STOP_ONE_ORDINAL
+            ? thread.status === "paused" || thread.status === "cancelled"
+            : thread.persistedAtMs !== null && thread.completedAtMs !== null)) return;
         this.resolve = null;
         clearTimeout(timer);
         resolve();
@@ -942,11 +1026,60 @@ function auditConversationTail(tail) {
   };
 }
 
+function auditConversationOutcome(tail, page, expectedOutcome, expectedExecutionId) {
+  const messages = Array.isArray(tail?.messages) ? tail.messages : [];
+  const assistant = messages.find((message) => message?.role === "assistant");
+  const hasUserMessage = messages.some((message) => message?.role === "user");
+  const assistantSummary = summarizeAssistantOutcome(assistant);
+  const narrativeSummary = summarizeNarrativeOutcome(page, assistant);
+  const summary = { messageCount: messages.length, hasUserMessage, ...assistantSummary, ...narrativeSummary };
+  return {
+    ...summary,
+    ok: hasExpectedDurableOutcome(summary, expectedOutcome, expectedExecutionId),
+  };
+}
+
+function summarizeAssistantOutcome(assistant) {
+  return {
+    hasFixtureAssistantMessage: assistant?.content?.includes("Fixture answer:") === true,
+    assistantContentLength: assistant?.content?.length ?? 0,
+    outcome: assistant?.outcome ?? null,
+    outcomeExecutionId: assistant?.outcomeExecutionId ?? null,
+  };
+}
+
+function summarizeNarrativeOutcome(page, assistant) {
+  const narrativeByMessage = page?.narrativeByMessage ?? {};
+  const allNarrative = Object.values(narrativeByMessage);
+  const narrative = assistant ? narrativeByMessage[assistant.id] : null;
+  return {
+    hasRetainedNarrative: narrative?.thoughts?.some((segment) => segment.text?.includes("Fixture step 1:")) === true,
+    narrativeMessageCount: allNarrative.length,
+    thoughtSegmentCount: allNarrative.reduce((count, batch) => count + (batch?.thoughts?.length ?? 0), 0),
+    toolCount: allNarrative.reduce((count, batch) => count + (batch?.tools?.length ?? 0), 0),
+  };
+}
+
+function hasExpectedDurableOutcome(summary, expectedOutcome, expectedExecutionId) {
+  if (!summary.hasUserMessage || summary.outcome !== expectedOutcome) return false;
+  if (expectedOutcome !== "cancelled") return summary.hasFixtureAssistantMessage;
+  return summary.outcomeExecutionId === expectedExecutionId
+    && summary.hasRetainedNarrative
+    && !summary.hasFixtureAssistantMessage;
+}
+
 function auditRun(receipt) {
   return receipt.state.threads.every((thread) => {
     thread.eventAudit = auditAgentEvents(thread.events);
-    return thread.eventAudit.sequenceValid && thread.eventAudit.completed && thread.durable?.ok === true;
+    return thread.eventAudit.sequenceValid && isExpectedTerminal(receipt, thread) && thread.durable?.ok === true;
   });
+}
+
+function isExpectedTerminal(receipt, thread) {
+  if (receipt.workload.scenario !== "stop-one" || thread.ordinal !== STOP_ONE_ORDINAL) return thread.eventAudit.completed;
+  return receipt.state.stop?.status === "cancelled"
+    && receipt.state.stop?.reconnectSnapshot === true
+    && (thread.status === "paused" || thread.status === "cancelled");
 }
 
 function summarizeEventAudits(threads) {
@@ -960,8 +1093,15 @@ function summarizeEventAudits(threads) {
     missingSequences: flatten("missingSequences"),
     duplicateSequences: flatten("duplicateSequences"),
     arrivalOrderViolations: flatten("arrivalOrderViolations"),
-    ok: audits.length === THREAD_COUNT && audits.every((audit) => audit.sequenceValid && audit.completed),
+    ok: audits.length === threads.length && audits.every((audit) => audit.sequenceValid)
+      && threads.every((thread) => thread.durable?.ok === true)
+      && threads.every((thread) => hasExpectedEventTerminal(thread, threads.length)),
   };
+}
+
+function hasExpectedEventTerminal(thread, threadCount) {
+  if (threadCount !== STOP_ONE_THREAD_COUNT || thread.ordinal !== STOP_ONE_ORDINAL) return thread.eventAudit.completed;
+  return thread.status === "paused" || thread.status === "cancelled";
 }
 
 async function cleanupOwnedResources(socket, receipt, paths, repoRoot) {
@@ -1001,7 +1141,7 @@ function resolveCleanupTransport(receipt, threads, cleanup) {
 async function cleanupWorkloadResources(socket, receipt, threads, workspace, terminalTransport, cleanup) {
   if (cleanup.failures.length > 0) return;
   if (terminalTransport) await cleanupPtys(socket, threads, terminalTransport, cleanup);
-  await cleanupThreads(socket, threads, workspace.id, receipt.runId, cleanup);
+  await cleanupThreads(socket, threads, workspace.id, receipt.runId, receipt.workload.threadCount, cleanup);
 }
 
 async function cleanupPtys(socket, threads, transport, cleanup) {
@@ -1091,11 +1231,11 @@ function cleanupRpc(socket, method, params) {
   return socket.rpc(method, params, cleanupDeadline());
 }
 
-async function cleanupThreads(socket, threads, workspaceId, runId, cleanup) {
+async function cleanupThreads(socket, threads, workspaceId, runId, threadCount, cleanup) {
   const current = await currentWorkspaceThreads(socket, workspaceId, cleanup);
   if (current === null) return;
   for (const thread of threads) {
-    await cleanupThread(socket, current, thread, runId, cleanup);
+    await cleanupThread(socket, current, thread, runId, threadCount, cleanup);
   }
   await verifyThreadsRemoved(socket, threads, workspaceId, cleanup);
 }
@@ -1109,14 +1249,14 @@ async function currentWorkspaceThreads(socket, workspaceId, cleanup) {
   }
 }
 
-async function cleanupThread(socket, current, thread, runId, cleanup) {
+async function cleanupThread(socket, current, thread, runId, threadCount, cleanup) {
   if (!isReceiptThread(thread)) return;
   const found = current.find((candidate) => candidate?.id === thread.id);
   if (!found) {
     cleanup.threads.push({ threadId: thread.id, outcome: "already-deleted" });
     return;
   }
-  if (!matchesReceiptThread(found, thread, runId)) {
+  if (!matchesReceiptThread(found, thread, runId, threadCount)) {
     cleanup.failures.push(`Refusing to delete thread ${thread.id}: title does not match this receipt`);
     return;
   }
@@ -1133,8 +1273,8 @@ function isReceiptThread(thread) {
   return typeof thread?.id === "string" && Number.isInteger(thread?.ordinal);
 }
 
-function matchesReceiptThread(found, thread, runId) {
-  return found.title === expectedThreadTitle(runId, thread.ordinal) && found.title === thread.title;
+function matchesReceiptThread(found, thread, runId, threadCount) {
+  return found.title === expectedThreadTitle(runId, thread.ordinal, threadCount) && found.title === thread.title;
 }
 
 async function verifyThreadsRemoved(socket, threads, workspaceId, cleanup) {
@@ -1457,7 +1597,7 @@ async function main() {
     return;
   }
   const result = args.command === "run"
-    ? await runLiveHarness({ label: args.label })
+    ? await runLiveHarness({ label: args.label, stopOne: args.stopOne })
     : await cleanupReceipt({ receiptPath: args.receiptPath });
   process.stdout.write(`${JSON.stringify({ ok: true, receiptPath: relativePath(resolveRepoRoot(), result.receiptPath) })}\n`);
 }
