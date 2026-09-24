@@ -17,6 +17,17 @@ interface ActiveDiff extends TurnDiffIdentity {
   rejected?: boolean;
 }
 
+/** Cloneable native evidence frozen for one execution before terminal file settlement. */
+export interface PreparedTurnDiffEvidence extends TurnDiffIdentity {
+  readonly threadId: string;
+  readonly revision: number;
+  readonly evidence: ProviderTurnDiffUpdate | null;
+  readonly rejected: boolean;
+}
+
+/** Data the terminal writer can store with its assigned assistant message. */
+export type SelectedTurnDiff = Pick<StoredTurnDiff, "thread_id" | "source" | "patch" | "revision">;
+
 /** Owns admission, volatile native evidence, and final source reconciliation. */
 export class TurnDiffService {
   private readonly active = new Map<string, ActiveDiff>();
@@ -57,16 +68,25 @@ export class TurnDiffService {
 
   /** Freeze native evidence at the terminal fence before asynchronous file settlement. */
   prepareFinalization(threadId: string, executionId: string | undefined, outcome: TurnOutcome): SettleTurnDiff {
-    const current = [...this.active.values()].find((entry) => entry.threadId === threadId && entry.turnExecutionId === executionId);
+    const current = this.takeFinalizationEvidence(threadId, executionId);
     if (!current) return () => {};
-    this.clear(current.turnId, executionId);
     return (messageId, effects, reconstructionPatch) => {
-      if (outcome !== "completed") return;
-      const selected = selectSettledEvidence(current, effects, reconstructionPatch);
+      const selected = selectTurnDiffSettlement(current, outcome, effects, reconstructionPatch);
       if (!selected) return;
-      this.repo.create({ id: NodeCrypto.randomUUID(), message_id: messageId, thread_id: threadId,
-        ...selected, revision: Math.max(0, current.revision) });
+      this.repo.create({ id: NodeCrypto.randomUUID(), message_id: messageId, ...selected });
       this.changed(threadId);
+    };
+  }
+
+  /** Transfer terminal evidence only for its exact admitted execution. */
+  takeFinalizationEvidence(threadId: string, executionId: string | undefined): PreparedTurnDiffEvidence | null {
+    const current = [...this.active.values()].find((entry) => entry.threadId === threadId && entry.turnExecutionId === executionId);
+    if (!current) return null;
+    this.clear(current.turnId, executionId);
+    return {
+      threadId: current.threadId, turnId: current.turnId,
+      turnExecutionId: current.turnExecutionId, deliveryAttempt: current.deliveryAttempt,
+      revision: current.revision, evidence: structuredClone(current.evidence), rejected: current.rejected ?? false,
     };
   }
 
@@ -119,14 +139,26 @@ function isNewRevision(update: ProviderTurnDiffUpdate, current: ActiveDiff): boo
   return matches(update, current) && Number.isSafeInteger(update.revision) && update.revision > current.revision;
 }
 
-function selectSettledEvidence(current: ActiveDiff, effects: TurnFileEffectSummary | undefined, reconstructionPatch?: string): Pick<StoredTurnDiff, "source" | "patch"> | null {
+/** Reconcile frozen native evidence with settled file effects without a repository connection. */
+export function selectTurnDiffSettlement(
+  current: PreparedTurnDiffEvidence,
+  outcome: TurnOutcome,
+  effects: TurnFileEffectSummary | undefined,
+  reconstructionPatch?: string,
+): SelectedTurnDiff | null {
+  if (outcome !== "completed") return null;
+  const selected = selectSettledEvidence(current, effects, reconstructionPatch);
+  return selected ? { thread_id: current.threadId, ...selected, revision: Math.max(0, current.revision) } : null;
+}
+
+function selectSettledEvidence(current: PreparedTurnDiffEvidence, effects: TurnFileEffectSummary | undefined, reconstructionPatch?: string): Pick<StoredTurnDiff, "source" | "patch"> | null {
   const native = nativeSettlement(current, effects);
   if (native !== undefined) return native;
   if (reconstructionPatch && parseTurnDiff(reconstructionPatch)) return { source: "tracked", patch: reconstructionPatch };
   return effects?.fileCount ? { source: "git", patch: null } : null;
 }
 
-function nativeSettlement(current: ActiveDiff, effects: TurnFileEffectSummary | undefined): Pick<StoredTurnDiff, "source" | "patch"> | null | undefined {
+function nativeSettlement(current: PreparedTurnDiffEvidence, effects: TurnFileEffectSummary | undefined): Pick<StoredTurnDiff, "source" | "patch"> | null | undefined {
   const evidence = current.evidence;
   if (!evidence) return undefined;
   if (evidence.state === "snapshot") return { source: "native", patch: evidence.patch };
