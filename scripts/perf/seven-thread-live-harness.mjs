@@ -337,8 +337,9 @@ async function executeLiveHarness(context) {
   await startWorkloadMeasurement(context);
   await createAndSubscribeThreads(context);
   const terminal = await preflightTerminalTransport(context);
-  const completed = await dispatchFixtureTurns(context);
+  const { completed, sends } = await dispatchFixtureTurns(context);
   await sampleActiveControls(context, terminal);
+  throwFirstRejected(await sends, "Dispatching the controlled fixture turns failed");
   context.receipt.state.phase = "waiting-for-events";
   await completed;
   await readDurableConversations(context);
@@ -460,10 +461,9 @@ async function dispatchFixtureTurns(context) {
   const completed = context.terminalEvents.wait(TURN_TIMEOUT_MS);
   const started = context.turnStarts.wait(TURN_TIMEOUT_MS);
   context.receipt.state.phase = "sending-turns";
-  const sends = await Promise.allSettled(context.receipt.state.threads.map((thread) => sendFixtureTurn(context, thread)));
-  throwFirstRejected(sends, "Dispatching the controlled fixture turns failed");
+  const sends = Promise.allSettled(context.receipt.state.threads.map((thread) => sendFixtureTurn(context, thread)));
   await started;
-  return completed;
+  return { completed, sends };
 }
 
 async function sendFixtureTurn(context, thread) {
@@ -915,7 +915,7 @@ class TurnStartWaiter {
         reject(new Error("No controlled fixture turn started before the deadline"));
       }, timeoutMs);
       this.resolve = () => {
-        if (![...this.state.values()].some((thread) => thread.startedAtMs !== null)) return;
+        if (![...this.state.values()].every((thread) => thread.startedAtMs !== null)) return;
         this.resolve = null;
         clearTimeout(timer);
         resolve();
