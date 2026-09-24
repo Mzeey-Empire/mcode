@@ -17,6 +17,7 @@ type Work =
   | { readonly kind: "event"; readonly sequence: number }
   | { readonly kind: "checkpoint"; readonly revision: number }
   | { readonly kind: "effect-result"; readonly effectId: string }
+  | { readonly kind: "stage-terminal" }
   | { readonly kind: "finalize" };
 type Command = Work | { readonly kind: "stop"; readonly requestId: string };
 type Result = { readonly revision: number };
@@ -193,12 +194,14 @@ describe("ExecutionMailboxScheduler", () => {
       .toEqual({ kind: "stopping" });
     expect(scheduler.submit({ execution: identity, lease, command: { kind: "stop", requestId: "again" }, byteLength: 100 }))
       .toEqual({ kind: "stop-already-requested" });
+    const staged = admitted(scheduler, identity, lease, { kind: "stage-terminal" });
     const finalize = admitted(scheduler, identity, lease, { kind: "finalize" });
-    for (let index = 3; index < 6; index += 1) workers[0]?.reply(request(workers[0]!, index), index + 1);
+    for (let index = 3; index < 7; index += 1) workers[0]?.reply(request(workers[0]!, index), index + 1);
     expect(await start.completion).toEqual({ kind: "reply", result: { revision: 1 } });
     expect(await event.completion).toEqual({ kind: "reply", result: { revision: 2 } });
     expect((await checkpoint.completion).kind).toBe("reply");
     expect((await effect.completion).kind).toBe("reply");
+    expect((await staged.completion).kind).toBe("reply");
     expect((await finalize.completion).kind).toBe("reply");
     expect(scheduler.release(identity, lease)).toBe(true);
     scheduler.shutdown();
