@@ -93,6 +93,7 @@ import { TerminalRpcError } from "./terminal-rpc-error";
 const MIN_RECONNECT_MS = 1000;
 /** Maximum reconnect delay in milliseconds. */
 const MAX_RECONNECT_MS = 30_000;
+const CREATE_REPLAY_CONNECTION_TIMEOUT_MS = 120_000;
 /** Number of immediate (delay=0) retries on auth failure before falling back to exponential backoff. */
 const MAX_IMMEDIATE_AUTH_RETRIES = 3;
 /** Deadline for model discovery requested from the visible model picker. */
@@ -276,6 +277,10 @@ interface LateResponseHandler {
 interface RpcOptions {
   /** Bound this request without changing the transport's default timeout. */
   readonly timeoutMs?: number;
+  /** Bound only the wait before the request is sent. */
+  readonly waitToSendTimeoutMs?: number;
+  /** Observe a successful send without changing response handling. */
+  readonly onRequestSent?: () => void;
   /** Reclaims a resource when a timed-out request eventually succeeds. */
   readonly onLateSuccess?: (result: unknown) => void;
   /** Runs request-specific cleanup after a late response settles. */
@@ -696,6 +701,7 @@ export function createWsTransport(
       }
       let settled = false;
       let requestId: string | null = null;
+      let waitToSendTimer: ReturnType<typeof setTimeout> | null = null;
       const deadline = options?.timeoutMs === undefined
         ? null
         : setTimeout(() => {
@@ -716,6 +722,7 @@ export function createWsTransport(
         if (settled) return;
         settled = true;
         if (deadline !== null) clearTimeout(deadline);
+        if (waitToSendTimer !== null) clearTimeout(waitToSendTimer);
         options?.onRequestSettled?.();
         resolve(value as T);
       };
@@ -723,9 +730,13 @@ export function createWsTransport(
         if (settled) return;
         settled = true;
         if (deadline !== null) clearTimeout(deadline);
+        if (waitToSendTimer !== null) clearTimeout(waitToSendTimer);
         options?.onRequestSettled?.();
         reject(error);
       };
+      if (options?.waitToSendTimeoutMs !== undefined) {
+        waitToSendTimer = setTimeout(() => fail(new Error("Could not reconnect to confirm thread creation")), options.waitToSendTimeoutMs);
+      }
 
       void ready.then(
         () => {
@@ -741,6 +752,8 @@ export function createWsTransport(
           pending.set(requestId, { resolve: complete, reject: fail });
           try {
             ws.send(JSON.stringify({ id: requestId, method, params }));
+            if (waitToSendTimer !== null) clearTimeout(waitToSendTimer);
+            options?.onRequestSent?.();
           } catch (error) {
             pending.delete(requestId);
             fail(error instanceof Error ? error : new Error("WebSocket send failed"));
@@ -899,6 +912,38 @@ export function createWsTransport(
         },
       );
     });
+  }
+
+  async function waitForCreateReplayConnection(deadline: number): Promise<void> {
+    while (!closed) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error("Could not reconnect to confirm thread creation");
+      await waitForConnection(remaining);
+      if (ws.readyState === WebSocket.OPEN) return;
+      // `ready` can still refer to the old socket before its close event runs.
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error("Transport closed");
+  }
+
+  async function createAndSendWithReconnect(params: Record<string, unknown>): Promise<CreateAndSendResult> {
+    let reconnectDeadline = Date.now() + CREATE_REPLAY_CONNECTION_TIMEOUT_MS;
+    while (true) {
+      if (ws.readyState !== WebSocket.OPEN) await waitForCreateReplayConnection(reconnectDeadline);
+      const remaining = reconnectDeadline - Date.now();
+      if (remaining <= 0) throw new Error("Could not reconnect to confirm thread creation");
+      let requestSent = false;
+      try {
+        return await rpc<CreateAndSendResult>("agent.createAndSend", params, {
+          waitToSendTimeoutMs: remaining,
+          onRequestSent: () => { requestSent = true; },
+        });
+      } catch (error) {
+        if (closed || !(error instanceof Error) || error instanceof RpcError || error.message !== "WebSocket disconnected") throw error;
+        if (requestSent) reconnectDeadline = Date.now() + CREATE_REPLAY_CONNECTION_TIMEOUT_MS;
+        await waitForCreateReplayConnection(reconnectDeadline);
+      }
+    }
   }
 
   // Kick off the first connection.
@@ -1124,10 +1169,13 @@ export function createWsTransport(
       const guardrails = state.loaded
         ? { maxBudgetUsd: state.settings.agent.guardrails.maxBudgetUsd, maxTurns: state.settings.agent.guardrails.maxTurns }
         : {};
-      return rpc<CreateAndSendResult>("agent.createAndSend", {
+      const params = {
         ...input,
         ...guardrails,
-      });
+      };
+      return input.startupId
+        ? createAndSendWithReconnect(params)
+        : rpc<CreateAndSendResult>("agent.createAndSend", params);
     },
     stopAgent: (threadId) => rpc<import("@mcode/contracts").AgentStopResult>("agent.stop", { threadId }),
     continueWithoutSaving: (executionId) =>
