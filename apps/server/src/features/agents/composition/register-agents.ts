@@ -75,6 +75,11 @@ import { ThreadCreationCoordinator } from "../turns/thread-creation-coordinator.
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { ProviderSessionCursorPersistence } from "../turns/provider-session-cursor-persistence.js";
 import { ProviderTurnEventApplication } from "../turns/provider-turn-event-application.js";
+import { CanonicalAgentWriterClient } from "../canonical/canonical-agent-writer-client.js";
+import {
+  PARENT_NARRATIVE_RECOVERY_WRITER,
+  type ParentNarrativeRecoveryWriter,
+} from "../turns/parent-narrative-recovery-coordinator.js";
 import {
   TURN_RUNTIME_EVENT_CONTROL,
   type TurnRuntimeEventControl,
@@ -241,6 +246,9 @@ export function registerAgentServices(container: DependencyContainer): void {
   });
   container.register<TurnRuntimeEventControl>(TURN_RUNTIME_EVENT_CONTROL, {
     useFactory: (c) => c.resolve(TurnRuntimeController),
+  });
+  container.register<ParentNarrativeRecoveryWriter>(PARENT_NARRATIVE_RECOVERY_WRITER, {
+    useFactory: (c) => c.resolve(CanonicalAgentWriterClient),
   });
   container.register(
     ProviderTurnEventApplication,

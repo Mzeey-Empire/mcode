@@ -79,6 +79,7 @@ function providerRuntimeEventForNarrativeTest(eventName: string, event: unknown)
 import type { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { CodexCollaborationEventAdapter } from "../../collaboration/adapters/codex-collaboration-event-adapter.js";
 import { ProviderEventIngress } from "../../../providers/composition/provider-event-ingress.js";
+import type { ParentNarrativeRecoveryWriter } from "../../turns/parent-narrative-recovery-coordinator.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 vi.mock("fs", async (importOriginal) => {
@@ -164,6 +165,7 @@ function build(options: {
   messageRepo?: MessageRepo;
   parentAssistantTextCheckpoints?: ParentAssistantTextCheckpointService;
   onProviderEvent?: (event: AgentEvent) => void;
+  narrativeWriter?: ParentNarrativeRecoveryWriter;
 } = {}): Built {
   const thread = makeThread();
   const providerEmitter = Object.assign(new NodeEvents.EventEmitter(), {
@@ -316,6 +318,10 @@ function build(options: {
       undefined,
       undefined,
       new TaskPersistenceService(taskRepo, narrativeStore),
+      undefined,
+      undefined,
+      undefined,
+      options.narrativeWriter,
   );
   startAgentServiceIngressForTest(service, options.onProviderEvent);
   // Provider adapters always stamp turn-scoped events with the active execution
@@ -358,9 +364,103 @@ function build(options: {
   };
 }
 
+function buildCommittedNarrativeTurn(
+  writerFor: (sink: CanonicalAgentEventSink) => ParentNarrativeRecoveryWriter,
+  onProviderEvent: (event: AgentEvent) => void,
+): Built {
+  const db = openMemoryDatabase();
+  const now = "2026-08-24T10:00:00.000Z";
+  db.prepare(
+    "INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+  ).run("ws-1", "Workspace", "/workspace", now, now);
+  db.prepare(
+    "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
+  const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+  const built = build({ db, canonicalSink, onProviderEvent, narrativeWriter: writerFor(canonicalSink) });
+  canonicalSink.startParentTurn({
+    thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
+    turnId: "turn-async-narrative",
+    executionId: narrativeExecutionId(built.service),
+    permissionMode: "supervised",
+    providerIdentities: [],
+    projectUserMessage: () => new SqliteMessageRepo(db).create(THREAD_ID, "user", "start", 1),
+  });
+  return built;
+}
+
 describe("AgentService narrative persistence", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("waits for a narrative writer acknowledgement before publishing and finalizing Stop", async () => {
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    const published: AgentEvent[] = [];
+    const { db, service, providerEmitter, canonicalSink } = buildCommittedNarrativeTurn((sink) => ({
+      async recordParentNarrativeRecovery(_operationId, input) {
+        await writeGate;
+        return { recorded: sink.recordParentNarrativeRecovery(input) };
+      },
+      async classifyParentNarrativeRecovery() { throw new Error("Unexpected classification"); },
+      async acknowledgeOperation() {},
+    }), (event) => published.push(event));
+    const finalize = vi.spyOn(finalizerForAgentServiceTest(service), "finalize");
+    try {
+      providerEmitter.emit("event", {
+        type: AgentEventType.TextDelta,
+        threadId: THREAD_ID,
+        turnExecutionId: narrativeExecutionId(service),
+        isFinalResponse: false,
+        delta: "awaited thought",
+      });
+      await waitForAgentServiceIngressForTest(service, THREAD_ID);
+      await service.stopSession(THREAD_ID);
+
+      expect(published).toEqual([]);
+      expect(finalize).not.toHaveBeenCalled();
+      releaseWrite();
+      await vi.waitFor(() => expect(finalize).toHaveBeenCalledOnce());
+      expect(published.filter((event) => event.type === AgentEventType.TextDelta)).toHaveLength(1);
+      expect(canonicalSink.loadParentNarrativeRecovery("turn-async-narrative")).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not finalize a stopped execution after its narrative write fails", async () => {
+    let failWrite!: (error: Error) => void;
+    const writeGate = new Promise<void>((_resolve, reject) => { failWrite = reject; });
+    const published: AgentEvent[] = [];
+    const { db, service, providerEmitter } = buildCommittedNarrativeTurn(() => ({
+      async recordParentNarrativeRecovery() {
+        await writeGate;
+        return { recorded: true };
+      },
+      async classifyParentNarrativeRecovery() { throw new Error("Unexpected classification"); },
+      async acknowledgeOperation() {},
+    }), (event) => published.push(event));
+    const finalize = vi.spyOn(finalizerForAgentServiceTest(service), "finalize");
+    try {
+      providerEmitter.emit("event", {
+        type: AgentEventType.TextDelta,
+        threadId: THREAD_ID,
+        turnExecutionId: narrativeExecutionId(service),
+        isFinalResponse: false,
+        delta: "uncommitted thought",
+      });
+      await waitForAgentServiceIngressForTest(service, THREAD_ID);
+      failWrite(new Error("injected writer failure"));
+      await vi.waitFor(() => expect(providerEmitter.stopSession).toHaveBeenCalled());
+      await service.stopSession(THREAD_ID);
+      await Promise.resolve();
+
+      expect(published).toEqual([]);
+      expect(finalize).not.toHaveBeenCalled();
+    } finally {
+      db.close();
+    }
   });
 
   it("moves unclassified text to narration and clears its assistant checkpoint at a false boundary", async () => {
@@ -418,15 +518,17 @@ describe("AgentService narrative persistence", () => {
       });
       await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
-      expect(published
-        .filter((event) => event.type === AgentEventType.TextDelta)
-        .map((event) => event.delta))
-        .toEqual(["durable ", "text"]);
-      expect(db.prepare(`
-        SELECT first_sequence, last_sequence, text
-        FROM parent_assistant_text_checkpoint_chunks
-        WHERE execution_id = ?
-      `).all(executionId)).toEqual([]);
+      await vi.waitFor(() => {
+        expect(published
+          .filter((event) => event.type === AgentEventType.TextDelta)
+          .map((event) => event.delta))
+          .toEqual(["durable ", "text"]);
+        expect(db.prepare(`
+          SELECT first_sequence, last_sequence, text
+          FROM parent_assistant_text_checkpoint_chunks
+          WHERE execution_id = ?
+        `).all(executionId)).toEqual([]);
+      });
     } finally {
       vi.useRealTimers();
       db.close();
@@ -481,12 +583,14 @@ describe("AgentService narrative persistence", () => {
       }
       await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
-      expect(published
-        .filter((event) => event.type === AgentEventType.TextDelta)
-        .map((event) => event.delta.length))
-        .toEqual([...firstSegment, ...secondSegment].map((delta) => delta.length));
-      expect(published.filter((event) => event.type === AgentEventType.AssistantMessageBoundary))
-        .toHaveLength(2);
+      await vi.waitFor(() => {
+        expect(published
+          .filter((event) => event.type === AgentEventType.TextDelta)
+          .map((event) => event.delta.length))
+          .toEqual([...firstSegment, ...secondSegment].map((delta) => delta.length));
+        expect(published.filter((event) => event.type === AgentEventType.AssistantMessageBoundary))
+          .toHaveLength(2);
+      });
     } finally {
       db.close();
     }
@@ -892,12 +996,12 @@ describe("AgentService narrative persistence", () => {
       expect(published).toEqual([]);
 
       continueAgentTurnWithoutSavingForTest(service, executionId);
-      await Promise.resolve();
-
-      expect(published.map((event) => event.type)).toEqual([
-        AgentEventType.TextDelta,
-        AgentEventType.AssistantMessageBoundary,
-      ]);
+      await vi.waitFor(() => {
+        expect(published.map((event) => event.type)).toEqual([
+          AgentEventType.TextDelta,
+          AgentEventType.AssistantMessageBoundary,
+        ]);
+      });
       expect(narrativeStore.recoverySnapshot(THREAD_ID)).toEqual([
         expect.objectContaining({
           kind: "narrationSegment",
@@ -948,7 +1052,7 @@ describe("AgentService narrative persistence", () => {
       });
       await waitForAgentServiceIngressForTest(service, THREAD_ID);
       vi.advanceTimersByTime(250);
-      expect(published).toHaveLength(1);
+      await vi.waitFor(() => expect(published).toHaveLength(1));
       published.length = 0;
       db.exec(`
         CREATE TRIGGER reject_narration_recovery
@@ -1030,9 +1134,11 @@ describe("AgentService narrative persistence", () => {
     });
     await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
-    expect(observed.at(-1)).toMatchObject({
-      type: AgentEventType.AssistantMessageBoundary,
-      persisted: expect.stringContaining("I will inspect the child."),
+    await vi.waitFor(() => {
+      expect(observed.at(-1)).toMatchObject({
+        type: AgentEventType.AssistantMessageBoundary,
+        persisted: expect.stringContaining("I will inspect the child."),
+      });
     });
     expect(observed.at(-1)?.persisted).not.toContain("turnExecutionId");
     db.close();

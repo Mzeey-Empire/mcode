@@ -58,6 +58,10 @@ import { TurnFeatureEffects } from "../../turns/turn-feature-effects.js";
 import { AgentEventPublicationRuntimePort, AgentTurnContinuationPort } from "../agent-runtime-internal-ports.js";
 import { TurnRuntimeController } from "../turn-runtime-controller.js";
 import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
+import {
+  PARENT_NARRATIVE_RECOVERY_WRITER,
+  type ParentNarrativeRecoveryWriter,
+} from "../../turns/parent-narrative-recovery-coordinator.js";
 import { TURN_RUNTIME_EVENT_CONTROL, type TurnRuntimeEventControl } from "../turn-runtime-event-control.js";
 
 const testEventPublications = new WeakMap<AgentService, AgentEventPublicationRegistry>();
@@ -200,6 +204,7 @@ export function createAgentServiceForTest(
   threadBranching?: ThreadBranchingService,
   eventPublication?: AgentEventPublicationRegistry,
   threadStartups?: ThreadStartupService,
+  narrativeWriterOverride?: ParentNarrativeRecoveryWriter,
 ): AgentService {
   if (!parentDurability) throw new Error("Parent turn durability is required by the test harness");
   const turnDiffs = new TurnDiffService(new TurnDiffRepo(db));
@@ -318,6 +323,9 @@ export function createAgentServiceForTest(
   testContainer.registerInstance(AgentReliabilityPort, reliability);
   testContainer.registerInstance(AgentEventPublicationRegistry, publication);
   testContainer.registerInstance(PARENT_TURN_DURABILITY, parentDurability);
+  testContainer.registerInstance(PARENT_NARRATIVE_RECOVERY_WRITER, narrativeWriterForTest(
+    narrativeWriterOverride, db, parentDurability, parentAssistantTextCheckpoints,
+  ));
   testContainer.registerInstance(NarrativeStore, narrativeStore);
   testContainer.registerInstance(ParentAssistantTextCheckpointService, parentAssistantTextCheckpoints);
   testContainer.registerInstance("Database", db);
@@ -341,4 +349,27 @@ export function createAgentServiceForTest(
   testProviderEventIngresses.set(service, eventIngress);
   testGoalLifecycles.set(service, resolvedGoals);
   return service;
+}
+
+function narrativeWriterForTest(
+  override: ParentNarrativeRecoveryWriter | undefined,
+  db: Database,
+  parentDurability: ParentTurnDurability,
+  parentAssistantTextCheckpoints: ParentAssistantTextCheckpointService,
+): ParentNarrativeRecoveryWriter {
+  return override ?? {
+    async recordParentNarrativeRecovery(_operationId, input) {
+      return { recorded: parentDurability.recordParentNarrativeRecovery(input) };
+    },
+    async classifyParentNarrativeRecovery(_operationId, input) {
+      return db.transaction(() => {
+        const recorded = parentDurability.recordParentNarrativeRecovery(input);
+        if (!recorded) throw new Error("Canonical parent turn was not found");
+        const reset = parentAssistantTextCheckpoints.resetInTransaction(input.executionId);
+        if (!reset) throw new Error("Provisional assistant text checkpoint was not reset");
+        return { recorded, reset };
+      })();
+    },
+    async acknowledgeOperation() {},
+  };
 }
