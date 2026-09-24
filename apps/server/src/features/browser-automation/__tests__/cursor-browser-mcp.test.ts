@@ -179,10 +179,16 @@ describe("Cursor browser MCP configuration", () => {
       mcpServers = servers;
     });
     provider.runTurn = vi.fn().mockResolvedValue(undefined);
+    let pooled: unknown;
     provider.runtime = {
-      get: vi.fn().mockReturnValue(undefined),
-      stop: vi.fn(),
-      acquire: vi.fn(async (args: any) => (await provider.spawn({ ...args, env: {} })).state),
+      get: vi.fn(() => pooled),
+      stop: vi.fn(async () => {
+        pooled = undefined;
+      }),
+      acquire: vi.fn(async (args: any) => {
+        pooled = (await provider.spawn({ ...args, env: {} })).state;
+        return pooled;
+      }),
       recordUsage: vi.fn(),
     };
 
@@ -593,10 +599,17 @@ describe("Cursor browser MCP configuration", () => {
       mcpServers = servers;
     });
     provider.runTurn = vi.fn().mockResolvedValue(undefined);
+    let pooled: unknown = existing;
     provider.runtime = {
-      get: vi.fn().mockReturnValueOnce(existing).mockReturnValue(undefined),
-      stop: vi.fn(async () => provider.close(existing)),
-      acquire: vi.fn(async (args: any) => (await provider.spawn({ ...args, env: {} })).state),
+      get: vi.fn(() => pooled),
+      stop: vi.fn(async () => {
+        pooled = undefined;
+        await provider.close(existing);
+      }),
+      acquire: vi.fn(async (args: any) => {
+        pooled = (await provider.spawn({ ...args, env: {} })).state;
+        return pooled;
+      }),
       recordUsage: vi.fn(),
     };
 

@@ -158,7 +158,7 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
     })();
   }, [expanded, diffStats, messageId]);
 
-  /** Open the diff panel focused on the Changes tab showing this turn's changes. */
+  /** Open the Changes tab on the Turn view showing this turn's diff. */
   const openReviewPanel = useCallback(async () => {
     const { activeThreadId: threadId, activeWorkspaceId: workspaceId } =
       useWorkspaceStore.getState();
@@ -167,37 +167,47 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
     const store = useDiffStore.getState();
     showRightPanelAdaptive(workspaceId, threadId);
     store.setRightPanelTab(workspaceId, threadId, "changes");
-    // Pin cumulative as the per-thread override so the live default cannot revert
-    // this deliberate pick (ADR-0011).
-    store.setReviewViewForThread(threadId, "cumulative");
 
-    // Ensure snapshots are loaded so the panel can display this turn
-    if (!store.snapshotsByThread[threadId]) {
+    const serverMsgId = readThreadRecord(threadId).serverMessageIds[messageId] ?? messageId;
+    // A cached snapshot list may predate this turn's row (or a failed refresh);
+    // only trust a positive hit, so refetch before accepting a miss.
+    let snapshots = store.snapshotsByThread[threadId];
+    if (!snapshots?.some((s) => s.message_id === serverMsgId)) {
       try {
-        const snapshots = await getTransport().listSnapshots(threadId);
+        snapshots = await getTransport().listSnapshots(threadId);
         useDiffStore.getState().setSnapshots(threadId, snapshots);
       } catch (err) {
         console.warn("[TurnChangeSummary] Failed to load snapshots:", err);
       }
     }
-    return threadId;
-  }, []);
 
-  const handleViewAllDiffs = useCallback(() => {
+    if (snapshots?.some((s) => s.message_id === serverMsgId)) {
+      store.setReviewTurnForThread(threadId, serverMsgId);
+      // Pin the pick as the per-thread override so the live default cannot
+      // revert this deliberate choice (ADR-0011).
+      store.setReviewViewForThread(threadId, "turn");
+      return { threadId, viewKey: `turn:${serverMsgId}` };
+    }
+    // The turn cannot be resolved to a snapshot; fall back to All turns.
+    store.setReviewViewForThread(threadId, "cumulative");
+    return { threadId, viewKey: "cumulative" };
+  }, [messageId]);
+
+  const handleViewDiff = useCallback(() => {
     void openReviewPanel();
   }, [openReviewPanel]);
 
   /** Open the Changes tab and scroll the comparison to this file. */
   const handleJumpToFile = useCallback((filePath: string) => {
-    void openReviewPanel().then((threadId) => {
-      if (threadId) useDiffStore.getState().requestReviewFileJump(threadId, filePath);
+    void openReviewPanel().then((result) => {
+      if (result) useDiffStore.getState().requestReviewFileJump(result.threadId, filePath, result.viewKey);
     });
   }, [openReviewPanel]);
 
   return (
     <div className="my-1">
       <div className={diffCardSurfaceClass()}>
-        {/* Header row: toggle and "View All Diffs" are siblings to avoid nested buttons */}
+        {/* Header row: toggle and "View diff" are siblings to avoid nested buttons */}
         <div className="flex w-full items-center justify-between px-2.5 py-1.5 text-xs text-muted-foreground">
           <button
             type="button"
@@ -221,10 +231,10 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
             <Button
               variant="outline"
               size="xs"
-              onClick={handleViewAllDiffs}
+              onClick={handleViewDiff}
               className="gap-1 border-border/60 text-muted-foreground/80 shadow-none hover:text-foreground"
             >
-              View all diffs
+              View diff
               <ExternalLink size={10} />
             </Button>
           </span>
@@ -239,7 +249,7 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
               hiddenCount={hiddenCount}
               diffStats={diffStats}
               onJump={handleJumpToFile}
-              onViewAll={handleViewAllDiffs}
+              onViewAll={handleViewDiff}
             />
           </div>
         )}

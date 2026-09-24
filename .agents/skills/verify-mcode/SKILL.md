@@ -5,7 +5,7 @@ description: Verify Mcode behavior in the Electron desktop app and through publi
 
 # Verify Mcode
 
-Use this skill for requested live proof and for changes that cross an Electron UI, persistence, provider adapter, or managed-worktree boundary. Select focused checks with [the agent workflow](../../../docs/guides/agent-workflow.md#focused-checks); do not use a verifier area check as a repository-wide gate.
+Use this skill for requested live proof and for changes that cross an Electron UI, persistence, provider adapter, or managed-worktree boundary. Select focused checks with [the agent workflow](../../../docs/internals/agent-workflow.md#focused-checks); do not use a verifier area check as a repository-wide gate.
 
 1. Read `references/features/README.md`. Read each affected feature file. Read `multi-surface-journeys.md` when a workflow crosses product surfaces.
 2. Select the proof surface below. Run the health command for each area that needs live proof before proof collection.

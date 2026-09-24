@@ -43,7 +43,7 @@ function CumulativePendingNotice({ refreshing, onRefresh }: { refreshing: boolea
 
 function CumulativeBody({ showSummary, files, threadId, cacheVersion, refreshing, onRefresh }: { showSummary: boolean; files: ReviewComparison["files"]; threadId: string; cacheVersion: string | number; refreshing: boolean; onRefresh: () => void }) {
   if (showSummary) return <SummaryView />;
-  return <FileList files={files} source="cumulative" id={threadId} threadId={threadId} cacheVersion={cacheVersion} refreshable refreshing={refreshing} onRefresh={onRefresh} />;
+  return <FileList files={files} source="cumulative" id={threadId} threadId={threadId} cacheVersion={cacheVersion} refreshable refreshing={refreshing} onRefresh={onRefresh} jumpViewKey="cumulative" />;
 }
 
 function getCumulativeLensState(pending: boolean, scopeLabel: string | undefined, summaryLens: boolean, summaryEnabled: boolean): { showPendingNotice: boolean; showSummary: boolean } {

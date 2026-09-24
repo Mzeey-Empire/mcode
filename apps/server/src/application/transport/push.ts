@@ -13,6 +13,8 @@ import { getTransportPayloadValidator } from "./payload-validation.js";
 export const MAX_AGENT_EVENT_JOURNAL_EVENTS_PER_THREAD = 256;
 /** Maximum thread journals retained by the process. */
 export const MAX_AGENT_EVENT_JOURNAL_THREADS = 100;
+/** Maximum buffered push bytes for one connected client. */
+export const MAX_PUSH_SOCKET_BUFFERED_BYTES = 16 * 1_024 * 1_024;
 
 const clients = new Set<WebSocket>();
 const threadSubscriptions = new Map<WebSocket, Set<string>>();
@@ -226,9 +228,11 @@ function trimJournalMap(map: Map<string, unknown>): void {
 
 function sendBroadcastPayload(channel: WsChannelName, threadId: string | undefined, payload: string): void {
   const requiresThreadSubscription = SUBSCRIPTION_SCOPED_CHANNELS.has(channel);
+  const payloadBytes = Buffer.byteLength(payload, "utf8");
   for (const ws of clients) {
     if (ws.readyState !== ws.OPEN) continue;
     if (requiresThreadSubscription && threadId && !threadSubscriptions.get(ws)?.has(threadId)) continue;
+    if (!canSendPayload(ws, channel, payloadBytes)) continue;
     try {
       ws.send(payload);
     } catch {
@@ -237,6 +241,27 @@ function sendBroadcastPayload(channel: WsChannelName, threadId: string | undefin
       logger.warn("Broadcast send failed", { channel });
     }
   }
+}
+
+/** Terminate only the lagging connection so its next subscription can replay or hydrate. */
+function canSendPayload(ws: WebSocket, channel: WsChannelName | "terminal.data", payloadBytes: number): boolean {
+  const bufferedAmount = ws.bufferedAmount;
+  if (bufferedAmount + payloadBytes <= MAX_PUSH_SOCKET_BUFFERED_BYTES) return true;
+  logger.warn("Terminating slow WebSocket client for push recovery", {
+    channel,
+    bufferedAmount,
+    payloadBytes,
+  });
+  try {
+    ws.terminate();
+  } catch (error) {
+    logger.warn("Failed to terminate slow WebSocket client", {
+      channel,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  removeClient(ws);
+  return false;
 }
 
 /** Sends one validated push event to exactly one connected WebSocket client. */
@@ -250,8 +275,10 @@ export function sendToClient(
   if (!schema) return false;
   const validation = getTransportPayloadValidator().validatePush(channel, data, schema);
   if (!validation.ok) return false;
+  const payload = JSON.stringify({ type: "push" as const, channel, data: validation.data });
+  if (!canSendPayload(ws, channel, Buffer.byteLength(payload, "utf8"))) return false;
   try {
-    ws.send(JSON.stringify({ type: "push" as const, channel, data: validation.data }));
+    ws.send(payload);
     return true;
   } catch (error) {
     logger.warn("Directed push delivery failed", {
@@ -276,6 +303,7 @@ export function broadcastTerminalData(
   const frame = encodeTerminalDataFrame(ptyId, seq, payload);
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) {
+      if (!canSendPayload(ws, "terminal.data", frame.byteLength)) continue;
       try {
         ws.send(frame, { binary: true });
       } catch (err) {

@@ -106,10 +106,8 @@ describe("summonTab", () => {
         id: "placeholder-1",
         workspaceId: WID,
         title: "Starting thread",
-        queuedMessage: "Start",
         transportMode: "direct",
         branch: "main",
-        clientPreparingContext: "new-direct",
       });
       useWorkspaceStore.setState({
         activeThreadId: placeholder.id,

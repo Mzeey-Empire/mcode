@@ -1,4 +1,4 @@
-import { Lifecycle, type DependencyContainer } from "tsyringe";
+import { instanceCachingFactory, Lifecycle, type DependencyContainer } from "tsyringe";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 
 import { ClaudeProvider } from "../adapters/claude/claude-provider.js";
@@ -20,9 +20,17 @@ import {
   type ProviderEventIngressDiagnosticSink,
 } from "./provider-event-ingress.js";
 import { CODEX_PROVIDER_EVENT_ADAPTER, type ProviderEventAdapter } from "./provider-event-adapter.js";
+import {
+  PROVIDER_EVENT_WORKER_POOL,
+  ThreadEventWorkerPool,
+  type ProviderEventWorkerPool,
+} from "./provider-event-worker-pool.js";
 
 /** Register provider adapters, the provider registry, and provider host ports. */
 export function registerProviderAdapters(container: DependencyContainer): void {
+  container.register<ProviderEventWorkerPool>(PROVIDER_EVENT_WORKER_POOL, {
+    useFactory: instanceCachingFactory(() => new ThreadEventWorkerPool()),
+  });
   container.register(
     CodexCollaborationEventAdapter,
     { useClass: CodexCollaborationEventAdapter },

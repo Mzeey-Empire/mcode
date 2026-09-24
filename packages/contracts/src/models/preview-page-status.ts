@@ -11,6 +11,7 @@ export const PREVIEW_PAGE_STATUS_STRING_MAX = {
   title: 240,
   favicon: 4096,
   message: 500,
+  detail: 500,
   code: 120,
 } as const;
 
@@ -27,7 +28,7 @@ export type PreviewPagePhase = z.infer<ReturnType<typeof PreviewPagePhaseSchema>
  */
 export const PreviewPageErrorSchema = lazySchema(() =>
   z.object({
-    kind: z.enum(["http", "network", "file-not-found", "crash"]),
+    kind: z.enum(["http", "network", "file-not-found", "crash", "blocked"]),
     status: z.number().int().optional(),
     /**
      * Diagnostic code shown to the (developer) audience in the error panel:
@@ -36,6 +37,12 @@ export const PreviewPageErrorSchema = lazySchema(() =>
      */
     code: z.string().max(PREVIEW_PAGE_STATUS_STRING_MAX.code).optional(),
     message: z.string().max(PREVIEW_PAGE_STATUS_STRING_MAX.message),
+    /**
+     * Optional support line under the headline explaining the next useful move
+     * (e.g. why a folder needs an index.html). Synthesized renderer-side for
+     * local-navigation failures; absent on wire-classified load errors.
+     */
+    detail: z.string().max(PREVIEW_PAGE_STATUS_STRING_MAX.detail).optional(),
   }),
 );
 export type PreviewPageError = z.infer<ReturnType<typeof PreviewPageErrorSchema>>;

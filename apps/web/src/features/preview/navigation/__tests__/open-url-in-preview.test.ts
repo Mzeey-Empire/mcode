@@ -9,6 +9,10 @@ import {
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createMockWorkspace, createMockThread } from "@/__tests__/mocks/transport";
+import {
+  previewTabsScopeKey,
+  usePreviewTabsStore,
+} from "../../state/previewTabsStore";
 
 describe("isModifierClick", () => {
   it("returns true for ctrl+click", () => {
@@ -75,6 +79,18 @@ function mockTabList(activeUrl: string | null) {
   });
 }
 
+/** The host's `tabs.open` response carries the full post-open tab set. */
+function openedTabSet() {
+  return {
+    threadId: "thread-1",
+    activeTabId: "tab-2",
+    tabs: [
+      { id: "tab-1", threadId: "thread-1", title: null, url: null, faviconUrl: null, warm: true, active: false },
+      { id: "tab-2", threadId: "thread-1", title: null, url: null, faviconUrl: null, warm: true, active: true },
+    ],
+  };
+}
+
 describe("openUrlInPreview", () => {
   let mockOpen: ReturnType<typeof vi.fn>;
   let mockNavigate: ReturnType<typeof vi.fn>;
@@ -86,7 +102,7 @@ describe("openUrlInPreview", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    mockOpen = vi.fn().mockResolvedValue({ ok: true, data: { tabId: "tab-2", tabs: {} } });
+    mockOpen = vi.fn().mockResolvedValue({ ok: true, data: { tabId: "tab-2", tabs: openedTabSet() } });
     mockNavigate = vi.fn().mockResolvedValue({ ok: true });
     mockResolveNavigation = vi.fn(async (url: string) => ({ ok: true, url }));
     mockOpenExternalUrl = vi.fn().mockResolvedValue(undefined);
@@ -116,6 +132,7 @@ describe("openUrlInPreview", () => {
         resolveNavigation: mockResolveNavigation,
       },
     } as unknown as typeof window.desktopBridge;
+    usePreviewTabsStore.setState({ pendingNavErrorsByScope: {} });
   });
 
   afterEach(() => {
@@ -126,6 +143,7 @@ describe("openUrlInPreview", () => {
       activeWorkspaceId: null,
       activeThreadId: null,
     });
+    usePreviewTabsStore.setState({ pendingNavErrorsByScope: {} });
   });
 
   it("creates a new tab then navigates when the active tab already has a page", async () => {
@@ -191,23 +209,100 @@ describe("openUrlInPreview", () => {
     vi.unstubAllGlobals();
   });
 
-  it("opens externally when URL resolution fails", async () => {
-    mockResolveNavigation.mockResolvedValue({ ok: false, error: "invalid-url" });
+  it("opens an activated error tab when resolution reports a missing file", async () => {
+    mockResolveNavigation.mockResolvedValue({ ok: false, error: "file-not-found" });
+
+    openUrlInPreview({ url: "C:\\missing\\page.html", threadId: "thread-1" });
+    await vi.runAllTimersAsync();
+
+    // The known-bad address must not go back through initialAddress; the
+    // pending error record is what renders the page.
+    expect(mockOpen).toHaveBeenCalledWith("thread-1", "ws-1", { activate: true });
+    expect(mockOpenExternalUrl).not.toHaveBeenCalled();
+    expect(setPreviewUrlForThread).not.toHaveBeenCalled();
+    const pending = usePreviewTabsStore.getState()
+      .pendingNavErrorsByScope[previewTabsScopeKey("ws-1", "thread-1")]?.["tab-2"];
+    expect(pending?.input).toBe("C:\\missing\\page.html");
+    expect(pending?.error).toMatchObject({
+      kind: "file-not-found",
+      message: "File not found",
+    });
+  });
+
+  it("opens an error tab for hint-only codes instead of dead-clicking", async () => {
+    mockResolveNavigation.mockResolvedValue({ ok: false, error: "no-workspace" });
+
+    openUrlInPreview({ url: "docs/report.html", threadId: "thread-1" });
+    await vi.runAllTimersAsync();
+
+    expect(mockOpen).toHaveBeenCalledWith("thread-1", "ws-1", { activate: true });
+    const pending = usePreviewTabsStore.getState()
+      .pendingNavErrorsByScope[previewTabsScopeKey("ws-1", "thread-1")]?.["tab-2"];
+    expect(pending?.error.message).toBe("Open a workspace to use relative file paths.");
+    expect(mockOpenExternalUrl).not.toHaveBeenCalled();
+  });
+
+  it("reuses an empty active tab for the error page", async () => {
+    mockResolveNavigation.mockResolvedValue({ ok: false, error: "file-not-found" });
     window.desktopBridge = {
       openExternalUrl: mockOpenExternalUrl,
       preview: {
-        tabs: { open: mockOpen, list: mockTabList("https://example.com") },
+        tabs: { open: mockOpen, list: mockTabList(null) },
         navigate: mockNavigate,
         resolveNavigation: mockResolveNavigation,
       },
     } as unknown as typeof window.desktopBridge;
 
-    openUrlInPreview({ url: "https://example.com", threadId: "thread-1" });
+    openUrlInPreview({ url: "C:\\missing\\page.html", threadId: "thread-1" });
     await vi.runAllTimersAsync();
 
-    expect(mockOpen).not.toHaveBeenCalled();
+    expect(mockOpen).toHaveBeenCalledWith("thread-1", "ws-1", {
+      activate: true,
+      tabId: "tab-1",
+    });
+  });
+
+  it("falls back to external when the error tab itself cannot open", async () => {
+    mockResolveNavigation.mockResolvedValue({ ok: false, error: "file-not-found" });
+    mockOpen.mockResolvedValue({ ok: false, error: "tab-unavailable" });
+
+    openUrlInPreview({ url: "C:\\missing\\page.html", threadId: "thread-1" });
+    await vi.runAllTimersAsync();
+
+    expect(mockOpenExternalUrl).toHaveBeenCalledWith("C:\\missing\\page.html");
+  });
+
+  it("opens an error tab when the file vanishes between resolve and tab open", async () => {
+    mockOpen
+      .mockResolvedValueOnce({ ok: false, error: "invalid-initial-address" })
+      .mockResolvedValue({ ok: true, data: { tabId: "tab-2", tabs: openedTabSet() } });
+    mockResolveNavigation
+      .mockResolvedValueOnce({ ok: true, url: "file:///C:/missing/page.html" })
+      .mockResolvedValueOnce({ ok: false, error: "file-not-found" });
+
+    openUrlInPreview({ url: "C:\\missing\\page.html", threadId: "thread-1" });
+    await vi.runAllTimersAsync();
+
+    const pending = usePreviewTabsStore.getState()
+      .pendingNavErrorsByScope[previewTabsScopeKey("ws-1", "thread-1")]?.["tab-2"];
+    expect(pending?.error.kind).toBe("file-not-found");
     expect(setPreviewUrlForThread).not.toHaveBeenCalled();
-    expect(mockOpenExternalUrl).toHaveBeenCalledWith("https://example.com");
+    expect(mockOpenExternalUrl).not.toHaveBeenCalled();
+  });
+
+  it("resolves relative paths against the clicked thread's workspace", async () => {
+    const other = createMockWorkspace({ id: "ws-2", path: "/tmp/other-workspace" });
+    useWorkspaceStore.setState({
+      workspaces: [createMockWorkspace({ id: "ws-1", path: "/tmp/workspace" }), other],
+      activeWorkspaceId: "ws-1",
+      activeThreadId: "thread-2",
+      threads: [createMockThread({ id: "thread-2", workspace_id: "ws-2" })],
+    });
+
+    openUrlInPreview({ url: "docs/report.html", threadId: "thread-2" });
+    await vi.runAllTimersAsync();
+
+    expect(mockResolveNavigation).toHaveBeenCalledWith("docs/report.html", "/tmp/other-workspace");
   });
 
   it("retries as a fresh tab when the listed reuse target was closed", async () => {
@@ -223,7 +318,7 @@ describe("openUrlInPreview", () => {
     } as unknown as typeof window.desktopBridge;
     mockOpen
       .mockResolvedValueOnce({ ok: false, error: "tab-not-found" })
-      .mockResolvedValueOnce({ ok: true, data: { tabId: "tab-2", tabs: {} } });
+      .mockResolvedValueOnce({ ok: true, data: { tabId: "tab-2", tabs: openedTabSet() } });
 
     openUrlInPreview({ url: "https://example.com/pr/1", threadId: "thread-1" });
     await vi.runAllTimersAsync();

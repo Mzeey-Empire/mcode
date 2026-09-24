@@ -27,7 +27,7 @@ import type {
   WorkspaceEnvironmentSetupAttempt,
   WorkspaceEnvironmentActionRun,
 } from "./types";
-import { TurnRuntimeSnapshotSchema, WS_CHANNELS } from "@mcode/contracts";
+import { TurnRuntimeSnapshotSchema, WS_CHANNELS, WS_METHODS } from "@mcode/contracts";
 import { TerminalErrorCodeSchema } from "@mcode/contracts";
 import type {
   CreateAndSendResult,
@@ -95,6 +95,16 @@ const MIN_RECONNECT_MS = 1000;
 const MAX_RECONNECT_MS = 30_000;
 /** Number of immediate (delay=0) retries on auth failure before falling back to exponential backoff. */
 const MAX_IMMEDIATE_AUTH_RETRIES = 3;
+/** Deadline for model discovery requested from the visible model picker. */
+const PROVIDER_MODEL_LIST_TIMEOUT_MS = 10_000;
+/** Deadline for choosing the Terminal backend before Terminal UI can continue. */
+const TERMINAL_CAPABILITIES_TIMEOUT_MS = 10_000;
+/** Deadline for a user-requested Terminal creation. */
+const TERMINAL_CREATE_TIMEOUT_MS = 20_000;
+/** Deadline for closing a Terminal returned after its create request timed out. */
+const TERMINAL_LATE_CREATE_CLEANUP_TIMEOUT_MS = 10_000;
+/** Maximum Terminal creates whose late responses still need exact cleanup. */
+const MAX_PENDING_TERMINAL_CREATE_CLEANUPS = 8;
 
 /** Last thread-list refresh timestamp per workspace, triggered on WS reconnect. */
 const lastLoadThreadsAtByWorkspace = new Map<string, number>();
@@ -139,6 +149,36 @@ export class RpcError extends Error {
     super(message);
     this.name = "RpcError";
   }
+}
+
+interface RpcErrorDetails {
+  readonly code: string;
+  readonly message: string;
+  readonly data?: Record<string, unknown>;
+  readonly retry?: string;
+}
+
+function toTransportRpcError(error: unknown): Error {
+  if (isTerminalRpcError(error)) return new TerminalRpcError(error);
+  const details = readRpcErrorDetails(error);
+  return new RpcError(details.message, details.code, details.data, details.retry);
+}
+
+function isTerminalRpcError(error: unknown): boolean {
+  return isRecord(error) && TerminalErrorCodeSchema().safeParse(error.code).success;
+}
+
+function readRpcErrorDetails(error: unknown): RpcErrorDetails {
+  if (!isRecord(error)) return { code: "RPC_ERROR", message: "RPC error" };
+  const code = typeof error.code === "string" ? error.code : "RPC_ERROR";
+  const message = typeof error.message === "string" ? error.message : "RPC error";
+  const retry = typeof error.retry === "string" ? error.retry : undefined;
+  const data = isRecord(error.data) ? error.data : undefined;
+  return data ? { code, message, data, retry } : { code, message, retry };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 type Listener = (data: unknown) => void;
@@ -228,6 +268,51 @@ interface PendingCall {
   reject: (reason: Error) => void;
 }
 
+interface LateResponseHandler {
+  readonly onSuccess?: (result: unknown) => void;
+  readonly onSettled?: () => void;
+}
+
+interface RpcOptions {
+  /** Bound this request without changing the transport's default timeout. */
+  readonly timeoutMs?: number;
+  /** Reclaims a resource when a timed-out request eventually succeeds. */
+  readonly onLateSuccess?: (result: unknown) => void;
+  /** Runs request-specific cleanup after a late response settles. */
+  readonly onLateSettled?: () => void;
+  /** Rejects a request before it consumes transport state. */
+  readonly rejectBeforeRequest?: () => Error | null;
+  /** Releases request-specific state after a normal response or failure. */
+  readonly onRequestSettled?: () => void;
+}
+
+/** Raised when a request for an interactive control exceeds its bounded wait. */
+export class RpcTimeoutError extends Error {
+  constructor(readonly method: string) {
+    super("Request timed out. Try again.");
+    this.name = "RpcTimeoutError";
+  }
+}
+
+/** Extracts the exact Terminal ID from a late successful create response. */
+export function parseLateTerminalCreateId(
+  method: "terminal.create" | "terminal.session.create",
+  result: unknown,
+): string | null {
+  if (method === "terminal.create") {
+    const parsed = WS_METHODS()["terminal.create"].result.safeParse(result);
+    return parsed.success ? readTerminalCreateId(parsed.data, "ptyId") : null;
+  }
+  const parsed = WS_METHODS()["terminal.session.create"].result.safeParse(result);
+  return parsed.success ? readTerminalCreateId(parsed.data, "sessionId") : null;
+}
+
+function readTerminalCreateId(value: unknown, field: "ptyId" | "sessionId"): string | null {
+  if (!value || typeof value !== "object" || !Object.prototype.hasOwnProperty.call(value, field)) return null;
+  const id = Reflect.get(value, field);
+  return typeof id === "string" ? id : null;
+}
+
 /** Describes the current state of the WebSocket connection. */
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "authFailed";
 
@@ -287,6 +372,11 @@ export function createWsTransport(
   let ws: WebSocket;
   let idCounter = 0;
   let pending = new Map<string, PendingCall>();
+  let lateResponseHandlers = new Map<string, LateResponseHandler>();
+  // Each reservation holds a terminal create until it either resolves or its
+  // late response can clean up the unknown terminal. The cap bounds a stalled
+  // server while allowing normal retries after one visible timeout.
+  const pendingTerminalCreateCleanups = new Set<symbol>();
   const freshTurnDiffThreads = new Set<string>();
   let closed = false;
   let reconnectDelay = MIN_RECONNECT_MS;
@@ -396,23 +486,33 @@ export function createWsTransport(
   }
 
   function handleRpcResponse(message: Record<string, unknown>): boolean {
-    if (!message.id || !pending.has(message.id as string)) return false;
-    const { resolve, reject } = pending.get(message.id as string)!;
-    pending.delete(message.id as string);
-    if (!message.error) {
-      resolve(message.result);
-      return true;
-    }
-    const error = message.error as {
-      code?: string;
-      message?: string;
-      data?: Record<string, unknown>;
-      retry?: string;
-    };
-    if (TerminalErrorCodeSchema().safeParse(error.code).success) {
-      reject(new TerminalRpcError(error));
-    } else {
-      reject(new RpcError(error.message ?? "RPC error", error.code ?? "RPC_ERROR", error.data, error.retry));
+    const id = typeof message.id === "string" ? message.id : null;
+    if (!id) return false;
+    const call = pending.get(id);
+    return call
+      ? settlePendingRpcResponse(id, call, message)
+      : settleLateRpcResponse(id, message);
+  }
+
+  function settlePendingRpcResponse(
+    id: string,
+    call: PendingCall,
+    message: Record<string, unknown>,
+  ): true {
+    pending.delete(id);
+    if (message.error) call.reject(toTransportRpcError(message.error));
+    else call.resolve(message.result);
+    return true;
+  }
+
+  function settleLateRpcResponse(id: string, message: Record<string, unknown>): boolean {
+    const handler = lateResponseHandlers.get(id);
+    if (!handler) return false;
+    lateResponseHandlers.delete(id);
+    try {
+      if (!message.error) handler.onSuccess?.(message.result);
+    } finally {
+      handler.onSettled?.();
     }
     return true;
   }
@@ -450,7 +550,7 @@ export function createWsTransport(
       resolveReady();
       options?.onStatusChange?.("connected");
       invalidateLiveTurnDiff();
-      terminalSelectionPromise = selectTerminalClient();
+      void selectTerminalClientWithRecovery();
 
       // Reconcile runningThreadIds with the server's authoritative set.
       // The client-side optimistic Set is lost on reload/reconnect; this
@@ -509,6 +609,8 @@ export function createWsTransport(
     ws.onclose = (event: CloseEvent) => {
       freshTurnDiffThreads.clear();
       rejectPending("WebSocket disconnected");
+      lateResponseHandlers = new Map();
+      pendingTerminalCreateCleanups.clear();
       invalidateLiveTurnDiff();
       if (!closed) {
         // Re-arm `ready` so rpc() calls park until the reconnect opens instead
@@ -580,32 +682,77 @@ export function createWsTransport(
   }
 
   /** Send a JSON-RPC request and return the result. */
-  async function rpc<T>(method: string, params: Record<string, unknown>): Promise<T> {
-    await ready;
+  function rpc<T>(
+    method: string,
+    params: Record<string, unknown>,
+    options?: RpcOptions,
+  ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      // `ready` may have resolved on a socket that closed before this
-      // continuation ran; send() on a dead socket is silently dropped and the
-      // request would sit in `pending` forever.
-      if (ws.readyState !== WebSocket.OPEN) {
-        reject(new Error("WebSocket disconnected"));
+      const immediateError = options?.rejectBeforeRequest?.();
+      if (immediateError) {
+        reject(immediateError);
         return;
       }
-      const id = `req_${++idCounter}`;
-      pending.set(id, {
-        resolve: resolve as (v: unknown) => void,
-        reject,
-      });
-      try {
-        ws.send(JSON.stringify({ id, method, params }));
-      } catch (err) {
-        pending.delete(id);
-        reject(err);
-      }
+      let settled = false;
+      let requestId: string | null = null;
+      const deadline = options?.timeoutMs === undefined
+        ? null
+        : setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          if (requestId) pending.delete(requestId);
+          if (requestId && options.onLateSuccess) {
+            lateResponseHandlers.set(requestId, {
+              onSuccess: options.onLateSuccess,
+              onSettled: options.onLateSettled,
+            });
+          } else {
+            options?.onRequestSettled?.();
+          }
+          reject(new RpcTimeoutError(method));
+        }, options.timeoutMs);
+      const complete = (value: unknown) => {
+        if (settled) return;
+        settled = true;
+        if (deadline !== null) clearTimeout(deadline);
+        options?.onRequestSettled?.();
+        resolve(value as T);
+      };
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        if (deadline !== null) clearTimeout(deadline);
+        options?.onRequestSettled?.();
+        reject(error);
+      };
+
+      void ready.then(
+        () => {
+          if (settled) return;
+          // `ready` may have resolved on a socket that closed before this
+          // continuation ran; send() on a dead socket is silently dropped and the
+          // request would sit in `pending` forever.
+          if (ws.readyState !== WebSocket.OPEN) {
+            fail(new Error("WebSocket disconnected"));
+            return;
+          }
+          requestId = `req_${++idCounter}`;
+          pending.set(requestId, { resolve: complete, reject: fail });
+          try {
+            ws.send(JSON.stringify({ id: requestId, method, params }));
+          } catch (error) {
+            pending.delete(requestId);
+            fail(error instanceof Error ? error : new Error("WebSocket send failed"));
+          }
+        },
+        (error: Error) => fail(error),
+      );
     });
   }
 
   const terminalClientSelector = new TerminalClientSelector(
-    <T>(method: string, params: Record<string, unknown>) => rpc<T>(method, params),
+    <T>(method: string, params: Record<string, unknown>) =>
+      rpc<T>(method, params, terminalRpcOptions(method)),
     (frame) => {
       // Drop terminal frames while the socket is down; reattach resyncs output.
       if (ws.readyState === WebSocket.OPEN) ws.send(frame);
@@ -622,15 +769,70 @@ export function createWsTransport(
     },
   );
 
+  function terminalRpcOptions(method: string): RpcOptions | undefined {
+    if (method !== "terminal.create" && method !== "terminal.session.create") {
+      return undefined;
+    }
+    const cleanupReservation = Symbol();
+    return {
+      timeoutMs: TERMINAL_CREATE_TIMEOUT_MS,
+      onLateSuccess: (result) => cleanupLateTerminalCreate(method, result),
+      onLateSettled: () => {
+        pendingTerminalCreateCleanups.delete(cleanupReservation);
+      },
+      rejectBeforeRequest: () => {
+        if (pendingTerminalCreateCleanups.size >= MAX_PENDING_TERMINAL_CREATE_CLEANUPS) {
+          return new Error("Too many terminal creations are awaiting cleanup. Try again shortly.");
+        }
+        pendingTerminalCreateCleanups.add(cleanupReservation);
+        return null;
+      },
+      onRequestSettled: () => {
+        pendingTerminalCreateCleanups.delete(cleanupReservation);
+      },
+    };
+  }
+
+  function cleanupLateTerminalCreate(method: string, result: unknown): void {
+    if (method !== "terminal.create" && method !== "terminal.session.create") return;
+    const terminalId = parseLateTerminalCreateId(method, result);
+    if (!terminalId) return;
+    const reportCleanupFailure = (error: unknown) => {
+      console.warn("[terminal] Could not clean up a terminal created after its request timed out", error);
+    };
+    if (method === "terminal.create") {
+      void rpc<void>("terminal.kill", { ptyId: terminalId }, {
+        timeoutMs: TERMINAL_LATE_CREATE_CLEANUP_TIMEOUT_MS,
+      }).catch(reportCleanupFailure);
+      return;
+    }
+    void rpc<void>("terminal.session.close", {
+      sessionId: terminalId,
+      reason: "user",
+    }, {
+      timeoutMs: TERMINAL_LATE_CREATE_CLEANUP_TIMEOUT_MS,
+    }).catch(reportCleanupFailure);
+  }
+
   async function selectTerminalClient(): Promise<TerminalBackendCapabilities> {
-    const capabilities = await rpc<TerminalBackendCapabilities>("terminal.capabilities", {});
+    const capabilities = await rpc<TerminalBackendCapabilities>("terminal.capabilities", {}, {
+      timeoutMs: TERMINAL_CAPABILITIES_TIMEOUT_MS,
+    });
     terminalClientSelector.select(capabilities);
     return capabilities;
   }
 
+  function selectTerminalClientWithRecovery(): Promise<TerminalBackendCapabilities> {
+    const selection = selectTerminalClient();
+    terminalSelectionPromise = selection;
+    void selection.catch(() => {
+      if (terminalSelectionPromise === selection) terminalSelectionPromise = null;
+    });
+    return selection;
+  }
+
   async function terminalCapabilities(): Promise<TerminalBackendCapabilities> {
-    terminalSelectionPromise ??= selectTerminalClient();
-    return terminalSelectionPromise;
+    return terminalSelectionPromise ?? selectTerminalClientWithRecovery();
   }
 
   async function withTerminalClient<T>(
@@ -1140,7 +1342,12 @@ export function createWsTransport(
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>
       rpc<string>("snapshot.getDiff", { snapshotId, filePath, maxLines }),
-    getTurnDiffComparison: (threadId) => rpc<ReviewComparison | null>("turnDiff.getComparison", { threadId, includeLive: freshTurnDiffThreads.has(threadId) }),
+    getTurnDiffComparison: (threadId, messageId?) =>
+      rpc<ReviewComparison | null>("turnDiff.getComparison", {
+        threadId,
+        includeLive: messageId ? undefined : freshTurnDiffThreads.has(threadId),
+        messageId,
+      }),
     getTurnDiffFile: (threadId, comparisonId, filePath) => rpc<string>("turnDiff.getFileDiff", { threadId, comparisonId, filePath }),
     getSnapshotDiffStats: (snapshotId) =>
       rpc<DiffStats[]>("snapshot.getDiffStats", { snapshotId }),
@@ -1212,7 +1419,9 @@ export function createWsTransport(
 
     // Provider models
     listProviderModels: (providerId) =>
-      rpc<ProviderModelInfo[]>("provider.listModels", { providerId }),
+      rpc<ProviderModelInfo[]>("provider.listModels", { providerId }, {
+        timeoutMs: PROVIDER_MODEL_LIST_TIMEOUT_MS,
+      }),
     listProviderModes: (providerId) =>
       rpc<string[] | null>("provider.listModes", { providerId }),
     getProviderUsage: (providerId) =>

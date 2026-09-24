@@ -221,7 +221,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     @inject(TurnDiffService) turnDiffs: TurnDiffService,
   ) {
     this.turnDiffs = turnDiffs;
-    this.turnEventPipeline = new TurnEventPipeline(this, eventApplication, turnDiffs);
+    this.turnEventPipeline = new TurnEventPipeline(this, eventApplication, turnDiffs, providerEventIngress);
     runtimeCommands.bind({
       sendMessage: (command) => this.sendMessage(command),
       runtimeSnapshots: () => this.runtimeSnapshots(),
@@ -707,12 +707,22 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     };
   }
 
-  /** Stop exact active turn, preserving provider failure as retryable RPC error. */
+  /**
+   * Stop exact active turn. Provider teardown is detached so a slow or wedged
+   * provider cannot hold the RPC; `stopProviderBounded` still bounds the settle
+   * and evicts the pooled session in the background.
+   */
   private async stopSessionInternal(threadId: string): Promise<AgentStopResult> {
     const prepared = this.prepareStop(threadId);
     if (!isRunningRuntime(prepared.runtime)) return this.alreadyTerminal(prepared);
     this.finishStopCheckpoint(prepared);
-    await this.stopProviderForTurn(prepared);
+    void this.stopProviderForTurn(prepared).catch((error: unknown) => {
+      logger.warn("Provider teardown failed after user stop", {
+        threadId: prepared.threadId,
+        providerId: prepared.providerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     return this.finalizeStoppedTurn(prepared);
   }
 
@@ -801,7 +811,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     try {
       await this.providerRegistry.resolve(prepared.providerId).stopSession(prepared.sessionId);
     } catch (error) {
-      if (!isRunningRuntime(this.turnRuntime.snapshot(prepared.threadId) ?? idleRuntime(prepared.threadId))) return;
+      if (!isRunningRuntime(this.turnRuntime.snapshot(prepared.threadId) ?? idleRuntime(prepared.threadId))) {
+        // The turn already finalized as cancelled; a session that failed
+        // teardown is untrusted, so evict it rather than reuse it.
+        this.evictUnresponsiveSession(prepared);
+        return;
+      }
       if (prepared.reservationToken) {
         this.mutationReservations.transition(prepared.threadId, prepared.reservationToken, "stopping", "activeTurn");
       }
@@ -818,7 +833,16 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!this.turnRuntime.terminalize(prepared.threadId, prepared.runtime.turnExecutionId!, "cancelled")) {
       return this.alreadyTerminal({ ...prepared, runtime: this.turnRuntime.snapshot(prepared.threadId) ?? idleRuntime(prepared.threadId) });
     }
-    await (this.finalizeTerminalTurn(prepared.threadId, "cancelled", "user stop") ?? Promise.resolve());
+    // Durable finalize (narrative, git snapshot) runs detached so it cannot hold
+    // the stop RPC; the per-thread finalize chain still orders it before any
+    // later turn's finalization.
+    void this.finalizeTerminalTurn(prepared.threadId, "cancelled", "user stop")
+      ?.catch((error: unknown) => {
+        logger.warn("Detached user-stop finalize failed", {
+          threadId: prepared.threadId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     this.disarmTurnRetryWindow(prepared.threadId);
     this.clearTurnEndedState(prepared.threadId);
     this.runtimePersistence.setRuntimeStatus(prepared.threadId, "paused");

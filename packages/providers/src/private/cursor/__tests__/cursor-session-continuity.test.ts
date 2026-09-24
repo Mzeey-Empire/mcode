@@ -359,4 +359,77 @@ describe("CursorProvider session continuity", () => {
       await (provider as unknown as { runtime: { shutdown(): Promise<void> } }).runtime.shutdown();
     }
   });
+
+  it("reuses the warm session for a follow-up sent during a healthy cancel drain", async () => {
+    const host = createHost();
+    const first = createFakeRuntime("cursor-session-1", 101);
+    const runtimes = [first.runtime];
+    const start = vi.spyOn(AcpSessionRuntime, "start").mockImplementation(async () => {
+      const runtime = runtimes.shift();
+      if (!runtime) throw new Error("Unexpected Cursor ACP spawn");
+      return runtime;
+    });
+    const provider = new CursorProvider(host, {
+      settings: { get: () => getDefaultSettings() },
+      skills: { list: () => [] },
+    }, 60_000, 1_000);
+
+    const held = deferred<{ stopReason: string }>();
+    vi.mocked(first.runtime.prompt)
+      .mockImplementationOnce(async () => await held.promise)
+      .mockImplementation(async () => ({ stopReason: "end_turn", usage: {} }));
+
+    try {
+      const sending = provider.sendTurn(turn("first prompt", "execution-1"));
+      await vi.waitFor(() => expect(first.runtime.prompt).toHaveBeenCalledOnce());
+      const stopping = provider.stopSession("mcode-thread-1");
+      const followUp = provider.sendTurn(turn("second prompt", "execution-2"));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      // The follow-up waits on the in-flight turn's drain rather than racing it.
+      expect(first.runtime.prompt).toHaveBeenCalledTimes(1);
+      held.resolve({ stopReason: "cancelled" });
+      await Promise.all([sending, stopping, followUp]);
+
+      expect(first.runtime.prompt).toHaveBeenCalledTimes(2);
+      expect(first.runtime.close).not.toHaveBeenCalled();
+      expect(host.processes.terminateTree).not.toHaveBeenCalled();
+    } finally {
+      start.mockRestore();
+      await (provider as unknown as { runtime: { shutdown(): Promise<void> } }).runtime.shutdown();
+    }
+  });
+
+  it("kills and respawns for a follow-up that outlives a wedged cancel drain", async () => {
+    const host = createHost();
+    const stuck = createFakeRuntime("cursor-session-1", 101);
+    const replacement = createFakeRuntime("cursor-session-2", 202);
+    const runtimes = [stuck.runtime, replacement.runtime];
+    const start = vi.spyOn(AcpSessionRuntime, "start").mockImplementation(async () => {
+      const runtime = runtimes.shift();
+      if (!runtime) throw new Error("Unexpected Cursor ACP spawn");
+      return runtime;
+    });
+    const provider = new CursorProvider(host, {
+      settings: { get: () => getDefaultSettings() },
+      skills: { list: () => [] },
+    }, 60_000, 25);
+
+    vi.mocked(stuck.runtime.prompt).mockImplementation(async () => await new Promise(() => {}));
+
+    try {
+      // The wedged prompt never settles, so this send stays pending by design.
+      void provider.sendTurn(turn("first prompt", "execution-1"));
+      await vi.waitFor(() => expect(stuck.runtime.prompt).toHaveBeenCalledOnce());
+      await provider.stopSession("mcode-thread-1");
+      await provider.sendTurn(turn("second prompt", "execution-2"));
+
+      // The gate killed the wedged child early and the follow-up ran on a respawn.
+      expect(vi.mocked(host.processes.terminateTree)).toHaveBeenCalledWith(101);
+      await vi.waitFor(() => expect(replacement.runtime.prompt).toHaveBeenCalledOnce());
+      expect(start).toHaveBeenCalledTimes(2);
+    } finally {
+      start.mockRestore();
+      await (provider as unknown as { runtime: { shutdown(): Promise<void> } }).runtime.shutdown();
+    }
+  });
 });

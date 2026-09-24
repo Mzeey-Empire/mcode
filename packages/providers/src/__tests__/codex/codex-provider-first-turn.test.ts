@@ -651,6 +651,164 @@ describe("CodexProvider first turn on new session", () => {
     }
   });
 
+  it("holds a follow-up send behind the stop drain, then reuses the warm session", async () => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: "test-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "stop this turn",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const runtime = (provider as unknown as {
+      runtime: {
+        get: (id: string) => { abortPendingTurnWait?: () => void; interruptDrain?: Promise<boolean> } | undefined;
+      };
+    }).runtime;
+    const state = runtime.get(sessionId);
+    expect(state).toBeDefined();
+
+    try {
+      // Hold the interrupt drain open so the follow-up send must wait on it.
+      const server = appServers[0]!;
+      let releaseDrain!: () => void;
+      const drainGate = new Promise<void>((resolve) => { releaseDrain = resolve; });
+      server.interruptTurnAndDrain = vi.fn(async (turnId: string) => {
+        await drainGate;
+        server.emit("notification", {
+          method: "turn/completed",
+          params: { threadId: "sdk-thread-1", turn: { id: turnId, status: "interrupted" } },
+        });
+      });
+
+      const stop = provider.stopSession(sessionId);
+      await vi.waitFor(() => expect(state!.interruptDrain).toBeDefined());
+      sendTurnMock.mockResolvedValueOnce("next-native-turn");
+      const send = provider.sendTurn({
+        turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+        workspaceId: "workspace-test", threadId, message: "continue",
+        cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+        providerOptions: {}, permissionMode: "auto",
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      // The send is queued behind the drain: no second turn/start yet.
+      expect(sendTurnMock).toHaveBeenCalledTimes(1);
+      releaseDrain();
+      await Promise.all([stop, send]);
+      await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(2));
+      expect(appServers).toHaveLength(1);
+      expect(server.isAlive).toBe(true);
+    } finally {
+      state?.abortPendingTurnWait?.();
+      await provider.discardSession(sessionId);
+    }
+  });
+
+  it("discards and respawns when a follow-up send outlives a wedged stop drain", async () => {
+    const provider = makeProvider();
+    // Shrink the reuse bound so the test does not wait seconds.
+    (provider as unknown as { stopDrainReuseTimeoutMs: number }).stopDrainReuseTimeoutMs = 25;
+
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: "test-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "stop this turn",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const runtime = (provider as unknown as {
+      runtime: {
+        get: (id: string) => { abortPendingTurnWait?: () => void; interruptDrain?: Promise<boolean> } | undefined;
+      };
+    }).runtime;
+    const state = runtime.get(sessionId);
+    expect(state).toBeDefined();
+
+    // A wedged drain: the interrupt drain never settles.
+    state!.interruptDrain = new Promise<boolean>(() => {});
+    sendTurnMock.mockResolvedValueOnce("next-native-turn");
+    const send = provider.sendTurn({
+      turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "continue",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await send;
+    await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(2));
+    expect(appServers).toHaveLength(2);
+    expect(appServers[0]!.isAlive).toBe(false);
+    expect(appServers[1]!.isAlive).toBe(true);
+
+    // A killed server's late exit must not evict the replacement session.
+    appServers[0]!.emit("exit");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(appServers[1]!.isAlive).toBe(true);
+
+    state?.abortPendingTurnWait?.();
+    await provider.discardSession(sessionId);
+  });
+
+  it("keeps the respawned session when a rejected stop drain settles after replacement", async () => {
+    const provider = makeProvider();
+
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: "test-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "stop this turn",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const runtime = (provider as unknown as {
+      runtime: {
+        get: (id: string) => { abortPendingTurnWait?: () => void; interruptDrain?: Promise<boolean> } | undefined;
+      };
+    }).runtime;
+    const state = runtime.get(sessionId);
+    expect(state).toBeDefined();
+
+    const server = appServers[0]!;
+    let releaseDrain!: () => void;
+    const drainGate = new Promise<void>((resolve) => { releaseDrain = resolve; });
+    server.interruptTurnAndDrain = vi.fn(async (turnId: string) => {
+      await drainGate;
+      server.emit("notification", {
+        method: "turn/completed",
+        params: { threadId: "sdk-thread-1", turn: { id: turnId, status: "interrupted" } },
+      });
+      throw new Error("drain rejected");
+    });
+
+    const stop = provider.stopSession(sessionId);
+    await vi.waitFor(() => expect(state!.interruptDrain).toBeDefined());
+    sendTurnMock.mockResolvedValueOnce("next-native-turn");
+    const send = provider.sendTurn({
+      turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "continue",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    releaseDrain();
+    await Promise.all([stop, send]);
+    await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(2));
+    expect(appServers).toHaveLength(2);
+    // Whoever observed the failed drain first may own the discard; the
+    // replacement must survive both the teardown and the dead server's exit.
+    expect(appServers[0]!.isAlive).toBe(false);
+    appServers[0]!.emit("exit");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(appServers[1]!.isAlive).toBe(true);
+    expect(runtime.get(sessionId)).not.toBe(state);
+
+    state?.abortPendingTurnWait?.();
+    await provider.discardSession(sessionId);
+  });
+
   it("cancels a staged turn before turn/start without closing the app-server", async () => {
     const provider = makeProvider();
     await provider.sendTurn({
@@ -717,7 +875,7 @@ describe("CodexProvider first turn on new session", () => {
     await provider.discardSession(sessionId);
   });
 
-  it("reports provider_lost without an outcome when main-turn drain fails", async () => {
+  it("reports provider_lost and discards the session when main-turn drain fails", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
@@ -753,9 +911,11 @@ describe("CodexProvider first turn on new session", () => {
     const state = runtime.get(sessionId);
 
     try {
-      await expect(provider.stopSession(sessionId)).rejects.toThrow();
+      // A failed interrupt is treated like a wedged drain: the stop resolves
+      // and the untrusted session is discarded so the next turn respawns.
+      await provider.stopSession(sessionId);
       expect(interruptRejected).toBe(true);
-      expect(server.isAlive).toBe(true);
+      expect(server.isAlive).toBe(false);
       expect(events).toContainEqual({
         event: {
           type: AgentEventType.Ended,

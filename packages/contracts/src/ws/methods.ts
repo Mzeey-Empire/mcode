@@ -1401,7 +1401,11 @@ export const WS_METHODS = lazySchema(() => ({
       .nullable(),
   },
   "turnDiff.getComparison": {
-    params: z.object({ threadId: AgentThreadIdSchema, includeLive: z.boolean().optional() }),
+    params: z.object({
+      threadId: AgentThreadIdSchema,
+      includeLive: z.boolean().optional(),
+      messageId: z.string().min(1).max(512).optional(),
+    }),
     result: ReviewComparisonSchema().nullable(),
   },
   "turnDiff.getFileDiff": {

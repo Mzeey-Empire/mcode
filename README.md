@@ -48,7 +48,7 @@ bun run dev:desktop
 **Reference docs:**
 
 - **[Architecture](ARCHITECTURE.md)** - System design, data model, IPC flow, and diagrams
-- **[Provider architecture](docs/guides/provider-architecture.md)** - How providers are wired up
+- **[Provider architecture](docs/internals/provider-architecture.md)** - How providers are wired up
 - **[Settings reference](docs/settings/reference.md)** - All configurable settings
 
 ## Tech Stack

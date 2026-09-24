@@ -50,7 +50,11 @@ export interface CanonicalAgentEventStoreInput {
 export interface CanonicalAgentEventStoreOperations {
   loadThread(threadId: string): AgentThread | null;
   loadCheckpoint(executionId: string): CanonicalAgentEventStoreCheckpoint | null;
-  loadState(threadId: string, executionId: string): AgentModelState;
+  loadCommitState(
+    threadId: string,
+    checkpoint: CanonicalAgentEventStoreCheckpoint | null,
+    events: readonly CanonicalAgentEventEnvelope[],
+  ): AgentModelState;
   boundEvents(
     input: CanonicalAgentEventStoreInput,
     events: readonly CanonicalAgentEventDraft[],
@@ -165,7 +169,6 @@ export class CanonicalAgentEventStore {
     context: CommitContext,
     newDrafts: readonly CanonicalAgentEventDraft[],
   ): CanonicalAgentCommitResult {
-    const state = this.operations.loadState(input.threadId, input.executionId);
     const acceptedAt = new Date().toISOString();
     const candidateRevision = (context.thread?.conversationRevision ?? 0) + 1;
     let acceptedSequence = context.checkpoint?.lastAcceptedSequence ?? 0;
@@ -173,6 +176,7 @@ export class CanonicalAgentEventStore {
       acceptedSequence += 1;
       return this.operations.createEnvelope(draft, acceptedSequence, candidateRevision, acceptedAt);
     });
+    const state = this.operations.loadCommitState(input.threadId, context.checkpoint, envelopes);
     let reduction = this.requireAppliedReduction(state, envelopes);
 
     const conversationChanged = reduction.appliedCount > 0;

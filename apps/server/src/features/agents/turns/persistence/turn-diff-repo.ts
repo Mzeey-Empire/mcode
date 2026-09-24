@@ -88,6 +88,21 @@ export class TurnDiffRepo {
     return row ? rowToStoredTurnDiff(row) : undefined;
   }
 
+  /** Read the durable comparison owned by one assistant message. */
+  findByMessage(threadId: string, messageId: string): StoredTurnDiff | undefined {
+    const row = this.orm
+      .select(TURN_DIFF_SELECTION)
+      .from(turnDiffSnapshots)
+      .where(
+        and(
+          eq(turnDiffSnapshots.threadId, threadId),
+          eq(turnDiffSnapshots.messageId, messageId),
+        ),
+      )
+      .get();
+    return row ? rowToStoredTurnDiff(row) : undefined;
+  }
+
   /** Read one comparison only within its owning thread. */
   find(threadId: string, id: string): StoredTurnDiff | undefined {
     const row = this.orm

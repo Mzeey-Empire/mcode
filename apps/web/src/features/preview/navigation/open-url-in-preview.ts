@@ -3,6 +3,8 @@ import type { BrowserTabInfo } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
+import { navCodeToPageError } from "./nav-errors";
+import { usePreviewTabsStore } from "../state/previewTabsStore";
 
 const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Z]:[\\/]/i;
 
@@ -39,11 +41,17 @@ export interface OpenUrlInPreviewOptions {
   newTab?: boolean;
 }
 
-function resolveWorkspacePath(explicit: string | null | undefined): string | null {
+function resolveWorkspacePath(
+  explicit: string | null | undefined,
+  workspaceId: string | undefined,
+): string | null {
   if (explicit !== undefined) return explicit;
   const { activeWorkspaceId, workspaces } = useWorkspaceStore.getState();
-  if (!activeWorkspaceId) return null;
-  return workspaces.find((w) => w.id === activeWorkspaceId)?.path ?? null;
+  // The clicked link's thread scope wins: resolving a relative path against a
+  // different active workspace would report missing for a file that exists.
+  return workspaces.find((w) => w.id === workspaceId)?.path
+    ?? workspaces.find((w) => w.id === activeWorkspaceId)?.path
+    ?? null;
 }
 
 /**
@@ -100,8 +108,8 @@ async function openTabWithAddress(
   workspaceId: string,
   target: { readonly tabId?: string } | null,
   address: string,
-): Promise<boolean> {
-  if (!target || !tabsApi.open) return true;
+): Promise<{ readonly tabId: string | null } | null> {
+  if (!target || !tabsApi.open) return null;
   let opened = await tabsApi.open(threadId, workspaceId, {
     activate: true,
     ...target,
@@ -114,7 +122,40 @@ async function openTabWithAddress(
       initialAddress: address,
     });
   }
-  return opened.ok;
+  return opened.ok ? { tabId: opened.data.tabId } : null;
+}
+
+/**
+ * Opens an activated blank tab and attaches the resolver failure to it. The
+ * address is already known-bad, so passing it as `initialAddress` would just
+ * bounce back as `invalid-initial-address`; the renderer-owned pending error
+ * is what turns the blank tab into the error page.
+ */
+async function openPreviewErrorTab(
+  tabsApi: PreviewTabsApi,
+  threadId: string,
+  workspaceId: string,
+  input: string,
+  code: string,
+  newTab: boolean,
+): Promise<boolean> {
+  if (!tabsApi?.open) return false;
+  const target = await resolvePreviewTabTarget(threadId, workspaceId, tabsApi, newTab);
+  if (!target) return false;
+  const opened = await tabsApi.open(threadId, workspaceId, {
+    activate: true,
+    ...target,
+  });
+  if (!opened.ok) return false;
+  // Land the host's tab set before the pending entry: a stale tabs snapshot
+  // arriving afterwards would otherwise prune the just-opened tab's error.
+  usePreviewTabsStore.getState().setTabSet(workspaceId, threadId, opened.data.tabs);
+  usePreviewTabsStore.getState().setPendingNavError(workspaceId, threadId, opened.data.tabId, {
+    input,
+    error: navCodeToPageError(code),
+    supersededUrl: null,
+  });
+  return true;
 }
 
 /** A modifier-click promised an in-app preview, but a dead click is worse than an external one. */
@@ -147,6 +188,62 @@ function revealPreviewPanel(threadId: string): string | undefined {
   return workspaceId;
 }
 
+interface OpenPreviewAddressInput {
+  readonly url: string;
+  readonly threadId: string;
+  readonly workspaceId: string;
+  readonly wsPath: string | null;
+  readonly newTab: boolean;
+  readonly setPreviewUrlForThread: (threadId: string, url: string) => void;
+}
+
+type PreviewBridge = NonNullable<typeof window.desktopBridge>["preview"];
+
+/** Opens a resolved address on the target tab; failure re-resolves so a vanished file becomes the error page. */
+async function openResolvedAddress(
+  preview: PreviewBridge,
+  input: OpenPreviewAddressInput,
+  address: string,
+): Promise<void> {
+  const target = await resolvePreviewTabTarget(input.threadId, input.workspaceId, preview.tabs, input.newTab);
+  const opened = await openTabWithAddress(preview.tabs, input.threadId, input.workspaceId, target, address);
+  if (opened) {
+    input.setPreviewUrlForThread(input.threadId, address);
+    return;
+  }
+  // The host re-validates initialAddress on open, so a file can vanish between
+  // resolve and open (invalid-initial-address). Re-resolving turns that race
+  // into the same error page rather than a dead click.
+  const recheck = await preview.resolveNavigation?.(input.url, input.wsPath ?? undefined);
+  if (recheck && !recheck.ok) {
+    if (await openPreviewErrorTab(preview.tabs, input.threadId, input.workspaceId, input.url, recheck.error, input.newTab)) return;
+  }
+  openUrlExternally(input.url, input.wsPath);
+}
+
+/** Resolves then opens the address; every failure surfaces as an error tab or an external open. */
+async function openPreviewAddress(
+  preview: PreviewBridge,
+  input: OpenPreviewAddressInput,
+): Promise<void> {
+  const resolved = await preview.resolveNavigation?.(input.url, input.wsPath ?? undefined);
+  if (resolved?.ok) {
+    await openResolvedAddress(preview, input, resolved.url);
+    return;
+  }
+  // A rejected local path must not dead-click: any known failure opens an
+  // activated error tab instead of silently falling back to the OS.
+  if (resolved && await openPreviewErrorTab(
+    preview.tabs,
+    input.threadId,
+    input.workspaceId,
+    input.url,
+    resolved.error,
+    input.newTab,
+  )) return;
+  openUrlExternally(input.url, input.wsPath);
+}
+
 /**
  * Opens a URL in the embedded browser preview, optionally in a new tab so the
  * current preview tab keeps its page.
@@ -165,40 +262,20 @@ export function openUrlInPreview({
     return;
   }
 
-  const wsPath = resolveWorkspacePath(workspacePath);
   const { setPreviewUrlForThread } = useDiffStore.getState();
   const workspaceId = revealPreviewPanel(threadId);
-
-  const run = async (): Promise<void> => {
-    const exactWorkspaceId = workspaceId ?? threadId;
-    const resolved = await preview.resolveNavigation?.(url, wsPath ?? undefined);
-    if (!resolved?.ok) {
-      openUrlExternally(url, wsPath);
-      return;
-    }
-    const target = await resolvePreviewTabTarget(
-      threadId,
-      exactWorkspaceId,
-      preview.tabs,
-      newTab,
-    );
-    const opened = await openTabWithAddress(
-      preview.tabs,
-      threadId,
-      exactWorkspaceId,
-      target,
-      resolved.url,
-    );
-    if (!opened) {
-      openUrlExternally(url, wsPath);
-      return;
-    }
-    setPreviewUrlForThread(threadId, resolved.url);
-  };
+  const wsPath = resolveWorkspacePath(workspacePath, workspaceId);
 
   // Defer until the preview panel has mounted and reported bounds.
   setTimeout(() => {
-    void run();
+    void openPreviewAddress(preview, {
+      url,
+      threadId,
+      workspaceId: workspaceId ?? threadId,
+      wsPath,
+      newTab,
+      setPreviewUrlForThread,
+    });
   }, 0);
 }
 

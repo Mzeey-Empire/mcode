@@ -6,6 +6,7 @@ import {
   TurnEventPipeline,
   TURN_EVENT_QUEUE_RETAINED_LIMITS,
   type TurnEventApplication,
+  type TurnEventIngressFence,
   type TurnLifecycleControl,
 } from "../turn-event-pipeline.js";
 import type { ProviderEventIngressEvent } from "../../../providers/composition/provider-event-ingress.js";
@@ -13,7 +14,7 @@ import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../parent-assistant-text-
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 
-function textDelta(delta: string): ProviderEventIngressEvent {
+function textDelta(delta: string, threadId = "thread-1"): ProviderEventIngressEvent {
   return {
     providerId: "claude",
     sourceKind: "canonical-bridge",
@@ -25,7 +26,7 @@ function textDelta(delta: string): ProviderEventIngressEvent {
     },
     event: {
       type: AgentEventType.TextDelta,
-      threadId: "thread-1",
+      threadId,
       turnExecutionId: EXECUTION_ID,
       delta,
     },
@@ -55,6 +56,7 @@ function createPipeline(
   finalize = vi.fn(async () => true),
   previousFileFinalization: TurnEventApplication["previousFileFinalization"] = () => undefined,
   rejectForQueueCapacity = vi.fn(),
+  ingressFence?: TurnEventIngressFence,
 ): {
   pipeline: TurnEventPipeline;
   finalize: ReturnType<typeof vi.fn>;
@@ -73,7 +75,7 @@ function createPipeline(
     observeToolUse: vi.fn(),
     observeToolResult: vi.fn(),
   };
-  return { pipeline: new TurnEventPipeline(lifecycle, application), finalize, rejectForQueueCapacity };
+  return { pipeline: new TurnEventPipeline(lifecycle, application, undefined, ingressFence), finalize, rejectForQueueCapacity };
 }
 
 describe("TurnEventPipeline", () => {
@@ -127,6 +129,26 @@ describe("TurnEventPipeline", () => {
     expect(finalize).toHaveBeenCalledOnce();
   });
 
+  it("holds finalization until its thread-affine ingress worker is idle", async () => {
+    let releaseIngress!: () => void;
+    const ingressIdle = new Promise<void>((resolve) => { releaseIngress = resolve; });
+    const ingressFence: TurnEventIngressFence = { waitForThread: () => ingressIdle };
+    const { pipeline, finalize } = createPipeline(() => true, undefined, undefined, undefined, ingressFence);
+
+    const finalization = pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "completed",
+      source: "provider",
+    });
+
+    await Promise.resolve();
+    expect(finalize).not.toHaveBeenCalled();
+    releaseIngress();
+    await expect(finalization).resolves.toBe(true);
+    expect(finalize).toHaveBeenCalledOnce();
+  });
+
   it("keeps more than one text write batch ordered while checkpoint recovery delays the turn", () => {
     let checkpointReady = false;
     const applied: string[] = [];
@@ -157,6 +179,23 @@ describe("TurnEventPipeline", () => {
 
     expect(apply).not.toHaveBeenCalled();
     expect(rejectForQueueCapacity).toHaveBeenCalledOnce();
+  });
+
+  it("signals the overflowed turn without blocking another thread", () => {
+    const appliedThreads: string[] = [];
+    const { pipeline, rejectForQueueCapacity } = createPipeline((_input, event) => {
+      appliedThreads.push(event.threadId);
+      return event.threadId === "healthy-thread";
+    });
+    const blocked = textDelta("blocked", "overflowed-thread");
+    const overflow = textDelta("overflow", "overflowed-thread");
+
+    pipeline.handleProviderEvent(blocked);
+    pipeline.handleProviderIngressOverflow(overflow);
+    pipeline.handleProviderEvent(textDelta("healthy", "healthy-thread"));
+
+    expect(rejectForQueueCapacity).toHaveBeenCalledWith(overflow.event);
+    expect(appliedThreads).toEqual(["overflowed-thread", "healthy-thread"]);
   });
 
   it("compacts an oversized tool result so its completion reaches the queue", () => {

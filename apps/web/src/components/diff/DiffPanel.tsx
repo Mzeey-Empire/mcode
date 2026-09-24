@@ -41,6 +41,7 @@ interface ComparisonLoadInput {
   readonly branchRange: { readonly base: string; readonly target: string } | null;
   readonly mutableComparisonRevision: number;
   readonly selectedCommitSha: string | null;
+  readonly selectedTurnMessageId: string | null;
   readonly snapshotVersion: string;
   readonly snapshots: readonly Snapshot[] | undefined;
   readonly viewMode: DiffViewMode;
@@ -71,7 +72,7 @@ function isUnavailableBranchComparison(input: ComparisonLoadInput): boolean {
 async function loadComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
   if (isGitView(input.viewMode)) return loadGitComparison({ ...input, viewMode: input.viewMode });
   if (input.viewMode === "cumulative") return loadCumulativeComparison(input);
-  return loadLastTurnComparison(input);
+  return loadTurnDiffComparison(input);
 }
 
 async function loadGitComparison(
@@ -142,8 +143,22 @@ async function loadCumulativeComparison(input: ComparisonLoadInput): Promise<Loa
   };
 }
 
-async function loadLastTurnComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
-  const comparison = await getTransport().getTurnDiffComparison(input.activeThreadId!);
+async function loadTurnDiffComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
+  // "turn" passes the picked operand; "last-turn" passes none and the server
+  // resolves the latest turn's evidence. An unpicked "turn" must not ask at
+  // all: operand-less requests resolve live/latest state the user never chose.
+  if (input.viewMode === "turn" && !input.selectedTurnMessageId) {
+    return {
+      comparison: emptyComparison(),
+      git: null,
+      cacheVersion: input.mutableComparisonRevision,
+      liveRevision: input.mutableComparisonRevision,
+    };
+  }
+  const comparison = await getTransport().getTurnDiffComparison(
+    input.activeThreadId!,
+    input.viewMode === "turn" ? input.selectedTurnMessageId ?? undefined : undefined,
+  );
   return {
     comparison: comparison ?? emptyComparison(),
     git: null,
@@ -177,6 +192,7 @@ interface DiffPanelStore {
   readonly panelVisible: boolean;
   readonly requestReviewFileJump: DiffStoreState["requestReviewFileJump"];
   readonly selectedCommitSha: DiffStoreState["selectedCommitSha"];
+  readonly selectedTurnMessageId: string | null;
   readonly setReviewDiffStat: DiffStoreState["setReviewDiffStat"];
   readonly setReviewFilesVisible: DiffStoreState["setReviewFilesVisible"];
   readonly setSnapshots: DiffStoreState["setSnapshots"];
@@ -248,6 +264,9 @@ function useDiffPanelStore(): DiffPanelStore {
     panelVisible,
     requestReviewFileJump: useDiffStore((state) => state.requestReviewFileJump),
     selectedCommitSha: useDiffStore((state) => state.selectedCommitSha),
+    selectedTurnMessageId: useDiffStore((state) =>
+      activeThreadId ? (state.selectedTurnMessageIdByThread[activeThreadId] ?? null) : null,
+    ),
     setReviewDiffStat: useDiffStore((state) => state.setReviewDiffStat),
     setReviewFilesVisible: useDiffStore((state) => state.setReviewFilesVisible),
     setSnapshots: useDiffStore((state) => state.setSnapshots),
@@ -356,6 +375,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     store.viewMode,
     store.selectedCommitSha,
     branchRange,
+    store.selectedTurnMessageId,
   );
   const snapshotVersion = getSnapshotVersion(store.snapshots);
   const comparisonLoadInput = useMemo<ComparisonLoadInput>(() => ({
@@ -365,6 +385,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     branchRange,
     mutableComparisonRevision,
     selectedCommitSha: store.selectedCommitSha,
+    selectedTurnMessageId: store.selectedTurnMessageId,
     snapshotVersion,
     snapshots: store.snapshots,
     viewMode: store.viewMode,
@@ -377,6 +398,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     store.activeWorkspaceId,
     store.branchComparison,
     store.selectedCommitSha,
+    store.selectedTurnMessageId,
     store.snapshots,
     store.viewMode,
   ]);
@@ -497,12 +519,21 @@ function getComparisonIdentity(
   viewMode: DiffViewMode,
   selectedCommitSha: string | null,
   branchRange: { readonly base: string; readonly target: string } | null,
+  selectedTurnMessageId: string | null,
 ): string {
-  const commitIdentity = viewMode === "commit" ? (selectedCommitSha ?? "") : "";
-  const branchIdentity = viewMode === "branch"
-    ? `${branchRange?.base ?? ""}...${branchRange?.target ?? ""}`
-    : "";
-  return `${diffScopeId ?? "none"}:${viewMode}:${commitIdentity}:${branchIdentity}`;
+  return `${diffScopeId ?? "none"}:${viewMode}:${comparisonOperand(viewMode, selectedCommitSha, branchRange, selectedTurnMessageId)}`;
+}
+
+function comparisonOperand(
+  viewMode: DiffViewMode,
+  selectedCommitSha: string | null,
+  branchRange: { readonly base: string; readonly target: string } | null,
+  selectedTurnMessageId: string | null,
+): string {
+  if (viewMode === "commit") return selectedCommitSha ?? "";
+  if (viewMode === "branch" && branchRange) return `${branchRange.base}...${branchRange.target}`;
+  if (viewMode === "turn") return selectedTurnMessageId ?? "";
+  return "";
 }
 
 function getSnapshotVersion(snapshots: readonly Snapshot[] | undefined): string {
@@ -954,6 +985,7 @@ function ThreadComparisonView({
       comparisonLoading={comparisonLoading}
       onRefreshComparison={onRefreshComparison}
       threadId={threadId}
+      viewMode={viewMode}
       visibleComparison={visibleComparison}
       visibleSettled={visibleSettled}
     />
@@ -1001,15 +1033,21 @@ function LastTurnComparisonView({
   comparisonLoading,
   onRefreshComparison,
   threadId,
+  viewMode,
   visibleComparison,
   visibleSettled,
 }: {
   readonly comparisonLoading: boolean;
   readonly onRefreshComparison: () => void;
   readonly threadId: string;
+  readonly viewMode: DiffViewMode;
   readonly visibleComparison: ReviewComparison | null;
   readonly visibleSettled: SettledComparison | null;
 }) {
+  const selectedTurnMessageId = useDiffStore(
+    (state) => state.selectedTurnMessageIdByThread[threadId] ?? null,
+  );
+  const jumpViewKey = viewMode === "turn" ? `turn:${selectedTurnMessageId ?? ""}` : "last-turn";
   return (
     <LastTurnView
       threadId={threadId}
@@ -1017,6 +1055,7 @@ function LastTurnComparisonView({
       cacheVersion={visibleSettled?.cacheVersion ?? ""}
       refreshing={comparisonLoading}
       onRefresh={onRefreshComparison}
+      jumpViewKey={jumpViewKey}
     />
   );
 }

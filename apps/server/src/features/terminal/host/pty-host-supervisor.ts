@@ -30,9 +30,10 @@ import { PTY_HOST_SHUTDOWN_DEADLINE_MS } from "@mcode/shared/node/shutdown-deadl
 
 const STARTUP_TIMEOUT_MS = 5_000;
 const REPLACEMENT_DELAY_MS = 250;
-const HEARTBEAT_DEGRADED_MS = 750;
-const HEARTBEAT_UNHEALTHY_MS = 1_000;
+const HEARTBEAT_DEGRADED_MS = 5_000;
+const HEARTBEAT_UNHEALTHY_MS = 10_000;
 const OPERATION_TIMEOUT_MS = 5_000;
+const CREATE_TIMEOUT_MS = 15_000;
 const MAX_IPC_QUEUE_BYTES = 1_048_576;
 const CONTAINMENT_SETTLE_TIMEOUT_MS = 500;
 
@@ -79,7 +80,7 @@ type SupervisorState =
 interface PendingCreate {
   readonly resolve: (running: PtyHostRunning) => void;
   readonly reject: (error: Error) => void;
-  readonly timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface PendingClose {
@@ -134,6 +135,12 @@ export class PtyHostSupervisor implements PtyHostAdapter {
   /** Starts the initial PTY host generation. */
   start(): Promise<PtyHostHealth> {
     if (this.startPromise) return this.startPromise;
+    if (this.state === "unhealthy") {
+      // An explicit start after failure opens a new lifecycle with a fresh
+      // replacement budget; without it one dead host wedges every later create.
+      this.state = "stopped";
+      this.replacementUsed = false;
+    }
     if (this.state !== "stopped")
       throw new Error("PTY host is already started");
     this.state = "starting";
@@ -176,11 +183,26 @@ export class PtyHostSupervisor implements PtyHostAdapter {
       );
     }
     const result = new Promise<PtyHostRunning>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timeoutMs = this.options.operationTimeoutMs ?? CREATE_TIMEOUT_MS;
+      const deadline = Date.now() + timeoutMs;
+      const rejectCreate = () => {
         this.pendingCreates.delete(input.sessionId);
-        reject(new Error(`PTY create exceeded ${this.operationTimeoutMs()}ms`));
-      }, this.operationTimeoutMs());
-      this.pendingCreates.set(input.sessionId, { resolve, reject, timer });
+        reject(new Error(`PTY create exceeded ${timeoutMs}ms`));
+      };
+      const timer = setTimeout(() => {
+        if (Date.now() - deadline > 250) {
+          // A late server timer must allow the queued running event to arrive.
+          const pending = this.pendingCreates.get(input.sessionId);
+          if (pending) pending.timer = setTimeout(rejectCreate, timeoutMs);
+          return;
+        }
+        rejectCreate();
+      }, timeoutMs);
+      this.pendingCreates.set(input.sessionId, {
+        resolve,
+        reject,
+        timer,
+      });
     });
     try {
       this.sendMessage({
@@ -397,14 +419,20 @@ export class PtyHostSupervisor implements PtyHostAdapter {
       this.resolveStart = resolve;
       this.rejectStart = reject;
     });
+    const startupTimeoutMs = this.options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
+    const startupDeadline = Date.now() + startupTimeoutMs;
+    const failStartup = () => {
+      if (child !== this.child || this.state !== "starting") return;
+      this.handleHostFailure(child, new Error(`PTY host startup exceeded ${startupTimeoutMs}ms`));
+    };
     this.startupTimer = setTimeout(() => {
-      this.handleHostFailure(
-        child,
-        new Error(
-          `PTY host startup exceeded ${this.options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS}ms`,
-        ),
-      );
-    }, this.options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS);
+      if (Date.now() - startupDeadline > 250) {
+        // Give an already ready host one second to deliver its queued event.
+        this.startupTimer = setTimeout(failStartup, 1_000);
+        return;
+      }
+      failStartup();
+    }, startupTimeoutMs);
     try {
       this.sendMessage({
         contractVersion: 1,
@@ -579,7 +607,8 @@ export class PtyHostSupervisor implements PtyHostAdapter {
     const failedGeneration = this.generation.toString();
     const records = this.cleanupLedger.forGeneration(failedGeneration);
     setTimeout(async () => {
-      if (this.stopping || this.child) return;
+      // A manual start() takes over recovery; only proceed while still unhealthy.
+      if (this.stopping || this.child || this.state !== "unhealthy") return;
       const failures = await this.reapCleanupRecords(records);
       if (failures.length > 0) {
         this.publish({
@@ -592,6 +621,8 @@ export class PtyHostSupervisor implements PtyHostAdapter {
         });
         return;
       }
+      // The reap awaited: a manual start() may be mid-spawn on the new state.
+      if (this.stopping || this.child || this.state !== "unhealthy") return;
       this.trackStart(this.spawnGeneration());
     }, this.options.replacementDelayMs ?? REPLACEMENT_DELAY_MS);
   }
@@ -754,13 +785,20 @@ export class PtyHostSupervisor implements PtyHostAdapter {
         );
         return;
       }
-      this.heartbeatTimer = setTimeout(() => {
+      const probeTimeoutMs = unhealthyMs - degradedMs;
+      const probeDeadline = Date.now() + probeTimeoutMs;
+      const failHeartbeat = () => {
         if (child !== this.child || this.state !== "degraded") return;
-        this.handleHostFailure(
-          child,
-          new Error(`PTY host heartbeat exceeded ${HEARTBEAT_UNHEALTHY_MS}ms`),
-        );
-      }, unhealthyMs - degradedMs);
+        this.handleHostFailure(child, new Error(`PTY host heartbeat exceeded ${unhealthyMs}ms`));
+      };
+      this.heartbeatTimer = setTimeout(() => {
+        if (Date.now() - probeDeadline > 250) {
+          // Give the host's queued reply one second after a stalled server timer.
+          this.heartbeatTimer = setTimeout(failHeartbeat, 1_000);
+          return;
+        }
+        failHeartbeat();
+      }, probeTimeoutMs);
     }, degradedMs);
   }
 

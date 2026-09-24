@@ -11,11 +11,11 @@ export type ReviewViewRequirement = "git";
 /**
  * The kind of picked operand a comparison view surfaces in the toolbar's
  * contextual operand slot. `"branch"` picks a base→target ref pair; `"commit"`
- * picks a single commit. Views with no operand are *fixed* comparisons
- * (Unstaged, Staged, Last turn, Cumulative) and render no operand control. See
- * CONTEXT.md → "Comparison".
+ * picks a single commit; `"turn"` picks one turn's snapshot. Views with no
+ * operand are *fixed* comparisons (Unstaged, Staged, Last turn, Cumulative) and
+ * render no operand control. See CONTEXT.md → "Comparison".
  */
-export type ReviewViewOperand = "branch" | "commit";
+export type ReviewViewOperand = "branch" | "commit" | "turn";
 
 /**
  * Static metadata describing one Review-tab view for the dual-scope selection
@@ -58,6 +58,7 @@ export const REVIEW_VIEWS: readonly ReviewView[] = [
   { id: "commit", label: "Commit", threadOnly: false, requires: "git", operand: "commit" },
   { id: "branch", label: "Branch", threadOnly: false, requires: "git", operand: "branch" },
   { id: "last-turn", label: "Last turn", threadOnly: true },
+  { id: "turn", label: "Turn", threadOnly: true, operand: "turn" },
   { id: "cumulative", label: "All turns", threadOnly: true },
 ];
 

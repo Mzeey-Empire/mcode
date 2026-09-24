@@ -308,7 +308,7 @@ function seedPreparingComposerState() {
   useWorkspaceStore.setState({
     workspaces: [workspace],
     activeWorkspaceId: workspace.id,
-    threads: [{ ...placeholder, clientPreparing: true, clientPreparingContext: "new-existing-worktree" }],
+    threads: [{ ...placeholder, clientPreparing: true }],
     activeThreadId: placeholder.id,
     branches: [branch("main", true)],
     newThreadMode: "existing-worktree",
@@ -715,9 +715,12 @@ describe("Composer checkout confirmation", () => {
       expect.objectContaining({
         workspace_id: "ws-1",
         clientPreparing: true,
-        clientStartupId: expect.stringMatching(/^[0-9a-f-]{36}$/),
       }),
     ));
+    const preparingThread = onThreadPreparing.mock.calls[0]?.[0];
+    expect(
+      useWorkspaceStore.getState().pendingStartupByThreadId[preparingThread.id]?.startupId,
+    ).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("reports a failed new-thread request after exposing its optimistic startup row", async () => {

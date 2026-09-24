@@ -190,6 +190,87 @@ function startCanonicalParent(
   });
 }
 
+function seedCanonicalItemHistory(db: Database, count: number): void {
+  const insertItem = db.prepare(`
+    INSERT INTO canonical_agent_items (
+      id, thread_id, turn_id, parent_item_id, kind, provider_identities_json,
+      payload_json, created_at, updated_at
+    ) VALUES (?, ?, ?, NULL, 'message', '[]', ?, ?, ?)
+  `);
+  const insertEvent = db.prepare(`
+    INSERT INTO canonical_agent_events (
+      event_id, thread_id, turn_id, execution_id, accepted_sequence,
+      durable_revision, roster_revision, envelope_json, accepted_at, persisted_at
+    ) VALUES (?, ?, ?, ?, ?, 1, NULL, ?, ?, ?)
+  `);
+  db.transaction(() => {
+    for (let index = 0; index < count; index += 1) {
+      const itemId = `history-item-${index}`;
+      const eventId = `${EXECUTION_ID}:history-${index}`;
+      const payload = { projection: "history", value: itemId };
+      insertItem.run(itemId, THREAD_ID, TURN_ID, JSON.stringify(payload), NOW, NOW);
+      insertEvent.run(
+        eventId,
+        THREAD_ID,
+        TURN_ID,
+        EXECUTION_ID,
+        index + 5,
+        JSON.stringify({
+          eventId,
+          routing: { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, itemId },
+          sourceProviderId: "codex",
+          sourceIdentities: [],
+          acceptedSequence: index + 5,
+          durableRevision: 1,
+          serverTimestamps: { acceptedAt: NOW, persistedAt: NOW },
+          payload: {
+            type: "item.recorded",
+            item: {
+              id: itemId,
+              threadId: THREAD_ID,
+              turnId: TURN_ID,
+              kind: "message",
+              providerIdentities: [],
+              payload,
+              createdAt: NOW,
+              updatedAt: NOW,
+            },
+          },
+        }),
+        NOW,
+        NOW,
+      );
+    }
+  })();
+  db.prepare(`
+    UPDATE canonical_agent_ingest_checkpoints
+    SET last_accepted_sequence = ?, last_durable_sequence = ?
+    WHERE execution_id = ?
+  `).run(count + 4, count + 4, EXECUTION_ID);
+}
+
+function appendItemDraft(eventId: string, itemId: string): CanonicalAgentEventDraft {
+  return {
+    eventId,
+    routing: { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, itemId },
+    sourceProviderId: "codex",
+    sourceIdentities: [],
+    payload: {
+      type: "item.recorded",
+      item: {
+        id: itemId,
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        kind: "message",
+        providerIdentities: [],
+        payload: { projection: "message", content: "new event" },
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    },
+  };
+}
+
 function parentNarrativeToolCall(index: number): ParentNarrativeRecoveryItem {
   return {
     kind: "toolCall",
@@ -445,7 +526,7 @@ describe("CanonicalAgentEventSink", () => {
     });
   });
 
-  it("retains only the five fixed active-turn write statements", () => {
+  it("retains fixed active-turn commit statements", () => {
     const preparedSql: string[] = [];
     const originalPrepare = db.prepare.bind(db);
     (db as unknown as { prepare: Database["prepare"] }).prepare = ((sql: string) => {
@@ -476,10 +557,14 @@ describe("CanonicalAgentEventSink", () => {
       'insert into "canonical_agent_items"',
       'insert into "canonical_agent_events"',
       'insert into "canonical_agent_ingest_checkpoints"',
+      '"canonical_agent_threads"."id" = ? and "canonical_agent_threads"."parent_thread_id" = ?',
+      '"canonical_agent_turns"."id" = ? and "canonical_agent_turns"."thread_id" = ?',
+      'select "event_id", "accepted_sequence" from "canonical_agent_events"',
+      'select "accepted_sequence" from "canonical_agent_events"',
     ];
     expect(retainedTargets.map((target) =>
       preparedSql.filter((sql) => sql.includes(target)).length
-    )).toEqual([1, 1, 1, 1, 1]);
+    )).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1]);
   });
 
   it("accepts duplicate input idempotently without a revision or publication", () => {
@@ -507,6 +592,51 @@ describe("CanonicalAgentEventSink", () => {
       durableThrough: 3,
     });
     expect(published).not.toHaveBeenCalled();
+  });
+
+  it("appends after 15k canonical items without materializing historic items", () => {
+    startCanonicalParent(sink, db);
+    const historicEventCount = 15_000;
+    seedCanonicalItemHistory(db, historicEventCount);
+    const parse = vi.spyOn(JSON, "parse");
+    const prepare = vi.spyOn(db, "prepare");
+
+    try {
+      const startedAt = performance.now();
+      const result = sink.commit({
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        executionId: EXECUTION_ID,
+        phase: "running",
+        events: [appendItemDraft(`${EXECUTION_ID}:after-history`, "item-after-history")],
+      });
+      const durationMs = performance.now() - startedAt;
+
+      expect(result).toMatchObject({
+        outcome: "committed",
+        conversationRevision: 2,
+        acceptedThrough: historicEventCount + 5,
+        durableThrough: historicEventCount + 5,
+      });
+      expect(db.prepare(
+        "SELECT COUNT(*) AS count FROM canonical_agent_events WHERE thread_id = ?",
+      ).get(THREAD_ID)).toEqual({ count: historicEventCount + 5 });
+      expect(db.prepare(
+        "SELECT payload_json FROM canonical_agent_items WHERE id = ?",
+      ).get("item-after-history")).toEqual({
+        payload_json: JSON.stringify({ projection: "message", content: "new event" }),
+      });
+      expect(parse.mock.calls.filter(([value]) => (
+        typeof value === "string" && value.includes("history-item-")
+      ))).toHaveLength(0);
+      expect(prepare.mock.calls.map(([sql]) => String(sql)).some((sql) => (
+        sql.includes("SELECT * FROM canonical_agent_items WHERE thread_id = ?")
+      ))).toBe(false);
+      console.info(`canonical append: 15k historic items in ${durationMs.toFixed(1)}ms`);
+    } finally {
+      parse.mockRestore();
+      prepare.mockRestore();
+    }
   });
 
   it("marks unfinished work interrupted without removing accepted content", () => {

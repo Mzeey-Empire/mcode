@@ -6,6 +6,11 @@
 
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+const { broadcastMock } = vi.hoisted(() => ({ broadcastMock: vi.fn() }));
+vi.mock("../../../../application/transport/push.js", () => ({
+  broadcast: broadcastMock,
+}));
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ModelCacheRepo } from "../persistence/model-cache-repo.js";
@@ -41,6 +46,7 @@ describe("ModelCacheService", () => {
   let repo: ModelCacheRepo;
 
   beforeEach(() => {
+    broadcastMock.mockClear();
     db = openMemoryDatabase();
     repo = new ModelCacheRepo(db);
   });
@@ -119,6 +125,33 @@ describe("ModelCacheService", () => {
     // The provider was called, but since IDs match, upsert should not run
     expect(provider.listModels).toHaveBeenCalledTimes(1);
     expect(upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it("broadcasts provider.modelsChanged when a refresh changes the list", async () => {
+    repo.upsert("devin", [{ id: "swe-1-7", name: "SWE-1.7" }]);
+    const fresh: ProviderModelInfo[] = [{ id: "swe-2", name: "SWE-2" }];
+    const provider = makeProvider(fresh);
+    const registry = makeRegistry(new Map([["devin", provider]]));
+    const service = new ModelCacheService(repo, registry);
+
+    await service.refreshProvider("devin");
+
+    expect(broadcastMock).toHaveBeenCalledWith("provider.modelsChanged", {
+      providerId: "devin",
+      models: fresh,
+    });
+  });
+
+  it("does not broadcast when a refresh returns an unchanged list", async () => {
+    const models: ProviderModelInfo[] = [{ id: "swe-2", name: "SWE-2" }];
+    repo.upsert("devin", models);
+    const provider = makeProvider(models);
+    const registry = makeRegistry(new Map([["devin", provider]]));
+    const service = new ModelCacheService(repo, registry);
+
+    await service.refreshProvider("devin");
+
+    expect(broadcastMock).not.toHaveBeenCalled();
   });
 
   it("persists changed order and labels across cache reconstruction", async () => {

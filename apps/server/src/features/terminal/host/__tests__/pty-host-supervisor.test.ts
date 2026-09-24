@@ -34,6 +34,7 @@ class FakeHostChild extends NodeEvents.EventEmitter implements PtyHostChild {
   readonly pid = 42;
   readonly connected = true;
   respondToInspection = true;
+  respondToHandshake = true;
   readonly send = vi.fn(
     (
       message: PtyHostServerMessage,
@@ -57,6 +58,7 @@ class FakeHostChild extends NodeEvents.EventEmitter implements PtyHostChild {
         return true;
       }
       if (message.kind !== "handshake") return true;
+      if (!this.respondToHandshake) return true;
       queueMicrotask(() => {
         this.emitMessage({
           contractVersion: 1,
@@ -193,14 +195,14 @@ describe("PtyHostSupervisor", () => {
     });
     await supervisor.start();
 
-    await vi.advanceTimersByTimeAsync(750);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(supervisor.health().state).toBe("degraded");
     expect(children[0]!.send).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "probe" }),
       expect.any(Function),
     );
 
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(5_250);
     await expect(supervisor.whenHealthy()).resolves.toMatchObject({
       hostGeneration: "2",
       state: "healthy",
@@ -208,6 +210,110 @@ describe("PtyHostSupervisor", () => {
     expect(children).toHaveLength(2);
     await supervisor.shutdown();
     vi.useRealTimers();
+  });
+
+  it("accepts a running session after a delayed server create timer", async () => {
+    vi.useFakeTimers();
+    const child = new FakeHostChild();
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      operationTimeoutMs: 10,
+      heartbeatDegradedMs: 2_000,
+      heartbeatUnhealthyMs: 3_000,
+      spawnHost: () => child,
+    });
+    try {
+      await supervisor.start();
+      const creating = supervisor.create(createRequest);
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 1_000);
+      await vi.advanceTimersByTimeAsync(10);
+      clock.mockRestore();
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "running",
+        sessionId: UUID,
+        hostGeneration: "1",
+        rootPid: 123,
+        processGroupId: "job-123",
+        containment: "job-object",
+      });
+      await expect(creating).resolves.toMatchObject({ state: "running" });
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("accepts a running session beyond five seconds under the default create deadline", async () => {
+    vi.useFakeTimers();
+    const child = new FakeHostChild();
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => child,
+    });
+    try {
+      await supervisor.start();
+      const creating = supervisor.create(createRequest);
+      const settled = vi.fn();
+      void creating.then(settled, settled);
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(settled).not.toHaveBeenCalled();
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "heartbeat",
+        hostGeneration: "1",
+        monotonicMs: "2",
+        activeSessions: 0,
+        queueBytes: 0,
+        rssBytes: "1",
+      });
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "running",
+        sessionId: UUID,
+        hostGeneration: "1",
+        rootPid: 123,
+        processGroupId: "job-123",
+        containment: "job-object",
+      });
+      await expect(creating).resolves.toMatchObject({ state: "running" });
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a live host through a four-second server stall", async () => {
+    vi.useFakeTimers();
+    const child = new FakeHostChild();
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => child,
+    });
+    try {
+      await supervisor.start();
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(supervisor.health().state).toBe("healthy");
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "heartbeat",
+        hostGeneration: "1",
+        monotonicMs: "2",
+        activeSessions: 0,
+        queueBytes: 0,
+        rssBytes: "1",
+      });
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(supervisor.health().state).toBe("healthy");
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
   });
 
   it("closes a session that reports running after its create deadline", async () => {
@@ -535,5 +641,214 @@ describe("PtyHostSupervisor", () => {
       expect.objectContaining({ sessionId: UUID, hostGeneration: "1" }),
     );
     expect(ledger.list()).toEqual([]);
+  });
+
+  it("restarts after the replacement budget is exhausted", async () => {
+    vi.useFakeTimers();
+    const children: FakeHostChild[] = [];
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => {
+        const child = new FakeHostChild();
+        children.push(child);
+        return child;
+      },
+    });
+    try {
+      await supervisor.start();
+      children[0]!.crash();
+      await vi.advanceTimersByTimeAsync(250);
+      children[1]!.crash();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(supervisor.health().state).toBe("unhealthy");
+
+      await expect(supervisor.start()).resolves.toEqual({
+        hostGeneration: "3",
+        state: "healthy",
+      });
+      expect(children).toHaveLength(3);
+
+      children[2]!.crash();
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(supervisor.whenHealthy()).resolves.toEqual({
+        hostGeneration: "4",
+        state: "healthy",
+      });
+      expect(children).toHaveLength(4);
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("restarts after a host failure during startup", async () => {
+    vi.useFakeTimers();
+    const children: FakeHostChild[] = [];
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      startupTimeoutMs: 100,
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => {
+        const child = new FakeHostChild();
+        child.respondToHandshake = children.length > 0;
+        children.push(child);
+        return child;
+      },
+    });
+    try {
+      const starting = supervisor.start();
+      const rejection = expect(starting).rejects.toThrow(
+        "PTY host startup exceeded 100ms",
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      await rejection;
+      expect(supervisor.health().state).toBe("unhealthy");
+
+      await expect(supervisor.start()).resolves.toEqual({
+        hostGeneration: "2",
+        state: "healthy",
+      });
+      expect(children).toHaveLength(2);
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("accepts a queued heartbeat after a delayed server watchdog timer", async () => {
+    vi.useFakeTimers();
+    const child = new FakeHostChild();
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      heartbeatDegradedMs: 750,
+      heartbeatUnhealthyMs: 1_000,
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => child,
+    });
+    try {
+      await supervisor.start();
+      await vi.advanceTimersByTimeAsync(750);
+      expect(supervisor.health().state).toBe("degraded");
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 1_000);
+      await vi.advanceTimersByTimeAsync(250);
+      clock.mockRestore();
+      expect(supervisor.health().state).toBe("degraded");
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "heartbeat",
+        hostGeneration: "1",
+        monotonicMs: "2",
+        activeSessions: 0,
+        queueBytes: 0,
+        rssBytes: "1",
+      });
+      expect(supervisor.health().state).toBe("healthy");
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("accepts a ready host after a delayed server startup timer", async () => {
+    vi.useFakeTimers();
+    const child = new FakeHostChild();
+    child.respondToHandshake = false;
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      startupTimeoutMs: 100,
+      heartbeatDegradedMs: 2_000,
+      heartbeatUnhealthyMs: 3_000,
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => child,
+    });
+    try {
+      const starting = supervisor.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 1_000);
+      await vi.advanceTimersByTimeAsync(100);
+      clock.mockRestore();
+      expect(supervisor.health().state).toBe("starting");
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "ready",
+        hostGeneration: "1",
+        platform: "windows",
+        nativeAbi: "fake-v1",
+        capabilities: { pty: "conpty", containment: "job-object", maxSessions: 20, protocolVersion: 1 },
+      });
+      child.emitMessage({
+        contractVersion: 1,
+        kind: "heartbeat",
+        hostGeneration: "1",
+        monotonicMs: "1",
+        activeSessions: 0,
+        queueBytes: 0,
+        rssBytes: "1",
+      });
+      await expect(starting).resolves.toMatchObject({ state: "healthy" });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not double-spawn when a manual start races a pending replacement", async () => {
+    vi.useFakeTimers();
+    const children: FakeHostChild[] = [];
+    const reapResolvers: Array<() => void> = [];
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => {
+        const child = new FakeHostChild();
+        children.push(child);
+        return child;
+      },
+      reapProcessTree: vi.fn(
+        () => new Promise<void>((resolve) => reapResolvers.push(resolve)),
+      ),
+    });
+    try {
+      await supervisor.start();
+      // A running session leaves a durable record so the manual restart's reap
+      // stays pending long enough for the replacement timer to fire.
+      const creating = supervisor.create(createRequest);
+      children[0]!.emitMessage({
+        contractVersion: 1,
+        kind: "running",
+        sessionId: UUID,
+        hostGeneration: "1",
+        rootPid: 123,
+        processGroupId: "job-123",
+        containment: "job-object",
+      });
+      await creating;
+
+      children[0]!.crash();
+      // The deferred replacement fires first and parks inside its reap; the
+      // manual start lands while that reap is still in flight.
+      await vi.advanceTimersByTimeAsync(250);
+      const manual = supervisor.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reapResolvers).toHaveLength(2);
+      reapResolvers.forEach((resolve) => resolve());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(children).toHaveLength(2);
+      await expect(manual).resolves.toEqual({
+        hostGeneration: "2",
+        state: "healthy",
+      });
+    } finally {
+      reapResolvers.forEach((resolve) => resolve());
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
   });
 });

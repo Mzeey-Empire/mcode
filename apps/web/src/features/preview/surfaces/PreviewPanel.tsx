@@ -41,7 +41,7 @@ import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
 import { usePreviewDesignModeStore } from "../state/previewDesignModeStore";
 import { usePreviewFocusStore } from "../state/previewFocusStore";
-import { usePreviewTabsStore } from "../state/previewTabsStore";
+import { previewTabsScopeKey, usePreviewTabsStore, type PendingNavError, type PreviewLiveChrome } from "../state/previewTabsStore";
 import { BrowserHeader } from "./BrowserHeader";
 import { BrowserViewportToolbar } from "./BrowserViewportToolbar";
 import {
@@ -54,6 +54,7 @@ import { PreviewErrorPanel } from "./PreviewErrorPanel";
 import { PreviewPerfHud } from "./PreviewPerfHud";
 import { PreviewWebview, type PreviewWebviewHandle } from "./PreviewWebview";
 import { formatNavError, usePreviewSurfaceBridge } from "../navigation/usePreviewSurfaceBridge";
+import { isPageEligibleNavError, navCodeToPageError } from "../navigation/nav-errors";
 import {
   usePreviewCapture,
   type PreviewCaptureKind,
@@ -1642,8 +1643,9 @@ function annotationSnapshotRequest(
 function previewInputUrl(
   pageStatus: PreviewPageStatus,
   activeUrl: string | null,
+  pendingNavError: PendingNavError | null,
 ): string {
-  return pageStatus.url ?? activeUrl ?? "";
+  return pendingNavError?.input ?? pageStatus.url ?? activeUrl ?? "";
 }
 
 function activePreviewTabId(
@@ -1839,8 +1841,24 @@ function hasLoadedPreviewPage(
   return !isEmptyPreviewTabUrl(activeWebviewUrl ?? pageStatus.url);
 }
 
-function previewPageError(pageStatus: PreviewPageStatus): PreviewPageError | undefined {
-  return pageStatus.phase === "error" ? pageStatus.error : undefined;
+function previewPageError(
+  pageStatus: PreviewPageStatus,
+  pendingNavError: PendingNavError | null,
+): PreviewPageError | undefined {
+  return pendingNavError?.error
+    ?? (pageStatus.phase === "error" ? pageStatus.error : undefined);
+}
+
+function previewLiveChrome(
+  pageStatus: PreviewPageStatus,
+  pendingNavError: PendingNavError | null,
+): PreviewLiveChrome {
+  // A rejected navigation never reaches the guest, so the error headline
+  // stands in as the tab's title and its attempted address as the url.
+  if (pendingNavError) {
+    return { title: pendingNavError.error.message, url: pendingNavError.input, favicon: null };
+  }
+  return { title: pageStatus.title, url: pageStatus.url, favicon: pageStatus.favicon };
 }
 
 function previewSurfaceState(
@@ -2628,6 +2646,13 @@ export function PreviewPanel({
     Boolean(window.desktopBridge?.preview),
   );
   const browserWorkspaceId = browserWorkspaceScopeId(workspaceId, threadId);
+  const previewScopeKey = previewTabsScopeKey(browserWorkspaceId, threadId);
+  // A rejected local navigation lives outside webviewPageStatus: hydration and
+  // mount publishes rewrite that state, so the error survives in a keyed slot
+  // until a real commit for its tab or the tab closes.
+  const pendingNavError = usePreviewTabsStore(
+    (s) => s.pendingNavErrorsByScope[previewScopeKey]?.[activeWebviewTabId] ?? null,
+  );
   const activeBrowserTargetKey = browserAutomationTargetKey(browserWorkspaceId, threadId, activeWebviewTabId);
   const projectedActiveViewportState: ViewportCoordinatorState | undefined =
     automationViewportStates.get(activeBrowserTargetKey);
@@ -2788,6 +2813,13 @@ export function PreviewPanel({
       phase: "loaded",
     },
   );
+  // A rejected navigation needs the page it replaced as its superseded marker;
+  // async resolve callbacks can't see fresh state, so mirror it in a ref.
+  const webviewPageStatusRef = useRef(webviewPageStatus);
+  webviewPageStatusRef.current = webviewPageStatus;
+  const activeWebviewTabIdRef = useRef(activeWebviewTabId);
+  activeWebviewTabIdRef.current = activeWebviewTabId;
+  const webviewNavSeqRef = useRef(0);
 
   // Inline capture confirmation. The composer chip lives in another panel and
   // may scroll off; this badge acknowledges the action where the user is
@@ -2973,9 +3005,24 @@ export function PreviewPanel({
     hydrateStoredWebviewStatus,
   ]);
 
+  // A committed real address on the pending-error tab is the only publish that
+  // clears it; republishes of the superseded page (or a blank error tab's null
+  // url) must not, or the error would flash and die.
+  const clearPendingNavOnCommit = useCallback(
+    (tabId: string, url: string | null): void => {
+      if (url === null || url.startsWith("about:") || url.startsWith("chrome-error:")) return;
+      const pending = usePreviewTabsStore.getState().pendingNavErrorsByScope[previewScopeKey]?.[tabId];
+      if (pending && url !== pending.supersededUrl) {
+        usePreviewTabsStore.getState().clearPendingNavError(browserWorkspaceId, threadId, tabId);
+      }
+    },
+    [browserWorkspaceId, previewScopeKey, threadId],
+  );
+
   const onWebviewPageStatus = useCallback(
     (status: PreviewPageStatus): void => {
       setWebviewPageStatus(status);
+      clearPendingNavOnCommit(activeWebviewTabId, status.url);
       const url = status.url;
       // Title events can arrive without a readable guest URL. They refine the
       // current page and must not erase it, while a titleless null status is an
@@ -2986,42 +3033,97 @@ export function PreviewPanel({
         : url;
       useDiffStore.getState().setPreviewUrlForThread(threadId, persistedUrl);
     },
-    [threadId],
+    [activeWebviewTabId, clearPendingNavOnCommit, threadId],
+  );
+
+  // Page-eligible rejections (missing file, folder, blocked file) replace the
+  // page; input-shape failures keep the inline hint. Either way the sibling
+  // state for the submitting tab is cleared, and panel-global chrome is only
+  // touched while that tab is still active.
+  const applyResolveFailure = useCallback(
+    (code: string, input: string, tabId: string, supersededUrl: string | null): void => {
+      const tabs = usePreviewTabsStore.getState();
+      const stillActive = activeWebviewTabIdRef.current === tabId;
+      if (stillActive) setWebviewPageStatus((status) => ({ ...status, phase: "loaded" }));
+      if (isPageEligibleNavError(code)) {
+        tabs.setPendingNavError(browserWorkspaceId, threadId, tabId, {
+          input,
+          error: navCodeToPageError(code),
+          supersededUrl,
+        });
+        return;
+      }
+      tabs.clearPendingNavError(browserWorkspaceId, threadId, tabId);
+      if (stillActive) setWebviewNavError(formatNavError(code));
+    },
+    [browserWorkspaceId, threadId],
+  );
+
+  const applyResolveSuccess = useCallback(
+    (resolvedUrl: string, tabId: string): void => {
+      usePreviewTabsStore.getState().clearPendingNavError(browserWorkspaceId, threadId, tabId);
+      if (activeWebviewTabIdRef.current !== tabId) {
+        // The user moved on mid-resolve; navigate the submitted tab in the
+        // background instead of hijacking the active tab's chrome.
+        setWebviewRequestedUrl(tabId, resolvedUrl);
+        return;
+      }
+      useDiffStore.getState().setPreviewUrlForThread(threadId, resolvedUrl);
+      setWebviewPageStatus({
+        url: resolvedUrl,
+        title: null,
+        favicon: null,
+        phase: "loading",
+      });
+      const active = activeWebviewRef();
+      const liveUrl = active?.getUrl();
+      const mountedSrc = webviewRequestedUrlRef.current;
+      if (liveUrl === resolvedUrl) {
+        active?.reload();
+        return;
+      }
+      if (mountedSrc === resolvedUrl) {
+        active?.navigate(resolvedUrl);
+        return;
+      }
+      setWebviewRequestedUrl(tabId, resolvedUrl);
+    },
+    [activeWebviewRef, browserWorkspaceId, setWebviewRequestedUrl, threadId],
   );
 
   const onWebviewNavigate = useCallback(
     (url: string): void => {
+      // Resolve is async: capture the submitting tab and its page so a result
+      // landing after a tab switch or a newer submission can't clobber the
+      // wrong tab's chrome or pin a stale error over a live page.
+      const submitTabId = activeWebviewTabId;
+      const submitPageUrl = webviewPageStatusRef.current.url;
+      const submitSeq = ++webviewNavSeqRef.current;
       setWebviewNavError(null);
       setWebviewPageStatus((status) => ({ ...status, phase: "loading" }));
       void bridge.resolveNavigation(url).then((result) => {
+        // A newer submission supersedes this result entirely.
+        if (webviewNavSeqRef.current !== submitSeq) return;
         if (!result.ok) {
-          setWebviewPageStatus((status) => ({ ...status, phase: "loaded" }));
-          setWebviewNavError(formatNavError(result.error));
+          applyResolveFailure(result.error, url, submitTabId, submitPageUrl);
           return;
         }
-        useDiffStore.getState().setPreviewUrlForThread(threadId, result.url);
-        setWebviewPageStatus({
-          url: result.url,
-          title: null,
-          favicon: null,
-          phase: "loading",
-        });
-        const active = activeWebviewRef();
-        const liveUrl = active?.getUrl();
-        const mountedSrc = webviewRequestedUrlRef.current;
-        if (liveUrl === result.url) {
-          active?.reload();
-          return;
-        }
-        if (mountedSrc === result.url) {
-          active?.navigate(result.url);
-          return;
-        }
-        setWebviewRequestedUrl(activeWebviewTabId, result.url);
+        applyResolveSuccess(result.url, submitTabId);
       });
     },
-    [activeWebviewRef, activeWebviewTabId, bridge, setWebviewRequestedUrl, threadId],
+    [activeWebviewTabId, applyResolveFailure, applyResolveSuccess, bridge],
   );
+
+  // A rejected address never reached the guest, so there is nothing to reload;
+  // retry re-runs the whole resolve + navigate against the attempted input.
+  const onPreviewErrorRetry = useCallback((): void => {
+    const pending = usePreviewTabsStore.getState().pendingNavErrorsByScope[previewScopeKey]?.[activeWebviewTabId];
+    if (pending) {
+      onWebviewNavigate(pending.input);
+      return;
+    }
+    void activeWebviewRef()?.reload();
+  }, [activeWebviewRef, activeWebviewTabId, onWebviewNavigate, previewScopeKey]);
 
   const onWebviewOpenExternal = useCallback((): void => {
     const url = activeWebviewRef()?.getUrl() || activeWebviewSrc;
@@ -3039,7 +3141,7 @@ export function PreviewPanel({
     [activeWebviewRef],
   );
 
-  const webviewInputUrl = previewInputUrl(webviewPageStatus, activeWebviewSrc);
+  const webviewInputUrl = previewInputUrl(webviewPageStatus, activeWebviewSrc, pendingNavError);
   const webviewLoading = webviewPageStatus.phase === "loading";
   const currentPageIdentity = normalizePreviewPageIdentity(
     previewPageIdentityUrl(webviewPageStatus, webviewInputUrl),
@@ -3141,12 +3243,12 @@ export function PreviewPanel({
   // every favicon tick. Clear on unmount so a backgrounded scope falls back to
   // each tab's own persisted favicon rather than a stale overlay.
   useEffect(() => {
-    usePreviewTabsStore.getState().setLiveChrome(browserWorkspaceId, threadId, {
-      title: webviewPageStatus.title,
-      url: webviewPageStatus.url,
-      favicon: webviewPageStatus.favicon,
-    });
-  }, [browserWorkspaceId, threadId, webviewPageStatus]);
+    usePreviewTabsStore.getState().setLiveChrome(
+      browserWorkspaceId,
+      threadId,
+      previewLiveChrome(webviewPageStatus, pendingNavError),
+    );
+  }, [browserWorkspaceId, threadId, webviewPageStatus, pendingNavError]);
   useEffect(() => {
     return () => {
       usePreviewTabsStore.getState().setLiveChrome(browserWorkspaceId, threadId, null);
@@ -3422,7 +3524,7 @@ export function PreviewPanel({
     activeWebviewSrc,
     webviewPageStatus,
   );
-  const pageError = previewPageError(webviewPageStatus);
+  const pageError = previewPageError(webviewPageStatus, pendingNavError);
   const {
     showLocalPorts,
     hasWebviewLayer,
@@ -3587,6 +3689,9 @@ export function PreviewPanel({
             url: status.url,
             favicon: status.favicon,
           });
+          // Warm tabs publish too; a real commit on a backgrounded tab must
+          // still retire its own pending navigation error.
+          clearPendingNavOnCommit(tab.id, status.url);
           if (tab.id !== activeWebviewTabId) return;
           onWebviewPageStatus(status);
         }}
@@ -4174,9 +4279,9 @@ export function PreviewPanel({
           {(pageError) => (
           <PreviewErrorPanel
             error={pageError}
-            url={webviewPageStatus.url}
+            url={webviewInputUrl || null}
             canBack={webviewCanBack}
-            onRetry={() => void activeWebviewRef()?.reload()}
+            onRetry={onPreviewErrorRetry}
             onGoBack={() => void activeWebviewRef()?.goBack()}
           />
           )}

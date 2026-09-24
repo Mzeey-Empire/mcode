@@ -20,6 +20,7 @@ describe("REVIEW_VIEWS catalog", () => {
       "commit",
       "branch",
       "last-turn",
+      "turn",
       "cumulative",
     ]);
   });
@@ -28,7 +29,7 @@ describe("REVIEW_VIEWS catalog", () => {
     const anyScope = REVIEW_VIEWS.filter((v) => !v.threadOnly).map((v) => v.id);
     const threadOnly = REVIEW_VIEWS.filter((v) => v.threadOnly).map((v) => v.id);
     expect(anyScope).toEqual(["unstaged", "staged", "commit", "branch"]);
-    expect(threadOnly).toEqual(["last-turn", "cumulative"]);
+    expect(threadOnly).toEqual(["last-turn", "turn", "cumulative"]);
   });
 
   it("marks every git view as git-requiring", () => {
@@ -40,10 +41,11 @@ describe("REVIEW_VIEWS catalog", () => {
     ]);
   });
 
-  it("carries a picked operand only on the comparison views (Branch, Commit)", () => {
+  it("carries a picked operand only on the comparison views (Branch, Commit, Turn)", () => {
     expect(REVIEW_VIEWS.filter((v) => v.operand).map((v) => [v.id, v.operand])).toEqual([
       ["commit", "commit"],
       ["branch", "branch"],
+      ["turn", "turn"],
     ]);
     // The fixed-operand views surface no operand control.
     const fixed = REVIEW_VIEWS.filter((v) => !v.operand).map((v) => v.id);
@@ -68,6 +70,7 @@ describe("availableReviewViews — dual-scope selection", () => {
       "commit",
       "branch",
       "last-turn",
+      "turn",
       "cumulative",
     ]);
   });
@@ -95,7 +98,7 @@ describe("visibleReviewViews — runtime gates", () => {
   it("does not expose Summary as a switcher view", () => {
     expect(
       ids(visibleReviewViews("thread", { isGitRepo: true })),
-    ).toEqual(["unstaged", "staged", "commit", "branch", "last-turn", "cumulative"]);
+    ).toEqual(["unstaged", "staged", "commit", "branch", "last-turn", "turn", "cumulative"]);
   });
 
   it("keeps Cumulative visible because Summary lives inside it as a lens", () => {
@@ -107,6 +110,7 @@ describe("visibleReviewViews — runtime gates", () => {
       "commit",
       "branch",
       "last-turn",
+      "turn",
       "cumulative",
     ]);
   });
@@ -114,7 +118,7 @@ describe("visibleReviewViews — runtime gates", () => {
   it("leaves the turn views unaffected by git presence (only git views drop)", () => {
     expect(
       ids(visibleReviewViews("thread", { isGitRepo: false })),
-    ).toEqual(["last-turn", "cumulative"]);
+    ).toEqual(["last-turn", "turn", "cumulative"]);
   });
 });
 

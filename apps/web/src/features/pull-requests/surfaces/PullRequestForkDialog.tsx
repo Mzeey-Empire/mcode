@@ -198,8 +198,10 @@ function PullRequestForkComposer({
   onThreadCreationFailed: () => void;
   onThreadCreated: (thread: Thread) => void;
 }) {
+  const pendingStartupId = useWorkspaceStore((s) =>
+    preparingThread ? s.pendingStartupByThreadId[preparingThread.id]?.startupId : undefined);
   const startup = useThreadStartup({
-    startupId: preparingThread?.clientStartupId,
+    startupId: pendingStartupId,
     workspaceId: target.workspaceId,
     enabled: preparingThread !== null,
   });
@@ -208,7 +210,7 @@ function PullRequestForkComposer({
       <div className="p-5">
         <StartupProgressCard
           startup={startup}
-          startupId={preparingThread.clientStartupId}
+          startupId={pendingStartupId}
           context={target.mode === "existing-worktree" ? "attached-worktree" : "managed-worktree"}
         />
       </div>

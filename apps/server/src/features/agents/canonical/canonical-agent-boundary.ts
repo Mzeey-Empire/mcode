@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
-import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, or, placeholder, sql } from "drizzle-orm";
+import { and, asc, between, desc, eq, getTableColumns, inArray, isNotNull, isNull, or, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   AgentItemSchema,
@@ -363,6 +363,10 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   private readonly persistItemStatement: ReturnType<CanonicalAgentBoundary["buildPersistItemStatement"]>;
   private readonly insertEventStatement: ReturnType<CanonicalAgentBoundary["buildInsertEventStatement"]>;
   private readonly persistCheckpointStatement: ReturnType<CanonicalAgentBoundary["buildPersistCheckpointStatement"]>;
+  private readonly loadCommitChildThreadStatement: ReturnType<CanonicalAgentBoundary["buildLoadCommitChildThreadStatement"]>;
+  private readonly loadCommitTurnStatement: ReturnType<CanonicalAgentBoundary["buildLoadCommitTurnStatement"]>;
+  private readonly loadCommitSequenceCollisionStatement: ReturnType<CanonicalAgentBoundary["buildLoadCommitSequenceCollisionStatement"]>;
+  private readonly loadLastAcceptedSequenceStatement: ReturnType<CanonicalAgentBoundary["buildLoadLastAcceptedSequenceStatement"]>;
   private readonly diagnostics = new CanonicalAgentDiagnostics();
   private readonly turnIdByExecution = new Map<string, string>();
   private readonly eventStore: CanonicalAgentEventStore;
@@ -382,11 +386,15 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     this.persistItemStatement = this.buildPersistItemStatement();
     this.insertEventStatement = this.buildInsertEventStatement();
     this.persistCheckpointStatement = this.buildPersistCheckpointStatement();
+    this.loadCommitChildThreadStatement = this.buildLoadCommitChildThreadStatement();
+    this.loadCommitTurnStatement = this.buildLoadCommitTurnStatement();
+    this.loadCommitSequenceCollisionStatement = this.buildLoadCommitSequenceCollisionStatement();
+    this.loadLastAcceptedSequenceStatement = this.buildLoadLastAcceptedSequenceStatement();
     this.displayMaterializer = new ConversationDisplayMaterializer(db);
     this.eventStore = new CanonicalAgentEventStore(db, {
       loadThread: (threadId) => this.loadThread(threadId),
       loadCheckpoint: (executionId) => this.toEventStoreCheckpoint(this.loadCheckpoint(executionId)),
-      loadState: (threadId, executionId) => this.loadState(threadId, executionId),
+      loadCommitState: (threadId, checkpoint, events) => this.loadCommitState(threadId, checkpoint, events),
       boundEvents: (input, events, checkpoint) => this.boundIngestBatch(
         this.toCanonicalCommitInput(input),
         events,
@@ -2044,10 +2052,12 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     threadId: string,
     drafts: readonly CanonicalAgentEventDraft[],
   ): number {
-    const partialRevision = this.db
-      .prepare("SELECT durable_revision FROM canonical_agent_events WHERE event_id = ?")
-      .get(drafts[0]!.eventId) as { durable_revision: number } | undefined;
-    return partialRevision?.durable_revision ?? (this.loadThread(threadId)?.conversationRevision ?? 0) + 1;
+    const partialRevision = this.orm
+      .select({ durableRevision: canonicalAgentEvents.durableRevision })
+      .from(canonicalAgentEvents)
+      .where(eq(canonicalAgentEvents.eventId, drafts[0]!.eventId))
+      .get();
+    return partialRevision?.durableRevision ?? (this.loadThread(threadId)?.conversationRevision ?? 0) + 1;
   }
 
   private parentTerminalBatchOverhead(
@@ -2107,13 +2117,15 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   }
 
   private parentTerminalBatchContains(draft: CanonicalAgentEventDraft): boolean {
-    const existingRow = this.db
-      .prepare("SELECT envelope_json FROM canonical_agent_events WHERE event_id = ?")
-      .get(draft.eventId) as { envelope_json: string } | undefined;
+    const existingRow = this.orm
+      .select({ envelopeJson: canonicalAgentEvents.envelopeJson })
+      .from(canonicalAgentEvents)
+      .where(eq(canonicalAgentEvents.eventId, draft.eventId))
+      .get();
     if (!existingRow) return false;
     this.assertDuplicateMatches(
       draft,
-      CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(existingRow.envelope_json)),
+      CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(existingRow.envelopeJson)),
     );
     return true;
   }
@@ -2839,6 +2851,133 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     return applications;
   }
 
+  /** Load only the persisted reducer dependencies for one new semantic batch. */
+  private loadCommitState(
+    threadId: string,
+    checkpoint: CanonicalAgentEventStoreCheckpoint | null,
+    events: readonly CanonicalAgentEventEnvelope[],
+  ): AgentModelState {
+    const state = createAgentModelState();
+    const thread = this.loadThread(threadId);
+    if (thread) state.threads[thread.id] = thread;
+    this.addCommitChildThreadState(state, events);
+    this.addCommitTurnState(state, events);
+    // Item and action reducers replace their records, so prior rows cannot affect this batch.
+    this.addCommitSequenceState(state, checkpoint, events);
+    return state;
+  }
+
+  private addCommitChildThreadState(
+    state: AgentModelState,
+    events: readonly CanonicalAgentEventEnvelope[],
+  ): void {
+    const childIdsByParent = new Map<string, Set<string>>();
+    for (const event of events) {
+      const childThreadId = this.commitChildThreadId(event);
+      if (!childThreadId) continue;
+      const parentThreadId = event.routing.threadId;
+      const childIds = childIdsByParent.get(parentThreadId) ?? new Set<string>();
+      childIds.add(childThreadId);
+      childIdsByParent.set(parentThreadId, childIds);
+    }
+    for (const [parentThreadId, childIds] of childIdsByParent) {
+      for (const childThreadId of childIds) {
+        const row = this.loadCommitChildThreadStatement.get({
+          id: childThreadId,
+          parentThreadId,
+        });
+        if (!row) continue;
+        const child = this.threadFromRow(row);
+        state.threads[child.id] = child;
+      }
+    }
+  }
+
+  private commitChildThreadId(event: CanonicalAgentEventEnvelope): string | null {
+    if (event.payload.type === "child-thread.recorded") {
+      return event.payload.parentThreadId === event.routing.threadId
+        ? event.payload.childThread.id
+        : null;
+    }
+    if (event.payload.type === "child-thread.bound") {
+      return event.payload.parentThreadId === event.routing.threadId
+        ? event.payload.childThreadId
+        : null;
+    }
+    return null;
+  }
+
+  private addCommitTurnState(
+    state: AgentModelState,
+    events: readonly CanonicalAgentEventEnvelope[],
+  ): void {
+    const first = events[0];
+    if (!first) return;
+    const turnIds = new Set<string>();
+    for (const event of events) {
+      const turnId = this.commitTurnId(event);
+      if (turnId) turnIds.add(turnId);
+    }
+    for (const turnId of turnIds) {
+      const row = this.loadCommitTurnStatement.get({
+        id: turnId,
+        threadId: first.routing.threadId,
+      });
+      if (!row) continue;
+      const turn = this.turnFromRow(row);
+      state.turns[turn.id] = turn;
+    }
+  }
+
+  private commitTurnId(event: CanonicalAgentEventEnvelope): string | null {
+    if (event.payload.type === "turn.created") return event.payload.turn.id;
+    if (
+      event.payload.type === "turn.started"
+      || event.payload.type === "turn.completed"
+      || event.payload.type === "turn.cancelled"
+      || event.payload.type === "turn.interrupted"
+      || event.payload.type === "turn.errored"
+      || event.payload.type === "ingest.overflow"
+    ) {
+      return event.routing.turnId ?? null;
+    }
+    return null;
+  }
+
+  private addCommitSequenceState(
+    state: AgentModelState,
+    checkpoint: CanonicalAgentEventStoreCheckpoint | null,
+    events: readonly CanonicalAgentEventEnvelope[],
+  ): void {
+    const first = events[0];
+    if (!first) return;
+    const acceptedSequences = events.map((event) => event.acceptedSequence);
+    const firstAcceptedSequence = Math.min(...acceptedSequences);
+    const lastAcceptedSequence = Math.max(...acceptedSequences);
+    const existing = this.loadCommitSequenceCollisionStatement.all({
+      executionId: first.routing.executionId,
+      minSequence: firstAcceptedSequence,
+      maxSequence: lastAcceptedSequence,
+    });
+    for (const event of existing) {
+      state.appliedEventIds[event.eventId] = true;
+      state.acceptedInputEventIds[`${first.routing.executionId}:${event.acceptedSequence}`] = event.eventId;
+    }
+
+    const acceptedSequence = checkpoint?.lastAcceptedSequence ?? this.lastAcceptedSequence(
+      first.routing.threadId,
+      first.routing.executionId,
+    );
+    if (acceptedSequence > 0) {
+      state.lastAcceptedSequenceByExecution[first.routing.executionId] = acceptedSequence;
+    }
+  }
+
+  private lastAcceptedSequence(threadId: string, executionId: string): number {
+    const row = this.loadLastAcceptedSequenceStatement.get({ threadId, executionId });
+    return row?.acceptedSequence ?? 0;
+  }
+
   private loadState(threadId: string, executionId?: string): AgentModelState {
     const state = createAgentModelState();
     this.addThreadState(state, threadId);
@@ -3309,6 +3448,59 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
         updatedAt: sql`excluded.updated_at`,
       },
     }).prepare();
+  }
+
+  private buildLoadCommitChildThreadStatement() {
+    return this.orm
+      .select()
+      .from(canonicalAgentThreads)
+      .where(and(
+        eq(canonicalAgentThreads.id, placeholder("id")),
+        eq(canonicalAgentThreads.parentThreadId, placeholder("parentThreadId")),
+      ))
+      .prepare();
+  }
+
+  private buildLoadCommitTurnStatement() {
+    return this.orm
+      .select()
+      .from(canonicalAgentTurns)
+      .where(and(
+        eq(canonicalAgentTurns.id, placeholder("id")),
+        eq(canonicalAgentTurns.threadId, placeholder("threadId")),
+      ))
+      .prepare();
+  }
+
+  private buildLoadCommitSequenceCollisionStatement() {
+    return this.orm
+      .select({
+        eventId: canonicalAgentEvents.eventId,
+        acceptedSequence: canonicalAgentEvents.acceptedSequence,
+      })
+      .from(canonicalAgentEvents)
+      .where(and(
+        eq(canonicalAgentEvents.executionId, placeholder("executionId")),
+        between(
+          canonicalAgentEvents.acceptedSequence,
+          placeholder("minSequence"),
+          placeholder("maxSequence"),
+        ),
+      ))
+      .prepare();
+  }
+
+  private buildLoadLastAcceptedSequenceStatement() {
+    return this.orm
+      .select({ acceptedSequence: canonicalAgentEvents.acceptedSequence })
+      .from(canonicalAgentEvents)
+      .where(and(
+        eq(canonicalAgentEvents.threadId, placeholder("threadId")),
+        eq(canonicalAgentEvents.executionId, placeholder("executionId")),
+      ))
+      .orderBy(desc(canonicalAgentEvents.acceptedSequence))
+      .limit(1)
+      .prepare();
   }
 
   private persistCheckpoint(checkpoint: CanonicalAgentCheckpoint): void {

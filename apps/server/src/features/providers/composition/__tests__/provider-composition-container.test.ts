@@ -74,10 +74,6 @@ function runtimeBatch(): ProviderEventBatch {
   };
 }
 
-async function flushIngress(): Promise<void> {
-  await new Promise<void>((resolve) => queueMicrotask(resolve));
-}
-
 describe("provider composition container", () => {
   let database: Database | undefined;
   let temporaryDirectory: string | undefined;
@@ -94,6 +90,7 @@ describe("provider composition container", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await container.resolve(ProviderRegistry).shutdown();
+    container.resolve(ProviderEventIngress).shutdown();
     container.resolve(SettingsService).dispose();
     database?.close(true);
     database = undefined;
@@ -136,14 +133,14 @@ describe("provider composition container", () => {
       commit: { outcome: "committed", eventCount: 1 },
       delivery: { ingress: "queued" },
     });
-    await flushIngress();
-
-    expect(received).toEqual([expect.objectContaining({
-      providerId: "cursor",
-      sourceKind: "canonical-commit",
-      event: expect.objectContaining({ delta: "canonical delivery" }),
-      canonicalReceipt: expect.objectContaining({ eventId: "cursor:runtime-event-1" }),
-    })]);
+    await vi.waitFor(() => {
+      expect(received).toEqual([expect.objectContaining({
+        providerId: "cursor",
+        sourceKind: "canonical-commit",
+        event: expect.objectContaining({ delta: "canonical delivery" }),
+        canonicalReceipt: expect.objectContaining({ eventId: "cursor:runtime-event-1" }),
+      })]);
+    });
   });
 
   it("waits for provider cleanup even when another provider shutdown fails", async () => {

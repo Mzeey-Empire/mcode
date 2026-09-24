@@ -579,6 +579,7 @@ export async function buildServerRuntimeBundles({
   serverRoot,
   serverOutFile,
   ptyHostOutFile,
+  providerEventWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "provider-event.worker.cjs"),
   production = false,
 }) {
   const shared = {
@@ -596,7 +597,7 @@ export async function buildServerRuntimeBundles({
       ...(production ? { "process.env.NODE_ENV": '"production"' } : {}),
     },
   };
-  await Promise.all([
+  const bundles = [
     build({
       ...shared,
       entryPoints: [NodePath.resolve(serverRoot, "dist-tsc/index.js")],
@@ -609,7 +610,17 @@ export async function buildServerRuntimeBundles({
       ],
       outfile: ptyHostOutFile,
     }),
-  ]);
+  ];
+  const providerEventWorkerEntry = NodePath.resolve(
+    serverRoot,
+    "dist-tsc/features/providers/composition/provider-event.worker.js",
+  );
+  bundles.push(build({
+    ...shared,
+    entryPoints: [providerEventWorkerEntry],
+    outfile: providerEventWorkerOutFile,
+  }));
+  await Promise.all(bundles);
 }
 
 /**

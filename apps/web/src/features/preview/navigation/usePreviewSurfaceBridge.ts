@@ -9,22 +9,9 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { resolveScopeBasePath } from "@/lib/resolve-scope-path";
 import type { PreviewResolveNavigationResult } from "@/transport/desktop-bridge";
 
-const NAV_ERROR_LABEL: Record<string, string> = {
-  "no-bounds": "Wait for the panel to finish layout, then try again.",
-  "invalid-url": "Only http, https URLs and local file paths are supported.",
-  "empty-url": "Enter a URL or file path.",
-  "no-window": "Preview is unavailable.",
-  "file-not-found": "File not found.",
-  "not-a-file": "Path is not a regular file.",
-  "is-directory": "Path is a directory (no index.html found).",
-  "sensitive-file": "Cannot preview sensitive files (.env, .git, keys, etc.).",
-  "no-workspace": "Open a workspace to use relative file paths.",
-};
-
-/** Resolves an IPC error code to a short user-visible hint. */
-export function formatNavError(code: string): string {
-  return NAV_ERROR_LABEL[code] ?? code;
-}
+// Resolver-code copy lives in nav-errors so the omnibox hint, the Ctrl+click
+// error tab, and the load-failed classifier share one source.
+export { formatNavError } from "./nav-errors";
 
 /** Options for the {@link usePreviewSurfaceBridge} hook. */
 export interface UsePreviewSurfaceBridgeOptions {

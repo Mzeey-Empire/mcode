@@ -26,6 +26,7 @@ const { workspaceState, draftState } = vi.hoisted(() => ({
       workspaceState.activeThreadId = threadId;
     }),
     recordPullRequestLink: vi.fn(),
+    pendingStartupByThreadId: {} as Record<string, { startupId: string }>,
   },
   draftState: {
     setPendingPrefill: vi.fn(),
@@ -33,7 +34,10 @@ const { workspaceState, draftState } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/features/projects/state/workspaceStore", () => ({
-  useWorkspaceStore: { getState: () => workspaceState },
+  useWorkspaceStore: Object.assign(
+    (selector: (s: unknown) => unknown) => selector(workspaceState),
+    { getState: () => workspaceState },
+  ),
 }));
 
 vi.mock("@/stores/composerDraftStore", () => ({
@@ -51,7 +55,6 @@ vi.mock("@/features/conversation", () => ({
       id: string;
       workspace_id: string;
       clientPreparing: boolean;
-      clientStartupId: string;
     }) => void;
     onThreadCreationFailed: () => void;
     onThreadCreated: (thread: { id: string }) => void;
@@ -63,7 +66,6 @@ vi.mock("@/features/conversation", () => ({
           id: "thread-placeholder",
           workspace_id: workspaceId,
           clientPreparing: true,
-          clientStartupId: "00000000-0000-4000-8000-000000000001",
         })}
       >
         Start pending fork

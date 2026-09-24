@@ -37,6 +37,7 @@ import {
   fileTrackerForAgentServiceTest,
   startAgentServiceIngressForTest,
   startProviderTurnForTest,
+  waitForAgentServiceIngressForTest,
   wrapProviderEmitterForRuntimeEvents,
 } from "./agent-service-test-harness.js";
 import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
@@ -362,7 +363,7 @@ describe("AgentService turn cleanup", () => {
     vi.clearAllMocks();
   });
 
-  it("retains provider subscriptions through the provider ingress", () => {
+  it("retains provider subscriptions through the provider ingress", async () => {
     const legacyProvider = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
       id: "claude" as ProviderId,
     })) as unknown as IAgentProvider;
@@ -384,6 +385,7 @@ describe("AgentService turn cleanup", () => {
       reason: "disabled",
     } satisfies AgentEvent;
     (legacyProvider as unknown as NodeEvents.EventEmitter).emit("event", providerEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenLastCalledWith(providerEvent);
@@ -410,6 +412,7 @@ describe("AgentService turn cleanup", () => {
       turnExecutionId: executionId,
     } satisfies AgentEvent;
     providerEmitter.emit("event", event);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenCalledWith(event);
@@ -445,6 +448,7 @@ describe("AgentService turn cleanup", () => {
       totalProcessedTokens: 150,
       providerId: "claude",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     // Thread should no longer be active
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
@@ -607,7 +611,7 @@ describe("AgentService turn cleanup", () => {
     expect(memoryPressureService.markActive).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps exact turn running when provider stop fails, then cancels on retry", async () => {
+  it("cancels the turn and evicts the session when provider stop fails", async () => {
     const { service, providerEmitter } = buildService();
     startAgentServiceIngressForTest(service, );
 
@@ -619,18 +623,21 @@ describe("AgentService turn cleanup", () => {
       attachments: [],
       provider: "claude",
     });
-    const provider = providerEmitter as NodeEvents.EventEmitter & { stopSession: ReturnType<typeof vi.fn> };
+    const provider = providerEmitter as NodeEvents.EventEmitter & {
+      stopSession: ReturnType<typeof vi.fn>;
+      discardSession: ReturnType<typeof vi.fn>;
+    };
+    provider.discardSession = vi.fn(() => Promise.resolve());
     provider.stopSession.mockRejectedValueOnce(new Error("stop unavailable"));
 
-    await expect(service.stopSession(THREAD_ID)).rejects.toThrow("stop unavailable");
-    expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
-
-    provider.stopSession.mockResolvedValueOnce(undefined);
     const result = await service.stopSession(THREAD_ID);
     expect(result.status).toBe("cancelled");
-    expect(result.dispatchState).toBe("dispatched");
     expect(result.snapshot).toMatchObject({ threadId: THREAD_ID, phase: "cancelled" });
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
+    await vi.waitFor(() => expect(provider.discardSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`));
+
+    const retry = await service.stopSession(THREAD_ID);
+    expect(retry.status).toBe("already-terminal");
   });
 
   it("finalizes the turn as cancelled when provider stopSession never settles", async () => {
@@ -657,9 +664,10 @@ describe("AgentService turn cleanup", () => {
     vi.useFakeTimers();
     try {
       const stop = service.stopSession(THREAD_ID);
-      await vi.advanceTimersByTimeAsync(20_000);
+      // The RPC resolves on terminalize; provider settle continues detached.
       await expect(stop).resolves.toMatchObject({ status: "cancelled" });
       expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
+      await vi.advanceTimersByTimeAsync(20_000);
       await vi.advanceTimersByTimeAsync(0);
       expect(provider.discardSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
 
@@ -864,7 +872,7 @@ describe("AgentService turn cleanup", () => {
     expect(firstResult.status).toBe("cancelled");
   });
 
-  it("shares provider stop failure, then retries after single-flight clears", async () => {
+  it("shares one provider stop across concurrent callers even when it fails", async () => {
     const { service, providerEmitter } = buildService();
     startAgentServiceIngressForTest(service, );
     await service.sendMessage({
@@ -877,19 +885,52 @@ describe("AgentService turn cleanup", () => {
     });
     const provider = providerEmitter as NodeEvents.EventEmitter & {
       stopSession: ReturnType<typeof vi.fn>;
+      discardSession: ReturnType<typeof vi.fn>;
     };
+    provider.discardSession = vi.fn(() => Promise.resolve());
     provider.stopSession.mockRejectedValueOnce(new Error("stop unavailable"));
     const first = service.stopSession(THREAD_ID);
     const second = service.stopSession(THREAD_ID);
-    await expect(first).rejects.toThrow("stop unavailable");
-    await expect(second).rejects.toThrow("stop unavailable");
-    expect(provider.stopSession).toHaveBeenCalledTimes(1);
-    expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult.status).toBe("cancelled");
+    expect(secondResult).toEqual(firstResult);
+    await vi.waitFor(() => expect(provider.stopSession).toHaveBeenCalledTimes(1));
+    expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
 
-    provider.stopSession.mockResolvedValueOnce(undefined);
     const retry = await service.stopSession(THREAD_ID);
-    expect(retry.status).toBe("cancelled");
-    expect(provider.stopSession).toHaveBeenCalledTimes(2);
+    expect(retry.status).toBe("already-terminal");
+  });
+
+  it("admits a follow-up turn while provider teardown is still settling", async () => {
+    const { service, providerEmitter } = buildService();
+    startAgentServiceIngressForTest(service, );
+    const provider = providerEmitter as NodeEvents.EventEmitter & {
+      sendTurn: ReturnType<typeof vi.fn>;
+      stopSession: ReturnType<typeof vi.fn>;
+    };
+    provider.stopSession.mockImplementation(() => new Promise<void>(() => {}));
+
+    await service.sendMessage({
+      threadId: THREAD_ID,
+      content: "hello",
+      permissionMode: "default",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "claude",
+    });
+    const result = await service.stopSession(THREAD_ID);
+    expect(result.status).toBe("cancelled");
+
+    await service.sendMessage({
+      threadId: THREAD_ID,
+      content: "again",
+      permissionMode: "default",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "claude",
+    });
+    expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
+    expect(provider.sendTurn).toHaveBeenCalledTimes(2);
   });
 
   it("does not let completion race overwrite an explicit stop", async () => {
@@ -1024,6 +1065,7 @@ describe("AgentService turn cleanup", () => {
       totalProcessedTokens: 150,
       providerId: "claude",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
     providerEmitter.emit("event", {
@@ -1033,6 +1075,7 @@ describe("AgentService turn cleanup", () => {
       content: "Goal achieved in 1s.",
       tokens: null,
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(messageRepo.create).toHaveBeenCalledWith(
       THREAD_ID,
@@ -1074,6 +1117,7 @@ describe("AgentService turn cleanup", () => {
       totalProcessedTokens: 150,
       providerId: "claude",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
 
@@ -1114,6 +1158,7 @@ describe("AgentService turn cleanup", () => {
       turnExecutionId: resumedExecutionId,
       outcome: "cancelled",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
     expect(mutationReservations.owns(THREAD_ID, "pending-approval", "pendingApproval")).toBe(true);
   });
@@ -1251,6 +1296,7 @@ describe("AgentService turn cleanup", () => {
         totalProcessedTokens: 2,
         providerId: "claude",
       } satisfies AgentEvent);
+      await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
       const secondExecutionId = startProviderTurn(service);
       providerEmitter.emit("event", {
@@ -1266,6 +1312,8 @@ describe("AgentService turn cleanup", () => {
         toolName: "Edit",
         toolInput: { file_path: "second.txt" },
       } satisfies AgentEvent);
+      await vi.waitFor(() => expect(observeToolUse).toHaveBeenCalledTimes(2));
+      await observeToolUse.mock.results[1]!.value;
       await NodeFSPromises.writeFile(NodePath.join(root, "second.txt"), "after second\n");
       providerEmitter.emit("event", {
         type: AgentEventType.Message,
@@ -1294,7 +1342,7 @@ describe("AgentService turn cleanup", () => {
         totalProcessedTokens: 2,
         providerId: "claude",
       } satisfies AgentEvent);
-      await vi.waitFor(() => expect(observeToolUse).toHaveBeenCalledTimes(2));
+      await waitForAgentServiceIngressForTest(service, THREAD_ID);
       expect(turnSnapshotRepo.create).not.toHaveBeenCalled();
 
       releaseFirstResult();
@@ -1350,6 +1398,7 @@ describe("AgentService turn cleanup", () => {
       providerId: "claude",
     } satisfies AgentEvent);
 
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
 
     // Error event should not re-add the thread
@@ -1360,6 +1409,7 @@ describe("AgentService turn cleanup", () => {
       turnExecutionId: executionId,
       error: "Something went wrong",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
     expect(memoryPressureService.markActive).not.toHaveBeenCalled();
@@ -1386,6 +1436,7 @@ describe("AgentService turn cleanup", () => {
       turnExecutionId: executionId,
       outcome: "completed",
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
     expect(memoryPressureService.markIdle).toHaveBeenCalled();
@@ -1533,9 +1584,11 @@ describe("AgentService Ended finalization", () => {
       type: AgentEventType.ContextEstimate, threadId: thread.id, turnExecutionId,
       tokensIn: 100, tokensOut: 20, totalProcessedTokens: 120, cacheReadTokens: 40, contextWindow: 200_000,
     } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, thread.id);
     expect(service.runtimeAccess().activeThreadIds()).toContain(thread.id);
     expect(threadRepo.findById(thread.id)).toMatchObject({ last_context_tokens: 100, context_window: 200_000 });
     providerEmitter.emit("event", { type: AgentEventType.Ended, threadId: thread.id, turnExecutionId, outcome } satisfies AgentEvent);
+    await waitForAgentServiceIngressForTest(service, thread.id);
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(thread.id);
     expect(threadRepo.findById(thread.id)).toMatchObject({ last_context_tokens: 100, context_window: 200_000 });
   });
@@ -1663,6 +1716,7 @@ describe("AgentService Ended finalization", () => {
         turnExecutionId: executionId,
         error: "provider failed",
       } satisfies AgentEvent);
+      await waitForAgentServiceIngressForTest(service, thread.id);
 
       expect(service.runtimeAccess().runtimeSnapshots())
         .toContainEqual(expect.objectContaining({ threadId: thread.id, phase: "errored" }));
@@ -1776,6 +1830,8 @@ describe("AgentService Ended finalization", () => {
     const result = await service.stopSession(thread.id);
 
     expect(result.status).toBe("cancelled");
+    // Descendant interrupts and the provider stop run detached after the RPC.
+    await vi.waitFor(() => expect(providerEmitter.stopSession).toHaveBeenCalledOnce());
     expect(providerEmitter.interruptChildTurn).toHaveBeenCalledTimes(2);
     expect(providerEmitter.interruptChildTurn).toHaveBeenCalledWith(
       `mcode-${thread.id}`,
@@ -1787,7 +1843,6 @@ describe("AgentService Ended finalization", () => {
       "native-direct-thread",
       "native-direct-turn",
     );
-    expect(providerEmitter.stopSession).toHaveBeenCalledOnce();
     expect(Math.max(...providerEmitter.interruptChildTurn.mock.invocationCallOrder))
       .toBeLessThan(providerEmitter.stopSession.mock.invocationCallOrder[0]!);
     expect(canonicalSink.loadCanonicalChildStopTarget({

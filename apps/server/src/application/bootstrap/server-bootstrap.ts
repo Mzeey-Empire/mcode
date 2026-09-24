@@ -107,6 +107,7 @@ import { CleanupWorker } from "../../features/thread-control/cleanup/cleanup-wor
 import { ProviderAvailabilityService } from "../../features/providers/availability/provider-availability-service.js";
 import { ProviderUsageWarmupService } from "../../features/providers/availability/provider-usage-warmup-service.js";
 import { ProviderRegistry } from "../../features/providers/composition/provider-registry.js";
+import { ProviderEventIngress } from "../../features/providers/composition/provider-event-ingress.js";
 import type { CursorProviderBoundary } from "@mcode/providers";
 import { ModelCacheService } from "../../features/providers/models/model-cache-service.js";
 import { DiffSummaryService } from "../../features/projects/diffs/summaries/diff-summary-service.js";
@@ -340,6 +341,7 @@ const terminalDiagnosticsService = container.resolve(TerminalDiagnosticsService)
 const messageRepo = container.resolve(MessageRepo);
 const threadRepo = container.resolve(ThreadRepo);
 const providerRegistry = container.resolve(ProviderRegistry);
+const providerEventIngress = container.resolve(ProviderEventIngress);
 const cursorProvider = container.resolve<CursorProviderBoundary>("CursorProvider");
 const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
@@ -941,6 +943,8 @@ async function shutdown(): Promise<void> {
   // 2. Shutdown provider registry
   shutdownCoordinator.setPhase("shutdown providers");
   await providerRegistry.shutdown();
+  shutdownCoordinator.setPhase("shutdown provider event workers");
+  providerEventIngress.shutdown();
   browserAutomationBroker.shutdown();
   browserAutomationSessionLease.shutdown();
 

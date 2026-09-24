@@ -46,7 +46,7 @@ Split **shell session** (server PTY, long-lived) from **terminal view**
 - **Performance** keeps the terminal module lazy until first use, retains no
   more than one view, and releases rendering acceleration while the warm view
   is hidden. This follows the lazy-loading and bounded-renderer guidance in the
-  [performance audit](../guides/performance-audit.md).
+  [performance audit](../internals/performance-audit.md).
 
 ## Considered Options
 

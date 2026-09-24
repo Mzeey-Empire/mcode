@@ -19,6 +19,7 @@ import { TurnFileEffectSummarySchema } from "../models/file-effect.js";
 import { TurnOutcomeSchema } from "../models/turn-outcome.js";
 import { TurnSavingStatusSchema } from "../models/turn-runtime.js";
 import { ProviderCatalogChangeSchema } from "../providers/capability-catalog.js";
+import { ProviderModelInfoSchema } from "../providers/models.js";
 import { ThreadObservedStateSchema } from "../thread-control.js";
 import { WorkspaceEnvironmentActionRunSchema } from "../models/workspace-environment.js";
 import { ThreadStartupSchema } from "../thread-startup.js";
@@ -141,6 +142,13 @@ export const WS_CHANNELS = {
   }).strict(),
   /** Identity-based catalog changes produced by a completed background refresh. */
   "provider.catalogChanged": ProviderCatalogChangeSchema(),
+  /** Emitted when a model-cache refresh detects a changed list; replaces the client entry. */
+  "provider.modelsChanged": z
+    .object({
+      providerId: ProviderIdSchema,
+      models: z.array(ProviderModelInfoSchema()).max(512),
+    })
+    .strict(),
   /** Full-list broadcast of provider availability. Replaces the client cache. */
   "providers.availability": z.array(ProviderAvailabilitySchema()),
   "branch.changed": lazySchema(() =>

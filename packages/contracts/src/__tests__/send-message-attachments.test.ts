@@ -139,6 +139,8 @@ describe("orchestration mode", () => {
 
   it("advertises Codex Ultra for Astra, Sol, and Terra", () => {
     expect(supportsCodexUltraOrchestration("gpt-6-astra")).toBe(true);
+    expect(supportsCodexUltraOrchestration("gpt-6-sol")).toBe(true);
+    expect(supportsCodexUltraOrchestration("gpt-6-luna")).toBe(false);
     expect(supportsCodexUltraOrchestration("gpt-5.6-sol")).toBe(true);
     expect(supportsCodexUltraOrchestration("gpt-5.6-terra")).toBe(true);
     expect(supportsCodexUltraOrchestration("gpt-5.6-luna")).toBe(false);
