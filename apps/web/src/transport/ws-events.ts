@@ -17,6 +17,7 @@ import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useProviderCatalogStore } from "@/stores/providerCatalogStore";
+import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { usePlanStore } from "@/stores/planStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-registry";
@@ -149,6 +150,7 @@ function handleTerminalData(data: unknown): void {
  * - `files.changed` -- invalidates the file autocomplete cache
  * - `skills.changed` -- invalidates provider catalogs; popup re-fetches on next open
  * - `provider.catalogChanged` -- reconciles a refreshed catalog by stable identity
+ * - `provider.modelsChanged` -- replaces one provider's cached model list after a server refresh diff
  * - `turn.persisted` -- tool call persistence confirmation forwarded to threadStore
  * - `settings.changed` -- server-pushed settings updates forwarded to settingsStore
  * - `branch.changed` -- refreshes branch list and updates current branch if not manually overridden
@@ -424,6 +426,17 @@ export function startPushListeners(): void {
       const parsed = ProviderCatalogChangeSchema().safeParse(change);
       if (!parsed.success) return;
       useProviderCatalogStore.getState().reconcile(parsed.data);
+    }),
+  );
+
+  // provider.modelsChanged: a model-cache refresh detected a changed list
+  unsubs.push(
+    pushEmitter.on("provider.modelsChanged", (data) => {
+      const parsed = WS_CHANNELS["provider.modelsChanged"].safeParse(data);
+      if (!parsed.success) return;
+      useProviderModelsStore
+        .getState()
+        .applyModels(parsed.data.providerId, parsed.data.models);
     }),
   );
 

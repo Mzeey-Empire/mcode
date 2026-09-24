@@ -11,6 +11,7 @@
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type { ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+import { broadcast } from "../../../application/transport/push.js";
 import { ModelCacheRepo } from "./persistence/model-cache-repo.js";
 
 /** How long a cached entry is considered "fresh" (no background refresh). */
@@ -179,6 +180,9 @@ export class ModelCacheService {
 
     if (changed) {
       this.repo.upsert(providerId, models);
+      // Push the diff to clients so pickers converge without polling; the TTL
+      // refetch stays as a fallback for missed pushes.
+      broadcast("provider.modelsChanged", { providerId, models });
       logger.info("Model cache updated", {
         providerId,
         modelCount: models.length,
