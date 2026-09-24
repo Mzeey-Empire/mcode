@@ -14,7 +14,12 @@ const BEFORE_START_EVENTS = new Set<AgentEvent["type"]>([
   "system", "quotaUpdate", "goalUpdated", "goalCleared", "mcpServerStartupStatus",
 ]);
 const AFTER_COMPLETION_EVENTS = new Set<AgentEvent["type"]>([
-  "ended", "hookStarted", "hookCompleted", ...BEFORE_START_EVENTS,
+  "ended", "hookStarted", "hookProgress", "hookCompleted", ...BEFORE_START_EVENTS,
+]);
+const TRANSIENT_STATUS_EVENTS = new Set<AgentEvent["type"]>([
+  "apiRetry", "rateLimited", "quotaUpdate", "providerUnavailable", "modelFallback",
+  "toolInputDelta", "toolProgress", "hookProgress", "goalUpdated", "goalCleared",
+  "mcpServerStartupStatus",
 ]);
 
 // A new contract variant must receive an owner decision before the reducer accepts it.
@@ -30,17 +35,17 @@ const UNSUPPORTED_FEATURE_REASON = {
   system: null,
   compacting: null,
   compactSummary: null,
-  modelFallback: "model fallback needs the model selection owner",
+  modelFallback: null,
   textDelta: null,
-  toolInputDelta: "incremental tool event needs the tool lifecycle owner",
-  toolProgress: "incremental tool event needs the tool lifecycle owner",
+  toolInputDelta: null,
+  toolProgress: null,
   contextEstimate: null,
   quotaUpdate: null,
-  providerUnavailable: "provider availability needs the provider dispatch owner",
+  providerUnavailable: null,
   rateLimited: null,
   apiRetry: null,
   hookStarted: null,
-  hookProgress: "hook output needs the hook lifecycle owner",
+  hookProgress: null,
   hookCompleted: null,
   assistantMessageBoundary: null,
   goalUpdated: null,
@@ -216,17 +221,9 @@ export class CodexLiveEventReducer {
   }
 
   private applyStatus(event: AgentEvent): CodexLiveWriterIntent[] | undefined {
-    switch (event.type) {
-      case "system": return this.system(event);
-      // These status events have no server projection beyond their canonical receipt.
-      case "apiRetry":
-      case "rateLimited":
-      case "quotaUpdate":
-      case "goalUpdated":
-      case "goalCleared":
-      case "mcpServerStartupStatus": return [];
-      default: return undefined;
-    }
+    if (event.type === "system") return this.system(event);
+    // The legacy turn application only publishes these transient statuses.
+    return TRANSIENT_STATUS_EVENTS.has(event.type) ? [] : undefined;
   }
 
   private start(event: Extract<AgentEvent, { type: "turnStarted" }>): CodexLiveWriterIntent[] {

@@ -237,9 +237,17 @@ describe("CodexLiveEventReducer", () => {
     expect(reducer.reduce(event("textDelta", { delta: "wrong", turnExecutionId: "22222222-2222-4222-8222-222222222222" }))).toEqual({
       kind: "unsupported", eventType: "textDelta", reason: "different execution",
     });
-    expect(reducer.reduce(event("modelFallback", { requestedModel: "a", actualModel: "b" }))).toEqual({
-      kind: "unsupported", eventType: "modelFallback", reason: "model fallback needs the model selection owner",
-    });
+    for (const status of [
+      event("modelFallback", { requestedModel: "a", actualModel: "b" }),
+      event("toolInputDelta", { partialJson: "{" }),
+      event("toolProgress", { toolCallId: "tool-1", toolName: "command_execution", elapsedSeconds: 1 }),
+      event("providerUnavailable", { providerId: "codex", reason: "disabled" }),
+      event("hookProgress", { hookName: "check", output: "running" }),
+    ]) {
+      expect(reducer.reduce(status)).toMatchObject({
+        kind: "reduced", writer: [], publication: { event: status, after: "writer" },
+      });
+    }
     const final = reducer.reduce(event("textDelta", { delta: "right", isFinalResponse: true }));
     expect(final.kind).toBe("reduced");
     if (final.kind !== "reduced") return;

@@ -870,7 +870,11 @@ function validLiveTextAssociation(
 
 function validNarrativeEvent(event: ExecutionLivePublicationIntent["event"]): boolean {
   return event.type === "textDelta" ? event.isFinalResponse === false
-    : ["assistantMessageBoundary", "toolUse", "toolResult", "hookStarted", "hookCompleted"].includes(event.type);
+    : [
+      "assistantMessageBoundary", "toolUse", "toolResult", "hookStarted", "hookCompleted",
+      "modelFallback", "toolInputDelta", "toolProgress", "providerUnavailable", "hookProgress",
+      "apiRetry", "rateLimited", "quotaUpdate", "goalUpdated", "goalCleared", "mcpServerStartupStatus",
+    ].includes(event.type);
 }
 
 function validAppendEvent(

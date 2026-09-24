@@ -534,6 +534,19 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(await writer.transact(op)).toEqual(receipt);
   });
 
+  it("acknowledges transient tool progress without inventing a durable tool row", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const event = { type: AgentEventType.ToolProgress, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+      toolCallId: "tool-1", toolName: "command_execution", elapsedSeconds: 1 };
+    const op = { ...operation(2, { kind: "live-event", text: { kind: "unchanged" } }),
+      livePublication: [{ after: "writer" as const, event }] };
+    const receipt = await writer.transact(op);
+    expect(receipt).toMatchObject({ kind: "committed", livePublication: [{ event }] });
+    expect(await writer.transact(op)).toEqual(receipt);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE turn_id = ? AND id LIKE 'toolCall:%'")
+      .get(TURN_ID)).toEqual({ count: 0 });
+  });
+
   it("rejects a compound live event that exceeds its shared row or byte budget", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const event = { type: AgentEventType.TextDelta, threadId: THREAD_ID,
