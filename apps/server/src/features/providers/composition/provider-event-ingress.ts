@@ -73,7 +73,7 @@ export interface ProviderEventIngressEvent {
   canonicalReceipt?: CanonicalProviderEventReceipt;
 }
 
-/** Narrow downstream contract used until TurnEventPipeline owns provider event handling. */
+/** Downstream contract for applying accepted provider events in the turn pipeline. */
 export interface ProviderEventIngressConsumer {
   handleProviderEvent(event: ProviderEventIngressEvent): void;
   handleProviderFileMutation(event: ProviderFileMutationStart): void;

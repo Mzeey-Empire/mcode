@@ -2,6 +2,32 @@
 
 Read this file when a change crosses product surfaces. Use the linked feature files for selectors and surface-specific proof.
 
+## Seven active tasks and controls
+
+Run `runtime health` in this worktree. Then run the controlled workload:
+
+```sh
+bun scripts/perf/seven-thread-live-harness.mjs --run --confirm-run --label after
+```
+
+The harness uses seven direct tasks in `.dev/fixture-repo` and a checked-in Codex
+fixture. It does not call an upstream model. Inspect its receipt under
+`.dev/verification/performance/seven-thread-live/`. Require seven completed
+tasks, every expected event once and in order, durable final conversation data,
+model and terminal RPC results while tasks are active, and successful cleanup.
+If cleanup is incomplete, use the receipt's exact path with
+`--cleanup-receipt <receipt-path> --confirm-run` before another run. Do not
+delete tasks by title or age.
+
+In the owned Electron app, create separate direct tasks in `.dev/fixture-repo`.
+Open and close the model picker, open a Terminal, switch tasks, and reload.
+Capture the settled controls and terminal output in a screenshot, record the
+visible state after reload, and remove only those Electron-owned tasks.
+Use [provider events and durability](provider-events-and-durability.md) for the
+final conversation check and [Electron live testing](../../../electorn-live-testing/SKILL.md)
+for the desktop control and capture. Report any unavailable control or missing
+capture as a gap. A public RPC receipt alone does not prove the desktop path.
+
 ## Provider completeness
 
 Use this journey when a change affects turn diffs, Review, provider events, automatic review, or workspace invalidation. Resolve the upstream Codex source with the OpenSrc command in the repository instructions before a Codex run. Record the resolved upstream commit in the receipt. The cache is read-only.

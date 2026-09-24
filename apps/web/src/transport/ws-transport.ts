@@ -244,11 +244,11 @@ interface LateResponseHandler {
 }
 
 interface RpcOptions {
-  /** Bound a request that blocks a visible control. Omitted requests may run normally. */
+  /** Bound this request without changing the transport's default timeout. */
   readonly timeoutMs?: number;
   /** Reclaims a resource when a timed-out request eventually succeeds. */
   readonly onLateSuccess?: (result: unknown) => void;
-  /** Releases request-specific retry state after a late response settles. */
+  /** Runs request-specific cleanup after a late response settles. */
   readonly onLateSettled?: () => void;
   /** Rejects a request before it consumes transport state. */
   readonly rejectBeforeRequest?: () => Error | null;

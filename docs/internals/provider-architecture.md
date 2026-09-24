@@ -75,13 +75,19 @@ evidence that must not reach the renderer.
 The server accepts runtime events in this order:
 
 ```text
-Provider runtime event → provider ingress → provider adapter → turn event pipeline → AgentEvent
+Provider runtime event → provider ingress → event worker → provider adapter → turn event pipeline → AgentEvent
 ```
 
-Ingress validates the provider identity, queues the event, and preserves its
-receipt when it came from a canonical commit. An adapter may forward a generic
-event, consume private provider work, or reject malformed native evidence with
-a diagnostic. Only a forwarded `AgentEvent` enters narration, lifecycle, and
+Ingress validates the provider identity and sends cloneable event validation to
+a fixed worker pool. A thread stays on one worker until its queued work drains;
+the pool limits concurrent work and returns results in that thread's order.
+Ingress then queues accepted results fairly across threads and preserves the
+receipt when it came from a canonical commit. It waits for both the worker and
+the ingress queue before finalizing a turn. The worker does not own the
+database: canonical commits and turn state still run in the server process.
+An adapter may forward a generic event, consume private provider work, or
+reject malformed native evidence with a diagnostic. Only a forwarded
+`AgentEvent` enters narration, lifecycle, and
 renderer publication.
 
 Codex collaboration evidence uses a Codex adapter. Claude, Cursor, and Copilot
