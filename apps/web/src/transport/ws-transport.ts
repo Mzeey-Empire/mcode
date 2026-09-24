@@ -151,6 +151,36 @@ export class RpcError extends Error {
   }
 }
 
+interface RpcErrorDetails {
+  readonly code: string;
+  readonly message: string;
+  readonly data?: Record<string, unknown>;
+  readonly retry?: string;
+}
+
+function toTransportRpcError(error: unknown): Error {
+  if (isTerminalRpcError(error)) return new TerminalRpcError(error);
+  const details = readRpcErrorDetails(error);
+  return new RpcError(details.message, details.code, details.data, details.retry);
+}
+
+function isTerminalRpcError(error: unknown): boolean {
+  return isRecord(error) && TerminalErrorCodeSchema().safeParse(error.code).success;
+}
+
+function readRpcErrorDetails(error: unknown): RpcErrorDetails {
+  if (!isRecord(error)) return { code: "RPC_ERROR", message: "RPC error" };
+  const code = typeof error.code === "string" ? error.code : "RPC_ERROR";
+  const message = typeof error.message === "string" ? error.message : "RPC error";
+  const retry = typeof error.retry === "string" ? error.retry : undefined;
+  const data = isRecord(error.data) ? error.data : undefined;
+  return data ? { code, message, data, retry } : { code, message, retry };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 type Listener = (data: unknown) => void;
 
 /**
@@ -271,28 +301,16 @@ export function parseLateTerminalCreateId(
 ): string | null {
   if (method === "terminal.create") {
     const parsed = WS_METHODS()["terminal.create"].result.safeParse(result);
-    if (
-      !parsed.success ||
-      typeof parsed.data !== "object" ||
-      parsed.data === null ||
-      !("ptyId" in parsed.data) ||
-      typeof parsed.data.ptyId !== "string"
-    ) {
-      return null;
-    }
-    return parsed.data.ptyId;
+    return parsed.success ? readTerminalCreateId(parsed.data, "ptyId") : null;
   }
   const parsed = WS_METHODS()["terminal.session.create"].result.safeParse(result);
-  if (
-    !parsed.success ||
-    typeof parsed.data !== "object" ||
-    parsed.data === null ||
-    !("sessionId" in parsed.data) ||
-    typeof parsed.data.sessionId !== "string"
-  ) {
-    return null;
-  }
-  return parsed.data.sessionId;
+  return parsed.success ? readTerminalCreateId(parsed.data, "sessionId") : null;
+}
+
+function readTerminalCreateId(value: unknown, field: "ptyId" | "sessionId"): string | null {
+  if (!value || typeof value !== "object" || !Object.hasOwn(value, field)) return null;
+  const id = Reflect.get(value, field);
+  return typeof id === "string" ? id : null;
 }
 
 /** Describes the current state of the WebSocket connection. */
@@ -471,33 +489,30 @@ export function createWsTransport(
     const id = typeof message.id === "string" ? message.id : null;
     if (!id) return false;
     const call = pending.get(id);
-    if (!call) {
-      const handler = lateResponseHandlers.get(id);
-      if (!handler) return false;
-      lateResponseHandlers.delete(id);
-      try {
-        if (!message.error) handler.onSuccess?.(message.result);
-      } finally {
-        handler.onSettled?.();
-      }
-      return true;
-    }
-    const { resolve, reject } = call;
+    return call
+      ? settlePendingRpcResponse(id, call, message)
+      : settleLateRpcResponse(id, message);
+  }
+
+  function settlePendingRpcResponse(
+    id: string,
+    call: PendingCall,
+    message: Record<string, unknown>,
+  ): true {
     pending.delete(id);
-    if (!message.error) {
-      resolve(message.result);
-      return true;
-    }
-    const error = message.error as {
-      code?: string;
-      message?: string;
-      data?: Record<string, unknown>;
-      retry?: string;
-    };
-    if (TerminalErrorCodeSchema().safeParse(error.code).success) {
-      reject(new TerminalRpcError(error));
-    } else {
-      reject(new RpcError(error.message ?? "RPC error", error.code ?? "RPC_ERROR", error.data, error.retry));
+    if (message.error) call.reject(toTransportRpcError(message.error));
+    else call.resolve(message.result);
+    return true;
+  }
+
+  function settleLateRpcResponse(id: string, message: Record<string, unknown>): boolean {
+    const handler = lateResponseHandlers.get(id);
+    if (!handler) return false;
+    lateResponseHandlers.delete(id);
+    try {
+      if (!message.error) handler.onSuccess?.(message.result);
+    } finally {
+      handler.onSettled?.();
     }
     return true;
   }

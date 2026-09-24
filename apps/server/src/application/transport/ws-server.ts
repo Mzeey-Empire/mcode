@@ -7,8 +7,19 @@
 import * as NodeHTTP from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { logger } from "@mcode/shared";
-import { TerminalBackendError } from "../../features/terminal/backends/terminal-backend.js";
-import { BinaryUploadHeaderSchema, TERMINAL_BINARY_MAGIC, type BinaryUploadHeader } from "@mcode/contracts";
+import {
+  TerminalBackendError,
+  type DisconnectedTerminalCreate,
+} from "../../features/terminal/backends/terminal-backend.js";
+import {
+  BinaryUploadHeaderSchema,
+  TERMINAL_BINARY_MAGIC,
+  TERMINAL_V1_METHODS,
+  WebSocketRequestSchema,
+  WS_METHODS,
+  type BinaryUploadHeader,
+  type WebSocketResponse,
+} from "@mcode/contracts";
 import { routeMessage, type RouterDeps } from "./ws-router.js";
 import { addClient, removeClient } from "./push.js";
 import { handleBinaryUpload } from "../../features/attachments/transport/binary-upload.js";
@@ -553,10 +564,71 @@ function replacePendingUploadHeader(header: BinaryUploadHeader, context: WsMessa
 
 /** Routes a regular JSON-RPC frame and returns its response to the same client. */
 function routeWsMessage(raw: string, context: WsMessageContext): void {
+  const terminalCreateMethod = parseTerminalCreateMethod(raw);
   void routeMessage(raw, context.deps, {
     client: context.ws,
     browserAutomationAuthorization: context.resolveCurrentBrowserAutomationAuthorization(),
   })
-    .then((response) => sendWsJson(context.ws, response))
+    .then(async (response) => {
+      await cleanupDisconnectedTerminalCreate(terminalCreateMethod, response, context);
+      sendWsJson(context.ws, response);
+    })
     .catch((error: unknown) => logger.error("Unexpected router error", { error: describeError(error) }));
+}
+
+type TerminalCreateMethod = DisconnectedTerminalCreate["method"];
+
+/** Reads the only create methods that may allocate a Terminal resource. */
+function parseTerminalCreateMethod(raw: string): TerminalCreateMethod | null {
+  try {
+    const parsed = WebSocketRequestSchema().safeParse(JSON.parse(raw));
+    if (!parsed.success) return null;
+    return isTerminalCreateMethod(parsed.data.method) ? parsed.data.method : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTerminalCreateMethod(method: string): method is TerminalCreateMethod {
+  return method === "terminal.create" || method === "terminal.session.create";
+}
+
+/** Reclaims a completed create only when its original WebSocket can no longer receive the response. */
+async function cleanupDisconnectedTerminalCreate(
+  method: TerminalCreateMethod | null,
+  response: WebSocketResponse,
+  context: WsMessageContext,
+): Promise<void> {
+  if (!method || context.ws.readyState === WebSocket.OPEN) return;
+  const create = disconnectedTerminalCreateFromResponse(method, response);
+  if (!create) return;
+  try {
+    await context.deps.terminalService.cleanupDisconnectedCreate(create, context.ws);
+  } catch (error) {
+    logger.error("Failed to clean up a Terminal created after WebSocket disconnect", {
+      error: describeError(error),
+      method: create.method,
+    });
+  }
+}
+
+function disconnectedTerminalCreateFromResponse(
+  method: TerminalCreateMethod,
+  response: WebSocketResponse,
+): DisconnectedTerminalCreate | null {
+  if (response.error || response.result === undefined) return null;
+  if (method === "terminal.create") {
+    const parsed = WS_METHODS()[method].result.safeParse(response.result);
+    const ptyId = parsed.success ? readStringField(parsed.data, "ptyId") : null;
+    return ptyId ? { method, ptyId } : null;
+  }
+  const parsed = TERMINAL_V1_METHODS[method].result.safeParse(response.result);
+  const sessionId = parsed.success ? readStringField(parsed.data, "sessionId") : null;
+  return sessionId ? { method, sessionId } : null;
+}
+
+function readStringField(value: unknown, field: "ptyId" | "sessionId"): string | null {
+  if (!value || typeof value !== "object" || !Object.hasOwn(value, field)) return null;
+  const candidate = Reflect.get(value, field);
+  return typeof candidate === "string" ? candidate : null;
 }
