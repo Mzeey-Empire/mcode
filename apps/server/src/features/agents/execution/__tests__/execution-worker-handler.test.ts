@@ -1,6 +1,10 @@
 import type { ProviderEventDraft } from "@mcode/providers";
 import { describe, expect, it } from "vitest";
 
+import type {
+  DataOnlyParentTurnFinishInput,
+  DataOnlyParentTurnStartInput,
+} from "../../canonical/canonical-parent-turn-write.js";
 import {
   ExecutionMailboxScheduler,
   type ExecutionMailboxCommand,
@@ -28,6 +32,25 @@ const EXECUTION: ExecutionIdentity = {
   threadId: "fixture-thread",
   turnId: "fixture-turn",
   executionId: "00000000-0000-4000-8000-000000000001",
+};
+
+const START_INPUT: DataOnlyParentTurnStartInput = {
+  thread: { id: EXECUTION.threadId, workspaceId: "fixture-workspace", providerId: "codex", createdAt: "2026-09-24T12:00:00.000Z" },
+  turnId: EXECUTION.turnId,
+  executionId: EXECUTION.executionId,
+  permissionMode: "full",
+  providerIdentities: [],
+  userMessage: { kind: "create", content: "Test", sequence: 1 },
+};
+
+const FINISH_INPUT: DataOnlyParentTurnFinishInput = {
+  threadId: EXECUTION.threadId,
+  turnId: EXECUTION.turnId,
+  executionId: EXECUTION.executionId,
+  providerId: "codex",
+  providerIdentities: [],
+  outcome: "cancelled",
+  projection: { message: null, narrative: [] },
 };
 
 const LIMITS: ExecutionMailboxLimits = {
@@ -126,7 +149,7 @@ async function committed(admission: ReturnType<typeof submit>, revision: number)
 describe("ExecutionWorkerHandler through its scheduler", () => {
   it("runs one synthetic turn from start through Stop, checkpoint, and finalization", async () => {
     const { scheduler, worker, writer, lease } = fixture();
-    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex" }), 1);
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
     await committed(submit(scheduler, lease, { kind: "event", events: [eventDraft()] }), 2);
     const stop = submit(scheduler, lease, { kind: "stop", requestId: "stop-1" });
     expect(scheduler.submit({
@@ -139,7 +162,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     await committed(submit(scheduler, lease, { kind: "checkpoint", phase: "stopping", nativeCursor: "cursor-1" }), 4);
     await committed(submit(scheduler, lease, { kind: "effect-result", effectId: "file-1", settled: true }), 5);
     await committed(submit(scheduler, lease, { kind: "provider-outcome", outcome: "cancelled" }), 6);
-    await committed(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled" }), 7);
+    await committed(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled", input: FINISH_INPUT }), 7);
     await expect(submit(scheduler, lease, { kind: "release" }).completion).resolves.toEqual({
       kind: "reply",
       result: { kind: "released" },
@@ -164,7 +187,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     let releaseWrite: (() => void) | undefined;
     writer.beforeCommit = () => new Promise<void>((resolve) => { releaseWrite = resolve; });
     const { scheduler, worker, lease } = fixture(writer);
-    const start = submit(scheduler, lease, { kind: "start", providerId: "codex" });
+    const start = submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT });
     const event = submit(scheduler, lease, { kind: "event", events: [eventDraft()] });
     await Promise.resolve();
     expect(worker.requests).toHaveLength(1);
@@ -177,11 +200,30 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     scheduler.shutdown();
   });
 
+  it("rejects a start whose transaction input names another execution", async () => {
+    const { scheduler, writer, lease } = fixture();
+    const input = { ...START_INPUT, executionId: "another-execution" };
+    await expect(submit(scheduler, lease, { kind: "start", providerId: "codex", input }).completion)
+      .resolves.toEqual({ kind: "reply", result: { kind: "rejected", reason: "invalid-transition" } });
+    expect(writer.operations).toEqual([]);
+    scheduler.shutdown();
+  });
+
+  it("rejects finalization when its projected outcome disagrees with the command", async () => {
+    const { scheduler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    const input = { ...FINISH_INPUT, outcome: "completed" as const };
+    await expect(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled", input }).completion)
+      .resolves.toEqual({ kind: "reply", result: { kind: "rejected", reason: "invalid-transition" } });
+    expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin"]);
+    scheduler.shutdown();
+  });
+
   it("rejects a writer conflict without reporting a durable command", async () => {
     const writer = new RecordingWriter();
     writer.conflictKind = "append-events";
     const { scheduler, lease } = fixture(writer);
-    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex" }), 1);
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
     await expect(submit(scheduler, lease, { kind: "event", events: [eventDraft()] }).completion).resolves.toEqual({
       kind: "reply",
       result: { kind: "rejected", reason: "writer-conflict" },
@@ -197,7 +239,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
       if (operation.mutation.kind === "append-events") throw new Error("database unavailable");
     };
     const { scheduler, worker, lost, lease } = fixture(writer);
-    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex" }), 1);
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
     await expect(submit(scheduler, lease, { kind: "event", events: [eventDraft()] }).completion)
       .resolves.toEqual({ kind: "worker-lost" });
     expect(lost).toEqual([[EXECUTION]]);

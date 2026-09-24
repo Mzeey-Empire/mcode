@@ -2,6 +2,10 @@ import type { TurnOutcome } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 
 import type {
+  DataOnlyParentTurnFinishInput,
+  DataOnlyParentTurnStartInput,
+} from "../canonical/canonical-parent-turn-write.js";
+import type {
   ExecutionIdentity,
   ExecutionLease,
   ExecutionWorkerReply,
@@ -11,13 +15,13 @@ import type { ExecutionMailboxCommand } from "./execution-mailbox-scheduler.js";
 
 /** Data that an execution worker may receive without a server dependency container. */
 export type ExecutionWorkCommand =
-  | { readonly kind: "start"; readonly providerId: string }
+  | { readonly kind: "start"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput }
   | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
   | { readonly kind: "event"; readonly events: readonly ProviderEventDraft[] }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
   | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
   | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
-  | { readonly kind: "finalize"; readonly outcome: TurnOutcome }
+  | { readonly kind: "finalize"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput }
   | { readonly kind: "release" };
 
 /** One complete semantic mutation. The single writer decides its SQL transaction. */
@@ -27,13 +31,14 @@ export interface ExecutionSemanticOperation {
   readonly lease: ExecutionLease;
   readonly ordinal: number;
   readonly mutation:
-    | { readonly kind: "begin"; readonly providerId: string; readonly checkpointId?: string }
+    | { readonly kind: "begin"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput }
+    | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
     | { readonly kind: "append-events"; readonly events: readonly ProviderEventDraft[] }
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
     | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
     | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
-    | { readonly kind: "finish"; readonly outcome: TurnOutcome };
+    | { readonly kind: "finish"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput };
 }
 
 /** A writer reply is valid only after the semantic operation commits durably. */
@@ -61,6 +66,7 @@ type WorkerCommand = ExecutionMailboxCommand<ExecutionWorkCommand>;
 interface ExecutionState {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
+  readonly providerId: string;
   nextOrdinal: number;
   phase: "running" | "stopping" | "finalized";
   durableRevision: number;
@@ -126,11 +132,12 @@ export class ExecutionWorkerHandler {
     if (request.ordinal !== 1) return { kind: "rejected", reason: "out-of-order" };
     const command = request.command;
     if (command.kind !== "start" && command.kind !== "resume") return { kind: "rejected", reason: "invalid-transition" };
-    const mutation: ExecutionSemanticOperation["mutation"] = {
-      kind: "begin",
-      providerId: command.providerId,
-      ...(command.kind === "resume" ? { checkpointId: command.checkpointId } : {}),
-    };
+    if (command.kind === "start" && !validStartInput(command, request.execution)) {
+      return { kind: "rejected", reason: "invalid-transition" };
+    }
+    const mutation: ExecutionSemanticOperation["mutation"] = command.kind === "start"
+      ? { kind: "begin", providerId: command.providerId, input: command.input }
+      : { kind: "resume", providerId: command.providerId, checkpointId: command.checkpointId };
     const receipt = await this.writer.transact(operationFor(request, mutation));
     if (!isDurableReceipt(receipt, request, 0)) {
       return { kind: "rejected", reason: "writer-conflict" };
@@ -138,6 +145,7 @@ export class ExecutionWorkerHandler {
     this.states.set(request.execution.threadId, {
       execution: request.execution,
       lease: request.lease,
+      providerId: command.providerId,
       nextOrdinal: 2,
       phase: "running",
       durableRevision: receipt.durableRevision,
@@ -169,7 +177,7 @@ function mutationFor(
     case "provider-outcome":
       return { kind: "provider-outcome", outcome: command.outcome };
     case "finalize":
-      return { kind: "finish", outcome: command.outcome };
+      return finishMutation(command, request.execution, state.providerId);
     case "start":
     case "resume":
     case "release":
@@ -199,6 +207,15 @@ function stopMutation(
   return { kind: "stop-requested", requestId: command.requestId, lastAdmittedOrdinal: request.stopWatermark };
 }
 
+function finishMutation(
+  command: Extract<WorkerCommand, { kind: "finalize" }>,
+  execution: ExecutionIdentity,
+  providerId: string,
+): ExecutionSemanticOperation["mutation"] | undefined {
+  if (!validFinishInput(command, execution, providerId)) return undefined;
+  return { kind: "finish", outcome: command.outcome, input: command.input };
+}
+
 function commandRejection(
   request: ExecutionWorkerRequest<WorkerCommand>,
   state: ExecutionState,
@@ -219,6 +236,28 @@ function invalidReason(request: ExecutionWorkerRequest<WorkerCommand>): Extract<
 function validEventRouting(events: readonly ProviderEventDraft[], execution: ExecutionIdentity): boolean {
   return events.length > 0 && events.every((event) => event.routing.threadId === execution.threadId
     && event.routing.turnId === execution.turnId && event.routing.executionId === execution.executionId);
+}
+
+function validStartInput(
+  command: Extract<ExecutionWorkCommand, { kind: "start" }>,
+  execution: ExecutionIdentity,
+): boolean {
+  return command.providerId === command.input.thread.providerId
+    && command.input.thread.id === execution.threadId
+    && command.input.turnId === execution.turnId
+    && command.input.executionId === execution.executionId;
+}
+
+function validFinishInput(
+  command: Extract<ExecutionWorkCommand, { kind: "finalize" }>,
+  execution: ExecutionIdentity,
+  providerId: string,
+): boolean {
+  return command.outcome === command.input.outcome
+    && command.input.providerId === providerId
+    && command.input.threadId === execution.threadId
+    && command.input.turnId === execution.turnId
+    && command.input.executionId === execution.executionId;
 }
 
 function operationFor(

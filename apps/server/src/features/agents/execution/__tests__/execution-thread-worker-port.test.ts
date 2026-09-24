@@ -1,6 +1,10 @@
 import type { ProviderEventDraft } from "@mcode/providers";
 import { describe, expect, it } from "vitest";
 
+import type {
+  DataOnlyParentTurnFinishInput,
+  DataOnlyParentTurnStartInput,
+} from "../../canonical/canonical-parent-turn-write.js";
 import { ExecutionMailboxScheduler, type ExecutionMailboxLimits } from "../execution-mailbox-scheduler.js";
 import type { ExecutionIdentity, ExecutionLease } from "../execution-mailbox-protocol.js";
 import { ExecutionThreadWorkerPort } from "../execution-worker-port.js";
@@ -16,6 +20,25 @@ const EXECUTION: ExecutionIdentity = {
   threadId: "real-worker-thread",
   turnId: "real-worker-turn",
   executionId: "00000000-0000-4000-8000-000000000002",
+};
+
+const START_INPUT: DataOnlyParentTurnStartInput = {
+  thread: { id: EXECUTION.threadId, workspaceId: "fixture-workspace", providerId: "codex", createdAt: "2026-09-24T12:00:00.000Z" },
+  turnId: EXECUTION.turnId,
+  executionId: EXECUTION.executionId,
+  permissionMode: "full",
+  providerIdentities: [],
+  userMessage: { kind: "create", content: "Test", sequence: 1 },
+};
+
+const FINISH_INPUT: DataOnlyParentTurnFinishInput = {
+  threadId: EXECUTION.threadId,
+  turnId: EXECUTION.turnId,
+  executionId: EXECUTION.executionId,
+  providerId: "codex",
+  providerIdentities: [],
+  outcome: "cancelled",
+  projection: { message: null, narrative: [] },
 };
 
 const LIMITS: ExecutionMailboxLimits = {
@@ -92,7 +115,7 @@ describe("ExecutionThreadWorkerPort", () => {
     const writer = new AcknowledgingWriter();
     const { scheduler, port, lease } = fixture(writer);
     try {
-      await expect(submit(scheduler, lease, { kind: "start", providerId: "codex" }))
+      await expect(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 1 } });
       await expect(port.whenReady()).resolves.toBe(true);
       await expect(submit(scheduler, lease, { kind: "event", events: [eventDraft()] }))
@@ -101,7 +124,7 @@ describe("ExecutionThreadWorkerPort", () => {
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 3 } });
       await expect(submit(scheduler, lease, { kind: "checkpoint", phase: "stopping", nativeCursor: null }))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 4 } });
-      await expect(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled" }))
+      await expect(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled", input: FINISH_INPUT }))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 5 } });
       await expect(submit(scheduler, lease, { kind: "release" }))
         .resolves.toEqual({ kind: "reply", result: { kind: "released" } });
@@ -121,7 +144,7 @@ describe("ExecutionThreadWorkerPort", () => {
     const { scheduler, port, lost, lease } = fixture(new AcknowledgingWriter(), exitWorkerUrl);
     try {
       await expect(port.whenReady()).resolves.toBe(true);
-      await expect(submit(scheduler, lease, { kind: "start", providerId: "codex" }))
+      await expect(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }))
         .resolves.toEqual({ kind: "worker-lost" });
       expect(lost).toEqual([[EXECUTION]]);
       expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 0 });
