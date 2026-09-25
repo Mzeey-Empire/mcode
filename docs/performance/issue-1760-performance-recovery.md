@@ -175,9 +175,10 @@ persisted messages. Only the two recorded task IDs were deleted during cleanup.
 
 Five warm model-picker opens took 62.8 to 100.8 ms, with a median of 76.3 ms.
 Five task switches took 372.7 to 608.2 ms, with a median of 416.0 ms. A terminal
-reached its fixture PowerShell prompt in 1189 ms. A command printed its marker
-in 126 ms. These are current-build observations, not a matched desktop speed
-comparison.
+reached its fixture PowerShell prompt in 1189 ms. PowerShell printed the expected
+command marker. Command output timing is excluded because an earlier identical
+marker was already present. These are current-build observations, not a matched
+desktop speed comparison.
 
 The first Stop measurement took 4775 ms from the Playwright action call to the
 "Stopping" state. It includes actionability waiting and did not measure final
