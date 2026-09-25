@@ -1,3 +1,4 @@
+import * as NodePerfHooks from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
 import { eventApplyType, ServerWorkTrace, type ServerWorkTraceReport } from "../server-work-trace.js";
 
@@ -5,7 +6,8 @@ describe("ServerWorkTrace", () => {
   it("attributes aggregate work in a stalled tick and bounds content-free output", () => {
     const reports: ServerWorkTraceReport[] = [];
     const trace = new ServerWorkTrace((report) => reports.push(report));
-    trace.tick(1_000);
+    const started = NodePerfHooks.performance.now();
+    trace.tick(started + 20);
     for (let index = 0; index < 40; index += 1) {
       trace.record("event-apply", "thread-a", "execution-a", 12, "textDelta");
     }
@@ -19,7 +21,7 @@ describe("ServerWorkTrace", () => {
     trace.record("narrative-prepare", "thread-overflow", "execution-d", 4);
     trace.record("narrative-persist", "thread-overflow", "execution-d", 2);
     trace.record("narrative-confirm", "thread-overflow", "execution-d", 1);
-    trace.tick(1_240);
+    trace.tick(started + 260);
 
     expect(reports).toHaveLength(1);
     const report = reports[0];
@@ -48,14 +50,15 @@ describe("ServerWorkTrace", () => {
     expect(report.samples[2]).toMatchObject({ threadId: null, executionId: null });
     expect(JSON.stringify(report)).not.toMatch(/prompt|toolInput|output|secret/);
 
-    trace.tick(1_260);
+    trace.tick(started + 280);
     expect(reports).toHaveLength(1);
   });
 
   it("classifies only the fixed event type across threads", () => {
     const reports: ServerWorkTraceReport[] = [];
     const trace = new ServerWorkTrace((report) => reports.push(report));
-    trace.tick(1_000);
+    const started = NodePerfHooks.performance.now();
+    trace.tick(started + 20);
     const types = ["textDelta", "toolUse", "toolResult", "assistantMessageBoundary", "unrecognized"];
     types.forEach((type, index) => {
       trace.record("event-apply", `thread-${index}`, "execution-a", index + 1, eventApplyType(type));
@@ -64,7 +67,7 @@ describe("ServerWorkTrace", () => {
       trace.record("narrative-persist", `thread-${index}`, "execution-a", 1);
       trace.record("narrative-confirm", `thread-${index}`, "execution-a", 1);
     });
-    trace.tick(1_200);
+    trace.tick(started + 220);
     const report = reports[0];
     expect(report?.kind).toBe("server-work-stall");
     if (report?.kind !== "server-work-stall") return;

@@ -1,4 +1,5 @@
 import * as NodePerfHooks from "node:perf_hooks";
+import * as NodeWorkerThreads from "node:worker_threads";
 import { logger } from "@mcode/shared";
 
 /** Fixed names keep trace output free of event bodies and provider text. */
@@ -194,8 +195,8 @@ export class ServerWorkTrace {
   }
 }
 
-/** Null unless explicitly enabled before server startup. */
-export const serverWorkTrace = process.env.MCODE_SERVER_WORK_TRACE === "1"
+/** Trace only the server loop; writer-worker delays are not server stalls. */
+export const serverWorkTrace = NodeWorkerThreads.isMainThread && process.env.MCODE_SERVER_WORK_TRACE === "1"
   ? new ServerWorkTrace((report) => logger.warn("Server work trace", report))
   : null;
 
