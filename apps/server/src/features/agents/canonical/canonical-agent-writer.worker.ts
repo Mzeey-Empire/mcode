@@ -5,6 +5,8 @@ import * as NodePath from "node:path";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
+import { isGroupableAppend, selectAppendGroup, type QueuedCanonicalWrite } from "./canonical-append-group.js";
+import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
 import { CanonicalAgentWriterReceipts, CanonicalWriterOperationConflict, CanonicalWriterReceiptCapacity } from "./canonical-agent-writer-receipts.js";
 import type {
@@ -36,13 +38,7 @@ function openDatabase(dbPath: string): void {
     semanticWriter = new CanonicalExecutionSemanticWriter(connection, (events) => {
       const correlation = semanticPublication;
       if (!correlation) throw new Error("Semantic publication has no active request");
-      for (let offset = 0; offset < events.length; offset += SEMANTIC_PUBLICATION_PAGE_SIZE) {
-        globalThis.postMessage({
-          ...correlation,
-          kind: "semantic-publication",
-          events: events.slice(offset, offset + SEMANTIC_PUBLICATION_PAGE_SIZE),
-        } satisfies CanonicalWriterResponse);
-      }
+      publishSemantic(correlation, events);
     });
     db = connection;
   } catch (error) {
@@ -155,6 +151,16 @@ async function handleSemanticWrite(
   }
 }
 
+function publishSemantic(
+  correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
+  events: Parameters<CanonicalAgentEventPublisher>[0],
+): void {
+  for (let offset = 0; offset < events.length; offset += SEMANTIC_PUBLICATION_PAGE_SIZE) {
+    globalThis.postMessage({ ...correlation, kind: "semantic-publication",
+      events: events.slice(offset, offset + SEMANTIC_PUBLICATION_PAGE_SIZE) } satisfies CanonicalWriterResponse);
+  }
+}
+
 async function withSQLiteBusyRetry<T>(work: () => Promise<T> | T): Promise<T> {
   const delaysMs = [10, 30, 90, 270, 500];
   for (const delayMs of delaysMs) {
@@ -223,23 +229,78 @@ function applyWrite(
   };
 }
 
-let requestTail = Promise.resolve();
+const requestQueue: QueuedCanonicalWrite[] = [];
+let draining = false;
+
+function failRequest(request: CanonicalWriterRequest): void {
+  globalThis.postMessage({ requestId: request.requestId, operationId: request.operationId,
+    executionId: request.executionId, kind: "failed", reason: "write-failed" } satisfies CanonicalWriterResponse);
+}
+
+async function handleAppendGroup(requests: Extract<CanonicalWriterRequest, { kind: "semantic-transact" }>[]): Promise<number> {
+  const first = requests[0];
+  if (!first) return 0;
+  let results: ReturnType<CanonicalExecutionSemanticWriter["transactAppendGroup"]>;
+  try {
+    const writer = semanticWriter;
+    if (!writer || semanticPublication) throw new Error("Semantic writer is not ready");
+    results = await withSQLiteBusyRetry(
+      () => writer.transactAppendGroup(requests.map((request) => request.operation)));
+  } catch {
+    // A rolled-back peer must not inherit another execution's write failure.
+    // Replaying semantic operations is safe because their durable receipts fence duplicates.
+    for (const request of requests) await handleSingleRequest(request);
+    return requests.length;
+  }
+  for (const [index, result] of results.entries()) {
+    const request = requests[index];
+    if (!request) throw new Error("Semantic append group lost its request");
+    const correlation = { requestId: request.requestId, operationId: request.operationId, executionId: request.executionId };
+    for (const events of result.publications) publishSemantic(correlation, events);
+    globalThis.postMessage({ ...correlation, kind: "semantic-transacted", receipt: result.receipt } satisfies CanonicalWriterResponse);
+  }
+  return results.length;
+}
+
+async function handleSingleRequest(request: CanonicalWriterRequest): Promise<void> {
+  const response = await handle(request);
+  globalThis.postMessage(response);
+}
+
+async function drainRequests(): Promise<void> {
+  const queued = requestQueue[0];
+  if (!queued) { draining = false; return; }
+  const request = queued.request;
+  let consumed = 1;
+  try {
+    const group = selectAppendGroup(requestQueue);
+    if (group.length > 1) consumed = await handleAppendGroup(group);
+    else await handleSingleRequest(request);
+  } catch (error) {
+    console.error("Canonical writer request failed unexpectedly", error);
+    failRequest(request);
+  } finally {
+    requestQueue.splice(0, consumed);
+    if (requestQueue.length > 0) setImmediate(() => { void drainRequests(); });
+    else draining = false;
+  }
+}
+
 globalThis.onmessage = (message: MessageEvent<CanonicalWriterRequest>): void => {
   const request = message.data;
-  requestTail = requestTail.then(async () => {
-    try {
-      globalThis.postMessage(await handle(request));
-    } catch (error) {
-      console.error("Canonical writer request failed unexpectedly", error);
-      globalThis.postMessage({
-        requestId: request.requestId,
-        operationId: request.operationId,
-        executionId: request.executionId,
-        kind: "failed",
-        reason: "write-failed",
-      } satisfies CanonicalWriterResponse);
-    }
-  });
+  try {
+    requestQueue.push({ request,
+      bytes: request.kind === "semantic-transact" && isGroupableAppend(request.operation)
+        ? Buffer.byteLength(JSON.stringify(request.operation), "utf8") : 0 });
+  } catch {
+    failRequest(request);
+    return;
+  }
+  if (!draining) {
+    draining = true;
+    // Collect already-ready messages without waiting for a group to fill.
+    setImmediate(() => { void drainRequests(); });
+  }
 };
 
 process.on("exit", () => db?.close(true));

@@ -34,6 +34,7 @@ import type {
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
 import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
 import { CanonicalCodexSystemErrorProjection, matchesCodexSystemIntents } from "./canonical-codex-system-error-projection.js";
@@ -237,11 +238,12 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private readonly updateCheckpoint: ReturnType<Database["prepare"]>;
   private bufferedPublication: Parameters<CanonicalAgentEventPublisher>[0][] | null = null;
   private bufferedPublicationCount = 0;
+  private groupedPublication: Parameters<CanonicalAgentEventPublisher>[0][] | null = null;
 
   constructor(private readonly db: Database, private readonly publish: CanonicalAgentEventPublisher) {
     this.turns = new CanonicalParentTurnWrite(db, (events) => {
       if (this.bufferedPublication) this.bufferPublication(events);
-      else this.publish(events);
+      else this.publishCommitted(events);
     });
     // Compound terminal batches publish from their durable sequence log only after the final receipt commits.
     this.compoundTurns = new CanonicalParentTurnWrite(db, () => {});
@@ -275,16 +277,12 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   /** Commit a supported operation with a durable receipt, or reject it without changing canonical state. */
   async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
+    if (operation.mutation.kind === "append-events") return this.transactAppend(operation);
     if (!validOperation(operation)) return conflict(operation);
     const hash = fingerprint(operation);
     const existing = this.existingReceipt(operation, hash);
     if (existing) {
-      if (existing.kind === "committed" && isFinishMutation(operation.mutation)) {
-        this.assistantText.retire(operation.execution.executionId);
-      }
-      if (existing.kind === "committed" && parentLiveOperation(operation)?.mutation.text.kind === "reclassify") {
-        this.assistantText.discardRecoveryJournal(operation.execution.executionId);
-      }
+      this.retireReplayedText(operation, existing);
       return existing;
     }
     try {
@@ -346,7 +344,6 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (isFinishMutation(operation.mutation)) return await this.finish(operation, hash);
     switch (operation.mutation.kind) {
       case "begin": return this.begin(operation, hash);
-      case "append-events": return this.append(operation, hash);
       case "checkpoint":
       case "stop-requested":
       case "provider-outcome": return this.control(operation, hash);
@@ -442,6 +439,56 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.assistantText.discardRecoveryJournal(operation.execution.executionId);
     }
     return receipt;
+  }
+
+  /** Commit a bounded prefix of independent appends, returning publications only after physical commit. */
+  transactAppendGroup(operations: readonly ExecutionSemanticOperation[]) {
+    if (this.groupedPublication || operations.length === 0 || operations.length > APPEND_GROUP_LIMITS.operations
+      || operations.some((operation) => !isGroupableAppend(operation))
+      || new Set(operations.map((operation) => operation.execution.executionId)).size !== operations.length) {
+      throw new Error("Invalid semantic append group");
+    }
+    try {
+      return this.db.transaction(() => {
+        const results: { operation: ExecutionSemanticOperation; receipt: ExecutionWriteReceipt;
+          publications: Parameters<CanonicalAgentEventPublisher>[0][] }[] = [];
+        const startedAt = performance.now();
+        for (const operation of operations) {
+          const publications: Parameters<CanonicalAgentEventPublisher>[0][] = [];
+          this.groupedPublication = publications;
+          const receipt = this.transactAppend(operation);
+          results.push({ operation, receipt, publications });
+          if (performance.now() - startedAt >= APPEND_GROUP_LIMITS.elapsedMs) break;
+        }
+        return results;
+      }).immediate();
+    } finally {
+      this.groupedPublication = null;
+    }
+  }
+
+  private transactAppend(operation: ExecutionSemanticOperation): ExecutionWriteReceipt {
+    if (!validOperation(operation)) return conflict(operation);
+    const hash = fingerprint(operation);
+    const existing = this.existingReceipt(operation, hash);
+    if (existing) {
+      this.retireReplayedText(operation, existing);
+      return existing;
+    }
+    try {
+      return this.append(operation, hash);
+    } catch (error) {
+      if (error instanceof SemanticConflict) return conflict(operation);
+      throw error;
+    }
+  }
+
+  private retireReplayedText(operation: ExecutionSemanticOperation, receipt: ExecutionWriteReceipt): void {
+    if (receipt.kind !== "committed") return;
+    if (isFinishMutation(operation.mutation)) this.assistantText.retire(operation.execution.executionId);
+    if (parentLiveOperation(operation)?.mutation.text.kind === "reclassify") {
+      this.assistantText.discardRecoveryJournal(operation.execution.executionId);
+    }
   }
 
   private appendParentLive(
@@ -1128,7 +1175,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const events = sequences.map((sequence) => typeof sequence === "number"
       ? this.loadPublishedEvent(executionId, sequence)
       : this.loadPublishedEvent(sequence.executionId, sequence.sequence));
-    this.publish(events);
+    this.publishCommitted(events);
     if (acknowledge) this.acknowledgePublication.run(ACKNOWLEDGED_PUBLICATION_KIND, executionId,
       chunk.operation_id, PUBLICATION_KIND, hash);
   }
@@ -1156,12 +1203,17 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     try {
       const result = write();
       this.bufferedPublication = null;
-      if (publishAfterCommit) for (const events of pending) this.publish(events);
+      if (publishAfterCommit) for (const events of pending) this.publishCommitted(events);
       return result;
     } finally {
       this.bufferedPublication = null;
       this.bufferedPublicationCount = 0;
     }
+  }
+
+  private publishCommitted(events: Parameters<CanonicalAgentEventPublisher>[0]): void {
+    if (this.groupedPublication) this.groupedPublication.push(events);
+    else this.publish(events);
   }
 }
 
