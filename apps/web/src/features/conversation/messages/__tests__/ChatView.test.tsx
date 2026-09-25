@@ -65,6 +65,17 @@ const {
         return () => chatViewDisplayLeaseListeners.delete(listener);
       }),
       getDisplayConversationSnapshot: vi.fn(() => chatViewDisplayLeaseIdsRef.current),
+      mountDisplayConversation: vi.fn((threadId: string) => {
+        if (!chatViewDisplayLeaseIdsRef.current.includes(threadId)) {
+          chatViewDisplayLeaseIdsRef.current = [...chatViewDisplayLeaseIdsRef.current, threadId];
+          for (const listener of chatViewDisplayLeaseListeners) listener();
+        }
+        return Promise.resolve();
+      }),
+      unmountDisplayConversation: vi.fn((threadId: string) => {
+        chatViewDisplayLeaseIdsRef.current = chatViewDisplayLeaseIdsRef.current.filter((id) => id !== threadId);
+        for (const listener of chatViewDisplayLeaseListeners) listener();
+      }),
     },
   };
 });
@@ -152,6 +163,7 @@ vi.mock("@/transport", () => ({
 
 vi.mock("@/features/conversation/residency/conversation-residency", () => ({
   getConversationResidency: () => chatViewResidencyMock,
+  tryGetConversationResidency: () => chatViewResidencyMock,
 }));
 
 // Composer and MessageList have deep dependencies; stub them out.
@@ -204,6 +216,7 @@ import {
   getThreadSwitchTelemetryCounters,
 } from "@/lib/thread-switch-telemetry";
 import { ChatView } from "../ChatView";
+import { KEPT_ALIVE_THREAD_COUNT } from "../chat-view/useChatViewState";
 
 /** Build a minimal Thread fixture. */
 function makeThread(overrides: Partial<Thread> = {}): Thread {
@@ -792,7 +805,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("conversation-transition-shell")).toHaveTextContent("Thread 2");
     expect(screen.getByTestId("conversation-transition-shell")).toHaveAttribute("data-thread-id", "thread-2");
     expect(screen.queryByTestId("conversation-loading")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("message-list")).not.toBeInTheDocument();
+    for (const el of screen.queryAllByTestId("message-list")) expect(el).not.toBeVisible();
   });
 
   it("keeps startup progress visible while the durable thread hydrates", () => {
@@ -907,7 +920,9 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     view.rerender(<ChatView />);
 
     expect(screen.getByTestId("chat-message-stage")).toBeInTheDocument();
-    expect(screen.getByTestId("message-list")).toBeInTheDocument();
+    const visible = screen.getAllByTestId("message-list").find((el) => el.style.display !== "none");
+    expect(visible).toBeDefined();
+    expect(visible).toHaveAttribute("data-display-thread-id", persisted.id);
     expect(screen.queryByTestId("thread-preparing-shell")).not.toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
     expect(chatViewTransportMock.getThreadStartup.mock.calls).toHaveLength(recoveryCallsBeforeAgentAdmission.get + 1);
@@ -1326,8 +1341,11 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     act(() => rerender(<ChatView />));
 
     expect(screen.getByTestId("chat-header-title")).toHaveTextContent("Thread 2");
-    expect(screen.getByTestId("message-list")).toHaveAttribute("data-display-thread-id", thread1.id);
-    expect(screen.getByTestId("message-list").parentElement).toHaveAttribute("inert");
+    const held = screen.getAllByTestId("message-list")
+      .find((el) => el.getAttribute("data-display-thread-id") === thread1.id);
+    expect(held).toBeDefined();
+    expect(held).toBeVisible();
+    expect(held!.closest("[inert]")).not.toBeNull();
     expect(screen.getByTestId("conversation-hold-overlay")).toHaveTextContent("Thread 2");
 
     const targetRecord = {
@@ -1342,7 +1360,9 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     act(() => rerender(<ChatView />));
 
     expect(screen.queryByTestId("conversation-hold-overlay")).not.toBeInTheDocument();
-    expect(screen.getByTestId("message-list")).not.toHaveAttribute("data-display-thread-id");
+    const visible = screen.getAllByTestId("message-list").find((el) => el.style.display !== "none");
+    expect(visible).toBeDefined();
+    expect(visible).toHaveAttribute("data-display-thread-id", thread2.id);
   });
 
   it("holds the outgoing transcript for an empty running target", () => {
@@ -1377,7 +1397,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     act(() => rerender(<ChatView />));
 
-    expect(screen.getByTestId("message-list")).toHaveAttribute("data-display-thread-id", thread1.id);
+    const held = screen.getAllByTestId("message-list")
+      .find((el) => el.getAttribute("data-display-thread-id") === thread1.id);
+    expect(held).toBeDefined();
+    expect(held).toBeVisible();
     expect(screen.getByTestId("conversation-hold-overlay")).toBeInTheDocument();
     expect(screen.queryByTestId("thread-preparing-shell")).not.toBeInTheDocument();
     expect(screen.queryByTestId("startup-progress")).not.toBeInTheDocument();
@@ -1425,7 +1448,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     act(() => rerender(<ChatView />));
 
     expect(screen.queryByTestId("conversation-hold-overlay")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("message-list")).not.toBeInTheDocument();
+    for (const el of screen.queryAllByTestId("message-list")) expect(el).not.toBeVisible();
     expect(screen.getByTestId("conversation-transition-shell")).toHaveAttribute("data-thread-id", thread3.id);
   });
 
@@ -1441,7 +1464,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     expect(screen.getByTestId("conversation-error")).toHaveTextContent("Conversation request failed");
     expect(screen.queryByTestId("conversation-loading")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("message-list")).not.toBeInTheDocument();
+    for (const el of screen.queryAllByTestId("message-list")) expect(el).not.toBeVisible();
   });
 
   it("keeps a live turn visible when hydration fails before any messages are resident", () => {
@@ -1533,31 +1556,32 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
   });
 
   it("retries a rejected thread unsubscription", async () => {
-    const thread1 = makeThread({ id: "thread-1", title: "Thread 1" });
-    const thread2 = makeThread({ id: "thread-2", title: "Thread 2" });
+    // Kept-alive transcripts stay subscribed through their display lease, so
+    // thread-1 must age out of the retained set before it unsubscribes.
+    const threads = Array.from({ length: KEPT_ALIVE_THREAD_COUNT + 1 }, (_, index) =>
+      makeThread({ id: `thread-${index + 1}`, title: `Thread ${index + 1}` }));
     setupWorkspaceMock(defaultWorkspaceState({
-      activeThreadId: thread1.id,
-      threads: [thread1, thread2],
+      activeThreadId: threads[0]!.id,
+      threads,
     }));
 
     const { rerender } = render(<ChatView />);
     await waitFor(() => {
-      expect(chatViewTransportMock.subscribeThread).toHaveBeenCalledWith(thread1.id);
+      expect(chatViewTransportMock.subscribeThread).toHaveBeenCalledWith(threads[0]!.id);
     });
 
     chatViewTransportMock.unsubscribeThread
       .mockRejectedValueOnce(new Error("temporary unsubscribe failure"))
       .mockResolvedValue(undefined);
-    setupWorkspaceMock(defaultWorkspaceState({
-      activeThreadId: thread2.id,
-      threads: [thread1, thread2],
-    }));
-    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread2.id });
-    rerender(<ChatView />);
+    for (const thread of threads.slice(1)) {
+      setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads }));
+      chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
+      act(() => rerender(<ChatView />));
+    }
 
     await waitFor(() => {
       expect(chatViewTransportMock.unsubscribeThread).toHaveBeenCalledTimes(2);
-      expect(chatViewTransportMock.unsubscribeThread).toHaveBeenLastCalledWith(thread1.id);
+      expect(chatViewTransportMock.unsubscribeThread).toHaveBeenLastCalledWith(threads[0]!.id);
     }, { timeout: 3000 });
   });
 
@@ -1826,17 +1850,12 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
 
+    // The outgoing transcript stays subscribed through its kept-alive lease.
     requests[0]?.resolve();
     await waitFor(() => {
-      expect(setThreadSubscriptions).toHaveBeenCalledTimes(2);
-      expect(requests[1]?.input).toEqual({
-        threadIds: ["thread-2"],
-        revisions: { "thread-2": { conversationRevision: 0, rosterRevision: 0 } },
-      });
+      for (const request of requests) request.resolve();
+      expect(serverThreadIds).toEqual(["thread-2", "thread-1"]);
     });
-
-    requests[1]?.resolve();
-    await waitFor(() => expect(serverThreadIds).toEqual(["thread-2"]));
   });
 
   it("clears a pending atomic set on unmount without retrying after it settles", async () => {

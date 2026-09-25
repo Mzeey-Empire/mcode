@@ -744,6 +744,7 @@ export class CursorProvider
       model: context.req.model,
       resume: context.resume,
       attachments: context.req.attachments,
+      mentions: context.req.mentions,
       turnId: context.req.turnId,
       turnExecutionId: context.req.turnExecutionId,
       deliveryAttempt: context.routing.deliveryAttempt,

@@ -7,6 +7,7 @@ import {
   $isSlashCommandNode,
 } from "@/components/chat/lexical/SlashCommandNode";
 import { extractComposerMessage } from "@/components/chat/lexical/cursor-utils";
+import { writeComposerContent } from "@/features/conversation/composer/draft/composer-editor-content";
 
 function createTestEditor() {
   return createEditor({
@@ -135,6 +136,64 @@ describe("SlashCommandNode", () => {
           nativeId: "C:/skills/impeccable/SKILL.md",
         },
         range: { start: 4, end: 15 },
+      }],
+    });
+  });
+
+  it("serializes a stored command path into the extracted mention", () => {
+    const editor = createTestEditor();
+    editor.update(
+      () => {
+        const paragraph = $createParagraphNode();
+        paragraph.append($createSlashCommandNode("deploy", "skill", {
+          providerId: "cursor",
+          kind: "skill",
+          nativeId: "deploy",
+        }, "C:/repo/.cursor/skills/deploy/SKILL.md"));
+        $getRoot().append(paragraph);
+      },
+      { discrete: true },
+    );
+
+    expect(extractComposerMessage(editor)).toEqual({
+      text: "/deploy",
+      mentions: [{
+        id: "command:skill:deploy",
+        kind: "command",
+        label: "deploy",
+        namespace: "skill",
+        capabilityIdentity: {
+          providerId: "cursor",
+          kind: "skill",
+          nativeId: "deploy",
+        },
+        path: "C:/repo/.cursor/skills/deploy/SKILL.md",
+        range: { start: 0, end: 7 },
+      }],
+    });
+  });
+
+  it("round-trips a command mention path through writeComposerContent", async () => {
+    const editor = createTestEditor();
+    writeComposerContent(editor, "/deploy now", [{
+      id: "command:skill:deploy",
+      kind: "command",
+      label: "deploy",
+      namespace: "skill",
+      path: "C:/repo/.cursor/skills/deploy/SKILL.md",
+      range: { start: 0, end: 7 },
+    }]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(extractComposerMessage(editor)).toEqual({
+      text: "/deploy now",
+      mentions: [{
+        id: "command:skill:deploy",
+        kind: "command",
+        label: "deploy",
+        namespace: "skill",
+        path: "C:/repo/.cursor/skills/deploy/SKILL.md",
+        range: { start: 0, end: 7 },
       }],
     });
   });

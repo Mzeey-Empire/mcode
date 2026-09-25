@@ -22,13 +22,7 @@ interface TranscriptNarrativeRowProps {
 export function VisibleNarrativeLoader({ threadId, messageId }: { threadId: string; messageId: string }) {
   const records = useThreadRecord(threadId, (record) => record.narrativeByMessage[messageId]);
   const load = useThreadStore((state) => state.loadNarrativeForMessage);
-  const retain = useThreadStore((state) => state.retainNarrativeForMessage);
-  const release = useThreadStore((state) => state.releaseNarrativeForMessage);
 
-  useEffect(() => {
-    retain(messageId, threadId);
-    return () => release(messageId, threadId);
-  }, [messageId, release, retain, threadId]);
   useEffect(() => {
     void load(messageId, threadId);
   }, [load, messageId, records, threadId]);

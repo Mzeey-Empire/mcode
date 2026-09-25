@@ -598,7 +598,7 @@ export function Composer({
       if (cmd.action) {
         removeSlashCommandTrigger(editorRef.current);
       } else if (!insertSelectedPluginMention(editorRef.current, cmd)) {
-        insertSlashCommandNode(editorRef.current, cmd.name, cmd.namespace, cmd.identity);
+        insertSlashCommandNode(editorRef.current, cmd.name, cmd.namespace, cmd.identity, cmd.path);
       }
     }
   }, [editorRef, slashCommand]);

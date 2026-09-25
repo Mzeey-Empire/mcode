@@ -8,7 +8,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import type { AttachmentMeta } from "@mcode/contracts";
+import type { AttachmentMeta, MessageMention } from "@mcode/contracts";
 import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
 
 /**
@@ -58,4 +58,29 @@ export function buildCursorPrompt(
   }
   lines.push(message);
   return lines.join("\n\n");
+}
+
+/**
+ * Rewrites selected slash-command mentions as `[/name](path)` markdown links so
+ * Cursor, which has no native skill-invocation channel, receives the backing
+ * file the command refers to. Mentions whose stored range no longer matches the
+ * `/label` text (stale draft state) are left verbatim.
+ */
+export function rewriteCursorCommandMentionsAsLinks(
+  message: string,
+  mentions: readonly MessageMention[] = [],
+): string {
+  let text = message;
+  const linked = mentions
+    .filter((mention): mention is Extract<MessageMention, { kind: "command" }> =>
+      mention.kind === "command" && mention.path !== undefined)
+    // Descending order keeps earlier mention ranges valid while splicing.
+    .sort((a, b) => b.range.start - a.range.start);
+  for (const mention of linked) {
+    const expected = `/${mention.label}`;
+    const { start, end } = mention.range;
+    if (start < 0 || end > text.length || text.slice(start, end) !== expected) continue;
+    text = `${text.slice(0, start)}[${expected}](${mention.path})${text.slice(end)}`;
+  }
+  return text;
 }
