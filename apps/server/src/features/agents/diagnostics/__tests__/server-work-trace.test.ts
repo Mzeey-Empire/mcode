@@ -27,7 +27,7 @@ describe("ServerWorkTrace", () => {
     const report = reports[0];
     expect(report?.kind).toBe("server-work-stall");
     if (report?.kind !== "server-work-stall") return;
-    expect(report.delayMs).toBe(220);
+    expect(report.delayMs).toBeCloseTo(220, 8);
     expect(report.samples).toHaveLength(64);
     expect(report.overflowCount).toBe(24);
     expect(report.eventApplyByType.textDelta).toEqual({ count: 40, totalMs: 480, maxMs: 12 });
