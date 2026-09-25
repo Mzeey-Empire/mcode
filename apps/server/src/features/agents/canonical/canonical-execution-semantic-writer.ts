@@ -29,6 +29,7 @@ import type {
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
+import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
 import { CanonicalCodexSystemErrorProjection, matchesCodexSystemIntents } from "./canonical-codex-system-error-projection.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
 import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput } from "./canonical-parent-turn-write.js";
@@ -52,6 +53,12 @@ const MAX_BUFFERED_PUBLICATION_EVENTS = 2_048;
 const MAX_LIVE_PUBLICATION_EVENTS = 64;
 const MAX_LIVE_PUBLICATION_BYTES = 256 * 1024;
 const MAX_LIVE_RECEIPT_BYTES = 512 * 1024;
+
+class RejectedCodexProjection extends Error {
+  constructor(readonly diagnostic: Extract<ProviderEventProjection, { status: "rejected" }>["diagnostic"]) {
+    super("Codex projection rejected");
+  }
+}
 const LIVE_RECOVERY_KINDS: ReadonlySet<ExecutionSemanticOperation["mutation"]["kind"]> = new Set([
   "append-assistant-text", "narrative-delta", "live-event",
 ]);
@@ -216,7 +223,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.bufferPublication(events);
     });
     this.canonical = codexBoundary;
-    this.providerProjector = new CanonicalCommittedProviderProjector(codexBoundary);
+    this.providerProjector = new CanonicalCommittedProviderProjector(codexBoundary, (project) => this.commitCodexProjection(project));
     this.contextCompaction = new CanonicalContextCompactionProjection(db);
     this.systemProjection = new CanonicalCodexSystemErrorProjection(db);
     this.tasks = new TaskRepo(db);
@@ -398,6 +405,27 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.storeReceipt(operation, hash, receipt);
       return receipt;
     })());
+  }
+
+  private commitCodexProjection(project: () => ProviderEventProjection): ProviderEventProjection {
+    const pending = this.bufferedPublication;
+    if (!pending) throw new Error("Codex projection requires a semantic transaction");
+    const pendingLength = pending.length;
+    const pendingCount = this.bufferedPublicationCount;
+    try {
+      return this.db.transaction(() => {
+        const result = project();
+        if (result.status === "rejected") throw new RejectedCodexProjection(result.diagnostic);
+        return result;
+      })();
+    } catch (error) {
+      pending.length = pendingLength;
+      this.bufferedPublicationCount = pendingCount;
+      if (!(error instanceof RejectedCodexProjection)) throw error;
+      // The adapter's diagnostic was part of the rejected savepoint.
+      this.canonical.recordCodexChildRoutingDiagnostic(error.diagnostic);
+      return { status: "rejected", diagnostic: error.diagnostic };
+    }
   }
 
   private appendAssistantText(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {

@@ -4,12 +4,16 @@ import { CodexCollaborationEventAdapter } from "../collaboration/adapters/codex-
 import type { CodexCollaborationDurability } from "../collaboration/codex-collaboration-durability.js";
 import type { ProjectedCommittedProviderEvent } from "../execution/execution-worker-handler.js";
 import { processProviderEventWorkerTask } from "../../providers/composition/provider-event-worker-protocol.js";
+import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
+
+/** Runs one Codex projection in a savepoint and retains only its complete effects. */
+export type CommitCodexProjection = (project: () => ProviderEventProjection) => ProviderEventProjection;
 
 /** Interprets committed runtime envelopes beside the SQLite connection that owns their effects. */
 export class CanonicalCommittedProviderProjector {
   private readonly codex: CodexCollaborationEventAdapter;
 
-  constructor(durability: CodexCollaborationDurability) {
+  constructor(durability: CodexCollaborationDurability, private readonly commitCodex: CommitCodexProjection) {
     this.codex = new CodexCollaborationEventAdapter(durability);
   }
 
@@ -24,7 +28,7 @@ export class CanonicalCommittedProviderProjector {
         throw new Error(`Committed provider envelope cannot be interpreted: ${envelope.eventId}`);
       }
       const interpretation = outcome.event.providerId === "codex"
-        ? this.codex.project(outcome.event)
+        ? this.commitCodex(() => this.codex.project(outcome.event))
         : { status: "forward" as const, event: outcome.event.event };
       if (interpretation.status !== "forward") continue;
       projected.push({

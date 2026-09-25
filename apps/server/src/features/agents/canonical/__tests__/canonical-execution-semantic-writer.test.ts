@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { AgentEventType, type AgentEvent } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent, type ProviderRuntimeExtension } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
@@ -67,7 +67,7 @@ function event() {
   };
 }
 
-function runtimeEvent(sequence: number, agentEvent: AgentEvent): Extract<
+function runtimeEvent(sequence: number, agentEvent: AgentEvent, extension?: ProviderRuntimeExtension): Extract<
   ExecutionSemanticOperation["mutation"], { kind: "append-events" }
 >["events"][number] {
   const itemId = `runtime-${sequence}`;
@@ -80,7 +80,9 @@ function runtimeEvent(sequence: number, agentEvent: AgentEvent): Extract<
     payload: { type: "item.recorded", item: {
       id: itemId, threadId: THREAD_ID, turnId: TURN_ID, kind: "system",
       providerIdentities: [],
-      payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: agentEvent } },
+      payload: { projection: "providerRuntimeEvent", runtimeEvent: {
+        event: agentEvent, ...(extension ? { extension } : {}),
+      } },
       createdAt: NOW, updatedAt: NOW,
     } },
   };
