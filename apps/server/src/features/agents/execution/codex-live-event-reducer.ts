@@ -1,6 +1,7 @@
 import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, StoredAttachment, TurnOutcome } from "@mcode/contracts";
 import { NarrativeTurnState, type NarrativeTurnStateEffect } from "../conversation/narrative/narrative-turn-state.js";
 import { AssistantExecutionState, type AssistantMaterializationInput } from "../turns/assistant-execution-state.js";
+import { NarrativeRecoveryDelta, type PreparedNarrativeRecoveryDelta } from "../turns/narrative-recovery-delta.js";
 import { PlanExecutionState, type PlanPersistenceReady } from "../planning/plan-execution-state.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 
@@ -75,8 +76,7 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "tool-result"; readonly event: ToolResultEvent }
   | { readonly kind: "hook-started"; readonly hookId: string; readonly late: boolean }
   | { readonly kind: "hook-completed"; readonly hookId: string; readonly late: boolean; readonly exitCode: number; readonly durationMs: number; readonly didBlock: boolean }
-  | { readonly kind: "narrative-recovery"; readonly items: ParentNarrativeRecoveryItem[] }
-  | { readonly kind: "tool-recovery"; readonly item: Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }> | null }
+  | { readonly kind: "narrative-recovery"; readonly items: readonly ParentNarrativeRecoveryItem[]; readonly discardedItemIds: readonly string[] }
   | { readonly kind: "narrative-effect"; readonly effect: NarrativeTurnStateEffect }
   | { readonly kind: "feature-event"; readonly feature: "plan-text" | "assistant-message" | "task-tool" | "goal-refresh"; readonly event: AgentEvent }
   | { readonly kind: "plan-questions"; readonly questions: readonly PlanQuestion[] }
@@ -107,11 +107,13 @@ export type CodexLiveReduction =
  * Reduces one Codex execution's live AgentEvents without database or transport calls.
  * The caller must supply an exact turnExecutionId from provider turn binding;
  * session-level events without that proof belong to a separate owner.
- * The caller must discard this instance if its writer operation fails, because
+ * Preparation advances narrative checkpoints before the writer commits.
+ * The caller must discard this instance if preparation or its writer operation fails, because
  * the next event may only observe state whose preceding intents were committed.
  */
 export class CodexLiveEventReducer {
   private readonly narrative: NarrativeTurnState;
+  private readonly narrativeDelta = new NarrativeRecoveryDelta();
   private readonly assistant = new AssistantExecutionState();
   private phase: "awaiting-start" | "active" | "completed" | "ended" = "awaiting-start";
   private unknownText = "";
@@ -365,7 +367,7 @@ export class CodexLiveEventReducer {
     return [
       { kind: "tool-result", event },
       { kind: "feature-event", feature: "task-tool", event },
-      { kind: "tool-recovery", item: this.narrative.toolRecoveryItem(event.threadId, event.toolCallId) },
+      this.recoveryIntent(this.narrativeDelta.prepareToolUpdate(this.narrative.toolRecoveryItem(event.threadId, event.toolCallId))),
     ];
   }
 
@@ -460,7 +462,12 @@ export class CodexLiveEventReducer {
   }
 
   private recovery(): CodexLiveWriterIntent {
-    return { kind: "narrative-recovery", items: this.narrative.recoverySnapshot(this.execution.threadId) };
+    return this.recoveryIntent(this.narrativeDelta.prepare(this.narrative.recoverySnapshot(this.execution.threadId)));
+  }
+
+  private recoveryIntent(delta: PreparedNarrativeRecoveryDelta | null): CodexLiveWriterIntent {
+    delta?.acknowledge();
+    return { kind: "narrative-recovery", items: delta?.items ?? [], discardedItemIds: delta?.discardedItemIds ?? [] };
   }
 
   private unsupported(event: AgentEvent, reason: string): CodexLiveReduction {

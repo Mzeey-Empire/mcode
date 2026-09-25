@@ -1,7 +1,6 @@
 import type { DataOnlyParentTerminalProjectionInput } from "../canonical/canonical-parent-turn-write.js";
 import type { CodexSystemWriterIntent } from "../canonical/canonical-codex-system-error-projection.js";
 import { taskToolWriteIntents, type TaskToolCall } from "../tasks/task-tool-intent-reducer.js";
-import { NarrativeRecoveryDelta } from "../turns/narrative-recovery-delta.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";
 import type { ParentAssistantTextCheckpointInput } from "../turns/parent-assistant-text-checkpoint-service.js";
 import type { CodexLiveReduction, CodexLiveWriterIntent } from "./codex-live-event-reducer.js";
@@ -32,7 +31,6 @@ export interface PreparedCodexLiveEvent {
  */
 export class CodexLiveEventEffects {
   private sequence = 0;
-  private readonly narrative = new NarrativeRecoveryDelta();
   private readonly calls = new Map<string, TaskToolCall>();
   private assignedMessageId: string | undefined;
 
@@ -87,8 +85,7 @@ export class CodexLiveEventEffects {
   ): ParentLiveEffects {
     switch (intent.kind) {
       case "assistant-body": return this.messageEffects(intent, effects);
-      case "narrative-recovery":
-      case "tool-recovery": return this.narrativeEffects(intent, effects);
+      case "narrative-recovery": return this.narrativeEffects(intent, effects);
       case "feature-event": return this.featureEffects(intent, effects, runtime);
       case "plan-questions": return { ...effects, planQuestions: intent.questions };
       case "plan-output": return { ...effects, planOutput: intent.output };
@@ -109,13 +106,10 @@ export class CodexLiveEventEffects {
       content: intent.content, model: intent.model, attachments: intent.attachments } };
   }
 
-  private narrativeEffects(intent: Extract<CodexLiveWriterIntent, { kind: "narrative-recovery" | "tool-recovery" }>, effects: ParentLiveEffects): ParentLiveEffects {
-    const delta = intent.kind === "tool-recovery"
-      ? this.narrative.prepareToolUpdate(intent.item) : this.narrative.prepare(intent.items);
-    if (!delta) return effects;
-    delta.acknowledge();
+  private narrativeEffects(intent: Extract<CodexLiveWriterIntent, { kind: "narrative-recovery" }>, effects: ParentLiveEffects): ParentLiveEffects {
+    if (intent.items.length === 0 && intent.discardedItemIds.length === 0) return effects;
     return { ...effects, narrative: { executionId: this.execution.executionId,
-      items: delta.items, discardedItemIds: delta.discardedItemIds } };
+      items: intent.items, discardedItemIds: intent.discardedItemIds } };
   }
 
   private featureEffects(

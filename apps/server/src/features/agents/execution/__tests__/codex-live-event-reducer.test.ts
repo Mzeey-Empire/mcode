@@ -17,7 +17,52 @@ function boundByProvider(mapped: AgentEvent): AgentEvent {
   return { ...mapped, turnExecutionId: execution.executionId };
 }
 
+function reduceEvent(reducer: CodexLiveEventReducer, type: AgentEvent["type"], fields: Record<string, unknown> = {}) {
+  const reduction = reducer.reduce(event(type, fields));
+  if (reduction.kind !== "reduced") throw new Error(reduction.reason);
+  return reduction;
+}
+
 describe("CodexLiveEventReducer", () => {
+  it("returns only changed recovery items and retains the complete terminal snapshot", () => {
+    const reducer = new CodexLiveEventReducer(execution);
+    reduceEvent(reducer, "turnStarted");
+    reduceEvent(reducer, "toolUse", { toolCallId: "first", toolName: "Read", toolInput: { file_path: "one" } });
+    const second = reduceEvent(reducer, "toolUse", { toolCallId: "second", toolName: "Read", toolInput: { file_path: "two" } });
+    expect(second.writer).toContainEqual({ kind: "narrative-recovery", discardedItemIds: [],
+      items: [expect.objectContaining({ kind: "toolCall", record: expect.objectContaining({ id: "second" }) })] });
+    const result = reduceEvent(reducer, "toolResult", { toolCallId: "first", output: "contents", isError: false });
+    expect(result.writer).toContainEqual({ kind: "narrative-recovery", discardedItemIds: [],
+      items: [expect.objectContaining({ kind: "toolCall", record: expect.objectContaining({ id: "first", output_summary: "contents" }) })] });
+    const boundary = reduceEvent(reducer, "assistantMessageBoundary", { isFinalResponse: false });
+    expect(boundary.writer).toContainEqual({ kind: "narrative-recovery", items: [], discardedItemIds: [] });
+    const terminal = reduceEvent(reducer, "turnComplete", { reason: "stop", costUsd: 0, tokensIn: 0, tokensOut: 0 });
+    const projection = terminal.writer.find((intent) => intent.kind === "terminal-projection");
+    expect(projection?.narrative.map((item) => item.record.id)).toEqual(["first", "second"]);
+    const lateHook = reduceEvent(reducer, "hookStarted", { hookName: "stop", hookType: "stop" });
+    expect(lateHook.writer).toContainEqual({ kind: "narrative-recovery", discardedItemIds: [],
+      items: [expect.objectContaining({ kind: "hook" })] });
+  });
+
+  it("keeps recovery output independent of buffered state and emits discard-only deltas", () => {
+    const reducer = new CodexLiveEventReducer(execution);
+    reduceEvent(reducer, "turnStarted");
+    const thought = reduceEvent(reducer, "textDelta", { delta: "Answer", isFinalResponse: false });
+    const item = thought.writer.find((intent) => intent.kind === "narrative-recovery")?.items[0];
+    if (item?.kind !== "narrationSegment") throw new Error("Expected narration recovery");
+    const id = item.record.id;
+    item.record.text = "Mutated caller copy";
+    const extended = reduceEvent(reducer, "textDelta", { delta: " continues", isFinalResponse: false });
+    expect(extended.writer).toContainEqual({ kind: "narrative-recovery", discardedItemIds: [],
+      items: [expect.objectContaining({ record: expect.objectContaining({ id, text: "Answer continues" }) })] });
+    expect(item.record.text).toBe("Mutated caller copy");
+    const promoted = reduceEvent(reducer, "assistantMessageBoundary", { isFinalResponse: true });
+    expect(promoted.writer).toContainEqual({ kind: "narrative-recovery", items: [], discardedItemIds: [`narrationSegment:${id}`] });
+    expect(promoted.writer).toContainEqual({ kind: "assistant-text-promote", text: "Answer continues" });
+    const repeated = reduceEvent(reducer, "assistantMessageBoundary", { isFinalResponse: true });
+    expect(repeated.writer).toContainEqual({ kind: "narrative-recovery", items: [], discardedItemIds: [] });
+  });
+
   it("carries parsed plan questions as data on the completing text event", () => {
     const reducer = new CodexLiveEventReducer(execution, "questions");
     const question = { id: "q1", category: "AUTH", question: "Which login?", options: [

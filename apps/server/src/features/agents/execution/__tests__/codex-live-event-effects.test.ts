@@ -61,7 +61,9 @@ describe("CodexLiveEventEffects", () => {
     expect(id).toBeDefined();
     const promoted = prepare("assistantMessageBoundary", { isFinalResponse: true });
     expect(promoted.effects.text).toEqual({ kind: "promote", input: { ...execution, sequence: 1, text: "Answer" } });
+    expect(promoted.effects.narrative?.items).toEqual([]);
     expect(promoted.effects.narrative?.discardedItemIds).toEqual([`narrationSegment:${id}`]);
+    expect(prepare("assistantMessageBoundary", { isFinalResponse: true }).effects.narrative).toBeUndefined();
   });
 
   it("retains TaskCreate input until its result and keeps file intents separate", () => {
