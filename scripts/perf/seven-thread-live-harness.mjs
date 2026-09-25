@@ -1014,16 +1014,17 @@ class TerminalEventWaiter {
   }
 
   isComplete(thread) {
-    if (!this.stopOne || thread.ordinal !== STOP_ONE_ORDINAL) {
-      return thread.persistedAtMs !== null && thread.completedAtMs !== null;
-    }
     if (thread.persistedAtMs === null) return false;
+    if (!this.stopOne || thread.ordinal !== STOP_ONE_ORDINAL) return thread.completedAtMs !== null;
     if (thread.status === "paused" || thread.status === "cancelled") return true;
-    const stop = this.getStop();
-    return thread.status === "interrupted" && stop?.threadId === thread.id
-      && stop.status === "cancelled" && stop.snapshotPhase === "cancelled"
-      && typeof stop.turnExecutionId === "string";
+    return isInterruptedAfterStop(thread, this.getStop());
   }
+}
+
+function isInterruptedAfterStop(thread, stop) {
+  return thread.status === "interrupted" && stop?.threadId === thread.id
+    && stop.status === "cancelled" && stop.snapshotPhase === "cancelled"
+    && typeof stop.turnExecutionId === "string";
 }
 
 class TurnStartWaiter {
