@@ -142,7 +142,10 @@ export class MemoryPressureService {
     }
     if (!threadId && this.activeTurns.size > 0) return;
     this.stopActiveMemoryPolling();
-    if (this.pressure.level !== "normal") gc(true);
+    if (this.pressure.level !== "normal") {
+      // Completion callbacks still hold turn data until their stack unwinds.
+      setImmediate(() => { if (this.activeTurns.size === 0) gc(true); });
+    }
     this.setPressure({ level: "normal", source: this.pressure.source, usedBytes: 0, budgetBytes: 0, ratio: 0 });
     this.clearIdleTimers();
     if (this.isWindowBackground) {
