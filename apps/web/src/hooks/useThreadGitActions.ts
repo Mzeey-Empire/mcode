@@ -4,6 +4,7 @@ import { useHasCommitsAhead } from "@/hooks/useHasCommitsAhead";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { isPrable } from "@/lib/is-prable";
+import { resolveThreadDirPath } from "@/lib/worktree";
 import { openGitHubUrl } from "@/features/preview/navigation/open-url-in-preview";
 import type { Thread } from "@/transport";
 
@@ -88,7 +89,7 @@ function useThreadPrState(thread: Thread) {
 export function useThreadGitActions(thread: Thread) {
   const [createPrOpen, setCreatePrOpen] = useState(false);
   const { workspace, prable, pr, checks, openPrDetail } = useThreadPrState(thread);
-  const dirPath = thread.worktree_path ?? workspace?.path ?? null;
+  const dirPath = resolveThreadDirPath(thread, workspace?.path ?? null);
 
   // Whether the branch has commits ahead of base (disable Create PR when it doesn't).
   const hasCommitsAhead = useHasCommitsAhead(
