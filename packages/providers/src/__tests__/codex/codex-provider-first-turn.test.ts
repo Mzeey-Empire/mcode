@@ -81,7 +81,7 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
 
 import { BrowserAutomationSessionLease, CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import { AgentEventSchema, AgentEventType } from "@mcode/contracts";
-import type { ProviderRuntimeEvent, ProviderTurnDiffUpdate } from "@mcode/contracts";
+import type { ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate } from "@mcode/contracts";
 
 const schemaValidExecutionId = "00000000-0000-4000-8000-000000000001";
 
@@ -215,6 +215,63 @@ describe("CodexProvider first turn on new session", () => {
     ]);
     unsubscribe();
     provider.shutdown();
+  });
+
+  it("keeps repeated public item IDs on their native attempts and rejects old server callbacks", async () => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    const mutations: ProviderFileMutationStart[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.on("file_mutation_start", (event: ProviderFileMutationStart) => mutations.push(event));
+    sendTurnMock.mockResolvedValueOnce("native-attempt-1").mockResolvedValueOnce("native-attempt-2");
+    const request = {
+      turnId: "mcode-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 1,
+      sessionId, workspaceId: "workspace-test", threadId, message: "edit", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build" as const, providerOptions: {},
+      permissionMode: "supervised" as const, approvalReviewMode: "automatic" as const,
+    };
+    const notifyTool = (server: (typeof appServers)[number], turnId: string) => server.emit("notification", {
+      method: "item/started",
+      params: {
+        threadId: "sdk-thread-1", turnId,
+        item: { type: "fileChange", id: "same-native-item", changes: [{ path: "tracked.txt", kind: "edit" }] },
+      },
+    });
+    const notifyUnknownChild = (server: (typeof appServers)[number]) => server.emit("notification", {
+      method: "item/started",
+      params: {
+        threadId: "unknown-child",
+        item: { type: "fileChange", id: "unbound-child-edit", changes: [{ path: "child.txt", kind: "edit" }] },
+      },
+    });
+
+    await provider.sendTurn(request);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const firstServer = appServers[0]!;
+    notifyTool(firstServer, "native-attempt-1");
+    notifyUnknownChild(firstServer);
+    await provider.discardSession(sessionId);
+
+    await provider.sendTurn({ ...request, deliveryAttempt: 2, resumeFrom: undefined });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const retryServer = appServers[1]!;
+    notifyTool(firstServer, "native-attempt-1");
+    notifyUnknownChild(firstServer);
+    notifyTool(retryServer, "native-attempt-2");
+    notifyUnknownChild(retryServer);
+    retryServer.emit("notification", {
+      method: "turn/completed",
+      params: { threadId: "sdk-thread-1", turn: { id: "native-attempt-2", status: "completed", usage: {} } },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(events.filter((event) => event.event.type === AgentEventType.ToolUse
+      && event.event.toolCallId === "same-native-item").map((event) => event.deliveryAttempt)).toEqual([1, 2]);
+    expect(mutations.filter((event) => event.toolCallId === "unbound-child-edit")
+      .map((event) => event.deliveryAttempt)).toEqual([undefined, undefined]);
+    expect(events.find((event) => event.event.type === AgentEventType.Ended
+      && event.event.turnExecutionId === schemaValidExecutionId && event.deliveryAttempt === 2)).toBeDefined();
+    await provider.shutdown();
   });
 
   it("passes loopback browser MCP config and a child-only bearer token", async () => {
@@ -917,6 +974,7 @@ describe("CodexProvider first turn on new session", () => {
       expect(interruptRejected).toBe(true);
       expect(server.isAlive).toBe(false);
       expect(events).toContainEqual({
+        deliveryAttempt: 1,
         event: {
           type: AgentEventType.Ended,
           threadId,

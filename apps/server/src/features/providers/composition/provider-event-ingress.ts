@@ -83,6 +83,7 @@ export interface ProviderEventIngressEvent {
   providerId: ProviderId;
   sourceKind: ProviderEventSourceKind;
   event: AgentEvent;
+  deliveryAttempt?: number;
   runtimeExtension?: ProviderRuntimeEvent["extension"];
   canonicalReceipt?: CanonicalProviderEventReceipt;
 }

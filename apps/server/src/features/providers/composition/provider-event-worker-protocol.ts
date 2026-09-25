@@ -203,6 +203,7 @@ function runtimeIngressEvent(
     providerId,
     sourceKind,
     event: normalizeEvent(runtimeEvent.event),
+    ...(runtimeEvent.deliveryAttempt !== undefined ? { deliveryAttempt: runtimeEvent.deliveryAttempt } : {}),
     ...(runtimeEvent.extension ? { runtimeExtension: runtimeEvent.extension } : {}),
   };
 }

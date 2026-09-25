@@ -134,9 +134,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     const entry = await startSession(provider, "mcode-file-attempt", "file-attempt");
     const state = entry as PoolEntry & {
       turnExecutionIdsByNativeTurn: Map<string, string>;
+      turnDeliveryAttemptsByNativeTurn: Map<string, number>;
+      nativeExecutionConflictKeys: Set<string>;
       turnDiffRouting?: { turnId: string; turnExecutionId: string; deliveryAttempt: number };
     };
     state.turnExecutionIdsByNativeTurn.set("bound-native", "same-execution");
+    state.turnDeliveryAttemptsByNativeTurn.set("bound-native", 1);
     state.turnDiffRouting = { turnId: "test-turn", turnExecutionId: "same-execution", deliveryAttempt: 2 };
     const item = { type: "fileChange", id: "edit", changes: [{ path: "tracked.txt", kind: "edit" }] };
 
@@ -150,8 +153,12 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     expect(mutations[0]?.turnExecutionId).toBeUndefined();
     expect(mutations[0]?.deliveryAttempt).toBeUndefined();
     expect(mutations[1]).toMatchObject({
-      toolCallId: "edit-current", turnExecutionId: "same-execution", deliveryAttempt: 2,
+      toolCallId: "edit-current", turnExecutionId: "same-execution", deliveryAttempt: 1,
     });
+    state.nativeExecutionConflictKeys.add("bound-native");
+    entry.server.emit("notification", { method: "item/started",
+      params: { threadId: "early-child", turnId: "bound-native", item: { ...item, id: "edit-conflicted" } } });
+    expect(mutations[2]?.deliveryAttempt).toBeUndefined();
   });
 
   it("assigns the active execution to main tool and text events before turn/start binds", async () => {
@@ -493,6 +500,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       turnBindingPhase: "idle" | "awaiting" | "bound";
       currentNativeTurnId?: string;
       turnExecutionIdsByNativeTurn: Map<string, string>;
+      turnDeliveryAttemptsByNativeTurn: Map<string, number>;
+      turnDiffRouting?: { turnId: string; turnExecutionId: string; deliveryAttempt: number };
       childExecutionGenerations: Map<string, { executionId: string; generation: number }>;
       nativeThreadExecutionIds: Map<string, string>;
       pendingChildEvents: unknown[];
@@ -503,6 +512,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     state.turnBindingPhase = "bound";
     state.currentNativeTurnId = "main-native-turn";
     state.turnExecutionIdsByNativeTurn.set("main-native-turn", state.currentTurnExecutionId);
+    state.turnDeliveryAttemptsByNativeTurn.set("main-native-turn", 2);
+    state.turnDiffRouting = { turnId: "test-turn", turnExecutionId: state.currentTurnExecutionId, deliveryAttempt: 2 };
 
     entry.server.emit("notification", {
       method: "item/started",
@@ -578,6 +589,7 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       "child-two-layer-item",
     ]);
     expect(childEvents).toHaveLength(3);
+    expect(childEvents.every((runtimeEvent) => runtimeEvent.deliveryAttempt === undefined)).toBe(true);
     expect(childEvents.every((runtimeEvent) => (
       runtimeEvent.event.turnExecutionId
         === "exec-mcode-child-two-layer-replay"

@@ -329,6 +329,8 @@ interface CodexSessionState {
   pendingTurnStartNotification?: { nativeTurnId: string; executionId: string };
   /** Immutable Mcode execution identity keyed by native Codex turn id. */
   turnExecutionIdsByNativeTurn: Map<string, string>;
+  /** Immutable dispatch attempt keyed by the same authoritative native turn id. */
+  turnDeliveryAttemptsByNativeTurn: Map<string, number>;
   /** Current generation execution identity keyed by authoritative child thread id. */
   nativeThreadExecutionIds: Map<string, string>;
   /** Execution currently owning the active main turn, retained through drains. */
@@ -338,7 +340,7 @@ interface CodexSessionState {
   /** Bounded conflict fingerprints already logged for this session. */
   nativeExecutionConflictKeys: Set<string>;
   /** Current generation for each authoritative child thread linkage. */
-  childExecutionGenerations: Map<string, { executionId: string; generation: number }>;
+  childExecutionGenerations: Map<string, { executionId: string; generation: number; deliveryAttempt?: number }>;
   /** Monotonic child generation counter, bounded by the child map lifetime. */
   nextChildGeneration: number;
   /** Child threads already queried for authoritative model metadata this session. */
@@ -669,6 +671,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       threadControlEligible: boolean;
     }
   >();
+  /** Guards callbacks before pool registration and after a retry replaces the app-server. */
+  private activeCodexServers = new Map<string, CodexAppServer>();
   /** Browser scope staged only until a fresh main app-server process starts. */
   private pendingBrowserAccess = new Map<string, {
     stage: BrowserAutomationSessionLeaseStage;
@@ -1285,19 +1289,24 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
     const server = this.createCodexAppServer(context, mcodeInstructions, browserTokenEnvName);
     const mapper = this.createCodexEventMapper(threadId, context.sessionId);
+    this.activeCodexServers.set(context.sessionId, server);
+    try {
+      this.attachCodexServerEvents(context, server, mapper);
+      const internalMcpStartup = internalMcp ? observeCodexInternalMcpStartup(server) : undefined;
+      const internalMcpStartupOutcome = await this.startCodexAppServer(context, server, internalMcpStartup, browserTokenEnvName);
+      this.reportCodexInternalMcpSetupFailure(context, server, internalMcpStartupOutcome);
+      await this.verifyCodexInternalMcpSetup(context, server, internalMcpStartup, internalMcpStartupOutcome);
+      this.refreshUsageFromServer(server, threadId);
 
-    this.attachCodexServerEvents(context, server, mapper);
-    const internalMcpStartup = internalMcp ? observeCodexInternalMcpStartup(server) : undefined;
-    const internalMcpStartupOutcome = await this.startCodexAppServer(context, server, internalMcpStartup, browserTokenEnvName);
-    this.reportCodexInternalMcpSetupFailure(context, server, internalMcpStartupOutcome);
-    await this.verifyCodexInternalMcpSetup(context, server, internalMcpStartup, internalMcpStartupOutcome);
-    this.refreshUsageFromServer(server, threadId);
+      this.attachCodexThreadIdentity(context, server, mapper);
+      const state = this.createCodexSessionState(context, server, mapper);
+      this.scheduleStagedCodexTurn(context, server);
 
-    this.attachCodexThreadIdentity(context, server, mapper);
-    const state = this.createCodexSessionState(context, server, mapper);
-    this.scheduleStagedCodexTurn(context, server);
-
-    return { state, pids: [] };
+      return { state, pids: [] };
+    } catch (error) {
+      if (this.activeCodexServers.get(context.sessionId) === server) this.activeCodexServers.delete(context.sessionId);
+      throw error;
+    }
   }
 
   private async prepareCodexSpawn(args: SpawnArgs): Promise<CodexSpawnContext> {
@@ -1410,13 +1419,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const mapper = new CodexEventMapper(threadId, undefined, (event) => {
       const state = this.runtime.get(sessionId);
       const nativeTurnId = event.nativeTurnId;
-      const turnExecutionId = nativeTurnId && state?.mapper === mapper
-        && !state.nativeExecutionConflictKeys.has(nativeTurnId)
-        ? state.turnExecutionIdsByNativeTurn.get(nativeTurnId) : undefined;
-      const deliveryAttempt = turnExecutionId && state?.turnDiffRouting?.turnExecutionId === turnExecutionId
-        ? state.turnDiffRouting.deliveryAttempt : undefined;
+      const bound = state?.mapper === mapper ? this.nativeTurnAttempt(state, nativeTurnId) : undefined;
       this.emit("file_mutation_start", {
-        threadId: event.threadId, ...(deliveryAttempt ? { turnExecutionId, deliveryAttempt } : {}),
+        threadId: event.threadId,
+        ...(bound ? { turnExecutionId: bound.executionId, deliveryAttempt: bound.deliveryAttempt } : {}),
         toolCallId: event.toolCallId,
         toolName: event.toolName, toolInput: event.toolInput,
       } satisfies ProviderFileMutationStart);
@@ -1428,6 +1434,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private attachCodexServerEvents(context: CodexSpawnContext, server: CodexAppServer, mapper: CodexEventMapper): void {
     server.on("invalidNotification", () => {
+      if (this.activeCodexServers.get(context.sessionId) !== server) return;
       for (const event of mapper.mapNotification(undefined)) this.emitRuntimeEvent(event);
     });
     server.on("notification", (notification: CodexNotification) => this.handleCodexServerNotification(context, server, mapper, notification));
@@ -1450,12 +1457,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): void {
     const rawNotification = notification;
     const entry = this.runtime.get(context.sessionId);
+    if (!this.isActiveCodexServer(context.sessionId, server, mapper, entry)) return;
     const mainNotification = isMainThreadNotification(server, rawNotification.params);
     const nativeThreadId = nativeThreadIdFromParams(rawNotification.params);
     const nativeTurnId = nativeTurnIdFromParams(rawNotification.params);
-    const knownExecutionId = nativeTurnId ? entry?.turnExecutionIdsByNativeTurn.get(nativeTurnId) : undefined;
     // Reject old main-turn events before they can reset the shared mapper for a new dispatch.
-    if (mainNotification && knownExecutionId && knownExecutionId !== entry?.currentTurnExecutionId) return;
+    if (mainNotification && !this.isCurrentCodexMainTurn(entry, nativeTurnId)) return;
     this.handleCodexUsageNotification(rawNotification, server, context.threadId);
     const replayThreadId = this.bindCodexTurnStarted(entry, rawNotification.method, mainNotification, nativeThreadId, nativeTurnId);
     const events = this.mapCodexNotificationEvents(context.threadId, notification, mapper, rawNotification);
@@ -1466,7 +1473,24 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.deliverCodexNotificationEvents({ entry, sessionId: context.sessionId, mapper, mappedEvents: events, mainNotification, nativeThreadId, nativeTurnId, eventExecutionId: executionId, startupEventExecutionId: startupExecutionId });
     if (entry && replayThreadId) this.replayPendingChildEvents(entry, context.sessionId, replayThreadId);
     this.fetchCompletedChildMetadata(context.sessionId, context.threadId, server, mapper, rawNotification.method, nativeThreadId, executionId);
-    this.handleDiscoveredCodexChildren({ entry, sessionId: context.sessionId, threadId: context.threadId, server, mapper, notification: rawNotification, nativeThreadId, eventExecutionId: executionId });
+    this.handleDiscoveredCodexChildren({ entry, sessionId: context.sessionId, threadId: context.threadId, server, mapper, notification: rawNotification, nativeThreadId, nativeTurnId, eventExecutionId: executionId });
+  }
+
+  private isActiveCodexServer(sessionId: string, server: CodexAppServer, mapper: CodexEventMapper, entry: CodexSessionState | undefined): boolean {
+    return this.activeCodexServers.get(sessionId) === server
+      && (!entry || (entry.server === server && entry.mapper === mapper));
+  }
+
+  private isCurrentCodexMainTurn(entry: CodexSessionState | undefined, nativeTurnId: string | undefined): boolean {
+    if (!entry || !nativeTurnId) return true;
+    const knownExecutionId = entry.turnExecutionIdsByNativeTurn.get(nativeTurnId);
+    return (!knownExecutionId || knownExecutionId === entry.currentTurnExecutionId)
+      && this.matchesCurrentCodexAttempt(entry, nativeTurnId);
+  }
+
+  private matchesCurrentCodexAttempt(entry: CodexSessionState, nativeTurnId: string | undefined): boolean {
+    const nativeAttempt = this.nativeTurnAttempt(entry, nativeTurnId);
+    return !nativeAttempt || nativeAttempt.deliveryAttempt === entry.turnDiffRouting?.deliveryAttempt;
   }
 
   /** Subscribe to complete native turn diffs without routing their bytes through renderer events. */
@@ -1499,10 +1523,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     mapper: CodexEventMapper,
     error: string,
   ): void {
+    if (this.activeCodexServers.get(context.sessionId) !== server) return;
     logger.error("CodexAppServer fatal", { sessionId: context.sessionId, error, breadcrumb: server.lastTransportBreadcrumb });
-    const executionId = this.runtime.get(context.sessionId)?.activeParentTurnExecutionId ?? context.stagedExecutionId;
+    const entry = this.runtime.get(context.sessionId);
+    const executionId = entry?.activeParentTurnExecutionId ?? context.stagedExecutionId;
     for (const event of mapper.drainPendingAssistantBoundary(false)) {
-      this.emitRuntimeEvent(providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event));
+      const runtimeEvent = providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event);
+      this.emitRuntimeEvent(entry ? this.withCodexTurnAttempt(entry, runtimeEvent, executionId) : runtimeEvent);
     }
     this.emitTurnFailure(context.threadId, error, undefined, true, executionId);
     if (this.runtime.get(context.sessionId)?.server === server) {
@@ -1574,7 +1601,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private attachCodexThreadIdentity(context: CodexSpawnContext, server: CodexAppServer, mapper: CodexEventMapper): void {
-    server.on("threadIdChanged", (newThreadId: string) => this.recordCodexThreadIdentity(context, mapper, newThreadId));
+    server.on("threadIdChanged", (newThreadId: string) => {
+      if (this.activeCodexServers.get(context.sessionId) === server) this.recordCodexThreadIdentity(context, mapper, newThreadId);
+    });
     if (server.resumeFailed) {
       logger.warn("Codex session context lost; resume failed, started fresh thread", { sessionId: context.sessionId });
       this.emitRuntimeEvent(providerRuntimeEvent({ type: AgentEventType.System, threadId: context.threadId, subtype: "context_lost" } satisfies AgentEvent));
@@ -1593,7 +1622,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       sessionId: context.sessionId, threadId: context.threadId, cwd: context.cwd, server, mapper,
       nextTurnExecutionId: this.pendingSpawnTurns.get(context.sessionId)?.turnExecutionId,
       lastUsedAt: Date.now(), sandboxMode: context.sandbox, runTurnSeq: 0, pendingTurnId: null,
-      turnBindingPhase: "idle", turnStartResponsePending: false, turnExecutionIdsByNativeTurn: new Map(),
+      turnBindingPhase: "idle", turnStartResponsePending: false, turnExecutionIdsByNativeTurn: new Map(), turnDeliveryAttemptsByNativeTurn: new Map(),
       nativeThreadExecutionIds: new Map(), nativeExecutionConflictKeys: new Set(), childExecutionGenerations: new Map(), turnDiffRevision: 0,
       nextChildGeneration: 0, pendingChildEvents: [], deliveredChildEventKeys: new Set(),
       workspaceId: context.browserAccess?.workspaceId ?? "unknown-workspace",
@@ -1691,18 +1720,21 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     nativeTurnId: string | undefined,
   ): string | undefined {
     if (!state.activeParentTurnExecutionId) return undefined;
-    const executionId = nativeThreadId ? state.childExecutionGenerations.get(nativeThreadId)?.executionId : undefined;
+    const child = nativeThreadId ? state.childExecutionGenerations.get(nativeThreadId) : undefined;
+    const executionId = child?.executionId;
     const replayThreadId = nativeTurnId && executionId && nativeThreadId
-      ? this.bindChildNativeTurnStart(state, nativeThreadId, nativeTurnId, executionId)
+      ? this.bindChildNativeTurnStart(state, nativeThreadId, nativeTurnId, executionId, child.deliveryAttempt)
       : undefined;
     pruneExecutionMap(state.nativeThreadExecutionIds);
     pruneExecutionMap(state.turnExecutionIdsByNativeTurn);
+    this.pruneNativeTurnAttempts(state);
     return replayThreadId;
   }
 
-  private bindChildNativeTurnStart(state: CodexSessionState, nativeThreadId: string, nativeTurnId: string, executionId: string): string | undefined {
+  private bindChildNativeTurnStart(state: CodexSessionState, nativeThreadId: string, nativeTurnId: string, executionId: string, deliveryAttempt?: number): string | undefined {
     const assignment = assignNativeExecution(state.turnExecutionIdsByNativeTurn, nativeTurnId, executionId, state.nativeExecutionConflictKeys);
-    return assignment === "conflict" ? undefined : nativeThreadId;
+    return assignment === "conflict" || !this.rememberNativeTurnAttempt(state, nativeTurnId, executionId, deliveryAttempt)
+      ? undefined : nativeThreadId;
   }
 
   private mapCodexNotificationEvents(
@@ -1728,7 +1760,32 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): void {
     if (!state || !nativeThreadId || mainNotification || !mapper.hasReceiverThread(nativeThreadId) || !state.activeParentTurnExecutionId) return;
     state.nativeThreadExecutionIds.set(nativeThreadId, state.activeParentTurnExecutionId);
-    if (nativeTurnId && method === "turn/started") state.turnExecutionIdsByNativeTurn.set(nativeTurnId, state.activeParentTurnExecutionId);
+    if (nativeTurnId && method === "turn/started") {
+      const assignment = assignNativeExecution(state.turnExecutionIdsByNativeTurn, nativeTurnId, state.activeParentTurnExecutionId, state.nativeExecutionConflictKeys);
+      if (assignment !== "conflict") this.rememberNativeTurnAttempt(state, nativeTurnId, state.activeParentTurnExecutionId, state.childExecutionGenerations.get(nativeThreadId)?.deliveryAttempt);
+    }
+  }
+
+  private nativeTurnAttempt(state: CodexSessionState, nativeTurnId: string | undefined): { executionId: string; deliveryAttempt: number } | undefined {
+    if (!nativeTurnId || state.nativeExecutionConflictKeys.has(nativeTurnId)) return undefined;
+    const executionId = state.turnExecutionIdsByNativeTurn.get(nativeTurnId);
+    const deliveryAttempt = state.turnDeliveryAttemptsByNativeTurn.get(nativeTurnId);
+    return executionId && deliveryAttempt !== undefined ? { executionId, deliveryAttempt } : undefined;
+  }
+
+  private rememberNativeTurnAttempt(state: CodexSessionState, nativeTurnId: string, executionId: string, deliveryAttempt: number | undefined): boolean {
+    if (deliveryAttempt === undefined) return true;
+    if (state.turnExecutionIdsByNativeTurn.get(nativeTurnId) !== executionId) return false;
+    const existing = state.turnDeliveryAttemptsByNativeTurn.get(nativeTurnId);
+    if (existing !== undefined && existing !== deliveryAttempt) return false;
+    state.turnDeliveryAttemptsByNativeTurn.set(nativeTurnId, deliveryAttempt);
+    return true;
+  }
+
+  private pruneNativeTurnAttempts(state: CodexSessionState): void {
+    for (const nativeTurnId of state.turnDeliveryAttemptsByNativeTurn.keys()) {
+      if (!state.turnExecutionIdsByNativeTurn.has(nativeTurnId)) state.turnDeliveryAttemptsByNativeTurn.delete(nativeTurnId);
+    }
   }
 
   private codexNotificationExecutionId(
@@ -1781,13 +1838,28 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     args: Omit<Parameters<CodexProvider["deliverCodexNotificationEvents"]>[0], "mappedEvents">,
     event: ProviderRuntimeEvent,
   ): void {
-    const eventKey = childEventIdentity(event);
+    const boundEvent = this.withCodexDeliveryAttempt(args, event);
+    const eventKey = childEventIdentity(boundEvent);
     if (this.isDuplicateCodexChildEvent(args.entry, eventKey)) return;
-    if (this.shouldBufferCodexChildEvent(args, event)) {
-      if (args.entry && args.nativeThreadId) bufferPendingChildEvent(args.entry, event, args.nativeThreadId, args.nativeTurnId, eventKey);
+    if (this.shouldBufferCodexChildEvent(args, boundEvent)) {
+      if (args.entry && args.nativeThreadId) bufferPendingChildEvent(args.entry, boundEvent, args.nativeThreadId, args.nativeTurnId, eventKey);
       return;
     }
-    this.emitCodexNotificationEvent(args, event, eventKey);
+    this.emitCodexNotificationEvent(args, boundEvent, eventKey);
+  }
+
+  private withCodexDeliveryAttempt(
+    args: Omit<Parameters<CodexProvider["deliverCodexNotificationEvents"]>[0], "mappedEvents">,
+    event: ProviderRuntimeEvent,
+  ): ProviderRuntimeEvent {
+    if (!args.entry) return event;
+    // Replayed child events share the parent notification batch. Their own native turn is the only safe attempt source.
+    const nativeTurnId = event.extension?.child
+      ? event.extension.child.nativeTurnId
+      : args.nativeTurnId;
+    const bound = this.nativeTurnAttempt(args.entry, nativeTurnId);
+    if (!bound || (args.eventExecutionId && bound.executionId !== args.eventExecutionId)) return event;
+    return { ...event, deliveryAttempt: bound.deliveryAttempt };
   }
 
   private isDuplicateCodexChildEvent(state: CodexSessionState | undefined, eventKey: string | undefined): boolean {
@@ -1851,6 +1923,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     mapper: CodexEventMapper;
     notification: { method?: string; params?: Record<string, unknown> };
     nativeThreadId: string | undefined;
+    nativeTurnId: string | undefined;
     eventExecutionId: string | undefined;
   }): void {
     const childThreadId = nativeSubAgentThreadId(args.notification);
@@ -1864,22 +1937,27 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     args: Parameters<CodexProvider["handleDiscoveredCodexChildren"]>[0],
     childThreadId: string,
   ): void {
-    if (this.isCurrentCodexParentNotification(args)) this.registerCodexChildGeneration(args.entry as CodexSessionState, args.sessionId, childThreadId);
+    if (this.isCurrentCodexParentNotification(args)) this.registerCodexChildGeneration(args.entry as CodexSessionState, args.sessionId, childThreadId, args.nativeTurnId);
     this.fetchChildThreadMetadata(args.sessionId, args.threadId, args.server, args.mapper, childThreadId, args.eventExecutionId, true);
   }
 
   private isCurrentCodexParentNotification(args: Parameters<CodexProvider["handleDiscoveredCodexChildren"]>[0]): boolean {
     const executionId = args.entry?.currentTurnExecutionId;
     if (!args.entry || !executionId || args.eventExecutionId !== executionId) return false;
+    if (!this.matchesCurrentCodexAttempt(args.entry, args.nativeTurnId)) return false;
     if (args.server.threadId && args.nativeThreadId === args.server.threadId) return true;
     return Boolean(args.nativeThreadId && args.entry.nativeThreadExecutionIds.get(args.nativeThreadId) === executionId);
   }
 
-  private registerCodexChildGeneration(state: CodexSessionState, sessionId: string, childThreadId: string): void {
+  private registerCodexChildGeneration(state: CodexSessionState, sessionId: string, childThreadId: string, parentNativeTurnId: string | undefined): void {
     const executionId = state.currentTurnExecutionId;
     if (!executionId) return;
     state.nextChildGeneration += 1;
-    state.childExecutionGenerations.set(childThreadId, { executionId, generation: state.nextChildGeneration });
+    const parentAttempt = this.nativeTurnAttempt(state, parentNativeTurnId);
+    state.childExecutionGenerations.set(childThreadId, {
+      executionId, generation: state.nextChildGeneration,
+      ...(parentAttempt?.executionId === executionId ? { deliveryAttempt: parentAttempt.deliveryAttempt } : {}),
+    });
     pruneChildGenerationMap(state.childExecutionGenerations);
     state.nativeThreadExecutionIds.set(childThreadId, executionId);
     pruneExecutionMap(state.nativeThreadExecutionIds);
@@ -1917,9 +1995,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private matchesChildEventGeneration(
     item: PendingChildEvent,
-    childMapping: { executionId: string; generation: number },
+    childMapping: { executionId: string; generation: number; deliveryAttempt?: number },
     executionId: string,
   ): boolean {
+    if (item.event.deliveryAttempt !== undefined && childMapping.deliveryAttempt !== undefined
+      && item.event.deliveryAttempt !== childMapping.deliveryAttempt) return false;
     if (item.childGeneration !== undefined) return item.childGeneration === childMapping.generation;
     return !item.executionIdAtBuffer || item.executionIdAtBuffer === executionId;
   }
@@ -2016,9 +2096,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   async interrupt(state: CodexSessionState): Promise<void> {
     const turnExecutionId = executionForDrain(state);
     for (const event of state.mapper.drainPendingAssistantBoundary(false)) {
-      this.emitRuntimeEvent(providerRuntimeEvent(
-        turnExecutionId ? { ...event, turnExecutionId } : event,
-      ));
+      const runtimeEvent = providerRuntimeEvent(turnExecutionId ? { ...event, turnExecutionId } : event);
+      this.emitRuntimeEvent(this.withCodexTurnAttempt(state, runtimeEvent, turnExecutionId));
     }
     const nativeTurnId = state.currentNativeTurnId;
     if (nativeTurnId) {
@@ -2026,24 +2105,24 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
         await state.server.interruptTurnAndDrain(nativeTurnId);
       } catch (error) {
         if (turnExecutionId) {
-          this.emitRuntimeEvent(providerRuntimeEvent({
+          this.emitCodexTurnEvent(state, {
             type: AgentEventType.Ended,
             threadId: state.threadId,
             turnExecutionId,
             reason: "provider_lost",
-          } satisfies AgentEvent));
+          } satisfies AgentEvent, turnExecutionId);
         }
         throw error;
       }
     } else {
       await state.server.interruptTurn();
       if (turnExecutionId) {
-        this.emitRuntimeEvent(providerRuntimeEvent({
+        this.emitCodexTurnEvent(state, {
           type: AgentEventType.Ended,
           threadId: state.threadId,
           turnExecutionId,
           reason: "provider_lost",
-        } satisfies AgentEvent));
+        } satisfies AgentEvent, turnExecutionId);
       }
     }
     state.pendingTurnStartNotification = undefined;
@@ -2062,12 +2141,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * Drives shutdown, eviction, and stale-discard, but not turn cancellation.
    */
   async close(state: CodexSessionState): Promise<void> {
+    if (this.activeCodexServers.get(state.sessionId) === state.server) this.activeCodexServers.delete(state.sessionId);
     await this.host.threadControl.close(state.sessionId);
     const turnExecutionId = executionForDrain(state);
     for (const event of state.mapper.drainPendingAssistantBoundary(false)) {
-      this.emitRuntimeEvent(providerRuntimeEvent(
-        turnExecutionId ? { ...event, turnExecutionId } : event,
-      ));
+      const runtimeEvent = providerRuntimeEvent(turnExecutionId ? { ...event, turnExecutionId } : event);
+      this.emitRuntimeEvent(this.withCodexTurnAttempt(state, runtimeEvent, turnExecutionId));
     }
     this.liveSessionIds.delete(state.sessionId);
     state.pendingTurnStartNotification = undefined;
@@ -2321,11 +2400,17 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private emitCodexPendingAssistantBoundary(entry: CodexSessionState, turnExecutionId: string): void {
-    for (const event of entry.mapper.drainPendingAssistantBoundary(false)) this.emitCodexTurnEvent(event, turnExecutionId);
+    for (const event of entry.mapper.drainPendingAssistantBoundary(false)) this.emitCodexTurnEvent(entry, event, turnExecutionId);
   }
 
-  private emitCodexTurnEvent(event: AgentEvent, turnExecutionId: string): void {
-    this.emitRuntimeEvent(providerRuntimeEvent({ ...event, turnExecutionId }));
+  private emitCodexTurnEvent(entry: CodexSessionState, event: AgentEvent, turnExecutionId: string): void {
+    this.emitRuntimeEvent(this.withCodexTurnAttempt(entry, providerRuntimeEvent({ ...event, turnExecutionId }), turnExecutionId));
+  }
+
+  private withCodexTurnAttempt(entry: CodexSessionState, event: ProviderRuntimeEvent, turnExecutionId: string | undefined): ProviderRuntimeEvent {
+    const nativeAttempt = this.nativeTurnAttempt(entry, entry.currentNativeTurnId);
+    return nativeAttempt && nativeAttempt.executionId === turnExecutionId
+      ? { ...event, deliveryAttempt: nativeAttempt.deliveryAttempt } : event;
   }
 
   private async waitForCodexTurn(
@@ -2492,10 +2577,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
     const assignment = assignNativeExecution(entry.turnExecutionIdsByNativeTurn, turnId, turnExecutionId, entry.nativeExecutionConflictKeys);
     if (assignment === "conflict") throw new Error("Codex turn/start response reused native turn id");
+    const deliveryAttempt = entry.turnDiffRouting?.turnExecutionId === turnExecutionId
+      ? entry.turnDiffRouting.deliveryAttempt : undefined;
+    if (!this.rememberNativeTurnAttempt(entry, turnId, turnExecutionId, deliveryAttempt)) {
+      throw new Error("Codex turn/start response reused native turn id across dispatch attempts");
+    }
     entry.currentNativeTurnId = turnId;
     entry.pendingTurnId = turnId;
     entry.turnBindingPhase = "bound";
     pruneExecutionMap(entry.turnExecutionIdsByNativeTurn);
+    this.pruneNativeTurnAttempts(entry);
   }
 
   private handleCodexTurnWaitError(
@@ -2545,7 +2636,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): void {
     if (run.seq === run.entry.runTurnSeq) this.clearCodexTurnRunState(run.entry);
     if (!completion.serverDied && run.seq === run.entry.runTurnSeq) {
-      this.emitCodexTurnEvent(completion.deferredEnded ?? {
+      this.emitCodexTurnEvent(run.entry, completion.deferredEnded ?? {
         type: AgentEventType.Ended,
         threadId,
         turnExecutionId,
@@ -2789,6 +2880,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.pendingSpawnTurns.clear();
     this.pendingBrowserAccess.clear();
     this.liveSessionIds.clear();
+    this.activeCodexServers.clear();
     logger.info("CodexProvider shutdown complete");
   }
 }

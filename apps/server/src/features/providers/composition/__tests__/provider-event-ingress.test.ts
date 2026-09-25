@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { container, Lifecycle } from "tsyringe";
 import {
   AgentEventType,
+  ProviderRuntimeEventSchema,
   type CanonicalAgentEventEnvelope,
   type IAgentProvider,
   type ProviderId,
@@ -30,8 +31,9 @@ import type { CodexCollaborationDurability } from "../../../agents/collaboration
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 
-function runtimeEvent(delta: string, threadId = "thread-1"): ProviderRuntimeEvent {
+function runtimeEvent(delta: string, threadId = "thread-1", deliveryAttempt?: number): ProviderRuntimeEvent {
   return {
+    ...(deliveryAttempt === undefined ? {} : { deliveryAttempt }),
     event: {
       type: AgentEventType.TextDelta,
       threadId,
@@ -68,7 +70,7 @@ function oversizedToolResult(threadId: string): ProviderRuntimeEvent {
   };
 }
 
-function committedEnvelope(eventId: string, delta: string): CanonicalAgentEventEnvelope {
+function committedEnvelope(eventId: string, delta: string, deliveryAttempt?: number, sourceProviderId: ProviderId = "claude"): CanonicalAgentEventEnvelope {
   return {
     eventId,
     routing: {
@@ -77,7 +79,7 @@ function committedEnvelope(eventId: string, delta: string): CanonicalAgentEventE
       executionId: EXECUTION_ID,
       itemId: `item-${eventId}`,
     },
-    sourceProviderId: "claude",
+    sourceProviderId,
     sourceIdentities: [],
     acceptedSequence: 1,
     durableRevision: 1,
@@ -90,7 +92,7 @@ function committedEnvelope(eventId: string, delta: string): CanonicalAgentEventE
         turnId: "turn-1",
         kind: "system",
         providerIdentities: [],
-        payload: { projection: "providerRuntimeEvent", runtimeEvent: runtimeEvent(delta) },
+        payload: { projection: "providerRuntimeEvent", runtimeEvent: runtimeEvent(delta, "thread-1", deliveryAttempt) },
         createdAt: "2026-08-27T12:00:00.000Z",
         updatedAt: "2026-08-27T12:00:00.000Z",
       },
@@ -227,6 +229,20 @@ describe("ProviderEventIngress", () => {
       event: expect.objectContaining({ delta: "provider output" }),
     })]);
     expect(received[0]?.canonicalReceipt).toBeUndefined();
+  });
+
+  it("keeps private delivery attempt metadata through runtime and committed ingress", async () => {
+    const provider = createProvider("codex");
+    const { ingress, received } = createIngress([provider]);
+    const runtime = ProviderRuntimeEventSchema().parse(runtimeEvent("live", "thread-1", 2));
+
+    (provider as unknown as NodeEvents.EventEmitter).emit("event", structuredClone(runtime));
+    ingress.acceptCommitted([committedEnvelope("committed-attempt", "committed", 2, "codex")]);
+    await flushIngress();
+
+    expect(received.map((event) => event.deliveryAttempt)).toEqual([2, 2]);
+    expect(received.map((event) => event.event.type)).toEqual([AgentEventType.TextDelta, AgentEventType.TextDelta]);
+    expect(ProviderRuntimeEventSchema().safeParse({ ...runtime, deliveryAttempt: 0 }).success).toBe(false);
   });
 
   it("keeps direct canonical commits and runtime events in arrival order", async () => {

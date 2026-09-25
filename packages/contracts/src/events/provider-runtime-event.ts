@@ -63,6 +63,7 @@ export const ProviderRuntimeExtensionSchema = lazySchema(() => z
 export const ProviderRuntimeEventSchema = lazySchema(() =>
   z.object({
     event: AgentEventSchema(),
+    deliveryAttempt: z.number().int().positive().optional(),
     extension: ProviderRuntimeExtensionSchema().optional(),
   }).strict(),
 );
