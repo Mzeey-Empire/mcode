@@ -590,7 +590,7 @@ export async function buildServerRuntimeBundles({
     target: "node20",
     sourcemap: true,
     format: "cjs",
-  external: ["bun:sqlite", "node-pty", "electron", "koffi"],
+  external: ["bun", "bun:sqlite", "node-pty", "electron", "koffi"],
     banner: {
       js: 'var __importMetaUrl = require("url").pathToFileURL(__filename).href;',
     },

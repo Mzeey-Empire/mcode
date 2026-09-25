@@ -1,3 +1,4 @@
+import { gc } from "bun";
 import {
   ExecutionWorkerHandler,
   type ExecutionSemanticOperation,
@@ -70,7 +71,10 @@ function handleCommand(request: Extract<ExecutionWorkerInbound, { kind: "command
   commandActive = true;
   void handler.handle(request)
     .then((reply) => {
-      if (!closed) post({ kind: "command-reply", reply });
+      if (!closed) {
+        post({ kind: "command-reply", reply });
+        if (reply.result.kind === "released" && handler.isIdle) gc(true);
+      }
     })
     .catch((error: unknown) => {
       if (error instanceof ExecutionWriterRpcFailure) {

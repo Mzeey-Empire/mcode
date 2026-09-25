@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { gc } from "bun";
 import { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -265,6 +266,9 @@ async function handleAppendGroup(requests: Extract<CanonicalWriterRequest, { kin
 async function handleSingleRequest(request: CanonicalWriterRequest): Promise<void> {
   const response = await handle(request);
   globalThis.postMessage(response);
+  if (requestQueue.length === 1 && response.kind === "semantic-transacted" && response.receipt.kind === "committed"
+    && request.kind === "semantic-transact" && (request.operation.mutation.kind === "finish"
+      || request.operation.mutation.kind === "finish-live-event")) gc(true);
 }
 
 async function drainRequests(): Promise<void> {

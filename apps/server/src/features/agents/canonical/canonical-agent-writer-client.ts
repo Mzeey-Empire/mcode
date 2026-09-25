@@ -358,7 +358,8 @@ function defaultCreateWorker(): Worker {
   const workerFile = import.meta.url.endsWith(".cjs")
     ? "./canonical-agent-writer.worker.cjs"
     : "./canonical-agent-writer.worker.ts";
-  return new Worker(new URL(workerFile, import.meta.url), { type: "module" });
+  const workerOptions = { type: "module", smol: true } satisfies WorkerOptions & { smol: boolean };
+  return new Worker(new URL(workerFile, import.meta.url), workerOptions);
 }
 
 function acknowledgementKey(executionId: string, operationId: string): string {

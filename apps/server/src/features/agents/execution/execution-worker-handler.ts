@@ -211,6 +211,9 @@ export class ExecutionWorkerHandler {
 
   constructor(private readonly writer: ExecutionSemanticWriter, private readonly files = new ExecutionWorkerFileEvidence()) {}
 
+  /** Whether every execution assigned to this worker has released its state. */
+  get isIdle(): boolean { return this.states.size === 0; }
+
   /** Process one mailbox command and echo its exact execution and lease. */
   async handle(request: ExecutionWorkerRequest<WorkerCommand>): Promise<ExecutionWorkerReply<ExecutionWorkerResult>> {
     const result = await this.apply(request);

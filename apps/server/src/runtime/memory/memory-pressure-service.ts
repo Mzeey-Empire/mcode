@@ -7,6 +7,7 @@
  */
 
 import { injectable, inject } from "tsyringe";
+import { gc } from "bun";
 import type { Database } from "bun:sqlite";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../features/settings/settings-service.js";
@@ -141,6 +142,7 @@ export class MemoryPressureService {
     }
     if (!threadId && this.activeTurns.size > 0) return;
     this.stopActiveMemoryPolling();
+    if (this.pressure.level !== "normal") gc(true);
     this.setPressure({ level: "normal", source: this.pressure.source, usedBytes: 0, budgetBytes: 0, ratio: 0 });
     this.clearIdleTimers();
     if (this.isWindowBackground) {
@@ -249,6 +251,7 @@ export class MemoryPressureService {
       budgetBytes: snapshot.budgetBytes,
     });
     this.notifyPressureListeners(snapshot);
+    if (snapshot.level !== "normal") gc(false);
   }
 
   private notifyPressureListeners(snapshot: MemoryPressureSnapshot): void {
@@ -300,9 +303,7 @@ export class MemoryPressureService {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-    if (typeof global.gc === "function") {
-      global.gc();
-    }
+    gc(false);
     // These synchronous ops block the event loop; the duration ties stalls to
     // the health-probe failures they can cause.
     logger.info("Warm idle maintenance completed", {
@@ -326,9 +327,9 @@ export class MemoryPressureService {
       });
     }
     const now = Date.now();
-    if (typeof global.gc === "function" && now - this.lastFullGcAt > MIN_FULL_GC_INTERVAL_MS) {
+    if (now - this.lastFullGcAt > MIN_FULL_GC_INTERVAL_MS) {
       this.lastFullGcAt = now;
-      global.gc(true);
+      gc(true);
     }
     this.state = "background-idle";
     logger.info("Background idle maintenance completed", {

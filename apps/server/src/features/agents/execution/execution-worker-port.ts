@@ -54,7 +54,8 @@ export class ExecutionThreadWorkerPort implements ExecutionWorkerPort<Command, E
     workerUrl: URL = defaultWorkerUrl(),
   ) {
     this.readyPromise = new Promise((resolve) => { this.resolveReady = resolve; });
-    this.worker = new Worker(workerUrl, { type: "module" });
+    const workerOptions = { type: "module", smol: true } satisfies WorkerOptions & { smol: boolean };
+    this.worker = new Worker(workerUrl, workerOptions);
     this.worker.onmessage = (event: MessageEvent<ExecutionWorkerOutbound>) => this.receive(event.data);
     this.worker.onerror = (event) => this.fail(event);
     this.worker.onmessageerror = () => this.fail(new ErrorEvent("error"));
