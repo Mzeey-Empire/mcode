@@ -1,6 +1,7 @@
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 import type { ExecutionMailboxOwner } from "./execution-mailbox-owner.js";
 import type { ProviderEventCommitReceipt } from "@mcode/providers";
+import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
 import type { ProviderEventOwnership, ProviderEventOwnershipRoute, WorkerOwnedProviderEventBatch, WorkerOwnedProviderEventResult } from "../../providers/composition/provider-host-ports.js";
 
 interface ActiveRoute {
@@ -25,8 +26,26 @@ type Route = ActiveRoute | SwitchingRoute;
  */
 export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
   private readonly routes = new Map<string, Route>();
+  private readonly workerProviders = new Set(["codex"]);
+  private onCommitted: ((execution: ExecutionIdentity, result: Extract<ExecutionWorkerResult, { kind: "committed" }>) => Promise<void>) | undefined;
+  private prepareCommand: ((execution: ExecutionIdentity, batch: WorkerOwnedProviderEventBatch) => Promise<Extract<ExecutionWorkCommand, { kind: "event" }>>) | undefined;
 
   constructor(private readonly owner: Pick<ExecutionMailboxOwner, "isStarted" | "submit">) {}
+
+  /** Run execution lifecycle effects after the writer acknowledgement and before the provider receives its batch receipt. */
+  bindCommitted(onCommitted: (execution: ExecutionIdentity, result: Extract<ExecutionWorkerResult, { kind: "committed" }>) => Promise<void>): void {
+    this.onCommitted = onCommitted;
+  }
+
+  /** Prepare exact file and terminal inputs before admitting the provider batch to its mailbox. */
+  bindCommandPreparation(prepare: (execution: ExecutionIdentity, batch: WorkerOwnedProviderEventBatch) => Promise<Extract<ExecutionWorkCommand, { kind: "event" }>>): void {
+    this.prepareCommand = prepare;
+  }
+
+  /** Activate another provider only after its worker live effects are installed. */
+  enableProvider(providerId: string): void {
+    this.workerProviders.add(providerId);
+  }
 
   /** Admit one provider attempt only while the exact mailbox still owns the thread. */
   async bind(execution: ExecutionIdentity, deliveryAttempt: number): Promise<void> {
@@ -80,10 +99,10 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
   }
 
   /** Select the exact mailbox, then check again before asynchronous admission. */
-  resolve(executionId: string): ProviderEventOwnershipRoute {
+  resolve(executionId: string, sourceProviderId?: string): ProviderEventOwnershipRoute {
     const route = this.routes.get(executionId);
     if (route?.kind !== "active" || !this.owner.isStarted(route.execution)) {
-      return { kind: "rejected" };
+      return { kind: sourceProviderId && !this.workerProviders.has(sourceProviderId) ? "legacy" : "rejected" };
     }
     return {
       kind: "worker",
@@ -97,22 +116,21 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
     if (!this.isCurrent(route, batch)) {
       throw new Error("Provider batch belongs to a retired execution attempt");
     }
-    const pending = this.owner.submit(route.execution, {
-      kind: "event",
-      phase: batch.phase,
-      nativeCursor: batch.nativeCursor ?? null,
-      events: batch.events,
-    });
+    const pending = this.commitAndNotify(route, batch);
     route.pending.add(pending);
-    let result: Awaited<typeof pending>;
     try {
-      result = await pending;
+      return await pending;
     } finally {
       route.pending.delete(pending);
     }
+  }
+
+  private async commitAndNotify(route: ActiveRoute, batch: WorkerOwnedProviderEventBatch): Promise<WorkerOwnedProviderEventResult> {
+    const result = await this.submitPrepared(route, batch);
     if (result.kind !== "committed" || !result.providerCommit) {
       throw new Error("Execution worker did not commit provider batch");
     }
+    await this.notifyCommitted(route.execution, result);
     const commit: ProviderEventCommitReceipt = {
       ...result.providerCommit,
       outcome: result.providerCommit.outcome === "terminal-outcome-confirmed"
@@ -129,11 +147,29 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
     };
   }
 
+  private async submitPrepared(route: ActiveRoute, batch: WorkerOwnedProviderEventBatch): Promise<ExecutionWorkerResult> {
+    const command = this.prepareCommand
+      ? await this.prepareCommand(route.execution, batch)
+      : { kind: "event" as const, phase: batch.phase, nativeCursor: batch.nativeCursor ?? null, events: batch.events };
+    if (!this.isCurrent(route, batch) || command.kind !== "event"
+      || command.events !== batch.events || command.phase !== batch.phase) {
+      throw new Error("Prepared provider event lost its execution owner");
+    }
+    return await this.owner.submit(route.execution, command);
+  }
+
   private isCurrent(route: ActiveRoute, batch: WorkerOwnedProviderEventBatch): boolean {
     return this.routes.get(route.execution.executionId) === route
       && this.owner.isStarted(route.execution)
       && batch.deliveryAttempt === route.deliveryAttempt
       && sameExecution(batch, route.execution);
+  }
+
+  private async notifyCommitted(
+    execution: ExecutionIdentity,
+    result: Extract<ExecutionWorkerResult, { kind: "committed" }>,
+  ): Promise<void> {
+    await this.onCommitted?.(execution, result);
   }
 }
 

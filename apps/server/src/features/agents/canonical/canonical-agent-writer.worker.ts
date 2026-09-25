@@ -134,7 +134,8 @@ async function handleSemanticWrite(
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
 ): Promise<CanonicalWriterResponse> {
   try {
-    if (!semanticWriter || semanticPublication) throw new Error("Semantic writer is not ready");
+    const writer = semanticWriter;
+    if (!writer || semanticPublication) throw new Error("Semantic writer is not ready");
     if (request.kind === "semantic-transact"
       ? request.operation.operationId !== request.operationId
         || request.operation.execution.executionId !== request.executionId
@@ -144,14 +145,32 @@ async function handleSemanticWrite(
     }
     semanticPublication = correlation;
     const receipt = request.kind === "semantic-transact"
-      ? await semanticWriter.transact(request.operation)
-      : semanticWriter.interruptWorkerLoss(request.input);
+      ? await withSQLiteBusyRetry(() => writer.transact(request.operation))
+      : await withSQLiteBusyRetry(() => writer.interruptWorkerLoss(request.input));
     return { ...correlation, kind: "semantic-transacted", receipt };
   } catch {
     return { ...correlation, kind: "failed", reason: "write-failed" };
   } finally {
     semanticPublication = undefined;
   }
+}
+
+async function withSQLiteBusyRetry<T>(work: () => Promise<T> | T): Promise<T> {
+  const delaysMs = [10, 30, 90, 270, 500];
+  for (const delayMs of delaysMs) {
+    try {
+      return await work();
+    } catch (error) {
+      if (!isSQLiteBusy(error)) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return work();
+}
+
+function isSQLiteBusy(error: unknown): boolean {
+  return error instanceof Error && "code" in error
+    && typeof error.code === "string" && error.code.startsWith("SQLITE_BUSY");
 }
 
 async function handleWrite(

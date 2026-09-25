@@ -17,6 +17,7 @@ export type ExecutionMailboxCommand<Work extends { readonly kind: string }> =
 /** Lifecycle results that must be allowed to settle after Stop is admitted. */
 export const EXECUTION_CONTROL_KINDS = [
   "checkpoint", "effect-result", "provider-outcome", "stage-terminal", "finalize", "release",
+  "finish-from-state", "finish-live-event", "post-terminal-event",
 ] as const;
 export type ExecutionControlKind = typeof EXECUTION_CONTROL_KINDS[number];
 const CONTROL_KINDS: ReadonlySet<string> = new Set(EXECUTION_CONTROL_KINDS);

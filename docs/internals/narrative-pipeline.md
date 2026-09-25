@@ -128,21 +128,12 @@ Provider-native event
 Provider runtime event keeps native evidence separate from AgentEvent data
     │
     ▼
-Provider ingress selects a thread-affine worker for cloneable validation
-    │
-    ▼
-Provider ingress queues accepted results fairly and selects a provider adapter
-    │
-    ▼
-Adapter forwards a provider-neutral AgentEvent or consumes private provider work
-    │
-    ▼
-Turn event pipeline ToolUse handler → narrative-turn-state.ts bufferToolCall
-  (writes to the per-turn tool-call buffer for later persist)
-    │
-    ▼
-Turn event pipeline enriches missing parentToolCallId via
-  narrativeStore.getCurrentParentToolCallId (agentCallStack fallback)
+Provider event ownership selects the admitted execution's route
+    ├─ Worker-owned: ordered task mailbox → parent event and file reduction
+    │    → single execution writer commits event, turn effects, and publication receipt
+    │    → server releases the acknowledged AgentEvent
+    └─ Legacy: canonical commit → provider ingress and adapter
+         → turn event pipeline and parent turn application
     │
     ▼
 broadcast("agent.event", enrichedEvent)

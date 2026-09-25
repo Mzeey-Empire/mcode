@@ -88,6 +88,12 @@ describe("Codex live plan projections on the sole writer", () => {
     release.release(write, receipt);
     release.release(write, receipt);
     expect(published).toEqual([{ threadId: THREAD_ID, questions }]);
+    const compound = { ...write, mutation: {
+      kind: "append-events" as const, phase: "running", nativeCursor: null, events: [],
+      parentLive: { text: write.mutation.text, planQuestions: questions },
+    } };
+    expect(new ExecutionPlanQuestionRelease(() => {}).validate(compound, receipt)).toEqual(receipt.kind === "committed"
+      ? receipt.planQuestions : null);
     db.close(true);
     db = openDatabase({ dbPath: path });
     writer = new CanonicalExecutionSemanticWriter(db, () => {});

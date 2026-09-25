@@ -20,8 +20,7 @@ export class ExecutionPlanQuestionRelease {
     const batch = receipt.planQuestions;
     if (!matchesOperation(operation, receipt, batch) || !PlanQuestionBatchSchema().safeParse({
       threadId: batch.threadId, questions: batch.questions,
-    }).success || !NodeUtil.isDeepStrictEqual(batch.questions, operation.mutation.kind === "live-event"
-      ? operation.mutation.planQuestions : undefined)) {
+    }).success || !NodeUtil.isDeepStrictEqual(batch.questions, planQuestionsFor(operation))) {
       throw new Error("Plan-question publication receipt is invalid");
     }
     return batch;
@@ -44,9 +43,13 @@ function matchesOperation(
   receipt: Extract<ExecutionWriteReceipt, { kind: "committed" }>,
   batch: ExecutionPlanQuestionsReceipt,
 ): boolean {
-  return receipt.operationId === operation.operationId && operation.mutation.kind === "live-event"
-    && Boolean(operation.mutation.planQuestions)
+  return receipt.operationId === operation.operationId && Boolean(planQuestionsFor(operation))
     && operation.livePublication?.[0]?.event.type === "textDelta"
     && batch.publicationId === `${operation.operationId}:plan-questions`
     && batch.threadId === operation.execution.threadId;
+}
+
+function planQuestionsFor(operation: ExecutionSemanticOperation): readonly PlanQuestion[] | undefined {
+  if (operation.mutation.kind === "live-event") return operation.mutation.planQuestions;
+  return operation.mutation.kind === "append-events" ? operation.mutation.parentLive?.planQuestions : undefined;
 }

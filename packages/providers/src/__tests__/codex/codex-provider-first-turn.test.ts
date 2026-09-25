@@ -82,8 +82,16 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
 import { BrowserAutomationSessionLease, CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import { AgentEventSchema, AgentEventType } from "@mcode/contracts";
 import type { ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate } from "@mcode/contracts";
+import type { ProviderEventBatch, ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "../../host-ports.js";
 
 const schemaValidExecutionId = "00000000-0000-4000-8000-000000000001";
+const acceptedEventReceipt: ProviderEventSubmissionReceipt = {
+  commit: {
+    outcome: "committed", conversationRevision: 1, rosterRevision: 1,
+    acceptedThrough: 1, durableThrough: 1, eventCount: 1,
+  },
+  delivery: { ingress: "queued" },
+};
 
 function makeProvider(
   catalogService: {
@@ -108,6 +116,7 @@ function makeProvider(
     createCodexConfiguration?: () => Promise<unknown>;
     close?: (sessionId: string) => Promise<void>;
   } = undefined as never,
+  eventSink?: ProviderEventSinkPort,
 ): CodexProvider {
   return new CodexProvider(
     { get: async () => ({ provider: { cli: { codex: "codex" } } }) } as never,
@@ -116,6 +125,7 @@ function makeProvider(
     catalogService as never,
     browserAutomationLease,
     threadControlMcp as never,
+    eventSink,
   );
 }
 
@@ -640,6 +650,177 @@ describe("CodexProvider first turn on new session", () => {
     });
 
     await ended;
+  });
+
+  it("submits an attempt-bound parent event through the canonical sink only when enabled", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+
+    await provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: schemaValidExecutionId,
+      deliveryAttempt: 2,
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "hey",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const server = appServers[0]!;
+    server.emit("notification", {
+      method: "item/agentMessage/delta",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", delta: "Hello" },
+    });
+    await vi.waitFor(() => expect(submit).toHaveBeenCalled());
+
+    const batches = submit.mock.calls.map(([batch]) => batch);
+    expect(batches.some((batch) => batch.events.some((event) => event.payload.type === "item.recorded"
+      && event.payload.item.payload.projection === "providerRuntimeEvent"
+      && event.payload.item.payload.runtimeEvent.event.type === AgentEventType.TextDelta))).toBe(true);
+    expect(batches.every((batch) => batch.deliveryAttempt === 2 && batch.turnId === "test-turn")).toBe(true);
+    expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(false);
+  });
+
+  it("keeps Codex on the existing event channel until canonical delivery is enabled", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+
+    await provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: schemaValidExecutionId,
+      deliveryAttempt: 2,
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "hey",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    appServers[0]!.emit("notification", {
+      method: "item/agentMessage/delta",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", delta: "Hello" },
+    });
+
+    expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(true);
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("fences duplicate parent Ended callbacks for an owned attempt", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "hey", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto",
+    });
+    const emit = (provider as unknown as { emitRuntimeEvent(event: ProviderRuntimeEvent): void }).emitRuntimeEvent.bind(provider);
+    const ended: ProviderRuntimeEvent = { event: { type: AgentEventType.Ended,
+      threadId, turnExecutionId: schemaValidExecutionId, outcome: "completed" } };
+    emit(ended);
+    emit(ended);
+    await provider.waitForCanonicalTurnEvents({
+      threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 2,
+    });
+
+    expect(submit.mock.calls.flatMap(([batch]) => batch.events).filter((event) =>
+      event.payload.type === "item.recorded"
+      && event.payload.item.payload.projection === "providerRuntimeEvent"
+      && event.payload.item.payload.runtimeEvent.event.type === AgentEventType.Ended)).toHaveLength(1);
+    expect(legacy.some((event) => event.event.type === AgentEventType.Ended)).toBe(false);
+  });
+
+  it("stamps the admitted attempt on an early parent event before native turn binding", async () => {
+    let resolveNativeTurn!: (turnId: string) => void;
+    sendTurnMock.mockImplementationOnce(() => new Promise<string>((resolve) => { resolveNativeTurn = resolve; }));
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+
+    await provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: schemaValidExecutionId,
+      deliveryAttempt: 3,
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "hey",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "auto",
+    });
+    await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalled());
+    const server = appServers[0]!;
+    server.emit("notification", {
+      method: "item/agentMessage/delta",
+      params: { threadId: "sdk-thread-1", turnId: "early-native-turn", delta: "Early" },
+    });
+    await vi.waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({
+      deliveryAttempt: 3,
+      events: [{ payload: { item: { payload: { runtimeEvent: {
+        deliveryAttempt: 3,
+        event: { type: AgentEventType.TextDelta, turnExecutionId: schemaValidExecutionId },
+      } } } } }],
+    });
+    expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(false);
+
+    resolveNativeTurn("early-native-turn");
+    server.emit("notification", {
+      method: "turn/completed",
+      params: { threadId: "sdk-thread-1", turn: { id: "early-native-turn", status: "completed" } },
+    });
+    await provider.waitForCanonicalTurnEvents({
+      threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 3,
+    });
+  });
+
+  it("fences new parent events synchronously while draining already queued batches", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "hey", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const emitText = (delta: string) => appServers[0]!.emit("notification", {
+      method: "item/agentMessage/delta",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", delta },
+    });
+    emitText("Before stop");
+    const drained = provider.fenceCanonicalTurnEvents({
+      threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 2,
+    });
+    emitText("After stop");
+    await drained;
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(false);
   });
 
   it("cancels the main turn and reuses its app-server for the next turn", async () => {

@@ -87,6 +87,21 @@ describe("ExecutionProviderEventOwnership", () => {
     });
     const owner = new ExecutionMailboxOwner(scheduler);
     const ownership = new ExecutionProviderEventOwnership(owner);
+    const acknowledged: string[] = [];
+    let reportAcknowledgement: (() => void) | undefined;
+    const acknowledgementStarted = new Promise<void>((resolve) => { reportAcknowledgement = resolve; });
+    let finishAcknowledgement: (() => void) | undefined;
+    const acknowledgement = new Promise<void>((resolve) => { finishAcknowledgement = resolve; });
+    ownership.bindCommitted(async (owned, result) => {
+      acknowledged.push(`${owned.executionId}:${result.operationId}`);
+      reportAcknowledgement?.();
+      await acknowledgement;
+    });
+    const prepared: string[] = [];
+    ownership.bindCommandPreparation(async (owned, batch) => {
+      prepared.push(`${owned.executionId}:${batch.deliveryAttempt}`);
+      return { kind: "event", phase: batch.phase, nativeCursor: batch.nativeCursor ?? null, events: batch.events };
+    });
     expect(ownership.resolve(execution.executionId)).toEqual({ kind: "rejected" });
     const start = owner.start({ execution, ownerEpoch: 1, providerId: "codex", parentTurn });
     await expect(ownership.bind(execution, 1)).rejects.toThrow("no matching execution owner");
@@ -100,8 +115,10 @@ describe("ExecutionProviderEventOwnership", () => {
       batchId: "batch-1", deliveryAttempt: 1, phase: "running", events: [],
     };
     const submitted = route.submit(batch);
+    await Promise.resolve();
     expect(worker.requests[1]?.command).toMatchObject({ kind: "event", phase: "running", events: [] });
-    const nextAttempt = ownership.bind(execution, 2);
+    let nextAttemptBound = false;
+    const nextAttempt = ownership.bind(execution, 2).then(() => { nextAttemptBound = true; });
     expect(ownership.resolve(execution.executionId)).toEqual({ kind: "rejected" });
     await expect(route.submit(batch)).rejects.toThrow("retired execution attempt");
     worker.reply(1, {
@@ -111,13 +128,20 @@ describe("ExecutionProviderEventOwnership", () => {
         acceptedThrough: 1, durableThrough: 1, eventCount: 0,
       },
     });
+    await acknowledgementStarted;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(nextAttemptBound).toBe(false);
+    finishAcknowledgement?.();
     await expect(submitted).resolves.toMatchObject({ batchId: "batch-1",
       deliveryAttempt: 1, commit: { outcome: "committed" } });
+    expect(acknowledged).toEqual([`${execution.executionId}:${worker.requests[1]!.lease.leaseId}:2`]);
+    expect(prepared).toEqual([`${execution.executionId}:1`]);
 
     await nextAttempt;
     expect(ownership.resolve(execution.executionId)).toMatchObject({ kind: "worker", deliveryAttempt: 2 });
     await ownership.retire(execution);
     expect(ownership.resolve(execution.executionId)).toEqual({ kind: "rejected" });
+    expect(ownership.resolve("legacy-execution", "claude")).toEqual({ kind: "legacy" });
     expect(worker.requests).toHaveLength(2);
     scheduler.shutdown();
   });

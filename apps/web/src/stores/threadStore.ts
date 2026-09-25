@@ -247,7 +247,7 @@ interface ThreadState {
   /** Handle server-side tool call persistence confirmation. */
   handleTurnPersisted: (payload: {
     threadId: string;
-    messageId: string;
+    messageId: string | null;
     turnId?: string | null;
     executionId?: string | null;
     outcome?: TurnOutcome | null;
@@ -2578,6 +2578,16 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     currentThreadId: string | null,
     terminalPhase: ThreadRecord["runtimePhase"] | undefined,
   ): Partial<ThreadRecord> => {
+    if (payload.messageId === null) {
+      return {
+        ...turnPersistStopState(record, payload),
+        ...(terminalPhase ? terminalRuntimePatch(record, terminalPhase) : {}),
+        ...(payload.fileEffects && payload.turnId === record.fileEffectTurnId
+          && payload.fileEffects.revision >= record.fileEffectSummary.revision
+          ? { fileEffectSummary: payload.fileEffects }
+          : {}),
+      };
+    }
     const localMessageId = resolveTurnPersistLocalMessageId(record, payload.messageId);
     const messages = persistedTurnMessages(record, payload, localMessageId);
     const stopState = turnPersistStopState(record, payload);

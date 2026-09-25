@@ -11,7 +11,9 @@ import {
   normalizeTerminalSessions,
   parseArguments,
   parseServerStallEntries,
+  recordWorkerQueueSample,
   selectTerminalTransport,
+  summarizeEventThroughput,
   summarizeLatency,
 } from "./seven-thread-live-harness.mjs";
 
@@ -189,4 +191,41 @@ NodeTest.test("reads structured server work stalls and prefers them over duplica
     { timestamp: "2026-09-24T19:07:27.116Z", stalledMs: 260.15 },
     { timestamp: "2026-09-24T19:07:37.927Z", stalledMs: 3639.19 },
   ]);
+});
+
+NodeTest.test("records only bounded worker queue counts and retains the peak after the sample limit", () => {
+  const target = {
+    samples: [], omittedSamples: 0, unavailableSamples: 0,
+    summary: { sampleCount: 0, maxPending: 0, maxPendingBytes: 0, maxActiveExecutions: 0, maxQueuedPerWorker: 0, maxInFlightWorkers: 0 },
+  };
+  for (let index = 0; index < 513; index += 1) {
+    recordWorkerQueueSample(target, {
+      pending: index, pendingBytes: index * 2, activeExecutions: 7,
+      workers: [{ index: 0, queued: index, inFlight: true, command: "private prompt" }],
+      token: "private token",
+    });
+  }
+  recordWorkerQueueSample(target, { pending: "wrong shape", workers: [] });
+  NodeAssertStrict.equal(target.samples.length, 512);
+  NodeAssertStrict.equal(target.omittedSamples, 1);
+  NodeAssertStrict.equal(target.unavailableSamples, 1);
+  NodeAssertStrict.deepEqual(target.summary, {
+    sampleCount: 513, maxPending: 512, maxPendingBytes: 1024,
+    maxActiveExecutions: 7, maxQueuedPerWorker: 512, maxInFlightWorkers: 1,
+  });
+  NodeAssertStrict.doesNotMatch(JSON.stringify(target), /private|prompt|token/);
+});
+
+NodeTest.test("summarizes public event arrival throughput in bounded one-second buckets", () => {
+  const result = summarizeEventThroughput([
+    { sentAtMs: 0, events: [{ atMs: 100 }, { atMs: 900 }, { atMs: 1_100 }] },
+    { sentAtMs: 0, events: [{ atMs: 2_500 }] },
+  ]);
+  NodeAssertStrict.deepEqual(result, {
+    scope: "public-agent-event-push", intervalMs: 1_000,
+    totalEvents: 4, eventsPerInterval: [2, 1, 1], peakEventsPerSecond: 2,
+  });
+  const longRun = summarizeEventThroughput([{ sentAtMs: 0, events: [{ atMs: 0 }, { atMs: 3_600_000 }] }]);
+  NodeAssertStrict.ok(longRun.eventsPerInterval.length <= 600);
+  NodeAssertStrict.equal(longRun.totalEvents, 2);
 });

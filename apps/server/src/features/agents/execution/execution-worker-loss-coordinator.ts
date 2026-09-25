@@ -34,6 +34,7 @@ export class ExecutionWorkerLossCoordinator {
   constructor(
     private readonly writer: Pick<CanonicalExecutionWriterPort, "interruptWorkerLoss">,
     options: SchedulerOptions,
+    private readonly onRecovered?: (assignment: ExecutionLostAssignment) => void,
   ) {
     this.scheduler = new ExecutionMailboxScheduler({
       ...options,
@@ -86,12 +87,13 @@ export class ExecutionWorkerLossCoordinator {
         const receipt = await this.writer.interruptWorkerLoss({
           ...assignment,
           reason: WORKER_LOSS_REASON,
-          recoveryIncidentId: incidentId(assignment),
+          recoveryIncidentId: workerLossIncidentId(assignment),
         });
         const evidence = recoveryEvidence(receipt);
         if (!evidence || !this.scheduler.reconcileLost(assignment.execution, assignment.lease, evidence)) {
           throw new Error(`Lost execution has no matching durable recovery evidence: ${assignment.execution.executionId}`);
         }
+        this.onRecovered?.(assignment);
         slot.unresolved.shift();
       }
       if (!this.scheduler.replaceWorker(slot.workerIndex)) {
@@ -112,7 +114,8 @@ function recoveryEvidence(receipt: ExecutionWriteReceipt): ExecutionRecoveryRece
   return { ...receipt, recoveryState: receipt.recoveryState };
 }
 
-function incidentId(assignment: ExecutionLostAssignment): string {
+/** Stable incident identity for a writer-backed interruption of one exact lease. */
+export function workerLossIncidentId(assignment: ExecutionLostAssignment): string {
   const hash = NodeCrypto.createHash("sha256")
     .update(JSON.stringify([assignment.execution, assignment.lease])).digest("hex");
   return `worker-loss:${hash}`;

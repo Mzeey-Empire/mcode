@@ -133,6 +133,8 @@ export interface TurnParentStartOwner {
     readonly ownerEpoch: number;
     readonly providerId: string;
     readonly parentTurn: DataOnlyParentTurnStartInput;
+    readonly parentLive?: import("../execution/provider-execution-event-state.js").ExecutionParentStartContext;
+    readonly publishParentStart?: boolean;
   }): Promise<void>;
 }
 
@@ -436,18 +438,7 @@ export class TurnAdmissionDispatchCoordinator {
     const attachmentData = await this.persistAttachments(prepared);
     const sourceTurnId = prepared.command.sourceTurnId ?? NodeCrypto.randomUUID();
     const parentStartInput = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachmentData, review);
-    if (this.parentStartOwner) {
-      await this.parentStartOwner.start({
-        execution: { threadId: lease.threadId, turnId: sourceTurnId, executionId: lease.turnExecutionId },
-        ownerEpoch: lease.generation,
-        providerId: prepared.providerId,
-        parentTurn: parentStartInput,
-      });
-      if (parentStartInput.reopenThread) {
-        const reopened = this.threads.findById(lease.threadId);
-        if (reopened) broadcast("thread.lifecycleChanged", { thread: reopened });
-      }
-    } else this.startParentTurn(parentStartInput);
+    await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
     this.publishCommittedEffects(prepared, sourceTurnId);
     const wirePayload = this.buildWirePayload(prepared);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);
@@ -463,7 +454,7 @@ export class TurnAdmissionDispatchCoordinator {
       threadControl: this.threadControlDirective(prepared, sourceTurnId),
       contextSeed: prepared.thread.last_context_tokens ?? 0,
       contextWindow: prepared.thread.context_window,
-      ...(this.parentStartOwner ? { workerOwned: true as const } : {}),
+      ...(this.parentStartOwner && prepared.providerId === "codex" ? { workerOwned: true as const } : {}),
     };
   }
 
@@ -728,6 +719,31 @@ export class TurnAdmissionDispatchCoordinator {
       },
     });
     if (reopenedThread) broadcast("thread.lifecycleChanged", { thread: reopenedThread });
+  }
+
+  private async commitParentStart(
+    prepared: PreparedCommand,
+    lease: TurnRuntimeLease,
+    sourceTurnId: string,
+    input: DataOnlyParentTurnStartInput,
+  ): Promise<void> {
+    if (!this.parentStartOwner || prepared.providerId !== "codex") return this.startParentTurn(input);
+    const precedingMessageId = input.userMessage.messageId;
+    if (!precedingMessageId) throw new Error("Worker-owned turn needs its committed user message identity");
+    const planFeature = prepared.command.planAction === "revise" ? "output"
+      : this.effectiveInteractionMode(prepared.command) === "plan" ? "questions" : "none";
+    await this.parentStartOwner.start({
+      execution: { threadId: lease.threadId, turnId: sourceTurnId, executionId: lease.turnExecutionId },
+      ownerEpoch: lease.generation,
+      providerId: prepared.providerId,
+      parentTurn: input,
+      parentLive: { planFeature, precedingMessageId },
+      publishParentStart: prepared.providerId === "codex",
+    });
+    if (input.reopenThread) {
+      const reopened = this.threads.findById(lease.threadId);
+      if (reopened) broadcast("thread.lifecycleChanged", { thread: reopened });
+    }
   }
 
   private prepareParentTurnStartInput(

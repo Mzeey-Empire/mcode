@@ -11,7 +11,7 @@ import { CanonicalExecutionWriterPort } from "../../canonical/canonical-executio
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import type { ExecutionWorkerPort, ExecutionWorkerReply, ExecutionWorkerRequest } from "../execution-mailbox-protocol.js";
-import type { ExecutionMailboxCommand } from "../execution-mailbox-scheduler.js";
+import type { ExecutionLostAssignment, ExecutionMailboxCommand } from "../execution-mailbox-scheduler.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution-worker-handler.js";
 import { ExecutionThreadWorkerPort } from "../execution-worker-port.js";
 import { ExecutionWorkerLossCoordinator } from "../execution-worker-loss-coordinator.js";
@@ -64,6 +64,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
   let workers: CrashingPort[];
   let published: string[];
   let recoveryIncidentIds: string[];
+  let recoveredAssignments: ExecutionLostAssignment[];
 
   beforeEach(() => {
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-lost-worker-host-"));
@@ -78,6 +79,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
       published.push(...events.map((event) => event.eventId));
     });
     recoveryIncidentIds = [];
+    recoveredAssignments = [];
     workers = [];
     coordinator = new ExecutionWorkerLossCoordinator({
       interruptWorkerLoss: (input) => {
@@ -92,7 +94,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
         workers.push(worker);
         return worker;
       },
-    });
+    }, (assignment) => recoveredAssignments.push(assignment));
   });
 
   afterEach(async () => {
@@ -221,6 +223,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     new ParentAssistantTextCheckpointService(db).appendChunk([{ ...execution, sequence: 1, text: "Partial answer" }]);
     workers[0]?.crash();
     expect(await coordinator.waitForRecovery(0)).toEqual({ kind: "recovered", workerIndex: 0 });
+    expect(recoveredAssignments).toEqual([{ execution, lease }]);
     expect(workers).toHaveLength(2);
     expect(db.prepare("SELECT terminal_outcome, recovery_incident_id FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(execution.executionId)).toMatchObject({ terminal_outcome: "interrupted",

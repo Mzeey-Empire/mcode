@@ -56,6 +56,10 @@ import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
 import { CodexEventMapper } from "./codex-event-mapper.js";
 import {
+  CodexCanonicalEventPublisher,
+  type CodexCanonicalEventRouting,
+} from "./codex-canonical-event-publisher.js";
+import {
   buildCodexInput,
   hasCodexInternalThreadControlMcp,
   mapCodexRateLimitsToUsage,
@@ -631,7 +635,66 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private emitRuntimeEvent(runtimeEvent: ProviderRuntimeEvent): void {
+    const state = this.canonicalTurnRoutingsByThread.get(runtimeEvent.event.threadId);
+    const routing = state?.routing;
+    if (routing && runtimeEvent.extension?.child === undefined
+      && runtimeEvent.event.turnExecutionId === routing.executionId) {
+      if (state.kind === "fenced") return;
+      if (runtimeEvent.deliveryAttempt !== undefined && runtimeEvent.deliveryAttempt !== routing.deliveryAttempt) return;
+      this.canonicalEventPublisher.publish(routing, {
+        ...runtimeEvent,
+        deliveryAttempt: routing.deliveryAttempt,
+      });
+      // Ended closes this exact parent attempt; late SDK callbacks must stay fenced.
+      if (runtimeEvent.event.type === AgentEventType.Ended) state.kind = "fenced";
+      return;
+    }
     super.emit("event", runtimeEvent);
+  }
+
+  private readonly canonicalEventPublisher: CodexCanonicalEventPublisher;
+  private readonly canonicalTurnRoutingsByThread = new Map<string, {
+    kind: "active" | "fenced";
+    routing: CodexCanonicalEventRouting;
+  }>();
+  private canonicalTurnEventDeliveryEnabled = false;
+
+  /** Enables the server-owned event route for newly dispatched Codex parent turns. */
+  setCanonicalTurnEventDeliveryEnabled(enabled: boolean): void {
+    this.canonicalTurnEventDeliveryEnabled = enabled;
+  }
+
+  /** Report a failed canonical sink promptly for the exact turn attempt. */
+  setCanonicalTurnDeliveryFailureHandler(
+    handler: (routing: CodexCanonicalEventRouting, error: Error) => void | Promise<void>,
+  ): void {
+    this.canonicalEventPublisher.setFailureHandler(handler);
+  }
+
+  /** Reports acknowledged canonical delivery or its failure for one exact attempt. */
+  waitForCanonicalTurnEvents(routing: CodexCanonicalEventRouting): Promise<void> {
+    return this.canonicalEventPublisher.waitForExecution(routing);
+  }
+
+  /** Stops admission for one exact parent attempt before draining its queued batches. */
+  fenceCanonicalTurnEvents(routing: CodexCanonicalEventRouting, options?: { discardQueued?: boolean }): Promise<void> {
+    const state = this.canonicalTurnRoutingsByThread.get(routing.threadId);
+    if (!state || state.routing.turnId !== routing.turnId
+      || state.routing.executionId !== routing.executionId
+      || state.routing.deliveryAttempt !== routing.deliveryAttempt) return Promise.resolve();
+    this.canonicalTurnRoutingsByThread.set(routing.threadId, { kind: "fenced", routing: state.routing });
+    return options?.discardQueued
+      ? this.canonicalEventPublisher.discardQueuedForExecution(routing)
+      : this.canonicalEventPublisher.waitForExecution(routing);
+  }
+
+  /** Drop the drained publisher queue while retaining a fence against late SDK events. */
+  retireCanonicalTurnEvents(routing: CodexCanonicalEventRouting): Promise<void> {
+    const state = this.canonicalTurnRoutingsByThread.get(routing.threadId);
+    if (state?.kind !== "fenced" || state.routing.turnId !== routing.turnId
+      || state.routing.executionId !== routing.executionId
+      || state.routing.deliveryAttempt !== routing.deliveryAttempt) return Promise.resolve();
+    return this.canonicalEventPublisher.retireExecution(routing);
   }
 
   /** Owns the session pool, idle eviction (with busy guard), and JobObject/kill. */
@@ -687,6 +750,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     private readonly stopDrainReuseTimeoutMs: number = STOP_DRAIN_REUSE_TIMEOUT_MS,
   ) {
     super();
+    this.canonicalEventPublisher = new CodexCanonicalEventPublisher(host.events);
     this.runtime = new SessionRuntime<CodexSessionState>(this, {
       jobObject: {
         isWindowsJob: false,
@@ -1048,6 +1112,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   async sendTurn(req: TurnRequest<"codex">): Promise<void> {
     const preparingSession = this.runtime.get(req.sessionId);
     if (preparingSession) preparingSession.nextTurnExecutionId = req.turnExecutionId;
+    if (this.canonicalTurnEventDeliveryEnabled) {
+      const threadId = this.threadIdForSession(req.sessionId);
+      await this.retirePreviousCanonicalTurn(threadId);
+      this.canonicalTurnRoutingsByThread.set(threadId, { kind: "active", routing: {
+        threadId,
+        turnId: req.turnId,
+        executionId: req.turnExecutionId,
+        deliveryAttempt: req.deliveryAttempt ?? 1,
+      } });
+    }
     const turn = await this.prepareCodexTurn(req);
     if (!turn) return;
     if (this.consumePendingCodexStop(turn)) return;
@@ -1173,6 +1247,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const previous = this.pendingBrowserAccess.get(sessionId);
     if (previous) this.host.browser.release(previous.stage.leaseId);
     this.pendingBrowserAccess.set(sessionId, { stage, workspaceId: request.workspaceId, permissionCapability: turn.browserPermissionCapability });
+  }
+
+  private async retirePreviousCanonicalTurn(threadId: string): Promise<void> {
+    const state = this.canonicalTurnRoutingsByThread.get(threadId);
+    if (!state) return;
+    this.canonicalTurnRoutingsByThread.set(threadId, { kind: "fenced", routing: state.routing });
+    await this.canonicalEventPublisher.retireExecution(state.routing);
+    if (this.canonicalTurnRoutingsByThread.get(threadId)?.routing === state.routing) {
+      this.canonicalTurnRoutingsByThread.delete(threadId);
+    }
   }
 
   private async acquireCodexTurn(turn: PreparedCodexTurn): Promise<CodexSessionState | undefined> {
@@ -2881,6 +2965,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.pendingBrowserAccess.clear();
     this.liveSessionIds.clear();
     this.activeCodexServers.clear();
+    this.canonicalTurnRoutingsByThread.clear();
     logger.info("CodexProvider shutdown complete");
   }
 }

@@ -85,15 +85,44 @@ function contiguousPublicationIds(entries: readonly ExecutionLivePublicationRece
 }
 
 function samePublishedEvent(operation: ExecutionSemanticOperation, actual: AgentEvent, expected: AgentEvent): boolean {
-  if (NodeUtil.isDeepStrictEqual(actual, expected)) return true;
-  if (operation.mutation.kind !== "live-event" || operation.mutation.systemIntents?.[0]?.kind !== "system-notice"
-    || actual.type !== "system" || expected.type !== "system" || expected.messageId
-    || !actual.messageId) return false;
-  const { messageId: _generatedId, ...withoutGeneratedId } = actual;
-  return NodeUtil.isDeepStrictEqual(withoutGeneratedId, expected);
+  // Writer receipts may arrive from a live object or JSON replay. Compare the same wire shape in both cases.
+  const wireActual = AgentEventSchema().parse(JSON.parse(JSON.stringify(actual)));
+  const wireExpected = AgentEventSchema().parse(JSON.parse(JSON.stringify(expected)));
+  if (NodeUtil.isDeepStrictEqual(wireActual, wireExpected)) return true;
+  if (isPersistedTerminalHook(operation, wireActual)) {
+    const { persistedMessageId: _messageId, persistedHookId: _hookId, ...original } = wireActual;
+    return NodeUtil.isDeepStrictEqual(original, wireExpected);
+  }
+  if (!isGeneratedSystemNotice(operation, wireActual, wireExpected)) return false;
+  const { messageId: _generatedId, ...withoutGeneratedId } = wireActual;
+  return NodeUtil.isDeepStrictEqual(withoutGeneratedId, wireExpected);
+}
+
+function isPersistedTerminalHook(operation: ExecutionSemanticOperation, actual: AgentEvent):
+  actual is Extract<AgentEvent, { type: "hookCompleted" }> {
+  return operation.mutation.kind === "post-terminal-event" && actual.type === "hookCompleted"
+    && Boolean(actual.persistedMessageId)
+    && typeof actual.persistedHookId === "string"
+    && actual.persistedHookId === operation.mutation.hooks?.[0]?.record.id;
+}
+
+function isGeneratedSystemNotice(
+  operation: ExecutionSemanticOperation,
+  actual: AgentEvent,
+  expected: AgentEvent,
+): actual is Extract<AgentEvent, { type: "system" }> {
+  const systemIntents = systemIntentsFor(operation.mutation);
+  return systemIntents?.[0]?.kind === "system-notice"
+    && actual.type === "system" && expected.type === "system"
+    && !expected.messageId && Boolean(actual.messageId);
+}
+
+function systemIntentsFor(mutation: ExecutionSemanticOperation["mutation"]) {
+  if (mutation.kind === "live-event" || mutation.kind === "post-terminal-event") return mutation.systemIntents;
+  return mutation.kind === "append-events" ? mutation.parentLive?.systemIntents : undefined;
 }
 
 function barrierFor(kind: ExecutionSemanticOperation["mutation"]["kind"]): "writer" | "terminal" | null {
   if (kind === "begin" || kind === "append-events" || kind === "live-event") return "writer";
-  return kind === "finish" ? "terminal" : null;
+  return kind === "finish" || kind === "finish-live-event" || kind === "post-terminal-event" ? "terminal" : null;
 }

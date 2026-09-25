@@ -8,9 +8,11 @@ import {
   type TurnEventApplication,
   type TurnEventIngressFence,
   type TurnLifecycleControl,
+  type WorkerFileObservationPort,
 } from "../turn-event-pipeline.js";
 import type { ProviderEventIngressEvent } from "../../../providers/composition/provider-event-ingress.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../parent-assistant-text-checkpoint-service.js";
+import type { TurnDiffService } from "../turn-diff-service.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -57,31 +59,66 @@ function createPipeline(
   previousFileFinalization: TurnEventApplication["previousFileFinalization"] = () => undefined,
   rejectForQueueCapacity = vi.fn(),
   ingressFence?: TurnEventIngressFence,
+  workerFileObserver?: WorkerFileObservationPort,
+  turnDiffs?: Pick<TurnDiffService, "push">,
 ): {
   pipeline: TurnEventPipeline;
   finalize: ReturnType<typeof vi.fn>;
   rejectForQueueCapacity: ReturnType<typeof vi.fn>;
   publishCommitted: ReturnType<typeof vi.fn>;
+  observeFileMutation: ReturnType<typeof vi.fn>;
 } {
   const lifecycle: TurnLifecycleControl = {
     normalize: (event) => event,
     finalize,
   };
   const publishCommitted = vi.fn();
+  const observeFileMutation = vi.fn();
   const application: TurnEventApplication = {
     apply,
     publishCommitted,
-    observeFileMutation: vi.fn(),
+    observeFileMutation,
     rejectForQueueCapacity,
     previousFileFinalization,
     beginResumedFileTracking: vi.fn(),
     observeToolUse: vi.fn(),
     observeToolResult: vi.fn(),
   };
-  return { pipeline: new TurnEventPipeline(lifecycle, application, undefined, ingressFence), finalize, rejectForQueueCapacity, publishCommitted };
+  return { pipeline: new TurnEventPipeline(lifecycle, application, turnDiffs, ingressFence, workerFileObserver),
+    finalize, rejectForQueueCapacity, publishCommitted, observeFileMutation };
 }
 
 describe("TurnEventPipeline", () => {
+  it("claims worker file callbacks before legacy attribution and keeps native diff routing", () => {
+    const workerFileObserver: WorkerFileObservationPort = {
+      ownsFileMutation: vi.fn((event) => event.threadId === "worker-thread"),
+      capture: vi.fn(() => false),
+    };
+    const push = vi.fn((): "accepted" => "accepted");
+    const { pipeline, observeFileMutation } = createPipeline(
+      () => true, undefined, undefined, undefined, undefined, workerFileObserver, { push },
+    );
+    const mutation = {
+      threadId: "worker-thread", turnExecutionId: EXECUTION_ID, deliveryAttempt: 1,
+      toolCallId: "tool-1", toolName: "Edit", toolInput: { file_path: "tracked.txt" },
+    };
+
+    pipeline.handleProviderFileMutation(mutation);
+    pipeline.handleProviderFileMutation({ ...mutation, deliveryAttempt: 0 });
+    pipeline.handleProviderFileMutation({ ...mutation, threadId: "legacy-thread" });
+    pipeline.handleProviderTurnDiff({
+      turnId: "turn-1", turnExecutionId: EXECUTION_ID,
+      deliveryAttempt: 1, revision: 1, state: "invalidated",
+    });
+
+    expect(workerFileObserver.capture).toHaveBeenCalledTimes(2);
+    expect(observeFileMutation).toHaveBeenCalledExactlyOnceWith({ ...mutation, threadId: "legacy-thread" });
+    expect(push).toHaveBeenCalledExactlyOnceWith({
+      turnId: "turn-1", turnExecutionId: EXECUTION_ID,
+      deliveryAttempt: 1, revision: 1, state: "invalidated",
+    });
+  });
+
   it("publishes projected worker output without legacy event application", () => {
     const apply = vi.fn(() => true);
     const { pipeline, publishCommitted } = createPipeline(apply);

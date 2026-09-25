@@ -62,6 +62,12 @@ export interface TurnEventIngressFence {
   waitForThread(threadId: string): Promise<void>;
 }
 
+/** Claims every worker-owned file callback, including one rejected by its attempt fence. */
+export interface WorkerFileObservationPort {
+  ownsFileMutation(event: ProviderFileMutationStart): boolean;
+  capture(event: ProviderFileMutationStart): boolean;
+}
+
 interface QueuedTurnEvent {
   input: ProviderEventIngressEvent;
   event: AgentEvent;
@@ -93,6 +99,7 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     private readonly application: TurnEventApplication,
     private readonly turnDiffs?: Pick<TurnDiffService, "push">,
     private readonly ingressFence?: TurnEventIngressFence,
+    private readonly workerFileObserver?: WorkerFileObservationPort,
   ) {}
 
   /** Accept an ingress envelope and preserve its source receipt through the turn queue. */
@@ -118,6 +125,10 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
 
   /** Observe one provider file mutation before public event attribution is available. */
   handleProviderFileMutation(event: ProviderFileMutationStart): void {
+    if (this.workerFileObserver?.ownsFileMutation(event)) {
+      this.workerFileObserver.capture(event);
+      return;
+    }
     this.application.observeFileMutation(event);
   }
 

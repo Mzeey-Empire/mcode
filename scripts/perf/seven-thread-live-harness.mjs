@@ -31,6 +31,8 @@ const TERMINAL_CONTROL_COUNT = 1;
 export const WORKLOAD_MODEL = "gpt-5.6-luna";
 const PROVIDER_ID = "codex";
 const HEALTH_SAMPLE_INTERVAL_MS = 250;
+const MAX_WORKER_QUEUE_SAMPLES = 512;
+const MAX_THROUGHPUT_INTERVALS = 600;
 const EVENT_LOOP_INTERVAL_MS = 50;
 const TURN_TIMEOUT_MS = 120_000;
 const CONTROL_RPC_TIMEOUT_MS = 90_000;
@@ -325,9 +327,9 @@ function createLiveHarnessContext(repoRoot, label, stopOne) {
   const receipt = createReceipt(run, label, stopOne);
   const eventLoop = new EventLoopStallSampler(EVENT_LOOP_INTERVAL_MS);
   const serverStalls = new ServerLogStallReader(paths.logsDir);
-  const healthSampler = new HealthSampler(ports.healthUrl, receipt.metrics.health);
+  const healthSampler = new HealthSampler(ports.healthUrl, receipt.metrics.health, receipt.metrics.workerQueue);
   const eventState = new Map();
-  const terminalEvents = new TerminalEventWaiter(eventState, stopOne);
+  const terminalEvents = new TerminalEventWaiter(eventState, stopOne, () => receipt.state.stop);
   const turnStarts = new TurnStartWaiter(eventState);
   return {
     repoRoot,
@@ -378,6 +380,7 @@ async function prepareLiveHarness(context) {
   const { ports, receipt } = context;
   const initialHealth = await sampleHealth(ports.healthUrl);
   receipt.metrics.health.samples.push(initialHealth.durationMs);
+  recordWorkerQueueSample(receipt.metrics.workerQueue, initialHealth.workerQueue);
   assertHealthyRuntime(initialHealth);
   context.socket = await openRuntimeVerificationSocket(context.repoRoot, (push) => capturePush(push, context.eventState, context.terminalEvents, context.turnStarts));
   await assertRuntimeIdle(context);
@@ -529,6 +532,7 @@ async function stopOneActiveTurn(context) {
   if (!isCancelledStopResult(result, target.id)) {
     throw new Error("Stop did not return the targeted execution's cancelled outcome");
   }
+  context.terminalEvents.notify();
   writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
 }
 
@@ -677,7 +681,8 @@ async function recordFinalReceiptMetrics(context) {
   receipt.metrics.turnCompletion = summarizeLatency(receipt.state.threads.map((thread) => elapsedSinceSend(thread, "completedAtMs")));
   receipt.metrics.turnDurability = summarizeLatency(receipt.state.threads.map((thread) => elapsedSinceSend(thread, "persistedAtMs")));
   receipt.state.activeControlLaunch = attributeControlLaunchToTurnCompletion(receipt.state.activeControlLaunch, receipt.state.threads);
-  receipt.metrics.events = summarizeEventAudits(receipt.state.threads, receipt.workload.scenario);
+  receipt.metrics.events = summarizeEventAudits(receipt);
+  receipt.metrics.eventThroughput = summarizeEventThroughput(receipt.state.threads);
   receipt.metrics.harnessEventLoopStalls = {
     scope: "harness-process",
     intervalMs: EVENT_LOOP_INTERVAL_MS,
@@ -775,10 +780,18 @@ function createReceipt(run, label, stopOne) {
     },
     metrics: {
       health: { samples: [], summary: null },
+      workerQueue: {
+        intervalMs: HEALTH_SAMPLE_INTERVAL_MS,
+        samples: [],
+        omittedSamples: 0,
+        unavailableSamples: 0,
+        summary: { sampleCount: 0, maxPending: 0, maxPendingBytes: 0, maxActiveExecutions: 0, maxQueuedPerWorker: 0, maxInFlightWorkers: 0 },
+      },
       rpc: {},
       turnCompletion: null,
       turnDurability: null,
       events: null,
+      eventThroughput: null,
       harnessEventLoopStalls: null,
       serverEventLoopStalls: null,
       memory: [],
@@ -973,9 +986,10 @@ export function attributeControlLaunchToTurnCompletion(controlLaunch, threads) {
 }
 
 class TerminalEventWaiter {
-  constructor(state, stopOne = false) {
+  constructor(state, stopOne = false, getStop = () => null) {
     this.state = state;
     this.stopOne = stopOne;
+    this.getStop = getStop;
     this.resolve = null;
   }
 
@@ -986,10 +1000,7 @@ class TerminalEventWaiter {
         reject(new Error("Not every controlled thread produced both turn completion and durable persistence events before the deadline"));
       }, timeoutMs);
       this.resolve = () => {
-        if (![...this.state.values()].every((thread) =>
-          this.stopOne && thread.ordinal === STOP_ONE_ORDINAL
-            ? thread.status === "paused" || thread.status === "cancelled"
-            : thread.persistedAtMs !== null && thread.completedAtMs !== null)) return;
+        if (![...this.state.values()].every((thread) => this.isComplete(thread))) return;
         this.resolve = null;
         clearTimeout(timer);
         resolve();
@@ -1000,6 +1011,18 @@ class TerminalEventWaiter {
 
   notify() {
     this.resolve?.();
+  }
+
+  isComplete(thread) {
+    if (!this.stopOne || thread.ordinal !== STOP_ONE_ORDINAL) {
+      return thread.persistedAtMs !== null && thread.completedAtMs !== null;
+    }
+    if (thread.persistedAtMs === null) return false;
+    if (thread.status === "paused" || thread.status === "cancelled") return true;
+    const stop = this.getStop();
+    return thread.status === "interrupted" && stop?.threadId === thread.id
+      && stop.status === "cancelled" && stop.snapshotPhase === "cancelled"
+      && typeof stop.turnExecutionId === "string";
   }
 }
 
@@ -1092,12 +1115,19 @@ function auditRun(receipt) {
 
 function isExpectedTerminal(receipt, thread) {
   if (receipt.workload.scenario !== "stop-one" || thread.ordinal !== STOP_ONE_ORDINAL) return thread.eventAudit.completed;
-  return receipt.state.stop?.status === "cancelled"
-    && receipt.state.stop?.reconnectSnapshot === true
-    && (thread.status === "paused" || thread.status === "cancelled");
+  return hasConfirmedStoppedTerminal(receipt, thread);
 }
 
-function summarizeEventAudits(threads, scenario) {
+function hasConfirmedStoppedTerminal(receipt, thread) {
+  const stop = receipt.state.stop;
+  return stop?.threadId === thread.id && stop.status === "cancelled"
+    && stop.snapshotPhase === "cancelled" && stop.reconnectSnapshot === true
+    && typeof stop.turnExecutionId === "string" && thread.persistedAtMs !== null
+    && (thread.status === "paused" || thread.status === "cancelled" || thread.status === "interrupted");
+}
+
+function summarizeEventAudits(receipt) {
+  const threads = receipt.state.threads;
   const audits = threads.map((thread) => thread.eventAudit ?? auditAgentEvents(thread.events ?? []));
   for (let index = 0; index < threads.length; index += 1) threads[index].eventAudit = audits[index];
   const flatten = (field) => audits.flatMap((audit) => audit[field] ?? []);
@@ -1110,13 +1140,27 @@ function summarizeEventAudits(threads, scenario) {
     arrivalOrderViolations: flatten("arrivalOrderViolations"),
     ok: audits.length === THREAD_COUNT && audits.every((audit) => audit.sequenceValid)
       && threads.every((thread) => thread.durable?.ok === true)
-      && threads.every((thread) => hasExpectedEventTerminal(thread, scenario)),
+      && threads.every((thread) => isExpectedTerminal(receipt, thread)),
   };
 }
 
-function hasExpectedEventTerminal(thread, scenario) {
-  if (scenario !== "stop-one" || thread.ordinal !== STOP_ONE_ORDINAL) return thread.eventAudit.completed;
-  return thread.status === "paused" || thread.status === "cancelled";
+/** Counts public event arrivals in bounded time buckets across the workload. */
+export function summarizeEventThroughput(threads) {
+  const arrivals = threads.flatMap((thread) => (thread.events ?? []).map((event) => event.atMs)).filter(Number.isFinite);
+  if (arrivals.length === 0) return { scope: "public-agent-event-push", intervalMs: 1_000, totalEvents: 0, eventsPerInterval: [], peakEventsPerSecond: 0 };
+  const sentAt = threads.map((thread) => thread.sentAtMs).filter(Number.isFinite);
+  const first = Math.min(...arrivals, ...sentAt);
+  const last = Math.max(...arrivals);
+  const intervalMs = Math.max(1_000, Math.ceil((last - first + 1) / MAX_THROUGHPUT_INTERVALS / 1_000) * 1_000);
+  const counts = Array.from({ length: Math.floor((last - first) / intervalMs) + 1 }, () => 0);
+  for (const atMs of arrivals) counts[Math.floor((atMs - first) / intervalMs)] += 1;
+  return {
+    scope: "public-agent-event-push",
+    intervalMs,
+    totalEvents: arrivals.length,
+    eventsPerInterval: counts,
+    peakEventsPerSecond: roundMs(Math.max(...counts) * 1_000 / intervalMs),
+  };
 }
 
 async function cleanupOwnedResources(socket, receipt, paths, repoRoot) {
@@ -1360,13 +1404,51 @@ async function sampleHealth(healthUrl) {
   const started = NodePerfHooks.performance.now();
   const response = await fetch(healthUrl, { signal: AbortSignal.timeout(15_000) });
   const payload = await response.json();
-  return { durationMs: NodePerfHooks.performance.now() - started, status: response.ok ? payload?.status : `http-${response.status}` };
+  return {
+    durationMs: NodePerfHooks.performance.now() - started,
+    status: response.ok ? payload?.status : `http-${response.status}`,
+    workerQueue: response.ok ? payload?.workerQueue : null,
+  };
+}
+
+/** Copies only queue counts from health, with a fixed receipt sample limit. */
+export function recordWorkerQueueSample(target, raw) {
+  if (!validWorkerQueueDepth(raw)) {
+    target.unavailableSamples += 1;
+    return;
+  }
+  const workers = raw.workers.map((worker) => ({ index: worker.index, queued: worker.queued, inFlight: worker.inFlight }));
+  const sample = {
+    atMs: roundMs(NodePerfHooks.performance.now()),
+    pending: raw.pending,
+    pendingBytes: raw.pendingBytes,
+    activeExecutions: raw.activeExecutions,
+    workers,
+  };
+  target.summary.sampleCount += 1;
+  target.summary.maxPending = Math.max(target.summary.maxPending, sample.pending);
+  target.summary.maxPendingBytes = Math.max(target.summary.maxPendingBytes, sample.pendingBytes);
+  target.summary.maxActiveExecutions = Math.max(target.summary.maxActiveExecutions, sample.activeExecutions);
+  target.summary.maxQueuedPerWorker = Math.max(target.summary.maxQueuedPerWorker, ...workers.map((worker) => worker.queued));
+  target.summary.maxInFlightWorkers = Math.max(target.summary.maxInFlightWorkers, workers.filter((worker) => worker.inFlight).length);
+  if (target.samples.length < MAX_WORKER_QUEUE_SAMPLES) target.samples.push(sample);
+  else target.omittedSamples += 1;
+}
+
+function validWorkerQueueDepth(value) {
+  const count = (number) => Number.isSafeInteger(number) && number >= 0;
+  return value !== null && typeof value === "object"
+    && count(value.pending) && count(value.pendingBytes) && count(value.activeExecutions)
+    && Array.isArray(value.workers) && value.workers.length <= 16
+    && value.workers.every((worker) => worker !== null && typeof worker === "object"
+      && count(worker.index) && count(worker.queued) && typeof worker.inFlight === "boolean");
 }
 
 class HealthSampler {
-  constructor(healthUrl, target) {
+  constructor(healthUrl, target, queueTarget) {
     this.healthUrl = healthUrl;
     this.target = target;
+    this.queueTarget = queueTarget;
     this.timer = null;
     this.inFlight = null;
   }
@@ -1375,7 +1457,10 @@ class HealthSampler {
     const sample = async () => {
       if (this.inFlight) return;
       this.inFlight = sampleHealth(this.healthUrl)
-        .then((result) => this.target.samples.push(result.durationMs))
+        .then((result) => {
+          this.target.samples.push(result.durationMs);
+          recordWorkerQueueSample(this.queueTarget, result.workerQueue);
+        })
         .catch(() => this.target.failures = (this.target.failures ?? 0) + 1)
         .finally(() => { this.inFlight = null; });
     };

@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
+import * as NodeUtil from "node:util";
 import {
   AgentEventSchema,
   AgentEventType,
@@ -9,7 +10,10 @@ import {
   PlanRecordSchema,
   PlanSectionNavSchema,
   ProviderIdSchema,
+  ProviderIdentitySchema,
   TurnOutcomeSchema,
+  type ProviderIdentity,
+  type ParentNarrativeRecoveryItem,
   type TurnOutcome,
 } from "@mcode/contracts";
 import { z } from "zod";
@@ -26,6 +30,7 @@ import type {
   ExecutionWriteReceipt,
   ExecutionLivePublicationReceipt,
   ExecutionPlanQuestionsReceipt,
+  ExecutionTerminalPersistenceReceipt,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
@@ -33,9 +38,10 @@ import { CanonicalCommittedProviderProjector } from "./canonical-committed-provi
 import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
 import { CanonicalCodexSystemErrorProjection, matchesCodexSystemIntents } from "./canonical-codex-system-error-projection.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
-import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput } from "./canonical-parent-turn-write.js";
+import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type DataOnlyParentTurnFinishInput } from "./canonical-parent-turn-write.js";
 import { TaskRepo } from "../orchestration/persistence/task-repo.js";
 import { PlanRepo } from "../planning/persistence/plan-repo.js";
+import { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js";
 import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import {
   ParentAssistantTextCheckpointService,
@@ -47,6 +53,7 @@ import {
 const HEAD_ID = "semantic:head";
 const HEAD_KIND = "semantic-head";
 const PUBLICATION_KIND = "semantic-publication";
+const ACKNOWLEDGED_PUBLICATION_KIND = "semantic-publication-acknowledged";
 const PENDING_FINISH_KIND = "semantic:finish-pending";
 const PUBLICATION_CHUNK_SIZE = 64;
 const PUBLICATION_CHUNK_PAGE_SIZE = 16;
@@ -54,6 +61,9 @@ const MAX_BUFFERED_PUBLICATION_EVENTS = 2_048;
 const MAX_LIVE_PUBLICATION_EVENTS = 64;
 const MAX_LIVE_PUBLICATION_BYTES = 256 * 1024;
 const MAX_LIVE_RECEIPT_BYTES = 512 * 1024;
+const LIVE_PUBLICATION_KINDS: ReadonlySet<ExecutionSemanticOperation["mutation"]["kind"]> = new Set([
+  "begin", "append-events", "finish", "finish-live-event", "live-event", "post-terminal-event",
+]);
 
 class RejectedCodexProjection extends Error {
   constructor(readonly diagnostic: Extract<ProviderEventProjection, { status: "rejected" }>["diagnostic"]) {
@@ -124,6 +134,7 @@ const storedHeadSchema = z.object({
   providerOutcome: TurnOutcomeSchema.nullable(),
   assignedMessageId: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
   compacting: z.boolean().default(false),
+  ended: z.boolean().optional(),
 });
 const storedReceiptSchema = z.object({
   kind: z.literal("committed"),
@@ -161,6 +172,9 @@ const storedOperationSchema = z.object({
   input_hash: z.string(),
   receipt_json: z.string(),
 });
+const pendingFinishSchema = storedReceiptSchema.pick({ providerCommit: true }).extend({
+  providerIdentities: z.array(ProviderIdentitySchema),
+});
 const storedPublicationChunkPageSchema = z.array(storedOperationSchema.extend({ operation_id: z.string() }))
   .max(PUBLICATION_CHUNK_PAGE_SIZE);
 const storedEnvelopeRowSchema = z.object({ envelope_json: z.string() });
@@ -179,6 +193,7 @@ interface SemanticHead {
   readonly providerOutcome: TurnOutcome | null;
   readonly assignedMessageId?: string | null;
   readonly compacting: boolean;
+  readonly ended?: boolean;
 }
 
 type StoredOperation = z.infer<typeof storedOperationSchema>;
@@ -193,19 +208,25 @@ export interface LostExecutionInterruption {
   readonly recoveryIncidentId: string;
 }
 
-/** Adapts the supported execution mutations to one writer-local canonical SQLite connection. */
+/**
+ * Adapts execution mutations to one writer-local SQLite connection.
+ * Outer writes reserve the WAL writer before reading because the main connection may write concurrently.
+ */
 export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter {
   private readonly turns: CanonicalParentTurnWrite;
+  private readonly compoundTurns: CanonicalParentTurnWrite;
   private readonly providerProjector: CanonicalCommittedProviderProjector;
   private readonly contextCompaction: CanonicalContextCompactionProjection;
   private readonly systemProjection: CanonicalCodexSystemErrorProjection;
   private readonly tasks: TaskRepo;
   private readonly plans: PlanRepo;
   private readonly threads: ThreadRepo;
+  private readonly hooks: HookExecutionRepo;
   private readonly assistantText: ParentAssistantTextCheckpointService;
   private readonly canonical: CanonicalAgentBoundary;
   private readonly findOperation: ReturnType<Database["prepare"]>;
   private readonly listPublicationChunks: ReturnType<Database["prepare"]>;
+  private readonly acknowledgePublication: ReturnType<Database["prepare"]>;
   private readonly findPublishedEvent: ReturnType<Database["prepare"]>;
   private readonly findDurableSequence: ReturnType<Database["prepare"]>;
   private readonly advanceLivePublication: ReturnType<Database["prepare"]>;
@@ -222,6 +243,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       if (this.bufferedPublication) this.bufferPublication(events);
       else this.publish(events);
     });
+    // Compound terminal batches publish from their durable sequence log only after the final receipt commits.
+    this.compoundTurns = new CanonicalParentTurnWrite(db, () => {});
     const codexBoundary = new CanonicalAgentBoundary(db, (events) => {
       if (!this.bufferedPublication) throw new Error("Codex projection requires a semantic transaction");
       this.bufferPublication(events);
@@ -233,9 +256,11 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.tasks = new TaskRepo(db);
     this.plans = new PlanRepo(db);
     this.threads = new ThreadRepo(db);
+    this.hooks = new HookExecutionRepo(db);
     this.assistantText = new ParentAssistantTextCheckpointService(db);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
     this.listPublicationChunks = db.prepare("SELECT operation_id, kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id > ? AND operation_id < ? ORDER BY operation_id LIMIT ?");
+    this.acknowledgePublication = db.prepare("UPDATE canonical_writer_operation_receipts SET kind = ? WHERE execution_id = ? AND operation_id = ? AND kind = ? AND input_hash = ?");
     this.findPublishedEvent = db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE execution_id = ? AND accepted_sequence = ?");
     this.findDurableSequence = db.prepare("SELECT last_durable_sequence FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?");
     this.advanceLivePublication = db.prepare(`INSERT INTO canonical_writer_live_publication_heads (thread_id, last_sequence)
@@ -254,11 +279,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const hash = fingerprint(operation);
     const existing = this.existingReceipt(operation, hash);
     if (existing) {
-      if (existing.kind === "committed" && operation.mutation.kind === "finish") {
+      if (existing.kind === "committed" && isFinishMutation(operation.mutation)) {
         this.assistantText.retire(operation.execution.executionId);
       }
-      if (existing.kind === "committed" && operation.mutation.kind === "live-event"
-        && operation.mutation.text.kind === "reclassify") {
+      if (existing.kind === "committed" && parentLiveOperation(operation)?.mutation.text.kind === "reclassify") {
         this.assistantText.discardRecoveryJournal(operation.execution.executionId);
       }
       return existing;
@@ -290,7 +314,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     try {
       const receipt = this.withBufferedPublication(() => this.db.transaction(
         () => this.writeLostInterruption(input, operation, hash),
-      )());
+      ).immediate());
       this.turns.retireInterruptedText(input.execution.executionId);
       return receipt;
     } catch (error) {
@@ -319,6 +343,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private async applySupported(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
     if (LIVE_RECOVERY_KINDS.has(operation.mutation.kind)) return this.applyLiveRecovery(operation, hash);
+    if (isFinishMutation(operation.mutation)) return await this.finish(operation, hash);
     switch (operation.mutation.kind) {
       case "begin": return this.begin(operation, hash);
       case "append-events": return this.append(operation, hash);
@@ -326,7 +351,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       case "stop-requested":
       case "provider-outcome": return this.control(operation, hash);
       case "stage-terminal": return this.stageTerminal(operation, hash);
-      case "finish": return await this.finish(operation, hash);
+      case "post-terminal-event": return this.postTerminalEvent(operation, hash);
       default: return conflict(operation);
     }
   }
@@ -335,7 +360,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const row = this.loadOperation(operation.execution.executionId, operation.operationId);
     if (!row) return null;
     if (row.kind !== PENDING_FINISH_KIND) return this.replay(operation, hash, row);
-    return operation.mutation.kind === "finish" && row.input_hash === hash ? null : conflict(operation);
+    return isFinishMutation(operation.mutation) && row.input_hash === hash ? null : conflict(operation);
   }
 
   private begin(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
@@ -368,7 +393,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.insertOperation.run(operation.execution.executionId, HEAD_ID, HEAD_KIND, fingerprint(head.lease), JSON.stringify(head));
       this.storePublicationChunks(operation.execution.executionId, hash, result.events.map((event) => event.acceptedSequence));
       return this.storeReceipt(operation, hash, receipt);
-    })());
+    }).immediate());
   }
 
   private append(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
@@ -378,7 +403,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       || mutation.events.some((event) => event.routing.threadId !== operation.execution.threadId
         || event.routing.turnId !== operation.execution.turnId
         || event.routing.executionId !== operation.execution.executionId)) return conflict(operation);
-    return this.withBufferedPublication(() => this.db.transaction(() => {
+    const receipt = this.withBufferedPublication(() => this.db.transaction(() => {
       const head = this.requireNextHead(operation);
       if (!validPublicationProvider(operation, head.providerId)) throw new SemanticConflict();
       const result = this.turns.append({
@@ -391,6 +416,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const providerEvents = this.providerProjector.project(result.events);
       const compacting = this.contextCompaction.apply(operation.execution.threadId, head.compacting, providerEvents);
       if (compacting === null) throw new SemanticConflict();
+      const live = this.appendParentLive(operation, head, providerEvents);
       const checkpoint = durableSequenceRowSchema.parse(this.findDurableSequence.get(operation.execution.executionId));
       const providerCommit: ExecutionProviderCommitReceipt = {
         outcome: result.outcome,
@@ -400,16 +426,42 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         durableThrough: result.durableThrough,
         eventCount: result.events.length,
       };
-      const receipt = committed(operation, checkpoint.last_durable_sequence, providerCommit, providerEvents);
-      this.storeHead({ ...head, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, compacting });
+      const receipt = committed(operation, checkpoint.last_durable_sequence, providerCommit, live.providerEvents,
+        live.textResult, undefined, live.planQuestions, live.planOutput);
+      this.storeHead({ ...head, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, compacting,
+        ...(mutation.parentLive?.message ? { assignedMessageId: mutation.parentLive.message.messageId } : {}) });
       const publication = this.bufferedPublication?.flat() ?? [];
       // A Codex child write has its own execution sequence, even when the parent event caused it.
       this.storePublicationChunks(operation.execution.executionId, hash, publication.map((event) => ({
         executionId: event.routing.executionId,
         sequence: event.acceptedSequence,
       })));
-      return this.storeReceipt(operation, hash, receipt);
-    })());
+      return this.storeReceipt(operation, hash, receipt, live.publication);
+    }).immediate());
+    if (mutation.parentLive?.text.kind === "reclassify") {
+      this.assistantText.discardRecoveryJournal(operation.execution.executionId);
+    }
+    return receipt;
+  }
+
+  private appendParentLive(
+    operation: ExecutionSemanticOperation,
+    head: SemanticHead,
+    providerEvents: readonly ProjectedCommittedProviderEvent[],
+  ) {
+    const live = parentLiveOperation(operation);
+    if (!live) return { providerEvents, textResult: undefined, planQuestions: undefined,
+      planOutput: undefined, publication: undefined };
+    const publication = liveEventPublication(live);
+    const matches = providerEvents.filter((projected) => publication
+      && sameParentLiveEvent(projected.event, publication.event));
+    if (matches.length !== 1) throw new SemanticConflict();
+    this.requireUnfinishedCheckpoint(operation.execution);
+    return {
+      ...this.applyLiveFeatureEffects(live, head),
+      publication: this.projectLiveSystem(live, head.providerId),
+      providerEvents: providerEvents.filter((projected) => projected !== matches[0]),
+    };
   }
 
   private commitCodexProjection(project: () => ProviderEventProjection): ProviderEventProjection {
@@ -444,7 +496,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const receipt = committed(operation, head.durableRevision, undefined, undefined, result);
       this.storeHead({ ...head, ordinal: operation.ordinal });
       return this.storeReceipt(operation, hash, receipt);
-    })();
+    }).immediate();
   }
 
   private recordNarrativeDelta(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
@@ -457,7 +509,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...head, ordinal: operation.ordinal });
       return this.storeReceipt(operation, hash, receipt);
-    })();
+    }).immediate();
   }
 
   private applyLiveRecovery(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
@@ -471,29 +523,29 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (mutation.kind !== "live-event") return conflict(operation);
     const receipt = this.db.transaction(() => {
       const head = this.requireNextHead(operation);
-      if (head.providerId !== "codex") throw new SemanticConflict();
+      if (!validPublicationProvider(operation, head.providerId)) throw new SemanticConflict();
       this.requireUnfinishedCheckpoint(operation.execution);
       const { textResult, planQuestions, planOutput } = this.applyLiveFeatureEffects(operation, head);
-      const livePublication = this.projectLiveSystem(operation);
+      const livePublication = this.projectLiveSystem(operation, head.providerId);
       const committedReceipt = committed(operation, head.durableRevision, undefined, undefined, textResult,
         undefined, planQuestions, planOutput);
       this.storeHead({ ...head, ordinal: operation.ordinal,
         ...(mutation.message ? { assignedMessageId: mutation.message.messageId } : {}) });
       return this.storeReceipt(operation, hash, committedReceipt, livePublication);
-    })();
+    }).immediate();
     if (mutation.text.kind === "reclassify") {
       this.assistantText.discardRecoveryJournal(operation.execution.executionId);
     }
     return receipt;
   }
 
-  private projectLiveSystem(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationIntent[] | undefined {
+  private projectLiveSystem(operation: ExecutionSemanticOperation, providerId: string): readonly ExecutionLivePublicationIntent[] | undefined {
     const mutation = operation.mutation;
     if (mutation.kind !== "live-event" || mutation.systemIntents === undefined) return undefined;
-    const publication = liveEventPublication(operation);
+    const publication = operation.livePublication?.length === 1 ? operation.livePublication[0] : undefined;
     if (publication?.event.type !== "system") throw new SemanticConflict();
     const result = this.systemProjection.projectBoundSystem(
-      operation.execution, publication.event, mutation.systemIntents, publication.after,
+      operation.execution, providerId, publication.event, mutation.systemIntents, publication.after,
     );
     return [{ after: result.after, event: result.event }];
   }
@@ -589,16 +641,22 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private async finish(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
     const mutation = operation.mutation;
-    if (mutation.kind !== "finish" || !validFinish(operation, mutation)) return conflict(operation);
+    if (!isFinishMutation(mutation) || !validFinish(operation, mutation)) return conflict(operation);
     if (!this.validFinishHead(operation, mutation.input.providerId)) return conflict(operation);
-    this.reserveFinish(operation, hash);
-    this.publishStoredEvents(operation.execution.executionId, hash);
-    const result = await this.turns.finish(mutation.input, (batch) => {
+    const providerCommit = mutation.kind === "finish-live-event"
+      ? this.prepareLiveFinish(operation, hash, mutation) : undefined;
+    if (mutation.kind === "finish") {
+      this.reserveFinish(operation, hash);
+      this.publishStoredEvents(operation.execution.executionId, hash);
+    }
+    const turns = mutation.kind === "finish-live-event" ? this.compoundTurns : this.turns;
+    const input = this.terminalFinishInput(operation, mutation);
+    const result = await turns.finish(input, (batch) => {
       this.storePublicationChunks(operation.execution.executionId, hash, batch.publishedSequences);
       if (batch.terminal) {
         const current = this.requireNextHead(operation);
         if (current.providerId !== mutation.input.providerId) throw new SemanticConflict();
-        const receipt = committed(operation, batch.durableSequence);
+        const receipt = committed(operation, batch.durableSequence, providerCommit, providerCommit ? [] : undefined);
         const status = mutation.outcome === "cancelled" ? "interrupted" : mutation.outcome;
         if (!this.threads.updateStatus(operation.execution.threadId, status)) throw new SemanticConflict();
         this.storeHead({ ...current, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, terminal: true });
@@ -606,11 +664,183 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       }
     });
     if (result.outcome !== "committed") return conflict(operation);
+    return this.finishedReceipt(operation, hash);
+  }
+
+  private finishedReceipt(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
     const stored = this.loadOperation(operation.execution.executionId, operation.operationId);
     if (!stored) return conflict(operation);
     const receipt = this.readReceipt(operation, hash, stored);
+    if (operation.mutation.kind === "finish-live-event" && receipt.kind === "committed") {
+      this.publishStoredEvents(operation.execution.executionId, hash, true);
+    }
     if (receipt.kind === "committed") this.assistantText.retire(operation.execution.executionId);
     return receipt;
+  }
+
+  private terminalFinishInput(
+    operation: ExecutionSemanticOperation,
+    mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish" | "finish-live-event" }>,
+  ): DataOnlyParentTurnFinishInput {
+    if (mutation.kind === "finish") return mutation.input;
+    const pending = this.loadOperation(operation.execution.executionId, operation.operationId);
+    if (!pending || pending.kind !== PENDING_FINISH_KIND) throw new SemanticConflict();
+    const preparation = pendingFinishSchema.parse(JSON.parse(pending.receipt_json));
+    return { ...mutation.input, providerIdentities: preparation.providerIdentities };
+  }
+
+  private terminalProviderIdentities(threadId: string, providerId: string): ProviderIdentity[] {
+    const canonicalThread = this.canonical.loadThread(threadId);
+    if (!canonicalThread || canonicalThread.providerId !== providerId) throw new SemanticConflict();
+    const thread = this.threads.findById(threadId);
+    if (!thread?.sdk_session_id || thread.provider !== providerId) return [...canonicalThread.providerIdentities];
+    return [{ providerId: canonicalThread.providerId, scope: providerId === "codex" ? "thread" : "session",
+      value: thread.sdk_session_id, provenance: "native" }];
+  }
+
+  private prepareLiveFinish(
+    operation: ExecutionSemanticOperation,
+    hash: string,
+    mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>,
+  ): ExecutionProviderCommitReceipt | undefined {
+    if (!validLiveFinish(operation.execution, mutation)) throw new SemanticConflict();
+    const prepared = this.withBufferedPublication(() => this.db.transaction(() => {
+      const head = this.requireNextHead(operation);
+      const pending = this.loadOperation(operation.execution.executionId, operation.operationId);
+      if (pending) {
+        this.reserveFinish(operation, hash);
+        return committed(operation, head.durableRevision, pendingFinishSchema.parse(JSON.parse(pending.receipt_json)).providerCommit);
+      }
+      if (head.assignedMessageId && head.assignedMessageId !== mutation.projection.assistant.messageId) {
+        throw new SemanticConflict();
+      }
+      const next = this.recordProviderOutcome(head, mutation.outcome);
+      const evidence = this.appendTerminalEvidence(operation, hash, mutation, next);
+      const staged = this.turns.stageTerminalProjection(mutation.projection);
+      this.storeHead({ ...evidence.head, assignedMessageId: staged.messageId });
+      this.reserveFinish(operation, hash, evidence.providerCommit,
+        this.terminalProviderIdentities(operation.execution.threadId, head.providerId));
+      return committed(operation, head.durableRevision, evidence.providerCommit);
+    }).immediate(), false);
+    if (prepared.kind !== "committed") throw new SemanticConflict();
+    return prepared.providerCommit;
+  }
+
+  private appendTerminalEvidence(
+    operation: ExecutionSemanticOperation,
+    hash: string,
+    mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>,
+    head: SemanticHead,
+  ): { head: SemanticHead; providerCommit: ExecutionProviderCommitReceipt | undefined } {
+    if (!mutation.providerEvent) return { head, providerCommit: undefined };
+    const checkpoint = this.canonical.loadCheckpoint(operation.execution.executionId);
+    const result = this.turns.append({ ...operation.execution, ...mutation.providerEvent,
+      nativeCursor: mutation.providerEvent.nativeCursor ?? checkpoint?.nativeCursor ?? null });
+    if (result.outcome !== "committed") throw new SemanticConflict();
+    const projected = this.providerProjector.project(result.events);
+    if (!matchesTerminalProviderPublication(operation, projected)) throw new SemanticConflict();
+    const compacting = this.contextCompaction.apply(operation.execution.threadId, head.compacting, projected);
+    if (compacting === null) throw new SemanticConflict();
+    const publicationEvents = this.bufferedPublication?.flat() ?? [];
+    this.storePublicationChunks(operation.execution.executionId, hash,
+      publicationEvents.map((event) => event.acceptedSequence));
+    return { head: { ...head, compacting, durableRevision: result.durableThrough }, providerCommit: {
+      outcome: result.outcome, conversationRevision: result.conversationRevision, rosterRevision: result.rosterRevision,
+      acceptedThrough: result.acceptedThrough, durableThrough: result.durableThrough, eventCount: result.events.length,
+    } };
+  }
+
+  private postTerminalEvent(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
+    const mutation = operation.mutation;
+    if (mutation.kind !== "post-terminal-event") return conflict(operation);
+    return this.withBufferedPublication(() => this.db.transaction(() => {
+      const head = this.requireTerminalHead(operation);
+      this.requirePostTerminalPublication(operation, head);
+      const hookDrafts = this.persistTerminalHooks(operation, head, mutation.hooks ?? []);
+      const providerCommit = this.appendPostTerminalEvidence(operation, hookDrafts);
+      const live = parentLiveOperation(operation);
+      const publication = this.terminalHookPublication(operation)
+        ?? (live ? this.projectLiveSystem(live, head.providerId) : undefined);
+      return this.storePostTerminalReceipt(operation, hash, head, providerCommit, publication);
+    }).immediate());
+  }
+
+  private requirePostTerminalPublication(operation: ExecutionSemanticOperation, head: SemanticHead): void {
+    const event = operation.livePublication?.[0]?.event;
+    if (!event || !validPublicationProvider(operation, head.providerId)) throw new SemanticConflict();
+    const checkpoint = this.canonical.loadCheckpoint(operation.execution.executionId);
+    if (!checkpoint?.terminalOutcome || !matchesLateOutcome(event, checkpoint.terminalOutcome)) throw new SemanticConflict();
+  }
+
+  private terminalHookPublication(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationIntent[] | undefined {
+    const mutation = operation.mutation;
+    const publication = operation.livePublication?.[0];
+    if (mutation.kind !== "post-terminal-event" || publication?.event.type !== "hookCompleted") return undefined;
+    const hook = mutation.hooks?.[0];
+    if (!hook) return undefined;
+    const message = this.canonical.loadTerminalProjection(operation.execution.turnId).message;
+    if (!message) throw new SemanticConflict();
+    return [{ after: "terminal", event: { ...publication.event,
+      persistedMessageId: message.id, persistedHookId: hook.record.id } }];
+  }
+
+  private storePostTerminalReceipt(operation: ExecutionSemanticOperation, hash: string, head: SemanticHead,
+    providerCommit: ExecutionProviderCommitReceipt | undefined, publication: readonly ExecutionLivePublicationIntent[] | undefined): ExecutionWriteReceipt {
+    const receipt = committed(operation, providerCommit?.durableThrough ?? head.durableRevision,
+      providerCommit, providerCommit ? [] : undefined);
+    this.storeHead({ ...head, ordinal: operation.ordinal, durableRevision: receipt.durableRevision,
+      ...(operation.livePublication?.[0]?.event.type === "ended" ? { ended: true } : {}) });
+    const events = this.bufferedPublication?.flat() ?? [];
+    this.storePublicationChunks(operation.execution.executionId, hash, events.map((entry) => entry.acceptedSequence));
+    return this.storeReceipt(operation, hash, receipt, publication);
+  }
+
+  private requireTerminalHead(operation: ExecutionSemanticOperation): SemanticHead {
+    const head = this.loadHead(operation.execution.executionId);
+    if (!head?.terminal || head.ended || head.ordinal + 1 !== operation.ordinal
+      || !sameExecutionAndLease(head, operation)) throw new SemanticConflict();
+    return head;
+  }
+
+  private persistTerminalHooks(
+    operation: ExecutionSemanticOperation,
+    head: SemanticHead,
+    hooks: readonly Extract<ParentNarrativeRecoveryItem, { kind: "hook" }>[],
+  ): Extract<ExecutionSemanticOperation["mutation"], { kind: "append-events" }>["events"] {
+    if (hooks.length === 0) return [];
+    const message = this.canonical.loadTerminalProjection(operation.execution.turnId).message;
+    if (!message) throw new SemanticConflict();
+    const drafts = [];
+    for (const hook of hooks) {
+      const record = hook.record;
+      const existing = this.db.prepare("SELECT message_id FROM hook_executions WHERE id = ?").get(record.id);
+      if (existing && !NodeUtil.isDeepStrictEqual(existing, { message_id: message.id })) throw new SemanticConflict();
+      if (record.message_id && record.message_id !== message.id) throw new SemanticConflict();
+      this.hooks.bulkCreate([{ id: record.id, messageId: message.id, hookName: record.hook_name,
+        toolName: record.tool_name, phase: record.phase, payload: record.payload, durationMs: record.duration_ms,
+        didBlock: record.did_block, startedAt: record.started_at, endedAt: record.ended_at, sortOrder: record.sort_order }], true);
+      drafts.push(terminalHookDraft(operation, head.providerId, { ...record, message_id: message.id }));
+    }
+    return drafts;
+  }
+
+  private appendPostTerminalEvidence(
+    operation: ExecutionSemanticOperation,
+    hooks: Extract<ExecutionSemanticOperation["mutation"], { kind: "append-events" }>["events"],
+  ): ExecutionProviderCommitReceipt | undefined {
+    const mutation = operation.mutation;
+    if (mutation.kind !== "post-terminal-event") throw new SemanticConflict();
+    const source = mutation.providerEvent;
+    const events = [...source ? source.events : [], ...hooks];
+    if (events.length === 0) return undefined;
+    const result = this.turns.append({ ...operation.execution, events,
+      phase: source ? source.phase : "post-terminal", nativeCursor: null });
+    if (result.outcome !== "committed") throw new SemanticConflict();
+    const projected = this.providerProjector.project(result.events);
+    if (mutation.providerEvent && !matchesPostTerminalProviderPublication(operation, projected)) throw new SemanticConflict();
+    return { outcome: result.outcome, conversationRevision: result.conversationRevision, rosterRevision: result.rosterRevision,
+      acceptedThrough: result.acceptedThrough, durableThrough: result.durableThrough,
+      eventCount: source ? source.events.length : 0 };
   }
 
   private stageTerminal(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
@@ -628,7 +858,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.storeHead({ ...head, ordinal: operation.ordinal,
         assignedMessageId: mutation.input.assistant.messageId ?? head.assignedMessageId ?? null });
       return this.storeReceipt(operation, hash, receipt);
-    })();
+    }).immediate();
   }
 
   private control(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
@@ -638,7 +868,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...next, ordinal: operation.ordinal });
       return this.storeReceipt(operation, hash, receipt);
-    })();
+    }).immediate();
   }
 
   private applyControlMutation(head: SemanticHead, operation: ExecutionSemanticOperation): SemanticHead {
@@ -723,13 +953,15 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.updateHead.run(JSON.stringify(head), head.execution.executionId, HEAD_ID, HEAD_KIND);
   }
 
-  private reserveFinish(operation: ExecutionSemanticOperation, hash: string): void {
+  private reserveFinish(operation: ExecutionSemanticOperation, hash: string, providerCommit?: ExecutionProviderCommitReceipt,
+    providerIdentities?: readonly ProviderIdentity[]): void {
     const existing = this.loadOperation(operation.execution.executionId, operation.operationId);
     if (existing) {
       if (existing.kind !== PENDING_FINISH_KIND || existing.input_hash !== hash) throw new SemanticConflict();
       return;
     }
-    this.insertOperation.run(operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash, "{}");
+    this.insertOperation.run(operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash,
+      JSON.stringify({ providerCommit, providerIdentities }));
   }
 
   private storePublicationChunks(
@@ -766,9 +998,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (operation.livePublication && Buffer.byteLength(receiptJson, "utf8") > MAX_LIVE_RECEIPT_BYTES) {
       throw new SemanticConflict();
     }
-    if (operation.mutation.kind === "finish") {
+    if (isFinishMutation(operation.mutation)) {
       const updated = this.commitPendingFinish.run(
-        "semantic:finish", receiptJson, operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash,
+        `semantic:${operation.mutation.kind}`, receiptJson, operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash,
       );
       if (updated.changes !== 1) throw new SemanticConflict();
       return storedReceipt;
@@ -799,7 +1031,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private replay(operation: ExecutionSemanticOperation, hash: string, stored: StoredOperation): ExecutionWriteReceipt {
     const receipt = this.readReceipt(operation, hash, stored);
-    if (receipt.kind === "committed") this.publishStoredEvents(operation.execution.executionId, hash);
+    if (receipt.kind === "committed") {
+      this.publishStoredEvents(operation.execution.executionId, hash, operation.mutation.kind === "finish-live-event");
+    }
     return receipt;
   }
 
@@ -813,21 +1047,46 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       || !this.matchesLivePublicationReceipt(operation, receipt.livePublication)) {
       throw new Error("Live publication receipt does not match its operation");
     }
-    return receipt.operationId === operation.operationId && Number.isSafeInteger(receipt.durableRevision)
-      ? committed(operation, receipt.durableRevision, receipt.providerCommit, receipt.providerEvents,
-        receipt.assistantTextCheckpoint, receipt.livePublication, receipt.planQuestions, receipt.planOutput) : conflict(operation);
+    if (receipt.operationId !== operation.operationId || !Number.isSafeInteger(receipt.durableRevision)) {
+      return conflict(operation);
+    }
+    const committedReceipt = committed(operation, receipt.durableRevision, receipt.providerCommit, receipt.providerEvents,
+      receipt.assistantTextCheckpoint, receipt.livePublication, receipt.planQuestions, receipt.planOutput);
+    return operation.mutation.kind === "finish-live-event"
+      ? { ...committedReceipt, terminalPersistence: this.terminalPersistence(operation) } : committedReceipt;
+  }
+
+  private terminalPersistence(operation: ExecutionSemanticOperation): ExecutionTerminalPersistenceReceipt {
+    const mutation = operation.mutation;
+    if (mutation.kind !== "finish-live-event") throw new SemanticConflict();
+    const persisted = this.canonical.loadTerminalProjection(operation.execution.turnId);
+    const message = persisted.message;
+    if (message && !matchesCommittedTerminalMessage(message, operation.execution, mutation.outcome)) {
+      throw new SemanticConflict();
+    }
+    const fileEvidence = mutation.input.fileEvidence;
+    return {
+      messageId: message?.id ?? null,
+      outcome: mutation.outcome,
+      toolCallCount: persisted.toolCallCount,
+      filesChanged: [...fileEvidence?.filesChanged ?? []],
+      ...(fileEvidence ? { fileEffects: fileEvidence.fileEffects } : {}),
+    };
   }
 
   private matchesLivePublicationReceipt(
     operation: ExecutionSemanticOperation,
     actual: readonly ExecutionLivePublicationReceipt[] | undefined,
   ): boolean {
-    const mutation = operation.mutation;
-    if (mutation.kind === "live-event" && mutation.systemIntents?.[0]?.kind === "system-notice") {
+    const hookPublication = this.terminalHookPublication(operation);
+    if (hookPublication) {
+      return publicationFingerprint(actual) === publicationFingerprint(hookPublication);
+    }
+    const mutation = parentLiveOperation(operation)?.mutation;
+    if (mutation?.systemIntents?.[0]?.kind === "system-notice") {
       return this.matchesGeneratedNoticeReceipt(operation, actual);
     }
-    return fingerprint(actual?.map(({ after, event }) => ({ after, event })) ?? null)
-      === fingerprint(livePublicationFor(operation) ?? null);
+    return publicationFingerprint(actual) === publicationFingerprint(livePublicationFor(operation));
   }
 
   private matchesGeneratedNoticeReceipt(
@@ -842,7 +1101,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       === fingerprint(expected);
   }
 
-  private publishStoredEvents(executionId: string, hash: string): void {
+  private publishStoredEvents(executionId: string, hash: string, acknowledge = false): void {
     const prefix = publicationChunkPrefix(hash);
     let cursor = prefix;
     while (true) {
@@ -851,15 +1110,27 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       ));
       if (chunks.length === 0) return;
       for (const chunk of chunks) {
-        if (chunk.kind !== PUBLICATION_KIND || chunk.input_hash !== hash) throw new Error("Semantic publication chunk mismatch");
-        const sequences = storedPublicationSequencesSchema.parse(JSON.parse(chunk.receipt_json));
-        const events = sequences.map((sequence) => typeof sequence === "number"
-          ? this.loadPublishedEvent(executionId, sequence)
-          : this.loadPublishedEvent(sequence.executionId, sequence.sequence));
-        this.publish(events);
+        this.publishStoredChunk(executionId, hash, chunk, acknowledge);
       }
       cursor = chunks[chunks.length - 1]!.operation_id;
     }
+  }
+
+  private publishStoredChunk(
+    executionId: string,
+    hash: string,
+    chunk: z.infer<typeof storedPublicationChunkPageSchema>[number],
+    acknowledge: boolean,
+  ): void {
+    if (acknowledge && chunk.kind === ACKNOWLEDGED_PUBLICATION_KIND && chunk.input_hash === hash) return;
+    if (chunk.kind !== PUBLICATION_KIND || chunk.input_hash !== hash) throw new Error("Semantic publication chunk mismatch");
+    const sequences = storedPublicationSequencesSchema.parse(JSON.parse(chunk.receipt_json));
+    const events = sequences.map((sequence) => typeof sequence === "number"
+      ? this.loadPublishedEvent(executionId, sequence)
+      : this.loadPublishedEvent(sequence.executionId, sequence.sequence));
+    this.publish(events);
+    if (acknowledge) this.acknowledgePublication.run(ACKNOWLEDGED_PUBLICATION_KIND, executionId,
+      chunk.operation_id, PUBLICATION_KIND, hash);
   }
 
   private loadPublishedEvent(executionId: string, sequence: number) {
@@ -877,7 +1148,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.bufferedPublicationCount += events.length;
   }
 
-  private withBufferedPublication(write: () => ExecutionWriteReceipt): ExecutionWriteReceipt {
+  private withBufferedPublication(write: () => ExecutionWriteReceipt, publishAfterCommit = true): ExecutionWriteReceipt {
     if (this.bufferedPublication) throw new Error("Nested semantic publication buffer");
     const pending: Parameters<CanonicalAgentEventPublisher>[0][] = [];
     this.bufferedPublication = pending;
@@ -885,7 +1156,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     try {
       const result = write();
       this.bufferedPublication = null;
-      for (const events of pending) this.publish(events);
+      if (publishAfterCommit) for (const events of pending) this.publish(events);
       return result;
     } finally {
       this.bufferedPublication = null;
@@ -907,7 +1178,7 @@ function validLivePublication(operation: ExecutionSemanticOperation): boolean {
   const publication = operation.livePublication;
   if (publication === undefined) return true;
   if (!validLivePublicationShape(publication, operation.mutation.kind)) return false;
-  const barrier = operation.mutation.kind === "finish" ? "terminal" : "writer";
+  const barrier = isFinishMutation(operation.mutation) || operation.mutation.kind === "post-terminal-event" ? "terminal" : "writer";
   let bytes = 0;
   for (const intent of publication) {
     if (!validLivePublicationIntent(intent, operation, barrier)) return false;
@@ -923,8 +1194,8 @@ function validLivePublicationShape(
 ): boolean {
   return Array.isArray(publication) && publication.length > 0 && publication.length <= MAX_LIVE_PUBLICATION_EVENTS
     && publication.every((intent) => intent.event.publicationId === undefined)
-    && (mutationKind === "begin" || mutationKind === "append-events" || mutationKind === "finish"
-      || mutationKind === "live-event" && publication.length === 1);
+    && LIVE_PUBLICATION_KINDS.has(mutationKind)
+    && (mutationKind === "live-event" || mutationKind === "post-terminal-event" ? publication.length === 1 : true);
 }
 
 function validLivePublicationIntent(
@@ -936,7 +1207,7 @@ function validLivePublicationIntent(
     && intent.event.threadId === operation.execution.threadId
     && intent.event.turnExecutionId === operation.execution.executionId
     && (operation.mutation.kind !== "begin" || intent.event.type === "turnStarted")
-    && (intent.event.type !== "turnStarted" || operation.mutation.kind === "begin")
+    && validTurnStartedPublication(intent.event, operation.mutation)
     && (barrier === "terminal" || !isTerminalLiveEvent(intent.event.type));
 }
 
@@ -945,18 +1216,138 @@ function isTerminalLiveEvent(type: ExecutionLivePublicationIntent["event"]["type
 }
 
 function validPublicationProvider(operation: ExecutionSemanticOperation, providerId: string): boolean {
-  return operation.livePublication === undefined || providerId === "codex";
+  return operation.livePublication === undefined || ["codex", "claude", "cursor"].includes(providerId);
+}
+
+function validTurnStartedPublication(event: ExecutionLivePublicationIntent["event"], mutation: ExecutionSemanticOperation["mutation"]): boolean {
+  return event.type !== "turnStarted" || mutation.kind === "begin"
+    || mutation.kind === "append-events" && mutation.parentLive !== undefined;
+}
+
+function validPostTerminalInput(operation: ExecutionSemanticOperation): boolean {
+  const mutation = operation.mutation;
+  const publication = operation.livePublication;
+  if (mutation.kind !== "post-terminal-event" || publication?.length !== 1) return false;
+  const event = publication[0]?.event;
+  if (!event || !AgentEventSchema().safeParse(event).success) return false;
+  return validTerminalProviderEvent(operation.execution, mutation.providerEvent)
+    && validPostTerminalEffects(mutation, event)
+    && Buffer.byteLength(JSON.stringify(operation), "utf8") <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes;
+}
+
+function validPostTerminalEffects(
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "post-terminal-event" }>,
+  event: ExecutionLivePublicationIntent["event"],
+): boolean {
+  const hooks = mutation.hooks ?? [];
+  if (!Array.isArray(hooks) || hooks.length > 1) return false;
+  if (event.type === "system") {
+    return hooks.length === 0 && validPostTerminalSystem(event, mutation.systemIntents);
+  }
+  if (mutation.systemIntents !== undefined) return false;
+  if (event.type === "ended" || event.type === "hookProgress") return hooks.length === 0;
+  return validLateHookRecords(event, hooks);
+}
+
+function validPostTerminalSystem(
+  event: Extract<ExecutionLivePublicationIntent["event"], { type: "system" }>,
+  intents: Extract<ExecutionSemanticOperation["mutation"], { kind: "post-terminal-event" }>["systemIntents"],
+): boolean {
+  return Array.isArray(intents) && intents.every((intent) => intent.kind !== "session-cursor")
+    && matchesCodexSystemIntents(event, intents);
+}
+
+function validLateHookRecords(
+  event: ExecutionLivePublicationIntent["event"],
+  hooks: readonly Extract<ParentNarrativeRecoveryItem, { kind: "hook" }>[],
+): boolean {
+  if (event.type !== "hookStarted" && event.type !== "hookCompleted") return false;
+  if (event.type === "hookCompleted" && (event.persistedMessageId || event.persistedHookId)) return false;
+  if (event.type === "hookStarted" && hooks.length !== 1) return false;
+  return hooks.every((hook) => ParentNarrativeRecoveryItemSchema().safeParse(hook).success
+    && hook.kind === "hook" && hook.record.hook_name === event.hookName
+    && validLateHookRecord(event, hook.record));
+}
+
+function validLateHookRecord(
+  event: Extract<ExecutionLivePublicationIntent["event"], { type: "hookStarted" | "hookCompleted" }>,
+  record: Extract<ParentNarrativeRecoveryItem, { kind: "hook" }>["record"],
+): boolean {
+  if (!Number.isSafeInteger(record.sort_order) || record.sort_order < 0 || !Number.isFinite(Date.parse(record.started_at))) return false;
+  if (event.type === "hookStarted") return record.ended_at === null && record.phase === "stop";
+  return record.ended_at !== null && Number.isFinite(Date.parse(record.ended_at))
+    && record.duration_ms === event.durationMs && record.did_block === event.didBlock;
+}
+
+function matchesLateOutcome(event: ExecutionLivePublicationIntent["event"], outcome: TurnOutcome): boolean {
+  return event.type !== "ended" || event.outcome === undefined
+    || normalizeTerminalOutcome(event.outcome) === normalizeTerminalOutcome(outcome);
+}
+
+function matchesPostTerminalProviderPublication(
+  operation: ExecutionSemanticOperation,
+  projected: readonly ProjectedCommittedProviderEvent[],
+): boolean {
+  const event = operation.livePublication?.[0]?.event;
+  return projected.length === 1 && event !== undefined
+    && (event.type === "ended" ? sameTerminalEvent(projected[0]?.event, event)
+      : NodeUtil.isDeepStrictEqual(projected[0]?.event, event));
+}
+
+function terminalHookDraft(
+  operation: ExecutionSemanticOperation,
+  providerId: string,
+  record: Extract<ParentNarrativeRecoveryItem, { kind: "hook" }>["record"],
+): Extract<ExecutionSemanticOperation["mutation"], { kind: "append-events" }>["events"][number] {
+  const itemId = `hook:${record.id}`;
+  return { eventId: `${operation.execution.executionId}:post-terminal:${operation.ordinal}:${itemId}`,
+    routing: { ...operation.execution, itemId }, sourceProviderId: providerId, sourceIdentities: [],
+    payload: { type: "item.recorded", item: { id: itemId, threadId: operation.execution.threadId,
+      turnId: operation.execution.turnId, kind: "system", providerIdentities: [],
+      payload: { projection: "hook", record }, createdAt: record.started_at, updatedAt: record.ended_at ?? record.started_at } } };
 }
 
 function validSemanticMutationInput(operation: ExecutionSemanticOperation): boolean {
-  if (operation.mutation.kind === "append-assistant-text") {
-    return validAssistantTextInput(operation.mutation.inputs, operation.execution);
+  switch (operation.mutation.kind) {
+    case "post-terminal-event": return validPostTerminalInput(operation);
+    case "finish-live-event": return validLiveFinish(operation.execution, operation.mutation)
+      && validTerminalPublicationOutcome(operation.mutation, operation.livePublication);
+    case "append-assistant-text": return validAssistantTextInput(operation.mutation.inputs, operation.execution);
+    case "narrative-delta": return validNarrativeDeltaInput(operation.mutation.input, operation.execution);
+    case "live-event": return validLiveEventInput(operation);
+    case "append-events": return validAppendParentInput(operation);
+    default: return true;
   }
-  if (operation.mutation.kind === "narrative-delta") {
-    return validNarrativeDeltaInput(operation.mutation.input, operation.execution);
+}
+
+function validAppendParentInput(operation: ExecutionSemanticOperation): boolean {
+  if (operation.mutation.kind === "append-events" && operation.mutation.parentLive !== undefined) {
+    const live = parentLiveOperation(operation);
+    return live !== null && validLiveEventInput(live)
+      && Buffer.byteLength(JSON.stringify(operation), "utf8") <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes;
   }
-  if (operation.mutation.kind === "live-event") return validLiveEventInput(operation);
   return true;
+}
+
+function parentLiveOperation(operation: ExecutionSemanticOperation):
+  (ExecutionSemanticOperation & { mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }> }) | null {
+  const mutation = operation.mutation;
+  if (mutation.kind === "live-event") return { ...operation, mutation };
+  if (mutation.kind === "post-terminal-event") {
+    return { ...operation, mutation: { kind: "live-event", text: { kind: "unchanged" }, systemIntents: mutation.systemIntents } };
+  }
+  return mutation.kind === "append-events" && mutation.parentLive
+    ? { ...operation, mutation: { kind: "live-event", ...mutation.parentLive } } : null;
+}
+
+function sameParentLiveEvent(
+  source: ExecutionLivePublicationIntent["event"],
+  publication: ExecutionLivePublicationIntent["event"],
+): boolean {
+  if (source.type === "message" && publication.type === "message") {
+    return NodeUtil.isDeepStrictEqual({ ...source, messageId: undefined }, { ...publication, messageId: undefined });
+  }
+  return NodeUtil.isDeepStrictEqual(source, publication);
 }
 
 function validLiveEventInput(operation: ExecutionSemanticOperation): boolean {
@@ -1065,7 +1456,7 @@ function validLiveTextAssociation(
   event: ExecutionLivePublicationIntent["event"],
 ): boolean {
   switch (text.kind) {
-    case "unchanged": return event.type === "system" || validNarrativeEvent(event);
+    case "unchanged": return unchangedTextEvent(event);
     case "append": return validAppendEvent(event, text.inputs);
     case "reclassify": return event.type === "assistantMessageBoundary" && event.isFinalResponse === false
       && text.expectedText.length > 0;
@@ -1175,12 +1566,83 @@ function validLease(lease: ExecutionLease): boolean {
 
 function validFinish(
   operation: ExecutionSemanticOperation,
-  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish" }>,
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish" | "finish-live-event" }>,
 ): boolean {
   return mutation.outcome === mutation.input.outcome
     && mutation.input.threadId === operation.execution.threadId
     && mutation.input.turnId === operation.execution.turnId
     && mutation.input.executionId === operation.execution.executionId;
+}
+
+function unchangedTextEvent(event: ExecutionLivePublicationIntent["event"]): boolean {
+  return ["system", "turnStarted", "generatedAttachment", "contextEstimate", "compacting", "compactSummary"].includes(event.type)
+    || validNarrativeEvent(event);
+}
+
+function isFinishMutation(mutation: ExecutionSemanticOperation["mutation"]): mutation is Extract<
+  ExecutionSemanticOperation["mutation"], { kind: "finish" | "finish-live-event" }
+> {
+  return mutation.kind === "finish" || mutation.kind === "finish-live-event";
+}
+
+function validLiveFinish(
+  execution: ExecutionIdentity,
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>,
+): boolean {
+  return mutation.projection.threadId === execution.threadId
+    && mutation.projection.executionId === execution.executionId
+    && mutation.projection.outcome === mutation.outcome
+    && "kind" in mutation.input.projection
+    && mutation.input.projection.kind === "writer-staged"
+    && mutation.input.projection.messageId === mutation.projection.assistant.messageId
+    && validTerminalProviderEvent(execution, mutation.providerEvent);
+}
+
+function validTerminalProviderEvent(
+  execution: ExecutionIdentity,
+  input: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>["providerEvent"],
+): boolean {
+  return input === undefined || Boolean(input.phase && input.phase.length <= 64 && input.events.length > 0
+    && input.events.every((event) => event.routing.threadId === execution.threadId
+      && event.routing.turnId === execution.turnId && event.routing.executionId === execution.executionId));
+}
+
+function sameTerminalEvent(
+  source: ExecutionLivePublicationIntent["event"] | undefined,
+  publication: ExecutionLivePublicationIntent["event"],
+): boolean {
+  if (!source || !isTerminalLiveEvent(source.type)) return false;
+  const normalized = source.type === "ended" && source.outcome === "cancelled"
+    ? { ...source, outcome: "interrupted" } : source;
+  return NodeUtil.isDeepStrictEqual(normalized, publication);
+}
+
+function matchesTerminalProviderPublication(
+  operation: ExecutionSemanticOperation,
+  projected: readonly ProjectedCommittedProviderEvent[],
+): boolean {
+  const publication = operation.livePublication?.[0];
+  return projected.length === 1 && operation.livePublication?.length === 1 && publication !== undefined
+    && sameTerminalEvent(projected[0]?.event, publication.event);
+}
+
+function validTerminalPublicationOutcome(
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>,
+  publications: readonly ExecutionLivePublicationIntent[] | undefined,
+): boolean {
+  if (publications?.length !== 1) return false;
+  const event = publications[0]?.event;
+  switch (event?.type) {
+    case "turnComplete": return mutation.outcome === "completed";
+    case "error": return mutation.outcome === "errored" && mutation.input.error === event.error;
+    case "ended": return event.outcome === undefined
+      || normalizeTerminalOutcome(event.outcome) === normalizeTerminalOutcome(mutation.outcome);
+    default: return false;
+  }
+}
+
+function normalizeTerminalOutcome(outcome: TurnOutcome): Exclude<TurnOutcome, "cancelled"> {
+  return outcome === "cancelled" ? "interrupted" : outcome;
 }
 
 function nextHead(head: SemanticHead, operation: ExecutionSemanticOperation): boolean {
@@ -1198,7 +1660,7 @@ function validLostExecutionInput(input: LostExecutionInterruption, operation: Ex
     && Boolean(input.reason && input.recoveryIncidentId) && operation.operationId.length <= 256;
 }
 
-function sameExecutionAndLease(head: SemanticHead, input: LostExecutionInterruption): boolean {
+function sameExecutionAndLease(head: SemanticHead, input: Pick<LostExecutionInterruption, "execution" | "lease">): boolean {
   return head.execution.threadId === input.execution.threadId
     && head.execution.turnId === input.execution.turnId
     && head.execution.executionId === input.execution.executionId
@@ -1235,6 +1697,16 @@ function committed(
   };
 }
 
+function matchesCommittedTerminalMessage(
+  message: NonNullable<ReturnType<CanonicalAgentBoundary["loadTerminalProjection"]>["message"]>,
+  execution: ExecutionIdentity,
+  outcome: TurnOutcome,
+): boolean {
+  return message.thread_id === execution.threadId && message.role === "assistant"
+    && !message.is_internal && message.outcomeExecutionId === execution.executionId
+    && message.outcome === outcome;
+}
+
 function livePublicationFor(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationIntent[] | undefined {
   return operation.livePublication?.map((intent) => ({
     after: intent.after,
@@ -1258,6 +1730,10 @@ function validReceiptPublicationIds(publication: readonly ExecutionLivePublicati
 
 function conflict(operation: ExecutionSemanticOperation): Extract<ExecutionWriteReceipt, { kind: "conflict" }> {
   return { kind: "conflict", operationId: operation.operationId };
+}
+
+function publicationFingerprint(publications: readonly ExecutionLivePublicationIntent[] | undefined): string {
+  return fingerprint(publications?.map(({ after, event }) => ({ after, event })) ?? null);
 }
 
 function fingerprint(value: unknown): string {

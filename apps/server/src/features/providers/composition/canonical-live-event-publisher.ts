@@ -69,14 +69,22 @@ export class CanonicalLiveEventPublisher {
       });
   }
 
-  /** Waits for all queued drafts, then reports a sink failure to the caller. */
-  async waitForExecution(routing: CanonicalLiveEventRouting): Promise<void> {
+  /** Checks delivery so a pooled provider can report turn failure before stream teardown. */
+  async flushForExecution(routing: CanonicalLiveEventRouting): Promise<void> {
     const key = this.queueKey(routing);
     const queue = this.queues.get(key);
     if (!queue) return;
     await queue.tail;
-    this.queues.delete(key);
     if (queue.failure) throw queue.failure;
+  }
+
+  /** Waits for all queued drafts and retires the execution queue. */
+  async waitForExecution(routing: CanonicalLiveEventRouting): Promise<void> {
+    try {
+      await this.flushForExecution(routing);
+    } finally {
+      this.queues.delete(this.queueKey(routing));
+    }
   }
 
   private queueFor(routing: CanonicalLiveEventRouting): ProviderExecutionQueue {

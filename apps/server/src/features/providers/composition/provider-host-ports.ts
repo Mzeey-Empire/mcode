@@ -45,7 +45,7 @@ export type ProviderEventOwnershipRoute =
 
 /** Selects one commit owner for every batch of an exact execution. */
 export interface ProviderEventOwnership {
-  resolve(executionId: string): ProviderEventOwnershipRoute;
+  resolve(executionId: string, sourceProviderId?: string): ProviderEventOwnershipRoute;
 }
 
 /** Server services used to compose the narrow Provider host-port boundary. */
@@ -131,7 +131,9 @@ async function submitProviderEvents(
   dependencies: ProviderHostPortDependencies,
   batch: ProviderEventBatch,
 ): Promise<ProviderEventSubmissionReceipt> {
-  const route: ProviderEventOwnershipRoute = dependencies.eventOwnership?.resolve(batch.executionId)
+  const route: ProviderEventOwnershipRoute = dependencies.eventOwnership?.resolve(
+    batch.executionId, batch.events[0]?.sourceProviderId,
+  )
     ?? { kind: "legacy" };
   if (route.kind === "rejected") throw new Error("Canonical event execution is no longer admitted");
   if (route.kind === "worker") return await submitWorkerEvents(dependencies, route, batch);

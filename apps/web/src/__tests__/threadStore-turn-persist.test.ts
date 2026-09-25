@@ -450,6 +450,38 @@ describe("handleTurnPersisted", () => {
     expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("");
   });
 
+  it("settles a stopped turn before any assistant message was written", () => {
+    const user = createMockMessage({
+      id: "user-stop",
+      thread_id: THREAD_ID,
+      role: "user",
+      content: "Stop this turn",
+    });
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, {
+        messages: [user],
+        runtimePhase: "finalizing",
+        turnExecutionId: "execution-early-stop",
+        awaitingUserStopPersist: true,
+      }),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: THREAD_ID,
+      messageId: null,
+      toolCallCount: 0,
+      filesChanged: [],
+      outcome: "cancelled",
+      executionId: "execution-early-stop",
+    });
+
+    expect(readThreadField(THREAD_ID, (record) => record.messages)).toEqual([user]);
+    expect(readThreadField(THREAD_ID, (record) => record.awaitingUserStopPersist)).toBeUndefined();
+    expect(readThreadField(THREAD_ID, (record) => record.runtimePhase)).toBe("cancelled");
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
+  });
+
   it("materializes buffered streaming text when a terminal runtime snapshot arrives without a terminal event", () => {
     useThreadStore.setState({
       records: seedThreadRecord(THREAD_ID, {

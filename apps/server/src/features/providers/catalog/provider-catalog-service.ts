@@ -327,11 +327,22 @@ export class ProviderCatalogService {
       pendingSubscribers: new Map(),
     };
     this.inflight.set(persistenceKey, job);
-    void new Promise<void>((resolve) => {
-      setImmediate(() => {
-        void this.refresh(persistenceKey, job).finally(resolve);
+    setImmediate(() => {
+      void this.runRefresh(persistenceKey, job).catch((error: unknown) => {
+        logger.warn("Provider catalog background refresh could not persist", {
+          providerId: input.request.providerId,
+          workspaceId: input.request.workspaceId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
-    }).finally(() => {
+    });
+    return true;
+  }
+
+  private async runRefresh(persistenceKey: string, job: CatalogRefreshJob): Promise<void> {
+    try {
+      await this.refresh(persistenceKey, job);
+    } finally {
       this.inflight.delete(persistenceKey);
       for (const [pendingRequestKey, pending] of job.pendingSubscribers) {
         const persisted = this.snapshotRepo.get(persistenceKey);
@@ -348,8 +359,7 @@ export class ProviderCatalogService {
           false,
         );
       }
-    });
-    return true;
+    }
   }
 
   private emitChange(change: ProviderCatalogChange): void {

@@ -175,6 +175,44 @@ async function committed(admission: ReturnType<typeof submit>, revision: number)
 }
 
 describe("ExecutionWorkerHandler through its scheduler", () => {
+  it("commits a canonical draft and its parent effects in one operation", async () => {
+    const { scheduler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await committed(submit(scheduler, lease, {
+      kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()],
+      parentLive: { text: { kind: "append", inputs: [TEXT_INPUT] }, narrative: NARRATIVE_INPUT },
+      livePublication: [PUBLICATION],
+    }), 2);
+    expect(writer.operations[1]).toMatchObject({
+      mutation: {
+        kind: "append-events", events: [eventDraft()],
+        parentLive: { text: { kind: "append", inputs: [TEXT_INPUT] }, narrative: NARRATIVE_INPUT },
+      },
+      livePublication: [PUBLICATION],
+    });
+    expect(writer.operations).toHaveLength(2);
+    scheduler.shutdown();
+  });
+
+  it("rejects a compound event with mismatched parent routing or publication count", async () => {
+    const { scheduler, handler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    for (const command of [
+      { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()],
+        parentLive: { text: { kind: "append", inputs: [{ ...TEXT_INPUT, executionId: "other" }] } }, livePublication: [PUBLICATION] },
+      { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()],
+        parentLive: { text: { kind: "unchanged" } }, livePublication: [] },
+    ] as const) {
+      await expect(handler.handle({
+        requestId: 2, execution: EXECUTION, lease, ordinal: 2, command,
+      })).resolves.toMatchObject({
+        result: { kind: "rejected", reason: "invalid-text-routing" },
+      });
+    }
+    expect(writer.operations).toHaveLength(1);
+    scheduler.shutdown();
+  });
+
   it("commits one compound live event and forwards its publication receipt", async () => {
     class PublicationWriter extends RecordingWriter {
       override async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {

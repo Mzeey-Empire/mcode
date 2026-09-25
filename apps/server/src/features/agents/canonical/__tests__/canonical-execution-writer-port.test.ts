@@ -267,6 +267,35 @@ describe("execution semantic writer transport", () => {
     expect(published).toBe(8_193);
   });
 
+  it("releases a real Codex context estimate with optional undefined fields", () => {
+    const published: AgentEvent[] = [];
+    const release = new ExecutionLivePublicationRelease({
+      isBound: () => true,
+      publish: (event) => { published.push(event); },
+    });
+    const event: AgentEvent = {
+      type: AgentEventType.ContextEstimate,
+      threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID,
+      tokensIn: 30_787,
+      tokensOut: 25,
+      totalProcessedTokens: 30_812,
+      contextWindow: 258_400,
+      cacheReadTokens: undefined,
+    };
+    const operation: ExecutionSemanticOperation = {
+      ...beginOperation(),
+      livePublication: [{ after: "writer", event }],
+    };
+    release.release(operation, {
+      kind: "committed",
+      operationId: operation.operationId,
+      durableRevision: 1,
+      livePublication: [{ after: "writer", event: { ...event }, publicationId: "1" }],
+    });
+    expect(published).toEqual([{ ...event, publicationId: "1" }]);
+  });
+
   it("commits and replays a semantic start through the dedicated SQLite worker", async () => {
     writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
     const published: string[] = [];

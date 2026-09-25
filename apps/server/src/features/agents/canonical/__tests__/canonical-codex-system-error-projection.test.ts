@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent, ProviderId } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
@@ -19,14 +19,14 @@ const EXECUTION_ID = "11111111-1111-4111-8111-111111111111";
 const NOW = "2026-09-24T10:00:00.000Z";
 const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID };
 
-function seedThread(db: Database): void {
+function seedThread(db: Database, providerId: ProviderId = "codex"): void {
   db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
     .run("workspace-system-projection", "Workspace", "C:/fixture", NOW, NOW);
   db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run(THREAD_ID, "workspace-system-projection", "Thread", "main", "codex", NOW, NOW);
+    .run(THREAD_ID, "workspace-system-projection", "Thread", "main", providerId, NOW, NOW);
   const turns = new CanonicalParentTurnWrite(db, () => {});
   expect(turns.start({
-    thread: { id: THREAD_ID, workspaceId: "workspace-system-projection", providerId: "codex", createdAt: NOW },
+    thread: { id: THREAD_ID, workspaceId: "workspace-system-projection", providerId, createdAt: NOW },
     turnId: TURN_ID,
     executionId: EXECUTION_ID,
     permissionMode: "supervised",
@@ -125,6 +125,24 @@ describe("CanonicalCodexSystemErrorProjection", () => {
       .toThrow("could not be persisted");
     expect(db.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(THREAD_ID))
       .toEqual({ sdk_session_id: null });
+  });
+
+  it.each(["claude", "cursor"] as const)("persists a %s session cursor with its provider identity", (providerId) => {
+    const providerDb = openDatabase({ dbPath: NodePath.join(directory, `${providerId}.sqlite`) });
+    try {
+      seedThread(providerDb, providerId);
+      const providerProjection = new CanonicalCodexSystemErrorProjection(providerDb);
+      const cursor = boundSystem("sdk_session_id:native-session");
+      expect(providerProjection.projectBoundSystem(execution, providerId, cursor,
+        [{ kind: "session-cursor", event: cursor }], "writer"))
+        .toMatchObject({ kind: "system", event: { subtype: "sdk_session_id:native-session" } });
+      expect(providerDb.prepare("SELECT sdk_session_id FROM threads WHERE id = ?").get(THREAD_ID))
+        .toEqual({ sdk_session_id: "native-session" });
+      expect(new CanonicalAgentBoundary(providerDb, () => {}).loadCheckpoint(EXECUTION_ID))
+        .toMatchObject({ nativeCursor: { providerId, scope: "session", value: "native-session", provenance: "native" } });
+    } finally {
+      providerDb.close(true);
+    }
   });
 
   it("returns cloneable error terminal input without publishing or terminalizing early", () => {

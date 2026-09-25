@@ -13,6 +13,8 @@ interface PendingWrite {
   readonly reject: () => void;
 }
 
+class ExecutionWriterRpcFailure extends Error {}
+
 let nextRpcId = 1;
 let pendingWrite: PendingWrite | undefined;
 let commandActive = false;
@@ -27,7 +29,7 @@ const writer: ExecutionSemanticWriter = {
         rpcId,
         operationId: operation.operationId,
         resolve,
-        reject: () => reject(new Error("Execution writer RPC failed")),
+        reject: () => reject(new ExecutionWriterRpcFailure("Execution writer RPC failed")),
       };
       post({ kind: "writer-request", rpcId, operation });
     });
@@ -70,7 +72,15 @@ function handleCommand(request: Extract<ExecutionWorkerInbound, { kind: "command
     .then((reply) => {
       if (!closed) post({ kind: "command-reply", reply });
     })
-    .catch(() => failWorker())
+    .catch((error: unknown) => {
+      if (error instanceof ExecutionWriterRpcFailure) {
+        post({ kind: "command-reply", reply: { requestId: request.requestId,
+          execution: request.execution, lease: request.lease, ordinal: request.ordinal,
+          result: { kind: "rejected", reason: "writer-failure" } } });
+      } else {
+        failWorker();
+      }
+    })
     .finally(() => { commandActive = false; });
 }
 

@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import * as NodeUtil from "node:util";
-import type { AgentEvent } from "@mcode/contracts";
+import { ProviderIdSchema, type AgentEvent, type ProviderId } from "@mcode/contracts";
 
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
@@ -73,7 +73,7 @@ export class CanonicalCodexSystemErrorProjection {
     }
     if (event.type === "system") {
       if (!reduction.writer.every(isSystemWriterIntent)) throw new Error("Codex system has a non-system intent");
-      return this.projectBoundSystem(reduction.execution, event, reduction.writer, reduction.publication.after);
+      return this.projectBoundSystem(reduction.execution, "codex", event, reduction.writer, reduction.publication.after);
     }
     if (event.type === "error") return this.prepareError(reduction, event, endedAt);
     throw new Error(`Codex ${event.type} needs another feature owner`);
@@ -82,6 +82,7 @@ export class CanonicalCodexSystemErrorProjection {
   /** Apply one bound system event and return the event that the committed receipt must publish. */
   projectBoundSystem(
     execution: ExecutionIdentity,
+    providerId: string,
     event: SystemEvent,
     intents: readonly CodexSystemWriterIntent[],
     after: "writer" | "terminal",
@@ -92,16 +93,20 @@ export class CanonicalCodexSystemErrorProjection {
     if (!matchesCodexSystemIntents(event, intents)) {
       throw new Error("Codex system intents do not match the event");
     }
+    const provider = ProviderIdSchema.parse(providerId);
+    if (provider !== "codex" && provider !== "claude" && provider !== "cursor") {
+      throw new Error(`Provider ${provider} has no execution-bound system projection`);
+    }
     return this.db.transaction(() => {
       let published: SystemEvent = { ...event };
       for (const intent of intents) {
-        published = this.applySystemIntent(execution.executionId, intent, published);
+        published = this.applySystemIntent(execution.executionId, provider, intent, published);
       }
       return structuredClone({ kind: "system", event: published, after } satisfies SystemProjectionResult);
     })();
   }
 
-  private applySystemIntent(executionId: string, intent: CodexSystemWriterIntent, event: SystemEvent): SystemEvent {
+  private applySystemIntent(executionId: string, providerId: ProviderId, intent: CodexSystemWriterIntent, event: SystemEvent): SystemEvent {
     switch (intent.kind) {
       case "notice-session":
         if (event.subtype !== "provider.session.started") throw new Error("Codex notice session subtype is invalid");
@@ -114,12 +119,12 @@ export class CanonicalCodexSystemErrorProjection {
         return { ...event, messageId: message.id };
       }
       case "session-cursor":
-        this.applyCursor(executionId, event);
+        this.applyCursor(executionId, providerId, event);
         return event;
     }
   }
 
-  private applyCursor(executionId: string, event: SystemEvent): void {
+  private applyCursor(executionId: string, providerId: ProviderId, event: SystemEvent): void {
     if (event.subtype === "sdk_session_invalidated") {
       if (!this.threads.clearSdkSessionId(event.threadId)) throw new Error("Codex cursor thread is missing");
       return;
@@ -129,7 +134,7 @@ export class CanonicalCodexSystemErrorProjection {
     if (!cursor) return;
     if (!this.threads.updateSdkSessionId(event.threadId, cursor)
       || !this.canonical.recordNativeCursor(executionId, {
-        providerId: "codex", scope: "thread", value: cursor, provenance: "native",
+        providerId, scope: providerId === "codex" ? "thread" : "session", value: cursor, provenance: "native",
       })) throw new Error("Codex cursor could not be persisted for this execution");
   }
 

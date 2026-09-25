@@ -118,6 +118,32 @@ describe("CanonicalParentTurnWrite", () => {
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
 
+  it("stages the assistant after provider system notices that follow its user prompt", () => {
+    writer.start(startInput());
+    const messages = new MessageRepo(db);
+    messages.createSystemNotice(THREAD_ID, "Provider notice", 2, undefined);
+    const messageId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
+
+    expect(writer.stageLiveAssistant({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID }, {
+      precedingMessageId: "user-1", messageId, content: "Answer", model: null, attachments: [],
+    })).toBe(true);
+    expect(messages.findByIdInThreadIncludingInternal(THREAD_ID, messageId))
+      .toMatchObject({ sequence: 3, is_internal: true, content: "Answer" });
+  });
+
+  it("does not stage the assistant after a later user prompt", () => {
+    writer.start(startInput());
+    const messages = new MessageRepo(db);
+    messages.createSystemNotice(THREAD_ID, "Provider notice", 2, undefined);
+    messages.create(THREAD_ID, "user", "Later prompt", 3);
+    const messageId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
+
+    expect(writer.stageLiveAssistant({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID }, {
+      precedingMessageId: "user-1", messageId, content: "Answer", model: null, attachments: [],
+    })).toBe(false);
+    expect(messages.findByIdInThreadIncludingInternal(THREAD_ID, messageId)).toBeNull();
+  });
+
   it("commits cloneable start, event checkpoint and terminal projection across a reload", async () => {
     const start = startInput();
     expect(() => structuredClone(start)).not.toThrow();

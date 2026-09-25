@@ -1,3 +1,5 @@
+import * as NodePath from "node:path";
+import type { Database } from "bun:sqlite";
 import { Lifecycle, instanceCachingFactory, type DependencyContainer } from "tsyringe";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import { broadcast } from "../../../application/transport/push.js";
@@ -38,6 +40,15 @@ import {
   AgentTurnCommandPort,
 } from "../orchestration/agent-turn-command-port.js";
 import { AgentEventPublicationRegistry } from "../orchestration/agent-event-publication-registry.js";
+import { CanonicalAgentWriterClient } from "../canonical/canonical-agent-writer-client.js";
+import { CanonicalExecutionWriterPort } from "../canonical/canonical-execution-writer-port.js";
+import { ExecutionMailboxOwner } from "../execution/execution-mailbox-owner.js";
+import { ExecutionMailboxScheduler } from "../execution/execution-mailbox-scheduler.js";
+import { ExecutionProviderEventOwnership } from "../execution/execution-provider-event-ownership.js";
+import { ExecutionWorkerLossCoordinator } from "../execution/execution-worker-loss-coordinator.js";
+import { ExecutionFileEvidenceCoordinator } from "../execution/execution-file-evidence-coordinator.js";
+import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/execution-worker-handler.js";
+import { WorkerOwnedTurnRuntime } from "../execution/worker-owned-turn-runtime.js";
 import {
   AgentEventPublicationRuntimePort,
   AgentReliabilityPort,
@@ -83,6 +94,36 @@ import { TurnRuntimeController } from "../orchestration/turn-runtime-controller.
 
 /** Register agent orchestration, event, recovery, and planning services. */
 export function registerAgentServices(container: DependencyContainer): void {
+  container.register(WorkerOwnedTurnRuntime, {
+    useFactory: instanceCachingFactory((c) => {
+      const dbPath = c.resolve<Database>("Database").filename;
+      if (!dbPath || dbPath === ":memory:") {
+        throw new Error("Execution workers require a file-backed database");
+      }
+      return new WorkerOwnedTurnRuntime(NodePath.resolve(dbPath), c.resolve(AgentEventPublicationRegistry));
+    }),
+  });
+  container.register("WorkerOwnedTurnRuntime", {
+    useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime),
+  });
+  container.register(CanonicalAgentWriterClient, {
+    useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).writer,
+  });
+  container.register(CanonicalExecutionWriterPort, {
+    useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).writerPort,
+  });
+  container.register(ExecutionWorkerLossCoordinator, {
+    useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).workerLoss,
+  });
+  container.register<ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>>(ExecutionMailboxScheduler, {
+    useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).scheduler,
+  });
+  container.register(ExecutionMailboxOwner, {
+    useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).owner,
+  });
+  container.register(ExecutionProviderEventOwnership, {
+    useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).providerEvents,
+  });
   container.register(TurnDiffService, {
     useFactory: instanceCachingFactory((c) => new TurnDiffService(
       new TurnDiffRepo(c.resolve("Database")),
@@ -182,6 +223,18 @@ export function registerAgentServices(container: DependencyContainer): void {
       );
     }),
   });
+  container.register(ExecutionFileEvidenceCoordinator, {
+    useFactory: instanceCachingFactory((c) => new ExecutionFileEvidenceCoordinator(
+      c.resolve<TurnFileTracker>(TURN_FILE_TRACKER),
+      c.resolve(TurnDiffService),
+    )),
+  });
+  container.register("ExecutionFileEvidenceCoordinator", {
+    useFactory: (c) => c.resolve(ExecutionFileEvidenceCoordinator),
+  });
+  container.register("WorkerTurnSnapshotService", {
+    useFactory: (c) => c.resolve(SnapshotService),
+  });
   container.register<TurnFinalizer>(TURN_FINALIZER, {
     useFactory: instanceCachingFactory((c) => new TurnFinalizer(
       c.resolve(MessageRepo),
@@ -223,6 +276,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(WorkspaceEnvironmentService),
       c.resolve(FileService),
       c.resolve<HostRuntime>("HostRuntime").platform,
+      c.resolve(WorkerOwnedTurnRuntime).owner,
     )),
   });
   container.register(TurnConversationProjectionService, { useClass: TurnConversationProjectionService }, { lifecycle: Lifecycle.Singleton });

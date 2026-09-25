@@ -284,12 +284,13 @@ export class CanonicalParentTurnWrite {
 
   private createLiveAssistant(threadId: string, input: DataOnlyParentLiveMessageInput): boolean {
     const preceding = this.messages.findByIdInThreadIncludingInternal(threadId, input.precedingMessageId);
-    if (!preceding || preceding.sequence !== this.messages.getLatestSequenceIncludingInternal(threadId)) return false;
+    if (!preceding || !this.messages.isLatestNonSystemMessage(threadId, preceding.id)) return false;
+    const sequence = this.messages.getLatestSequenceIncludingInternal(threadId) + 1;
     this.messages.createAssistantIdempotent({
       id: input.messageId,
       threadId,
       content: input.content,
-      sequence: preceding.sequence + 1,
+      sequence,
       model: input.model,
       attachments: [...input.attachments],
       isInternal: true,
@@ -427,7 +428,10 @@ export class CanonicalParentTurnWrite {
       ...input,
       projectTurn: () => projection,
       finalizeCompatibility: () => {
-        if (!projection.message) return;
+        if (!projection.message) {
+          this.markEmptyTerminalFileChanges(input.threadId, fileEvidence);
+          return;
+        }
         this.messages.setAssistantOutcome(projection.message.id, input.outcome, input.executionId);
         this.messages.publishAssistant(projection.message.id);
         if (fileEvidence?.snapshot) {
@@ -450,6 +454,12 @@ export class CanonicalParentTurnWrite {
         });
       },
     }, onBatchWrite);
+  }
+
+  private markEmptyTerminalFileChanges(threadId: string, evidence?: PreparedExecutionFileEvidence): void {
+    if (evidence && (evidence.fileEffects.fileCount > 0 || evidence.filesChanged.length > 0)) {
+      this.markThreadFilesChanged.run(threadId);
+    }
   }
 
   private loadStagedTerminalProjection(threadId: string, executionId: string, messageId?: string): ParentTurnProjection {
@@ -488,7 +498,7 @@ function selectTerminalDiff(input: DataOnlyParentTurnFinishInput, hasAssistant: 
 
 function assertExecutionFileEvidence(input: DataOnlyParentTurnFinishInput, hasAssistant: boolean): void {
   const evidence = input.fileEvidence;
-  if (!evidence || !hasAssistant || input.selectedTurnDiff
+  if (!evidence || input.selectedTurnDiff || (!hasAssistant && evidence.selectedTurnDiff)
     || !validExecutionFileEvidence(evidence, input.threadId, input.turnId,
       input.executionId, input.deliveryAttempt)) {
     throw new Error("Invalid execution file evidence for terminal assistant");

@@ -96,4 +96,22 @@ describe("ClaudeCanonicalEventPublisher", () => {
       `claude:${routing.executionId}:attempt:1:event:3`,
     ]);
   });
+
+  it("checks a completed turn without resetting sequence for late SDK events", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const publisher = new ClaudeCanonicalEventPublisher(createSink(submit));
+    const event = providerRuntimeEvent({
+      type: AgentEventType.System,
+      threadId: routing.threadId,
+      subtype: "late-hook",
+      turnExecutionId: routing.executionId,
+    });
+
+    publisher.publish(routing, event, []);
+    await publisher.flushForExecution(routing);
+    publisher.publish(routing, event, []);
+    await publisher.waitForExecution(routing);
+
+    expect(submit.mock.calls.map(([batch]) => batch.events[0]?.sourceSequence)).toEqual([1, 2]);
+  });
 });

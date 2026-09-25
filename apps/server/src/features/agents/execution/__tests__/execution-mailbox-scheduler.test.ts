@@ -18,6 +18,7 @@ type Work =
   | { readonly kind: "checkpoint"; readonly revision: number }
   | { readonly kind: "effect-result"; readonly effectId: string }
   | { readonly kind: "stage-terminal" }
+  | { readonly kind: "finish-from-state" }
   | { readonly kind: "finalize" };
 type Command = Work | { readonly kind: "stop"; readonly requestId: string };
 type Result = { readonly revision: number };
@@ -108,6 +109,23 @@ function request(worker: FakeWorker, index: number): ExecutionWorkerRequest<Comm
 }
 
 describe("ExecutionMailboxScheduler", () => {
+  it("admits worker state finalization after the Stop watermark", async () => {
+    const { scheduler, workers } = fixture();
+    const identity = execution("stopped");
+    const lease = claimed(scheduler, identity);
+    const stop = admitted(scheduler, identity, lease, { kind: "stop", requestId: "stop" });
+    const finish = admitted(scheduler, identity, lease, { kind: "finish-from-state" });
+    const worker = workers[0];
+    if (!worker) throw new Error("Expected worker");
+    expect(worker.requests).toHaveLength(1);
+    worker.reply(request(worker, 0), 1);
+    expect(request(worker, 1).command.kind).toBe("finish-from-state");
+    worker.reply(request(worker, 1), 2);
+    await expect(stop.completion).resolves.toMatchObject({ kind: "reply" });
+    await expect(finish.completion).resolves.toMatchObject({ kind: "reply" });
+    scheduler.shutdown();
+  });
+
   it("keeps an execution on one worker and processes each mailbox in order", async () => {
     const { scheduler, workers } = fixture(2);
     const first = execution("first");

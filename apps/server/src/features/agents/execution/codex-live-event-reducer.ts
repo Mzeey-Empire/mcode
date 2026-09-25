@@ -1,4 +1,4 @@
-import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, StoredAttachment } from "@mcode/contracts";
+import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, StoredAttachment, TurnOutcome } from "@mcode/contracts";
 import { NarrativeTurnState, type NarrativeTurnStateEffect } from "../conversation/narrative/narrative-turn-state.js";
 import { AssistantExecutionState, type AssistantMaterializationInput } from "../turns/assistant-execution-state.js";
 import { PlanExecutionState, type PlanPersistenceReady } from "../planning/plan-execution-state.js";
@@ -14,6 +14,11 @@ const MAX_PLAN_TEXT_BYTES = 256 * 1024;
 
 /** Which plan parser, if any, was armed when this execution began. */
 export type CodexPlanFeature = "none" | "questions" | "output";
+
+/** A runtime termination carries its actual failure or cancellation outcome. */
+export type SyntheticTerminalInput =
+  | { readonly outcome: "errored"; readonly error: string }
+  | { readonly outcome: "cancelled" | "interrupted" };
 
 const BEFORE_START_EVENTS = new Set<AgentEvent["type"]>([
   "system", "quotaUpdate", "goalUpdated", "goalCleared", "mcpServerStartupStatus",
@@ -83,7 +88,7 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "system-notice"; readonly event: SystemEvent }
   | { readonly kind: "session-cursor"; readonly event: SystemEvent }
   | { readonly kind: "turn-error"; readonly error: string }
-  | { readonly kind: "terminal-projection"; readonly source: "turnComplete" | "error" | "ended"; readonly outcome: "completed" | "errored" | "interrupted"; readonly assistant: AssistantMaterializationInput; readonly narrative: ParentNarrativeRecoveryItem[] }
+  | { readonly kind: "terminal-projection"; readonly source: "turnComplete" | "error" | "ended"; readonly outcome: TurnOutcome; readonly assistant: AssistantMaterializationInput; readonly narrative: ParentNarrativeRecoveryItem[] }
   | { readonly kind: "turn-ended" };
 
 /** A publication is released only after the writer accepts every intent for the event. */
@@ -145,6 +150,22 @@ export class CodexLiveEventReducer {
         after: this.publicationBarrier(event),
       },
     });
+  }
+
+  /** Preserve partial text and narrative when the runtime must finish without a provider terminal event. */
+  finishFromState(input: SyntheticTerminalInput): CodexLiveReduction {
+    const event: AgentEvent = input.outcome === "errored"
+      ? { type: "error", threadId: this.execution.threadId, turnExecutionId: this.execution.executionId, error: input.error }
+      : { type: "ended", threadId: this.execution.threadId, turnExecutionId: this.execution.executionId, outcome: "interrupted" };
+    if (this.phase === "completed" || this.phase === "ended") return this.unsupported(event, "execution already terminal");
+    this.phase = "completed";
+    const writer: CodexLiveWriterIntent[] = [{ kind: "terminal-projection",
+      source: input.outcome === "errored" ? "error" : "ended", outcome: input.outcome,
+      assistant: this.assistant.materializationInput(null), narrative: this.narrative.recoverySnapshot(this.execution.threadId) }];
+    if (input.outcome === "errored") writer.push({ kind: "turn-error", error: input.error });
+    else writer.push({ kind: "turn-ended" });
+    return structuredClone({ kind: "reduced", execution: this.execution, writer,
+      publication: { event, after: "terminal" } });
   }
 
   private identityRejection(event: AgentEvent): string | undefined {

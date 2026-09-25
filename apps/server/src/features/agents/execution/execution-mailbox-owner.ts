@@ -1,6 +1,7 @@
 import type { DataOnlyParentTurnStartInput } from "../canonical/canonical-parent-turn-write.js";
+import type { ExecutionParentStartContext } from "./provider-execution-event-state.js";
 import type { ExecutionIdentity, ExecutionLease, ExecutionMailboxCompletion } from "./execution-mailbox-protocol.js";
-import type { ExecutionMailboxScheduler } from "./execution-mailbox-scheduler.js";
+import type { ExecutionMailboxScheduler, ExecutionRecoveryReceipt } from "./execution-mailbox-scheduler.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
 
 type Scheduler = ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>;
@@ -23,6 +24,8 @@ export class ExecutionMailboxOwner {
     readonly ownerEpoch: number;
     readonly providerId: string;
     readonly parentTurn: DataOnlyParentTurnStartInput;
+    readonly parentLive?: ExecutionParentStartContext;
+    readonly publishParentStart?: boolean;
   }): Promise<void> {
     if (this.active.has(input.execution.threadId)) throw new Error("Thread already has an execution owner");
     const claim = this.scheduler.claim(input.execution, input.ownerEpoch);
@@ -30,7 +33,11 @@ export class ExecutionMailboxOwner {
     const owner = { execution: input.execution, lease: claim.lease, started: false };
     this.active.set(input.execution.threadId, owner);
     try {
-      const result = await this.submitOwned(owner, { kind: "start", providerId: input.providerId, input: input.parentTurn });
+      const result = await this.submitOwned(owner, {
+        kind: "start", providerId: input.providerId, input: input.parentTurn,
+        ...(input.parentLive ? { parentLive: input.parentLive } : {}),
+        ...(input.publishParentStart ? { publishParentStart: true } : {}),
+      });
       if (result.kind !== "committed") throw new Error(`Execution start was not committed: ${input.execution.executionId}`);
       owner.started = true;
     } catch (error) {
@@ -57,6 +64,20 @@ export class ExecutionMailboxOwner {
     const result = await this.submitOwned(owner, { kind: "release" });
     if (result.kind !== "released" || !this.scheduler.release(owner.execution, owner.lease)) {
       throw new Error(`Execution release was not acknowledged: ${execution.executionId}`);
+    }
+    this.active.delete(execution.threadId);
+  }
+
+  /** Release one rejected execution only after the writer has durably settled that exact lease. */
+  async releaseRecovered(execution: ExecutionIdentity, recovery: ExecutionRecoveryReceipt): Promise<void> {
+    const owner = this.requireOwner(execution);
+    if (recovery.operationId !== `${owner.lease.leaseId}:worker-lost`
+      || recovery.kind === "conflict" && recovery.recoveryState !== "already-terminal") {
+      throw new Error("Recovered release has no matching durable evidence");
+    }
+    const result = await this.submitOwned(owner, { kind: "release", recovery });
+    if (result.kind !== "released" || !this.scheduler.release(owner.execution, owner.lease)) {
+      throw new Error(`Recovered execution release was not acknowledged: ${execution.executionId}`);
     }
     this.active.delete(execution.threadId);
   }
