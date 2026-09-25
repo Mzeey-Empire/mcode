@@ -1385,7 +1385,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): void => {
     const fileEffectTurnId = typeof event.fileEffectTurnId === "string" ? event.fileEffectTurnId : "";
     const record = getRec(event.threadId);
-    if (get().runningThreadIds.has(event.threadId) && record.fileEffectTurnId === fileEffectTurnId) return;
+    const sameExecution = runtime.incomingExecutionId === undefined
+      || record.turnExecutionId === runtime.incomingExecutionId;
+    if (get().runningThreadIds.has(event.threadId) && sameExecution && record.fileEffectTurnId === fileEffectTurnId) return;
     clearStreamingTextUsage(event.threadId);
     useTaskStore.getState().prepareTaskBubbleForNewTurn(event.threadId);
     patchRec(event.threadId, (current) => ({

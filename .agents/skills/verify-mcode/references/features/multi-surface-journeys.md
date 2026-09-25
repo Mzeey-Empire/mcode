@@ -36,6 +36,10 @@ final conversation check and [Electron live testing](../../../electorn-live-test
 for the desktop control and capture. Report any unavailable control or missing
 capture as a gap. A public RPC receipt alone does not prove the desktop path.
 
+Also run the [consecutive-turn navigation journey](provider-events-and-durability.md#consecutive-turns-and-navigation)
+with real Codex. The seven-task fixture starts one turn per task and cannot prove
+successful follow-ups or renderer state while switching during streaming.
+
 ## Provider completeness
 
 Use this journey when a change affects turn diffs, Review, provider events, automatic review, or workspace invalidation. Resolve the upstream Codex source with the OpenSrc command in the repository instructions before a Codex run. Record the resolved upstream commit in the receipt. The cache is read-only.
