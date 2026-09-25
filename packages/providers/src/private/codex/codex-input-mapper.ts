@@ -186,20 +186,26 @@ async function resolveCodexSlashInvocation(
 ): Promise<{ text: string; skillItem?: TurnInputPart }> {
   const slash = parseCodexSlashInvocation(message);
   if (!slash) return { text: message };
-  const selectedIdentity = selectedCommandIdentity(message, slash.requestedName, mentions);
+  const selectedMention = selectedCommandMention(message, slash.requestedName, mentions);
+  const selectedIdentity = selectedMention?.capabilityIdentity;
   const candidates = matchingSkillCandidates(skills, slash.requestedName);
   const selected = selectedIdentity ? candidates.find((item) => matchesCodexCapabilityIdentity(item, selectedIdentity)) : undefined;
   const promptCommand = selectPromptCommand(candidates, selected, selectedIdentity, slash.requestedName);
   if (promptCommand) return { text: await expandCodexPromptCommand(promptCommand, slash.args) };
   const skill = selectSkill(candidates, selected, selectedIdentity);
-  return skill ? codexSkillInvocation(skill, slash.args) : { text: message };
+  if (skill) return codexSkillInvocation(skill, slash.args);
+  // Neither native channel matched: link the backing file so the agent can read it.
+  if (selectedMention?.path) {
+    return { text: `[/${slash.requestedName}](${selectedMention.path})${slash.args ? ` ${slash.args}` : ""}` };
+  }
+  return { text: message };
 }
 
-function selectedCommandIdentity(
+function selectedCommandMention(
   message: string,
   requestedName: string,
   mentions: readonly MessageMention[],
-): ProviderCapabilityIdentity | undefined {
+): Extract<MessageMention, { kind: "command" }> | undefined {
   const leadingSpace = message.length - message.trimStart().length;
   const commandEnd = leadingSpace + requestedName.length + 1;
   return mentions.find((mention): mention is Extract<MessageMention, { kind: "command" }> => (
@@ -208,7 +214,7 @@ function selectedCommandIdentity(
     && mention.range.start === leadingSpace
     && mention.range.end === commandEnd
     && mention.capabilityIdentity?.providerId === "codex"
-  ))?.capabilityIdentity;
+  ));
 }
 
 function matchingSkillCandidates(skills: readonly SkillInfo[], requestedName: string): SkillInfo[] {

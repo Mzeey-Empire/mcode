@@ -1617,6 +1617,45 @@ describe("CodexProvider first turn on new session", () => {
     expect(sendTurnMock.mock.calls[0][0]).toEqual([{ type: "text", text: "/goal clear" }]);
   });
 
+  it("links a selected slash command to its backing file when no native channel matches", async () => {
+    const provider = makeProvider();
+
+    await provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: "test-execution",
+      sessionId: "mcode-command-link",
+      workspaceId: "workspace-test",
+      threadId: "command-link",
+      message: "/deploy staging",
+      mentions: [{
+        id: "command:skill:deploy",
+        kind: "command",
+        label: "deploy",
+        namespace: "skill",
+        capabilityIdentity: {
+          providerId: "codex",
+          kind: "skill",
+          nativeId: "deploy",
+        },
+        path: "C:\\skills\\deploy\\SKILL.md",
+        range: { start: 0, end: 7 },
+      }],
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "auto",
+    });
+
+    for (let i = 0; i < 20 && sendTurnMock.mock.calls.length === 0; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(sendTurnMock.mock.calls[0][0]).toEqual([
+      { type: "text", text: "[/deploy](C:\\skills\\deploy\\SKILL.md) staging" },
+    ]);
+  });
+
   it("runs side-channel handoff turns at low effort", async () => {
     const provider = makeProvider();
 
