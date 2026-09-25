@@ -837,9 +837,11 @@ export class TurnAdmissionDispatchCoordinator {
   private persistThreadSettings(prepared: PreparedCommand): void {
     const command = prepared.command;
     const model = command.model ?? "claude-sonnet-4-6";
-    this.threads.updateModel(command.threadId, model);
-    if (command.provider !== undefined) this.threads.updateProvider(command.threadId, prepared.providerId);
-    this.threads.updateSettings(command.threadId, this.threadSettings(command, prepared.providerId));
+    this.threads.updateSettings(command.threadId, {
+      ...this.threadSettings(command, prepared.providerId),
+      model,
+      ...(command.provider === undefined ? {} : { provider: prepared.providerId }),
+    });
     broadcast("thread.modelUpdated", {
       threadId: command.threadId,
       model,

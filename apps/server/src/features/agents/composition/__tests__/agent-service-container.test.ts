@@ -123,12 +123,24 @@ describe("AgentService container composition", () => {
     registry.bind((event) => published.push(event));
     registry.start();
     const workspace = container.resolve(WorkspaceRepo).create("worker-test", temporaryDirectory!);
-    const thread = container.resolve(ThreadRepo).create(workspace.id, "Worker turn", "direct", "main", true, "codex");
+    const threads = container.resolve(ThreadRepo);
+    const thread = threads.create(workspace.id, "Worker turn", "direct", "main", true, "claude");
+    threads.updateSettings(thread.id, { thinking: true });
 
-    await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "hello", permissionMode: "default" });
+    await container.resolve(AgentService).sendMessage({
+      threadId: thread.id, content: "hello", provider: "codex", model: "gpt-5.6-luna",
+      permissionMode: "full", reasoningLevel: "high", codexFastMode: false,
+    });
     await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
 
     expect(providerError).toBeUndefined();
+    expect(threads.findById(thread.id)).toMatchObject({
+      provider: "codex", model: "gpt-5.6-luna", permission_mode: "full",
+      reasoning_level: "high", codex_fast_mode: false, thinking: true,
+    });
+    expect(pushes.filter((push) => push.channel === "thread.modelUpdated")).toEqual([
+      { type: "push", channel: "thread.modelUpdated", data: { threadId: thread.id, model: "gpt-5.6-luna", provider: "codex" } },
+    ]);
     expect(published.map((event) => event.type)).toEqual(expect.arrayContaining([
       "turnStarted", "textDelta", "turnComplete", "ended",
     ]));
