@@ -55,6 +55,8 @@ export class CanonicalLiveEventPublisher {
           threadId: routing.threadId,
           turnId: routing.turnId,
           executionId: routing.executionId,
+          batchId: draft.eventId,
+          deliveryAttempt: routing.deliveryAttempt,
           phase: "running",
           events: [draft],
         });

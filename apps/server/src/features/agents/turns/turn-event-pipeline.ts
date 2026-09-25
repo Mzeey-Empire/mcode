@@ -41,6 +41,8 @@ export interface TurnLifecycleControl {
 export interface TurnEventApplication {
   /** Apply a validated event after the pipeline admits it in per-turn order. */
   apply(input: ProviderEventIngressEvent, event: AgentEvent, publish: boolean): boolean | Promise<boolean>;
+  /** Publish an event whose complete semantic work already committed on the execution writer. */
+  publishCommitted(event: AgentEvent): void;
   /** Record a provider file mutation before its corresponding public event arrives. */
   observeFileMutation(event: ProviderFileMutationStart): void;
   /** Abort one turn only when its completion cannot be compacted into the bounded queue. */
@@ -100,6 +102,12 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     this.recordTurnLifecycle(event);
     if (!this.enqueue(input, event, true)) return;
     this.drain(event.threadId);
+  }
+
+  /** Publish committed worker output without passing it through legacy persistence. */
+  handleProjectedCommitted(input: ProviderEventIngressEvent): void {
+    const event = this.lifecycle.normalize(input.event);
+    if (event) this.application.publishCommitted(event);
   }
 
   /** Stop only the affected turn when provider ingress cannot retain one of its events. */

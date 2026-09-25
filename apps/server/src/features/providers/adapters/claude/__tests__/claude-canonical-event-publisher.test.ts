@@ -46,6 +46,8 @@ describe("ClaudeCanonicalEventPublisher", () => {
       threadId: routing.threadId,
       turnId: routing.turnId,
       executionId: routing.executionId,
+      batchId: `claude:${routing.executionId}:attempt:1:event:1`,
+      deliveryAttempt: 1,
       events: [expect.objectContaining({
         eventId: `claude:${routing.executionId}:attempt:1:event:1`,
         sourceProviderId: "claude",

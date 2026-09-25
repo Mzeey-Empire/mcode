@@ -61,13 +61,16 @@ function createPipeline(
   pipeline: TurnEventPipeline;
   finalize: ReturnType<typeof vi.fn>;
   rejectForQueueCapacity: ReturnType<typeof vi.fn>;
+  publishCommitted: ReturnType<typeof vi.fn>;
 } {
   const lifecycle: TurnLifecycleControl = {
     normalize: (event) => event,
     finalize,
   };
+  const publishCommitted = vi.fn();
   const application: TurnEventApplication = {
     apply,
+    publishCommitted,
     observeFileMutation: vi.fn(),
     rejectForQueueCapacity,
     previousFileFinalization,
@@ -75,10 +78,21 @@ function createPipeline(
     observeToolUse: vi.fn(),
     observeToolResult: vi.fn(),
   };
-  return { pipeline: new TurnEventPipeline(lifecycle, application, undefined, ingressFence), finalize, rejectForQueueCapacity };
+  return { pipeline: new TurnEventPipeline(lifecycle, application, undefined, ingressFence), finalize, rejectForQueueCapacity, publishCommitted };
 }
 
 describe("TurnEventPipeline", () => {
+  it("publishes projected worker output without legacy event application", () => {
+    const apply = vi.fn(() => true);
+    const { pipeline, publishCommitted } = createPipeline(apply);
+    const input = { ...textDelta("durable"), sourceKind: "worker-commit" as const };
+
+    pipeline.handleProjectedCommitted(input);
+
+    expect(publishCommitted).toHaveBeenCalledWith(input.event);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("keeps canonical receipt provenance and FIFO order while an earlier checkpoint delays publication", () => {
     let checkpointReady = false;
     const received: Array<{ input: ProviderEventIngressEvent; event: AgentEvent }> = [];

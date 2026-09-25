@@ -112,6 +112,11 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return this.applyPreparedEvent(input, event, publish);
   }
 
+  /** Publish an execution-writer event without repeating any turn persistence. */
+  publishCommitted(event: AgentEvent): void {
+    this.publish(event);
+  }
+
   /** Record a provider file mutation before its public event is available. */
   observeFileMutation(event: import("@mcode/contracts").ProviderFileMutationStart): void {
     this.fileEffects.observeProviderMutation(event);

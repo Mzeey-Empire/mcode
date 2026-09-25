@@ -28,6 +28,7 @@ import {
 } from "../provider-event-worker-protocol.js";
 import { CodexCollaborationEventAdapter } from "../../../agents/collaboration/adapters/codex-collaboration-event-adapter.js";
 import type { CodexCollaborationDurability } from "../../../agents/collaboration/codex-collaboration-durability.js";
+import type { ProjectedCommittedProviderEvent } from "../../../agents/execution/execution-worker-handler.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -96,6 +97,20 @@ function committedEnvelope(eventId: string, delta: string, deliveryAttempt?: num
         createdAt: "2026-08-27T12:00:00.000Z",
         updatedAt: "2026-08-27T12:00:00.000Z",
       },
+    },
+  };
+}
+
+function projectedEvent(eventId: string, delta: string): ProjectedCommittedProviderEvent {
+  return {
+    providerId: "claude",
+    sourceKind: "canonical-commit",
+    event: runtimeEvent(delta).event,
+    canonicalReceipt: {
+      eventId,
+      acceptedSequence: 1,
+      durableRevision: 1,
+      serverTimestamps: { acceptedAt: "2026-08-27T12:00:00.000Z" },
     },
   };
 }
@@ -172,6 +187,7 @@ function createIngress(
 ) {
   const diagnostics: ProviderEventIngressDiagnostic[] = [];
   const received: ProviderEventIngressEvent[] = [];
+  const projected: ProviderEventIngressEvent[] = [];
   const overflowed: ProviderEventIngressEvent[] = [];
   const registry = { resolveAll: () => providers } as never;
   const ingress = new ProviderEventIngress(
@@ -181,10 +197,11 @@ function createIngress(
   );
   ingress.start(registry, {
       handleProviderEvent: (event) => received.push(event),
+      handleProjectedCommitted: (event) => projected.push(event),
       handleProviderFileMutation: vi.fn(),
       handleProviderIngressOverflow: (event) => overflowed.push(event),
     });
-  return { diagnostics, ingress, overflowed, provider: providers[0], received };
+  return { diagnostics, ingress, overflowed, projected, provider: providers[0], received };
 }
 
 async function flushIngress(): Promise<void> {
@@ -275,6 +292,22 @@ describe("ProviderEventIngress", () => {
     expect(received).toHaveLength(0);
     await flushIngress();
     expect(received).toHaveLength(1);
+  });
+
+  it("queues projected writer events in order without calling the legacy consumer", async () => {
+    const { ingress, projected, received } = createIngress();
+    const first = projectedEvent("worker-first", "first");
+    const second = projectedEvent("worker-second", "second");
+
+    ingress.acceptProjectedCommitted([first, second]);
+    expect(projected).toEqual([]);
+    await ingress.waitForThread("thread-1");
+
+    expect(projected.map((item) => item.canonicalReceipt?.eventId)).toEqual(["worker-first", "worker-second"]);
+    expect(received).toEqual([]);
+    ingress.acceptProjectedCommitted([first]);
+    await ingress.waitForThread("thread-1");
+    expect(projected).toHaveLength(2);
   });
 
   it("does not invoke the consumer on the provider callback stack", async () => {
