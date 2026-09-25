@@ -663,6 +663,12 @@ export class NarrativeTurnState {
     return this.turnToolCalls;
   }
 
+  /** Project only the tool changed by a result; other narrative records remain unchanged. */
+  toolRecoveryItem(threadId: string, toolCallId: string): Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }> | null {
+    const toolCall = this.latestBufferedToolCall(threadId, toolCallId);
+    return toolCall ? this.toolCallRecoveryItem(toolCall) : null;
+  }
+
   /**
    * Snapshot the visible structured narrative for an unfinished turn without
    * retaining provider protocol traffic or private raw tool input.
@@ -738,7 +744,7 @@ export class NarrativeTurnState {
     return retainedBytes;
   }
 
-  private toolCallRecoveryItem(toolCall: BufferedToolCall): ParentNarrativeRecoveryItem {
+  private toolCallRecoveryItem(toolCall: BufferedToolCall): Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }> {
     return {
       kind: "toolCall",
       record: {

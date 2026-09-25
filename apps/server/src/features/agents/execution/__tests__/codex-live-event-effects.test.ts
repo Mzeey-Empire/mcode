@@ -24,6 +24,21 @@ function setup(plan: CodexPlanFeature = "none") {
 }
 
 describe("CodexLiveEventEffects", () => {
+  it("checkpoints only the result tool while keeping full recovery and terminal narrative consistent", () => {
+    const { prepare } = setup();
+    prepare("textDelta", { delta: "Thought", isFinalResponse: false });
+    prepare("toolUse", { toolCallId: "read", toolName: "Read", toolInput: { file_path: "file.txt" } });
+    const result = prepare("toolResult", { toolCallId: "read", output: "contents", isError: false });
+    expect(result.effects.narrative?.items).toMatchObject([{ kind: "toolCall", record: { id: "read", output_summary: "contents" } }]);
+    expect(result.effects.narrative?.items).toHaveLength(1);
+    expect(prepare("assistantMessageBoundary", { isFinalResponse: false }).effects.narrative).toBeUndefined();
+    const terminal = prepare("turnComplete", { tokensIn: 0, tokensOut: 0, reason: "stop", costUsd: 0 });
+    expect(terminal.terminal?.narrative).toHaveLength(2);
+    expect(result.effects.narrative?.items).toHaveLength(1);
+    expect(() => prepare("toolResult", { toolCallId: "read", output: "late", isError: false }))
+      .toThrow("post-terminal event needs the terminal lifecycle owner");
+  });
+
   it("moves unknown text into narrative and restarts its checkpoint sequence", () => {
     const { prepare } = setup();
     expect(prepare("textDelta", { delta: "Looking at the files" }).effects.text).toEqual({

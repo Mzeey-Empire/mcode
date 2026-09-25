@@ -76,6 +76,7 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "hook-started"; readonly hookId: string; readonly late: boolean }
   | { readonly kind: "hook-completed"; readonly hookId: string; readonly late: boolean; readonly exitCode: number; readonly durationMs: number; readonly didBlock: boolean }
   | { readonly kind: "narrative-recovery"; readonly items: ParentNarrativeRecoveryItem[] }
+  | { readonly kind: "tool-recovery"; readonly item: Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }> | null }
   | { readonly kind: "narrative-effect"; readonly effect: NarrativeTurnStateEffect }
   | { readonly kind: "feature-event"; readonly feature: "plan-text" | "assistant-message" | "task-tool" | "goal-refresh"; readonly event: AgentEvent }
   | { readonly kind: "plan-questions"; readonly questions: readonly PlanQuestion[] }
@@ -364,7 +365,7 @@ export class CodexLiveEventReducer {
     return [
       { kind: "tool-result", event },
       { kind: "feature-event", feature: "task-tool", event },
-      this.recovery(),
+      { kind: "tool-recovery", item: this.narrative.toolRecoveryItem(event.threadId, event.toolCallId) },
     ];
   }
 

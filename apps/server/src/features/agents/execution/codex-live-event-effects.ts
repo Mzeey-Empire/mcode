@@ -87,7 +87,8 @@ export class CodexLiveEventEffects {
   ): ParentLiveEffects {
     switch (intent.kind) {
       case "assistant-body": return this.messageEffects(intent, effects);
-      case "narrative-recovery": return this.narrativeEffects(intent, effects);
+      case "narrative-recovery":
+      case "tool-recovery": return this.narrativeEffects(intent, effects);
       case "feature-event": return this.featureEffects(intent, effects, runtime);
       case "plan-questions": return { ...effects, planQuestions: intent.questions };
       case "plan-output": return { ...effects, planOutput: intent.output };
@@ -108,8 +109,9 @@ export class CodexLiveEventEffects {
       content: intent.content, model: intent.model, attachments: intent.attachments } };
   }
 
-  private narrativeEffects(intent: Extract<CodexLiveWriterIntent, { kind: "narrative-recovery" }>, effects: ParentLiveEffects): ParentLiveEffects {
-    const delta = this.narrative.prepare(intent.items);
+  private narrativeEffects(intent: Extract<CodexLiveWriterIntent, { kind: "narrative-recovery" | "tool-recovery" }>, effects: ParentLiveEffects): ParentLiveEffects {
+    const delta = intent.kind === "tool-recovery"
+      ? this.narrative.prepareToolUpdate(intent.item) : this.narrative.prepare(intent.items);
     if (!delta) return effects;
     delta.acknowledge();
     return { ...effects, narrative: { executionId: this.execution.executionId,

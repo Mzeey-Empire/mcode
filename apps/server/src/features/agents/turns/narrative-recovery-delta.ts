@@ -1,6 +1,7 @@
 import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import type { ParentNarrativeRecoveryCommit } from "./parent-turn-durability.js";
+import { assertActiveTurnRecoveryRetention } from "./active-turn-recovery-retention-policy.js";
 
 /** One full-snapshot difference awaiting confirmation of its durable write. */
 export interface PreparedNarrativeRecoveryDelta {
@@ -12,21 +13,30 @@ export interface PreparedNarrativeRecoveryDelta {
 /** Tracks one execution's committed narrative snapshot without owning persistence. */
 export class NarrativeRecoveryDelta {
   private fingerprints = new Map<string, string>();
+  private retainedBytes = 0;
+  private retainedRecords = 0;
   private revision = 0;
 
   /** Compare a complete snapshot to the last acknowledged one. */
   prepare(snapshot: readonly ParentNarrativeRecoveryItem[]): PreparedNarrativeRecoveryDelta | null {
     const next = new Map<string, string>();
     const items: ParentNarrativeRecoveryItem[] = [];
+    let retainedBytes = 0;
     for (const item of snapshot) {
       const id = `${item.kind}:${item.record.id}`;
       const fingerprint = JSON.stringify(item);
+      retainedBytes += Buffer.byteLength(fingerprint, "utf8");
       next.set(id, fingerprint);
       if (this.fingerprints.get(id) !== fingerprint) items.push(item);
     }
     const discardedItemIds = [...this.fingerprints.keys()]
       .filter((id) => !next.has(id)).map(canonicalItemId);
-    if (items.length === 0 && discardedItemIds.length === 0) return null;
+    if (items.length === 0 && discardedItemIds.length === 0) {
+      // Recovery limits count snapshot entries, including repeated hook/thought identities.
+      this.retainedBytes = retainedBytes;
+      this.retainedRecords = snapshot.length;
+      return null;
+    }
     const preparedAt = this.revision;
     return {
       items,
@@ -34,6 +44,32 @@ export class NarrativeRecoveryDelta {
       acknowledge: () => {
         if (this.revision !== preparedAt) throw new Error("Narrative recovery delta was already superseded");
         this.fingerprints = next;
+        this.retainedBytes = retainedBytes;
+        this.retainedRecords = snapshot.length;
+        this.revision += 1;
+      },
+    };
+  }
+
+  /** Update one already checkpointed tool without treating unrelated records as deleted. */
+  prepareToolUpdate(item: Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }> | null): PreparedNarrativeRecoveryDelta | null {
+    if (!item) return null;
+    const id = `${item.kind}:${item.record.id}`;
+    const previous = this.fingerprints.get(id);
+    if (previous === undefined) throw new Error("Tool recovery update requires an acknowledged full checkpoint");
+    const fingerprint = JSON.stringify(item);
+    const bytes = Buffer.byteLength(fingerprint, "utf8");
+    if (bytes > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes) throw new Error("Parent narrative recovery item exceeds the active-turn byte limit");
+    const retainedBytes = this.retainedBytes + bytes - Buffer.byteLength(previous, "utf8");
+    assertActiveTurnRecoveryRetention(this.retainedRecords, retainedBytes);
+    if (previous === fingerprint) return null;
+    const preparedAt = this.revision;
+    return {
+      items: [item], discardedItemIds: [],
+      acknowledge: () => {
+        if (this.revision !== preparedAt) throw new Error("Narrative recovery delta was already superseded");
+        this.fingerprints.set(id, fingerprint);
+        this.retainedBytes = retainedBytes;
         this.revision += 1;
       },
     };
