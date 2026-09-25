@@ -8,6 +8,7 @@ type Scheduler = ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorker
 interface OwnedExecution {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
+  started: boolean;
 }
 
 /** Claims one mailbox before a parent turn can be written or sent to a provider. */
@@ -26,11 +27,12 @@ export class ExecutionMailboxOwner {
     if (this.active.has(input.execution.threadId)) throw new Error("Thread already has an execution owner");
     const claim = this.scheduler.claim(input.execution, input.ownerEpoch);
     if (claim.kind !== "claimed") throw new Error(`Execution claim failed: ${claim.kind}`);
-    const owner = { execution: input.execution, lease: claim.lease };
+    const owner = { execution: input.execution, lease: claim.lease, started: false };
     this.active.set(input.execution.threadId, owner);
     try {
       const result = await this.submitOwned(owner, { kind: "start", providerId: input.providerId, input: input.parentTurn });
       if (result.kind !== "committed") throw new Error(`Execution start was not committed: ${input.execution.executionId}`);
+      owner.started = true;
     } catch (error) {
       // A lost worker is reconciled by its coordinator. A rejected start did not create worker state.
       if (this.scheduler.release(owner.execution, owner.lease)) this.active.delete(input.execution.threadId);
@@ -70,6 +72,12 @@ export class ExecutionMailboxOwner {
   /** Current exact owner, for provider ingress and Stop routing. */
   current(threadId: string): OwnedExecution | undefined {
     return this.active.get(threadId);
+  }
+
+  /** Whether this owner received its durable start receipt. */
+  isStarted(execution: ExecutionIdentity): boolean {
+    const owner = this.active.get(execution.threadId);
+    return owner?.started === true && sameExecution(owner.execution, execution);
   }
 
   private requireOwner(execution: ExecutionIdentity): OwnedExecution {
