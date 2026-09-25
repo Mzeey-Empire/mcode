@@ -2142,14 +2142,40 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     state: ParentTerminalBatchState,
     input: CanonicalParentTurnFinishInput,
   ): void {
-    state.modelState = this.loadState(input.threadId, input.executionId);
-    state.checkpoint = this.loadCheckpoint(input.executionId);
+    this.loadParentTerminalBatchState(state, input);
     state.acceptedAt = new Date().toISOString();
-    state.acceptedSequence = state.checkpoint?.lastAcceptedSequence ?? 0;
     state.changed = false;
     state.wrote = false;
     state.terminal = false;
     state.ignoredTerminal = false;
+  }
+
+  private loadParentTerminalBatchState(
+    state: ParentTerminalBatchState,
+    input: CanonicalParentTurnFinishInput,
+  ): void {
+    const modelState = createAgentModelState();
+    const thread = this.loadThread(input.threadId);
+    if (thread) modelState.threads[thread.id] = thread;
+    const turnRow = this.loadCommitTurnStatement.get({ id: input.turnId, threadId: input.threadId });
+    if (turnRow) {
+      const turn = this.turnFromRow(turnRow);
+      modelState.turns[turn.id] = turn;
+    }
+    state.checkpoint = this.loadCheckpoint(input.executionId);
+    state.acceptedSequence = state.checkpoint?.lastAcceptedSequence
+      ?? this.lastAcceptedSequence(input.threadId, input.executionId);
+    if (state.acceptedSequence > 0) {
+      modelState.lastAcceptedSequenceByExecution[input.executionId] = state.acceptedSequence;
+    }
+    // Every draft costs at least one row, bounding the sequences this transaction can accept.
+    this.addSequenceCollisions(
+      modelState,
+      input.executionId,
+      state.acceptedSequence + 1,
+      state.acceptedSequence + ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows,
+    );
+    state.modelState = modelState;
   }
 
   private writeParentTerminalBatchDraft(
@@ -3011,15 +3037,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     const acceptedSequences = events.map((event) => event.acceptedSequence);
     const firstAcceptedSequence = Math.min(...acceptedSequences);
     const lastAcceptedSequence = Math.max(...acceptedSequences);
-    const existing = this.loadCommitSequenceCollisionStatement.all({
-      executionId: first.routing.executionId,
-      minSequence: firstAcceptedSequence,
-      maxSequence: lastAcceptedSequence,
-    });
-    for (const event of existing) {
-      state.appliedEventIds[event.eventId] = true;
-      state.acceptedInputEventIds[`${first.routing.executionId}:${event.acceptedSequence}`] = event.eventId;
-    }
+    this.addSequenceCollisions(state, first.routing.executionId, firstAcceptedSequence, lastAcceptedSequence);
 
     const acceptedSequence = checkpoint?.lastAcceptedSequence ?? this.lastAcceptedSequence(
       first.routing.threadId,
@@ -3027,6 +3045,19 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     );
     if (acceptedSequence > 0) {
       state.lastAcceptedSequenceByExecution[first.routing.executionId] = acceptedSequence;
+    }
+  }
+
+  private addSequenceCollisions(
+    state: AgentModelState,
+    executionId: string,
+    minSequence: number,
+    maxSequence: number,
+  ): void {
+    const existing = this.loadCommitSequenceCollisionStatement.all({ executionId, minSequence, maxSequence });
+    for (const event of existing) {
+      state.appliedEventIds[event.eventId] = true;
+      state.acceptedInputEventIds[`${executionId}:${event.acceptedSequence}`] = event.eventId;
     }
   }
 
