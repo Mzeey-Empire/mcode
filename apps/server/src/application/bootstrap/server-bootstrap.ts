@@ -852,7 +852,9 @@ async function bootstrapServer(): Promise<void> {
 
     interruptThreadStartupsAtStartup();
     projectActionService.recoverStaleRuns();
-    cleanupWorker.start();
+    cleanupWorker.start(process.env.MCODE_AGENT_RUNTIME === "1"
+      ? process.env.MCODE_AGENT_FIXTURE_REPO?.trim()
+      : undefined);
     recordStartupCheckpoint("stale startup work recovery completed");
 
     await workerOwnedTurnRuntime.whenReady();
