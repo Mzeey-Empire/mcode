@@ -13,6 +13,7 @@ import type { ProviderHostPorts } from "@mcode/providers";
 
 import { setupContainer } from "../../../../application/composition/container.js";
 import { CanonicalAgentBoundary } from "../../../agents/canonical/canonical-agent-boundary.js";
+import { WorkerOwnedTurnRuntime } from "../../../agents/execution/worker-owned-turn-runtime.js";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
 import { ProviderRegistry } from "../provider-registry.js";
 import { SettingsService } from "../../../settings/settings-service.js";
@@ -90,6 +91,7 @@ describe("provider composition container", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await container.resolve(ProviderRegistry).shutdown();
+    await container.resolve(WorkerOwnedTurnRuntime).close();
     container.resolve(ProviderEventIngress).shutdown();
     container.resolve(SettingsService).dispose();
     database?.close(true);
