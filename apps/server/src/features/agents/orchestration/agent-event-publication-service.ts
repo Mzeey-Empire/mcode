@@ -62,6 +62,8 @@ export class AgentEventPublicationService {
   }
 
   private shouldSuppress(event: AgentEvent): boolean {
+    // A stable publication already passed the writer's semantic and terminal barriers.
+    if (event.publicationId) return false;
     if (event.type === AgentEventType.Ended) return this.dependencies.runtime.shouldSuppressTurnEnded(event.threadId);
     if (event.type === AgentEventType.TurnComplete) return this.dependencies.runtime.shouldSuppressTurnComplete(event.threadId);
     return event.type === AgentEventType.Error

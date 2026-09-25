@@ -756,6 +756,16 @@ export const canonicalWriterOperationReceipts = sqliteTable(
   (table) => [primaryKey({ columns: [table.executionId, table.operationId] })],
 );
 
+/** Monotonic live publication identity survives execution changes and receipt pruning. */
+export const canonicalWriterLivePublicationHeads = sqliteTable(
+  "canonical_writer_live_publication_heads",
+  {
+    threadId: text("thread_id").primaryKey().notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    lastSequence: integer("last_sequence").notNull(),
+  },
+);
+
 /** Durable accepted and committed progress for one canonical execution. */
 export const canonicalAgentIngestCheckpoints = sqliteTable(
   "canonical_agent_ingest_checkpoints",

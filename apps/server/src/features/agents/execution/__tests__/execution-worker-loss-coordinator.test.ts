@@ -146,11 +146,11 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
       livePublication: [{ after: "writer", event: started }],
     });
     expect(begin.livePublication).toEqual([{
-      publicationId: `${claim.lease.leaseId}:1:0`, after: "writer", event: started,
+      publicationId: "1", after: "writer", event: started,
     }]);
     expect(db.prepare("SELECT receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
       .get(execution.executionId, begin.operationId))
-      .toMatchObject({ receipt_json: expect.stringContaining(`${claim.lease.leaseId}:1:0`) });
+      .toMatchObject({ receipt_json: expect.stringContaining('"publicationId":"1"') });
 
     const tool = { kind: "toolCall" as const, sequence: 2, sortOrder: 0, record: {
       id: "transport-tool", message_id: "", parent_tool_call_id: null,
@@ -176,12 +176,12 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
       } },
     }], livePublication: [{ after: "writer", event: toolUse }] });
     expect(event.livePublication).toEqual([{
-      publicationId: `${claim.lease.leaseId}:3:0`, after: "writer", event: toolUse,
+      publicationId: "2", after: "writer", event: toolUse,
     }]);
     expect(published).toContain(`${execution.executionId}:transport-tool`);
     expect(db.prepare("SELECT receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
       .get(execution.executionId, event.operationId))
-      .toMatchObject({ receipt_json: expect.stringContaining(`${claim.lease.leaseId}:3:0`) });
+      .toMatchObject({ receipt_json: expect.stringContaining('"publicationId":"2"') });
 
     await send({ kind: "provider-outcome", outcome: "completed" });
     await send({ kind: "stage-terminal", input: {
@@ -196,7 +196,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
       projection: { kind: "writer-staged" },
     }, livePublication: [{ after: "terminal", event: ended }] });
     expect(finish.livePublication).toEqual([{
-      publicationId: `${claim.lease.leaseId}:6:0`, after: "terminal", event: ended,
+      publicationId: "3", after: "terminal", event: ended,
     }]);
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(execution.executionId)).toEqual({ terminal_outcome: "completed" });

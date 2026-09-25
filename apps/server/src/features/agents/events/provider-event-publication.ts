@@ -16,6 +16,9 @@ export function publishParentProviderEvent(
   if (!shouldPublishParentEvent(event)) return false;
 
   deps.publishAgentEvent(enrichedEvent);
+  // A semantic writer committed this status before releasing its terminal event.
+  // A late replay must not overwrite the status of a newer execution.
+  if (event.publicationId !== undefined) return true;
   if (event.type === "turnComplete") {
     deps.updateThreadStatus(event.threadId, "completed");
     deps.publishThreadStatus({ threadId: event.threadId, status: "completed" });

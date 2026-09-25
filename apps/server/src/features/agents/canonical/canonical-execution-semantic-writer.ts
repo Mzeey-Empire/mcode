@@ -15,6 +15,7 @@ import {
 import { z } from "zod";
 
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
+import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import type {
   ExecutionProviderCommitReceipt,
@@ -130,7 +131,7 @@ const storedReceiptSchema = z.object({
   durableRevision: z.number().int(),
   publicationVersion: z.literal(1),
   livePublication: z.array(z.object({
-    publicationId: z.string(),
+    publicationId: z.string().regex(/^[1-9]\d*$/).max(16),
     after: z.enum(["writer", "terminal"]),
     event: AgentEventSchema(),
   })).min(1).max(MAX_LIVE_PUBLICATION_EVENTS).optional(),
@@ -164,6 +165,7 @@ const storedPublicationChunkPageSchema = z.array(storedOperationSchema.extend({ 
   .max(PUBLICATION_CHUNK_PAGE_SIZE);
 const storedEnvelopeRowSchema = z.object({ envelope_json: z.string() });
 const durableSequenceRowSchema = z.object({ last_durable_sequence: z.number().int() });
+const livePublicationHeadSchema = z.object({ last_sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) });
 
 interface SemanticHead {
   readonly execution: ExecutionIdentity;
@@ -199,12 +201,14 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private readonly systemProjection: CanonicalCodexSystemErrorProjection;
   private readonly tasks: TaskRepo;
   private readonly plans: PlanRepo;
+  private readonly threads: ThreadRepo;
   private readonly assistantText: ParentAssistantTextCheckpointService;
   private readonly canonical: CanonicalAgentBoundary;
   private readonly findOperation: ReturnType<Database["prepare"]>;
   private readonly listPublicationChunks: ReturnType<Database["prepare"]>;
   private readonly findPublishedEvent: ReturnType<Database["prepare"]>;
   private readonly findDurableSequence: ReturnType<Database["prepare"]>;
+  private readonly advanceLivePublication: ReturnType<Database["prepare"]>;
   private readonly insertOperation: ReturnType<Database["prepare"]>;
   private readonly commitPendingFinish: ReturnType<Database["prepare"]>;
   private readonly updateHead: ReturnType<Database["prepare"]>;
@@ -228,11 +232,15 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.systemProjection = new CanonicalCodexSystemErrorProjection(db);
     this.tasks = new TaskRepo(db);
     this.plans = new PlanRepo(db);
+    this.threads = new ThreadRepo(db);
     this.assistantText = new ParentAssistantTextCheckpointService(db);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
     this.listPublicationChunks = db.prepare("SELECT operation_id, kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id > ? AND operation_id < ? ORDER BY operation_id LIMIT ?");
     this.findPublishedEvent = db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE execution_id = ? AND accepted_sequence = ?");
     this.findDurableSequence = db.prepare("SELECT last_durable_sequence FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?");
+    this.advanceLivePublication = db.prepare(`INSERT INTO canonical_writer_live_publication_heads (thread_id, last_sequence)
+      VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET last_sequence = last_sequence + excluded.last_sequence
+      WHERE last_sequence <= 9007199254740991 - excluded.last_sequence RETURNING last_sequence`);
     this.insertOperation = db.prepare("INSERT INTO canonical_writer_operation_receipts (execution_id, operation_id, kind, input_hash, receipt_json) VALUES (?, ?, ?, ?, ?)");
     this.commitPendingFinish = db.prepare("UPDATE canonical_writer_operation_receipts SET kind = ?, receipt_json = ? WHERE execution_id = ? AND operation_id = ? AND kind = ? AND input_hash = ?");
     this.updateHead = db.prepare("UPDATE canonical_writer_operation_receipts SET receipt_json = ? WHERE execution_id = ? AND operation_id = ? AND kind = ?");
@@ -306,8 +314,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.storePublicationChunks(input.execution.executionId, hash, sequences);
     this.storeHead({ ...current, ordinal: current.ordinal + 1,
       durableRevision: receipt.durableRevision, terminal: true });
-    this.storeReceipt(operation, hash, receipt);
-    return receipt;
+    return this.storeReceipt(operation, hash, receipt);
   }
 
   private async applySupported(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
@@ -360,8 +367,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       };
       this.insertOperation.run(operation.execution.executionId, HEAD_ID, HEAD_KIND, fingerprint(head.lease), JSON.stringify(head));
       this.storePublicationChunks(operation.execution.executionId, hash, result.events.map((event) => event.acceptedSequence));
-      this.storeReceipt(operation, hash, receipt);
-      return receipt;
+      return this.storeReceipt(operation, hash, receipt);
     })());
   }
 
@@ -402,8 +408,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         executionId: event.routing.executionId,
         sequence: event.acceptedSequence,
       })));
-      this.storeReceipt(operation, hash, receipt);
-      return receipt;
+      return this.storeReceipt(operation, hash, receipt);
     })());
   }
 
@@ -438,8 +443,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       // Assistant text has its own durable sequence; it does not advance the canonical event revision.
       const receipt = committed(operation, head.durableRevision, undefined, undefined, result);
       this.storeHead({ ...head, ordinal: operation.ordinal });
-      this.storeReceipt(operation, hash, receipt);
-      return receipt;
+      return this.storeReceipt(operation, hash, receipt);
     })();
   }
 
@@ -452,8 +456,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.persistNarrativeDelta(mutation.input);
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...head, ordinal: operation.ordinal });
-      this.storeReceipt(operation, hash, receipt);
-      return receipt;
+      return this.storeReceipt(operation, hash, receipt);
     })();
   }
 
@@ -473,11 +476,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const { textResult, planQuestions, planOutput } = this.applyLiveFeatureEffects(operation, head);
       const livePublication = this.projectLiveSystem(operation);
       const committedReceipt = committed(operation, head.durableRevision, undefined, undefined, textResult,
-        livePublication, planQuestions, planOutput);
+        undefined, planQuestions, planOutput);
       this.storeHead({ ...head, ordinal: operation.ordinal,
         ...(mutation.message ? { assignedMessageId: mutation.message.messageId } : {}) });
-      this.storeReceipt(operation, hash, committedReceipt);
-      return committedReceipt;
+      return this.storeReceipt(operation, hash, committedReceipt, livePublication);
     })();
     if (mutation.text.kind === "reclassify") {
       this.assistantText.discardRecoveryJournal(operation.execution.executionId);
@@ -485,7 +487,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     return receipt;
   }
 
-  private projectLiveSystem(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationReceipt[] | undefined {
+  private projectLiveSystem(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationIntent[] | undefined {
     const mutation = operation.mutation;
     if (mutation.kind !== "live-event" || mutation.systemIntents === undefined) return undefined;
     const publication = liveEventPublication(operation);
@@ -493,7 +495,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const result = this.systemProjection.projectBoundSystem(
       operation.execution, publication.event, mutation.systemIntents, publication.after,
     );
-    return [{ publicationId: `${operation.operationId}:0`, after: result.after, event: result.event }];
+    return [{ after: result.after, event: result.event }];
   }
 
   private applyLiveFeatureEffects(
@@ -597,6 +599,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         const current = this.requireNextHead(operation);
         if (current.providerId !== mutation.input.providerId) throw new SemanticConflict();
         const receipt = committed(operation, batch.durableSequence);
+        const status = mutation.outcome === "cancelled" ? "interrupted" : mutation.outcome;
+        if (!this.threads.updateStatus(operation.execution.threadId, status)) throw new SemanticConflict();
         this.storeHead({ ...current, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, terminal: true });
         this.storeReceipt(operation, hash, receipt);
       }
@@ -623,8 +627,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...head, ordinal: operation.ordinal,
         assignedMessageId: mutation.input.assistant.messageId ?? head.assignedMessageId ?? null });
-      this.storeReceipt(operation, hash, receipt);
-      return receipt;
+      return this.storeReceipt(operation, hash, receipt);
     })();
   }
 
@@ -634,8 +637,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const next = this.applyControlMutation(head, operation);
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...next, ordinal: operation.ordinal });
-      this.storeReceipt(operation, hash, receipt);
-      return receipt;
+      return this.storeReceipt(operation, hash, receipt);
     })();
   }
 
@@ -752,8 +754,15 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     }
   }
 
-  private storeReceipt(operation: ExecutionSemanticOperation, hash: string, receipt: ExecutionWriteReceipt): void {
-    const receiptJson = JSON.stringify({ ...receipt, publicationVersion: 1 });
+  private storeReceipt(
+    operation: ExecutionSemanticOperation,
+    hash: string,
+    receipt: Extract<ExecutionWriteReceipt, { kind: "committed" }>,
+    publicationOverride?: readonly ExecutionLivePublicationIntent[],
+  ): Extract<ExecutionWriteReceipt, { kind: "committed" }> {
+    const publication = this.numberLivePublication(operation, publicationOverride);
+    const storedReceipt = publication ? { ...receipt, livePublication: publication } : receipt;
+    const receiptJson = JSON.stringify({ ...storedReceipt, publicationVersion: 1 });
     if (operation.livePublication && Buffer.byteLength(receiptJson, "utf8") > MAX_LIVE_RECEIPT_BYTES) {
       throw new SemanticConflict();
     }
@@ -762,7 +771,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         "semantic:finish", receiptJson, operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash,
       );
       if (updated.changes !== 1) throw new SemanticConflict();
-      return;
+      return storedReceipt;
     }
     this.insertOperation.run(
       operation.execution.executionId,
@@ -771,6 +780,21 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       hash,
       receiptJson,
     );
+    return storedReceipt;
+  }
+
+  private numberLivePublication(
+    operation: ExecutionSemanticOperation,
+    publicationOverride?: readonly ExecutionLivePublicationIntent[],
+  ): readonly ExecutionLivePublicationReceipt[] | undefined {
+    const intents = publicationOverride ?? livePublicationFor(operation);
+    if (!intents) return undefined;
+    const row = livePublicationHeadSchema.safeParse(
+      this.advanceLivePublication.get(operation.execution.threadId, intents.length),
+    );
+    if (!row.success) throw new SemanticConflict();
+    const first = row.data.last_sequence - intents.length + 1;
+    return intents.map((intent, index) => ({ ...intent, publicationId: String(first + index) }));
   }
 
   private replay(operation: ExecutionSemanticOperation, hash: string, stored: StoredOperation): ExecutionWriteReceipt {
@@ -785,7 +809,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       throw new Error("Live publication receipt exceeds its size limit");
     }
     const receipt = storedReceiptSchema.parse(JSON.parse(stored.receipt_json));
-    if (!this.matchesLivePublicationReceipt(operation, receipt.livePublication)) {
+    if (!validReceiptPublicationIds(receipt.livePublication)
+      || !this.matchesLivePublicationReceipt(operation, receipt.livePublication)) {
       throw new Error("Live publication receipt does not match its operation");
     }
     return receipt.operationId === operation.operationId && Number.isSafeInteger(receipt.durableRevision)
@@ -801,7 +826,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (mutation.kind === "live-event" && mutation.systemIntents?.[0]?.kind === "system-notice") {
       return this.matchesGeneratedNoticeReceipt(operation, actual);
     }
-    return fingerprint(actual ?? null) === fingerprint(livePublicationFor(operation) ?? null);
+    return fingerprint(actual?.map(({ after, event }) => ({ after, event })) ?? null)
+      === fingerprint(livePublicationFor(operation) ?? null);
   }
 
   private matchesGeneratedNoticeReceipt(
@@ -812,7 +838,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const published = actual?.[0];
     if (actual?.length !== 1 || expected?.event.type !== "system" || expected.event.messageId
       || !isGeneratedNoticePublication(published)) return false;
-    return fingerprint({ ...published, event: { ...published.event, messageId: undefined } }) === fingerprint(expected);
+    return fingerprint({ after: published.after, event: { ...published.event, messageId: undefined } })
+      === fingerprint(expected);
   }
 
   private publishStoredEvents(executionId: string, hash: string): void {
@@ -895,6 +922,7 @@ function validLivePublicationShape(
   mutationKind: ExecutionSemanticOperation["mutation"]["kind"],
 ): boolean {
   return Array.isArray(publication) && publication.length > 0 && publication.length <= MAX_LIVE_PUBLICATION_EVENTS
+    && publication.every((intent) => intent.event.publicationId === undefined)
     && (mutationKind === "begin" || mutationKind === "append-events" || mutationKind === "finish"
       || mutationKind === "live-event" && publication.length === 1);
 }
@@ -1192,7 +1220,7 @@ function committed(
   providerCommit?: ExecutionProviderCommitReceipt,
   providerEvents?: readonly ProjectedCommittedProviderEvent[],
   assistantTextCheckpoint?: ParentAssistantTextCheckpointResult,
-  livePublication: readonly ExecutionLivePublicationReceipt[] | undefined = livePublicationFor(operation),
+  livePublication?: readonly ExecutionLivePublicationReceipt[],
   planQuestions?: ExecutionPlanQuestionsReceipt,
   planOutput?: ReturnType<PlanRepo["create"]>,
 ): Extract<ExecutionWriteReceipt, { kind: "committed" }> {
@@ -1207,9 +1235,9 @@ function committed(
   };
 }
 
-function livePublicationFor(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationReceipt[] | undefined {
-  return operation.livePublication?.map((intent, index) => ({
-    publicationId: `${operation.operationId}:${index}`, after: intent.after,
+function livePublicationFor(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationIntent[] | undefined {
+  return operation.livePublication?.map((intent) => ({
+    after: intent.after,
     event: AgentEventSchema().parse(intent.event),
   }));
 }
@@ -1219,6 +1247,13 @@ function isGeneratedNoticePublication(
 ): receipt is ExecutionLivePublicationReceipt & { readonly event: Extract<ExecutionLivePublicationIntent["event"], { type: "system" }> & { readonly messageId: string } } {
   return receipt?.event.type === "system" && typeof receipt.event.messageId === "string"
     && z.string().uuid().safeParse(receipt.event.messageId).success;
+}
+
+function validReceiptPublicationIds(publication: readonly ExecutionLivePublicationReceipt[] | undefined): boolean {
+  if (!publication) return true;
+  const first = Number(publication[0]?.publicationId);
+  return Number.isSafeInteger(first) && first > 0
+    && publication.every((entry, index) => entry.publicationId === String(first + index));
 }
 
 function conflict(operation: ExecutionSemanticOperation): Extract<ExecutionWriteReceipt, { kind: "conflict" }> {

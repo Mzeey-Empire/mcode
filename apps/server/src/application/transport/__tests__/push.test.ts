@@ -127,6 +127,22 @@ describe("broadcast", () => {
     resetTransportPayloadValidatorForTest();
   });
 
+  it("keeps the durable publication identity while assigning a process sequence", () => {
+    const received: Array<{ buf: Buffer; binary: boolean }> = [];
+    const socket = fakeOpenSocket(received);
+    addClient(socket);
+    subscribeClientToThread(socket, "thread-a");
+    const publicationId = "3";
+    const first = broadcast("agent.event", { type: "turnStarted", threadId: "thread-a",
+      turnExecutionId: "00000000-0000-4000-8000-000000000001", publicationId });
+    const replay = broadcast("agent.event", { type: "turnStarted", threadId: "thread-a",
+      turnExecutionId: "00000000-0000-4000-8000-000000000001", publicationId });
+    expect(first).toMatchObject({ publicationId, sequence: 1 });
+    expect(replay).toMatchObject({ publicationId, sequence: 2 });
+    expect(received.map(({ buf }) => JSON.parse(buf.toString("utf-8")).data.publicationId))
+      .toEqual([publicationId, publicationId]);
+  });
+
   it("routes thread-scoped events only to clients subscribed to that thread", () => {
     const a: Array<{ buf: Buffer; binary: boolean }> = [];
     const b: Array<{ buf: Buffer; binary: boolean }> = [];

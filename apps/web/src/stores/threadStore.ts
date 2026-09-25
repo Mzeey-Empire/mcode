@@ -78,6 +78,7 @@ import {
   prepareAgentEvent,
   type AgentEventHandlerTable,
 } from "./thread-store/agent-event-preflight";
+import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";
 import {
   hydrateRunningThreads as hydrateRunningThreadRecords,
   transferThreadRuntime as transferOptimisticThreadRuntime,
@@ -3774,6 +3775,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   handleAgentEvent: (event) => {
     if (!hasAgentEventHandler(agentEventHandlers, event)) return;
     const runtime = prepareAgentEvent({
+      acceptPublication: (incoming) => stableAgentEventPublications.accept(incoming),
       clearApiRetry: (id) => patchRec(id, { apiRetry: undefined }),
       flushPendingTextDeltas,
       getCurrentThreadId: () => get().currentThreadId,

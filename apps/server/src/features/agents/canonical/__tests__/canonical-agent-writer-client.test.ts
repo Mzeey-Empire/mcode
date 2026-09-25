@@ -194,7 +194,7 @@ describe("canonical SQLite writer", () => {
     expect(created).toBe(2);
     expect(published).toEqual([AgentEventType.TurnStarted]);
     expect(receipt).toMatchObject({ kind: "committed", livePublication: [{
-      publicationId: "publication-lease:1:0", after: "writer",
+      publicationId: "1", after: "writer",
       event: { type: AgentEventType.TurnStarted, turnExecutionId: EXECUTION_ID },
     }] });
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = ?").get("publication-user"))
@@ -342,7 +342,7 @@ describe("canonical SQLite writer", () => {
       : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
     const receipt = await writer.transactSemantic(reclassified, () => {});
     expect(receipt).toMatchObject({ kind: "committed", operationId: "live-text-lease:3",
-      livePublication: [{ publicationId: "live-text-lease:3:0", after: "writer" }] });
+      livePublication: [{ publicationId: "2", after: "writer" }] });
     expect(created).toBe(2);
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("");
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")

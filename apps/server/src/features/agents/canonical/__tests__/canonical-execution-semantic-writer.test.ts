@@ -18,6 +18,7 @@ import { NarrativeRecoveryDelta } from "../../turns/narrative-recovery-delta.js"
 import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
 import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-projection.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
+import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
 
 const THREAD_ID = "thread-1";
@@ -379,7 +380,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       publication: { after: "writer", event },
     });
     expect(committedMessage).toMatchObject({ kind: "committed", livePublication: [{
-      publicationId: "lease-1:2:0", event,
+      publicationId: "1", event,
     }] });
     expect(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, message.messageId))
       .toMatchObject({ id: message.messageId, content: message.content, model: null, is_internal: true });
@@ -562,7 +563,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       turnExecutionId: EXECUTION_ID, delta: "unknown draft" };
     const appended = await writer.transact({ ...unknown, livePublication: [{ after: "writer", event: unknownEvent }] });
     expect(appended).toMatchObject({ kind: "committed", assistantTextCheckpoint: { durableThrough: 1 },
-      livePublication: [{ publicationId: "lease-1:2:0", event: unknownEvent }] });
+      livePublication: [{ publicationId: "1", event: unknownEvent }] });
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("unknown draft");
 
     const thought = { kind: "narrationSegment" as const, record: {
@@ -578,12 +579,14 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     db.run("CREATE TRIGGER fail_compound_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:live-event' AND NEW.operation_id = 'lease-1:3' BEGIN SELECT RAISE(ABORT, 'compound receipt unavailable'); END");
     await expect(writer.transact(reclassified)).rejects.toThrow("compound receipt unavailable");
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("unknown draft");
+    expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?")
+      .get(THREAD_ID)).toEqual({ last_sequence: 1 });
     expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
     expect(published).toHaveLength(publicationCount);
     db.run("DROP TRIGGER fail_compound_receipt");
     const reclassifiedReceipt = await writer.transact(reclassified);
     expect(reclassifiedReceipt).toMatchObject({ kind: "committed", livePublication: [
-      { publicationId: "lease-1:3:0", event: boundary },
+      { publicationId: "2", event: boundary },
     ] });
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("");
     expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([thought]);
@@ -601,7 +604,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     livePublication: [{ after: "writer" as const, event: finalBoundary }] };
     expect(await writer.transact(promoted)).toMatchObject({ kind: "committed",
       assistantTextCheckpoint: { durableThrough: 1 },
-      livePublication: [{ publicationId: "lease-1:4:0", event: finalBoundary }],
+      livePublication: [{ publicationId: "3", event: finalBoundary }],
     });
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("final thought");
     expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
@@ -609,6 +612,32 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(new MessageRepo(db).listIncludingInternal(THREAD_ID)).toContainEqual(expect.objectContaining({
       role: "assistant", content: "final thought", outcome: "interrupted",
     }));
+  });
+
+  it("advances one thread publication identity across terminal and a new execution", async () => {
+    const firstStart = operation(1, { kind: "begin", providerId: "codex", input: startInput() });
+    const firstEvent = { type: AgentEventType.TurnStarted, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID };
+    expect(await writer.transact({ ...firstStart, livePublication: [{ after: "writer", event: firstEvent }] }))
+      .toMatchObject({ kind: "committed", livePublication: [{ publicationId: "1" }] });
+    expect(writer.interruptWorkerLoss(loss).kind).toBe("committed");
+
+    const nextExecution = { ...execution, turnId: "turn-next",
+      executionId: "00000000-0000-4000-8000-000000000002" };
+    const nextLease = { ...lease, leaseId: "lease-next" };
+    const nextStart: ExecutionSemanticOperation = {
+      operationId: "lease-next:1", execution: nextExecution, lease: nextLease, ordinal: 1,
+      mutation: { kind: "begin", providerId: "codex", input: {
+        ...startInput(), turnId: nextExecution.turnId, executionId: nextExecution.executionId,
+        userMessage: { kind: "create", messageId: "next-user", content: "Next question", sequence: 3 },
+      } },
+      livePublication: [{ after: "writer", event: { ...firstEvent,
+        turnExecutionId: nextExecution.executionId } }],
+    };
+    expect(await writer.transact(nextStart))
+      .toMatchObject({ kind: "committed", livePublication: [{ publicationId: "2" }] });
+    expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?")
+      .get(THREAD_ID)).toEqual({ last_sequence: 2 });
   });
 
   it("durably acknowledges a boundary with no new text or narrative rows", async () => {
@@ -619,7 +648,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       livePublication: [{ after: "writer" as const, event: boundary }] };
     const receipt = await writer.transact(op);
     expect(receipt).toMatchObject({ kind: "committed", livePublication: [
-      { publicationId: "lease-1:2:0", event: boundary },
+      { publicationId: "1", event: boundary },
     ] });
     expect(await writer.transact(op)).toEqual(receipt);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
@@ -645,13 +674,25 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     db.run("DROP TRIGGER fail_system_receipt");
 
     const receipt = await writer.transact(op);
-    expect(receipt).toMatchObject({ kind: "committed", livePublication: [{ publicationId: "lease-1:2:0",
+    expect(receipt).toMatchObject({ kind: "committed", livePublication: [{ publicationId: "1",
       after: "writer", event: { ...notice, messageId: expect.any(String) } }] });
     if (receipt.kind !== "committed") return;
     const messageId = receipt.livePublication?.[0]?.event.type === "system"
       ? receipt.livePublication[0].event.messageId : undefined;
     expect(messageId).toBeDefined();
     if (!messageId) return;
+    const released: AgentEvent[] = [];
+    const release = new ExecutionLivePublicationRelease({
+      isBound: () => true,
+      publish: (event) => { released.push(event); },
+    });
+    release.release(op, receipt);
+    expect(released).toEqual([{ ...notice, messageId, publicationId: "1" }]);
+    const actualPublication = receipt.livePublication?.[0];
+    if (!actualPublication) throw new Error("Missing system live publication");
+    expect(() => release.release(op, { ...receipt, livePublication: [{ ...actualPublication,
+      event: { ...notice, messageId, message: "Changed notice" },
+    }] })).toThrow("Live AgentEvent publication receipt is invalid");
     expect(new MessageRepo(db).findByIdInThread(THREAD_ID, messageId))
       .toMatchObject({ role: "system", content: notice.message });
     expect(await writer.transact(op)).toEqual(receipt);
@@ -717,7 +758,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     db.run("DROP TRIGGER fail_task_receipt");
     const receipt = await writer.transact(op);
     expect(receipt).toMatchObject({ kind: "committed", livePublication: [
-      { publicationId: "lease-1:2:0", event: toolUse },
+      { publicationId: "1", event: toolUse },
     ] });
     expect(new TaskRepo(db).get(THREAD_ID)).toEqual([
       { content: "Ship task", status: "pending", group: "Tasks" },
@@ -884,14 +925,16 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     await expect(writer.transact(finish)).rejects.toThrow("finish unavailable");
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(EXECUTION_ID)).toEqual({ terminal_outcome: null });
+    expect(db.prepare("SELECT status FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ status: "active" });
     db.run("DROP TRIGGER fail_live_finish");
 
     const receipt = await writer.transact(finish);
     expect(receipt).toMatchObject({ kind: "committed", livePublication: [{
-      publicationId: "lease-1:2:0", after: "terminal", event: ended,
+      publicationId: "1", after: "terminal", event: ended,
     }] });
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(EXECUTION_ID)).toEqual({ terminal_outcome: "completed" });
+    expect(db.prepare("SELECT status FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ status: "completed" });
     db.close(true);
     db = openDatabase({ dbPath: path });
     writer = new CanonicalExecutionSemanticWriter(db, () => {});
@@ -937,7 +980,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
 
     db.prepare("UPDATE canonical_writer_operation_receipts SET receipt_json = ? WHERE execution_id = ? AND operation_id = ?")
       .run(JSON.stringify({ ...beginReceipt, publicationVersion: 1, livePublication: [{
-        publicationId: "lease-1:1:0", after: "writer",
+        publicationId: "1", after: "writer",
         event: { ...started, threadId: "another-thread" },
       }] }), EXECUTION_ID, begin.operationId);
     await expect(writer.transact(begin)).rejects.toThrow("Live publication receipt does not match its operation");

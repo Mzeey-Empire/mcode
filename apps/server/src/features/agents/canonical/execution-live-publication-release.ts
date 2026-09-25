@@ -5,7 +5,7 @@ import type {
   ExecutionLivePublicationReceipt, ExecutionSemanticOperation, ExecutionWriteReceipt,
 } from "../execution/execution-worker-handler.js";
 
-const MAX_TRACKED_PUBLICATIONS = 8_192;
+const MAX_RECENT_PUBLICATIONS = 8_192;
 const MAX_RECEIPT_EVENTS = 64;
 const MAX_RECEIPT_BYTES = 512 * 1024;
 
@@ -15,7 +15,7 @@ export interface LiveAgentEventPublisher {
   publish(event: AgentEvent): void;
 }
 
-/** Releases committed live events once per host lifetime, even when a writer reply is replayed. */
+/** Releases committed live events with stable identities for transport replay. */
 export class ExecutionLivePublicationRelease {
   private readonly published = new Set<string>();
 
@@ -26,14 +26,15 @@ export class ExecutionLivePublicationRelease {
     if (receipt.kind !== "committed" || !receipt.livePublication) return;
     const events = this.validate(operation, receipt);
     if (!this.publisher.isBound()) throw new Error("Live AgentEvent publisher is not bound");
-    const newCount = events.filter((entry) => !this.published.has(entry.key)).length;
-    if (this.published.size + newCount > MAX_TRACKED_PUBLICATIONS) {
-      throw new Error("Live AgentEvent publication tracking is full");
-    }
     for (const entry of events) {
       if (this.published.has(entry.key)) continue;
       this.publisher.publish(entry.event);
+      // Recent suppression saves repeat host work. The durable wire identity handles older replays.
+      this.published.delete(entry.key);
       this.published.add(entry.key);
+      if (this.published.size > MAX_RECENT_PUBLICATIONS) {
+        this.published.delete(this.published.values().next().value as string);
+      }
     }
   }
 
@@ -44,7 +45,8 @@ export class ExecutionLivePublicationRelease {
     const entries = receipt.livePublication ?? [];
     if (receipt.operationId !== operation.operationId || !operation.livePublication
       || entries.length !== operation.livePublication.length || entries.length > MAX_RECEIPT_EVENTS
-      || Buffer.byteLength(JSON.stringify(entries), "utf8") > MAX_RECEIPT_BYTES) {
+      || Buffer.byteLength(JSON.stringify(entries), "utf8") > MAX_RECEIPT_BYTES
+      || !contiguousPublicationIds(entries)) {
       throw new Error("Live AgentEvent publication receipt is invalid");
     }
     return entries.map((entry, index) => this.validateEntry(operation, entry, index));
@@ -52,7 +54,7 @@ export class ExecutionLivePublicationRelease {
 
   private validateEntry(operation: ExecutionSemanticOperation, entry: ExecutionLivePublicationReceipt, index: number) {
     const expected = operation.livePublication?.[index];
-    if (!expected || !samePublicationHeader(operation, entry, expected.after, index)) {
+    if (!expected || !samePublicationHeader(operation, entry.after, expected.after)) {
       throw new Error("Live AgentEvent publication receipt is invalid");
     }
     const parsed = AgentEventSchema().safeParse(entry.event);
@@ -60,21 +62,35 @@ export class ExecutionLivePublicationRelease {
     if (!parsed.success || !original.success) throw new Error("Live AgentEvent publication receipt is invalid");
     if (parsed.data.threadId !== operation.execution.threadId
       || parsed.data.turnExecutionId !== operation.execution.executionId
-      || !NodeUtil.isDeepStrictEqual(parsed.data, original.data)) {
+      || !samePublishedEvent(operation, parsed.data, original.data)) {
       throw new Error("Live AgentEvent publication receipt is invalid");
     }
-    return { key: JSON.stringify([operation.execution.executionId, entry.publicationId]), event: parsed.data };
+    return { key: JSON.stringify([operation.execution.executionId, entry.publicationId]),
+      event: { ...parsed.data, publicationId: entry.publicationId } };
   }
 }
 
 function samePublicationHeader(
   operation: ExecutionSemanticOperation,
-  entry: ExecutionLivePublicationReceipt,
+  after: "writer" | "terminal",
   expectedBarrier: "writer" | "terminal",
-  index: number,
 ): boolean {
-  return entry.publicationId === `${operation.operationId}:${index}`
-    && entry.after === expectedBarrier && entry.after === barrierFor(operation.mutation.kind);
+  return after === expectedBarrier && after === barrierFor(operation.mutation.kind);
+}
+
+function contiguousPublicationIds(entries: readonly ExecutionLivePublicationReceipt[]): boolean {
+  const first = Number(entries[0]?.publicationId);
+  return Number.isSafeInteger(first) && first > 0
+    && entries.every((entry, index) => entry.publicationId === String(first + index));
+}
+
+function samePublishedEvent(operation: ExecutionSemanticOperation, actual: AgentEvent, expected: AgentEvent): boolean {
+  if (NodeUtil.isDeepStrictEqual(actual, expected)) return true;
+  if (operation.mutation.kind !== "live-event" || operation.mutation.systemIntents?.[0]?.kind !== "system-notice"
+    || actual.type !== "system" || expected.type !== "system" || expected.messageId
+    || !actual.messageId) return false;
+  const { messageId: _generatedId, ...withoutGeneratedId } = actual;
+  return NodeUtil.isDeepStrictEqual(withoutGeneratedId, expected);
 }
 
 function barrierFor(kind: ExecutionSemanticOperation["mutation"]["kind"]): "writer" | "terminal" | null {

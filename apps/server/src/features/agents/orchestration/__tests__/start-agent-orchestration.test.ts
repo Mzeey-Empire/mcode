@@ -115,4 +115,21 @@ describe("agent orchestration", () => {
     });
     expect(orchestration.pullRequestCompletionEffect.schedule).toHaveBeenCalledWith("thread-1");
   });
+
+  it("releases a committed terminal receipt even when the legacy runtime suppression is set", () => {
+    const orchestration = buildOrchestration();
+    orchestration.runtime.shouldSuppressTurnComplete.mockReturnValue(true);
+    const legacy: AgentEvent = { type: AgentEventType.TurnComplete, threadId: "thread-1",
+      reason: "completed", costUsd: null, tokensIn: 1, tokensOut: 1 };
+    orchestration.publish(legacy);
+    expect(orchestration.publishedEvents).toEqual([]);
+
+    const committed: AgentEvent = { ...legacy,
+      turnExecutionId: "00000000-0000-4000-8000-000000000001", publicationId: "1" };
+    orchestration.publish(committed);
+    expect(orchestration.publishedEvents).toEqual([committed]);
+    expect(orchestration.threadRepo.updateStatus).not.toHaveBeenCalled();
+    expect(orchestration.publishThreadStatus).not.toHaveBeenCalled();
+    expect(orchestration.pullRequestCompletionEffect.schedule).toHaveBeenCalledWith("thread-1");
+  });
 });
