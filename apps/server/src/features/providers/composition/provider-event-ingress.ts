@@ -196,7 +196,6 @@ export class ProviderEventIngress {
     if (this.started) return;
     this.started = true;
     this.consumer = consumer;
-    this.workerPool.start();
     for (const provider of providerRegistry.resolveAll()) {
       provider.on("file_mutation_start", (event) => consumer.handleProviderFileMutation(event));
       if (isTurnDiffSource(provider)) provider.onTurnDiff((event) => consumer.handleProviderTurnDiff(event));

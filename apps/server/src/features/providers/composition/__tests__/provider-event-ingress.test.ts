@@ -18,9 +18,10 @@ import {
   type ProviderEventIngressEvent,
 } from "../provider-event-ingress.js";
 import type { ProviderEventAdapter } from "../provider-event-adapter.js";
-import type {
-  ProviderEventWorkerCallbacks,
-  ProviderEventWorkerPool,
+import {
+  ThreadEventWorkerPool,
+  type ProviderEventWorkerCallbacks,
+  type ProviderEventWorkerPool,
 } from "../provider-event-worker-pool.js";
 import {
   processProviderEventWorkerTask,
@@ -216,6 +217,41 @@ async function drainIngress(ingress: ProviderEventIngress): Promise<void> {
 }
 
 describe("ProviderEventIngress", () => {
+  it("starts legacy workers only when the first legacy event needs preprocessing", async () => {
+    const createWorker = vi.fn(() => new Worker(new URL("../provider-event.worker.ts", import.meta.url), { type: "module" }));
+    const workerPool = new ThreadEventWorkerPool({ workerCount: 2, createWorker });
+    const { ingress, projected, received } = createIngress(undefined, undefined, workerPool);
+    try {
+      expect(createWorker).not.toHaveBeenCalled();
+      ingress.acceptProjectedCommitted([{ ...projectedEvent("owned-codex", "projected"), providerId: "codex" }]);
+      await ingress.waitForThread("thread-1");
+      expect(projected).toEqual([expect.objectContaining({ providerId: "codex" })]);
+      expect(createWorker).not.toHaveBeenCalled();
+
+      ingress.acceptProviderRuntime("claude", runtimeEvent("legacy"));
+      await ingress.waitForThread("thread-1");
+      expect(createWorker).toHaveBeenCalledTimes(2);
+      expect(received).toEqual([expect.objectContaining({
+        providerId: "claude", event: expect.objectContaining({ delta: "legacy" }),
+      })]);
+      expect(ingress.queueMetrics().pendingEvents).toBe(0);
+    } finally {
+      ingress.shutdown();
+    }
+  });
+
+  it("shuts down before the first submission without creating workers", async () => {
+    const createWorker = vi.fn(() => new Worker(new URL("../provider-event.worker.ts", import.meta.url), { type: "module" }));
+    const workerPool = new ThreadEventWorkerPool({ workerCount: 2, createWorker });
+    const { ingress, diagnostics, received } = createIngress(undefined, undefined, workerPool);
+    ingress.shutdown();
+    ingress.acceptProviderRuntime("claude", runtimeEvent("after shutdown"));
+    await ingress.waitForThread("thread-1");
+    expect(createWorker).not.toHaveBeenCalled();
+    expect(received).toEqual([]);
+    expect(diagnostics).toEqual([expect.objectContaining({ reason: "worker-shutdown" })]);
+  });
+
   it("resolves the diagnostic sink through its explicit injection token", () => {
     const child = container.createChildContainer();
     const provider = createProvider("claude");
