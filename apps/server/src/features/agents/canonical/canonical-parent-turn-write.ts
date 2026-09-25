@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import {
   ParentNarrativeRecoveryItemSchema,
+  TurnFileEffectSummarySchema,
   type ParentNarrativeRecoveryItem,
   type StoredAttachment,
   type TurnOutcome,
@@ -19,6 +20,8 @@ import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
 import { TURN_DIFF_MAX_BYTES, parseTurnDiff } from "../turns/turn-diff-patch.js";
 import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
+import { TurnSnapshotRepo } from "../turns/persistence/turn-snapshot-repo.js";
+import type { PreparedExecutionFileEvidence } from "../turns/turn-execution-file-evidence.js";
 import type { SelectedTurnDiff } from "../turns/turn-diff-service.js";
 import type {
   ParentTurnFinishInput,
@@ -98,7 +101,9 @@ export interface DataOnlyParentEventInput extends Omit<CanonicalAgentCommitInput
 /** A staged assistant and narrative to confirm in the terminal transaction. */
 export interface DataOnlyParentTurnFinishInput extends Omit<ParentTurnFinishInput, "projectTurn" | "finalizeCompatibility"> {
   projection: ParentTurnProjection | { readonly kind: "writer-staged"; readonly messageId?: string };
+  deliveryAttempt?: number;
   selectedTurnDiff?: SelectedTurnDiff;
+  fileEvidence?: PreparedExecutionFileEvidence;
 }
 
 /** Cloneable terminal data whose compatibility rows are staged on the writer connection. */
@@ -148,6 +153,8 @@ export class CanonicalParentTurnWrite {
   private readonly stagedAssistant: ReturnType<Database["prepare"]>;
   private readonly assistantTextCheckpoints: ParentAssistantTextCheckpointService;
   private readonly turnDiffs: TurnDiffRepo;
+  private readonly turnSnapshots: TurnSnapshotRepo;
+  private readonly markThreadFilesChanged: ReturnType<Database["prepare"]>;
 
   constructor(db: Database, publish: CanonicalAgentEventPublisher) {
     this.db = db;
@@ -165,6 +172,8 @@ export class CanonicalParentTurnWrite {
     this.stagedAssistant = db.prepare("SELECT role, content FROM messages WHERE id = ? AND thread_id = ?");
     this.assistantTextCheckpoints = new ParentAssistantTextCheckpointService(db);
     this.turnDiffs = new TurnDiffRepo(db);
+    this.turnSnapshots = new TurnSnapshotRepo(db);
+    this.markThreadFilesChanged = db.prepare("UPDATE threads SET has_file_changes = 1 WHERE id = ? AND has_file_changes = 0");
   }
 
   /** Import fsynced text before the interruption transaction reads its durable prefix. */
@@ -401,10 +410,8 @@ export class CanonicalParentTurnWrite {
       ? this.loadStagedTerminalProjection(input.threadId, input.executionId, input.projection.messageId)
       : input.projection;
     this.assertStagedAssistant(input.threadId, staged);
-    if (input.selectedTurnDiff && (input.outcome !== "completed" || !staged.message
-      || !validSelectedTurnDiff(input.selectedTurnDiff, input.threadId))) {
-      throw new Error("Invalid selected turn diff for terminal assistant");
-    }
+    const fileEvidence = input.fileEvidence;
+    const selectedTurnDiff = selectTerminalDiff(input, staged.message !== null);
     const projection: ParentTurnProjection = {
       message: staged.message
         ? {
@@ -423,8 +430,23 @@ export class CanonicalParentTurnWrite {
         if (!projection.message) return;
         this.messages.setAssistantOutcome(projection.message.id, input.outcome, input.executionId);
         this.messages.publishAssistant(projection.message.id);
-        if (input.selectedTurnDiff) this.turnDiffs.create({
-          id: NodeCrypto.randomUUID(), message_id: projection.message.id, ...input.selectedTurnDiff,
+        if (fileEvidence?.snapshot) {
+          const snapshot = fileEvidence.snapshot;
+          this.turnSnapshots.create({
+            messageId: projection.message.id,
+            threadId: snapshot.threadId,
+            refBefore: snapshot.refBefore,
+            refAfter: snapshot.refAfter,
+            filesChanged: [...snapshot.filesChanged],
+            fileEffects: snapshot.fileEffects,
+            worktreePath: null,
+          });
+          if (fileEvidence.fileEffects.fileCount > 0 || fileEvidence.filesChanged.length > 0) {
+            this.markThreadFilesChanged.run(input.threadId);
+          }
+        }
+        if (selectedTurnDiff) this.turnDiffs.create({
+          id: NodeCrypto.randomUUID(), message_id: projection.message.id, ...selectedTurnDiff,
         });
       },
     }, onBatchWrite);
@@ -452,6 +474,70 @@ export class CanonicalParentTurnWrite {
       throw new Error(`Staged assistant projection not found: ${projected.id}`);
     }
   }
+}
+
+function selectTerminalDiff(input: DataOnlyParentTurnFinishInput, hasAssistant: boolean): SelectedTurnDiff | null | undefined {
+  if (input.fileEvidence) assertExecutionFileEvidence(input, hasAssistant);
+  const selected = input.fileEvidence?.selectedTurnDiff ?? input.selectedTurnDiff;
+  if (selected && (input.outcome !== "completed" || !hasAssistant
+    || !validSelectedTurnDiff(selected, input.threadId))) {
+    throw new Error("Invalid selected turn diff for terminal assistant");
+  }
+  return selected;
+}
+
+function assertExecutionFileEvidence(input: DataOnlyParentTurnFinishInput, hasAssistant: boolean): void {
+  const evidence = input.fileEvidence;
+  if (!evidence || !hasAssistant || input.selectedTurnDiff
+    || !validExecutionFileEvidence(evidence, input.threadId, input.turnId,
+      input.executionId, input.deliveryAttempt)) {
+    throw new Error("Invalid execution file evidence for terminal assistant");
+  }
+}
+
+function validExecutionFileEvidence(
+  evidence: PreparedExecutionFileEvidence,
+  threadId: string,
+  turnId: string,
+  executionId: string,
+  deliveryAttempt: number | undefined,
+): boolean {
+  if (!sameTerminalFileOwner(evidence, threadId, turnId, executionId, deliveryAttempt)
+    || !TurnFileEffectSummarySchema().safeParse(evidence.fileEffects).success
+    || evidence.fileEffects.fileCount !== evidence.fileEffects.effects.length) return false;
+  const paths = evidence.fileEffects.effects.filter((effect) => effect.scope === "workspace")
+    .map((effect) => effect.path);
+  if (JSON.stringify(evidence.filesChanged) !== JSON.stringify(paths)) return false;
+  const snapshot = evidence.snapshot;
+  if (!snapshot) return evidence.fileEffects.fileCount === 0 && paths.length === 0;
+  return validExecutionSnapshot(snapshot, evidence, paths);
+}
+
+function sameTerminalFileOwner(
+  evidence: PreparedExecutionFileEvidence,
+  threadId: string,
+  turnId: string,
+  executionId: string,
+  deliveryAttempt: number | undefined,
+): boolean {
+  return Number.isSafeInteger(deliveryAttempt) && deliveryAttempt !== undefined && deliveryAttempt >= 1
+    && evidence.threadId === threadId && evidence.turnId === turnId
+    && evidence.executionId === executionId && evidence.deliveryAttempt === deliveryAttempt;
+}
+
+function validExecutionSnapshot(
+  snapshot: NonNullable<PreparedExecutionFileEvidence["snapshot"]>,
+  evidence: PreparedExecutionFileEvidence,
+  paths: readonly string[],
+): boolean {
+  return snapshot.threadId === evidence.threadId && snapshot.executionId === evidence.executionId
+    && snapshot.worktreePath === null && isSnapshotRef(snapshot.refBefore) && isSnapshotRef(snapshot.refAfter)
+    && JSON.stringify(snapshot.filesChanged) === JSON.stringify(paths)
+    && JSON.stringify(snapshot.fileEffects) === JSON.stringify(evidence.fileEffects);
+}
+
+function isSnapshotRef(ref: string): boolean {
+  return ref === "" || /^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(ref);
 }
 
 function validSelectedTurnDiff(selected: SelectedTurnDiff, threadId: string): boolean {

@@ -84,6 +84,7 @@ interface TrackedPath {
 }
 
 interface TurnState {
+  sealed: boolean;
   reconstructionRejected?: boolean;
   executionId: string | null;
   generation: number;
@@ -128,6 +129,13 @@ const fileTurnHandoffSchema = z.object({
 /** One execution's cloneable file-tracker start state, with no other turn data. */
 export type FileTurnHandoff = Readonly<z.infer<typeof fileTurnHandoffSchema>>;
 type FileTurnStart = Omit<FileTurnHandoff, "executionId"> & { readonly executionId: string | null };
+
+/** Frozen file evidence for one execution after its queued observations settle. */
+export interface ExecutionFileEvidence {
+  readonly baselineRef: string | null;
+  readonly summary: TurnFileEffectSummary;
+  readonly reconstructionPatch?: string;
+}
 
 /** Identity supplied by the scheduler, independently of the handoff payload. */
 export interface ExpectedFileExecution {
@@ -246,7 +254,7 @@ export class TurnFileTracker {
     const generation = this.currentGeneration.get(threadId);
     if (generation === undefined) return null;
     const turn = this.getTurn(threadId, generation);
-    if (!turn) return null;
+    if (!turn || turn.sealed) return null;
     const candidates = boundedMutationCandidates(toolName, toolInput);
     if (candidates.length === 0) return null;
     const observations = this.synchronousObservations(turn, candidates).map(freezeCandidateObservation);
@@ -266,7 +274,7 @@ export class TurnFileTracker {
   ): Promise<boolean> {
     const { threadId, toolCallId, toolName, toolInput } = event;
     const turn = this.getTurn(threadId);
-    if (!turn || !capturedMatchesTurn(captured, turn, threadId, toolCallId)) return Promise.resolve(false);
+    if (!turn || turn.sealed || !capturedMatchesTurn(captured, turn, threadId, toolCallId)) return Promise.resolve(false);
     const generation = turn.generation;
     const boundedCandidates = boundedMutationCandidates(toolName, toolInput);
     if (boundedCandidates.length === 0 || captured.observations.length !== boundedCandidates.length
@@ -316,11 +324,33 @@ export class TurnFileTracker {
     return turn.summary;
   }
 
+  /** Read an execution's settled evidence only while its original handoff still owns the generation. */
+  async finalEvidenceForExecution(handoff: FileTurnHandoff): Promise<ExecutionFileEvidence | null> {
+    const parsed = fileTurnHandoffSchema.safeParse(handoff);
+    if (!parsed.success) return null;
+    const turn = this.getTurn(parsed.data.threadId, parsed.data.generation);
+    if (!turn || !sameFileTurnHandoff(turn, parsed.data)) return null;
+    turn.sealed = true;
+    await turn.chain;
+    if (this.getTurn(parsed.data.threadId, parsed.data.generation) !== turn
+      || !sameFileTurnHandoff(turn, parsed.data)) return null;
+    return {
+      baselineRef: turn.baselineRef,
+      summary: structuredClone(turn.summary),
+      reconstructionPatch: this.reconstructionPatchForTurn(turn),
+    };
+  }
+
   /** Reconstruct a bounded patch only from complete explicit file-tool evidence. */
   async reconstructionPatch(threadId: string, generation?: number): Promise<string | undefined> {
     const turn = this.getTurn(threadId, generation);
     if (!turn || turn.reconstructionRejected) return undefined;
     await turn.chain;
+    return this.reconstructionPatchForTurn(turn);
+  }
+
+  private reconstructionPatchForTurn(turn: TurnState): string | undefined {
+    if (turn.reconstructionRejected) return undefined;
     const tracked = [...turn.tracked.values()].filter((entry) => entry.scope === "workspace" && entry.effectCandidate);
     if (tracked.length !== turn.summary.fileCount || tracked.some((entry) => entry.evidenceRejected || entry.evidenceBefore === undefined || entry.evidenceAfter === undefined || entry.oldPath !== undefined)) return undefined;
     const patches = tracked.map((entry) => createTextPatch(entry.displayPath.replaceAll("\\", "/"), entry.evidenceBefore!, entry.evidenceAfter!, entry.effectCandidate!.effect.kind === "added" ? "added" : entry.effectCandidate!.effect.kind === "removed" ? "removed" : "edited"));
@@ -346,7 +376,7 @@ export class TurnFileTracker {
     generation?: number,
   ): Promise<void> {
     const turn = this.getTurn(threadId, generation);
-    if (!turn) return Promise.resolve();
+    if (!turn || turn.sealed) return Promise.resolve();
     const operation = turn.chain.then(() => work(turn));
     turn.chain = operation.catch(() => undefined);
     return operation;
@@ -784,6 +814,7 @@ function boundedMutationCandidates(toolName: string, toolInput: Record<string, u
 
 function newTurnState(start: FileTurnStart): TurnState {
   return {
+    sealed: false,
     executionId: start.executionId,
     generation: start.generation,
     generationToken: start.generationToken,

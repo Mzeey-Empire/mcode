@@ -1,10 +1,14 @@
+import "reflect-metadata";
 import { afterEach, describe, expect, it } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import { AgentEventType, type TurnFileEffectSummary } from "@mcode/contracts";
 import { TurnFileTracker } from "../turn-file-tracker.js";
+import { prepareExecutionFileEvidence } from "../turn-execution-file-evidence.js";
 import { parseTurnDiff } from "../turn-diff-patch.js";
+import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
+import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
 import {
   createCursorAcpTurnState,
   mapCursorAcpSessionNotification,
@@ -130,6 +134,57 @@ describe("TurnFileTracker", () => {
     expect(await worker.observeCapturedToolUse(event, structuredClone(captured))).toBe(true);
     await worker.observeToolResult("t", "edit");
     expect(await worker.finalizeTurn("t")).toMatchObject({ fileCount: 1, additions: 2, deletions: 1 });
+  });
+
+  it("seals only the exact execution generation before a resumed turn reuses a tool ID", async () => {
+    const root = await tempDir("mcode-sealed-file-generation-");
+    const path = NodePath.join(root, "tracked.txt");
+    await NodeFSPromises.writeFile(path, "before\n");
+    const tracker = trackerWithBaseline({}, []);
+    const first = tracker.beginExecutionTurn({
+      threadId: "t", executionId: "execution-1", cwd: root, baselineRef: null,
+    });
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { file_path: "tracked.txt" } };
+    const capture = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!capture) throw new Error("Expected first execution capture");
+    await NodeFSPromises.writeFile(path, "after\n");
+    expect(await tracker.observeCapturedToolUse(event, capture)).toBe(true);
+    await tracker.observeToolResult("t", "edit");
+    const frozen = await tracker.finalEvidenceForExecution(first);
+    expect(frozen?.summary).toMatchObject({ fileCount: 1 });
+    expect(await tracker.finalEvidenceForExecution(first)).toEqual(frozen);
+    expect(tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput)).toBeNull();
+    expect(await tracker.observeCapturedToolUse(event, capture)).toBe(false);
+
+    const second = tracker.beginExecutionTurn({
+      threadId: "t", executionId: "execution-2", cwd: root, baselineRef: null,
+    });
+    expect(await tracker.finalEvidenceForExecution({ ...first, generationToken: second.generationToken })).toBeNull();
+    expect((await tracker.finalEvidenceForExecution(second))?.summary.fileCount).toBe(0);
+    tracker.clearTurn("t", first.generation);
+    expect(await tracker.finalEvidenceForExecution(first)).toBeNull();
+  });
+
+  it("rejects native diff evidence from another delivery attempt before terminal preparation", async () => {
+    const root = await tempDir("mcode-file-diff-attempt-");
+    const tracker = trackerWithBaseline({}, []);
+    const handoff = tracker.beginExecutionTurn({
+      threadId: "t", executionId: "execution-1", cwd: root, baselineRef: null,
+    });
+    const input = {
+      handoff, turnId: "turn-1", deliveryAttempt: 2, outcome: "completed" as const,
+      tracker, snapshots: new SnapshotService(new RealGitExecutor()),
+      nativeDiff: {
+        threadId: "t", turnId: "turn-1", turnExecutionId: "execution-1", deliveryAttempt: 1,
+        revision: 1, evidence: null, rejected: false,
+      },
+    };
+    await expect(prepareExecutionFileEvidence(input)).rejects.toThrow("Native diff does not belong");
+    const prepared = await prepareExecutionFileEvidence({ ...input, nativeDiff: null });
+    expect(prepared).toMatchObject({
+      threadId: "t", executionId: "execution-1", filesChanged: [], snapshot: null, selectedTurnDiff: null,
+    });
+    expect(() => structuredClone(prepared)).not.toThrow();
   });
 
   it("rejects a handoff or capture for another execution or root", async () => {

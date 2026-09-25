@@ -11,6 +11,7 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
+import type { PreparedExecutionFileEvidence } from "../../turns/turn-execution-file-evidence.js";
 import {
   CanonicalParentTurnWrite,
   type DataOnlyParentTerminalProjectionInput,
@@ -299,6 +300,56 @@ describe("CanonicalParentTurnWrite", () => {
     expect(db.prepare("SELECT message_id, source, patch, revision FROM turn_diff_snapshots WHERE message_id = ?")
       .get(messageId)).toEqual({ message_id: messageId, source: "native", patch, revision: 2 });
     expect(db.prepare("SELECT count(*) AS count FROM turn_diff_snapshots").get()).toEqual({ count: 1 });
+  });
+
+  it("commits exact-execution file evidence with the terminal assistant or rolls it all back", async () => {
+    writer.start(startInput());
+    const messageId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
+    const input = terminalProjectionInput();
+    input.assistant.messageId = messageId;
+    const staged = writer.stageTerminalProjection(input);
+    const patch = "diff --git a/a.txt b/a.txt\nindex 1..2\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n";
+    const fileEffects = {
+      revision: 1, fileCount: 1, additions: 1, deletions: 1,
+      effects: [{ path: "a.txt", kind: "edited" as const, scope: "workspace" as const,
+        additions: 1, deletions: 1, binary: false, toolCallIds: ["tool-1"] }],
+    };
+    const fileEvidence: PreparedExecutionFileEvidence = {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, deliveryAttempt: 2,
+      fileEffects, filesChanged: ["a.txt"],
+      snapshot: {
+        threadId: THREAD_ID, executionId: EXECUTION_ID, refBefore: "a".repeat(40),
+        refAfter: "b".repeat(40), filesChanged: ["a.txt"], fileEffects, worktreePath: null,
+      },
+      selectedTurnDiff: { thread_id: THREAD_ID, source: "native", patch, revision: 2 },
+    };
+    const finish: DataOnlyParentTurnFinishInput = {
+      ...finishInput(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, messageId)!),
+      projection: { kind: "writer-staged", messageId }, deliveryAttempt: 2, fileEvidence,
+    };
+    expect(() => writer.finish({ ...finish, fileEvidence: { ...fileEvidence, executionId: "old-execution" } }))
+      .toThrow("Invalid execution file evidence");
+    expect(() => writer.finish({ ...finish, deliveryAttempt: 1 })).toThrow("Invalid execution file evidence");
+    db.run("CREATE TRIGGER fail_snapshot BEFORE INSERT ON turn_snapshots BEGIN SELECT RAISE(ABORT, 'snapshot unavailable'); END");
+    await expect(writer.finish(structuredClone(finish))).rejects.toThrow("snapshot unavailable");
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ terminal_outcome: null });
+    expect(db.prepare("SELECT is_internal FROM messages WHERE id = ?").get(messageId)).toEqual({ is_internal: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM turn_diff_snapshots").get()).toEqual({ count: 0 });
+    db.run("DROP TRIGGER fail_snapshot");
+    expect((await writer.finish(finish)).outcome).toBe("committed");
+    expect(db.prepare("SELECT message_id, thread_id, files_changed, ref_before, ref_after FROM turn_snapshots WHERE message_id = ?")
+      .get(messageId)).toEqual({
+        message_id: messageId, thread_id: THREAD_ID, files_changed: '["a.txt"]',
+        ref_before: "a".repeat(40), ref_after: "b".repeat(40),
+      });
+    expect(db.prepare("SELECT source, patch FROM turn_diff_snapshots WHERE message_id = ?").get(messageId))
+      .toEqual({ source: "native", patch });
+    expect(db.prepare("SELECT has_file_changes FROM threads WHERE id = ?").get(THREAD_ID))
+      .toEqual({ has_file_changes: 1 });
+    expect((await writer.finish({ ...finish, projection: staged.projection })).outcome).toBe("terminal-outcome-confirmed");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM turn_snapshots").get()).toEqual({ count: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM turn_diff_snapshots").get()).toEqual({ count: 1 });
   });
 
   it("refuses to reuse a public assistant row as a staged turn projection", () => {
