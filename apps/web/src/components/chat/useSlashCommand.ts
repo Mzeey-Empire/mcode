@@ -30,6 +30,8 @@ export interface Command {
   capabilityKind: ProviderCapabilityKind | "mcode";
   nativeId: string;
   mentionPath?: string;
+  /** Filesystem path of the backing skill/command file, when the catalog knows it. */
+  path?: string;
   identity?: ProviderCapabilityIdentity;
   /** Discovery scope of the backing skill entry; used to tag project-local duplicates. */
   source?: SkillSource;
@@ -106,6 +108,7 @@ function toCommand(entry: ProviderCapabilityEntry): Command | null {
     return {
       ...base,
       namespace: "command",
+      path: entry.path,
     };
   }
   // Compat-prefixed names like `claude:prototype` are ordinary skills, not
@@ -114,6 +117,7 @@ function toCommand(entry: ProviderCapabilityEntry): Command | null {
     ...base,
     source: entry.source,
     namespace: entry.source === "plugin" ? "plugin" : "skill",
+    path: entry.path,
   };
 }
 

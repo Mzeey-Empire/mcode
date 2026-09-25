@@ -60,6 +60,7 @@ export const MessageMentionSchema = lazySchema(() => z.discriminatedUnion("kind"
     kind: z.literal("command"),
     namespace: z.enum(["skill", "mcode", "plugin", "command"]),
     capabilityIdentity: ProviderCapabilityIdentitySchema().optional(),
+    path: MentionPathSchema.optional(),
   }),
 ]));
 

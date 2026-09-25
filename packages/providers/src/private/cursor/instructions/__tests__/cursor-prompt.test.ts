@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { buildCursorPrompt, readCursorUserInstructions } from "../cursor-prompt.js";
+import {
+  buildCursorPrompt,
+  readCursorUserInstructions,
+  rewriteCursorCommandMentionsAsLinks,
+} from "../cursor-prompt.js";
 
 describe("cursor-prompt", () => {
   describe("readCursorUserInstructions", () => {
@@ -68,6 +72,49 @@ describe("cursor-prompt", () => {
         true,
       );
       expect(prompt.endsWith("\n\ndo work")).toBe(true);
+    });
+  });
+
+  describe("rewriteCursorCommandMentionsAsLinks", () => {
+    const commandMention = (overrides: Record<string, unknown>) => ({
+      id: "command:skill:deploy",
+      kind: "command" as const,
+      label: "deploy",
+      namespace: "skill" as const,
+      range: { start: 0, end: 7 },
+      ...overrides,
+    });
+
+    it("links a command mention to its backing file", () => {
+      expect(
+        rewriteCursorCommandMentionsAsLinks("/deploy now", [
+          commandMention({ path: "/x/SKILL.md" }),
+        ]),
+      ).toBe("[/deploy](/x/SKILL.md) now");
+    });
+
+    it("rewrites multiple command mentions without shifting earlier ranges", () => {
+      const message = "/build /deploy now";
+      expect(
+        rewriteCursorCommandMentionsAsLinks(message, [
+          commandMention({ label: "build", path: "/x/build/SKILL.md", range: { start: 0, end: 6 } }),
+          commandMention({ path: "/x/deploy/SKILL.md", range: { start: 7, end: 14 } }),
+        ]),
+      ).toBe("[/build](/x/build/SKILL.md) [/deploy](/x/deploy/SKILL.md) now");
+    });
+
+    it("leaves command mentions without a path verbatim", () => {
+      expect(
+        rewriteCursorCommandMentionsAsLinks("/deploy now", [commandMention({})]),
+      ).toBe("/deploy now");
+    });
+
+    it("leaves a stale range verbatim when the text no longer matches", () => {
+      expect(
+        rewriteCursorCommandMentionsAsLinks("/deploy now", [
+          commandMention({ path: "/x/SKILL.md", range: { start: 1, end: 8 } }),
+        ]),
+      ).toBe("/deploy now");
     });
   });
 });

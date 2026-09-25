@@ -1,14 +1,17 @@
 import type { ClientSideConnection } from "@agentclientprotocol/sdk";
 import { logger } from "@mcode/shared";
 import { AgentEventType } from "@mcode/contracts";
-import type { AgentEvent, AttachmentMeta } from "@mcode/contracts";
+import type { AgentEvent, AttachmentMeta, MessageMention } from "@mcode/contracts";
 import type { CursorProviderPorts } from "../../../factory-types.js";
 import { buildCursorAcpPromptBlocks } from "../instructions/cursor-acp-prompt.js";
 import {
   buildCursorAgentGuidanceMarkdown,
   formatCursorSkillsAndCommandsForPrompt,
 } from "../instructions/cursor-agent-guidance.js";
-import { readCursorUserInstructions } from "../instructions/cursor-prompt.js";
+import {
+  readCursorUserInstructions,
+  rewriteCursorCommandMentionsAsLinks,
+} from "../instructions/cursor-prompt.js";
 import { resolveCursorStickyInstructionBlob } from "../instructions/cursor-acp-sticky-instructions.js";
 import {
   buildCursorAcpContinueAfterDisconnectPrompt,
@@ -42,6 +45,7 @@ export interface CursorTurnExecutorOptions {
   model: string;
   resume: boolean;
   attachments?: AttachmentMeta[];
+  mentions?: readonly MessageMention[];
   turnId: string;
   turnExecutionId: string;
   deliveryAttempt: number;
@@ -75,7 +79,8 @@ export class CursorTurnExecutor {
 
   /** Runs a turn and emits its terminal events. */
   async run(entry: CursorSessionState, opts: CursorTurnExecutorOptions): Promise<void> {
-    const { message, model, resume, attachments, turnId, turnExecutionId, deliveryAttempt } = opts;
+    const { model, resume, attachments, turnId, turnExecutionId, deliveryAttempt } = opts;
+    const message = rewriteCursorCommandMentionsAsLinks(opts.message, opts.mentions);
     const cursorCfg = this.deps.settings.get().provider.cursor;
     const execution: CursorTurnExecutionState = {
       currentEntry: entry,

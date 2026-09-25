@@ -45,6 +45,7 @@ export function extractComposerMessage(editor: LexicalEditor): ExtractedComposer
             ...(child.getCapabilityIdentity()
               ? { capabilityIdentity: child.getCapabilityIdentity() }
               : {}),
+            ...(child.getPath() ? { path: child.getPath() } : {}),
             range: { start, end: text.length },
           });
         } else {
