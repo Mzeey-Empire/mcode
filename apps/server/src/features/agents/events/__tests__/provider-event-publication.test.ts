@@ -49,6 +49,25 @@ describe("provider event publication ownership", () => {
     });
   });
 
+  it("publishes a committed terminal replay without changing a newer thread status", () => {
+    const deps = buildPublicationDeps();
+    const event: AgentEvent = {
+      type: AgentEventType.TurnComplete,
+      threadId: "parent-thread",
+      turnExecutionId: "00000000-0000-4000-8000-000000000001",
+      publicationId: "1",
+      reason: "completed",
+      costUsd: null,
+      tokensIn: 1,
+      tokensOut: 1,
+    };
+
+    expect(publishParentProviderEvent(event, event, deps)).toBe(true);
+    expect(deps.publishAgentEvent).toHaveBeenCalledWith(event);
+    expect(deps.updateThreadStatus).not.toHaveBeenCalled();
+    expect(deps.publishThreadStatus).not.toHaveBeenCalled();
+  });
+
   it("publishes a parent error and updates its status", () => {
     const deps = buildPublicationDeps();
     const parentEvent: AgentEvent = {

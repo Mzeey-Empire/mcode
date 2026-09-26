@@ -155,15 +155,15 @@ export class ToolCallRecordRepo {
   }
 
   /** Create multiple tool call records in a single transaction. */
-  bulkCreate(inputs: CreateToolCallRecordInput[]): void {
+  bulkCreate(inputs: CreateToolCallRecordInput[], replaceExisting = false): void {
     this.orm.transaction((tx) => {
       const now = new Date().toISOString();
       for (const item of inputs) {
         const insert = prepareToolCallRecordInsert(item, now);
-        tx.insert(toolCallRecords)
-          .values(this.insertValues(item, insert))
-          .onConflictDoNothing()
-          .run();
+        const { id, ...rest } = this.insertValues(item, insert);
+        const write = tx.insert(toolCallRecords).values({ id, ...rest });
+        if (replaceExisting) write.onConflictDoUpdate({ target: toolCallRecords.id, set: rest }).run();
+        else write.onConflictDoNothing().run();
       }
     });
   }

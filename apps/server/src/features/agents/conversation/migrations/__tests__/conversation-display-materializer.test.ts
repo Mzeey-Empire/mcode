@@ -69,6 +69,29 @@ function insertItem(
   `).run(id, THREAD_ID, TURN_ID, JSON.stringify(payload), createdAt, createdAt);
 }
 
+function recoveryThought(messageId?: string, id = "thought-1"): Record<string, unknown> {
+  return {
+    projection: "narrativeRecovery",
+    narrative: {
+      kind: "narrationSegment",
+      record: {
+        id,
+        message_id: messageId,
+        text: "Working",
+        started_at: NOW,
+        sort_order: 0,
+      },
+    },
+  };
+}
+
+function directThought(id: string, messageId: string): Record<string, unknown> {
+  return {
+    projection: "narrationSegment",
+    record: { id, message_id: messageId, text: id, started_at: NOW, sort_order: 0 },
+  };
+}
+
 describe("ConversationDisplayMaterializer", () => {
   let db: Database;
 
@@ -79,6 +102,175 @@ describe("ConversationDisplayMaterializer", () => {
 
   afterEach(() => {
     db.close();
+  });
+
+  it("keeps explicit anchors while choosing the earliest visible assistant for mixed child rows", () => {
+    insertItem(db, "hidden", {
+      projection: "message", message: { ...message("hidden-1", "assistant", 0), is_internal: true },
+    });
+    insertItem(db, "prompt", { projection: "message", message: message("prompt-1", "user", 1) });
+    insertItem(db, "first", { projection: "message", message: message("assistant-a", "assistant", 2) });
+    insertItem(db, "tied", { projection: "message", message: message("assistant-z", "assistant", 2) });
+    insertItem(db, "last", { projection: "message", message: message("assistant-last", "assistant", 3) });
+    insertItem(db, "direct-1", directThought("explicit-1", "assistant-last"));
+    insertItem(db, "direct-2", directThought("explicit-2", "assistant-last"));
+    insertItem(db, "recovery", recoveryThought(undefined, "implicit-1"));
+    insertItem(db, "child-reasoning", { projection: "codexChildReasoning", nativeItemId: "reasoning", content: "Thinking" });
+    insertItem(db, "child-call", { projection: "codexChildToolCall", nativeItemId: "tool", toolName: "Read", toolInput: {} });
+    insertItem(db, "child-result", { projection: "codexChildToolResult", nativeItemId: "tool", output: "contents" });
+    insertItem(db, "hook", {
+      projection: "hook",
+      record: { id: "hook-1", message_id: "assistant-last", hook_name: "Stop", phase: "stop", started_at: NOW },
+    });
+
+    new ConversationDisplayMaterializer(db).materializeItems(["last"]);
+
+    expect(db.prepare("SELECT id, message_id FROM thought_segments WHERE id NOT LIKE 'codex-child-%' ORDER BY id").all()).toEqual([
+      { id: "explicit-1", message_id: "assistant-last" },
+      { id: "explicit-2", message_id: "assistant-last" },
+      { id: "implicit-1", message_id: "assistant-a" },
+    ]);
+    expect(db.prepare("SELECT message_id, text FROM thought_segments WHERE id LIKE 'codex-child-%'").all())
+      .toEqual([{ message_id: "assistant-a", text: "Thinking" }]);
+    expect(db.prepare("SELECT message_id, output_summary, status FROM tool_call_records").all())
+      .toEqual([{ message_id: "assistant-a", output_summary: "contents", status: "completed" }]);
+    expect(db.prepare("SELECT id, message_id FROM hook_executions").all())
+      .toEqual([{ id: "hook-1", message_id: "assistant-last" }]);
+    expect(db.prepare("SELECT id FROM messages ORDER BY id").all())
+      .toEqual([{ id: "assistant-a" }, { id: "assistant-last" }]);
+  });
+
+  it("preserves message updates between different resolutions of a shared canonical message ID", () => {
+    insertItem(db, "a-explicit-source", {
+      projection: "message", message: { ...message("shared", "assistant", 3), content: "Explicit source" },
+    });
+    insertItem(db, "b-anchor-source", {
+      projection: "message", message: { ...message("shared", "assistant", 2), content: "Anchor source" },
+    });
+    insertItem(db, "child-a", directThought("explicit-a", "shared"));
+    insertItem(db, "child-b", { projection: "codexChildReasoning", nativeItemId: "reasoning", content: "Thinking" });
+    insertItem(db, "child-c", directThought("explicit-c", "shared"));
+    const materializer = new ConversationDisplayMaterializer(db);
+    materializer.materializeItems(["a-explicit-source"]);
+    expect(db.prepare("SELECT content FROM messages WHERE id = 'shared'").get()).toEqual({ content: "Explicit source" });
+
+    insertItem(db, "child-d", recoveryThought(undefined, "implicit"));
+    materializer.materializeItems(["a-explicit-source"]);
+    expect(db.prepare("SELECT content FROM messages WHERE id = 'shared'").get()).toEqual({ content: "Explicit source" });
+  });
+
+  it("rolls back a failed child traversal and resolves current messages when the same materializer retries", () => {
+    insertItem(db, "assistant", { projection: "message", message: message("assistant-1", "assistant", 2) });
+    insertItem(db, "a-recovery", recoveryThought());
+    insertItem(db, "b-direct", directThought("direct-1", "assistant-1"));
+    insertItem(db, "c-invalid", {
+      projection: "narrationSegment",
+      record: { id: "invalid-1", message_id: "assistant-1", text: "Retried", started_at: "" },
+    });
+    const materializer = new ConversationDisplayMaterializer(db);
+    const materialize = db.transaction(() => materializer.materializeItems(["assistant"]));
+
+    expect(materialize).toThrow("Canonical thought started_at is required");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM thought_segments").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_conversation_display_mappings").get()).toEqual({ count: 0 });
+
+    db.prepare("UPDATE canonical_agent_items SET payload_json = json_set(payload_json, '$.record.started_at', ?) WHERE id = 'c-invalid'").run(NOW);
+    db.prepare("UPDATE canonical_agent_items SET payload_json = json_set(payload_json, '$.message.content', 'New answer') WHERE id = 'assistant'").run();
+    materialize();
+
+    expect(db.prepare("SELECT content FROM messages WHERE id = 'assistant-1'").get()).toEqual({ content: "New answer" });
+    expect(db.prepare("SELECT id, message_id FROM thought_segments ORDER BY id").all()).toEqual([
+      { id: "direct-1", message_id: "assistant-1" },
+      { id: "invalid-1", message_id: "assistant-1" },
+      { id: "thought-1", message_id: "assistant-1" },
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_conversation_display_mappings").get()).toEqual({ count: 4 });
+  });
+
+  it("resolves later canonical visibility and content changes without reusing a prior traversal", () => {
+    insertItem(db, "first", { projection: "message", message: message("assistant-first", "assistant", 2) });
+    insertItem(db, "last", { projection: "message", message: message("assistant-last", "assistant", 3) });
+    insertItem(db, "recovery", recoveryThought());
+    insertItem(db, "direct", directThought("direct-1", "assistant-last"));
+    const materializer = new ConversationDisplayMaterializer(db);
+    materializer.materializeItems(["last"]);
+    expect(db.prepare("SELECT message_id FROM thought_segments WHERE id = 'thought-1'").get())
+      .toEqual({ message_id: "assistant-first" });
+
+    db.prepare("UPDATE canonical_agent_items SET payload_json = json_set(payload_json, '$.message.is_internal', 1) WHERE id = 'first'").run();
+    db.prepare("UPDATE canonical_agent_items SET payload_json = json_set(payload_json, '$.message.content', 'Updated answer') WHERE id = 'last'").run();
+    materializer.materializeItems(["last"]);
+
+    expect(db.prepare("SELECT id, message_id FROM thought_segments ORDER BY id").all()).toEqual([
+      { id: "direct-1", message_id: "assistant-last" },
+      { id: "thought-1", message_id: "assistant-last" },
+    ]);
+    expect(db.prepare("SELECT content FROM messages WHERE id = 'assistant-last'").get()).toEqual({ content: "Updated answer" });
+
+    db.prepare("UPDATE canonical_agent_ingest_checkpoints SET terminal_outcome = NULL, phase = 'running'").run();
+    insertItem(db, "prompt", { projection: "message", message: message("prompt-1", "user", 1) });
+    materializer.materializeItems(["recovery", "direct"]);
+    expect(db.prepare("SELECT DISTINCT message_id FROM thought_segments").all()).toEqual([{ message_id: "prompt-1" }]);
+  });
+
+  it.each(["completed", "cancelled"])("keeps recovered narrative on the prompt until the turn is %s", (outcome) => {
+    db.prepare("UPDATE canonical_agent_ingest_checkpoints SET terminal_outcome = NULL, phase = 'running'").run();
+    insertItem(db, "prompt-item", { projection: "message", message: message("prompt-1", "user", 1) });
+    insertItem(db, "assistant-item", { projection: "message", message: message("assistant-1", "assistant", 2) });
+    insertItem(db, "recovery-item", recoveryThought());
+
+    new ConversationDisplayMaterializer(db).materializeItems(["recovery-item"]);
+
+    expect(db.prepare("SELECT id, content FROM messages").all()).toEqual([{ id: "prompt-1", content: "Question" }]);
+    expect(db.prepare("SELECT id, message_id, text FROM thought_segments").all()).toEqual([
+      { id: "thought-1", message_id: "prompt-1", text: "Working" },
+    ]);
+
+    const recoveredMaterializer = new ConversationDisplayMaterializer(db);
+    recoveredMaterializer.materializeItems(["recovery-item"]);
+    expect(db.prepare("SELECT message_id FROM thought_segments").all()).toEqual([{ message_id: "prompt-1" }]);
+
+    db.prepare("UPDATE canonical_agent_ingest_checkpoints SET terminal_outcome = ?, phase = ?").run(outcome, outcome);
+    recoveredMaterializer.materializeItems(["assistant-item"]);
+
+    expect(db.prepare("SELECT id, message_id, text FROM thought_segments").all()).toEqual([
+      { id: "thought-1", message_id: "assistant-1", text: "Working" },
+    ]);
+    expect(db.prepare("SELECT target_kind, target_id FROM canonical_conversation_display_mappings WHERE source_item_id = 'recovery-item'").get())
+      .toEqual({ target_kind: "narrationSegment", target_id: "thought-1" });
+  });
+
+  it("defers recovery narrative with no visible anchor until a terminal message arrives", () => {
+    insertItem(db, "recovery-item", recoveryThought());
+    const materializer = new ConversationDisplayMaterializer(db);
+
+    materializer.materializeItems(["recovery-item"]);
+
+    expect(db.prepare("SELECT COUNT(*) AS count FROM thought_segments").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_conversation_display_mappings").get()).toEqual({ count: 0 });
+
+    insertItem(db, "assistant-item", { projection: "message", message: message("assistant-1", "assistant", 2) });
+    materializer.materializeItems(["assistant-item"]);
+
+    expect(db.prepare("SELECT id, message_id FROM thought_segments").all()).toEqual([
+      { id: "thought-1", message_id: "assistant-1" },
+    ]);
+  });
+
+  it.each(["missing", "hidden"])("rejects recovery narrative with an explicit %s message", (visibility) => {
+    insertItem(db, "prompt-item", { projection: "message", message: message("prompt-1", "user", 1) });
+    if (visibility === "hidden") {
+      insertItem(db, "hidden-item", {
+        projection: "message",
+        message: { ...message("invalid-1", "user", 2), is_internal: true },
+      });
+    }
+    insertItem(db, "recovery-item", recoveryThought("invalid-1"));
+
+    expect(() => new ConversationDisplayMaterializer(db).materializeItems(["recovery-item"]))
+      .toThrow(`Canonical narrative item recovery-item references ${visibility === "hidden" ? "a hidden" : "missing"} message invalid-1`);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM thought_segments").get()).toEqual({ count: 0 });
   });
 
   it("defers unanchored canonical child rows until a terminal assistant can display them", async () => {

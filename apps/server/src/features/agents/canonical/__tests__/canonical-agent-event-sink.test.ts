@@ -1,5 +1,8 @@
 import "reflect-metadata";
 import type { Database } from "bun:sqlite";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CANONICAL_AGENT_EVENT_BATCH_MAX,
@@ -19,7 +22,7 @@ import {
   type ProviderIdentity,
   type ProviderRuntimeExtension,
 } from "@mcode/contracts";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openDatabase, openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
@@ -271,7 +274,7 @@ function appendItemDraft(eventId: string, itemId: string): CanonicalAgentEventDr
   };
 }
 
-function parentNarrativeToolCall(index: number): ParentNarrativeRecoveryItem {
+function parentNarrativeToolCall(index: number): Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }> {
   return {
     kind: "toolCall",
     record: {
@@ -307,6 +310,27 @@ function executionIdForTurn(db: Database, turnId: string): string {
     "SELECT execution_id FROM canonical_agent_turns WHERE id = ?",
   ).get(turnId) as { execution_id: string };
   return row.execution_id;
+}
+
+function parentTerminalInput(db: Database, toolCount = 0): Parameters<CanonicalAgentEventSink["finishParentTurnBatched"]>[0] {
+  const messageRepo = new MessageRepo(db);
+  const message = messageRepo.create(THREAD_ID, "assistant", "answer", 2, undefined, undefined, undefined, undefined, true);
+  return {
+    threadId: THREAD_ID,
+    turnId: TURN_ID,
+    executionId: EXECUTION_ID,
+    providerId: "codex",
+    providerIdentities: [],
+    outcome: "completed",
+    projectTurn: () => ({
+      message: { ...message, is_internal: false },
+      narrative: Array.from({ length: toolCount }, (_, index) => {
+        const item = parentNarrativeToolCall(index);
+        return { ...item, record: { ...item.record, message_id: message.id }, sequence: 2, sortOrder: index };
+      }),
+    }),
+    finalizeCompatibility: () => messageRepo.publishAssistant(message.id),
+  };
 }
 
 describe("CanonicalAgentEventSink", () => {
@@ -858,7 +882,7 @@ describe("CanonicalAgentEventSink", () => {
     expect(messageRepo.listByThread(THREAD_ID, 10).messages).toHaveLength(2);
   });
 
-  it("resumes terminal batches when a recovered item changes", async () => {
+  it("resumes terminal batches over large history when a recovered item changes", async () => {
     const messageRepo = new MessageRepo(db);
     let interruptPublication = false;
     let interrupted = false;
@@ -888,6 +912,8 @@ describe("CanonicalAgentEventSink", () => {
       providerIdentities: [],
       projectUserMessage: () => messageRepo.create(THREAD_ID, "user", "question", 1),
     });
+    const historyCount = 2_048;
+    seedCanonicalItemHistory(db, historyCount);
     interruptPublication = true;
     const message = messageRepo.create(THREAD_ID, "assistant", "answer", 2, undefined, undefined, undefined, undefined, true);
     const narrative = Array.from({ length: 100 }, (_, index) => ({
@@ -944,10 +970,10 @@ describe("CanonicalAgentEventSink", () => {
     expect(result.outcome).toBe("committed");
     expect(sink.loadCheckpoint(EXECUTION_ID)).toMatchObject({
       terminalOutcome: "completed",
-      lastAcceptedSequence: 107,
-      lastDurableSequence: 107,
+      lastAcceptedSequence: historyCount + 107,
+      lastDurableSequence: historyCount + 107,
     });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 107 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: historyCount + 107 });
     expect(messageRepo.listByThread(THREAD_ID, 10).messages).toHaveLength(2);
     expect(sink.loadConversationProjection(THREAD_ID, 10).messages).toHaveLength(2);
     expect(sink.loadConversationProjection(THREAD_ID, 10).narrativeByMessage[message.id]?.tools)
@@ -965,9 +991,108 @@ describe("CanonicalAgentEventSink", () => {
     expect(db.prepare(`
       SELECT DISTINCT durable_revision
       FROM canonical_agent_events
-      WHERE accepted_sequence > 4
-    `).all()).toEqual([{ durable_revision: 2 }]);
+      WHERE accepted_sequence > ?
+    `).all(historyCount + 4)).toEqual([{ durable_revision: 2 }]);
     expect(sink.loadThread(THREAD_ID)?.conversationRevision).toBe(2);
+  });
+
+  it("rolls back a failed terminal batch and resumes without publishing its writes", async () => {
+    startCanonicalParent(sink, db);
+    published.mockClear();
+    const input = parentTerminalInput(db, ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows + 1);
+    let batches = 0;
+    await expect(sink.finishParentTurnBatched(input, () => {
+      batches += 1;
+      if (batches === 2) throw new Error("terminal batch write failed");
+    })).rejects.toThrow("terminal batch write failed");
+
+    const committed = published.mock.calls.flatMap(([events]) => events);
+    expect(committed.length).toBeGreaterThan(0);
+    expect(sink.loadCheckpoint(EXECUTION_ID)).toMatchObject({
+      lastAcceptedSequence: committed.length + 4,
+      lastDurableSequence: committed.length + 4,
+      terminalOutcome: null,
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get())
+      .toEqual({ count: committed.length + 4 });
+    expect(sink.loadTurn(TURN_ID)?.status).toBe("Running");
+    expect(new MessageRepo(db).listByThread(THREAD_ID, 10).messages).toHaveLength(1);
+
+    await sink.finishParentTurnBatched(input);
+    const events = published.mock.calls.flatMap(([batch]) => batch);
+    expect(events.map((event) => event.acceptedSequence))
+      .toEqual(Array.from({ length: 67 }, (_, index) => index + 5));
+    expect(new Set(events.map((event) => event.eventId)).size).toBe(67);
+    expect(sink.loadCheckpoint(EXECUTION_ID)?.terminalOutcome).toBe("completed");
+    expect(new MessageRepo(db).listByThread(THREAD_ID, 10).messages).toHaveLength(2);
+  });
+
+  it("rejects terminal sequence collisions from a stale checkpoint before publication", async () => {
+    startCanonicalParent(sink, db);
+    seedCanonicalItemHistory(db, 1);
+    db.prepare("UPDATE canonical_agent_ingest_checkpoints SET last_accepted_sequence = 4, last_durable_sequence = 4").run();
+    published.mockClear();
+
+    await expect(sink.finishParentTurnBatched(parentTerminalInput(db))).rejects.toThrow("sequence-conflict");
+
+    expect(published).not.toHaveBeenCalled();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 5 });
+    expect(sink.loadTurn(TURN_ID)?.status).toBe("Running");
+    expect(sink.loadCheckpoint(EXECUTION_ID)?.lastAcceptedSequence).toBe(4);
+    expect(new MessageRepo(db).listByThread(THREAD_ID, 10).messages).toHaveLength(1);
+  });
+
+  it("continues terminal sequences from durable events when the checkpoint is absent", async () => {
+    startCanonicalParent(sink, db);
+    seedCanonicalItemHistory(db, 256);
+    db.prepare("DELETE FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").run(EXECUTION_ID);
+    published.mockClear();
+
+    const result = await sink.finishParentTurnBatched(parentTerminalInput(db));
+
+    expect(result.events.map((event) => event.acceptedSequence)).toEqual([261, 262]);
+    expect(sink.loadCheckpoint(EXECUTION_ID)).toMatchObject({
+      lastAcceptedSequence: 262,
+      lastDurableSequence: 262,
+      terminalOutcome: "completed",
+    });
+  });
+
+  it("reloads thread and turn fields changed by another connection between terminal batches", async () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-terminal-freshness-"));
+    const path = NodePath.join(directory, "app.sqlite");
+    const writerDb = openDatabase({ dbPath: path });
+    const otherDb = openDatabase({ dbPath: path });
+    try {
+      seedThread(writerDb);
+      let finishing = false;
+      let mutated = false;
+      const writer = new CanonicalAgentEventSink(writerDb, () => {
+        if (!finishing || mutated) return;
+        mutated = true;
+        otherDb.prepare("UPDATE canonical_agent_threads SET roster_revision = 17 WHERE id = ?").run(THREAD_ID);
+        otherDb.prepare("UPDATE canonical_agent_turns SET approval_review_reason = 'changed-between-batches' WHERE id = ?").run(TURN_ID);
+        otherDb.prepare("UPDATE canonical_agent_ingest_checkpoints SET native_cursor_json = ? WHERE execution_id = ?")
+          .run(JSON.stringify({ position: "changed-between-batches" }), EXECUTION_ID);
+      });
+      startCanonicalParent(writer, writerDb);
+      finishing = true;
+
+      const result = await writer.finishParentTurnBatched(parentTerminalInput(writerDb, ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows + 1));
+
+      expect(mutated).toBe(true);
+      expect(result.writeBatches.batches).toBeGreaterThan(1);
+      expect(writer.loadThread(THREAD_ID)?.rosterRevision).toBe(17);
+      expect(writer.loadTurn(TURN_ID)).toMatchObject({
+        status: "Completed",
+        approvalReviewReason: "changed-between-batches",
+      });
+      expect(writer.loadCheckpoint(EXECUTION_ID)?.nativeCursor).toEqual({ position: "changed-between-batches" });
+    } finally {
+      otherDb.close(true);
+      writerDb.close(true);
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("commits terminal projections above the semantic event limit in bounded batches", async () => {

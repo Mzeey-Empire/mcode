@@ -13,6 +13,7 @@ import {
 import { inject, injectable } from "tsyringe";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "./active-turn-recovery-retention-policy.js";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 
 export { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "./active-turn-recovery-retention-policy.js";
 
@@ -1045,7 +1046,10 @@ export class ParentAssistantTextCheckpointQueue {
       return false;
     }
     try {
-      const result = this.checkpoints.appendChunk(chunk.entries.map((entry) => entry.input));
+      const append = () => this.checkpoints.appendChunk(chunk.entries.map((entry) => entry.input));
+      const result = serverWorkTrace
+        ? serverWorkTrace.measure("assistant-text-write", state.threadId, executionId, append)
+        : append();
       if (result.outcome === "overflow") {
         this.rejectChunk(executionId, state, chunk, "Parent assistant text recovery capacity reached");
         return false;

@@ -1,7 +1,9 @@
 import { WS_METHODS, type Thread, type Workspace, type WsMethodName } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import * as NodePerfHooks from "node:perf_hooks";
 import type { z } from "zod";
 import type { GoalLifecycleService } from "../../../agents/goals/goal-lifecycle-service.js";
+import { serverWorkTrace } from "../../../agents/diagnostics/server-work-trace.js";
 import { broadcast } from "../../../../application/transport/push.js";
 import type { GithubService } from "../../../pull-requests/github/github-service.js";
 import type { CiWatcherService } from "../../../pull-requests/status/ci-watcher.js";
@@ -224,15 +226,22 @@ async function createThread(
   deps: WorkspaceThreadRouterDeps,
   params: { workspaceId: string; title: string; mode: string; branch: string },
 ): Promise<Thread> {
-  const thread = await deps.threadService.create(
-    params.workspaceId,
-    params.title,
-    params.mode,
-    params.branch,
-    { branchless: params.mode === "worktree" },
-  );
-  watchReturnedThreadWorktree(deps, thread);
-  return thread;
+  const started = serverWorkTrace ? NodePerfHooks.performance.now() : 0;
+  let threadId: string | undefined;
+  try {
+    const thread = await deps.threadService.create(
+      params.workspaceId,
+      params.title,
+      params.mode,
+      params.branch,
+      { branchless: params.mode === "worktree" },
+    );
+    threadId = thread.id;
+    watchReturnedThreadWorktree(deps, thread);
+    return thread;
+  } finally {
+    if (serverWorkTrace) serverWorkTrace.record("thread-create", threadId, undefined, NodePerfHooks.performance.now() - started);
+  }
 }
 
 function watchReturnedThreadWorktree(

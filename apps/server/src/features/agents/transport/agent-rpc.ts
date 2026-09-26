@@ -6,6 +6,7 @@ import type {
 } from "@mcode/contracts";
 import { WS_METHODS } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import * as NodePerfHooks from "node:perf_hooks";
 import type { z } from "zod";
 import type { GitWatcherService } from "../../projects/git/git-watcher-service.js";
 import type { ThreadControlService } from "../../thread-control/authority/thread-control-service.js";
@@ -21,6 +22,7 @@ import type { ThoughtSegmentRepo } from "../conversation/narrative/persistence/t
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import type { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js";
 import type { AgentService } from "../orchestration/agent-service.js";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 import type { AgentTurnContinuationPort } from "../orchestration/agent-runtime-internal-ports.js";
 import type { TaskRepo } from "../orchestration/persistence/task-repo.js";
 import type { AgentPermissionService } from "../permissions/agent-permission-service.js";
@@ -107,11 +109,16 @@ const PREVIEW_ANNOTATION_FENCE_END = "mcode-preview-annotations:end -->";
 
 const agentHandlers: AgentRpcHandlerMap = {
   "agent.send": async (deps, params) => {
-    await deps.agentService.sendMessage({
-      ...params,
-      content: appendPreviewAnnotations(params.content, params.previewAnnotations),
-      displayContent: params.displayContent ?? params.content,
-    });
+    const started = serverWorkTrace ? NodePerfHooks.performance.now() : 0;
+    try {
+      await deps.agentService.sendMessage({
+        ...params,
+        content: appendPreviewAnnotations(params.content, params.previewAnnotations),
+        displayContent: params.displayContent ?? params.content,
+      });
+    } finally {
+      if (serverWorkTrace) serverWorkTrace.record("agent-send", params.threadId, undefined, NodePerfHooks.performance.now() - started);
+    }
   },
   "agent.recoveryIncident": (deps) => deps.turnRecoveryService.currentRecoveryIncident(),
   "agent.retry": async (deps, params) => {

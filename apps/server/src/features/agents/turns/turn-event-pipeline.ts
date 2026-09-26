@@ -1,5 +1,7 @@
 import type { AgentEvent, ProviderFileMutationStart, ProviderTurnDiffUpdate } from "@mcode/contracts";
 import type { TurnDiffService } from "./turn-diff-service.js";
+import * as NodePerfHooks from "node:perf_hooks";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 
 import type {
   ProviderEventIngressConsumer,
@@ -38,7 +40,9 @@ export interface TurnLifecycleControl {
 /** Applies one ordered event to the existing focused turn collaborators. */
 export interface TurnEventApplication {
   /** Apply a validated event after the pipeline admits it in per-turn order. */
-  apply(input: ProviderEventIngressEvent, event: AgentEvent, publish: boolean): boolean;
+  apply(input: ProviderEventIngressEvent, event: AgentEvent, publish: boolean): boolean | Promise<boolean>;
+  /** Publish an event whose complete semantic work already committed on the execution writer. */
+  publishCommitted(event: AgentEvent): void;
   /** Record a provider file mutation before its corresponding public event arrives. */
   observeFileMutation(event: ProviderFileMutationStart): void;
   /** Abort one turn only when its completion cannot be compacted into the bounded queue. */
@@ -58,6 +62,12 @@ export interface TurnEventIngressFence {
   waitForThread(threadId: string): Promise<void>;
 }
 
+/** Claims every worker-owned file callback, including one rejected by its attempt fence. */
+export interface WorkerFileObservationPort {
+  ownsFileMutation(event: ProviderFileMutationStart): boolean;
+  capture(event: ProviderFileMutationStart): boolean;
+}
+
 interface QueuedTurnEvent {
   input: ProviderEventIngressEvent;
   event: AgentEvent;
@@ -69,6 +79,8 @@ interface QueuedTurnEvent {
 export class TurnEventPipeline implements ProviderEventIngressConsumer {
   private readonly queues = new Map<string, QueuedTurnEvent[]>();
   private readonly drainingThreads = new Set<string>();
+  private readonly inFlightApplications = new Map<string, Promise<boolean>>();
+  private readonly applicationErrors = new Map<string, unknown>();
   private readonly queuedBytesByThread = new Map<string, number>();
   private readonly finalizations = new Map<string, Promise<boolean>>();
   private readonly barriersByThread = new Map<string, Promise<void>>();
@@ -77,13 +89,17 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
   private readonly barrierGenerationByThread = new Map<string, number>();
   private readonly earlyFileEffects = new WeakSet<object>();
   private readonly fileBarrierDeferredEvents = new WeakSet<object>();
-  private readonly queueEmptyWaitersByThread = new Map<string, Array<() => void>>();
+  private readonly queueEmptyWaitersByThread = new Map<string, Array<{
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }>>();
 
   constructor(
     private readonly lifecycle: TurnLifecycleControl,
     private readonly application: TurnEventApplication,
     private readonly turnDiffs?: Pick<TurnDiffService, "push">,
     private readonly ingressFence?: TurnEventIngressFence,
+    private readonly workerFileObserver?: WorkerFileObservationPort,
   ) {}
 
   /** Accept an ingress envelope and preserve its source receipt through the turn queue. */
@@ -95,6 +111,12 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     this.drain(event.threadId);
   }
 
+  /** Publish committed worker output without passing it through legacy persistence. */
+  handleProjectedCommitted(input: ProviderEventIngressEvent): void {
+    const event = this.lifecycle.normalize(input.event);
+    if (event) this.application.publishCommitted(event);
+  }
+
   /** Stop only the affected turn when provider ingress cannot retain one of its events. */
   handleProviderIngressOverflow(input: ProviderEventIngressEvent): void {
     this.application.rejectForQueueCapacity(input.event);
@@ -103,6 +125,10 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
 
   /** Observe one provider file mutation before public event attribution is available. */
   handleProviderFileMutation(event: ProviderFileMutationStart): void {
+    if (this.workerFileObserver?.ownsFileMutation(event)) {
+      this.workerFileObserver.capture(event);
+      return;
+    }
     this.application.observeFileMutation(event);
   }
 
@@ -113,18 +139,30 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
 
   /** Materialize a terminal turn once, after every earlier event in its turn queue. */
   finalizeTurn(command: FinalizeTurnCommand): Promise<boolean> | null {
+    const inFlight = this.inFlightApplications.get(command.threadId);
+    const priorFailure = this.applicationErrors.get(command.threadId);
     if (cancelsDeferredWork(command.source)) this.discard(command.threadId, command.executionId);
     const existing = this.finalizations.get(command.threadId);
     if (existing) return existing;
-    const pending = this.ingressFence
+    // A cancelled queue may still have one durable write in progress.
+    const afterIngress = () => this.ingressFence
       ? this.ingressFence.waitForThread(command.threadId).then(() => this.finalizeAfterIngress(command))
       : this.finalizeAfterIngress(command);
+    const pending = priorFailure !== undefined
+      ? Promise.reject<boolean>(priorFailure)
+      : inFlight ? inFlight.then(afterIngress) : afterIngress();
     this.finalizations.set(command.threadId, pending);
-    void pending.finally(() => this.finalizations.delete(command.threadId));
+    void pending.then(
+      () => this.finalizations.delete(command.threadId),
+      () => this.finalizations.delete(command.threadId),
+    );
     return pending;
   }
 
   private finalizeAfterIngress(command: FinalizeTurnCommand): Promise<boolean> {
+    if (this.applicationErrors.has(command.threadId)) {
+      return Promise.reject(this.applicationErrors.get(command.threadId));
+    }
     this.drain(command.threadId);
     return this.isReadyForFinalization(command.threadId)
       ? this.startFinalization(command)
@@ -144,7 +182,8 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     this.deferredExecutionByThread.delete(threadId);
     this.queues.delete(threadId);
     this.queuedBytesByThread.delete(threadId);
-    this.completeQueue(threadId);
+    this.applicationErrors.delete(threadId);
+    if (!this.inFlightApplications.has(threadId)) this.completeQueue(threadId);
   }
 
   /** Return whether the pipeline already attributed this deferred event's file effect. */
@@ -186,8 +225,12 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
   }
 
   private drain(threadId: string): void {
-    if (this.drainingThreads.has(threadId)) return;
+    if (this.drainingThreads.has(threadId) || this.applicationErrors.has(threadId)) return;
     this.drainingThreads.add(threadId);
+    this.drainOwnedQueue(threadId);
+  }
+
+  private drainOwnedQueue(threadId: string): void {
     try {
       const queue = this.queues.get(threadId);
       while (queue && queue.length > 0) {
@@ -197,33 +240,102 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
           this.decrementQueuedBytes(threadId, next.byteLength);
           continue;
         }
-        if (!this.application.apply(next.input, next.event, next.publish)) return;
+        const applied = this.application.apply(next.input, next.event, next.publish);
+        if (typeof applied !== "boolean") {
+          const inFlight = Promise.resolve(applied);
+          this.inFlightApplications.set(threadId, inFlight);
+          void inFlight.then(
+            (accepted) => this.completeAsyncApplication(threadId, queue, next, inFlight, accepted),
+            (error: unknown) => this.failAsyncApplication(threadId, queue, inFlight, error),
+          );
+          return;
+        }
+        if (!applied) return;
         queue.shift();
         this.decrementQueuedBytes(threadId, next.byteLength);
       }
-      if (queue?.length === 0) this.completeQueue(threadId);
+      if (!queue || queue.length === 0) this.completeQueue(threadId);
     } finally {
-      this.drainingThreads.delete(threadId);
+      if (!this.inFlightApplications.has(threadId)) this.drainingThreads.delete(threadId);
     }
+  }
+
+  private completeAsyncApplication(
+    threadId: string,
+    queue: QueuedTurnEvent[],
+    next: QueuedTurnEvent,
+    inFlight: Promise<boolean>,
+    accepted: boolean,
+  ): void {
+    if (this.inFlightApplications.get(threadId) !== inFlight) return;
+    this.inFlightApplications.delete(threadId);
+    const currentQueue = this.queues.get(threadId);
+    if (accepted && currentQueue === queue && queue[0] === next) {
+      queue.shift();
+      this.decrementQueuedBytes(threadId, next.byteLength);
+    }
+    if (!accepted && currentQueue === queue) {
+      this.drainingThreads.delete(threadId);
+      return;
+    }
+    try {
+      this.drainOwnedQueue(threadId);
+    } catch (error) {
+      this.failApplication(threadId, error);
+    }
+  }
+
+  private failAsyncApplication(
+    threadId: string,
+    queue: QueuedTurnEvent[],
+    inFlight: Promise<boolean>,
+    error: unknown,
+  ): void {
+    if (this.inFlightApplications.get(threadId) !== inFlight) return;
+    this.inFlightApplications.delete(threadId);
+    if (this.queues.get(threadId) === queue) {
+      this.failApplication(threadId, error);
+      return;
+    }
+    try {
+      this.drainOwnedQueue(threadId);
+    } catch (nextError) {
+      this.failApplication(threadId, nextError);
+    }
+  }
+
+  private failApplication(threadId: string, error: unknown): void {
+    this.drainingThreads.delete(threadId);
+    this.applicationErrors.set(threadId, error);
+    const waiters = this.queueEmptyWaitersByThread.get(threadId) ?? [];
+    this.queueEmptyWaitersByThread.delete(threadId);
+    for (const waiter of waiters) waiter.reject(error);
   }
 
   private waitForQueue(threadId: string): Promise<void> {
     this.drain(threadId);
+    if (this.applicationErrors.has(threadId)) return Promise.reject(this.applicationErrors.get(threadId));
     if (!this.queues.has(threadId) && !this.drainingThreads.has(threadId)) return Promise.resolve();
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const waiters = this.queueEmptyWaitersByThread.get(threadId) ?? [];
-      waiters.push(resolve);
+      waiters.push({ resolve, reject });
       this.queueEmptyWaitersByThread.set(threadId, waiters);
     });
   }
 
   private isReadyForFinalization(threadId: string): boolean {
     const queuedEvents = this.queues.get(threadId)?.length ?? 0;
-    return queuedEvents === 0 || (queuedEvents === 1 && this.drainingThreads.has(threadId));
+    return queuedEvents === 0 && !this.inFlightApplications.has(threadId);
   }
 
   private startFinalization(command: FinalizeTurnCommand): Promise<boolean> {
-    return this.lifecycle.finalize(command) ?? Promise.resolve(false);
+    const trace = serverWorkTrace;
+    if (!trace) return this.lifecycle.finalize(command) ?? Promise.resolve(false);
+    const started = NodePerfHooks.performance.now();
+    const result = this.lifecycle.finalize(command) ?? Promise.resolve(false);
+    return result.finally(() => trace.record(
+      "finalization", command.threadId, command.executionId, NodePerfHooks.performance.now() - started,
+    ));
   }
 
   private decrementQueuedBytes(threadId: string, byteLength: number): void {
@@ -239,7 +351,7 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     this.queues.delete(threadId);
     const waiters = this.queueEmptyWaitersByThread.get(threadId) ?? [];
     this.queueEmptyWaitersByThread.delete(threadId);
-    for (const resolve of waiters) resolve();
+    for (const waiter of waiters) waiter.resolve();
   }
 
   private deferBehindFileFinalization(next: QueuedTurnEvent): boolean {

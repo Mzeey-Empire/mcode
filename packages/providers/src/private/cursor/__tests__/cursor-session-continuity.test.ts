@@ -1,7 +1,7 @@
 import * as NodeEvents from "node:events";
 import type * as NodeChildProcess from "node:child_process";
 import type { ClientSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
-import { getDefaultSettings, type TurnRequest } from "@mcode/contracts";
+import { AgentEventType, getDefaultSettings, type TurnRequest } from "@mcode/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderHostPorts } from "../../../host-ports.js";
 import { AcpSessionRuntime, SessionRecoveryFailedError } from "../../protocols/acp/acp-session-runtime.js";
@@ -125,6 +125,54 @@ function submittedRuntimeEvents(host: ProviderHostPorts): unknown[] {
 }
 
 describe("CursorProvider session continuity", () => {
+  it("delivers the turn through the canonical host without EventEmitter duplicates", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("cursor-session-1", 101);
+    const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
+    const provider = new CursorProvider(host, {
+      settings: { get: () => getDefaultSettings() },
+      skills: { list: () => [] },
+    }, 60_000);
+    const directEvents = vi.fn();
+    provider.on("event", directEvents);
+
+    try {
+      await provider.sendTurn(turn("prompt", "execution-1"));
+
+      expect(submittedRuntimeEvents(host)).toEqual([
+        expect.objectContaining({ type: AgentEventType.System, turnExecutionId: "execution-1" }),
+        expect.objectContaining({ type: AgentEventType.TurnComplete, turnExecutionId: "execution-1" }),
+        expect.objectContaining({ type: AgentEventType.Ended, turnExecutionId: "execution-1" }),
+      ]);
+      expect(directEvents).not.toHaveBeenCalled();
+    } finally {
+      start.mockRestore();
+      await (provider as unknown as { runtime: { shutdown(): Promise<void> } }).runtime.shutdown();
+    }
+  });
+
+  it("rejects the turn when canonical host delivery fails", async () => {
+    const host = createHost();
+    host.events.submit = vi.fn(async () => { throw new Error("writer unavailable"); });
+    const fake = createFakeRuntime("cursor-session-1", 101);
+    const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
+    const provider = new CursorProvider(host, {
+      settings: { get: () => getDefaultSettings() },
+      skills: { list: () => [] },
+    }, 60_000);
+    const directEvents = vi.fn();
+    provider.on("event", directEvents);
+
+    try {
+      await expect(provider.sendTurn(turn("prompt", "execution-1")))
+        .rejects.toThrow("writer unavailable");
+      expect(directEvents).not.toHaveBeenCalled();
+    } finally {
+      start.mockRestore();
+      await (provider as unknown as { runtime: { shutdown(): Promise<void> } }).runtime.shutdown();
+    }
+  });
+
   it("reuses a healthy ACP child for normal turns and replaces it only for an explicit fresh session", async () => {
     const host = createHost();
     const first = createFakeRuntime("cursor-session-1", 101);

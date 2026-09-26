@@ -1,4 +1,5 @@
 import { logger } from "@mcode/shared";
+import * as NodePerfHooks from "node:perf_hooks";
 import {
   AgentEventType,
   isTurnDiffSource,
@@ -30,6 +31,8 @@ import {
   type ProviderEventWorkerTask,
 } from "./provider-event-worker-protocol.js";
 import { normalizeProviderError } from "./provider-error-normalize.js";
+import { eventApplyType, serverWorkTrace } from "../../agents/diagnostics/server-work-trace.js";
+import type { ProjectedCommittedProviderEvent } from "../../agents/execution/execution-worker-handler.js";
 
 const MAX_PENDING_NON_TERMINAL_EVENTS = 8_192;
 const MAX_PENDING_NON_TERMINAL_EVENTS_PER_THREAD = 2_048;
@@ -65,7 +68,7 @@ const MAX_OVERFLOWED_TURNS = 16_384;
 export const PROVIDER_EVENT_INGRESS_DIAGNOSTIC_SINK = Symbol("ProviderEventIngressDiagnosticSink");
 
 /** Identifies the transport path that delivered one provider runtime event. */
-export type ProviderEventSourceKind = "provider-runtime" | "canonical-commit";
+export type ProviderEventSourceKind = "provider-runtime" | "canonical-commit" | "worker-commit";
 
 /** Durable canonical metadata that must remain attached to a projected live event. */
 export interface CanonicalProviderEventReceipt {
@@ -81,6 +84,7 @@ export interface ProviderEventIngressEvent {
   providerId: ProviderId;
   sourceKind: ProviderEventSourceKind;
   event: AgentEvent;
+  deliveryAttempt?: number;
   runtimeExtension?: ProviderRuntimeEvent["extension"];
   canonicalReceipt?: CanonicalProviderEventReceipt;
 }
@@ -88,6 +92,8 @@ export interface ProviderEventIngressEvent {
 /** Downstream contract for applying accepted provider events in the turn pipeline. */
 export interface ProviderEventIngressConsumer {
   handleProviderEvent(event: ProviderEventIngressEvent): void;
+  /** Publish a writer-owned event without running the legacy turn write pipeline. */
+  handleProjectedCommitted?(event: ProviderEventIngressEvent): void;
   handleProviderFileMutation(event: ProviderFileMutationStart): void;
   handleProviderTurnDiff(event: ProviderTurnDiffUpdate): void;
   /** Stop one turn when ingress cannot retain one of its provider events. */
@@ -128,6 +134,7 @@ export interface ProviderEventIngressQueueMetrics {
 interface QueuedProviderEvent {
   event: ProviderEventIngressEvent;
   queuedAt: number;
+  traceQueuedAt: number;
   byteLength: number;
   terminal: boolean;
 }
@@ -189,7 +196,6 @@ export class ProviderEventIngress {
     if (this.started) return;
     this.started = true;
     this.consumer = consumer;
-    this.workerPool.start();
     for (const provider of providerRegistry.resolveAll()) {
       provider.on("file_mutation_start", (event) => consumer.handleProviderFileMutation(event));
       if (isTurnDiffSource(provider)) provider.onTurnDiff((event) => consumer.handleProviderTurnDiff(event));
@@ -224,6 +230,15 @@ export class ProviderEventIngress {
 
   /** Accept one provider-originated runtime event that has no canonical receipt. */
   acceptProviderRuntime(providerId: ProviderId, runtimeEvent: unknown): void {
+    if (serverWorkTrace) {
+      const threadId = providerEventWorkerThreadId({ kind: "provider-runtime", providerId, runtimeEvent });
+      serverWorkTrace.measure("provider-callback", threadId, undefined, () => this.acceptProviderRuntimeCore(providerId, runtimeEvent));
+      return;
+    }
+    this.acceptProviderRuntimeCore(providerId, runtimeEvent);
+  }
+
+  private acceptProviderRuntimeCore(providerId: ProviderId, runtimeEvent: unknown): void {
     const parsedProviderId = ProviderIdSchema.safeParse(providerId);
     if (!parsedProviderId.success) {
       this.report({ reason: "provider-identity-mismatch", sourceKind: "provider-runtime", providerId: String(providerId) });
@@ -249,6 +264,24 @@ export class ProviderEventIngress {
   /** Accept one committed canonical batch and queue its runtime events in receipt order. */
   acceptCommitted(envelopes: readonly CanonicalAgentEventEnvelope[]): void {
     for (const envelope of envelopes) this.acceptCanonicalEnvelope(envelope);
+  }
+
+  /** Deliver writer-projected events after their durable reply without reapplying old turn writes. */
+  acceptProjectedCommitted(events: readonly ProjectedCommittedProviderEvent[]): void {
+    if (this.stopped || !this.consumer?.handleProjectedCommitted) {
+      throw new Error("Worker-owned provider publication is unavailable");
+    }
+    for (const event of events) {
+      const eventId = event.canonicalReceipt.eventId;
+      if (this.seenCanonicalEventIds.has(eventId) || this.pendingCanonicalEventIds.has(eventId)) {
+        this.report({ reason: "duplicate-event", sourceKind: "worker-commit", eventId });
+        continue;
+      }
+      if (!this.enqueue({ ...event, sourceKind: "worker-commit" })) {
+        throw new Error("Worker-owned provider publication queue is full");
+      }
+      this.rememberCanonicalEvent(eventId);
+    }
   }
 
   private acceptCanonicalEnvelope(envelope: unknown): void {
@@ -299,7 +332,19 @@ export class ProviderEventIngress {
       this.report({ reason: "worker-shutdown", sourceKind: task.kind, eventId: canonicalEventIdentity(task) });
       return false;
     }
-    const accepted = this.workerPool.submit(providerEventWorkerThreadId(task), task, { onOutcome });
+    const threadId = providerEventWorkerThreadId(task);
+    let accepted: boolean;
+    const trace = serverWorkTrace;
+    if (trace) {
+      const started = NodePerfHooks.performance.now();
+      accepted = this.workerPool.submit(threadId, task, { onOutcome: (outcome) => {
+        trace.record("worker-wait", threadId,
+          outcome.status === "accepted" ? outcome.event.event.turnExecutionId : undefined,
+          NodePerfHooks.performance.now() - started);
+        onOutcome(outcome);
+      } });
+      trace.record("worker-admission", threadId, undefined, NodePerfHooks.performance.now() - started);
+    } else accepted = this.workerPool.submit(threadId, task, { onOutcome });
     if (!accepted) this.rejectForWorkerCapacity(task);
     return accepted;
   }
@@ -372,6 +417,10 @@ export class ProviderEventIngress {
     queueCapacity: "global" | "thread" | "global-bytes" | "thread-bytes" | "terminal",
   ): false {
     this.rejectedQueueEvents += 1;
+    if (event.sourceKind === "worker-commit") {
+      this.reportQueueDiagnostic("queue-capacity", event, queue?.length ?? 0, queueCapacity);
+      return false;
+    }
     if (!this.rememberOverflowedTurn(event)) return false;
     this.reportQueueDiagnostic("queue-capacity", event, queue?.length ?? 0, queueCapacity);
     this.discardPendingExecution(event);
@@ -392,7 +441,7 @@ export class ProviderEventIngress {
       this.pendingByThread.set(threadId, queued);
       this.readyThreadIds.push(threadId);
     }
-    queued.push({ event, queuedAt: Date.now(), byteLength, terminal });
+    queued.push({ event, queuedAt: Date.now(), traceQueuedAt: serverWorkTrace ? NodePerfHooks.performance.now() : 0, byteLength, terminal });
     this.pendingEventCount += 1;
     this.pendingByteCount += byteLength;
     this.pendingBytesByThread.set(threadId, (this.pendingBytesByThread.get(threadId) ?? 0) + byteLength);
@@ -431,9 +480,20 @@ export class ProviderEventIngress {
     for (let delivered = 0; delivered < MAX_PROVIDER_EVENTS_PER_DRAIN; delivered += 1) {
       const queued = this.takeNextPendingEvent();
       if (!queued) break;
-      this.consumer.handleProviderEvent(queued.event);
+      if (serverWorkTrace) {
+        serverWorkTrace.record("mailbox-wait", queued.event.event.threadId,
+          queued.event.event.turnExecutionId, NodePerfHooks.performance.now() - queued.traceQueuedAt);
+        serverWorkTrace.measure("event-apply", queued.event.event.threadId,
+          queued.event.event.turnExecutionId, () => this.deliverQueuedEvent(queued.event),
+          eventApplyType(queued.event.event.type));
+      } else this.deliverQueuedEvent(queued.event);
     }
     if (this.pendingEventCount > 0) this.scheduleYieldedDrain();
+  }
+
+  private deliverQueuedEvent(event: ProviderEventIngressEvent): void {
+    if (event.sourceKind === "worker-commit") this.consumer?.handleProjectedCommitted?.(event);
+    else this.consumer?.handleProviderEvent(event);
   }
 
   private takeNextPendingEvent(): QueuedProviderEvent | undefined {

@@ -468,16 +468,9 @@ export function startPushListeners(): void {
   // turn.persisted: server has persisted tool calls for a completed turn
   unsubs.push(
     pushEmitter.on("turn.persisted", (data) => {
-      const payload = data as {
-        threadId: string;
-        turnId?: string | null;
-        executionId?: string | null;
-        messageId: string;
-        outcome?: "completed" | "cancelled" | "interrupted" | "errored" | null;
-        toolCallCount: number;
-        filesChanged: string[];
-        fileEffects?: TurnFileEffectSummary;
-      };
+      const parsed = WS_CHANNELS["turn.persisted"].safeParse(data);
+      if (!parsed.success) return;
+      const payload = parsed.data;
       useThreadStore.getState().handleTurnPersisted(payload);
 
       refreshTurnSnapshotsAfterPersist(payload.threadId, payload.filesChanged);

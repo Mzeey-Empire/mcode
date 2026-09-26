@@ -5,9 +5,11 @@
  * Extracted from apps/desktop/src/main/app-state.ts.
  */
 
+import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { AgentEventType, isSessionEvictable } from "@mcode/contracts";
+import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable } from "@mcode/contracts";
+import type { CodexProviderBoundary } from "@mcode/providers";
 import type {
   Thread,
   IProviderRegistry,
@@ -17,6 +19,7 @@ import type {
   ProviderId,
   TurnRuntimeSnapshot,
   AgentStopResult,
+  ProviderRuntimeEvent,
 } from "@mcode/contracts";
 import { TURN_FILE_EFFECTS, TurnFileEffects } from "../turns/turn-file-effects.js";
 import type { WorkspaceEnvironmentAutomaticSetupDispatch } from "../../projects/environment/workspace-environment-service.js";
@@ -31,6 +34,13 @@ import { TurnErrorPolicy } from "../turns/turn-error-policy.js";
 import { TurnRuntimeRegistry } from "../turns/turn-runtime.js";
 import type { TurnOutcome } from "../turns/turn-outcome.js";
 import { ProviderEventIngress } from "../../providers/composition/provider-event-ingress.js";
+import { ExecutionFileEvidenceCoordinator } from "../execution/execution-file-evidence-coordinator.js";
+import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
+import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/execution-worker-handler.js";
+import { WorkerOwnedTurnRuntime } from "../execution/worker-owned-turn-runtime.js";
+import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/provider-host-ports.js";
+import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
+import type { DataOnlyParentTurnFinishInput } from "../canonical/canonical-parent-turn-write.js";
 import {
   TurnEventPipeline,
   type FinalizeTurnCommand,
@@ -94,6 +104,21 @@ type PreparedStop = {
   dispatchState: AgentStopResult["dispatchState"];
   runtime: TurnRuntimeSnapshot;
 };
+
+interface WorkerOwnedTurn {
+  readonly execution: ExecutionIdentity;
+  readonly prepared: PreparedTurnDispatch;
+  readonly provider: CodexProviderBoundary;
+  deliveryAttempt: number;
+  terminalCommitted: boolean;
+  persistedPublished: boolean;
+  terminalOutcome?: TurnOutcome;
+  releaseStarted: boolean;
+  deliveryFailed?: boolean;
+  deliveryFailureHandling?: boolean;
+  stopInProgress?: boolean;
+  stopRequested?: boolean;
+}
 
 /** Read-only runtime state available to server-owned diagnostics and recovery infrastructure. */
 export interface AgentRuntimeAccess {
@@ -184,6 +209,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private readonly turnGenerations = new Map<string, number>();
   /** Single ordered pipeline for validated provider envelopes and terminal materialization. */
   private readonly turnEventPipeline: TurnEventPipeline;
+  private readonly workerTurns = new Map<string, WorkerOwnedTurn>();
   constructor(
     @inject(TURN_RUNTIME_PERSISTENCE)
     private readonly runtimePersistence: TurnRuntimePersistence,
@@ -220,9 +246,19 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     @inject(delay(() => ProviderTurnEventApplication))
     private readonly eventApplication: ProviderTurnEventApplication,
     @inject(TurnDiffService) turnDiffs: TurnDiffService,
+    @inject("WorkerOwnedTurnRuntime", { isOptional: true })
+    private readonly workerRuntime?: WorkerOwnedTurnRuntime,
+    @inject("ExecutionFileEvidenceCoordinator", { isOptional: true })
+    private readonly workerFiles?: ExecutionFileEvidenceCoordinator,
+    @inject("WorkerTurnSnapshotService", { isOptional: true })
+    private readonly snapshots?: SnapshotService,
   ) {
     this.turnDiffs = turnDiffs;
-    this.turnEventPipeline = new TurnEventPipeline(this, eventApplication, turnDiffs, providerEventIngress);
+    this.turnEventPipeline = new TurnEventPipeline(this, eventApplication, turnDiffs, providerEventIngress,
+      workerRuntime && workerFiles ? {
+        ownsFileMutation: (event) => Boolean(workerRuntime.owner.current(event.threadId)?.started),
+        capture: (event) => workerFiles.capture(event),
+      } : undefined);
     runtimeCommands.bind({
       sendMessage: (command) => this.sendMessage(command),
       runtimeSnapshots: () => this.runtimeSnapshots(),
@@ -237,6 +273,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     });
     continuation.bind((executionId) => eventApplication.continueWithoutSaving(executionId));
     reliability.bind((threadId) => eventApplication.streamReliabilityAssistantText(threadId));
+    workerRuntime?.providerEvents.bindCommandPreparation((execution, batch) => this.prepareWorkerEvent(execution, batch));
+    workerRuntime?.providerEvents.bindCommitted((execution, result) => this.applyWorkerReceipt(execution, result));
+    workerRuntime?.bindRecovered((execution) => this.handleWorkerRecovery(execution));
     this.eventPublication.registerPipelineStart(() => this.initializeProviderEvents());
   }
 
@@ -488,6 +527,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Terminalize an admitted turn when durable admission cannot complete. */
   private async abortTurnAdmission(lease: TurnRuntimeLease): Promise<void> {
+    if (await this.finishUnsentWorkerTurn(lease.threadId, lease.turnExecutionId)) {
+      this.turnRuntime.terminalize(lease.threadId, lease.turnExecutionId, "errored");
+      this.disarmTurnRetryWindow(lease.threadId);
+      this.trackSessionEnded(lease.threadId, lease.turnExecutionId);
+      return;
+    }
     if (!this.turnRuntime.terminalize(lease.threadId, lease.turnExecutionId, "errored")) return;
     await (this.finalizeTerminalTurn(lease.threadId, "errored", "turn admission failure") ?? Promise.resolve());
     this.disarmTurnRetryWindow(lease.threadId);
@@ -514,6 +559,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       await this.activatePreparedCommandEffect(prepared);
       await this.startPreparedProviderDispatch(prepared);
     } catch (error) {
+      logger.error("Prepared turn dispatch failed", { threadId: prepared.lease.threadId,
+        error: error instanceof Error ? error.message : String(error) });
       await this.failPreparedTurnDispatch(prepared, error);
     }
   }
@@ -521,6 +568,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Initialize pipeline state after the parent-turn transaction has committed. */
   private async prepareRuntimeDispatch(prepared: PreparedTurnDispatch): Promise<void> {
     const { lease, request } = prepared;
+    if (prepared.workerOwned) {
+      await this.prepareWorkerRuntimeDispatch(prepared);
+      return;
+    }
     this.eventApplication.beginPreparedTurn(lease.threadId, lease.turnExecutionId, request.turnId);
     this.turnAdmissions.markDispatchActive(lease.threadId);
     this.emitProviderEvent(prepared.provider, {
@@ -531,6 +582,255 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.ensureTurnFileTracking(lease.threadId, prepared.cwd);
     await this.turnFileEffects.get(lease.threadId);
     this.eventApplication.recordContextSeed(lease.threadId, prepared.contextSeed, prepared.contextWindow ?? undefined);
+  }
+
+  /** Bind file evidence and the exact provider route after the parent start receipt. */
+  private async prepareWorkerRuntimeDispatch(prepared: PreparedTurnDispatch): Promise<void> {
+    const worker = this.requireWorkerRuntime();
+    const files = this.requireWorkerFiles();
+    const snapshots = this.snapshots;
+    if (!snapshots) throw new Error("Worker-owned turn requires snapshot service");
+    const execution = this.executionFor(prepared);
+    const provider = this.codexProvider(prepared.provider);
+    let baselineRef: string | null = null;
+    try {
+      baselineRef = await snapshots.captureRef(prepared.cwd);
+    } catch (error) {
+      logger.warn("Could not capture initial turn snapshot", {
+        threadId: execution.threadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (!this.ownsTurnAdmission(prepared.lease)) throw new Error("Worker turn lost admission during file preparation");
+    const handoff = files.begin({ ...execution, deliveryAttempt: 1, cwd: prepared.cwd, baselineRef });
+    const began = await worker.owner.submit(execution, {
+      kind: "begin-files", cwd: prepared.cwd, handoff, deliveryAttempt: 1,
+    });
+    if (began.kind !== "committed") throw new Error("Worker file handoff was not committed");
+    this.markProviderTurnActive(execution.threadId);
+    await worker.providerEvents.bind(execution, 1);
+    this.workerTurns.set(execution.threadId, {
+      execution, prepared, provider, deliveryAttempt: 1,
+      terminalCommitted: false, persistedPublished: false, releaseStarted: false,
+    });
+    provider.setCanonicalTurnDeliveryFailureHandler((routing, error) => this.handleWorkerDeliveryFailure(routing, error));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    this.turnAdmissions.markDispatchActive(execution.threadId);
+  }
+
+  private executionFor(prepared: PreparedTurnDispatch): ExecutionIdentity {
+    return {
+      threadId: prepared.lease.threadId,
+      turnId: prepared.request.turnId,
+      executionId: prepared.lease.turnExecutionId,
+    };
+  }
+
+  private codexProvider(provider: IAgentProvider): CodexProviderBoundary {
+    if (provider.id !== "codex" || !("setCanonicalTurnEventDeliveryEnabled" in provider)
+      || !("fenceCanonicalTurnEvents" in provider)) {
+      throw new Error("Codex provider has no worker-owned event route");
+    }
+    return provider as CodexProviderBoundary;
+  }
+
+  private requireWorkerRuntime(): WorkerOwnedTurnRuntime {
+    if (!this.workerRuntime) throw new Error("Worker-owned turn runtime is unavailable");
+    return this.workerRuntime;
+  }
+
+  private requireWorkerFiles(): ExecutionFileEvidenceCoordinator {
+    if (!this.workerFiles) throw new Error("Worker-owned file capture is unavailable");
+    return this.workerFiles;
+  }
+
+  /** Attach host-captured evidence before the exact provider batch enters its mailbox. */
+  private async prepareWorkerEvent(
+    execution: ExecutionIdentity,
+    batch: WorkerOwnedProviderEventBatch,
+  ): Promise<Extract<ExecutionWorkCommand, { kind: "event" }>> {
+    const active = this.requireActiveWorkerTurn(execution, batch.deliveryAttempt);
+    const event = this.parentRuntimeEvent(batch);
+    const fileObservation = event?.type === "toolUse"
+      ? this.requireWorkerFiles().take(event, batch.deliveryAttempt) : null;
+    const outcome = event ? workerTerminalOutcome(event) : null;
+    const terminal = outcome ? this.prepareWorkerTerminal(active, outcome) : null;
+    return {
+      kind: "event", phase: batch.phase, nativeCursor: batch.nativeCursor ?? null,
+      events: batch.events, deliveryAttempt: batch.deliveryAttempt,
+      ...(fileObservation ? { capturedFileObservation: fileObservation } : {}),
+      ...(terminal ? { terminalInput: terminal.input, frozenFileEvidence: terminal.files } : {}),
+    };
+  }
+
+  private requireActiveWorkerTurn(execution: ExecutionIdentity, attempt: number): WorkerOwnedTurn {
+    const active = this.workerTurns.get(execution.threadId);
+    if (!active || active.execution.executionId !== execution.executionId
+      || active.deliveryAttempt !== attempt) {
+      throw new Error("Provider event has no matching worker-owned turn");
+    }
+    return active;
+  }
+
+  private parentRuntimeEvent(batch: WorkerOwnedProviderEventBatch): AgentEvent | null {
+    if (batch.events.length !== 1) return null;
+    const draft = batch.events[0];
+    if (!draft || draft.payload.type !== "item.recorded") return null;
+    const payload = draft.payload.item.payload;
+    if (payload.projection !== "providerRuntimeEvent") return null;
+    const parsed = ProviderRuntimeEventSchema().safeParse(payload.runtimeEvent);
+    if (!parsed.success) throw new Error("Worker event has an invalid provider runtime payload");
+    if (writerOwnedProviderExtension(parsed.data.extension)) return null;
+    const event = parsed.data.event;
+    if (!matchesWorkerEvent(event, batch)) {
+      throw new Error("Worker event belongs to a different execution");
+    }
+    return event;
+  }
+
+  private prepareWorkerTerminal(active: WorkerOwnedTurn, outcome: TurnOutcome): {
+    input: DataOnlyParentTurnFinishInput;
+    files: NonNullable<ReturnType<ExecutionFileEvidenceCoordinator["seal"]>>;
+  } {
+    const files = this.requireWorkerFiles().seal({ ...active.execution,
+      deliveryAttempt: active.deliveryAttempt, outcome });
+    if (!files) throw new Error("Terminal event lost its exact file evidence generation");
+    return {
+      files,
+      input: {
+        ...active.execution,
+        providerId: active.prepared.providerId,
+        providerIdentities: active.prepared.parentStartInput.providerIdentities,
+        outcome,
+        deliveryAttempt: active.deliveryAttempt,
+        projection: { kind: "writer-staged" },
+      },
+    };
+  }
+
+  /** Update volatile runtime state only after the semantic writer has acknowledged the event. */
+  private async applyWorkerReceipt(
+    execution: ExecutionIdentity,
+    result: Extract<ExecutionWorkerResult, { kind: "committed" }>,
+  ): Promise<void> {
+    const active = this.workerTurns.get(execution.threadId);
+    if (!active || active.execution.executionId !== execution.executionId) return;
+    const event = result.parentEvent?.publication.event;
+    if (!event) return;
+    this.applyWorkerFeatureReceipt(active, result);
+    this.publishWorkerPersistence(active, result);
+    this.applyWorkerTerminalReceipt(active, event);
+    if (event.type === "ended") {
+      // The callback still belongs to the route's pending set. Release on the next task.
+      setTimeout(() => { void this.releaseWorkerTurn(active).catch((error: unknown) => {
+        logger.error("Worker-owned terminal release failed", { threadId: execution.threadId,
+          error: error instanceof Error ? error.message : String(error) });
+      }); }, 0);
+    }
+  }
+
+  private applyWorkerFeatureReceipt(
+    active: WorkerOwnedTurn,
+    result: Extract<ExecutionWorkerResult, { kind: "committed" }>,
+  ): void {
+    const event = result.parentEvent?.publication.event;
+    if (event?.type === "message" && active.prepared.providerId === "codex") {
+      this.featureEffects.onAssistantMessage("codex", event);
+    }
+    for (const intent of result.parentEvent?.runtime ?? []) {
+      if (intent.kind === "assistant-message-feature") {
+        this.featureEffects.onAssistantMessage(intent.providerId, intent.event);
+      }
+    }
+  }
+
+  private applyWorkerTerminalReceipt(active: WorkerOwnedTurn, event: AgentEvent): void {
+    if (event.type === "turnStarted") this.markProviderTurnActive(event.threadId);
+    const outcome = workerTerminalOutcome(event);
+    if (!outcome) return;
+    active.terminalCommitted = true;
+    active.terminalOutcome = outcome;
+    this.turnRuntime.terminalize(active.execution.threadId, active.execution.executionId, outcome);
+  }
+
+  private publishWorkerPersistence(
+    active: WorkerOwnedTurn | undefined,
+    result: Extract<ExecutionWorkerResult, { kind: "committed" }>,
+  ): void {
+    if (!active) return;
+    const persisted = result.terminalPersistence;
+    if (!persisted || active.persistedPublished) return;
+    active.persistedPublished = true;
+    broadcast("thread.status", { threadId: active.execution.threadId,
+      status: persisted.outcome === "cancelled" ? "interrupted" : persisted.outcome });
+    broadcast("turn.persisted", {
+      threadId: active.execution.threadId,
+      turnId: active.execution.turnId,
+      messageId: persisted.messageId,
+      toolCallCount: persisted.toolCallCount,
+      filesChanged: [...persisted.filesChanged],
+      outcome: persisted.outcome,
+      executionId: active.execution.executionId,
+      ...(persisted.fileEffects ? { fileEffects: persisted.fileEffects } : {}),
+    });
+  }
+
+  private async releaseWorkerTurn(active: WorkerOwnedTurn): Promise<void> {
+    if (active.releaseStarted || active.stopInProgress || !active.terminalCommitted) return;
+    active.releaseStarted = true;
+    const { execution, provider, deliveryAttempt } = active;
+    try {
+      const routing = { ...execution, deliveryAttempt };
+      if (active.deliveryFailed) {
+        await provider.fenceCanonicalTurnEvents(routing).catch(() => {});
+        await provider.retireCanonicalTurnEvents(routing).catch(() => {});
+      } else {
+        await provider.fenceCanonicalTurnEvents(routing);
+        await provider.retireCanonicalTurnEvents(routing);
+      }
+      await this.requireWorkerRuntime().providerEvents.retire(execution);
+      await this.requireWorkerRuntime().owner.release(execution);
+      this.requireWorkerFiles().retire(execution.threadId, execution.executionId, deliveryAttempt);
+      if (this.workerTurns.get(execution.threadId) === active) this.workerTurns.delete(execution.threadId);
+      this.trackSessionEnded(execution.threadId, execution.executionId);
+      if (active.terminalOutcome === "completed") this.featureEffects.refreshAfterTurn(execution.threadId);
+      this.disarmTurnRetryWindow(execution.threadId);
+      this.clearTurnEndedState(execution.threadId);
+    } catch (error) {
+      active.releaseStarted = false;
+      await this.requireWorkerRuntime().recoverRejected(execution);
+      throw error;
+    }
+  }
+
+  private handleWorkerRecovery(execution: ExecutionIdentity): void {
+    if (this.turnRuntime.snapshot(execution.threadId)?.turnExecutionId !== execution.executionId) return;
+    const active = this.workerTurns.get(execution.threadId);
+    if (active && active.execution.executionId !== execution.executionId) return;
+    if (active) this.workerTurns.delete(execution.threadId);
+    if (active) this.recoverWorkerProvider(active);
+    this.turnRuntime.terminalize(execution.threadId, execution.executionId, "interrupted");
+    this.trackSessionEnded(execution.threadId, execution.executionId);
+    this.disarmTurnRetryWindow(execution.threadId);
+    this.clearTurnEndedState(execution.threadId);
+  }
+
+  private recoverWorkerProvider(active: WorkerOwnedTurn): void {
+    const { execution } = active;
+    void active.provider.fenceCanonicalTurnEvents({ ...execution,
+      deliveryAttempt: active.deliveryAttempt }).catch((error: unknown) => {
+      logger.warn("Recovered worker provider fence failed", { threadId: execution.threadId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
+    void this.requireWorkerRuntime().providerEvents.retire(execution).catch((error: unknown) => {
+      logger.warn("Recovered worker provider route cleanup failed", { threadId: execution.threadId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
+    this.requireWorkerFiles().retire(execution.threadId, execution.executionId, active.deliveryAttempt);
+    void Promise.resolve(active.provider.stopSession(active.prepared.request.sessionId)).catch((error: unknown) => {
+      logger.warn("Recovered worker provider stop failed", { threadId: execution.threadId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
   }
 
   /** Activate command-specific state only after the runtime can still dispatch. */
@@ -618,7 +918,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       "activeTurn",
       () => {
         dispatch.dispatchStarted = true;
-        this.turnDiffs.begin({ ...dispatch.turnRequest, deliveryAttempt: dispatch.turnRequest.deliveryAttempt ?? 1 });
+        if (!this.workerTurns.has(threadId)) {
+          this.turnDiffs.begin({ ...dispatch.turnRequest, deliveryAttempt: dispatch.turnRequest.deliveryAttempt ?? 1 });
+        }
         return dispatch.resolvedProvider.sendTurn(dispatch.turnRequest);
       },
     );
@@ -644,8 +946,67 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     error: unknown,
   ): Promise<void> {
     if (!this.mutationReservations.owns(threadId, dispatch.mutationReservationToken, "activeTurn")) return;
+    const workerTurn = this.workerTurns.get(threadId);
+    if (workerTurn) {
+      try {
+        await this.failWorkerDispatch(workerTurn, error);
+      } catch (failure) {
+        await this.requireWorkerRuntime().recoverRejected(workerTurn.execution);
+        throw failure;
+      }
+      return;
+    }
     if (await this.runTransientTurnRetry(threadId, error)) return;
     await this.giveUpTransientTurnRetry(threadId, error);
+  }
+
+  private async failWorkerDispatch(active: WorkerOwnedTurn, error: unknown): Promise<void> {
+    const { execution, deliveryAttempt, provider } = active;
+    this.requireWorkerFiles().fence(execution.threadId, execution.executionId, deliveryAttempt);
+    if (active.deliveryFailed) {
+      await provider.fenceCanonicalTurnEvents({ ...execution, deliveryAttempt }).catch(() => {});
+    } else {
+      await provider.fenceCanonicalTurnEvents({ ...execution, deliveryAttempt });
+    }
+    if (active.terminalCommitted) return this.releaseWorkerTurn(active);
+    const frozen = this.requireWorkerFiles().seal({ ...execution, deliveryAttempt, outcome: "errored" });
+    if (!frozen) throw new Error("Failed worker dispatch lost its file evidence generation");
+    const result = await this.requireWorkerRuntime().owner.submit(execution, {
+      kind: "finish-from-state", outcome: "errored", frozenFileEvidence: frozen,
+      input: { ...execution, providerId: active.prepared.providerId,
+        providerIdentities: active.prepared.parentStartInput.providerIdentities,
+        outcome: "errored", error: error instanceof Error ? error.message : String(error),
+        deliveryAttempt, projection: { kind: "writer-staged" } },
+    });
+    if (result.kind !== "committed") throw new Error("Failed worker dispatch terminal did not commit");
+    this.publishWorkerPersistence(active, result);
+    active.terminalCommitted = true;
+    active.terminalOutcome = "errored";
+    this.turnRuntime.terminalize(execution.threadId, execution.executionId, "errored");
+    await this.releaseWorkerTurn(active);
+  }
+
+  private async handleWorkerDeliveryFailure(
+    routing: { threadId: string; turnId: string; executionId: string; deliveryAttempt: number },
+    error: Error,
+  ): Promise<void> {
+    const active = this.workerTurns.get(routing.threadId);
+    if (!active || active.execution.turnId !== routing.turnId
+      || active.execution.executionId !== routing.executionId
+      || active.deliveryAttempt !== routing.deliveryAttempt || active.deliveryFailureHandling) return;
+    active.deliveryFailed = true;
+    active.deliveryFailureHandling = true;
+    logger.error("Worker-owned canonical delivery failed", { threadId: routing.threadId,
+      executionId: routing.executionId, deliveryAttempt: routing.deliveryAttempt, error: error.message });
+    try {
+      await this.failWorkerDispatch(active, error);
+    } catch (failure) {
+      logger.error("Worker-owned canonical delivery recovery failed", { threadId: routing.threadId,
+        executionId: routing.executionId, error: failure instanceof Error ? failure.message : String(failure) });
+      await this.requireWorkerRuntime().recoverRejected(active.execution);
+    } finally {
+      active.deliveryFailureHandling = false;
+    }
   }
 
   /** Terminalize setup failures while preserving an explicit user-stop winner. */
@@ -659,6 +1020,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       this.releaseTurnAdmission(prepared.lease);
       return;
     }
+    if (prepared.workerOwned) return this.failWorkerPreparedDispatch(prepared, error);
     if (this.turnRuntime.terminalize(prepared.lease.threadId, prepared.lease.turnExecutionId, "errored")) {
       await (this.finalizeTerminalTurn(prepared.lease.threadId, "errored", "send setup failure") ?? Promise.resolve());
       this.disarmTurnRetryWindow(prepared.lease.threadId);
@@ -667,6 +1029,79 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.releaseTurnAdmission(prepared.lease);
     await this.turnAdmissions.rollbackCommandEffect(prepared.commandEffect);
     throw error;
+  }
+
+  private async failWorkerPreparedDispatch(prepared: PreparedTurnDispatch, error: unknown): Promise<never> {
+    if (this.turnRetryDispatchByThread.get(prepared.lease.threadId)?.dispatchStarted) throw error;
+    await this.finishUnsentWorkerTurn(prepared.lease.threadId, prepared.lease.turnExecutionId);
+    this.turnRuntime.terminalize(prepared.lease.threadId, prepared.lease.turnExecutionId, "errored");
+    this.disarmTurnRetryWindow(prepared.lease.threadId);
+    this.trackSessionEnded(prepared.lease.threadId, prepared.lease.turnExecutionId);
+    this.releaseTurnAdmission(prepared.lease);
+    await this.turnAdmissions.rollbackCommandEffect(prepared.commandEffect);
+    throw error;
+  }
+
+  /** Finish a committed parent start that never reached provider dispatch. */
+  private async finishUnsentWorkerTurn(threadId: string, executionId: string, outcome: "errored" | "cancelled" = "errored"): Promise<boolean> {
+    const worker = this.workerRuntime;
+    const owned = worker?.owner.current(threadId);
+    if (!worker || !owned?.started || owned.execution.executionId !== executionId) return false;
+    const active = this.workerTurns.get(threadId);
+    const execution = owned.execution;
+    const result = await this.submitUnsentWorkerFinish(worker, execution, active, outcome);
+    if (!result) return true;
+    if (result.kind !== "committed") throw new Error("Unsent worker turn did not finish durably");
+    this.publishWorkerPersistence(active, result);
+    await worker.providerEvents.retire(execution);
+    await worker.owner.release(execution);
+    if (active) this.requireWorkerFiles().retire(execution.threadId, execution.executionId, active.deliveryAttempt);
+    this.workerTurns.delete(execution.threadId);
+    return true;
+  }
+
+  private async submitUnsentWorkerFinish(
+    worker: WorkerOwnedTurnRuntime,
+    execution: ExecutionIdentity,
+    active: WorkerOwnedTurn | undefined,
+    outcome: "errored" | "cancelled",
+  ): Promise<ExecutionWorkerResult | null> {
+    try {
+      return await worker.owner.submit(execution, this.unsentFinishCommand(execution, active, outcome));
+    } catch (error) {
+      await worker.recoverRejected(execution);
+      logger.error("Unsent worker turn recovered after rejected finish", { threadId: execution.threadId,
+        error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  }
+
+  private unsentFinishCommand(
+    execution: ExecutionIdentity,
+    active: WorkerOwnedTurn | undefined,
+    outcome: "errored" | "cancelled",
+  ): Extract<ExecutionWorkCommand, { kind: "finish-from-state" }> {
+    const frozen = this.unsentFileEvidence(execution, active, outcome);
+    const providerId = active?.prepared.providerId
+      ?? this.runtimePersistence.load(execution.threadId)?.provider ?? "codex";
+    return {
+      kind: "finish-from-state", outcome,
+      input: { ...execution, providerId,
+      providerIdentities: active?.prepared.parentStartInput.providerIdentities ?? [],
+      outcome, projection: { kind: "writer-staged" },
+      ...(outcome === "errored" ? { error: "Provider turn failed before dispatch" } : {}),
+      ...(active ? { deliveryAttempt: active.deliveryAttempt } : {}) },
+      ...(frozen ? { frozenFileEvidence: frozen } : {}),
+    };
+  }
+
+  private unsentFileEvidence(
+    execution: ExecutionIdentity,
+    active: WorkerOwnedTurn | undefined,
+    outcome: "errored" | "cancelled",
+  ): ReturnType<ExecutionFileEvidenceCoordinator["seal"]> {
+    return active ? this.requireWorkerFiles().seal({ ...execution,
+      deliveryAttempt: active.deliveryAttempt, outcome }) : null;
   }
 
   /** Start a prepared first-turn command and return its authoritative admission outcome. */
@@ -715,6 +1150,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    */
   private async stopSessionInternal(threadId: string): Promise<AgentStopResult> {
     const prepared = this.prepareStop(threadId);
+    const owned = this.workerRuntime?.owner.current(threadId);
+    if (owned?.started && owned.execution.executionId === prepared.runtime.turnExecutionId) {
+      return this.stopWorkerSession(prepared);
+    }
     if (!isRunningRuntime(prepared.runtime)) return this.alreadyTerminal(prepared);
     this.finishStopCheckpoint(prepared);
     void this.stopProviderForTurn(prepared).catch((error: unknown) => {
@@ -725,6 +1164,106 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       });
     });
     return this.finalizeStoppedTurn(prepared);
+  }
+
+  private async stopWorkerSession(prepared: PreparedStop): Promise<AgentStopResult> {
+    const executionId = prepared.runtime.turnExecutionId!;
+    const active = this.workerTurns.get(prepared.threadId);
+    if (!active || !this.turnRetryDispatchByThread.get(prepared.threadId)?.dispatchStarted) {
+      await this.finishUnsentWorkerTurn(prepared.threadId, executionId, "cancelled");
+      this.turnRuntime.terminalize(prepared.threadId, executionId, "cancelled");
+      this.trackSessionEnded(prepared.threadId, executionId);
+      this.disarmTurnRetryWindow(prepared.threadId);
+      return this.cancelledWorkerStop(prepared);
+    }
+    if (!isRunningRuntime(prepared.runtime)) {
+      await this.releaseWorkerTurn(active);
+      return this.alreadyTerminal(prepared);
+    }
+    active.stopInProgress = true;
+    this.requireWorkerFiles().fence(prepared.threadId, executionId, active.deliveryAttempt);
+    const drained = active.provider.fenceCanonicalTurnEvents({ ...active.execution,
+      deliveryAttempt: active.deliveryAttempt }, { discardQueued: true });
+    void this.stopWorkerProvider(prepared, active.provider);
+    try {
+      return await this.completeWorkerStop(prepared, active, drained);
+    } catch (error) {
+      await this.requireWorkerRuntime().recoverRejected(active.execution);
+      throw error;
+    } finally {
+      active.stopInProgress = false;
+    }
+  }
+
+  private async completeWorkerStop(
+    prepared: PreparedStop,
+    active: WorkerOwnedTurn,
+    drained: Promise<void>,
+  ): Promise<AgentStopResult> {
+    await drained;
+    if (active.terminalCommitted) {
+      active.stopInProgress = false;
+      await this.releaseWorkerTurn(active);
+      return this.alreadyTerminal(prepared);
+    }
+    if (!active.stopRequested) {
+      const stopped = await this.requireWorkerRuntime().owner.stop(active.execution, NodeCrypto.randomUUID());
+      if (stopped.kind !== "committed") throw new Error("Worker stop request did not commit");
+      active.stopRequested = true;
+    }
+    const frozen = this.requireWorkerFiles().seal({ ...active.execution,
+      deliveryAttempt: active.deliveryAttempt, outcome: "cancelled" });
+    if (!frozen) throw new Error("Worker stop lost its file evidence generation");
+    await this.finishWorkerStop(active, frozen);
+    return this.cancelledWorkerStop(prepared);
+  }
+
+  private async finishWorkerStop(
+    active: WorkerOwnedTurn,
+    frozen: NonNullable<ReturnType<ExecutionFileEvidenceCoordinator["seal"]>>,
+  ): Promise<void> {
+    const result = await this.requireWorkerRuntime().owner.submit(active.execution, {
+      kind: "finish-from-state", outcome: "cancelled", frozenFileEvidence: frozen,
+      input: { ...active.execution, providerId: active.prepared.providerId,
+        providerIdentities: active.prepared.parentStartInput.providerIdentities,
+        outcome: "cancelled", deliveryAttempt: active.deliveryAttempt,
+        projection: { kind: "writer-staged" } },
+    });
+    if (result.kind !== "committed") throw new Error("Worker stop terminal did not commit");
+    this.publishWorkerPersistence(active, result);
+    active.terminalCommitted = true;
+    active.terminalOutcome = "cancelled";
+    this.turnRuntime.terminalize(active.execution.threadId, active.execution.executionId, "cancelled");
+    active.stopInProgress = false;
+    await this.releaseWorkerTurn(active);
+  }
+
+  private cancelledWorkerStop(prepared: PreparedStop): AgentStopResult {
+    return { threadId: prepared.threadId, turnExecutionId: prepared.runtime.turnExecutionId,
+      snapshot: this.turnRuntime.snapshot(prepared.threadId) ?? prepared.runtime,
+      status: "cancelled", dispatchState: prepared.dispatchState };
+  }
+
+  private async stopWorkerProvider(prepared: PreparedStop, provider: CodexProviderBoundary): Promise<void> {
+    void Promise.resolve(this.featureEffects.stopDescendants(prepared.threadId)).catch((error: unknown) => {
+      logger.warn("Worker-owned descendant stop failed", { threadId: prepared.threadId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
+    const stop = Promise.resolve(provider.stopSession(prepared.sessionId));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timedOut = await Promise.race([
+        stop.then(() => false),
+        new Promise<true>((resolve) => { timer = setTimeout(() => resolve(true), PROVIDER_STOP_SETTLE_TIMEOUT_MS); }),
+      ]);
+      if (timedOut) this.evictUnresponsiveSession(prepared);
+    } catch (error) {
+      this.evictUnresponsiveSession(prepared);
+      logger.warn("Worker-owned provider stop failed", { threadId: prepared.threadId,
+        error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private prepareStop(threadId: string): PreparedStop {
@@ -1511,4 +2050,19 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     this.activeMutationReservations.clear();
   }
+}
+
+function workerTerminalOutcome(event: AgentEvent): TurnOutcome | null {
+  if (event.type === "turnComplete") return "completed";
+  if (event.type === "error") return "errored";
+  if (event.type !== "ended" || event.outcome === undefined) return null;
+  return event.outcome === "cancelled" ? "interrupted" : event.outcome;
+}
+
+function writerOwnedProviderExtension(extension: ProviderRuntimeEvent["extension"]): boolean {
+  return Boolean(extension?.child || extension?.collaboration || extension?.continuation);
+}
+
+function matchesWorkerEvent(event: AgentEvent, batch: WorkerOwnedProviderEventBatch): boolean {
+  return event.threadId === batch.threadId && event.turnExecutionId === batch.executionId;
 }

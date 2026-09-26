@@ -88,7 +88,7 @@ function createProvider() {
   const complete = async (number: number, executionId: string) => {
     await vi.waitFor(() => expect(starts()).toHaveLength(number));
     child.complete(`native-turn-${number}`);
-    await vi.waitFor(() => expect(events).toContainEqual({ event: {
+    await vi.waitFor(() => expect(events).toContainEqual({ deliveryAttempt: 1, event: {
       type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: executionId, outcome: "completed",
     } }));
   };

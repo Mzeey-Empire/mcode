@@ -50,6 +50,8 @@ export class PtyHostCleanupLedger implements PtyHostCleanupLedgerStore {
   /** Adds one process identity or refreshes the matching generation record. */
   record(record: PtyHostCleanupRecord): void {
     const parsed = validateRecord(record);
+    // Reserve the write lock before reading; a deferred read can lose its WAL snapshot
+    // when the execution writer commits between this ledger's SELECT and INSERT.
     this.db.transaction(() => {
       const existing = this.db
         .prepare(
@@ -108,7 +110,7 @@ export class PtyHostCleanupLedger implements PtyHostCleanupLedgerStore {
           now,
           now,
         );
-    })();
+    }).immediate();
   }
 
   /** Removes one record only when its session and host generation match. */

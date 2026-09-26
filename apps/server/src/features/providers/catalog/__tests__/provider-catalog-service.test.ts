@@ -1,12 +1,15 @@
 import "reflect-metadata";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import type {
   ProviderCatalogChange,
   ProviderCatalogRequest,
   ProviderCatalogSnapshot,
 } from "@mcode/contracts";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openDatabase, openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ProviderCatalogSnapshotRepo } from "../persistence/provider-catalog-snapshot-repo.js";
 import {
   ProviderCatalogService,
@@ -47,6 +50,46 @@ describe("ProviderCatalogService", () => {
     const repo = new ProviderCatalogSnapshotRepo(db);
     return { repo, service: new ProviderCatalogService(repo) };
   }
+
+  it("keeps a background refresh failure contained while another SQLite writer holds the database", async () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-catalog-busy-"));
+    const path = NodePath.join(directory, "app.sqlite");
+    db = openDatabase({ dbPath: path });
+    db.run("PRAGMA busy_timeout = 1");
+    db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)")
+      .run("workspace-1", "Workspace 1", "C:/repo");
+    const blocker = new Database(path, { strict: true });
+    const repo = new ProviderCatalogSnapshotRepo(db);
+    const service = new ProviderCatalogService(repo);
+    const upsert = vi.spyOn(repo, "upsert");
+    const changes: ProviderCatalogChange[] = [];
+    service.onChanged((change) => changes.push(change));
+    const input = {
+      request: REQUEST, context: CACHED.context, cwd: "C:/repo", refresh: async () => CACHED,
+    };
+    let locked = false;
+
+    try {
+      blocker.run("BEGIN IMMEDIATE");
+      locked = true;
+      service.request(input);
+      await vi.waitFor(() => expect(upsert).toHaveBeenCalledTimes(1));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(changes).toHaveLength(0);
+
+      blocker.run("ROLLBACK");
+      locked = false;
+      service.request(input);
+      await vi.waitFor(() => expect(changes).toHaveLength(1));
+      expect(repo.get(providerCatalogContextKey(REQUEST, "C:/repo"))).toEqual(CACHED);
+    } finally {
+      if (locked) blocker.run("ROLLBACK");
+      blocker.close(true);
+      db.close(true);
+      db = undefined;
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
   it("returns a stale persisted snapshot before background refresh completes", async () => {
     const { repo, service } = createService();

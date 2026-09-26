@@ -37,6 +37,11 @@ import {
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import {
+  projectParentUserMessage,
+  type DataOnlyParentTurnStartInput,
+  type ParentUserMessageWrite,
+} from "../canonical/canonical-parent-turn-write.js";
+import {
   GoalLifecycleService,
   type GoalCommandEffectReceipt,
 } from "../goals/goal-lifecycle-service.js";
@@ -46,6 +51,7 @@ import {
 } from "./parent-turn-durability.js";
 import { appendSelectedTextComments } from "./selected-text-comment-append.js";
 import { ApprovalReviewPolicy, type ApprovalReviewDecision } from "./approval-review-policy.js";
+import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 
 const FILE_INJECTION_SEPARATOR = "\n\n---\n";
 
@@ -120,6 +126,18 @@ export interface TurnRuntimeAdmissionAuthority {
   owns(lease: TurnRuntimeLease): boolean;
 }
 
+/** Commits a new parent turn through its exact execution mailbox. */
+export interface TurnParentStartOwner {
+  start(input: {
+    readonly execution: ExecutionIdentity;
+    readonly ownerEpoch: number;
+    readonly providerId: string;
+    readonly parentTurn: DataOnlyParentTurnStartInput;
+    readonly parentLive?: import("../execution/provider-execution-event-state.js").ExecutionParentStartContext;
+    readonly publishParentStart?: boolean;
+  }): Promise<void>;
+}
+
 /** The thread-control action selected during generic dispatch preparation. */
 export type ThreadControlLeaseDirective =
   | {
@@ -136,6 +154,7 @@ export type ThreadControlLeaseDirective =
 export interface PreparedTurnDispatch {
   readonly kind: "dispatch";
   readonly lease: TurnRuntimeLease;
+  readonly parentStartInput: DataOnlyParentTurnStartInput;
   readonly provider: IAgentProvider;
   readonly providerId: ProviderId;
   readonly request: TurnRequest;
@@ -144,6 +163,7 @@ export interface PreparedTurnDispatch {
   readonly threadControl: ThreadControlLeaseDirective | null;
   readonly contextSeed: number;
   readonly contextWindow: number | null;
+  readonly workerOwned?: true;
 }
 
 /** The stable outcome of handling a complete send command. */
@@ -188,6 +208,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly environment: WorkspaceEnvironmentService | undefined,
     private readonly files: FileService | undefined,
     private readonly platform: NodeJS.Platform,
+    private readonly parentStartOwner?: TurnParentStartOwner,
   ) {}
 
   /** Admit one command and return an immutable package for the runtime owner. */
@@ -416,13 +437,15 @@ export class TurnAdmissionDispatchCoordinator {
     runtime.activate(lease);
     const attachmentData = await this.persistAttachments(prepared);
     const sourceTurnId = prepared.command.sourceTurnId ?? NodeCrypto.randomUUID();
-    this.startParentTurn(prepared, lease, sourceTurnId, attachmentData, review);
+    const parentStartInput = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachmentData, review);
+    await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
     this.publishCommittedEffects(prepared, sourceTurnId);
     const wirePayload = this.buildWirePayload(prepared);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);
     return {
       kind: "dispatch",
       lease,
+      parentStartInput,
       provider: prepared.provider,
       providerId: prepared.providerId,
       request,
@@ -431,6 +454,7 @@ export class TurnAdmissionDispatchCoordinator {
       threadControl: this.threadControlDirective(prepared, sourceTurnId),
       contextSeed: prepared.thread.last_context_tokens ?? 0,
       contextWindow: prepared.thread.context_window,
+      ...(this.parentStartOwner && prepared.providerId === "codex" ? { workerOwned: true as const } : {}),
     };
   }
 
@@ -682,19 +706,70 @@ export class TurnAdmissionDispatchCoordinator {
     return prepared.automaticAttachments ?? this.persistCommandAttachments(prepared.command);
   }
 
-  private startParentTurn(
+  private startParentTurn(input: DataOnlyParentTurnStartInput): void {
+    const { userMessage, reopenThread, answeredPlanQuestionMessageId, ...start } = input;
+    let reopenedThread: Exclude<ReturnType<ThreadRepo["findById"]>, null> | null = null;
+    this.parentTurns.startParentTurn({
+      ...start,
+      projectUserMessage: () => {
+        if (reopenThread) reopenedThread = this.reopenThread(input.thread.id);
+        const message = projectParentUserMessage(this.messages, input.thread.id, userMessage);
+        if (answeredPlanQuestionMessageId) this.planAnswers.markAnswered(answeredPlanQuestionMessageId, input.thread.id);
+        return message;
+      },
+    });
+    if (reopenedThread) broadcast("thread.lifecycleChanged", { thread: reopenedThread });
+  }
+
+  private async commitParentStart(
+    prepared: PreparedCommand,
+    lease: TurnRuntimeLease,
+    sourceTurnId: string,
+    input: DataOnlyParentTurnStartInput,
+  ): Promise<void> {
+    if (!this.parentStartOwner || prepared.providerId !== "codex") return this.startParentTurn(input);
+    const precedingMessageId = input.userMessage.messageId;
+    if (!precedingMessageId) throw new Error("Worker-owned turn needs its committed user message identity");
+    const planFeature = prepared.command.planAction === "revise" ? "output"
+      : this.effectiveInteractionMode(prepared.command) === "plan" ? "questions" : "none";
+    await this.parentStartOwner.start({
+      execution: { threadId: lease.threadId, turnId: sourceTurnId, executionId: lease.turnExecutionId },
+      ownerEpoch: lease.generation,
+      providerId: prepared.providerId,
+      parentTurn: input,
+      parentLive: { planFeature, precedingMessageId },
+      publishParentStart: prepared.providerId === "codex",
+    });
+    if (input.reopenThread) {
+      const reopened = this.threads.findById(lease.threadId);
+      if (reopened) broadcast("thread.lifecycleChanged", { thread: reopened });
+    }
+  }
+
+  private prepareParentTurnStartInput(
     prepared: PreparedCommand,
     lease: TurnRuntimeLease,
     sourceTurnId: string,
     attachments: PersistedAttachmentData,
     review: ApprovalReviewDecision,
-  ): void {
+  ): DataOnlyParentTurnStartInput {
     const command = prepared.command;
-    const wasUserCompleted = prepared.thread.user_completed_at !== null;
-    const nextSequence = command.persistedUserMessage?.sequence
-      ?? this.messages.getLatestSequenceIncludingInternal(command.threadId) + 1;
-    let reopenedThread: Exclude<ReturnType<ThreadRepo["findById"]>, null> | null = null;
-    this.parentTurns.startParentTurn({
+    const userMessage: ParentUserMessageWrite = command.persistedUserMessage
+      ? { kind: "existing", messageId: command.persistedUserMessage.id }
+      : {
+          kind: "create",
+          messageId: command.messageId ?? NodeCrypto.randomUUID(),
+          content: command.displayContent ?? command.content,
+          sequence: this.messages.getLatestSequenceIncludingInternal(command.threadId) + 1,
+          attachments: attachments.stored.length > 0 ? [...attachments.stored] : undefined,
+          replyToMessageId: command.replyToMessageId,
+          quotedText: command.quotedText,
+          mentions: prepared.mentions.length > 0 ? [...prepared.mentions] : undefined,
+          previewAnnotations: command.previewAnnotations,
+          origin: this.messageOrigin(command),
+          selectedTextComments: command.selectedTextComments,
+        };
+    return {
       thread: {
         id: prepared.thread.id,
         workspaceId: prepared.workspace.id,
@@ -708,14 +783,10 @@ export class TurnAdmissionDispatchCoordinator {
       approvalReviewReason: review.reason,
       providerIdentities: this.resumeIdentities(prepared),
       retryOfExecutionId: command.retryOfExecutionId,
-      projectUserMessage: () => {
-        if (wasUserCompleted) reopenedThread = this.reopenThread(command.threadId);
-        const message = this.persistUserMessage(prepared, nextSequence, attachments);
-        this.markPlanAnswer(command, prepared.thread.id);
-        return message;
-      },
-    });
-    if (reopenedThread) broadcast("thread.lifecycleChanged", { thread: reopenedThread });
+      userMessage,
+      reopenThread: prepared.thread.user_completed_at !== null,
+      answeredPlanQuestionMessageId: command.markPlanAnswerForMessageId,
+    };
   }
 
   private effectivePermissionMode(requested: PermissionMode | "default" | undefined, persisted: PermissionMode): "full" | "supervised" {
@@ -739,19 +810,6 @@ export class TurnAdmissionDispatchCoordinator {
     return reopened;
   }
 
-  private persistUserMessage(prepared: PreparedCommand, sequence: number, attachments: PersistedAttachmentData) {
-    const command = prepared.command;
-    if (command.persistedUserMessage) return this.persistedQueuedMessage(command);
-    const origin = this.messageOrigin(command);
-    return this.createUserMessage(prepared, sequence, attachments, origin);
-  }
-
-  private persistedQueuedMessage(command: SendMessageCommand) {
-    const message = this.messages.findByIdInThread(command.threadId, command.persistedUserMessage!.id);
-    if (!message) throw new Error(`Queued Turn message was not found: ${command.persistedUserMessage!.id}`);
-    return message;
-  }
-
   private messageOrigin(command: SendMessageCommand) {
     if (!command.sourceThreadId || !command.originSourceTurnId || !command.sourceProviderId) return undefined;
     return {
@@ -760,39 +818,6 @@ export class TurnAdmissionDispatchCoordinator {
       sourceTurnId: command.originSourceTurnId,
       sourceProviderId: command.sourceProviderId,
     };
-  }
-
-  private createUserMessage(
-    prepared: PreparedCommand,
-    sequence: number,
-    attachments: PersistedAttachmentData,
-    origin: ReturnType<TurnAdmissionDispatchCoordinator["messageOrigin"]>,
-  ) {
-    const command = prepared.command;
-    const args = [
-      command.threadId,
-      "user" as const,
-      command.displayContent ?? command.content,
-      sequence,
-      attachments.stored.length > 0 ? [...attachments.stored] : undefined,
-      command.replyToMessageId,
-      command.quotedText,
-      undefined,
-      undefined,
-      prepared.mentions.length > 0 ? [...prepared.mentions] : undefined,
-      command.previewAnnotations,
-    ] as const;
-    if (command.selectedTextComments !== undefined) {
-      return this.messages.create(...args, origin, command.messageId, command.selectedTextComments);
-    }
-    if (command.messageId === undefined && origin === undefined) return this.messages.create(...args);
-    if (command.messageId === undefined) return this.messages.create(...args, origin);
-    if (origin === undefined) return this.messages.create(...args, undefined, command.messageId);
-    return this.messages.create(...args, origin, command.messageId);
-  }
-
-  private markPlanAnswer(command: SendMessageCommand, threadId: string): void {
-    if (command.markPlanAnswerForMessageId) this.planAnswers.markAnswered(command.markPlanAnswerForMessageId, threadId);
   }
 
   private publishCommittedEffects(prepared: PreparedCommand, sourceTurnId: string): void {
@@ -812,9 +837,11 @@ export class TurnAdmissionDispatchCoordinator {
   private persistThreadSettings(prepared: PreparedCommand): void {
     const command = prepared.command;
     const model = command.model ?? "claude-sonnet-4-6";
-    this.threads.updateModel(command.threadId, model);
-    if (command.provider !== undefined) this.threads.updateProvider(command.threadId, prepared.providerId);
-    this.threads.updateSettings(command.threadId, this.threadSettings(command, prepared.providerId));
+    this.threads.updateSettings(command.threadId, {
+      ...this.threadSettings(command, prepared.providerId),
+      model,
+      ...(command.provider === undefined ? {} : { provider: prepared.providerId }),
+    });
     broadcast("thread.modelUpdated", {
       threadId: command.threadId,
       model,

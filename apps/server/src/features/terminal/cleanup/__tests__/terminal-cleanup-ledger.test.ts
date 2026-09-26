@@ -23,16 +23,19 @@ async function openLedgerTestDatabase(): Promise<Database> {
     `);
     return {
       prepare: (sql: string) => database.prepare(sql),
-      transaction: <Result>(action: () => Result) => () => {
-        database.exec("BEGIN");
-        try {
-          const result = action();
-          database.exec("COMMIT");
-          return result;
-        } catch (error) {
-          database.exec("ROLLBACK");
-          throw error;
-        }
+      transaction: <Result>(action: () => Result) => {
+        const run = (begin: "BEGIN" | "BEGIN IMMEDIATE") => {
+          database.exec(begin);
+          try {
+            const result = action();
+            database.exec("COMMIT");
+            return result;
+          } catch (error) {
+            database.exec("ROLLBACK");
+            throw error;
+          }
+        };
+        return Object.assign(() => run("BEGIN"), { immediate: () => run("BEGIN IMMEDIATE") });
       },
       close: () => database.close(),
     } as unknown as Database;

@@ -163,7 +163,7 @@ export const WS_CHANNELS = {
   "turn.persisted": z.object({
     threadId: z.string(),
     turnId: z.string().nullable().optional(),
-    messageId: z.string(),
+    messageId: z.string().nullable(),
     toolCallCount: z.number(),
     filesChanged: z.array(z.string()),
     fileEffects: TurnFileEffectSummarySchema().optional(),

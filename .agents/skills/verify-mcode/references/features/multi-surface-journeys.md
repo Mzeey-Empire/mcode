@@ -19,6 +19,14 @@ If cleanup is incomplete, use the receipt's exact path with
 `--cleanup-receipt <receipt-path> --confirm-run` before another run. Do not
 delete tasks by title or age.
 
+For the worker-owned turn change in issue #1760, collect at least ten matched
+receipts. Compare server-loop delay, public event throughput, memory, and
+`metrics.workerQueue` peaks with the recorded baseline. Require model-picker
+and Stop acknowledgement within 2 seconds, terminal readiness within 5 seconds,
+and ordered durable events in every run. Run `--stop-one` as a separate case;
+require the six peers to finish and the stopped task to remain cancelled after
+reload. Trace and fix a missed budget before calling the run complete.
+
 In the owned Electron app, create separate direct tasks in `.dev/fixture-repo`.
 Open and close the model picker, open a Terminal, switch tasks, and reload.
 Capture the settled controls and terminal output in a screenshot, record the
@@ -27,6 +35,10 @@ Use [provider events and durability](provider-events-and-durability.md) for the
 final conversation check and [Electron live testing](../../../electorn-live-testing/SKILL.md)
 for the desktop control and capture. Report any unavailable control or missing
 capture as a gap. A public RPC receipt alone does not prove the desktop path.
+
+Also run the [consecutive-turn navigation journey](provider-events-and-durability.md#consecutive-turns-and-navigation)
+with real Codex. The seven-task fixture starts one turn per task and cannot prove
+successful follow-ups or renderer state while switching during streaming.
 
 ## Provider completeness
 

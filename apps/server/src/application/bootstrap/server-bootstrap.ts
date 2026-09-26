@@ -70,6 +70,7 @@ import {
   startAgentOrchestration,
 } from "../../features/agents";
 import { AgentEventPublicationRegistry } from "../../features/agents/orchestration/agent-event-publication-registry.js";
+import { WorkerOwnedTurnRuntime } from "../../features/agents/execution/worker-owned-turn-runtime.js";
 import {
   AgentEventPublicationRuntimePort,
   AgentReliabilityPort,
@@ -342,6 +343,7 @@ const messageRepo = container.resolve(MessageRepo);
 const threadRepo = container.resolve(ThreadRepo);
 const providerRegistry = container.resolve(ProviderRegistry);
 const providerEventIngress = container.resolve(ProviderEventIngress);
+const workerOwnedTurnRuntime = container.resolve(WorkerOwnedTurnRuntime);
 const cursorProvider = container.resolve<CursorProviderBoundary>("CursorProvider");
 const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
@@ -664,6 +666,7 @@ codexCatalogService.onSkillsChanged((cwd) => {
 
 // Create and start HTTP + WS server
 const { httpServer, wss } = createWsServer({
+  workerQueueDepth: () => workerOwnedTurnRuntime.scheduler.depth(),
   runtime: hostRuntime,
   workspaceService,
   workspaceEnvironmentService,
@@ -849,8 +852,13 @@ async function bootstrapServer(): Promise<void> {
 
     interruptThreadStartupsAtStartup();
     projectActionService.recoverStaleRuns();
-    cleanupWorker.start();
+    cleanupWorker.start(process.env.MCODE_AGENT_RUNTIME === "1"
+      ? process.env.MCODE_AGENT_FIXTURE_REPO?.trim()
+      : undefined);
     recordStartupCheckpoint("stale startup work recovery completed");
+
+    await workerOwnedTurnRuntime.whenReady();
+    recordStartupCheckpoint("execution workers ready");
 
     // Provider work must start only after every client-visible history route has
     // one durable display representation.
@@ -951,6 +959,8 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => providerRegistry.shutdown());
   shutdownCoordinator.setPhase("shutdown provider event workers");
   providerEventIngress.shutdown();
+  shutdownCoordinator.setPhase("shutdown execution workers and writer");
+  await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
   browserAutomationBroker.shutdown();
   browserAutomationSessionLease.shutdown();
 

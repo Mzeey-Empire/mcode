@@ -8,9 +8,11 @@ import {
   type TurnEventApplication,
   type TurnEventIngressFence,
   type TurnLifecycleControl,
+  type WorkerFileObservationPort,
 } from "../turn-event-pipeline.js";
 import type { ProviderEventIngressEvent } from "../../../providers/composition/provider-event-ingress.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../parent-assistant-text-checkpoint-service.js";
+import type { TurnDiffService } from "../turn-diff-service.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -57,28 +59,77 @@ function createPipeline(
   previousFileFinalization: TurnEventApplication["previousFileFinalization"] = () => undefined,
   rejectForQueueCapacity = vi.fn(),
   ingressFence?: TurnEventIngressFence,
+  workerFileObserver?: WorkerFileObservationPort,
+  turnDiffs?: Pick<TurnDiffService, "push">,
 ): {
   pipeline: TurnEventPipeline;
   finalize: ReturnType<typeof vi.fn>;
   rejectForQueueCapacity: ReturnType<typeof vi.fn>;
+  publishCommitted: ReturnType<typeof vi.fn>;
+  observeFileMutation: ReturnType<typeof vi.fn>;
 } {
   const lifecycle: TurnLifecycleControl = {
     normalize: (event) => event,
     finalize,
   };
+  const publishCommitted = vi.fn();
+  const observeFileMutation = vi.fn();
   const application: TurnEventApplication = {
     apply,
-    observeFileMutation: vi.fn(),
+    publishCommitted,
+    observeFileMutation,
     rejectForQueueCapacity,
     previousFileFinalization,
     beginResumedFileTracking: vi.fn(),
     observeToolUse: vi.fn(),
     observeToolResult: vi.fn(),
   };
-  return { pipeline: new TurnEventPipeline(lifecycle, application, undefined, ingressFence), finalize, rejectForQueueCapacity };
+  return { pipeline: new TurnEventPipeline(lifecycle, application, turnDiffs, ingressFence, workerFileObserver),
+    finalize, rejectForQueueCapacity, publishCommitted, observeFileMutation };
 }
 
 describe("TurnEventPipeline", () => {
+  it("claims worker file callbacks before legacy attribution and keeps native diff routing", () => {
+    const workerFileObserver: WorkerFileObservationPort = {
+      ownsFileMutation: vi.fn((event) => event.threadId === "worker-thread"),
+      capture: vi.fn(() => false),
+    };
+    const push = vi.fn((): "accepted" => "accepted");
+    const { pipeline, observeFileMutation } = createPipeline(
+      () => true, undefined, undefined, undefined, undefined, workerFileObserver, { push },
+    );
+    const mutation = {
+      threadId: "worker-thread", turnExecutionId: EXECUTION_ID, deliveryAttempt: 1,
+      toolCallId: "tool-1", toolName: "Edit", toolInput: { file_path: "tracked.txt" },
+    };
+
+    pipeline.handleProviderFileMutation(mutation);
+    pipeline.handleProviderFileMutation({ ...mutation, deliveryAttempt: 0 });
+    pipeline.handleProviderFileMutation({ ...mutation, threadId: "legacy-thread" });
+    pipeline.handleProviderTurnDiff({
+      turnId: "turn-1", turnExecutionId: EXECUTION_ID,
+      deliveryAttempt: 1, revision: 1, state: "invalidated",
+    });
+
+    expect(workerFileObserver.capture).toHaveBeenCalledTimes(2);
+    expect(observeFileMutation).toHaveBeenCalledExactlyOnceWith({ ...mutation, threadId: "legacy-thread" });
+    expect(push).toHaveBeenCalledExactlyOnceWith({
+      turnId: "turn-1", turnExecutionId: EXECUTION_ID,
+      deliveryAttempt: 1, revision: 1, state: "invalidated",
+    });
+  });
+
+  it("publishes projected worker output without legacy event application", () => {
+    const apply = vi.fn(() => true);
+    const { pipeline, publishCommitted } = createPipeline(apply);
+    const input = { ...textDelta("durable"), sourceKind: "worker-commit" as const };
+
+    pipeline.handleProjectedCommitted(input);
+
+    expect(publishCommitted).toHaveBeenCalledWith(input.event);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("keeps canonical receipt provenance and FIFO order while an earlier checkpoint delays publication", () => {
     let checkpointReady = false;
     const received: Array<{ input: ProviderEventIngressEvent; event: AgentEvent }> = [];
@@ -127,6 +178,144 @@ describe("TurnEventPipeline", () => {
     await expect(finalization).resolves.toBe(true);
 
     expect(finalize).toHaveBeenCalledOnce();
+  });
+
+  it("waits for an asynchronous application without holding another thread", async () => {
+    let acknowledge!: (accepted: boolean) => void;
+    const durable = new Promise<boolean>((resolve) => { acknowledge = resolve; });
+    const applied: string[] = [];
+    const { pipeline, finalize } = createPipeline((_input, event) => {
+      const delta = (event as Extract<AgentEvent, { type: "textDelta" }>).delta;
+      applied.push(delta);
+      return delta === "first" ? durable : true;
+    });
+
+    pipeline.handleProviderEvent(textDelta("first"));
+    pipeline.handleProviderEvent(textDelta("second"));
+    pipeline.handleProviderEvent(textDelta("other", "thread-2"));
+    const finalization = pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "completed",
+      source: "provider",
+    });
+
+    expect(applied).toEqual(["first", "other"]);
+    expect(finalize).not.toHaveBeenCalled();
+    acknowledge(true);
+    await expect(finalization).resolves.toBe(true);
+    expect(applied).toEqual(["first", "other", "second"]);
+  });
+
+  it("waits for an in-flight acknowledgement before finalizing Stop", async () => {
+    let acknowledge!: (accepted: boolean) => void;
+    const durable = new Promise<boolean>((resolve) => { acknowledge = resolve; });
+    const apply = vi.fn(() => durable);
+    const { pipeline, finalize } = createPipeline(apply);
+
+    pipeline.handleProviderEvent(textDelta("in flight"));
+    pipeline.handleProviderEvent(textDelta("discarded"));
+    const finalization = pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "cancelled",
+      source: "user-stop",
+    });
+
+    expect(finalize).not.toHaveBeenCalled();
+    acknowledge(true);
+    await expect(finalization).resolves.toBe(true);
+    expect(apply).toHaveBeenCalledOnce();
+    expect(finalize).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an asynchronous blocked event at the queue head until resume", async () => {
+    let acknowledge!: (accepted: boolean) => void;
+    const durable = new Promise<boolean>((resolve) => { acknowledge = resolve; });
+    const applied: string[] = [];
+    let ready = false;
+    const { pipeline } = createPipeline((_input, event) => {
+      const delta = (event as Extract<AgentEvent, { type: "textDelta" }>).delta;
+      applied.push(delta);
+      return delta === "first" && !ready ? durable : true;
+    });
+
+    pipeline.handleProviderEvent(textDelta("first"));
+    pipeline.handleProviderEvent(textDelta("second"));
+    acknowledge(false);
+    await Promise.resolve();
+    expect(applied).toEqual(["first"]);
+
+    ready = true;
+    pipeline.resume("thread-1");
+    expect(applied).toEqual(["first", "first", "second"]);
+  });
+
+  it("does not let a discarded acknowledgement consume the next execution's event", async () => {
+    const firstExecution = "00000000-0000-4000-8000-000000000010";
+    const nextExecution = "00000000-0000-4000-8000-000000000011";
+    let acknowledge!: (accepted: boolean) => void;
+    const durable = new Promise<boolean>((resolve) => { acknowledge = resolve; });
+    const applied: string[] = [];
+    const { pipeline } = createPipeline((_input, event) => {
+      applied.push(`${event.turnExecutionId}:${event.type}`);
+      return event.type === AgentEventType.TextDelta && event.turnExecutionId === firstExecution
+        ? durable
+        : true;
+    });
+
+    pipeline.handleProviderEvent(turnStarted(firstExecution));
+    pipeline.handleProviderEvent({
+      ...textDelta("old"),
+      event: { ...textDelta("old").event, turnExecutionId: firstExecution },
+    });
+    pipeline.discard("thread-1", firstExecution);
+    pipeline.handleProviderEvent(turnStarted(nextExecution));
+    expect(applied).toEqual([`${firstExecution}:turnStarted`, `${firstExecution}:textDelta`]);
+
+    acknowledge(true);
+    await vi.waitFor(() => {
+      expect(applied).toEqual([
+        `${firstExecution}:turnStarted`,
+        `${firstExecution}:textDelta`,
+        `${nextExecution}:turnStarted`,
+      ]);
+    });
+  });
+
+  it("does not finalize after an asynchronous application fails", async () => {
+    let fail!: (error: Error) => void;
+    const durable = new Promise<boolean>((_resolve, reject) => { fail = reject; });
+    const apply = vi.fn(() => durable);
+    const { pipeline, finalize } = createPipeline(apply);
+
+    pipeline.handleProviderEvent(textDelta("write failure"));
+    const finalization = pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "completed",
+      source: "provider",
+    });
+
+    fail(new Error("checkpoint failed"));
+    await expect(finalization).rejects.toThrow("checkpoint failed");
+    pipeline.resume("thread-1");
+    expect(apply).toHaveBeenCalledOnce();
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
+  it("does not turn a failed checkpoint into a successful later Stop", async () => {
+    const { pipeline, finalize } = createPipeline(() => Promise.reject(new Error("checkpoint failed")));
+
+    pipeline.handleProviderEvent(textDelta("write failure"));
+    await Promise.resolve();
+    await expect(pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "cancelled",
+      source: "user-stop",
+    })).rejects.toThrow("checkpoint failed");
+    expect(finalize).not.toHaveBeenCalled();
   });
 
   it("holds finalization until its thread-affine ingress worker is idle", async () => {

@@ -340,6 +340,8 @@ describe("AgentService.sendMessage — admission gates", () => {
         sourceTurnId: "source-turn",
         sourceProviderId: "claude",
       },
+      expect.any(String),
+      undefined,
     );
     expect(threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "active");
     expect(providerStub.sendTurn).toHaveBeenCalledTimes(1);
