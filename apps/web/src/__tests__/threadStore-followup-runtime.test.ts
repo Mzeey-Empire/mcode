@@ -44,7 +44,25 @@ describe("follow-up runtime ownership", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("completes a follow-up when the publication cursor write fails", async () => {
+    completeFirstTurn();
+    await useThreadStore.getState().sendMessage(THREAD_ID, "Second prompt");
+    const original = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("mcode-agent-publication-v2:")) throw new DOMException("quota", "QuotaExceededError");
+      original.call(this, key, value);
+    });
+    const handle = useThreadStore.getState().handleAgentEvent;
+    handle({ type: "turnStarted", threadId: THREAD_ID, turnExecutionId: "second", sequence: 1, publicationId: "1" });
+    handle({ type: "textDelta", threadId: THREAD_ID, turnExecutionId: "second", sequence: 2, publicationId: "2", delta: "Visible reply" });
+    handle({ type: "ended", threadId: THREAD_ID, turnExecutionId: "second", sequence: 3, publicationId: "3", outcome: "completed" });
+    expect(record()?.runtimePhase).toBe("completed");
+    expect(record()?.messages.map((message) => message.content)).toContain("Visible reply");
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
   });
 
   it.each([false, true])("completes a sent follow-up without file-effect metadata, background=%s", async (background) => {

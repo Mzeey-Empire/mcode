@@ -55,12 +55,37 @@ describe("stable AgentEvent publications", () => {
     expect(secondTab.accept(event(1))).toBe(false);
   });
 
-  it("fails closed if its durable cursor cannot be stored", () => {
+  it("applies each publication once when its cursor write fails", () => {
     const cursor = new StableAgentEventPublications(() => ({
       getItem: () => null,
       setItem: () => { throw new Error("quota"); },
     }));
+    expect(cursor.accept(event(1))).toBe(true);
     expect(cursor.accept(event(1))).toBe(false);
+    expect(cursor.accept(event(2))).toBe(true);
+    expect(cursor.accept(event(1))).toBe(false);
+  });
+
+  it("retains a failed write over the older stored cursor and persists again after recovery", () => {
+    const shared = storage();
+    let failWrites = false;
+    const cursor = new StableAgentEventPublications(() => ({
+      getItem: shared.getItem,
+      setItem: (key, value) => {
+        if (failWrites) throw new Error("quota");
+        shared.setItem(key, value);
+      },
+    }));
+    expect(cursor.accept(event(6))).toBe(true);
+    failWrites = true;
+    expect(cursor.accept(event(7))).toBe(true);
+    expect(cursor.accept(event(7))).toBe(false);
+    failWrites = false;
+    expect(cursor.accept(event(8))).toBe(true);
+    const reloaded = new StableAgentEventPublications(() => shared);
+    expect(reloaded.accept(event(7))).toBe(false);
+    expect(reloaded.accept(event(8))).toBe(false);
+    expect(reloaded.accept(event(9))).toBe(true);
   });
 
   it("fails closed on an oversized stored cursor", () => {

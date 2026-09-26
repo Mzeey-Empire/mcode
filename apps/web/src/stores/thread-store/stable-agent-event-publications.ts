@@ -11,11 +11,14 @@ function publicationSequence(value: string): number | null {
   return Number.isSafeInteger(sequence) ? sequence : null;
 }
 
-/** Retains one per-thread cursor across server epochs, executions, and browser reloads. */
+/** Retains a per-thread cursor, surviving reloads when storage writes succeed. */
 export class StableAgentEventPublications {
+  private readonly pendingWrites = new Map<string, number>();
+  private warnedAboutWriteFailure = false;
+
   constructor(private readonly storage: () => PublicationStorage | undefined) {}
 
-  /** Reserve a publication before applying its UI effects. A storage failure fails closed. */
+  /** Reserve a publication before applying its UI effects, retaining failed writes in memory. */
   accept(event: AgentEvent): boolean {
     if (!event.publicationId) return true;
     if (!event.turnExecutionId || publicationSequence(event.publicationId) === null) return false;
@@ -27,14 +30,31 @@ export class StableAgentEventPublications {
   }
 
   private reserve(threadId: string, publicationId: string): boolean {
-    const store = this.storage();
-    if (!store) return false;
-    const key = `${STORAGE_PREFIX}${threadId}`;
-    const stored = store.getItem(key);
-    const previous = stored === null ? 0 : publicationSequence(stored);
+    const previous = this.pendingWrites.get(threadId) ?? this.readCursor(threadId);
     if (previous === null || Number(publicationId) <= previous) return false;
-    store.setItem(key, publicationId);
+    this.pendingWrites.set(threadId, Number(publicationId));
+    this.persistCursor(threadId, publicationId);
     return true;
+  }
+
+  private readCursor(threadId: string): number | null {
+    const store = this.storage();
+    if (!store) return null;
+    const stored = store.getItem(`${STORAGE_PREFIX}${threadId}`);
+    return stored === null ? 0 : publicationSequence(stored);
+  }
+
+  private persistCursor(threadId: string, publicationId: string): void {
+    try {
+      const store = this.storage();
+      if (!store) throw new Error("Publication cursor storage is unavailable");
+      store.setItem(`${STORAGE_PREFIX}${threadId}`, publicationId);
+      this.pendingWrites.delete(threadId);
+    } catch {
+      if (this.warnedAboutWriteFailure) return;
+      this.warnedAboutWriteFailure = true;
+      console.warn("Live event cursor could not be saved. Duplicate protection remains active in this renderer; reload recovery may replay older events.");
+    }
   }
 }
 
