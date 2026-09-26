@@ -11,9 +11,10 @@ import {
   setClientThreadSubscriptions,
   subscribeClientToThread,
   unsubscribeClientFromThread,
+  MAX_AGENT_EVENT_JOURNAL_THREADS,
   _resetForTest,
 } from "../push.js";
-import { decodeTerminalDataFrame } from "@mcode/contracts";
+import { AgentEventSchema, decodeTerminalDataFrame } from "@mcode/contracts";
 import {
   createPassThroughTransportPayloadValidator,
   createValidatingTransportPayloadValidator,
@@ -270,6 +271,51 @@ describe("broadcast", () => {
     broadcast("agent.event", { type: "textDelta", threadId: "thread-replay", delta: "three" });
 
     expect(received.map((entry) => JSON.parse(entry.buf.toString("utf-8")).data.sequence)).toEqual([1, 2, 3]);
+  });
+
+  it("keeps an evicted thread's next event distinguishable from its old cursor", () => {
+    const first = AgentEventSchema().parse(broadcast("agent.event", { type: "turnStarted", threadId: "evicted-thread" }));
+    if (!first.epoch) throw new Error("Agent event has no journal epoch");
+    for (let index = 0; index < MAX_AGENT_EVENT_JOURNAL_THREADS; index++) {
+      broadcast("agent.event", { type: "turnStarted", threadId: `other-${index}` });
+    }
+    const next = broadcast("agent.event", { type: "turnStarted", threadId: "evicted-thread" });
+    expect(next).not.toEqual(first);
+    const received: Array<{ buf: Buffer; binary: boolean }> = [];
+    const ws = fakeOpenSocket(received);
+    addClient(ws);
+    const result = setClientThreadSubscriptions(ws, ["evicted-thread"], {
+      "evicted-thread": { epoch: first.epoch, sequence: 1 },
+    });
+    expect(result.hydrationRequiredThreadIds).toEqual(["evicted-thread"]);
+    expect(received).toHaveLength(0);
+  });
+
+  it("requires hydration for an ambiguous legacy cursor or a cursor ahead of its journal", () => {
+    const first = AgentEventSchema().parse(broadcast("agent.event", { type: "turnStarted", threadId: "cursor-thread" }));
+    if (!first.epoch) throw new Error("Agent event has no journal epoch");
+    const received: Array<{ buf: Buffer; binary: boolean }> = [];
+    const ws = fakeOpenSocket(received);
+    addClient(ws);
+    for (const cursor of [1, { epoch: first.epoch, sequence: 2 }]) {
+      const result = setClientThreadSubscriptions(ws, ["cursor-thread"], { "cursor-thread": cursor });
+      expect(result.hydrationRequiredThreadIds).toEqual(["cursor-thread"]);
+    }
+    expect(received).toHaveLength(0);
+  });
+
+  it("replays only newer events for a cursor in the current journal generation", () => {
+    const first = AgentEventSchema().parse(broadcast("agent.event", { type: "turnStarted", threadId: "current-thread" }));
+    if (!first.epoch) throw new Error("Agent event has no journal epoch");
+    broadcast("agent.event", { type: "textDelta", threadId: "current-thread", delta: "new text" });
+    const received: Array<{ buf: Buffer; binary: boolean }> = [];
+    const ws = fakeOpenSocket(received);
+    addClient(ws);
+    const result = setClientThreadSubscriptions(ws, ["current-thread"], {
+      "current-thread": { epoch: first.epoch, sequence: 1 },
+    });
+    expect(result).toEqual({ hydrationRequiredThreadIds: [], replayedThrough: { "current-thread": 2 } });
+    expect(received).toHaveLength(1);
   });
 
   it("does not replay history for legacy subscription calls without cursors", () => {
