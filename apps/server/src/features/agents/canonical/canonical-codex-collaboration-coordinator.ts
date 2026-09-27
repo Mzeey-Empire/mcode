@@ -38,7 +38,7 @@ import type {
   CanonicalAgentCommitInput,
   CanonicalAgentCommitResult,
   CanonicalAgentEventDraft,
-} from "./canonical-agent-event-sink.js";
+} from "./canonical-agent-boundary.js";
 
 /** Generic persistence operations required by the Codex child-thread protocol. */
 export interface CanonicalCodexCollaborationOperations {

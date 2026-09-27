@@ -12,7 +12,7 @@ import {
   type CanonicalAgentRevision,
   type Message,
 } from "@mcode/contracts";
-import type { CanonicalAgentCheckpoint } from "./canonical-agent-event-sink.js";
+import type { CanonicalAgentCheckpoint } from "./canonical-agent-boundary.js";
 import {
   CanonicalConversationProjectionReader,
   type CanonicalConversationProjection,

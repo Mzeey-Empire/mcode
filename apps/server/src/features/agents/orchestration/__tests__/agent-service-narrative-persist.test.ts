@@ -26,14 +26,14 @@ import {
   streamAgentReliabilityTextForTest,
   waitForAgentServiceIngressForTest,
 } from "./agent-service-test-harness.js";
-import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { TaskPersistenceService } from "../../tasks/task-persistence-service.js";
 import {
   ParentAssistantTextCheckpointService,
   PARENT_ASSISTANT_TEXT_RETAINED_LIMITS,
 } from "../../turns/parent-assistant-text-checkpoint-service.js";
-import { CanonicalAgentEventSink } from "../../canonical/canonical-agent-event-sink.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { broadcast } from "../../../../application/transport/push.js";
 import { isTurnScopedEvent } from "../../turns/turn-runtime.js";
@@ -145,7 +145,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 interface Built {
   service: AgentService;
   providerEmitter: NodeEvents.EventEmitter;
-  canonicalSink: CanonicalAgentEventSink;
+  canonicalSink: CanonicalAgentBoundary;
   db: Database;
   messageRepo: MessageRepo;
   thoughtBulk: ReturnType<typeof vi.fn>;
@@ -160,7 +160,7 @@ interface Built {
 
 function build(options: {
   db?: Database;
-  canonicalSink?: CanonicalAgentEventSink;
+  canonicalSink?: CanonicalAgentBoundary;
   messageRepo?: MessageRepo;
   parentAssistantTextCheckpoints?: ParentAssistantTextCheckpointService;
   onProviderEvent?: (event: AgentEvent) => void;
@@ -270,7 +270,7 @@ function build(options: {
     transaction: vi.fn((fn: Function) => fn),
     prepare: vi.fn(() => ({ run: vi.fn() })),
   } as unknown as Database);
-  const canonicalSink = options.canonicalSink ?? createCanonicalAgentEventSinkStub(db);
+  const canonicalSink = options.canonicalSink ?? createCanonicalAgentBoundaryStub(db);
   const parentAssistantTextCheckpoints = options.parentAssistantTextCheckpoints
     ?? new ParentAssistantTextCheckpointService(db);
 
@@ -372,7 +372,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const published: AgentEvent[] = [];
     const { providerEmitter, service } = build({
       db,
@@ -442,7 +442,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const published: AgentEvent[] = [];
     const { providerEmitter, service } = build({
       db,
@@ -501,7 +501,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const published: AgentEvent[] = [];
     let sqliteAvailable = false;
     const appendChunk = ParentAssistantTextCheckpointService.prototype.appendChunk;
@@ -569,7 +569,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const published: AgentEvent[] = [];
     const restoreChunks = ParentAssistantTextCheckpointService.prototype.restoreChunks;
     const restoreChunksSpy = vi.spyOn(ParentAssistantTextCheckpointService.prototype, "restoreChunks")
@@ -635,7 +635,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const restoreChunksSpy = vi.spyOn(ParentAssistantTextCheckpointService.prototype, "restoreChunks")
       .mockImplementation(() => {
         throw Object.assign(new Error("database locked"), { code: "SQLITE_BUSY" });
@@ -697,7 +697,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const restoreChunksSpy = vi.spyOn(ParentAssistantTextCheckpointService.prototype, "restoreChunks")
       .mockImplementation(() => {
         throw Object.assign(new Error("database locked"), { code: "SQLITE_BUSY" });
@@ -767,7 +767,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const journalService = new ParentAssistantTextCheckpointService(
       db,
       undefined,
@@ -851,7 +851,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const published: AgentEvent[] = [];
     const appendSpy = vi.spyOn(ParentAssistantTextCheckpointService.prototype, "appendChunk")
       .mockImplementation(() => {
@@ -920,7 +920,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const published: AgentEvent[] = [];
     const { providerEmitter, service, thoughtBulk, narrativeStore } = build({
       db,
@@ -990,7 +990,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const observed: Array<{ type: string; persisted: string | undefined }> = [];
     const { providerEmitter, service } = build({
       db,
@@ -1047,7 +1047,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const published: AgentEvent[] = [];
     const messageRepo = new SqliteMessageRepo(db);
     const { service } = build({
@@ -1599,7 +1599,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const published: AgentEvent[] = [];
     const { service, providerEmitter, hookBulk, narrativeStore } = build({
       db,
@@ -1930,7 +1930,7 @@ describe("AgentService narrative persistence", () => {
       "INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "codex", now, now);
     const published = vi.fn();
-    const canonicalSink = new CanonicalAgentEventSink(db, published);
+    const canonicalSink = new CanonicalAgentBoundary(db, published);
     const { providerEmitter, service, narrativeStore } = build({ db, canonicalSink });
     const executionId = narrativeExecutionId(service);
     const messages = new SqliteMessageRepo(db);
@@ -2093,7 +2093,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-nested", "Parent", "main", "codex", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const { providerEmitter, service } = build({ db, canonicalSink });
     const executionId = narrativeExecutionId(service);
     const messages = new SqliteMessageRepo(db);
@@ -2352,7 +2352,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-failure", "Parent", "main", "codex", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const { providerEmitter, service } = build({ db, canonicalSink });
     const executionId = narrativeExecutionId(service);
     const messages = new SqliteMessageRepo(db);
@@ -2432,7 +2432,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-action", "Parent", "main", "codex", now, now);
-    const canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     const { providerEmitter, service } = build({ db, canonicalSink });
     const executionId = narrativeExecutionId(service);
     const messages = new SqliteMessageRepo(db);

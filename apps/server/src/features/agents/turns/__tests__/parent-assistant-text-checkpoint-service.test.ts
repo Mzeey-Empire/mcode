@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { CanonicalAgentEventSink } from "../../canonical/canonical-agent-event-sink.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import {
   ParentAssistantTextCheckpointQueue,
@@ -30,7 +30,7 @@ function seedParentAssistantTurn(db: Database): void {
     "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(THREAD_ID, "workspace-1522", "Durability", "main", "claude", "active", NOW, NOW);
   const messages = new MessageRepo(db);
-  new CanonicalAgentEventSink(db, () => {}).startParentTurn({
+  new CanonicalAgentBoundary(db, () => {}).startParentTurn({
     thread: { id: THREAD_ID, workspaceId: "workspace-1522", providerId: "claude", createdAt: NOW },
     turnId: TURN_ID,
     executionId: EXECUTION_ID,

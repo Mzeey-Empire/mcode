@@ -13,7 +13,7 @@ import {
 import type {
   CanonicalAgentCommitResult,
   CanonicalAgentEventDraft,
-} from "./canonical-agent-event-sink.js";
+} from "./canonical-agent-boundary.js";
 import { decideCanonicalExecutionLifecycle } from "./canonical-execution-lifecycle.js";
 
 /** Provider-neutral durable progress for one canonical execution. */

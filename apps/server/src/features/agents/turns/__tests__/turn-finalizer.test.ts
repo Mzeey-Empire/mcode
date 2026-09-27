@@ -16,7 +16,7 @@ import { TurnSnapshotRepo } from "../persistence/turn-snapshot-repo.js";
 import type { TurnOutcome } from "../turn-outcome.js";
 import type { TurnFileTracker } from "../turn-file-tracker.js";
 import { broadcast } from "../../../../application/transport/push.js";
-import { CanonicalAgentEventSink } from "../../canonical/canonical-agent-event-sink.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { ParentAssistantTextCheckpointService } from "../parent-assistant-text-checkpoint-service.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
@@ -355,7 +355,7 @@ describe("TurnFinalizer canonical commit recovery", () => {
       thoughtRepo,
       hookRepo,
     );
-    const sink = new CanonicalAgentEventSink(db, vi.fn());
+    const sink = new CanonicalAgentBoundary(db, vi.fn());
     sink.startParentTurn({
       thread: {
         id: THREAD,

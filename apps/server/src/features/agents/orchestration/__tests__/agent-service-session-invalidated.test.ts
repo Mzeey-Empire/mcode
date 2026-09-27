@@ -19,7 +19,7 @@ import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-rep
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { AgentService } from "../agent-service.js";
 import { createAgentServiceForTest, startAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents } from "./agent-service-test-harness.js";
-import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import type { GitService } from "../../../projects/index.js";
@@ -147,7 +147,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       assertUsable: vi.fn(),
     } as unknown as ProviderAvailabilityService;
     providerEventIngress = new ProviderEventIngress();
-    const canonicalSink = createCanonicalAgentEventSinkStub(db);
+    const canonicalSink = createCanonicalAgentBoundaryStub(db);
     Object.assign(canonicalSink, { recordNativeCursor: vi.fn(() => true) });
 
     svc = createAgentServiceForTest(

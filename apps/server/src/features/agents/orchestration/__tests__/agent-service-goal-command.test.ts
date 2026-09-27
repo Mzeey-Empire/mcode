@@ -19,7 +19,7 @@ import {
   waitForAgentServiceIngressForTest,
   wrapProviderEmitterForRuntimeEvents,
 } from "./agent-service-test-harness.js";
-import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -176,7 +176,7 @@ function buildService(db: Database) {
       undefined,
       undefined,
       undefined,
-      createCanonicalAgentEventSinkStub(db),
+      createCanonicalAgentBoundaryStub(db),
       undefined,
       undefined,
       undefined,

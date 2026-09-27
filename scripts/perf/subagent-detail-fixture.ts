@@ -1,7 +1,7 @@
 import "../../apps/server/node_modules/reflect-metadata/Reflect.js";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { CanonicalAgentEventSink } from "../../apps/server/src/features/agents/canonical/canonical-agent-event-sink.js";
+import { CanonicalAgentBoundary } from "../../apps/server/src/features/agents/canonical/canonical-agent-boundary.js";
 import { MessageRepo } from "../../apps/server/src/features/agents/conversation/persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../apps/server/src/features/agents/tools/persistence/tool-call-record-repo.js";
 import { WorkspaceRepo } from "../../apps/server/src/features/projects/persistence/workspace-repo.js";
@@ -58,7 +58,7 @@ function databasePath(repoRoot: string): string {
   return requested;
 }
 
-function recordCompletedBashCalls(sink: CanonicalAgentEventSink, childThreadId: string, nativeTurnId: string): void {
+function recordCompletedBashCalls(sink: CanonicalAgentBoundary, childThreadId: string, nativeTurnId: string): void {
   for (let index = 0; index < COMPLETED_TOOL_COUNT; index += 1) {
     const nativeItemId = `fixture-completed-${index}`;
     const isError = index === 124;
@@ -68,13 +68,13 @@ function recordCompletedBashCalls(sink: CanonicalAgentEventSink, childThreadId: 
   }
 }
 
-function recordActiveBashCalls(sink: CanonicalAgentEventSink, childThreadId: string, nativeTurnId: string): void {
+function recordActiveBashCalls(sink: CanonicalAgentBoundary, childThreadId: string, nativeTurnId: string): void {
   for (let index = 0; index < ACTIVE_TOOL_COUNT; index += 1) {
     sink.recordCodexChildItem({ childThreadId, nativeTurnId, nativeItemId: `fixture-active-${index}`, eventKey: "started", kind: "tool-call", payload: { projection: "codexChildToolCall", toolName: "Bash", toolInput: { command: `printf fixture-active-${index}` } } });
   }
 }
 
-function verifyFixtureRecovery(sink: CanonicalAgentEventSink, parentThreadId: string, childThreadId: string): void {
+function verifyFixtureRecovery(sink: CanonicalAgentBoundary, parentThreadId: string, childThreadId: string): void {
   const recovery = sink.recoverThread(childThreadId, { conversationRevision: 0, rosterRevision: 0 });
   const canonicalItems = recovery.mode === "snapshot" ? Object.values(recovery.snapshot.state.items) : [];
   const narrativeItemCount = canonicalItems.filter((item) => item.kind !== "message").length;
@@ -126,7 +126,7 @@ function seed(repoRoot: string, path: string, dbPath: string): Descriptor {
     const fixturePath = NodePath.join(repoRoot, ".dev", "fixture-repo");
     const workspace = workspaces.findByPath(fixturePath) ?? workspaces.create("fixture-repo", fixturePath);
     const parent = threads.create(workspace.id, MARKER, "local", "main", false, "codex");
-    const sink = new CanonicalAgentEventSink(db, () => {});
+    const sink = new CanonicalAgentBoundary(db, () => {});
     const parentTurnId = crypto.randomUUID();
     const parentExecutionId = crypto.randomUUID();
     const parentItemId = "toolCall:fixture-subagent";

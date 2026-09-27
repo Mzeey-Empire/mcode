@@ -27,7 +27,7 @@ import type {
   CanonicalAgentCommitResult,
   CanonicalAgentEventDraft,
   CanonicalProviderContinuationInput,
-} from "./canonical-agent-event-sink.js";
+} from "./canonical-agent-boundary.js";
 
 /** Canonical alias for the parent-turn start durability input. */
 export type CanonicalParentTurnStartInput = ParentTurnStartInput;

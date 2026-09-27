@@ -8,7 +8,6 @@ import {
   AgentPermissionService,
   AgentService,
   CanonicalAgentBoundary,
-  CanonicalAgentEventSink,
   ParentAssistantTextCheckpointService,
   publishCanonicalAgentEvents,
   TurnRecoveryService,
@@ -154,9 +153,6 @@ export function registerAgentServices(container: DependencyContainer): void {
   });
   container.register(SUBAGENT_LIFECYCLE_DURABILITY, {
     useFactory: (c) => c.resolve(CanonicalAgentBoundary),
-  });
-  container.register(CanonicalAgentEventSink, {
-    useFactory: (c) => c.resolve(CanonicalAgentBoundary) as CanonicalAgentEventSink,
   });
   container.register(
     ParentAssistantTextCheckpointService,

@@ -10,7 +10,7 @@ import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { createAgentServiceForTest, goalLifecycleForAgentServiceTest } from "./agent-service-test-harness.js";
 import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
-import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import type { GitService } from "../../../projects/index.js";
 import type { ThreadService } from "../../../thread-control/index.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -128,7 +128,7 @@ function createAgentServiceHarness(automaticSetup?:
     {} as never,
     undefined,
     undefined,
-    createCanonicalAgentEventSinkStub(db),
+    createCanonicalAgentBoundaryStub(db),
     resolvedAutomaticSetup as never,
     undefined,
     undefined,

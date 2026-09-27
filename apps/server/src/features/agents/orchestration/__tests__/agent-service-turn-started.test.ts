@@ -17,7 +17,7 @@ import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-rep
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { AgentService } from "../agent-service.js";
 import { createAgentServiceForTest, startAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents } from "./agent-service-test-harness.js";
-import { CanonicalAgentEventSink } from "../../canonical/canonical-agent-event-sink.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import type { GitService } from "../../../projects/index.js";
@@ -43,7 +43,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
   let toolCallRecordRepo: ToolCallRecordRepo;
   let turnSnapshotRepo: TurnSnapshotRepo;
   let svc: AgentService;
-  let canonicalSink: CanonicalAgentEventSink;
+  let canonicalSink: CanonicalAgentBoundary;
   let providerStub: NodeEvents.EventEmitter & Partial<IAgentProvider> & {
     sendTurn: ReturnType<typeof vi.fn>;
   };
@@ -123,7 +123,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       assertUsable: vi.fn(),
     } as unknown as ProviderAvailabilityService;
 
-    canonicalSink = new CanonicalAgentEventSink(db, vi.fn());
+    canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
     svc = createAgentServiceForTest(
       threadRepo,
       workspaceRepo,

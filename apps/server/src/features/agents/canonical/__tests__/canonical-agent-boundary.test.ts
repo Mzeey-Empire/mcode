@@ -29,9 +29,9 @@ import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import {
   CANONICAL_AGENT_CONTROL_EVENT_RESERVE,
-  CanonicalAgentEventSink,
+  CanonicalAgentBoundary,
   type CanonicalAgentEventDraft,
-} from "../canonical-agent-event-sink.js";
+} from "../canonical-agent-boundary.js";
 import { CodexCollaborationEventAdapter } from "../../collaboration/adapters/codex-collaboration-event-adapter.js";
 import type { CodexCollaborationDurability } from "../../collaboration/codex-collaboration-durability.js";
 
@@ -117,7 +117,7 @@ function initialDrafts(): CanonicalAgentEventDraft[] {
 
 function seedUnfinishedCheckpointCount(
   db: Database,
-  sink: CanonicalAgentEventSink,
+  sink: CanonicalAgentBoundary,
   count: number,
 ): void {
   const messageRepo = new MessageRepo(db);
@@ -171,7 +171,7 @@ function terminalDraft(
 }
 
 function startCanonicalParent(
-  sink: CanonicalAgentEventSink,
+  sink: CanonicalAgentBoundary,
   db: Database,
   approvalReview: { mode: "manual" | "automatic"; reason: string } = { mode: "manual", reason: "manual-requested" },
 ): void {
@@ -312,7 +312,7 @@ function executionIdForTurn(db: Database, turnId: string): string {
   return row.execution_id;
 }
 
-function parentTerminalInput(db: Database, toolCount = 0): Parameters<CanonicalAgentEventSink["finishParentTurnBatched"]>[0] {
+function parentTerminalInput(db: Database, toolCount = 0): Parameters<CanonicalAgentBoundary["finishParentTurnBatched"]>[0] {
   const messageRepo = new MessageRepo(db);
   const message = messageRepo.create(THREAD_ID, "assistant", "answer", 2, undefined, undefined, undefined, undefined, true);
   return {
@@ -333,21 +333,21 @@ function parentTerminalInput(db: Database, toolCount = 0): Parameters<CanonicalA
   };
 }
 
-describe("CanonicalAgentEventSink", () => {
+describe("CanonicalAgentBoundary", () => {
   let db: Database;
   let published: ReturnType<typeof vi.fn<(events: readonly CanonicalAgentEventEnvelope[]) => void>>;
-  let sink: CanonicalAgentEventSink;
+  let sink: CanonicalAgentBoundary;
 
   beforeEach(() => {
     db = openMemoryDatabase();
     seedThread(db);
     published = vi.fn();
-    sink = new CanonicalAgentEventSink(db, published);
+    sink = new CanonicalAgentBoundary(db, published);
   });
 
   it("retains the resolved approval-review decision when a turn is read after reopening", () => {
     startCanonicalParent(sink, db, { mode: "automatic", reason: "automatic-review-available" });
-    const reloaded = new CanonicalAgentEventSink(db, published);
+    const reloaded = new CanonicalAgentBoundary(db, published);
 
     expect(reloaded.loadTurnByExecution(EXECUTION_ID)).toMatchObject({
       approvalReviewMode: "automatic",
@@ -437,7 +437,7 @@ describe("CanonicalAgentEventSink", () => {
 
   it("reports deferred canonical delivery without undoing the durable commit", () => {
     const failingPublisher = vi.fn(() => { throw new Error("canonical delivery failed"); });
-    const deferredSink = new CanonicalAgentEventSink(db, failingPublisher);
+    const deferredSink = new CanonicalAgentBoundary(db, failingPublisher);
 
     const result = deferredSink.commit({
       threadId: THREAD_ID,
@@ -557,7 +557,7 @@ describe("CanonicalAgentEventSink", () => {
       preparedSql.push(sql);
       return originalPrepare(sql);
     }) as Database["prepare"];
-    const instrumentedSink = new CanonicalAgentEventSink(db, vi.fn());
+    const instrumentedSink = new CanonicalAgentBoundary(db, vi.fn());
 
     instrumentedSink.commit({
       threadId: THREAD_ID,
@@ -808,7 +808,7 @@ describe("CanonicalAgentEventSink", () => {
         userMessageId = message.id;
         return message;
       },
-    } satisfies Parameters<CanonicalAgentEventSink["startParentTurn"]>[0];
+    } satisfies Parameters<CanonicalAgentBoundary["startParentTurn"]>[0];
     sink.startParentTurn(startInput);
     sink.startParentTurn(startInput);
     const finishInput = {
@@ -855,7 +855,7 @@ describe("CanonicalAgentEventSink", () => {
           }],
         };
       },
-    } satisfies Parameters<CanonicalAgentEventSink["finishParentTurn"]>[0];
+    } satisfies Parameters<CanonicalAgentBoundary["finishParentTurn"]>[0];
     sink.finishParentTurn(finishInput);
     sink.finishParentTurn(finishInput);
 
@@ -887,7 +887,7 @@ describe("CanonicalAgentEventSink", () => {
     let interruptPublication = false;
     let interrupted = false;
     const batchRows: number[] = [];
-    sink = new CanonicalAgentEventSink(db, (events) => {
+    sink = new CanonicalAgentBoundary(db, (events) => {
       batchRows.push(3 + events.reduce(
         (rows, event) => rows + (event.payload.type === "item.recorded" ? 2 : 1),
         0,
@@ -1067,7 +1067,7 @@ describe("CanonicalAgentEventSink", () => {
       seedThread(writerDb);
       let finishing = false;
       let mutated = false;
-      const writer = new CanonicalAgentEventSink(writerDb, () => {
+      const writer = new CanonicalAgentBoundary(writerDb, () => {
         if (!finishing || mutated) return;
         mutated = true;
         otherDb.prepare("UPDATE canonical_agent_threads SET roster_revision = 17 WHERE id = ?").run(THREAD_ID);
@@ -1278,7 +1278,7 @@ describe("CanonicalAgentEventSink", () => {
           },
         }],
       });
-      const reloaded = new CanonicalAgentEventSink(db, vi.fn());
+      const reloaded = new CanonicalAgentBoundary(db, vi.fn());
 
       expect(committed.outcome).toBe("committed");
       expect(duplicate.outcome).toBe("duplicate");
@@ -1856,7 +1856,7 @@ describe("CanonicalAgentEventSink", () => {
       },
     }), "toolCall:spawn-generic-roster-source");
 
-    const restoredSink = new CanonicalAgentEventSink(db, vi.fn());
+    const restoredSink = new CanonicalAgentBoundary(db, vi.fn());
     const row = restoredSink.loadSubagentRoster({
       owningParentThreadId: THREAD_ID,
       limit: CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN,
@@ -2539,7 +2539,7 @@ describe("CanonicalAgentEventSink", () => {
       }],
       payload: { projection: "codexCollaboration" },
     });
-    const restoredSink = new CanonicalAgentEventSink(db, vi.fn());
+    const restoredSink = new CanonicalAgentBoundary(db, vi.fn());
     expect(restoredSink.loadCollaborationActionBySourceProviderIdentity(
       delegation.childThread.id,
       childTurn.id,
@@ -2921,7 +2921,7 @@ describe("CanonicalAgentEventSink", () => {
       outcome: "errored",
     })).toMatchObject({ status: "Completed" });
 
-    const restored = new CanonicalAgentEventSink(db, vi.fn());
+    const restored = new CanonicalAgentBoundary(db, vi.fn());
     const recovered = restored.loadCodexChildDelegation(THREAD_ID, input.parentItemId);
     expect(recovered).toMatchObject({
       childThread: {
