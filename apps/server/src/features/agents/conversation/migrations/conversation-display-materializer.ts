@@ -51,6 +51,12 @@ interface DisplayToolRecord {
   sortOrder: number;
 }
 
+interface NarrativeDisplayResolver {
+  childAnchor(): string | null;
+  recoveryAnchor(): string | null;
+  displayMessageId(value: unknown, row: CanonicalItemRow): string | null;
+}
+
 /**
  * Writes display-table projections for canonical conversation items before the
  * server admits provider work. The mapping stores identities only, so canonical
@@ -63,6 +69,10 @@ export class ConversationDisplayMaterializer {
   private readonly insertThought: ReturnType<ConversationDisplayMaterializer["buildInsertThought"]>;
   private readonly insertHook: ReturnType<ConversationDisplayMaterializer["buildInsertHook"]>;
   private readonly mapSource: ReturnType<ConversationDisplayMaterializer["buildMapSource"]>;
+  private readonly findChildMessage: ReturnType<ConversationDisplayMaterializer["buildFindChildMessage"]>;
+  private readonly findCanonicalMessage: ReturnType<ConversationDisplayMaterializer["buildFindCanonicalMessage"]>;
+  private readonly findDisplayMessage: ReturnType<ConversationDisplayMaterializer["buildFindDisplayMessage"]>;
+  private readonly findTerminalCheckpoint: ReturnType<ConversationDisplayMaterializer["buildFindTerminalCheckpoint"]>;
 
   constructor(private readonly db: Database) {
     this.orm = drizzle(db);
@@ -71,6 +81,10 @@ export class ConversationDisplayMaterializer {
     this.insertThought = this.buildInsertThought();
     this.insertHook = this.buildInsertHook();
     this.mapSource = this.buildMapSource();
+    this.findChildMessage = this.buildFindChildMessage();
+    this.findCanonicalMessage = this.buildFindCanonicalMessage();
+    this.findDisplayMessage = this.buildFindDisplayMessage();
+    this.findTerminalCheckpoint = this.buildFindTerminalCheckpoint();
   }
 
   private buildInsertMessage() {
@@ -377,9 +391,9 @@ export class ConversationDisplayMaterializer {
     return bounded;
   }
 
-  private materializeRow(row: CanonicalItemRow): void {
+  private materializeRow(row: CanonicalItemRow, resolver?: NarrativeDisplayResolver): void {
     const payload = parsePayload(row);
-    const target = this.materializePayload(row, payload);
+    const target = this.materializePayload(row, payload, resolver);
     if (!target) return;
     this.mapSource.run({
       sourceItemId: row.id,
@@ -393,16 +407,17 @@ export class ConversationDisplayMaterializer {
   private materializePayload(
     row: CanonicalItemRow,
     payload: NarrativePayload,
+    resolver?: NarrativeDisplayResolver,
   ): { kind: string; id: string } | null {
     switch (payload.projection) {
       case "message": return this.materializeMessagePayload(row, payload.message);
-      case "toolCall": return this.materializeDirectNarrative(row, payload, "toolCall");
-      case "narrationSegment": return this.materializeDirectNarrative(row, payload, "narrationSegment");
-      case "hook": return this.materializeDirectNarrative(row, payload, "hook");
-      case "narrativeRecovery": return this.materializeRecoveryPayload(row, payload.narrative);
-      case "codexChildReasoning": return this.materializeChildReasoning(row, payload);
+      case "toolCall": return this.materializeDirectNarrative(row, payload, "toolCall", resolver);
+      case "narrationSegment": return this.materializeDirectNarrative(row, payload, "narrationSegment", resolver);
+      case "hook": return this.materializeDirectNarrative(row, payload, "hook", resolver);
+      case "narrativeRecovery": return this.materializeRecoveryPayload(row, payload.narrative, resolver);
+      case "codexChildReasoning": return this.materializeChildReasoning(row, payload, resolver);
       case "codexChildToolCall":
-      case "codexChildToolResult": return this.materializeChildTool(row, payload);
+      case "codexChildToolResult": return this.materializeChildTool(row, payload, resolver);
       default: return null;
     }
   }
@@ -410,8 +425,9 @@ export class ConversationDisplayMaterializer {
   private materializeRecoveryPayload(
     row: CanonicalItemRow,
     narrative: NarrativePayload["narrative"],
+    resolver?: NarrativeDisplayResolver,
   ): { kind: string; id: string } | null {
-    return narrative?.record ? this.materializeRecoveryNarrative(row, narrative) : null;
+    return narrative?.record ? this.materializeRecoveryNarrative(row, narrative, resolver) : null;
   }
 
   private materializeMessagePayload(
@@ -428,9 +444,10 @@ export class ConversationDisplayMaterializer {
     row: CanonicalItemRow,
     payload: NarrativePayload,
     kind: "toolCall" | "narrationSegment" | "hook",
+    resolver?: NarrativeDisplayResolver,
   ): { kind: string; id: string } | null {
     if (!payload.record) return null;
-    const record = this.withDisplayMessage(payload.record, row);
+    const record = this.withDisplayMessage(payload.record, row, resolver);
     return record ? this.materializeNarrativeRecord(kind, record) : null;
   }
 
@@ -454,17 +471,21 @@ export class ConversationDisplayMaterializer {
   private materializeRecoveryNarrative(
     row: CanonicalItemRow,
     narrative: { kind?: string; record?: Record<string, unknown> },
+    resolver?: NarrativeDisplayResolver,
   ): { kind: string; id: string } | null {
     const record = { ...narrative.record! };
     requiredString(record.id, "recovery narrative id");
+    let visibleRecord: Record<string, unknown> | null;
     if (typeof record.message_id !== "string" || record.message_id.length === 0) {
       // Recovery snapshots intentionally omit a staged assistant message. Keep
       // their visible rows on the prompt until a terminal assistant can own them.
-      const anchor = this.childAnchor(row);
+      const anchor = resolver ? resolver.recoveryAnchor() : this.recoveryAnchor(row);
       if (!anchor) return null;
       record.message_id = anchor;
+      visibleRecord = record;
+    } else {
+      visibleRecord = this.withDisplayMessage(record, row, resolver);
     }
-    const visibleRecord = this.withDisplayMessage(record, row);
     if (!visibleRecord) return null;
     return narrative.kind === "toolCall" || narrative.kind === "narrationSegment" || narrative.kind === "hook"
       ? this.materializeNarrativeRecord(narrative.kind, visibleRecord)
@@ -569,8 +590,9 @@ export class ConversationDisplayMaterializer {
   private materializeChildReasoning(
     row: CanonicalItemRow,
     payload: NarrativePayload,
+    resolver?: NarrativeDisplayResolver,
   ): { kind: string; id: string } | null {
-    const messageId = this.childAnchor(row);
+    const messageId = resolver ? resolver.childAnchor() : this.childAnchor(row);
     if (!messageId) return null;
     const id = `codex-child-reasoning:${hashCodexKey(`${payload.nativeItemId ?? row.payloadJson}:${row.id}`)}`;
     const existing = this.orm.select({ sortOrder: thoughtSegments.sortOrder })
@@ -593,8 +615,9 @@ export class ConversationDisplayMaterializer {
   private materializeChildTool(
     row: CanonicalItemRow,
     payload: NarrativePayload,
+    resolver?: NarrativeDisplayResolver,
   ): { kind: string; id: string } | null {
-    const messageId = this.childAnchor(row);
+    const messageId = resolver ? resolver.childAnchor() : this.childAnchor(row);
     if (!messageId) return null;
     const nativeItemId = payload.nativeItemId ?? row.payloadJson;
     const id = `codex-child-tool:${hashCodexKey(nativeItemId)}`;
@@ -659,7 +682,19 @@ export class ConversationDisplayMaterializer {
   }
 
   private childAnchor(row: CanonicalItemRow): string | null {
-    const childMessage = this.orm.select({
+    const childMessage = this.findChildMessage.get({ threadId: row.threadId, turnId: row.turnId });
+    // Historical child events may be complete while their provider never
+    // emitted a visible message. They have no display projection yet, but the
+    // canonical row remains intact and a later terminal message reanchors it.
+    if (!childMessage) return null;
+    const payload = parsePayload(childMessage);
+    if (!payload.message) throw new Error(`Canonical child anchor ${childMessage.id} has no message payload`);
+    this.materializeMessage(payload.message);
+    return payload.message.id;
+  }
+
+  private buildFindChildMessage() {
+    return this.orm.select({
       id: canonicalAgentItems.id,
       threadId: canonicalAgentItems.threadId,
       turnId: canonicalAgentItems.turnId,
@@ -668,8 +703,8 @@ export class ConversationDisplayMaterializer {
       updatedAt: canonicalAgentItems.updatedAt,
     }).from(canonicalAgentItems)
       .where(and(
-        eq(canonicalAgentItems.threadId, row.threadId),
-        eq(canonicalAgentItems.turnId, row.turnId),
+        eq(canonicalAgentItems.threadId, placeholder("threadId")),
+        eq(canonicalAgentItems.turnId, placeholder("turnId")),
         eq(canonicalAgentItems.kind, "message"),
         sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
         sql`COALESCE(json_extract(${canonicalAgentItems.payloadJson}, '$.message.is_internal'), 0) = 0`,
@@ -688,45 +723,24 @@ export class ConversationDisplayMaterializer {
         sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.id') ASC`,
       )
       .limit(1)
-      .get();
-    // Historical child events may be complete while their provider never
-    // emitted a visible message. They have no display projection yet, but the
-    // canonical row remains intact and a later terminal message reanchors it.
-    if (!childMessage) return null;
-    const payload = parsePayload(childMessage);
-    if (!payload.message) throw new Error(`Canonical child anchor ${childMessage.id} has no message payload`);
-    this.materializeMessage(payload.message);
-    return payload.message.id;
+      .prepare();
   }
 
   private withDisplayMessage(
     record: Record<string, unknown>,
     row: CanonicalItemRow,
+    resolver?: NarrativeDisplayResolver,
   ): Record<string, unknown> | null {
-    const messageId = this.displayMessageId(record.message_id, row);
+    const messageId = resolver
+      ? resolver.displayMessageId(record.message_id, row)
+      : this.displayMessageId(record.message_id, row);
     return messageId ? { ...record, message_id: messageId } : null;
   }
 
   private displayMessageId(value: unknown, row: CanonicalItemRow): string | null {
     const messageId = requiredString(value, "narrative message_id");
-    const exists = this.orm.select({ id: messages.id }).from(messages)
-      .where(eq(messages.id, messageId))
-      .get();
-    const source = this.orm.select({
-      id: canonicalAgentItems.id,
-      threadId: canonicalAgentItems.threadId,
-      turnId: canonicalAgentItems.turnId,
-      payloadJson: canonicalAgentItems.payloadJson,
-      createdAt: canonicalAgentItems.createdAt,
-      updatedAt: canonicalAgentItems.updatedAt,
-    }).from(canonicalAgentItems)
-      .where(and(
-        eq(canonicalAgentItems.threadId, row.threadId),
-        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
-        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.id') = ${messageId}`,
-      ))
-      .limit(1)
-      .get();
+    const exists = this.findDisplayMessage.get({ messageId });
+    const source = this.findCanonicalMessage.get({ threadId: row.threadId, messageId });
     if (!source) {
       if (exists) return messageId;
       throw new Error(`Canonical narrative item ${row.id} references missing message ${messageId}`);
@@ -739,6 +753,30 @@ export class ConversationDisplayMaterializer {
     }
     if (payload.message.role === "assistant") return this.childAnchor(row);
     throw new Error(`Canonical narrative item ${row.id} references a hidden message ${messageId}`);
+  }
+
+  private buildFindDisplayMessage() {
+    return this.orm.select({ id: messages.id }).from(messages)
+      .where(eq(messages.id, placeholder("messageId")))
+      .prepare();
+  }
+
+  private buildFindCanonicalMessage() {
+    return this.orm.select({
+      id: canonicalAgentItems.id,
+      threadId: canonicalAgentItems.threadId,
+      turnId: canonicalAgentItems.turnId,
+      payloadJson: canonicalAgentItems.payloadJson,
+      createdAt: canonicalAgentItems.createdAt,
+      updatedAt: canonicalAgentItems.updatedAt,
+    }).from(canonicalAgentItems)
+      .where(and(
+        eq(canonicalAgentItems.threadId, placeholder("threadId")),
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.id') = ${placeholder("messageId")}`,
+      ))
+      .limit(1)
+      .prepare();
   }
 
   private nextChildThoughtSortOrder(messageId: string): number {
@@ -766,14 +804,18 @@ export class ConversationDisplayMaterializer {
   }
 
   private turnHasTerminalCheckpoint(turnId: string): boolean {
+    return this.findTerminalCheckpoint.get({ turnId }) != null;
+  }
+
+  private buildFindTerminalCheckpoint() {
     return this.orm.select({ executionId: canonicalAgentIngestCheckpoints.executionId })
       .from(canonicalAgentIngestCheckpoints)
       .where(and(
-        eq(canonicalAgentIngestCheckpoints.turnId, turnId),
+        eq(canonicalAgentIngestCheckpoints.turnId, placeholder("turnId")),
         isNotNull(canonicalAgentIngestCheckpoints.terminalOutcome),
       ))
       .limit(1)
-      .get() != null;
+      .prepare();
   }
 
   private reanchorTurnChildren(row: CanonicalItemRow): void {
@@ -796,7 +838,33 @@ export class ConversationDisplayMaterializer {
       ))
       .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
       .all();
-    for (const child of children) this.materializeRow(child);
+    const resolver = this.reanchorMessageResolver(row);
+    for (const child of children) this.materializeRow(child, resolver);
+  }
+
+  private recoveryAnchor(row: CanonicalItemRow): string | null {
+    const anchor = this.childAnchor(row);
+    return anchor ? this.displayMessageId(anchor, row) : null;
+  }
+
+  private reanchorMessageResolver(row: CanonicalItemRow): NarrativeDisplayResolver {
+    // Resolution also updates the display message. Only consecutive identical
+    // lookups can skip that write when canonical sources share a message ID.
+    let previous: { key: string; messageId: string | null } | undefined;
+    const resolve = (key: string, read: () => string | null): string | null => {
+      if (previous?.key === key) return previous.messageId;
+      const messageId = read();
+      previous = { key, messageId };
+      return messageId;
+    };
+    return {
+      childAnchor: () => resolve("child", () => this.childAnchor(row)),
+      recoveryAnchor: () => resolve("recovery", () => this.recoveryAnchor(row)),
+      displayMessageId: (value, child) => {
+        const messageId = requiredString(value, "narrative message_id");
+        return resolve(`message:${messageId}`, () => this.displayMessageId(messageId, child));
+      },
+    };
   }
 }
 

@@ -5,6 +5,7 @@ import type { NarrativeStore } from "../conversation/narrative/narrative-store.j
 import { publishParentProviderEvent } from "../events/provider-event-publication.js";
 import { publishAgentPermissionEvents } from "../permissions/permission-publication.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 
 /** The runtime read surface needed to prepare renderer-facing provider events. */
 export interface AgentEventPublicationRuntime {
@@ -42,6 +43,14 @@ export class AgentEventPublicationService {
 
   /** Publish one provider event after its synchronous persistence application completed. */
   publish(event: AgentEvent): void {
+    if (serverWorkTrace) {
+      serverWorkTrace.measure("publication", event.threadId, event.turnExecutionId, () => this.publishCore(event));
+      return;
+    }
+    this.publishCore(event);
+  }
+
+  private publishCore(event: AgentEvent): void {
     if (this.shouldSuppress(event)) return;
     const enriched = this.sanitize(this.enrich(event));
     const published = publishParentProviderEvent(event, enriched, {
@@ -53,6 +62,8 @@ export class AgentEventPublicationService {
   }
 
   private shouldSuppress(event: AgentEvent): boolean {
+    // A stable publication already passed the writer's semantic and terminal barriers.
+    if (event.publicationId) return false;
     if (event.type === AgentEventType.Ended) return this.dependencies.runtime.shouldSuppressTurnEnded(event.threadId);
     if (event.type === AgentEventType.TurnComplete) return this.dependencies.runtime.shouldSuppressTurnComplete(event.threadId);
     return event.type === AgentEventType.Error

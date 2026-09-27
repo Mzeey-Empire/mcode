@@ -42,6 +42,53 @@ describe("ThreadRepo.updateSettings", () => {
     expect(thread?.permission_mode).toBeNull();
   });
 
+  it("persists model, provider, and supplied settings together while retaining omitted values", () => {
+    repo.updateSettings(threadId, { reasoning_level: "high", thinking: true, codex_fast_mode: true });
+
+    expect(repo.updateSettings(threadId, {
+      model: "gpt-5.6-luna",
+      provider: "codex",
+      permission_mode: "full",
+      thinking: false,
+      codex_fast_mode: null,
+    })).toBe(true);
+
+    expect(repo.findById(threadId)).toMatchObject({
+      model: "gpt-5.6-luna",
+      provider: "codex",
+      permission_mode: "full",
+      reasoning_level: "high",
+      thinking: false,
+      codex_fast_mode: null,
+    });
+    repo.updateSettings(threadId, { model: "gpt-5.6-sol" });
+    expect(repo.findById(threadId)).toMatchObject({ model: "gpt-5.6-sol", provider: "codex", permission_mode: "full" });
+  });
+
+  it("leaves all thread settings unchanged when the combined update fails", () => {
+    repo.updateSettings(threadId, { model: "original-model", provider: "claude", permission_mode: "supervised" });
+    const before = repo.findById(threadId);
+    db.exec(`
+      CREATE TRIGGER reject_full_permission BEFORE UPDATE OF permission_mode ON threads
+      WHEN NEW.permission_mode = 'full'
+      BEGIN
+        SELECT RAISE(ABORT, 'permission update rejected');
+      END;
+    `);
+
+    expect(() => repo.updateSettings(threadId, {
+      model: "gpt-5.6-luna", provider: "codex", permission_mode: "full",
+    })).toThrow("permission update rejected");
+
+    expect(repo.findById(threadId)).toEqual(before);
+  });
+
+  it("retains the timestamp when no settings are supplied", () => {
+    const before = repo.findById(threadId);
+    expect(repo.updateSettings(threadId, {})).toBe(false);
+    expect(repo.findById(threadId)).toEqual(before);
+  });
+
   it("returns false for nonexistent thread", () => {
     const ok = repo.updateSettings("nonexistent", { reasoning_level: "low" });
     expect(ok).toBe(false);

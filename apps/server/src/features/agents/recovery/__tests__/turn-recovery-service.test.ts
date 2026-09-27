@@ -9,9 +9,9 @@ import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/datab
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import {
-  CanonicalAgentEventSink,
+  CanonicalAgentBoundary,
   type CanonicalAgentEventPublisher,
-} from "../../canonical/canonical-agent-event-sink.js";
+} from "../../canonical/canonical-agent-boundary.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
@@ -29,7 +29,7 @@ const EXECUTION_ID = "00000000-0000-4000-8000-000000000015";
 
 describe("TurnRecoveryService", () => {
   let db: Database;
-  let sink: CanonicalAgentEventSink;
+  let sink: CanonicalAgentBoundary;
   let threadRepo: ThreadRepo;
   let messageRepo: MessageRepo;
   let defaultCheckpoints: ParentAssistantTextCheckpointService;
@@ -45,7 +45,7 @@ describe("TurnRecoveryService", () => {
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "workspace-recovery", "Recovery", "main", "codex", "active", NOW, NOW);
     published = vi.fn();
-    sink = new CanonicalAgentEventSink(db, published);
+    sink = new CanonicalAgentBoundary(db, published);
     threadRepo = new ThreadRepo(db);
     messageRepo = new MessageRepo(db);
     defaultCheckpoints = new ParentAssistantTextCheckpointService(db);

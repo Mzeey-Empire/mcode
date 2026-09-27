@@ -8,6 +8,8 @@ import { TerminalBackendError, type TerminalBackend } from "../backends/terminal
 import type { TerminalProfileService } from "../profiles/terminal-profile-service.js";
 import type { WorkspaceTerminalPreferencesService } from "../preferences/workspace-terminal-preferences-service.js";
 import type { SettingsService } from "../../settings/settings-service.js";
+import * as NodePerfHooks from "node:perf_hooks";
+import { serverWorkTrace } from "../../agents/diagnostics/server-work-trace.js";
 
 type TerminalManagementMethod =
   | "terminal.profile.list"
@@ -111,7 +113,15 @@ const terminalManagementHandlers: TerminalManagementHandlers = {
 
 const terminalClassicHandlers: TerminalClassicHandlers = {
   "terminal.capabilities": (deps) => deps.terminalService.capabilities(),
-  "terminal.create": (deps, params) => deps.terminalService.create(params.threadId),
+  "terminal.create": async (deps, params) => {
+    if (!serverWorkTrace) return deps.terminalService.create(params.threadId);
+    const started = NodePerfHooks.performance.now();
+    try {
+      return await deps.terminalService.create(params.threadId);
+    } finally {
+      serverWorkTrace.record("terminal-create", params.threadId, undefined, NodePerfHooks.performance.now() - started);
+    }
+  },
   "terminal.write": async (deps, params) => {
     await deps.terminalService.write(params.ptyId, params.data);
   },

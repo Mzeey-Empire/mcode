@@ -72,32 +72,33 @@ A provider emits a `ProviderRuntimeEvent`. Its `event` is provider-neutral data
 that may reach the renderer. Its optional extension contains provider-native
 evidence that must not reach the renderer.
 
-The server accepts runtime events in this order:
+An admitted worker-owned execution sends its canonical provider drafts to the
+execution's ordered mailbox. One of a fixed number of workers owns that task
+for the execution lifetime. It reduces parent events and file observations,
+then awaits the single execution SQLite writer for the event, turn state, and
+publication receipt. The server publishes the committed result without
+applying that event again through `ProviderTurnEventApplication`. Stop,
+terminalization, and late events use the same execution fence. The mailbox has
+bounded capacity and schedules tasks fairly when they share a worker.
+Worker ownership currently admits user-dispatched Codex turns. Claude, Cursor,
+and provider-originated resumes still use the legacy route.
 
-```text
-Provider runtime event → provider ingress → event worker → provider adapter → turn event pipeline → AgentEvent
-```
-
-Ingress validates the provider identity and sends cloneable event validation to
-a fixed worker pool. A thread stays on one worker until its queued work drains;
-the pool limits concurrent work and returns results in that thread's order.
-Ingress then queues accepted results fairly across threads and preserves the
-receipt when it came from a canonical commit. It waits for both the worker and
-the ingress queue before finalizing a turn. The worker does not own the
-database: canonical commits and turn state still run in the server process.
-An adapter may forward a generic event, consume private provider work, or
-reject malformed native evidence with a diagnostic. Only a forwarded
-`AgentEvent` enters narration, lifecycle, and
-renderer publication.
+Executions without a worker owner still use provider ingress, cloneable event
+preprocessing, the provider adapter, and `TurnEventPipeline`. That route
+preserves the existing canonical receipt and finalization fence. A provider
+adapter may forward a generic event, consume private native evidence, or
+reject malformed evidence with a diagnostic. Only a forwarded `AgentEvent`
+reaches the renderer.
 
 Codex collaboration evidence uses a Codex adapter. Claude, Cursor, and Copilot
 send generic runtime events and do not invoke that adapter. A new provider adds
 an adapter only when it has private native evidence that requires server-side
 projection.
 
-Canonical commits hand their committed runtime envelopes directly to ingress.
-The resulting receipt means durable acceptance or queueing. It never means that
-the event was published to the renderer.
+Canonical commits on the legacy route hand their committed runtime envelopes
+to ingress. A worker-owned receipt instead covers the parent event and its
+turn effects together. Neither receipt alone proves the renderer displayed the
+event.
 
 `AgentService` owns provider selection and narrow parent-turn durability. It
 does not import a concrete provider, a provider adapter, or a canonical

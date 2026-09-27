@@ -8,18 +8,12 @@ import "reflect-metadata";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import * as NodeHTTP from "node:http";
 import { WebSocket } from "ws";
-import { createWsServer } from "../ws-server.js";
+import { createWsServer, type WsServerDeps } from "../ws-server.js";
 import type { RouterDeps } from "../ws-router.js";
 
 /** Minimal RouterDeps stub — only agentService is called by the health handler. */
 function makeMinimalDeps(
-  overrides: Partial<RouterDeps & {
-    authToken: string;
-    singleInstance: boolean;
-    instanceToken: string | null;
-    worktreeIdentity: string | null;
-    shutdown: () => void;
-  }> = {},
+  overrides: Partial<WsServerDeps> = {},
 ): RouterDeps & {
   authToken: string;
   singleInstance: boolean;
@@ -217,6 +211,28 @@ describe("/health endpoint", () => {
     const { body } = await getHealth(server);
     expect((body as Record<string, unknown>).status).toBe("ok");
     expect((body as Record<string, unknown>).activeAgents).toBe(2);
+  });
+
+  it("exposes bounded execution queue counts without command content", async () => {
+    const deps = makeMinimalDeps({
+      workerQueueDepth: () => ({
+        pending: 3,
+        pendingBytes: 512,
+        activeExecutions: 7,
+        workers: [{ index: 0, queued: 2, inFlight: true }],
+      }),
+    });
+    ({ httpServer: server } = createWsServer(deps));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const { body } = await getHealth(server);
+    expect((body as Record<string, unknown>).workerQueue).toEqual({
+      pending: 3,
+      pendingBytes: 512,
+      activeExecutions: 7,
+      workers: [{ index: 0, queued: 2, inFlight: true }],
+    });
+    expect(JSON.stringify((body as Record<string, unknown>).workerQueue)).not.toMatch(/thread|command|prompt|token/i);
   });
 
   it("exposes content-free browser automation reliability diagnostics", async () => {

@@ -4,7 +4,7 @@ import type { Database } from "bun:sqlite";
 import type { ProviderTurnDiffUpdate, TurnFileEffectSummary } from "@mcode/contracts";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { TurnDiffRepo } from "../persistence/turn-diff-repo.js";
-import { TURN_DIFF_MAX_BYTES, TurnDiffService } from "../turn-diff-service.js";
+import { TURN_DIFF_MAX_BYTES, TurnDiffService, selectTurnDiffSettlement } from "../turn-diff-service.js";
 
 const patch = "diff --git a/a.txt b/a.txt\nindex 1..2\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n";
 const identity = { threadId: "thread-1", turnId: "turn-1", turnExecutionId: "execution-1", deliveryAttempt: 1 };
@@ -70,6 +70,21 @@ describe("TurnDiffService production settlement", () => {
     expect(repo.latest(identity.threadId)?.patch).toBe(patch);
     expect(service.liveComparison(identity.threadId)?.turnDiff?.id).toBe("live:turn-2:execution-2:1:1");
     expect(service.push(update({ revision: 99 }))).toBe("stale");
+  });
+
+  it("transfers cloneable terminal evidence with exact execution fencing", () => {
+    expect(service.push(update())).toBe("accepted");
+    expect(service.takeFinalizationEvidence(identity.threadId, "stale-execution")).toBeNull();
+    const prepared = service.takeFinalizationEvidence(identity.threadId, identity.turnExecutionId);
+    expect(prepared).not.toBeNull();
+    if (!prepared) throw new Error("Expected frozen terminal evidence");
+    expect(service.liveComparison(identity.threadId)).toBeNull();
+    expect(service.takeFinalizationEvidence(identity.threadId, identity.turnExecutionId)).toBeNull();
+    expect(selectTurnDiffSettlement(structuredClone(prepared), "completed", effects)).toEqual({
+      thread_id: identity.threadId, source: "native", patch, revision: 1,
+    });
+    expect(selectTurnDiffSettlement(prepared, "interrupted", effects)).toBeNull();
+    expect(repo.latest(identity.threadId)).toBeUndefined();
   });
 
   it.each(["invalidated", "interrupted", "cancelled", "errored"] as const)("preserves previous settlement on %s", (state) => {

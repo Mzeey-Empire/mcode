@@ -307,6 +307,8 @@ function serializeBooleanOverride(value: boolean | null): number | null {
 }
 
 type ThreadSettings = {
+  model?: string;
+  provider?: string;
   reasoning_level?: string;
   interaction_mode?: string;
   orchestration_mode?: string;
@@ -320,6 +322,8 @@ type ThreadSettings = {
 };
 
 const TEXT_SETTING_COLUMNS = [
+  ["model", "model"],
+  ["provider", "provider"],
   ["reasoning_level", "reasoningLevel"],
   ["interaction_mode", "interactionMode"],
   ["orchestration_mode", "orchestrationMode"],
@@ -1007,7 +1011,7 @@ export class ThreadRepo {
     return result.changes > 0;
   }
 
-  /** Persist per-thread composer settings (reasoning, mode, permission, copilot agent). */
+  /** Persist model, provider, and supplied composer settings in one atomic update. */
   updateSettings(id: string, settings: ThreadSettings): boolean {
     const set = buildSettingsSet(settings);
     if (Object.keys(set).length === 0) return false;

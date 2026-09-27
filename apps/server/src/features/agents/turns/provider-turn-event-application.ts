@@ -7,6 +7,7 @@ import {
   type ProviderId,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 
 import { broadcast } from "../../../application/transport/push.js";
 import { BrowserNarrativeEventSanitizer } from "../../browser-automation/index.js";
@@ -109,6 +110,11 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     const queued = this.queueVisibleAssistantText(input, event, publish);
     if (queued !== undefined) return queued;
     return this.applyPreparedEvent(input, event, publish);
+  }
+
+  /** Publish an execution-writer event without repeating any turn persistence. */
+  publishCommitted(event: AgentEvent): void {
+    this.publish(event);
   }
 
   /** Record a provider file mutation before its public event is available. */
@@ -588,7 +594,10 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private checkpointNarrative(event: AgentEvent, publish: boolean): boolean {
     if (!publish || this.isUnsavedNarrationBoundary(event)) return true;
     try {
-      this.parentNarrativeRecovery.checkpoint(event);
+      if (serverWorkTrace) {
+        serverWorkTrace.measure("narrative-checkpoint", event.threadId, event.turnExecutionId,
+          () => this.parentNarrativeRecovery.checkpoint(event));
+      } else this.parentNarrativeRecovery.checkpoint(event);
       return true;
     } catch {
       this.runtime.stopForEventApplicationFailure(event, "Parent narrative recovery checkpoint failed");

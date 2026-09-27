@@ -1,10 +1,14 @@
+import "reflect-metadata";
 import { afterEach, describe, expect, it } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import { AgentEventType, type TurnFileEffectSummary } from "@mcode/contracts";
 import { TurnFileTracker } from "../turn-file-tracker.js";
+import { prepareExecutionFileEvidence } from "../turn-execution-file-evidence.js";
 import { parseTurnDiff } from "../turn-diff-patch.js";
+import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
+import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
 import {
   createCursorAcpTurnState,
   mapCursorAcpSessionNotification,
@@ -90,16 +94,13 @@ describe("TurnFileTracker", () => {
       TEST_PLATFORM,
     );
     tracker.beginTurn("t", root, "unavailable-ref");
-    const pendingStarts = [tracker.observeToolUse(
-      "t",
-      "file-child",
-      "file_change",
-      { changes: [{ path: "tracked.txt", kind: "edit" }] },
-    )];
+    const event = { threadId: "t", toolCallId: "file-child", toolName: "file_change", toolInput: { changes: [{ path: "tracked.txt", kind: "edit" }] } };
+    const captured = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected a captured baseline");
+    expect(structuredClone(captured)).toEqual(captured);
     await NodeFSPromises.writeFile(trackedPath, "after\nextra\n");
-    expect(pendingStarts).toHaveLength(1);
+    expect(await tracker.observeCapturedToolUse(event, structuredClone(captured))).toBe(true);
     await tracker.observeToolResult("t", "file-child");
-    await Promise.all(pendingStarts);
 
     const summary = await tracker.finalizeTurn("t");
     expect(summary).toMatchObject({ fileCount: 1, additions: 2, deletions: 1 });
@@ -109,6 +110,165 @@ describe("TurnFileTracker", () => {
       toolCallIds: ["file-child"],
     });
     expect(updates.at(-1)).toEqual(summary);
+  });
+
+  it("transfers one execution's pre-edit capture to a separate tracker after a real edit", async () => {
+    const root = await tempDir("mcode-transferred-file-observation-");
+    const path = NodePath.join(root, "tracked.txt");
+    await NodeFSPromises.writeFile(path, "before\n");
+    const baseline = async () => ({ kind: "unavailable" as const });
+    const host = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const worker = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const expected = { threadId: "t", executionId: "execution-1", cwd: root };
+    const handoff = host.beginExecutionTurn({ ...expected, baselineRef: null });
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { file_path: "tracked.txt" } };
+    const captured = host.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected a pre-edit capture");
+
+    await NodeFSPromises.writeFile(path, "after\nextra\n");
+    expect(worker.beginTurnFromHandoff(structuredClone(handoff), expected)).toBe(true);
+    expect(worker.beginTurnFromHandoff({ ...handoff, baselineRef: "other-ref" }, expected)).toBe(false);
+    await worker.setBaselineRef("t", handoff.generation, "later-ref");
+    expect(worker.beginTurnFromHandoff(structuredClone(handoff), expected)).toBe(true);
+    expect(await worker.observeCapturedToolUse(event, { ...captured, executionId: "other-execution" })).toBe(false);
+    expect(await worker.observeCapturedToolUse(event, structuredClone(captured))).toBe(true);
+    await worker.observeToolResult("t", "edit");
+    expect(await worker.finalizeTurn("t")).toMatchObject({ fileCount: 1, additions: 2, deletions: 1 });
+  });
+
+  it("seals only the exact execution generation before a resumed turn reuses a tool ID", async () => {
+    const root = await tempDir("mcode-sealed-file-generation-");
+    const path = NodePath.join(root, "tracked.txt");
+    await NodeFSPromises.writeFile(path, "before\n");
+    const tracker = trackerWithBaseline({}, []);
+    const first = tracker.beginExecutionTurn({
+      threadId: "t", executionId: "execution-1", cwd: root, baselineRef: null,
+    });
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { file_path: "tracked.txt" } };
+    const capture = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!capture) throw new Error("Expected first execution capture");
+    await NodeFSPromises.writeFile(path, "after\n");
+    expect(await tracker.observeCapturedToolUse(event, capture)).toBe(true);
+    await tracker.observeToolResult("t", "edit");
+    const frozen = await tracker.finalEvidenceForExecution(first);
+    expect(frozen?.summary).toMatchObject({ fileCount: 1 });
+    expect(await tracker.finalEvidenceForExecution(first)).toEqual(frozen);
+    expect(tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput)).toBeNull();
+    expect(await tracker.observeCapturedToolUse(event, capture)).toBe(false);
+
+    const second = tracker.beginExecutionTurn({
+      threadId: "t", executionId: "execution-2", cwd: root, baselineRef: null,
+    });
+    expect(await tracker.finalEvidenceForExecution({ ...first, generationToken: second.generationToken })).toBeNull();
+    expect((await tracker.finalEvidenceForExecution(second))?.summary.fileCount).toBe(0);
+    tracker.clearTurn("t", first.generation);
+    expect(await tracker.finalEvidenceForExecution(first)).toBeNull();
+  });
+
+  it("rejects native diff evidence from another delivery attempt before terminal preparation", async () => {
+    const root = await tempDir("mcode-file-diff-attempt-");
+    const tracker = trackerWithBaseline({}, []);
+    const handoff = tracker.beginExecutionTurn({
+      threadId: "t", executionId: "execution-1", cwd: root, baselineRef: null,
+    });
+    const input = {
+      handoff, turnId: "turn-1", deliveryAttempt: 2, outcome: "completed" as const,
+      tracker, snapshots: new SnapshotService(new RealGitExecutor()),
+      nativeDiff: {
+        threadId: "t", turnId: "turn-1", turnExecutionId: "execution-1", deliveryAttempt: 1,
+        revision: 1, evidence: null, rejected: false,
+      },
+    };
+    await expect(prepareExecutionFileEvidence(input)).rejects.toThrow("Native diff does not belong");
+    const prepared = await prepareExecutionFileEvidence({ ...input, nativeDiff: null });
+    expect(prepared).toMatchObject({
+      threadId: "t", executionId: "execution-1", filesChanged: [], snapshot: null, selectedTurnDiff: null,
+    });
+    expect(() => structuredClone(prepared)).not.toThrow();
+  });
+
+  it("rejects a handoff or capture for another execution or root", async () => {
+    const root = await tempDir("mcode-transferred-file-stale-");
+    const otherRoot = await tempDir("mcode-transferred-file-other-root-");
+    const baseline = async () => ({ kind: "unavailable" as const });
+    const oldHost = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const currentHost = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const worker = new TurnFileTracker(baseline, () => {}, TEST_PLATFORM);
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { file_path: "tracked.txt" } };
+    oldHost.beginExecutionTurn({ threadId: "t", executionId: "old-execution", cwd: root, baselineRef: null });
+    const oldCapture = oldHost.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!oldCapture) throw new Error("Expected an old capture");
+    const expected = { threadId: "t", executionId: "current-execution", cwd: root };
+    const handoff = currentHost.beginExecutionTurn({ ...expected, baselineRef: null });
+
+    expect(worker.beginTurnFromHandoff(handoff, { ...expected, executionId: "old-execution" })).toBe(false);
+    expect(worker.beginTurnFromHandoff(handoff, { ...expected, cwd: otherRoot })).toBe(false);
+    expect(worker.beginTurnFromHandoff({ ...handoff, unrelatedThread: "secret" }, expected)).toBe(false);
+    expect(worker.beginTurnFromHandoff(handoff, expected)).toBe(true);
+    expect(await worker.observeCapturedToolUse(event, oldCapture)).toBe(false);
+    expect(await worker.observeCapturedToolUse(event, { ...oldCapture, executionId: expected.executionId })).toBe(false);
+    expect(await worker.finalizeTurn("t")).toMatchObject({ fileCount: 0 });
+  });
+
+  it("rejects a captured baseline from another tool, root, or turn generation", async () => {
+    const root = await tempDir("mcode-stale-observation-");
+    const path = NodePath.join(root, "tracked.txt");
+    await NodeFSPromises.writeFile(path, "before\n");
+    const tracker = new TurnFileTracker(async () => ({ kind: "unavailable" }), () => {}, TEST_PLATFORM);
+    const event = { threadId: "t", toolCallId: "old-tool", toolName: "Edit", toolInput: { file_path: "tracked.txt" } };
+    const firstGeneration = tracker.beginTurn("t", root, null);
+    const captured = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected a captured baseline");
+    expect(await tracker.observeCapturedToolUse({ ...event, toolCallId: "other-tool" }, captured)).toBe(false);
+    expect(await tracker.observeCapturedToolUse({ ...event, toolName: "Write" }, captured)).toBe(false);
+    expect(await tracker.observeCapturedToolUse(event, { ...captured, canonicalRoot: "other-root" })).toBe(false);
+    expect(await tracker.observeCapturedToolUse({ ...event, toolInput: { file_path: "other.txt" } }, captured)).toBe(false);
+    const replacement = new TurnFileTracker(async () => ({ kind: "unavailable" }), () => {}, TEST_PLATFORM);
+    expect(replacement.beginTurn("t", root, null)).toBe(firstGeneration);
+    expect(await replacement.observeCapturedToolUse(event, captured)).toBe(false);
+
+    const nextGeneration = tracker.beginTurn("t", root, null);
+    await NodeFSPromises.writeFile(path, "after\n");
+    expect(await tracker.observeCapturedToolUse(event, structuredClone(captured))).toBe(false);
+    await tracker.observeToolResult("t", event.toolCallId);
+    expect(await tracker.finalizeTurn("t", firstGeneration)).toMatchObject({ fileCount: 0 });
+    expect(await tracker.finalizeTurn("t", nextGeneration)).toMatchObject({ fileCount: 0 });
+  });
+
+  it("binds captured observations to the exact before and after evidence text", async () => {
+    const root = await tempDir("mcode-observation-evidence-");
+    const tracker = trackerWithBaseline({}, []);
+    tracker.beginTurn("t", root, null);
+    const mutation = { path: "file.txt", kind: "edit", fullFileContent: true, beforeText: "before\n", afterText: "after\n" };
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { _mcodeFileMutations: [mutation] } };
+    const captured = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected captured text evidence");
+
+    expect(await tracker.observeCapturedToolUse({
+      ...event, toolInput: { _mcodeFileMutations: [{ ...mutation, beforeText: "befoXe\n" }] },
+    }, captured)).toBe(false);
+    expect(await tracker.observeCapturedToolUse({
+      ...event, toolInput: { _mcodeFileMutations: [{ ...mutation, afterText: "aftEr\n" }] },
+    }, captured)).toBe(false);
+  });
+
+  it("does not accept an observation if input extraction clears its turn", async () => {
+    const root = await tempDir("mcode-observation-cleared-turn-");
+    const tracker = trackerWithBaseline({}, []);
+    tracker.beginTurn("t", root, null);
+    const event = { threadId: "t", toolCallId: "edit", toolName: "Edit", toolInput: { file_path: "file.txt" } };
+    const captured = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected captured tool observation");
+    const clearingInput: Record<string, unknown> = {};
+    Object.defineProperty(clearingInput, "file_path", {
+      get: () => {
+        tracker.clearTurn("t");
+        return "file.txt";
+      },
+    });
+
+    expect(await tracker.observeCapturedToolUse({ ...event, toolInput: clearingInput }, captured)).toBe(false);
+    expect(tracker.getCurrentTurnId("t")).toBeUndefined();
   });
 
   it("classifies added, edited, and removed files with net line totals", async () => {
@@ -384,6 +544,23 @@ describe("TurnFileTracker", () => {
     await observation;
 
     expect(synchronousDurationMs).toBeLessThan(250);
+  });
+
+  it("keeps captured pre-edit observations within the path and byte budgets", async () => {
+    const root = await tempDir("mcode-captured-observation-budget-");
+    const tracker = trackerWithBaseline({}, []);
+    tracker.beginTurn("t", root, null);
+    const changes = Array.from({ length: 5 }, (_, index) => ({ path: `file-${index}.txt`, kind: "edit" }));
+    for (const change of changes) {
+      await NodeFSPromises.writeFile(NodePath.join(root, change.path), "x".repeat(350_000));
+    }
+    const captured = tracker.captureToolUseObservation("t", "bulk", "file_change", { changes });
+    if (!captured) throw new Error("Expected bounded observations");
+    expect(captured.observations).toHaveLength(5);
+    expect(captured.observations.filter(Boolean)).toHaveLength(4);
+    const capturedBytes = captured.observations.reduce((total, observation) =>
+      total + Buffer.byteLength(observation?.baseline?.text ?? "", "utf8"), 0);
+    expect(capturedBytes).toBeLessThanOrEqual(1_048_576);
   });
 
   it("falls back to complete async observation when a rename exceeds the remaining path budget", async () => {

@@ -16,6 +16,7 @@ export type {
   ProviderFactoryConfiguration,
   ProviderFactoryInput,
 } from "./factory-types.js";
+export type { CodexCanonicalEventRouting } from "./private/codex/codex-canonical-event-publisher.js";
 export type {
   ProviderBrowserLeaseHandle,
   ProviderBrowserLeaseGrant,

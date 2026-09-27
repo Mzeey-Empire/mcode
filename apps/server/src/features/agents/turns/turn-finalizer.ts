@@ -37,19 +37,13 @@ import type { ParentTurnDurability } from "./parent-turn-durability.js";
 import type { ParentAssistantTextCheckpointService } from "./parent-assistant-text-checkpoint-service.js";
 import { deriveTurnAssistantMessageId } from "./turn-assistant-message-id.js";
 import type { TurnDiffService, SettleTurnDiff } from "./turn-diff-service.js";
+import { AssistantExecutionState, type AssistantMaterializationInput } from "./assistant-execution-state.js";
 
 /** Pre-turn git ref captured at send time, used to diff the turn's file changes. */
 interface TurnRef {
   ref: string | null;
   cwd: string;
   fileTrackerGeneration?: number;
-}
-
-/** Provider assistant body buffered during a turn, materialized at finalize. */
-interface BufferedBody {
-  content: string;
-  model: string | null;
-  attachments: StoredAttachment[];
 }
 
 interface MaterializedAssistantRow {
@@ -63,13 +57,6 @@ interface CanonicalProjection {
   materialized: MaterializedAssistantRow | null;
   toolCallCount: number;
   narrative: ReturnType<NarrativeStore["loadForMessages"]>;
-}
-
-interface AssistantMaterializationInput {
-  content: string;
-  model: string | null;
-  attachments: StoredAttachment[];
-  fromProvider: boolean;
 }
 
 /** Durable snapshot operations required by terminal materialization. */
@@ -88,14 +75,8 @@ export class TurnFinalizer {
   private readonly persistingThreads = new Set<string>();
   /** Last persisted assistant message id per thread, for late-hook attachment. */
   private readonly lastPersistedMessageIdByThread = new Map<string, string>();
-  /** Streaming assistant text accumulated from textDelta events, per thread. */
-  private readonly streamingAssistantTextByThread = new Map<string, string>();
-  /** Buffered provider assistant body awaiting materialization at finalize, per thread. */
-  private readonly bufferedBodyByThread = new Map<string, BufferedBody>();
-  /** Generated attachments awaiting materialization with the assistant row. */
-  private readonly bufferedAttachmentsByThread = new Map<string, StoredAttachment[]>();
-  /** Threads whose assistant row was already materialized this turn (e.g. eagerly for a plan FK). */
-  private readonly materializedThreads = new Set<string>();
+  /** One assistant decision state per active thread execution. */
+  private readonly assistantStateByThread = new Map<string, AssistantExecutionState>();
   private readonly orm: BunSQLiteDatabase;
   /** Serializes finalize calls per thread so a slow git snapshot cannot drop a later turn. */
   private readonly finalizeChainByThread = new Map<string, Promise<void>>();
@@ -118,18 +99,17 @@ export class TurnFinalizer {
 
   /** Append a streaming assistant-text delta for the current turn. */
   appendStreamingText(threadId: string, delta: string): void {
-    const prev = this.streamingAssistantTextByThread.get(threadId) ?? "";
-    this.streamingAssistantTextByThread.set(threadId, prev + delta);
+    this.assistantState(threadId).appendStreamingText(delta);
   }
 
   /** Return the unmaterialized assistant text for the active turn. */
   getStreamingText(threadId: string): string {
-    return this.streamingAssistantTextByThread.get(threadId) ?? "";
+    return this.assistantStateByThread.get(threadId)?.getStreamingText() ?? "";
   }
 
   /** Drop accumulated streaming text (a real assistant row now exists, or a new turn began). */
   resetStreamingText(threadId: string): void {
-    this.streamingAssistantTextByThread.delete(threadId);
+    this.assistantStateByThread.get(threadId)?.resetStreamingText();
   }
 
   /**
@@ -147,24 +127,19 @@ export class TurnFinalizer {
     model: string | null,
     attachments = this.getBufferedAssistantAttachments(threadId),
   ): string {
-    this.bufferedBodyByThread.set(threadId, { content, model, attachments });
+    this.assistantState(threadId).bufferBody(content, model, attachments);
     return deriveTurnAssistantMessageId(threadId, this.turnAnchorId(threadId));
   }
 
   /** Buffer assistant-generated attachments until the turn's assistant row is materialized. */
   bufferAssistantAttachments(threadId: string, attachments: StoredAttachment[]): void {
     if (attachments.length === 0) return;
-    const existing = this.bufferedAttachmentsByThread.get(threadId) ?? [];
-    const byId = new Map(existing.map((att) => [att.id, att]));
-    for (const att of attachments) {
-      byId.set(att.id, att);
-    }
-    this.bufferedAttachmentsByThread.set(threadId, [...byId.values()]);
+    this.assistantState(threadId).bufferAttachments(attachments);
   }
 
   /** Return generated attachments buffered for the current assistant turn. */
   getBufferedAssistantAttachments(threadId: string): StoredAttachment[] {
-    return this.bufferedAttachmentsByThread.get(threadId) ?? [];
+    return this.assistantStateByThread.get(threadId)?.getBufferedAttachments() ?? [];
   }
 
   /** Record the pre-turn git ref so the turn's file changes can be diffed at finalize. */
@@ -206,18 +181,9 @@ export class TurnFinalizer {
   hasRecordableActivity(threadId: string): boolean {
     // An already-materialized row (e.g. eagerly written for a plan FK target)
     // is itself recordable activity even after its buffered body was consumed.
-    if (this.materializedThreads.has(threadId)) return true;
-    if (this.hasBufferedBody(threadId)) return true;
-    if (this.getBufferedAssistantAttachments(threadId).length > 0) return true;
+    const assistant = this.assistantStateByThread.get(threadId);
+    if (assistant?.hasMaterialized() || assistant?.hasBufferedBody() || assistant?.getBufferedAttachments().length) return true;
     return this.narrativeStore.hasBufferedNarrative(threadId);
-  }
-
-  /** True when a non-empty assistant body is buffered (provider body or streaming text). */
-  private hasBufferedBody(threadId: string): boolean {
-    const body = this.bufferedBodyByThread.get(threadId)?.content.trim();
-    if (body) return true;
-    const streamed = this.streamingAssistantTextByThread.get(threadId)?.trim();
-    return Boolean(streamed);
   }
 
   /**
@@ -731,16 +697,9 @@ export class TurnFinalizer {
   }
 
   private assistantMaterializationInput(threadId: string): AssistantMaterializationInput {
-    const buffered = this.bufferedBodyByThread.get(threadId);
-    const streamed = this.streamingAssistantTextByThread.get(threadId)?.trim();
-    const fromProvider = buffered != null;
-    const content = fromProvider ? buffered.content : (streamed ?? "");
-    const model = fromProvider ? buffered.model : (this.threadRepo.findById(threadId)?.model ?? null);
-    const bufferedAttachments = this.getBufferedAssistantAttachments(threadId);
-    const attachments = fromProvider
-      ? this.mergeAttachments(buffered.attachments, bufferedAttachments)
-      : bufferedAttachments;
-    return { content, model, attachments, fromProvider };
+    const state = this.assistantState(threadId);
+    const fallbackModel = state.hasProviderBody() ? null : (this.threadRepo.findById(threadId)?.model ?? null);
+    return state.materializationInput(fallbackModel);
   }
 
   private broadcastMaterializedAssistant(threadId: string, materialized: MaterializedAssistantRow): void {
@@ -756,10 +715,7 @@ export class TurnFinalizer {
   }
 
   private commitAssistantMaterialization(threadId: string): void {
-    this.streamingAssistantTextByThread.delete(threadId);
-    this.bufferedBodyByThread.delete(threadId);
-    this.bufferedAttachmentsByThread.delete(threadId);
-    this.materializedThreads.add(threadId);
+    this.assistantState(threadId).commitMaterialization();
   }
 
   /**
@@ -778,25 +734,15 @@ export class TurnFinalizer {
     if (turnRef !== undefined && this.turnRefBefore.get(threadId) === turnRef) {
       this.turnRefBefore.delete(threadId);
     }
-    this.streamingAssistantTextByThread.delete(threadId);
-    this.bufferedBodyByThread.delete(threadId);
-    this.bufferedAttachmentsByThread.delete(threadId);
-    this.materializedThreads.delete(threadId);
+    this.assistantStateByThread.delete(threadId);
     this.narrativeStore.clearTurn(threadId);
     this.turnFileTracker?.clearTurn(threadId, turnRef?.fileTrackerGeneration);
     this.persistingThreads.delete(threadId);
   }
 
-  private mergeAttachments(
-    first: StoredAttachment[],
-    second: StoredAttachment[],
-  ): StoredAttachment[] {
-    if (first.length === 0) return second;
-    if (second.length === 0) return first;
-    const byId = new Map(first.map((att) => [att.id, att]));
-    for (const att of second) {
-      byId.set(att.id, att);
-    }
-    return [...byId.values()];
+  private assistantState(threadId: string): AssistantExecutionState {
+    const state = this.assistantStateByThread.get(threadId) ?? new AssistantExecutionState();
+    this.assistantStateByThread.set(threadId, state);
+    return state;
   }
 }

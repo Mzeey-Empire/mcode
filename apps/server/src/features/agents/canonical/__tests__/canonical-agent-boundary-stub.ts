@@ -1,13 +1,13 @@
-import type { CanonicalAgentEventSink } from "../../index.js";
+import type { CanonicalAgentBoundary } from "../../index.js";
 import type { Database } from "bun:sqlite";
 
 /** Creates an AgentService test seam that runs compatibility writes without canonical persistence. */
-export function createCanonicalAgentEventSinkStub(
+export function createCanonicalAgentBoundaryStub(
   db: Pick<Database, "transaction">,
-): CanonicalAgentEventSink {
+): CanonicalAgentBoundary {
   return {
     startParentTurn: (
-      input: Parameters<CanonicalAgentEventSink["startParentTurn"]>[0],
+      input: Parameters<CanonicalAgentBoundary["startParentTurn"]>[0],
     ) => {
       db.transaction(input.projectUserMessage)();
       return {
@@ -26,5 +26,5 @@ export function createCanonicalAgentEventSinkStub(
     finishCanonicalChildTurn: () => null,
     recordProviderDiagnostic: () => undefined,
     recordCodexChildRoutingDiagnostic: () => false,
-  } as unknown as CanonicalAgentEventSink;
+  } as unknown as CanonicalAgentBoundary;
 }

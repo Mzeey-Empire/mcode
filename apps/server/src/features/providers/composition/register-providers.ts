@@ -9,6 +9,7 @@ import { createProviderHostPorts } from "./provider-host-ports.js";
 import { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { InternalThreadControlMcpRuntime } from "../../thread-control/index.js";
 import { CanonicalAgentBoundary } from "../../agents/index.js";
+import { WorkerOwnedTurnRuntime } from "../../agents/execution/worker-owned-turn-runtime.js";
 import { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
 import { EnvService } from "../../../runtime/environment/env-service.js";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
@@ -90,6 +91,7 @@ export function registerProviderAdapters(container: DependencyContainer): void {
       grants: c.resolve(ScopedPreGrantService),
       events: c.resolve(CanonicalAgentBoundary),
       ingress: c.resolve(ProviderEventIngress),
+      eventOwnership: c.resolve(WorkerOwnedTurnRuntime).providerEvents,
     }),
   });
 }

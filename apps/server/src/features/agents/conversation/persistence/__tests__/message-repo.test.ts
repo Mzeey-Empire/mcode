@@ -164,6 +164,25 @@ describe("MessageRepo", () => {
   });
 
   describe("listByThread", () => {
+    it("does not let hidden provider notices displace the visible conversation tail", () => {
+      const user = repo.create("thread-1", "user", "Stop this turn", 1);
+      repo.createSystemNotice("thread-1", "Provider warning", 2, {
+        kind: "warning", presentation: "timeline", scope: "turn", sessionId: "session-1", noticeKey: "warning-1",
+      });
+      repo.createSystemNotice("thread-1", "Deprecated setting", 3, {
+        kind: "deprecation", presentation: "timeline", scope: "turn", sessionId: "session-1", noticeKey: "deprecation-1",
+      });
+
+      expect(repo.listByThread("thread-1", 2)).toMatchObject({
+        messages: [{ id: user.id }],
+        hasMore: false,
+      });
+      expect(repo.listByThreadAfter("thread-1", 2, 0)).toMatchObject({
+        messages: [{ id: user.id }],
+        hasMore: false,
+      });
+    });
+
     it("returns stored canonical legacy provenance without replacing it with the ambiguous fallback", () => {
       db.prepare(`
         INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, origin_type, legacy_provenance)

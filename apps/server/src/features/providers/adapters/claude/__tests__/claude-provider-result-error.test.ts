@@ -291,4 +291,67 @@ describe("ClaudeProvider result is_error handling (#293)", () => {
     expect(submittedEvents.map((runtimeEvent) => runtimeEvent.event))
       .not.toContainEqual(expect.objectContaining({ type: AgentEventType.TurnComplete }));
   });
+
+  it("reports canonical sink failure for the exact execution without direct event delivery", async () => {
+    const failure = vi.fn(async () => undefined);
+    const directEvents = vi.fn();
+    provider = new ClaudeProvider(
+      stubEnvService(),
+      stubJobObject(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        ...mockProviderHost(),
+        events: { submit: vi.fn(async () => { throw new Error("writer unavailable"); }) },
+      },
+    );
+    provider.setCanonicalTurnDeliveryFailureHandler(failure);
+    provider.on("event", directEvents);
+    let releaseStream!: () => void;
+    const holdStream = new Promise<void>((resolve) => { releaseStream = resolve; });
+    const streamDone = vi.fn();
+    provider.on("_streamDone:mcode-thread-failed", streamDone);
+    mockQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => Object.assign(
+      (async function* () {
+        await prompt[Symbol.asyncIterator]().next();
+        yield { type: "system", subtype: "init", session_id: "sdk-abc" };
+        yield { type: "result", is_error: true, errors: ["rate_limit_exceeded"] };
+        await holdStream;
+      })(),
+      { ...queryMethodStubs(), close: vi.fn() },
+    ));
+
+    try {
+      await provider.sendTurn({
+        turnId: "turn-failed",
+        turnExecutionId: "execution-failed",
+        deliveryAttempt: 2,
+        sessionId: "mcode-thread-failed",
+        workspaceId: "workspace-1",
+        threadId: "thread-failed",
+        message: "hi",
+        cwd: "/tmp",
+        model: "claude-sonnet-4-6",
+        permissionMode: "default",
+        interactionMode: "build",
+        providerOptions: {},
+      });
+
+      await vi.waitFor(() => expect(failure).toHaveBeenCalledExactlyOnceWith(
+        {
+          threadId: "thread-failed",
+          turnId: "turn-failed",
+          executionId: "execution-failed",
+          deliveryAttempt: 2,
+        },
+        expect.objectContaining({ message: "writer unavailable" }),
+      ));
+      expect(streamDone).not.toHaveBeenCalled();
+      expect(directEvents).not.toHaveBeenCalled();
+    } finally {
+      releaseStream();
+    }
+    await vi.waitFor(() => expect(streamDone).toHaveBeenCalledOnce());
+  });
 });

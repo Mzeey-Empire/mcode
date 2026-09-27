@@ -124,6 +124,10 @@ export interface ProviderEventBatch {
   threadId: string;
   turnId: string;
   executionId: string;
+  /** Stable across retries of this submission when an execution has a worker owner. */
+  batchId?: string;
+  /** Provider delivery attempt that produced this batch. */
+  deliveryAttempt?: number;
   phase: string;
   nativeCursor?: unknown;
   events: readonly ProviderEventDraft[];

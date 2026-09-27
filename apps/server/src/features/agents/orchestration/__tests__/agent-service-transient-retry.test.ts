@@ -10,7 +10,7 @@ import {
   wrapProviderEmitterForRuntimeEvents,
 } from "./agent-service-test-harness.js";
 import { publishParentProviderEvent } from "../../events/provider-event-publication.js";
-import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { ThreadControlMutationReservationService } from "../../../thread-control/index.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -219,7 +219,7 @@ function buildService(): {
     undefined,
     threadControlMcp as never,
     mutationReservations,
-    createCanonicalAgentEventSinkStub(db),
+    createCanonicalAgentBoundaryStub(db),
   );
 
   return {

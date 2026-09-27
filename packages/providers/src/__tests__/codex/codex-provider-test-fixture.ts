@@ -5,6 +5,7 @@ import type {
   ProviderBrowserLeaseGrant,
   ProviderBrowserLeaseHandle,
   ProviderBrowserLeaseRequest,
+  ProviderEventSinkPort,
   ProviderHostPorts,
 } from "../../host-ports.js";
 import type { TurnRequest } from "@mcode/contracts";
@@ -167,6 +168,7 @@ export class CodexProvider extends PackageCodexProvider {
       createCodexConfiguration?: (sessionId: string) => Promise<unknown>;
       close?: (sessionId: string) => Promise<void>;
     },
+    eventSink?: ProviderEventSinkPort,
   ) {
     const delegatedSettingsService = { get: () => settings.get() };
     const host: ProviderHostPorts = {
@@ -186,7 +188,7 @@ export class CodexProvider extends PackageCodexProvider {
         close: (sessionId) => threadControl?.close?.(sessionId) ?? Promise.resolve(),
       },
       grants: { consume: () => false },
-      events: { submit: async () => undefined },
+      events: eventSink ?? { submit: async () => undefined },
     };
     const codexPorts: CodexProviderPorts = {
       settings: {

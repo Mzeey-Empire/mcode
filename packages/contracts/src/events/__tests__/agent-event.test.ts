@@ -2,6 +2,16 @@ import { describe, it, expect } from "vitest";
 import { AgentEventSchema, AgentEventType } from "../agent-event.js";
 
 describe("AgentEvent provider_unavailable", () => {
+  it("preserves a bounded durable publication identity", () => {
+    const event = { type: "turnStarted", threadId: "t-1",
+      turnExecutionId: "00000000-0000-4000-8000-000000000001",
+      publicationId: "1" };
+    expect(AgentEventSchema().parse(event)).toEqual(event);
+    expect(AgentEventSchema().safeParse({ ...event, publicationId: "x" }).success).toBe(false);
+    expect(AgentEventSchema().safeParse({ ...event, publicationId: "1".repeat(17) }).success)
+      .toBe(false);
+  });
+
   it("parses a disabled-provider event", () => {
     const parsed = AgentEventSchema().parse({
       type: "providerUnavailable",

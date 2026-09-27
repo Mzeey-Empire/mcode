@@ -51,6 +51,7 @@ export class ProviderCatalogSnapshotRepo {
     snapshot: ProviderCatalogSnapshot,
   ): boolean {
     const validated = ProviderCatalogSnapshotSchema().parse(snapshot);
+    // Reading the workspace before acquiring a write lock can fail a later WAL snapshot upgrade.
     return this.orm.transaction((tx) => {
       // The legacy INSERT...SELECT only wrote when the referenced workspace
       // still existed, so a dangling workspaceId must abort with no changes.
@@ -101,6 +102,6 @@ export class ProviderCatalogSnapshotRepo {
         )
         .run();
       return true;
-    });
+    }, { behavior: "immediate" });
   }
 }

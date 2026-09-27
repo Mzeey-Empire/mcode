@@ -7,6 +7,7 @@ import { ToolCallRecordRepo } from "../../../tools/persistence/tool-call-record-
 import { ThoughtSegmentRepo } from "../persistence/thought-segment-repo.js";
 import { HookExecutionRepo } from "../../../events/persistence/hook-execution-repo.js";
 import { NarrativeStore } from "../narrative-store.js";
+import { NarrativeTurnState } from "../narrative-turn-state.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../../../turns/parent-assistant-text-checkpoint-service.js";
 import {
@@ -638,6 +639,100 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     return { toolCallId, toolName, toolInput: {}, parentToolCallId };
   }
 
+  it("emits late Agent identity as data without a repository", () => {
+    const state = new NarrativeTurnState(THREAD);
+    state.beginTurn(THREAD);
+    state.resetTurnCounters(THREAD);
+    state.bufferToolCall(THREAD, {
+      toolCallId: "late-agent",
+      toolName: "Agent",
+      toolInput: { codexCollabKind: "spawnAgent", agentPath: "/root/worker" },
+    });
+    state.prepareNarrativePersistence(THREAD, "m1", "", "completed");
+    state.bufferToolCall(THREAD, {
+      toolCallId: "late-agent",
+      toolName: "Agent",
+      toolInput: {
+        codexCollabKind: "spawnAgent",
+        agentPath: "/root/worker",
+        nativeThreadId: "native-late-agent",
+      },
+    });
+
+    expect(state.takeEffects()).toEqual([{
+      kind: "update-subagent-identity",
+      toolCallId: "late-agent",
+      messageId: "m1",
+      identityKey: encodeSubagentAliasDetailTarget("native-late-agent"),
+    }]);
+  });
+
+  it("keeps two execution states for the same thread independent", () => {
+    const firstExecution = { threadId: THREAD, turnId: "turn-1", executionId: "execution-1" };
+    const secondExecution = { threadId: THREAD, turnId: "turn-2", executionId: "execution-2" };
+    const first = new NarrativeTurnState(firstExecution);
+    const second = new NarrativeTurnState(secondExecution);
+    first.beginTurn(THREAD);
+    first.resetTurnCounters(THREAD);
+    second.beginTurn(THREAD);
+    second.resetTurnCounters(THREAD);
+    first.openOrExtendThought(THREAD, "First turn");
+    first.bufferToolCall(THREAD, toolUse("read-1", "Read"));
+
+    expect(first.recoverySnapshot(THREAD).map((item) => item.record.sort_order)).toEqual([0, 1]);
+    expect(first.execution).toEqual(firstExecution);
+    expect(second.execution).toEqual(secondExecution);
+    expect(() => first.assertExecution(secondExecution)).toThrow("different execution");
+    expect(() => first.assertExecution(firstExecution)).not.toThrow();
+    expect(second.recoverySnapshot(THREAD)).toEqual([]);
+    expect(second.nextSortOrder(THREAD)).toBe(0);
+    expect(() => first.bufferToolCall("another-thread", toolUse("read-2", "Read")))
+      .toThrow("Narrative turn belongs to thread-1");
+    expect(first.getBufferedToolCalls(THREAD)).toHaveLength(1);
+  });
+
+  it("keeps the live store's thread adapters independent", () => {
+    const otherThread = "thread-2";
+    store.beginTurn(THREAD);
+    store.resetTurnCounters(THREAD);
+    store.beginTurn(otherThread);
+    store.resetTurnCounters(otherThread);
+    store.bufferToolCall(THREAD, toolUse("read-1", "Read"));
+
+    expect(store.getBufferedToolCalls(otherThread)).toEqual([]);
+    expect(store.nextSortOrder(otherThread)).toBe(0);
+    expect(store.nextSortOrder(THREAD)).toBe(1);
+  });
+
+  it("does not retain empty adapters for completed threads without narrative state", () => {
+    for (let index = 0; index < 50; index += 1) {
+      const threadId = `completed-thread-${index}`;
+      store.updateBufferedToolCallOutput(threadId, "missing-tool", "done", false);
+      expect(store.stageNarrationSegment(threadId, "")).toBeNull();
+      expect(store.prepareNarrativePersistence(threadId, "m1", "", "completed"))
+        .toEqual({ toolCalls: [], thoughts: [], hooks: [] });
+      store.clearTurn(threadId);
+    }
+
+    expect(Reflect.get(store, "narrativeStates").size).toBe(0);
+    store.beginTurn("completed-thread-0");
+    store.resetTurnCounters("completed-thread-0");
+    store.bufferToolCall("completed-thread-0", toolUse("new-tool", "Read"));
+    expect(store.getBufferedToolCalls("completed-thread-0")).toHaveLength(1);
+  });
+
+  it("keeps the completed turn's sort counter for late hooks, then resets it on the next turn", () => {
+    store.beginTurn(THREAD);
+    store.resetTurnCounters(THREAD);
+    store.bufferToolCall(THREAD, toolUse("read-1", "Read"));
+    store.clearTurn(THREAD);
+
+    expect(store.nextSortOrder(THREAD)).toBe(1);
+    store.beginTurn(THREAD);
+    store.resetTurnCounters(THREAD);
+    expect(store.nextSortOrder(THREAD)).toBe(0);
+  });
+
   it("persists a long active turn in order across bounded transactions", async () => {
     seedAssistantMessage("m1", "done", 1);
     store.beginTurn(THREAD);
@@ -674,6 +769,45 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     store.openOrExtendThought(THREAD, "x".repeat(ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes));
 
     expect(() => store.recoverySnapshot(THREAD)).toThrow("active-turn byte limit");
+  });
+
+  it("keeps mixed live recovery and persisted narrative in the same order", () => {
+    seedAssistantMessage("m1", "Done", 1);
+    store.beginTurn(THREAD);
+    store.resetTurnCounters(THREAD);
+    store.openOrExtendThought(THREAD, "I will check.");
+    store.closeOpenThought(THREAD);
+    store.bufferToolCall(THREAD, toolUse("agent", "Agent"));
+    store.bufferToolCall(THREAD, toolUse("child", "Read", "agent"));
+    store.updateBufferedToolCallOutput(THREAD, "child", "Found it", false);
+    store.openHook(THREAD, {
+      hookName: "AfterTool",
+      toolName: "Read",
+      phase: "post-tool",
+      payload: "{}",
+      sortOrder: store.nextSortOrder(THREAD),
+    });
+
+    const live = store.recoverySnapshot(THREAD);
+    expect(live.map((item) => [item.kind, item.record.sort_order])).toEqual([
+      ["narrationSegment", 0],
+      ["toolCall", 1],
+      ["toolCall", 2],
+      ["hook", 3],
+    ]);
+    expect(live.find((item) => item.kind === "toolCall" && item.record.id === "child"))
+      .toMatchObject({ record: { parent_tool_call_id: "agent", output_summary: "Found it" } });
+
+    store.persistNarrative(THREAD, "m1", "Done", "completed");
+
+    expect(store.load(THREAD)
+      .filter((entry) => entry.kind !== "assistantMessage")
+      .map((entry) => [entry.kind, entry.sortOrder])).toEqual([
+      ["narrationSegment", 0],
+      ["toolCall", 1],
+      ["toolCall", 2],
+      ["hook", 3],
+    ]);
   });
 
   it("rejects individually valid recovery records that exceed the retained byte budget together", () => {

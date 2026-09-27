@@ -515,6 +515,76 @@ describe("handleAgentEvent branches", () => {
       .toBe("00000000-0000-4000-8000-000000000002");
   });
 
+  it("does not reapply a stable publication after thread rehydration and a server restart", () => {
+    const threadId = "thread-stable-publication";
+    const executionId = "00000000-0000-4000-8000-000000000001";
+    const publicationId = "2";
+    const firstEpoch = "00000000-0000-4000-8000-000000000002";
+    const nextEpoch = "00000000-0000-4000-8000-000000000003";
+    const key = `mcode-agent-publication-v2:${threadId}`;
+    sessionStorage.removeItem(key);
+    try {
+      resetThreadStoreForTests({ currentThreadId: threadId,
+        runningThreadIds: new Set([threadId]),
+        records: new Map([[threadId, { ...createEmptyThreadRecord(), runtimePhase: "running",
+          turnExecutionId: executionId }]]),
+      });
+      const original: Extract<AgentEvent, { type: "toolUse" }> = { type: "toolUse", threadId, turnExecutionId: executionId,
+        publicationId, epoch: firstEpoch, sequence: 8, toolCallId: "stable-call",
+        toolName: "Read", toolInput: { path: "/original" } };
+      useThreadStore.getState().handleAgentEvent(original);
+      const persistedCalls = readThreadField(threadId, (record) => record.toolCalls);
+      expect(persistedCalls).toHaveLength(1);
+
+      resetThreadStoreForTests({ currentThreadId: threadId,
+        runningThreadIds: new Set([threadId]),
+        records: new Map([[threadId, { ...createEmptyThreadRecord(), runtimePhase: "running",
+          turnExecutionId: executionId, toolCalls: persistedCalls }]]),
+      });
+      useThreadStore.getState().handleAgentEvent({ ...original, epoch: nextEpoch,
+        sequence: 1, toolInput: { path: "/replayed" } });
+      expect(readThreadField(threadId, (record) => record.toolCalls)).toEqual(persistedCalls);
+      expect(readThreadField(threadId, (record) => record.lastAgentEventEpoch)).toBe(nextEpoch);
+      useThreadStore.getState().handleAgentEvent({ ...original, publicationId: undefined,
+        epoch: nextEpoch, sequence: 2, toolCallId: "legacy-call" });
+      expect(readThreadField(threadId, (record) => record.toolCalls)).toHaveLength(2);
+    } finally {
+      sessionStorage.removeItem(key);
+    }
+  });
+
+  it("does not repeat terminal projection after a stable completion is replayed", () => {
+    const threadId = "thread-stable-terminal";
+    const executionId = "00000000-0000-4000-8000-000000000011";
+    const key = `mcode-agent-publication-v2:${threadId}`;
+    sessionStorage.removeItem(key);
+    try {
+      resetThreadStoreForTests({ currentThreadId: threadId,
+        runningThreadIds: new Set([threadId]),
+        records: new Map([[threadId, { ...createEmptyThreadRecord(), runtimePhase: "running",
+          turnExecutionId: executionId, streaming: "completed answer" }]]),
+      });
+      const completion = { type: "turnComplete", threadId, turnExecutionId: executionId,
+        publicationId: "3", sequence: 3,
+        epoch: "00000000-0000-4000-8000-000000000012", reason: "end_turn",
+        costUsd: null, tokensIn: 0, tokensOut: 0 } as AgentEvent;
+      useThreadStore.getState().handleAgentEvent(completion);
+      const completed = readThreadField(threadId, (record) => record);
+      const messageCount = completed.messages.length;
+      expect(messageCount).toBeGreaterThan(0);
+
+      resetThreadStoreForTests({ currentThreadId: threadId,
+        runningThreadIds: new Set(), records: new Map([[threadId, completed]]),
+      });
+      useThreadStore.getState().handleAgentEvent({ ...completion,
+        epoch: "00000000-0000-4000-8000-000000000013", sequence: 1 });
+      expect(readThreadField(threadId, (record) => record.messages)).toHaveLength(messageCount);
+      expect(readThreadField(threadId, (record) => record.runtimePhase)).toBe(completed.runtimePhase);
+    } finally {
+      sessionStorage.removeItem(key);
+    }
+  });
+
   it("retains hook progress for an inactive thread", () => {
     const backgroundThreadId = "thread-background-hook";
     resetThreadStoreForTests({

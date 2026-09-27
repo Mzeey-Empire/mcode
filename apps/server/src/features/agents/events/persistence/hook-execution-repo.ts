@@ -97,26 +97,26 @@ export class HookExecutionRepo {
   }
 
   /** Insert multiple hook execution records in a single transaction. */
-  bulkCreate(inputs: CreateHookExecutionInput[]): void {
+  bulkCreate(inputs: CreateHookExecutionInput[], replaceExisting = false): void {
     if (inputs.length === 0) return;
     this.orm.transaction((tx) => {
       for (const item of inputs) {
-        tx.insert(hookExecutions)
-          .values({
-            id: item.id ?? NodeCrypto.randomUUID(),
-            messageId: item.messageId,
-            hookName: item.hookName,
-            toolName: item.toolName,
-            phase: item.phase,
-            payload: item.payload,
-            durationMs: item.durationMs,
-            didBlock: item.didBlock ? 1 : 0,
-            startedAt: item.startedAt,
-            endedAt: item.endedAt,
-            sortOrder: item.sortOrder,
-          })
-          .onConflictDoNothing()
-          .run();
+        const { id, ...rest } = {
+          id: item.id ?? NodeCrypto.randomUUID(),
+          messageId: item.messageId,
+          hookName: item.hookName,
+          toolName: item.toolName,
+          phase: item.phase,
+          payload: item.payload,
+          durationMs: item.durationMs,
+          didBlock: item.didBlock ? 1 : 0,
+          startedAt: item.startedAt,
+          endedAt: item.endedAt,
+          sortOrder: item.sortOrder,
+        };
+        const write = tx.insert(hookExecutions).values({ id, ...rest });
+        if (replaceExisting) write.onConflictDoUpdate({ target: hookExecutions.id, set: rest }).run();
+        else write.onConflictDoNothing().run();
       }
     });
   }

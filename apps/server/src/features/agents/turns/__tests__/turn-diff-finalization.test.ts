@@ -10,7 +10,7 @@ import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-rep
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
-import { CanonicalAgentEventSink } from "../../canonical/canonical-agent-event-sink.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { TurnDiffRepo } from "../persistence/turn-diff-repo.js";
 import { TurnSnapshotRepo } from "../persistence/turn-snapshot-repo.js";
 import { TurnDiffService } from "../turn-diff-service.js";
@@ -34,7 +34,7 @@ describe("native diff terminal persistence", () => {
   function harness(canonical: boolean) {
     const messages = new MessageRepo(db);
     const narrative = new NarrativeStore(messages, new ToolCallRecordRepo(db), new ThoughtSegmentRepo(db), new HookExecutionRepo(db));
-    const sink = canonical ? new CanonicalAgentEventSink(db, () => {}) : undefined;
+    const sink = canonical ? new CanonicalAgentBoundary(db, () => {}) : undefined;
     if (sink) sink.startParentTurn({
       thread: { id: identity.threadId, workspaceId: "ws-1", providerId: "codex", createdAt: new Date().toISOString() },
       turnId: identity.turnId, executionId: identity.turnExecutionId, permissionMode: "supervised", providerIdentities: [],

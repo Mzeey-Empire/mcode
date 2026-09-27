@@ -181,6 +181,8 @@ function rowToMessage(row: MessageRow): Message {
 
 /** Session-scoped system notices are hidden from transcript reads. */
 const notSessionNotice = sql`json_extract(${messages.systemNotice}, '$.scope') IS NOT 'session'`;
+// The transcript hides these notices, so they cannot consume a bounded display page.
+const notRoutineTranscriptNotice = sql`COALESCE(json_extract(${messages.systemNotice}, '$.kind'), '') NOT IN ('warning', 'configuration', 'deprecation', 'authentication-recovered')`;
 
 const DEFAULT_HISTORY_PAGE_SIZE = 100;
 const MAX_HISTORY_PAGE_SIZE = 500;
@@ -593,6 +595,14 @@ export class MessageRepo {
     return row?.sequence ?? 0;
   }
 
+  /** Provider system notices may follow a user prompt without starting another conversation turn. */
+  isLatestNonSystemMessage(threadId: string, messageId: string): boolean {
+    const latest = this.orm.select({ id: messages.id }).from(messages)
+      .where(and(eq(messages.threadId, threadId), inArray(messages.role, ["user", "assistant"])))
+      .orderBy(desc(messages.sequence)).limit(1).get();
+    return latest?.id === messageId;
+  }
+
   /** Append stored attachments to an existing message, deduping by attachment id. */
   appendAttachments(messageId: string, attachments: StoredAttachment[]): StoredAttachment[] {
     if (attachments.length === 0) return [];
@@ -643,6 +653,7 @@ export class MessageRepo {
         ...(before != null ? [lt(messages.sequence, before)] : []),
         eq(messages.isInternal, 0),
         notSessionNotice,
+        notRoutineTranscriptNotice,
       ),
       "DESC",
       fetchLimit,
@@ -700,6 +711,7 @@ export class MessageRepo {
         gt(messages.sequence, after),
         eq(messages.isInternal, 0),
         notSessionNotice,
+        notRoutineTranscriptNotice,
       ),
       "ASC",
       fetchLimit,
@@ -1077,6 +1089,14 @@ export class MessageRepo {
       .where(and(eq(messages.id, messageId), eq(messages.threadId, threadId), eq(messages.isInternal, 0)))
       .get();
 
+    return row ? rowToMessage(row) : null;
+  }
+
+  /** Find one private or published message for writer-owned turn materialization. */
+  findByIdInThreadIncludingInternal(threadId: string, messageId: string): Message | null {
+    const row = this.orm.select().from(messages)
+      .where(and(eq(messages.id, messageId), eq(messages.threadId, threadId)))
+      .get();
     return row ? rowToMessage(row) : null;
   }
 

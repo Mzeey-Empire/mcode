@@ -41,6 +41,7 @@ import {
   type TurnOutcome,
 } from "@mcode/contracts";
 import { broadcast } from "../../../application/transport/push.js";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 import {
   canonicalAgentEvents,
   canonicalAgentIngestCheckpoints,
@@ -56,6 +57,7 @@ import {
   ACTIVE_TURN_WRITE_BATCH_LIMITS,
   runBoundedWriteBatches,
   runBoundedWriteBatchesSync,
+  type RunBoundedWriteBatchesInput,
   type WriteBatchResult,
 } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { assertActiveTurnRecoveryRetention } from "../turns/active-turn-recovery-retention-policy.js";
@@ -188,6 +190,13 @@ export type CanonicalAgentBatchedCommitResult = Omit<CanonicalAgentCommitResult,
   writeBatches: WriteBatchResult;
 };
 
+/** Applied event locators available inside each terminal batch transaction. */
+export interface CanonicalTerminalBatchWrite {
+  readonly durableSequence: number;
+  readonly publishedSequences: readonly number[];
+  readonly terminal: boolean;
+}
+
 /** Canonical alias for the parent-turn terminal projection contract. */
 export type CanonicalParentTurnProjection = ParentTurnProjection;
 
@@ -196,6 +205,10 @@ export type CanonicalParentTurnFinishInput = ParentTurnFinishInput;
 
 /** Canonical alias for the structured parent recovery durability input. */
 export type ParentNarrativeRecoveryCommitInput = ParentNarrativeRecoveryCommit;
+
+type ParentNarrativeRecoveryOperation =
+  | { kind: "persist"; item: ParentNarrativeRecoveryItem }
+  | { kind: "discard"; itemId: string };
 
 export type {
   CanonicalChildTurnFinishInput,
@@ -480,11 +493,17 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
 
   /** Commit one semantic batch and publish only the applied events after SQLite commits. */
   commit(input: CanonicalAgentCommitInput): CanonicalAgentCommitResult {
-    return this.eventStore.commit(this.toEventStoreCommitInput(input));
+    return serverWorkTrace
+      ? serverWorkTrace.measure("canonical-write", input.threadId, input.executionId,
+        () => this.eventStore.commit(this.toEventStoreCommitInput(input)))
+      : this.eventStore.commit(this.toEventStoreCommitInput(input));
   }
 
   private commitInsideTransaction(input: CanonicalAgentCommitInput): CanonicalAgentCommitResult {
-    return this.eventStore.applyWithinTransaction(this.toEventStoreCommitInput(input));
+    return serverWorkTrace
+      ? serverWorkTrace.measure("canonical-write", input.threadId, input.executionId,
+        () => this.eventStore.applyWithinTransaction(this.toEventStoreCommitInput(input)))
+      : this.eventStore.applyWithinTransaction(this.toEventStoreCommitInput(input));
   }
 
   private toEventStoreCommitInput(input: CanonicalAgentCommitInput): CanonicalAgentEventStoreInput {
@@ -1741,6 +1760,26 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     return true;
   }
 
+  /** The writer worker yields between committed recovery batches so other SQLite writers can proceed. */
+  async recordParentNarrativeRecoveryYielding(
+    input: ParentNarrativeRecoveryCommitInput,
+  ): Promise<boolean> {
+    const turn = this.loadTurnByExecution(input.executionId);
+    if (!turn) return false;
+    const thread = this.loadThread(turn.threadId);
+    if (!thread) throw new Error(`Canonical parent thread not found: ${turn.threadId}`);
+    if (input.items.length === 0 && (input.discardedItemIds?.length ?? 0) === 0) return true;
+    const batch = this.parentNarrativeRecoveryBatchInput(input, thread, turn, new Date().toISOString());
+    if (!batch) return true;
+    await runBoundedWriteBatches({
+      ...batch,
+      beginImmediate: true,
+      // A macrotask-only yield can reacquire SQLite before another connection's busy waiter wakes.
+      yieldControl: () => new Promise<void>((resolve) => setTimeout(resolve, 2)),
+    });
+    return true;
+  }
+
   /** Completes the canonical-to-display startup migration before provider recovery begins. */
   async materializeConversationDisplay(): Promise<void> {
     await this.displayMaterializer.runToCompletion();
@@ -1752,10 +1791,20 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     turn: AgentTurn,
     now: string,
   ): void {
+    const batch = this.parentNarrativeRecoveryBatchInput(input, thread, turn, now);
+    if (batch) runBoundedWriteBatchesSync(batch);
+  }
+
+  private parentNarrativeRecoveryBatchInput(
+    input: ParentNarrativeRecoveryCommitInput,
+    thread: AgentThread,
+    turn: AgentTurn,
+    now: string,
+  ): RunBoundedWriteBatchesInput<ParentNarrativeRecoveryOperation> | null {
     const checkpoint = this.loadCheckpoint(input.executionId);
     if (!checkpoint) throw new Error(`Canonical parent checkpoint was not found: ${input.executionId}`);
-    if (checkpoint.terminalOutcome) return;
-    const operations = [
+    if (checkpoint.terminalOutcome) return null;
+    const operations: ParentNarrativeRecoveryOperation[] = [
       ...input.items.map((item) => ({ kind: "persist" as const, item })),
       ...(input.discardedItemIds ?? []).map((itemId) => ({ kind: "discard" as const, itemId })),
     ];
@@ -1766,7 +1815,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       operations.length,
       operations.reduce((total, operation) => total + byteLength(operation), 0),
     );
-    runBoundedWriteBatchesSync({
+    return {
       db: this.db,
       items: operations,
       limits: ACTIVE_TURN_WRITE_BATCH_LIMITS,
@@ -1778,7 +1827,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
         }
         this.discardParentNarrativeRecoveryItem(operation.itemId, thread, turn);
       },
-    });
+    };
   }
 
   private persistParentNarrativeRecoveryItem(
@@ -1984,15 +2033,16 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     });
   }
 
-  /** Persist a terminal parent turn in bounded transactions and confirm it only in the final batch. */
+  /** Persist a terminal parent turn in bounded transactions; the writer-local hook joins each batch transaction. */
   async finishParentTurnBatched(
     input: CanonicalParentTurnFinishInput,
+    onBatchWrite?: (batch: CanonicalTerminalBatchWrite) => void,
   ): Promise<CanonicalAgentBatchedCommitResult> {
     const checkpoint = this.loadCheckpoint(input.executionId);
     if (checkpoint?.terminalOutcome) {
       return this.confirmedParentTerminalBatch(checkpoint, input.threadId);
     }
-    return this.writeParentTerminalBatches(input, checkpoint);
+    return this.writeParentTerminalBatches(input, checkpoint, onBatchWrite);
   }
 
   private confirmedParentTerminalBatch(
@@ -2015,6 +2065,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   private async writeParentTerminalBatches(
     input: CanonicalParentTurnFinishInput,
     checkpoint: CanonicalAgentCheckpoint | null,
+    onBatchWrite?: (batch: CanonicalTerminalBatchWrite) => void,
   ): Promise<CanonicalAgentBatchedCommitResult> {
     const projection = input.projectTurn();
     const endedAt = new Date().toISOString();
@@ -2042,7 +2093,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
         terminalRevision,
         terminalEventId,
       ),
-      onBatchFinishing: () => this.finishParentTerminalBatch(state, input, terminalRevision),
+      onBatchFinishing: () => this.finishParentTerminalBatch(state, input, terminalRevision, onBatchWrite),
       onBatchCommitted: () => this.publishParentTerminalBatch(state),
     });
     return this.parentTerminalBatchResult(state, writeBatches);
@@ -2091,14 +2142,40 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     state: ParentTerminalBatchState,
     input: CanonicalParentTurnFinishInput,
   ): void {
-    state.modelState = this.loadState(input.threadId, input.executionId);
-    state.checkpoint = this.loadCheckpoint(input.executionId);
+    this.loadParentTerminalBatchState(state, input);
     state.acceptedAt = new Date().toISOString();
-    state.acceptedSequence = state.checkpoint?.lastAcceptedSequence ?? 0;
     state.changed = false;
     state.wrote = false;
     state.terminal = false;
     state.ignoredTerminal = false;
+  }
+
+  private loadParentTerminalBatchState(
+    state: ParentTerminalBatchState,
+    input: CanonicalParentTurnFinishInput,
+  ): void {
+    const modelState = createAgentModelState();
+    const thread = this.loadThread(input.threadId);
+    if (thread) modelState.threads[thread.id] = thread;
+    const turnRow = this.loadCommitTurnStatement.get({ id: input.turnId, threadId: input.threadId });
+    if (turnRow) {
+      const turn = this.turnFromRow(turnRow);
+      modelState.turns[turn.id] = turn;
+    }
+    state.checkpoint = this.loadCheckpoint(input.executionId);
+    state.acceptedSequence = state.checkpoint?.lastAcceptedSequence
+      ?? this.lastAcceptedSequence(input.threadId, input.executionId);
+    if (state.acceptedSequence > 0) {
+      modelState.lastAcceptedSequenceByExecution[input.executionId] = state.acceptedSequence;
+    }
+    // Every draft costs at least one row, bounding the sequences this transaction can accept.
+    this.addSequenceCollisions(
+      modelState,
+      input.executionId,
+      state.acceptedSequence + 1,
+      state.acceptedSequence + ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows,
+    );
+    state.modelState = modelState;
   }
 
   private writeParentTerminalBatchDraft(
@@ -2212,6 +2289,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     state: ParentTerminalBatchState,
     input: CanonicalParentTurnFinishInput,
     terminalRevision: number,
+    onBatchWrite?: (batch: CanonicalTerminalBatchWrite) => void,
   ): void {
     const modelState = this.parentTerminalBatchModelState(state);
     if (!state.wrote) {
@@ -2224,6 +2302,11 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       this.displayMaterializer.materializeItems(this.parentAssistantItemIds(input.turnId));
       this.retireParentNarrativeRecovery(input.turnId);
     }
+    onBatchWrite?.({
+      durableSequence: state.acceptedSequence,
+      publishedSequences: state.pendingPublication.map((event) => event.acceptedSequence),
+      terminal: state.terminal,
+    });
     state.latest = this.committedParentTerminalBatchResult(state, input.threadId, terminalRevision);
   }
 
@@ -2954,15 +3037,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     const acceptedSequences = events.map((event) => event.acceptedSequence);
     const firstAcceptedSequence = Math.min(...acceptedSequences);
     const lastAcceptedSequence = Math.max(...acceptedSequences);
-    const existing = this.loadCommitSequenceCollisionStatement.all({
-      executionId: first.routing.executionId,
-      minSequence: firstAcceptedSequence,
-      maxSequence: lastAcceptedSequence,
-    });
-    for (const event of existing) {
-      state.appliedEventIds[event.eventId] = true;
-      state.acceptedInputEventIds[`${first.routing.executionId}:${event.acceptedSequence}`] = event.eventId;
-    }
+    this.addSequenceCollisions(state, first.routing.executionId, firstAcceptedSequence, lastAcceptedSequence);
 
     const acceptedSequence = checkpoint?.lastAcceptedSequence ?? this.lastAcceptedSequence(
       first.routing.threadId,
@@ -2970,6 +3045,19 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     );
     if (acceptedSequence > 0) {
       state.lastAcceptedSequenceByExecution[first.routing.executionId] = acceptedSequence;
+    }
+  }
+
+  private addSequenceCollisions(
+    state: AgentModelState,
+    executionId: string,
+    minSequence: number,
+    maxSequence: number,
+  ): void {
+    const existing = this.loadCommitSequenceCollisionStatement.all({ executionId, minSequence, maxSequence });
+    for (const event of existing) {
+      state.appliedEventIds[event.eventId] = true;
+      state.acceptedInputEventIds[`${executionId}:${event.acceptedSequence}`] = event.eventId;
     }
   }
 

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { container, Lifecycle } from "tsyringe";
 import {
   AgentEventType,
+  ProviderRuntimeEventSchema,
   type CanonicalAgentEventEnvelope,
   type IAgentProvider,
   type ProviderId,
@@ -17,9 +18,10 @@ import {
   type ProviderEventIngressEvent,
 } from "../provider-event-ingress.js";
 import type { ProviderEventAdapter } from "../provider-event-adapter.js";
-import type {
-  ProviderEventWorkerCallbacks,
-  ProviderEventWorkerPool,
+import {
+  ThreadEventWorkerPool,
+  type ProviderEventWorkerCallbacks,
+  type ProviderEventWorkerPool,
 } from "../provider-event-worker-pool.js";
 import {
   processProviderEventWorkerTask,
@@ -27,11 +29,13 @@ import {
 } from "../provider-event-worker-protocol.js";
 import { CodexCollaborationEventAdapter } from "../../../agents/collaboration/adapters/codex-collaboration-event-adapter.js";
 import type { CodexCollaborationDurability } from "../../../agents/collaboration/codex-collaboration-durability.js";
+import type { ProjectedCommittedProviderEvent } from "../../../agents/execution/execution-worker-handler.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 
-function runtimeEvent(delta: string, threadId = "thread-1"): ProviderRuntimeEvent {
+function runtimeEvent(delta: string, threadId = "thread-1", deliveryAttempt?: number): ProviderRuntimeEvent {
   return {
+    ...(deliveryAttempt === undefined ? {} : { deliveryAttempt }),
     event: {
       type: AgentEventType.TextDelta,
       threadId,
@@ -68,7 +72,7 @@ function oversizedToolResult(threadId: string): ProviderRuntimeEvent {
   };
 }
 
-function committedEnvelope(eventId: string, delta: string): CanonicalAgentEventEnvelope {
+function committedEnvelope(eventId: string, delta: string, deliveryAttempt?: number, sourceProviderId: ProviderId = "claude"): CanonicalAgentEventEnvelope {
   return {
     eventId,
     routing: {
@@ -77,7 +81,7 @@ function committedEnvelope(eventId: string, delta: string): CanonicalAgentEventE
       executionId: EXECUTION_ID,
       itemId: `item-${eventId}`,
     },
-    sourceProviderId: "claude",
+    sourceProviderId,
     sourceIdentities: [],
     acceptedSequence: 1,
     durableRevision: 1,
@@ -90,10 +94,24 @@ function committedEnvelope(eventId: string, delta: string): CanonicalAgentEventE
         turnId: "turn-1",
         kind: "system",
         providerIdentities: [],
-        payload: { projection: "providerRuntimeEvent", runtimeEvent: runtimeEvent(delta) },
+        payload: { projection: "providerRuntimeEvent", runtimeEvent: runtimeEvent(delta, "thread-1", deliveryAttempt) },
         createdAt: "2026-08-27T12:00:00.000Z",
         updatedAt: "2026-08-27T12:00:00.000Z",
       },
+    },
+  };
+}
+
+function projectedEvent(eventId: string, delta: string): ProjectedCommittedProviderEvent {
+  return {
+    providerId: "claude",
+    sourceKind: "canonical-commit",
+    event: runtimeEvent(delta).event,
+    canonicalReceipt: {
+      eventId,
+      acceptedSequence: 1,
+      durableRevision: 1,
+      serverTimestamps: { acceptedAt: "2026-08-27T12:00:00.000Z" },
     },
   };
 }
@@ -170,6 +188,7 @@ function createIngress(
 ) {
   const diagnostics: ProviderEventIngressDiagnostic[] = [];
   const received: ProviderEventIngressEvent[] = [];
+  const projected: ProviderEventIngressEvent[] = [];
   const overflowed: ProviderEventIngressEvent[] = [];
   const registry = { resolveAll: () => providers } as never;
   const ingress = new ProviderEventIngress(
@@ -179,10 +198,11 @@ function createIngress(
   );
   ingress.start(registry, {
       handleProviderEvent: (event) => received.push(event),
+      handleProjectedCommitted: (event) => projected.push(event),
       handleProviderFileMutation: vi.fn(),
       handleProviderIngressOverflow: (event) => overflowed.push(event),
     });
-  return { diagnostics, ingress, overflowed, provider: providers[0], received };
+  return { diagnostics, ingress, overflowed, projected, provider: providers[0], received };
 }
 
 async function flushIngress(): Promise<void> {
@@ -197,6 +217,41 @@ async function drainIngress(ingress: ProviderEventIngress): Promise<void> {
 }
 
 describe("ProviderEventIngress", () => {
+  it("starts legacy workers only when the first legacy event needs preprocessing", async () => {
+    const createWorker = vi.fn(() => new Worker(new URL("../provider-event.worker.ts", import.meta.url), { type: "module" }));
+    const workerPool = new ThreadEventWorkerPool({ workerCount: 2, createWorker });
+    const { ingress, projected, received } = createIngress(undefined, undefined, workerPool);
+    try {
+      expect(createWorker).not.toHaveBeenCalled();
+      ingress.acceptProjectedCommitted([{ ...projectedEvent("owned-codex", "projected"), providerId: "codex" }]);
+      await ingress.waitForThread("thread-1");
+      expect(projected).toEqual([expect.objectContaining({ providerId: "codex" })]);
+      expect(createWorker).not.toHaveBeenCalled();
+
+      ingress.acceptProviderRuntime("claude", runtimeEvent("legacy"));
+      await ingress.waitForThread("thread-1");
+      expect(createWorker).toHaveBeenCalledTimes(2);
+      expect(received).toEqual([expect.objectContaining({
+        providerId: "claude", event: expect.objectContaining({ delta: "legacy" }),
+      })]);
+      expect(ingress.queueMetrics().pendingEvents).toBe(0);
+    } finally {
+      ingress.shutdown();
+    }
+  });
+
+  it("shuts down before the first submission without creating workers", async () => {
+    const createWorker = vi.fn(() => new Worker(new URL("../provider-event.worker.ts", import.meta.url), { type: "module" }));
+    const workerPool = new ThreadEventWorkerPool({ workerCount: 2, createWorker });
+    const { ingress, diagnostics, received } = createIngress(undefined, undefined, workerPool);
+    ingress.shutdown();
+    ingress.acceptProviderRuntime("claude", runtimeEvent("after shutdown"));
+    await ingress.waitForThread("thread-1");
+    expect(createWorker).not.toHaveBeenCalled();
+    expect(received).toEqual([]);
+    expect(diagnostics).toEqual([expect.objectContaining({ reason: "worker-shutdown" })]);
+  });
+
   it("resolves the diagnostic sink through its explicit injection token", () => {
     const child = container.createChildContainer();
     const provider = createProvider("claude");
@@ -229,6 +284,20 @@ describe("ProviderEventIngress", () => {
     expect(received[0]?.canonicalReceipt).toBeUndefined();
   });
 
+  it("keeps private delivery attempt metadata through runtime and committed ingress", async () => {
+    const provider = createProvider("codex");
+    const { ingress, received } = createIngress([provider]);
+    const runtime = ProviderRuntimeEventSchema().parse(runtimeEvent("live", "thread-1", 2));
+
+    (provider as unknown as NodeEvents.EventEmitter).emit("event", structuredClone(runtime));
+    ingress.acceptCommitted([committedEnvelope("committed-attempt", "committed", 2, "codex")]);
+    await flushIngress();
+
+    expect(received.map((event) => event.deliveryAttempt)).toEqual([2, 2]);
+    expect(received.map((event) => event.event.type)).toEqual([AgentEventType.TextDelta, AgentEventType.TextDelta]);
+    expect(ProviderRuntimeEventSchema().safeParse({ ...runtime, deliveryAttempt: 0 }).success).toBe(false);
+  });
+
   it("keeps direct canonical commits and runtime events in arrival order", async () => {
     const cursor = createProvider("cursor");
     const { ingress, received } = createIngress([createProvider("claude"), cursor]);
@@ -259,6 +328,22 @@ describe("ProviderEventIngress", () => {
     expect(received).toHaveLength(0);
     await flushIngress();
     expect(received).toHaveLength(1);
+  });
+
+  it("queues projected writer events in order without calling the legacy consumer", async () => {
+    const { ingress, projected, received } = createIngress();
+    const first = projectedEvent("worker-first", "first");
+    const second = projectedEvent("worker-second", "second");
+
+    ingress.acceptProjectedCommitted([first, second]);
+    expect(projected).toEqual([]);
+    await ingress.waitForThread("thread-1");
+
+    expect(projected.map((item) => item.canonicalReceipt?.eventId)).toEqual(["worker-first", "worker-second"]);
+    expect(received).toEqual([]);
+    ingress.acceptProjectedCommitted([first]);
+    await ingress.waitForThread("thread-1");
+    expect(projected).toHaveLength(2);
   });
 
   it("does not invoke the consumer on the provider callback stack", async () => {

@@ -78,6 +78,7 @@ import {
   prepareAgentEvent,
   type AgentEventHandlerTable,
 } from "./thread-store/agent-event-preflight";
+import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";
 import {
   hydrateRunningThreads as hydrateRunningThreadRecords,
   transferThreadRuntime as transferOptimisticThreadRuntime,
@@ -242,7 +243,7 @@ interface ThreadState {
   /** Handle server-side tool call persistence confirmation. */
   handleTurnPersisted: (payload: {
     threadId: string;
-    messageId: string;
+    messageId: string | null;
     turnId?: string | null;
     executionId?: string | null;
     outcome?: TurnOutcome | null;
@@ -1384,7 +1385,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): void => {
     const fileEffectTurnId = typeof event.fileEffectTurnId === "string" ? event.fileEffectTurnId : "";
     const record = getRec(event.threadId);
-    if (get().runningThreadIds.has(event.threadId) && record.fileEffectTurnId === fileEffectTurnId) return;
+    const sameExecution = runtime.incomingExecutionId === undefined
+      || record.turnExecutionId === runtime.incomingExecutionId;
+    if (get().runningThreadIds.has(event.threadId) && sameExecution && record.fileEffectTurnId === fileEffectTurnId) return;
     clearStreamingTextUsage(event.threadId);
     useTaskStore.getState().prepareTaskBubbleForNewTurn(event.threadId);
     patchRec(event.threadId, (current) => ({
@@ -2553,6 +2556,16 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     currentThreadId: string | null,
     terminalPhase: ThreadRecord["runtimePhase"] | undefined,
   ): Partial<ThreadRecord> => {
+    if (payload.messageId === null) {
+      return {
+        ...turnPersistStopState(record, payload),
+        ...(terminalPhase ? terminalRuntimePatch(record, terminalPhase) : {}),
+        ...(payload.fileEffects && payload.turnId === record.fileEffectTurnId
+          && payload.fileEffects.revision >= record.fileEffectSummary.revision
+          ? { fileEffectSummary: payload.fileEffects }
+          : {}),
+      };
+    }
     const localMessageId = resolveTurnPersistLocalMessageId(record, payload.messageId);
     const messages = persistedTurnMessages(record, payload, localMessageId);
     const stopState = turnPersistStopState(record, payload);
@@ -3737,6 +3750,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   handleAgentEvent: (event) => {
     if (!hasAgentEventHandler(agentEventHandlers, event)) return;
     const runtime = prepareAgentEvent({
+      acceptPublication: (incoming) => stableAgentEventPublications.accept(incoming),
       clearApiRetry: (id) => patchRec(id, { apiRetry: undefined }),
       flushPendingTextDeltas,
       getCurrentThreadId: () => get().currentThreadId,

@@ -167,16 +167,16 @@ export class CleanupJobRepo {
    * Return jobs that are due to run: next_retry_at <= now and attempts < max.
    * Ordered by created_at ascending so oldest jobs are processed first.
    */
-  findDue(nowMs: number, limit = CLEANUP_BATCH_LIMIT): CleanupJob[] {
+  findDue(nowMs: number, limit = CLEANUP_BATCH_LIMIT, workspacePath?: string): CleanupJob[] {
     const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
-    const counts = this.getDueCounts(nowMs);
+    const counts = this.getDueCounts(nowMs, workspacePath);
     if (counts.explicit === 0 || counts.retention === 0) {
-      return this.findDueFromAvailableKind(nowMs, boundedLimit, counts);
+      return this.findDueFromAvailableKind(nowMs, boundedLimit, counts, workspacePath);
     }
 
     const limits = calculateDueLimits(counts, boundedLimit);
-    const explicitJobs = this.findDueByKind(nowMs, "explicit", limits.explicit);
-    const retentionJobs = this.findDueByKind(nowMs, "retention", limits.retention);
+    const explicitJobs = this.findDueByKind(nowMs, "explicit", limits.explicit, workspacePath);
+    const retentionJobs = this.findDueByKind(nowMs, "retention", limits.retention, workspacePath);
     return interleaveDueJobs(retentionJobs, explicitJobs, boundedLimit);
   }
 
@@ -184,12 +184,13 @@ export class CleanupJobRepo {
     nowMs: number,
     limit: number,
     counts: CleanupJobDueCounts,
+    workspacePath?: string,
   ): CleanupJob[] {
     const kind = counts.retention > 0 ? "retention" : "explicit";
-    return this.findDueByKind(nowMs, kind, limit);
+    return this.findDueByKind(nowMs, kind, limit, workspacePath);
   }
 
-  private findDueByKind(nowMs: number, kind: CleanupJob["kind"], limit: number): CleanupJob[] {
+  private findDueByKind(nowMs: number, kind: CleanupJob["kind"], limit: number, workspacePath?: string): CleanupJob[] {
     const rows = this.orm
       .select()
       .from(cleanupJobs)
@@ -197,6 +198,7 @@ export class CleanupJobRepo {
         lte(cleanupJobs.nextRetryAt, nowMs),
         lt(cleanupJobs.attempts, MAX_CLEANUP_ATTEMPTS),
         eq(cleanupJobs.kind, kind),
+        workspacePath === undefined ? undefined : eq(cleanupJobs.workspacePath, workspacePath),
       ))
       .orderBy(asc(cleanupJobs.createdAt))
       .limit(limit)
@@ -205,7 +207,7 @@ export class CleanupJobRepo {
   }
 
   /** Return due cleanup job counts grouped by processing kind. */
-  getDueCounts(nowMs: number): CleanupJobDueCounts {
+  getDueCounts(nowMs: number, workspacePath?: string): CleanupJobDueCounts {
     const counts: CleanupJobDueCounts = { explicit: 0, retention: 0 };
     const rows = this.orm
       .select({ kind: cleanupJobs.kind, count: sql<number>`COUNT(*)` })
@@ -214,6 +216,7 @@ export class CleanupJobRepo {
         lte(cleanupJobs.nextRetryAt, nowMs),
         lt(cleanupJobs.attempts, MAX_CLEANUP_ATTEMPTS),
         inArray(cleanupJobs.kind, ["explicit", "retention"]),
+        workspacePath === undefined ? undefined : eq(cleanupJobs.workspacePath, workspacePath),
       ))
       .groupBy(cleanupJobs.kind)
       .all();
@@ -222,7 +225,7 @@ export class CleanupJobRepo {
   }
 
   /** Queue a bounded set of expired completed threads in one database transaction. */
-  enqueueExpiredCompleted(nowIso: string, limit = CLEANUP_BATCH_LIMIT): number {
+  enqueueExpiredCompleted(nowIso: string, limit = CLEANUP_BATCH_LIMIT, workspacePath?: string): number {
     const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
     const due = this.orm
       .select({
@@ -240,6 +243,7 @@ export class CleanupJobRepo {
         isNotNull(threads.scheduledDeletionAt),
         lte(threads.scheduledDeletionAt, nowIso),
         isNull(threads.cleanupState),
+        workspacePath === undefined ? undefined : eq(workspaces.path, workspacePath),
       ))
       .orderBy(asc(threads.scheduledDeletionAt), asc(threads.id))
       .limit(boundedLimit)
@@ -316,12 +320,15 @@ export class CleanupJobRepo {
    * deleting workspaces. Orphaned rows self-clean on the next poll because
    * the worker deletes explicit jobs whose thread is gone.
    */
-  requeueExhaustedJobs(): number {
+  requeueExhaustedJobs(workspacePath?: string): number {
     const result = runChanges(
       this.orm
         .update(cleanupJobs)
         .set({ attempts: 0, nextRetryAt: 0 })
-        .where(gte(cleanupJobs.attempts, MAX_CLEANUP_ATTEMPTS)),
+        .where(and(
+          gte(cleanupJobs.attempts, MAX_CLEANUP_ATTEMPTS),
+          workspacePath === undefined ? undefined : eq(cleanupJobs.workspacePath, workspacePath),
+        )),
     );
     return result.changes;
   }

@@ -160,7 +160,7 @@ const serverEsbuildCfg = {
   ...shared,
   entryPoints: [NodePath.resolve(serverRoot, "dist-tsc/index.js")],
   outfile: serverOutFile,
-  external: ["bun:sqlite", "node-pty", "electron", "koffi"],
+  external: ["bun", "bun:sqlite", "node-pty", "electron", "koffi"],
   banner: {
     js: 'var __importMetaUrl = require("url").pathToFileURL(__filename).href;',
   },

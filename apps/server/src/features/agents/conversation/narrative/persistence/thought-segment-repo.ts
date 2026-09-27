@@ -83,22 +83,22 @@ export class ThoughtSegmentRepo {
   }
 
   /** Insert multiple thought segment records in a single transaction. */
-  bulkCreate(inputs: CreateThoughtSegmentInput[]): void {
+  bulkCreate(inputs: CreateThoughtSegmentInput[], replaceExisting = false): void {
     if (inputs.length === 0) return;
     this.orm.transaction((tx) => {
       for (const item of inputs) {
-        tx.insert(thoughtSegments)
-          .values({
-            id: item.id ?? NodeCrypto.randomUUID(),
-            messageId: item.messageId,
-            text: item.text,
-            startedAt: item.startedAt,
-            endedAt: item.endedAt,
-            sortOrder: item.sortOrder,
-            isFinalResponse: item.isFinalResponse ?? 0,
-          })
-          .onConflictDoNothing()
-          .run();
+        const { id, ...rest } = {
+          id: item.id ?? NodeCrypto.randomUUID(),
+          messageId: item.messageId,
+          text: item.text,
+          startedAt: item.startedAt,
+          endedAt: item.endedAt,
+          sortOrder: item.sortOrder,
+          isFinalResponse: item.isFinalResponse ?? 0,
+        };
+        const write = tx.insert(thoughtSegments).values({ id, ...rest });
+        if (replaceExisting) write.onConflictDoUpdate({ target: thoughtSegments.id, set: rest }).run();
+        else write.onConflictDoNothing().run();
       }
     });
   }

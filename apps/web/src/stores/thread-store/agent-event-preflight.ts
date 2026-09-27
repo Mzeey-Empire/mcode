@@ -23,6 +23,7 @@ export type AgentEventHandlerTable = {
 /** Narrow store operations needed to validate and sequence one agent event. */
 export interface AgentEventPreflightContext {
   clearApiRetry: (threadId: string) => void;
+  acceptPublication?: (event: AgentEvent) => boolean;
   flushPendingTextDeltas: () => void;
   getCurrentThreadId: () => string | null;
   getRecord: (threadId: string) => ThreadRecord;
@@ -187,6 +188,7 @@ export function prepareAgentEvent(
   const incomingExecutionId = eventExecutionId(event);
   if (!acceptsExecution(event, runtimeRecord, incomingExecutionId)) return null;
   if (!acceptsSequence(context, event)) return null;
+  if (context.acceptPublication && !context.acceptPublication(event)) return null;
 
   const currentThreadId = context.getCurrentThreadId();
   const activeThread = isActiveThread(

@@ -5,7 +5,7 @@
 
 import { sql } from "drizzle-orm";
 import { asc, desc } from "drizzle-orm";
-import { type AnySQLiteColumn, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { type AnySQLiteColumn, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestampDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -739,6 +739,31 @@ export const canonicalAgentEvents = sqliteTable(
     uniqueIndex("idx_canonical_agent_events_execution_sequence").on(table.executionId, table.acceptedSequence),
     index("idx_canonical_agent_events_thread_revision").on(table.threadId, table.durableRevision),
   ],
+);
+
+/** Writer receipts survive a lost worker reply and follow their canonical turn on deletion. */
+export const canonicalWriterOperationReceipts = sqliteTable(
+  "canonical_writer_operation_receipts",
+  {
+    executionId: text("execution_id").notNull()
+      .references(() => canonicalAgentTurns.executionId, { onDelete: "cascade" }),
+    operationId: text("operation_id").notNull(),
+    kind: text("kind").notNull(),
+    inputHash: text("input_hash").notNull(),
+    receiptJson: text("receipt_json").notNull(),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+  },
+  (table) => [primaryKey({ columns: [table.executionId, table.operationId] })],
+);
+
+/** Monotonic live publication identity survives execution changes and receipt pruning. */
+export const canonicalWriterLivePublicationHeads = sqliteTable(
+  "canonical_writer_live_publication_heads",
+  {
+    threadId: text("thread_id").primaryKey().notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    lastSequence: integer("last_sequence").notNull(),
+  },
 );
 
 /** Durable accepted and committed progress for one canonical execution. */

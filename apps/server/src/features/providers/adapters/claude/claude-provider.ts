@@ -509,6 +509,10 @@ export class ClaudeProvider
   /** Serializes canonical event submission when the adapter runs in the server composition. */
   private readonly canonicalEventPublisher:
     ClaudeCanonicalEventPublisher | undefined;
+  private canonicalTurnDeliveryFailureHandler:
+    | ((routing: ClaudeCanonicalEventRouting, error: Error) => Promise<void>)
+    | undefined;
+  private readonly reportedCanonicalDeliveryFailures = new WeakSet<ClaudeCanonicalEventRouting>();
   /**
    * Tail of the most recent stderr emitted by each session's Claude Code
    * subprocess, capped at {@link STDERR_CAPTURE_LIMIT}. The SDK's process-exit
@@ -599,6 +603,13 @@ export class ClaudeProvider
       jobObject: this.jobObject,
       envService: this.envService,
     });
+  }
+
+  /** Reports canonical sink failure to the owner of the exact active turn. */
+  setCanonicalTurnDeliveryFailureHandler(
+    handler: (routing: ClaudeCanonicalEventRouting, error: Error) => Promise<void>,
+  ): void {
+    this.canonicalTurnDeliveryFailureHandler = handler;
   }
 
   /**
@@ -2054,7 +2065,12 @@ export class ClaudeProvider
       if (executionId && executionId !== state.currentTurnExecutionId)
         state.pendingPromptExecutionIds.push(executionId);
     });
-    void this.consumeClaudeStream(sessionId, q, routing, state);
+    void this.consumeClaudeStream(sessionId, q, routing, state).catch((error: unknown) => {
+      logger.error("Claude stream finalization failed", {
+        executionId: state.currentTurnExecutionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   private createClaudeStreamState(
@@ -2151,6 +2167,7 @@ export class ClaudeProvider
         }
         const outcome = await state.mapper.map(message);
         if (outcome !== "none") {
+          await this.flushCanonicalExecution(state.currentTurnExecutionId);
           state.awaitingResume = outcome === "turn_complete";
           state.resumedTurnStarted = false;
         }
@@ -2410,12 +2427,40 @@ export class ClaudeProvider
     try {
       await this.canonicalEventPublisher.waitForExecution(routing);
     } catch (error: unknown) {
-      logger.error("Claude canonical event delivery failed", {
-        executionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      await this.reportCanonicalDeliveryFailure(routing, error);
     } finally {
       this.getCanonicalRoutings().delete(executionId);
+    }
+  }
+
+  private async flushCanonicalExecution(executionId: string): Promise<void> {
+    const routing = this.getCanonicalRoutings().get(executionId);
+    if (!routing || !this.canonicalEventPublisher) return;
+    try {
+      await this.canonicalEventPublisher.flushForExecution(routing);
+    } catch (error: unknown) {
+      await this.reportCanonicalDeliveryFailure(routing, error);
+    }
+  }
+
+  private async reportCanonicalDeliveryFailure(
+    routing: ClaudeCanonicalEventRouting,
+    error: unknown,
+  ): Promise<void> {
+    if (this.reportedCanonicalDeliveryFailures.has(routing)) return;
+    this.reportedCanonicalDeliveryFailures.add(routing);
+    const deliveryError = error instanceof Error ? error : new Error(String(error));
+    logger.error("Claude canonical event delivery failed", {
+      executionId: routing.executionId,
+      error: deliveryError.message,
+    });
+    try {
+      await this.canonicalTurnDeliveryFailureHandler?.(routing, deliveryError);
+    } catch (handlerError: unknown) {
+      logger.error("Claude canonical failure handler failed", {
+        executionId: routing.executionId,
+        error: handlerError instanceof Error ? handlerError.message : String(handlerError),
+      });
     }
   }
 

@@ -48,6 +48,8 @@ describe("CursorCanonicalEventPublisher", () => {
       threadId: routing.threadId,
       turnId: routing.turnId,
       executionId: routing.executionId,
+      batchId: `cursor:${routing.executionId}:attempt:1:event:1`,
+      deliveryAttempt: 1,
       phase: "running",
       events: [{
         eventId: `cursor:${routing.executionId}:attempt:1:event:1`,
@@ -65,6 +67,8 @@ describe("CursorCanonicalEventPublisher", () => {
     });
     AgentEventRoutingSchema.parse(textBatch.events[0]?.routing);
     expect(terminalBatch).toMatchObject({
+      batchId: `cursor:${routing.executionId}:attempt:1:event:2`,
+      deliveryAttempt: 1,
       events: [{
         eventId: `cursor:${routing.executionId}:attempt:1:event:2`,
         sourceSequence: 2,

@@ -10,7 +10,7 @@ import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { createAgentServiceForTest } from "./agent-service-test-harness.js";
-import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { PlanQuestionService } from "../../planning/plan-question-service.js";
 import { PlanTurnService } from "../../planning/plan-turn-service.js";
@@ -120,7 +120,7 @@ function buildService(db: Database) {
       undefined,
       undefined,
       undefined,
-      createCanonicalAgentEventSinkStub(db),
+      createCanonicalAgentBoundaryStub(db),
   );
   const plans = new PlanTurnService(
     threadRepo,

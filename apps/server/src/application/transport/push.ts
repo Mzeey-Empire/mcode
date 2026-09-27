@@ -19,9 +19,13 @@ export const MAX_QUEUED_PUSH_BYTES = 16 * 1_024 * 1_024;
 const clients = new Set<WebSocket>();
 const queuedPushBytes = new Map<WebSocket, number>();
 const threadSubscriptions = new Map<WebSocket, Set<string>>();
-const threadJournals = new Map<string, { events: unknown[] }>();
-const nextSequenceByThread = new Map<string, number>();
-const eventEpoch = NodeCrypto.randomUUID();
+interface AgentEventJournal {
+  epoch: string;
+  sequence: number;
+  events: unknown[];
+}
+
+const threadJournals = new Map<string, AgentEventJournal>();
 const SUBSCRIPTION_SCOPED_CHANNELS = new Set<WsChannelName>([
   "agent.event",
   "agent.canonical",
@@ -134,10 +138,12 @@ function replayThreadSubscription(
 function requiresThreadHydration(
   rawCursor: NonNullable<SetThreadSubscriptionsInput["cursors"]>[string],
   cursor: number,
-  journal: { events: unknown[] } | undefined,
+  journal: AgentEventJournal | undefined,
 ): boolean {
-  if (typeof rawCursor !== "number" && rawCursor.epoch !== eventEpoch) return true;
+  if (typeof rawCursor === "number" && cursor > 0) return true;
   if (!journal) return cursor > 0;
+  if (typeof rawCursor !== "number" && rawCursor.epoch !== journal.epoch) return true;
+  if (cursor > journal.sequence) return true;
   return journal.events.length > 0 && cursor < (journal.events[0] as { sequence: number }).sequence - 1;
 }
 
@@ -206,21 +212,22 @@ export function broadcast(
 
 function decorateAgentEvent(channel: WsChannelName, data: unknown, threadId: string | undefined): unknown {
   if (channel !== "agent.event" || !threadId || !data || typeof data !== "object") return data;
-  const sequence = (nextSequenceByThread.get(threadId) ?? 0) + 1;
-  return { ...(data as Record<string, unknown>), sequence, epoch: eventEpoch };
+  const journal = threadJournals.get(threadId);
+  const sequence = (journal?.sequence ?? 0) + 1;
+  const epoch = journal?.epoch ?? NodeCrypto.randomUUID();
+  return { ...(data as Record<string, unknown>), sequence, epoch };
 }
 
 function retainAgentEvent(channel: WsChannelName, threadId: string | undefined, event: unknown): void {
   if (channel !== "agent.event" || !threadId) return;
-  nextSequenceByThread.delete(threadId);
-  nextSequenceByThread.set(threadId, (event as { sequence: number }).sequence);
+  if (!event || typeof event !== "object" || !("sequence" in event) || !("epoch" in event)) return;
+  if (typeof event.sequence !== "number" || typeof event.epoch !== "string") return;
   const existing = threadJournals.get(threadId);
   const events = existing ? [...existing.events, event] : [event];
   events.splice(0, Math.max(0, events.length - MAX_AGENT_EVENT_JOURNAL_EVENTS_PER_THREAD));
   threadJournals.delete(threadId);
-  threadJournals.set(threadId, { events });
+  threadJournals.set(threadId, { epoch: event.epoch, sequence: event.sequence, events });
   trimJournalMap(threadJournals);
-  trimJournalMap(nextSequenceByThread);
 }
 
 function trimJournalMap(map: Map<string, unknown>): void {
@@ -336,5 +343,4 @@ export function _resetForTest(): void {
   queuedPushBytes.clear();
   threadSubscriptions.clear();
   threadJournals.clear();
-  nextSequenceByThread.clear();
 }

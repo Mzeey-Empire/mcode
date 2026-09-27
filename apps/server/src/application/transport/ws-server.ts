@@ -34,6 +34,7 @@ import type {
 } from "../../features/browser-automation/index.js";
 import { EXTERNAL_THREAD_CONTROL_MCP_PATH } from "../../features/thread-control/index.js";
 import type { ReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
+import type { ExecutionMailboxDepth } from "../../features/agents/execution/execution-mailbox-scheduler.js";
 
 /** Constant-time string comparison to prevent timing attacks on token validation. */
 function safeTokenEqual(a: string, b: string): boolean {
@@ -74,6 +75,8 @@ export type WsServerDeps = RouterDeps & {
   browserAutomationMcpHandler?: BrowserAutomationMcpHandler;
   /** Optional opt-in packaged reliability controls. */
   reliabilityHarness?: ReliabilityHarnessAdapter;
+  /** Content-free counts for active execution worker queues. */
+  workerQueueDepth?: () => ExecutionMailboxDepth;
 };
 
 /** Refreshes mutable workspace authorization while preserving one connection's desktop identity. */
@@ -358,6 +361,7 @@ function createHealthBody(deps: WsServerDeps): Record<string, unknown> {
       nightlyEvidence: deps.browserAutomationBroker.nightlyEvidenceStatus(),
     };
   }
+  if (deps.workerQueueDepth) body.workerQueue = deps.workerQueueDepth();
   if (!deps.singleInstance) body.authToken = deps.authToken;
   return body;
 }

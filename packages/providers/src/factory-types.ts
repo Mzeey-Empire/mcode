@@ -6,6 +6,7 @@ import type {
   StoredAttachment,
 } from "@mcode/contracts";
 import type { ProviderHostPorts } from "./host-ports.js";
+import type { CodexCanonicalEventRouting } from "./private/codex/codex-canonical-event-publisher.js";
 
 /** Configuration validated by every inert Provider factory. */
 export interface ProviderFactoryConfiguration {
@@ -63,7 +64,13 @@ export interface ProviderBoundary {
 }
 
 /** Usable Codex Provider returned by its public factory. */
-export type CodexProviderBoundary = IAgentProvider & ProviderBoundary;
+export type CodexProviderBoundary = IAgentProvider & ProviderBoundary & {
+  setCanonicalTurnEventDeliveryEnabled(enabled: boolean): void;
+  setCanonicalTurnDeliveryFailureHandler(handler: (routing: CodexCanonicalEventRouting, error: Error) => void | Promise<void>): void;
+  fenceCanonicalTurnEvents(routing: CodexCanonicalEventRouting, options?: { discardQueued?: boolean }): Promise<void>;
+  waitForCanonicalTurnEvents(routing: CodexCanonicalEventRouting): Promise<void>;
+  retireCanonicalTurnEvents(routing: CodexCanonicalEventRouting): Promise<void>;
+};
 
 /** Usable Cursor Provider returned by its public factory. */
 export type CursorProviderBoundary = IAgentProvider & ProviderBoundary & {

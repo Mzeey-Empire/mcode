@@ -40,8 +40,8 @@ import {
   waitForAgentServiceIngressForTest,
   wrapProviderEmitterForRuntimeEvents,
 } from "./agent-service-test-harness.js";
-import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
-import { CanonicalAgentEventSink } from "../../canonical/canonical-agent-event-sink.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { broadcast } from "../../../../application/transport/push.js";
@@ -340,7 +340,7 @@ function buildService(
       undefined,
       undefined,
       mutationReservations,
-      createCanonicalAgentEventSinkStub(db),
+      createCanonicalAgentBoundaryStub(db),
       undefined,
       undefined,
   );
@@ -530,7 +530,7 @@ describe("AgentService turn cleanup", () => {
 
   it("marks a replayed queued plan answer after projecting its persisted user message", async () => {
     const { service, messageRepo, planQuestionAnswersRepo } = buildService();
-    vi.mocked(messageRepo.findByIdInThread).mockReturnValue({ id: "queued-plan-answer", sequence: 1 } as never);
+    vi.mocked(messageRepo.findByIdInThread).mockReturnValue({ id: "queued-plan-answer", role: "user", sequence: 1 } as never);
 
     await service.dispatchQueuedAutomaticTurn({
       threadId: THREAD_ID,
@@ -583,6 +583,9 @@ describe("AgentService turn cleanup", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
+      undefined,
+      expect.any(String),
       undefined,
     );
   });
@@ -1022,6 +1025,9 @@ describe("AgentService turn cleanup", () => {
       undefined,
       undefined,
       bundle,
+      undefined,
+      expect.any(String),
+      undefined,
     );
     expect((providerEmitter as any).sendTurn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1454,7 +1460,7 @@ describe("AgentService Ended finalization", () => {
     stopSession: ReturnType<typeof vi.fn>;
     interruptChildTurn: ReturnType<typeof vi.fn>;
   };
-  let canonicalSink: CanonicalAgentEventSink;
+  let canonicalSink: CanonicalAgentBoundary;
   let canonicalEvents: CanonicalAgentEventEnvelope[];
   let service: AgentService;
   let pendingPlanOutputs: Map<string, string>;
@@ -1520,7 +1526,7 @@ describe("AgentService Ended finalization", () => {
       listAnsweredForThread: vi.fn(() => []),
     } as unknown as PlanQuestionAnswersRepo;
 
-    canonicalSink = new CanonicalAgentEventSink(db, (events) => {
+    canonicalSink = new CanonicalAgentBoundary(db, (events) => {
       canonicalEvents.push(...events);
     });
     pendingPlanOutputs = new Map<string, string>();
