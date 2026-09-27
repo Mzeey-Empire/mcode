@@ -105,7 +105,7 @@ import {
 } from "./thread-store/usage";
 export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
-import { isThreadRuntimeActive } from "./thread-lifecycle";
+import { getCanonicalRuntimePhase, isThreadRuntimeActive } from "./thread-lifecycle";
 
 function deriveRunningThreadIds(records: Map<string, ThreadRecord>): Set<string> {
   return new Set(
@@ -2715,6 +2715,31 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return false;
   };
 
+  // Canonical lifecycle owns runtime state once its turn correlates to the
+  // record, so a dropped legacy terminal event cannot strand the running set
+  // or the composer gate.
+  const reconcileCanonicalRuntime = (
+    records: Map<string, ThreadRecord>,
+    runningThreadIds: Set<string>,
+    threadId: string,
+  ): { records: Map<string, ThreadRecord>; runningThreadIds: Set<string> } => {
+    const record = getThreadRecord(records, threadId);
+    const phase = getCanonicalRuntimePhase(threadId, record);
+    if (phase === null) return { records, runningThreadIds };
+    let nextRecords = records;
+    if (record.runtimePhase !== phase) {
+      nextRecords = patchThreadRecord(records, threadId, { runtimePhase: phase });
+    }
+    const running = phase === "running";
+    if (runningThreadIds.has(threadId) === running) {
+      return { records: nextRecords, runningThreadIds };
+    }
+    const nextRunning = new Set(runningThreadIds);
+    if (running) nextRunning.add(threadId);
+    else nextRunning.delete(threadId);
+    return { records: nextRecords, runningThreadIds: nextRunning };
+  };
+
   return {
     records: new Map<string, ThreadRecord>(),
     currentThreadId: null,
@@ -2728,6 +2753,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     flushPendingTextDeltas();
     set((state) => {
       let records = state.records;
+      let runningThreadIds = state.runningThreadIds;
       let changed = false;
       for (const recovery of recoveries) {
         const current = getThreadRecord(records, recovery.threadId);
@@ -2738,9 +2764,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           canonicalAgent: update.replica,
           ...(update.installedSnapshot ? recoverParentNarrative(recovery.threadId, update.replica.state) : {}),
         });
+        const reconciled = reconcileCanonicalRuntime(records, runningThreadIds, recovery.threadId);
+        records = reconciled.records;
+        runningThreadIds = reconciled.runningThreadIds;
         changed = true;
       }
-      return changed ? { records } : {};
+      return changed
+        ? { records, ...(runningThreadIds === state.runningThreadIds ? {} : { runningThreadIds }) }
+        : {};
     });
   },
 
@@ -2757,8 +2788,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const update = applyCanonicalPushEvents(current.canonicalAgent, threadId, events);
       if (update.replica === current.canonicalAgent) return {};
       accepted = true;
+      const records = patchThreadRecord(state.records, threadId, { canonicalAgent: update.replica });
+      const reconciled = reconcileCanonicalRuntime(records, state.runningThreadIds, threadId);
       return {
-        records: patchThreadRecord(state.records, threadId, { canonicalAgent: update.replica }),
+        records: reconciled.records,
+        ...(reconciled.runningThreadIds === state.runningThreadIds ? {} : { runningThreadIds: reconciled.runningThreadIds }),
       };
     });
     if (

@@ -1,24 +1,47 @@
-import type { AgentTurn, TurnRuntimePhase } from "@mcode/contracts";
+import type { AgentTurn, AgentTurnStatus, TurnRuntimePhase } from "@mcode/contracts";
 import type { ThreadRecord } from "./thread-record";
 
-/** Selects the provider-owned child lifecycle when no local execution is active. */
-export function getCanonicalLifecycleTurn(threadId: string, record: ThreadRecord): AgentTurn | undefined {
-  if (record.runtimePhase === "running" || record.runtimePhase === "finalizing") return undefined;
-  const latest = Object.values(record.canonicalAgent.state.turns)
+function latestCanonicalTurn(threadId: string, record: ThreadRecord): AgentTurn | undefined {
+  return Object.values(record.canonicalAgent.state.turns)
     .filter((turn) => turn.threadId === threadId)
     .sort((left, right) => Date.parse(left.startedAt ?? left.createdAt)
       - Date.parse(right.startedAt ?? right.createdAt) || left.id.localeCompare(right.id))
     .at(-1);
+}
+
+/** Selects the provider-owned child lifecycle when no local execution is active. */
+export function getCanonicalLifecycleTurn(threadId: string, record: ThreadRecord): AgentTurn | undefined {
+  if (record.runtimePhase === "running" || record.runtimePhase === "finalizing") return undefined;
+  const latest = latestCanonicalTurn(threadId, record);
   if (latest?.trigger.kind !== "child") return undefined;
   if (record.runtimePhase !== "idle" && (latest.status === "Pending" || latest.status === "Running")) return undefined;
   return latest;
 }
 
-/** Resolves the lifecycle shared by transcript, Composer, and running-thread indicators. */
-export function getThreadRuntimePhase(threadId: string, record: ThreadRecord): TurnRuntimePhase {
-  const turn = getCanonicalLifecycleTurn(threadId, record);
-  if (!turn) return record.runtimePhase;
-  switch (turn.status) {
+/**
+ * Canonical turn that owns this record's runtime phase, once correlation is
+ * proven. A tracked local execution only follows the canonical turn carrying
+ * the same execution identity, so an older persisted turn cannot clear or
+ * resurrect a live run while a matching terminal can clear a stale one.
+ */
+export function getCanonicalRuntimeTurn(threadId: string, record: ThreadRecord): AgentTurn | undefined {
+  if (record.runtimePhase === "finalizing") return undefined;
+  const latest = latestCanonicalTurn(threadId, record);
+  if (!latest) return undefined;
+  if (record.turnExecutionId !== null) {
+    return latest.executionId === record.turnExecutionId ? latest : undefined;
+  }
+  // Optimistic sends run without an identity until turnStarted lands; a prior
+  // terminal turn must not cancel that window.
+  if (record.runtimePhase === "running") return undefined;
+  // Without an identity, canonical Pending or Running claims only idle
+  // records; terminal truth may claim any non-busy record.
+  if ((latest.status === "Pending" || latest.status === "Running") && record.runtimePhase !== "idle") return undefined;
+  return latest;
+}
+
+function phaseForTurnStatus(status: AgentTurnStatus): TurnRuntimePhase {
+  switch (status) {
     case "Pending":
     case "Running": return "running";
     case "Completed": return "completed";
@@ -26,6 +49,17 @@ export function getThreadRuntimePhase(threadId: string, record: ThreadRecord): T
     case "Interrupted": return "interrupted";
     case "Errored": return "errored";
   }
+}
+
+/** Canonical-owned runtime phase for this record, or null when legacy owns it. */
+export function getCanonicalRuntimePhase(threadId: string, record: ThreadRecord): TurnRuntimePhase | null {
+  const turn = getCanonicalRuntimeTurn(threadId, record);
+  return turn ? phaseForTurnStatus(turn.status) : null;
+}
+
+/** Resolves the lifecycle shared by transcript, Composer, and running-thread indicators. */
+export function getThreadRuntimePhase(threadId: string, record: ThreadRecord): TurnRuntimePhase {
+  return getCanonicalRuntimePhase(threadId, record) ?? record.runtimePhase;
 }
 
 /** Whether the current lifecycle still owns execution, including final persistence. */
