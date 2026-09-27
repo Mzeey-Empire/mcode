@@ -167,16 +167,16 @@ export class ThreadBranchingService {
   private async createManaged(input: CreateBranchedThreadInput, messageId: string, lifecycle?: BranchedThreadLifecycle) {
     const created = await this.threadService.create(input.workspaceId, input.title, "worktree", input.branch, {
       branchless: input.worktreeBranchMode !== "named",
+      provider: input.provider,
       lifecycle: {
         onThreadPersisted: (thread) => {
           this.threads.updateLineage(thread.id, input.parentThreadId, messageId);
-          this.threads.updateProvider(thread.id, input.provider);
           lifecycle?.onManagedThreadPersisted(thread);
         },
       },
     });
     return {
-      thread: { ...created, provider: input.provider, parent_thread_id: input.parentThreadId, forked_from_message_id: messageId },
+      thread: { ...created, parent_thread_id: input.parentThreadId, forked_from_message_id: messageId },
       warnings: created.warnings,
     };
   }
