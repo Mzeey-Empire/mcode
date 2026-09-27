@@ -1,3 +1,4 @@
+import { sameExecution } from "./execution-mailbox-protocol.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 import type { ExecutionMailboxOwner } from "./execution-mailbox-owner.js";
 import type { ProviderEventCommitReceipt } from "@mcode/providers";
@@ -40,11 +41,6 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
   /** Prepare exact file and terminal inputs before admitting the provider batch to its mailbox. */
   bindCommandPreparation(prepare: (execution: ExecutionIdentity, batch: WorkerOwnedProviderEventBatch) => Promise<Extract<ExecutionWorkCommand, { kind: "event" }>>): void {
     this.prepareCommand = prepare;
-  }
-
-  /** Activate another provider only after its worker live effects are installed. */
-  enableProvider(providerId: string): void {
-    this.workerProviders.add(providerId);
   }
 
   /** Admit one provider attempt only while the exact mailbox still owns the thread. */
@@ -171,9 +167,4 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
   ): Promise<void> {
     await this.onCommitted?.(execution, result);
   }
-}
-
-function sameExecution(left: ExecutionIdentity | undefined, right: ExecutionIdentity): boolean {
-  return left?.threadId === right.threadId && left.turnId === right.turnId
-    && left.executionId === right.executionId;
 }

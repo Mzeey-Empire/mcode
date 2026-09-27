@@ -47,3 +47,17 @@ export interface ExecutionWorkerPort<Command, Result> {
   postMessage(request: ExecutionWorkerRequest<Command>): void;
   terminate(): void;
 }
+
+/** Identity fields carried by inbound provider routing, where the turn may be unresolved. */
+export type RoutedExecutionIdentity = Omit<ExecutionIdentity, "turnId"> & { readonly turnId?: string | undefined };
+
+/** Two executions match only when every durable identity field agrees. */
+export function sameExecution(left: RoutedExecutionIdentity, right: ExecutionIdentity): boolean {
+  return left.threadId === right.threadId && left.turnId === right.turnId && left.executionId === right.executionId;
+}
+
+/** Two leases match only when the epoch, worker incarnation, and lease id all agree. */
+export function sameLease(left: ExecutionLease, right: ExecutionLease): boolean {
+  return left.ownerEpoch === right.ownerEpoch && left.workerIndex === right.workerIndex
+    && left.workerGeneration === right.workerGeneration && left.leaseId === right.leaseId;
+}

@@ -1,3 +1,4 @@
+import { sameExecution, sameLease } from "./execution-mailbox-protocol.js";
 import type {
   ExecutionWorkerPort,
   ExecutionWorkerReply,
@@ -196,24 +197,14 @@ function defaultWorkerUrl(): URL {
 
 function matchesOperation(request: Request | undefined, operation: ExecutionSemanticOperation): boolean {
   return request !== undefined && request.ordinal === operation.ordinal
-    && request.execution.threadId === operation.execution.threadId
-    && request.execution.turnId === operation.execution.turnId
-    && request.execution.executionId === operation.execution.executionId
-    && request.lease.leaseId === operation.lease.leaseId
-    && request.lease.ownerEpoch === operation.lease.ownerEpoch
-    && request.lease.workerGeneration === operation.lease.workerGeneration
-    && request.lease.workerIndex === operation.lease.workerIndex
+    && sameExecution(request.execution, operation.execution)
+    && sameLease(request.lease, operation.lease)
     && operation.operationId === `${request.lease.leaseId}:${request.ordinal}`;
 }
 
 function matchesReply(request: Request | undefined, reply: Reply): boolean {
   return request !== undefined && request.requestId === reply.requestId
     && request.ordinal === reply.ordinal
-    && request.execution.threadId === reply.execution.threadId
-    && request.execution.turnId === reply.execution.turnId
-    && request.execution.executionId === reply.execution.executionId
-    && request.lease.leaseId === reply.lease.leaseId
-    && request.lease.ownerEpoch === reply.lease.ownerEpoch
-    && request.lease.workerGeneration === reply.lease.workerGeneration
-    && request.lease.workerIndex === reply.lease.workerIndex;
+    && sameExecution(request.execution, reply.execution)
+    && sameLease(request.lease, reply.lease);
 }

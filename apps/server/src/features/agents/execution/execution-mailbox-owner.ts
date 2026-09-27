@@ -1,5 +1,6 @@
 import type { DataOnlyParentTurnStartInput } from "../canonical/canonical-parent-turn-write.js";
 import type { ExecutionParentStartContext } from "./provider-execution-event-state.js";
+import { sameExecution } from "./execution-mailbox-protocol.js";
 import type { ExecutionIdentity, ExecutionLease, ExecutionMailboxCompletion } from "./execution-mailbox-protocol.js";
 import type { ExecutionMailboxScheduler, ExecutionRecoveryReceipt } from "./execution-mailbox-scheduler.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
@@ -126,8 +127,4 @@ function requireReply(completion: ExecutionMailboxCompletion<ExecutionWorkerResu
     throw new Error(`Execution worker rejected command: ${completion.result.reason}`);
   }
   return completion.result;
-}
-
-function sameExecution(left: ExecutionIdentity, right: ExecutionIdentity): boolean {
-  return left.threadId === right.threadId && left.turnId === right.turnId && left.executionId === right.executionId;
 }

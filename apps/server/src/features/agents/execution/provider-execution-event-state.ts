@@ -3,6 +3,7 @@ import type { ProviderEventDraft } from "@mcode/providers";
 import { processProviderEventWorkerTask } from "../../providers/composition/provider-event-worker-protocol.js";
 import { CodexLiveEventReducer, type CodexPlanFeature, type SyntheticTerminalInput } from "./codex-live-event-reducer.js";
 import { CodexLiveEventEffects, type PreparedCodexLiveEvent } from "./codex-live-event-effects.js";
+import { sameExecution } from "./execution-mailbox-protocol.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 import { OtherProviderLiveEventEffects, type OtherProviderRuntimeIntent } from "./provider-live-event-effects.js";
 
@@ -112,8 +113,7 @@ export class ProviderExecutionEventState {
   }
 
   private matchesExecution(draft: ProviderEventDraft): boolean {
-    return draft.routing.threadId === this.execution.threadId && draft.routing.turnId === this.execution.turnId
-      && draft.routing.executionId === this.execution.executionId;
+    return sameExecution(draft.routing, this.execution);
   }
 }
 

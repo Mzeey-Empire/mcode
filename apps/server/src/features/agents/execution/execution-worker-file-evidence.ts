@@ -6,6 +6,7 @@ import { RealGitExecutor } from "../../projects/git/execution/real-git-executor.
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import { TurnFileTracker, type CapturedToolUseObservation, type FileTurnHandoff } from "../turns/turn-file-tracker.js";
 import type { PreparedExecutionFileEvidence } from "../turns/turn-execution-file-evidence.js";
+import { sameExecution } from "./execution-mailbox-protocol.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 import {
   prepareFrozenExecutionFileEvidence,
@@ -132,9 +133,7 @@ export class ExecutionWorkerFileEvidence {
   }
 
   private matches(active: ActiveFileExecution, execution: ExecutionIdentity, deliveryAttempt: number): boolean {
-    return active.execution.threadId === execution.threadId
-      && active.execution.turnId === execution.turnId
-      && active.execution.executionId === execution.executionId
+    return sameExecution(active.execution, execution)
       && active.deliveryAttempt === deliveryAttempt;
   }
 

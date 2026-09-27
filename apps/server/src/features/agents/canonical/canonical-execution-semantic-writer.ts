@@ -20,6 +20,7 @@ import { z } from "zod";
 
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import { sameExecution, sameLease } from "../execution/execution-mailbox-protocol.js";
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import type {
   ExecutionProviderCommitReceipt,
@@ -1600,8 +1601,7 @@ function validAssistantTextInput(
 
 function validAssistantTextEntry(input: ParentAssistantTextCheckpointInput | undefined, execution: ExecutionIdentity): boolean {
   if (!input) return false;
-  return input.executionId === execution.executionId && input.threadId === execution.threadId
-    && input.turnId === execution.turnId && typeof input.text === "string"
+  return sameExecution(input, execution) && typeof input.text === "string"
     && Buffer.byteLength(input.text, "utf8") > 0
     && Number.isSafeInteger(input.sequence) && input.sequence > 0;
 }
@@ -1621,9 +1621,7 @@ function validFinish(
   mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish" | "finish-live-event" }>,
 ): boolean {
   return mutation.outcome === mutation.input.outcome
-    && mutation.input.threadId === operation.execution.threadId
-    && mutation.input.turnId === operation.execution.turnId
-    && mutation.input.executionId === operation.execution.executionId;
+    && sameExecution(mutation.input, operation.execution);
 }
 
 function unchangedTextEvent(event: ExecutionLivePublicationIntent["event"]): boolean {
@@ -1655,8 +1653,7 @@ function validTerminalProviderEvent(
   input: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>["providerEvent"],
 ): boolean {
   return input === undefined || Boolean(input.phase && input.phase.length <= 64 && input.events.length > 0
-    && input.events.every((event) => event.routing.threadId === execution.threadId
-      && event.routing.turnId === execution.turnId && event.routing.executionId === execution.executionId));
+    && input.events.every((event) => sameExecution(event.routing, execution)));
 }
 
 function sameTerminalEvent(
@@ -1703,8 +1700,7 @@ function nextHead(head: SemanticHead, operation: ExecutionSemanticOperation): bo
   return !head.terminal && head.execution.threadId === operation.execution.threadId
     && head.execution.turnId === operation.execution.turnId
     && head.ordinal + 1 === operation.ordinal
-    && lease.ownerEpoch === candidate.ownerEpoch && lease.workerIndex === candidate.workerIndex
-    && lease.workerGeneration === candidate.workerGeneration && lease.leaseId === candidate.leaseId;
+    && sameLease(lease, candidate);
 }
 
 function validLostExecutionInput(input: LostExecutionInterruption, operation: ExecutionSemanticOperation): boolean {
@@ -1713,13 +1709,7 @@ function validLostExecutionInput(input: LostExecutionInterruption, operation: Ex
 }
 
 function sameExecutionAndLease(head: SemanticHead, input: Pick<LostExecutionInterruption, "execution" | "lease">): boolean {
-  return head.execution.threadId === input.execution.threadId
-    && head.execution.turnId === input.execution.turnId
-    && head.execution.executionId === input.execution.executionId
-    && head.lease.ownerEpoch === input.lease.ownerEpoch
-    && head.lease.workerIndex === input.lease.workerIndex
-    && head.lease.workerGeneration === input.lease.workerGeneration
-    && head.lease.leaseId === input.lease.leaseId;
+  return sameExecution(head.execution, input.execution) && sameLease(head.lease, input.lease);
 }
 
 function workerLossOperation(input: LostExecutionInterruption): ExecutionSemanticOperation {
