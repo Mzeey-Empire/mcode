@@ -49,6 +49,11 @@ class TimeoutSocket {
     const parsed: unknown = JSON.parse(raw);
     if (!isRpcRequest(parsed)) throw new Error("Expected an RPC request");
     this.requests.push(parsed);
+    // A socket that ignores the liveness probe is closed by the watchdog;
+    // these tests exercise RPC timeouts on a live connection instead.
+    if (parsed.method === "app.version") {
+      queueMicrotask(() => this.respond(parsed, "0.0.1"));
+    }
   }
 
   open(): void {
