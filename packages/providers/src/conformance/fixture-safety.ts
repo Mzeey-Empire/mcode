@@ -9,7 +9,7 @@ import type {
 } from "./types.js";
 import { PROVIDER_CONFORMANCE_CONTRACT_VERSION } from "./types.js";
 
-const PROVIDER_IDS = new Set(["claude", "codex", "copilot", "cursor"]);
+const PROVIDER_IDS = new Set(["claude", "codex", "copilot", "cursor", "opencode"]);
 const PROFILES = new Set([
   "core",
   "build",

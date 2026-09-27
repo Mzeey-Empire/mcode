@@ -5,6 +5,7 @@ import {
   createCodexProvider,
   createCopilotProvider,
   createCursorProvider,
+  createOpencodeProvider,
   type ProviderFactoryInput,
   type ProviderHostPorts,
 } from "../index.js";
@@ -67,6 +68,7 @@ describe("Provider factories", () => {
     ["codex", createCodexProvider],
     ["copilot", createCopilotProvider],
     ["cursor", createCursorProvider],
+    ["opencode", createOpencodeProvider],
   ] as const)("creates an inert %s Provider boundary", (id, createProvider) => {
     const input = createInput();
 
@@ -103,6 +105,14 @@ describe("Provider factories", () => {
       expect(provider.descriptor.capabilities).toContainEqual(
         { name: "child-cancellation", support: "unsupported" },
       );
+    }
+    if (id === "opencode") {
+      expect(provider.descriptor.capabilities).toEqual([
+        { name: "build", support: "supported" },
+        { name: "plan", support: "supported" },
+        { name: "permissions", support: "supported" },
+        { name: "session-eviction", support: "supported" },
+      ]);
     }
     const hostPortMethods = Object.entries(input.host)
       .filter(([name]) => name !== "runtime")

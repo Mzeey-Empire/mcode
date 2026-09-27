@@ -44,12 +44,14 @@ describe("Provider conformance registry", () => {
       "codex",
       "copilot",
       "cursor",
+      "opencode",
     ]);
     await expect(Promise.all(ENABLED_PROVIDER_CONFORMANCE.map(runFactoryCoreProfile))).resolves.toEqual([
       { providerId: "claude", spawnCount: 1, terminalType: "turn.completed" },
       { providerId: "codex", spawnCount: 1, terminalType: "turn.completed" },
       { providerId: "copilot", spawnCount: 1, terminalType: "turn.completed" },
       { providerId: "cursor", spawnCount: 1, terminalType: "turn.completed" },
+      { providerId: "opencode", spawnCount: 1, terminalType: "turn.completed" },
     ]);
   });
 
