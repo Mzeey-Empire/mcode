@@ -156,6 +156,47 @@ function settleWithin<T>(promise: Promise<T>, fallback: T): Promise<T> {
 }
 
 /**
+ * Cap on blocking terminal mount while a webfont downloads. Late arrivals
+ * are still caught by the loadingdone → clearTextureAtlas path in
+ * loadRenderer, so this only needs to cover the common fast case.
+ */
+const TERMINAL_FONT_WAIT_MS = 500;
+
+/**
+ * Starts fetching the terminal's resolved font family and waits up to
+ * {@link TERMINAL_FONT_WAIT_MS}. @font-face files fetch lazily on first use
+ * and xterm never observes font loading, so without an explicit load the
+ * first paint always races the download. Failure or timeout must not block
+ * the mount; the CSS fallback chain still applies.
+ */
+function awaitTerminalFont(fontSpec: string): Promise<unknown> {
+  if (typeof document.fonts?.load !== "function") return Promise.resolve();
+  return Promise.race([
+    document.fonts.load(fontSpec),
+    new Promise((resolve) => setTimeout(resolve, TERMINAL_FONT_WAIT_MS)),
+  ]).catch(() => {});
+}
+
+/**
+ * Rebuilds the WebGL glyph atlas whenever a font-settle event fires while
+ * the addon is live. WebGL rasterizes glyphs at attach time and xterm never
+ * observes font loading, so a webfont landing late (cold cache, or a lazily
+ * fetched unicode-range subset) would keep showing fallback glyphs for the
+ * rest of the session. Returns the teardown that removes the listener.
+ */
+function watchWebfontSettle(
+  webgl: { clearTextureAtlas(): void },
+  term: Terminal,
+): () => void {
+  const onFontsLoaded = () => {
+    webgl.clearTextureAtlas();
+    term.refresh(0, term.rows - 1);
+  };
+  document.fonts?.addEventListener("loadingdone", onFontsLoaded);
+  return () => document.fonts?.removeEventListener("loadingdone", onFontsLoaded);
+}
+
+/**
  * Loads the xterm core and fit addon once and caches the result so view
  * remounts (shell-tab / thread switch) skip the cold dynamic-import cost — the
  * single biggest async gap on the remount path. Safe to call eagerly (e.g. when
@@ -355,7 +396,9 @@ async function loadRenderer(
       }
       rendererRef.current = webgl;
       setActiveRenderer("webgl");
+      const unwatchFonts = watchWebfontSettle(webgl, term);
       claimWebglSlot(ptyId, () => {
+        unwatchFonts();
         try {
           webgl.dispose();
         } catch {
@@ -606,11 +649,16 @@ export const TerminalView = memo(function TerminalView({
     const mountStart = performance.now();
 
     async function init(el: HTMLElement) {
+      const options = getTerminalOptions(terminalSettingsRef.current);
+      // Warm the terminal webfont in parallel with the xterm imports so it is
+      // loaded by the first paint whenever the network allows.
+      const fontReady = awaitTerminalFont(`${options.fontSize}px ${options.fontFamily}`);
       // Cached after the first mount, so remounts skip the cold import cost.
       const [{ Terminal: XTerminal, FitAddon: XFitAddon }, serializeModule] =
         await Promise.all([
           loadXtermModules(),
           import("@xterm/addon-serialize"),
+          fontReady,
         ]);
       if (disposed || !containerRef.current || !fitHostRef.current) {
         if (!disposedNotified) {
@@ -621,7 +669,7 @@ export const TerminalView = memo(function TerminalView({
       }
 
       const term = new XTerminal({
-        ...getTerminalOptions(terminalSettingsRef.current),
+        ...options,
         allowProposedApi: true,
         theme: {
           background: TERMINAL_BACKGROUND,
