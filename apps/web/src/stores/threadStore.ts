@@ -186,8 +186,6 @@ interface ThreadState {
   clearMessages: () => void;
   /** Deactivate the selected conversation and invalidate any active hydration commit. */
   deactivateConversation: () => void;
-  /** Returns true if an agent is actively executing on the given thread. */
-  isThreadRunning: (threadId: string) => boolean;
   /** Set questions received from the model and show the wizard. */
   setPlanQuestions: (threadId: string, questions: PlanQuestion[]) => void;
   /** Record the user's answer for one question. */
@@ -3368,11 +3366,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const current = get().currentThreadId;
     if (current) invalidateDeferredNarrativeEvents(current);
     threadHydrator.deactivate();
-  },
-
-  /** Check whether an agent is currently executing on the given thread. */
-  isThreadRunning: (threadId) => {
-    return get().runningThreadIds.has(threadId);
   },
 
   /** Return per-thread settings, preferring in-memory overrides then DB-persisted values then defaults. */
