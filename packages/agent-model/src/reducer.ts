@@ -243,12 +243,18 @@ function reduceTurnCreated(
   if (event.routing.threadId !== turn.threadId || event.routing.turnId !== turn.id) {
     return { state, outcome: "routing-conflict" };
   }
+  if (turn.executionId !== undefined && turn.executionId !== event.routing.executionId) {
+    return { state, outcome: "routing-conflict" };
+  }
   const currentTurn = state.turns[turn.id];
   if (currentTurn && TERMINAL_TURN_STATUSES.has(currentTurn.status)) {
     return { state: { ...state, ...acceptedInputState }, outcome: "terminal-outcome-confirmed" };
   }
+  const stored = turn.executionId === event.routing.executionId
+    ? turn
+    : { ...turn, executionId: event.routing.executionId };
   return {
-    state: { ...state, turns: { ...state.turns, [turn.id]: turn }, ...acceptedInputState },
+    state: { ...state, turns: { ...state.turns, [turn.id]: stored }, ...acceptedInputState },
     outcome: "applied",
   };
 }
