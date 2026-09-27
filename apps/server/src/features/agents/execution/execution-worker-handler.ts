@@ -17,6 +17,7 @@ import type {
 import type { ParentNarrativeRecoveryCommit } from "../turns/parent-turn-durability.js";
 import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import type { PlanPersistenceReady } from "../planning/plan-execution-state.js";
+import { sameExecution, sameLease } from "./execution-mailbox-protocol.js";
 import type {
   ExecutionIdentity,
   ExecutionLease,
@@ -38,21 +39,7 @@ export type ExecutionWorkCommand =
   | { readonly kind: "event"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[]; readonly parentLive?: ParentLiveEffects; readonly terminalInput?: DataOnlyParentTurnFinishInput; readonly deliveryAttempt?: number; readonly capturedFileObservation?: CapturedToolUseObservation | null; readonly frozenFileEvidence?: FrozenExecutionFileEvidence; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
   | { readonly kind: "assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
   | { readonly kind: "narrative-delta"; readonly input: ParentNarrativeRecoveryCommit }
-  | {
-    readonly kind: "live-event";
-    readonly text:
-      | { readonly kind: "unchanged" }
-      | { readonly kind: "append"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
-      | { readonly kind: "reclassify"; readonly expectedText: string }
-      | { readonly kind: "promote"; readonly input: ParentAssistantTextCheckpointInput };
-    readonly narrative?: ParentNarrativeRecoveryCommit;
-    readonly taskIntents?: readonly TaskToolWriteIntent[];
-    readonly systemIntents?: readonly CodexSystemWriterIntent[];
-    readonly message?: DataOnlyParentLiveMessageInput;
-    readonly planQuestions?: readonly PlanQuestion[];
-    readonly planOutput?: PlanPersistenceReady;
-    readonly publication: ExecutionLivePublicationIntent;
-  }
+  | ({ readonly kind: "live-event"; readonly publication: ExecutionLivePublicationIntent } & ParentLiveEffects)
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
   | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
   | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
@@ -64,7 +51,19 @@ export type ExecutionWorkCommand =
   | { readonly kind: "release"; readonly recovery?: ExecutionRecoveryReceipt };
 
 /** Parent effects prepared from the same provider event as its canonical draft. */
-export type ParentLiveEffects = Omit<Extract<ExecutionWorkCommand, { kind: "live-event" }>, "kind" | "publication">;
+export interface ParentLiveEffects {
+  readonly text:
+    | { readonly kind: "unchanged" }
+    | { readonly kind: "append"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
+    | { readonly kind: "reclassify"; readonly expectedText: string }
+    | { readonly kind: "promote"; readonly input: ParentAssistantTextCheckpointInput };
+  readonly narrative?: ParentNarrativeRecoveryCommit;
+  readonly taskIntents?: readonly TaskToolWriteIntent[];
+  readonly systemIntents?: readonly CodexSystemWriterIntent[];
+  readonly message?: DataOnlyParentLiveMessageInput;
+  readonly planQuestions?: readonly PlanQuestion[];
+  readonly planOutput?: PlanPersistenceReady;
+}
 
 /** The only effects admitted after an execution's terminal projection has committed. */
 export interface PostTerminalEffects {
@@ -94,16 +93,7 @@ export interface ExecutionSemanticOperation {
     | { readonly kind: "append-events"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[]; readonly parentLive?: ParentLiveEffects }
     | { readonly kind: "append-assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
     | { readonly kind: "narrative-delta"; readonly input: ParentNarrativeRecoveryCommit }
-    | {
-      readonly kind: "live-event";
-      readonly text: Extract<ExecutionWorkCommand, { readonly kind: "live-event" }>["text"];
-      readonly narrative?: ParentNarrativeRecoveryCommit;
-      readonly taskIntents?: readonly TaskToolWriteIntent[];
-      readonly systemIntents?: readonly CodexSystemWriterIntent[];
-      readonly message?: DataOnlyParentLiveMessageInput;
-      readonly planQuestions?: readonly PlanQuestion[];
-      readonly planOutput?: PlanPersistenceReady;
-    }
+    | ({ readonly kind: "live-event" } & ParentLiveEffects)
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
     | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
@@ -176,14 +166,11 @@ export type ExecutionParentEventResult = Pick<PreparedProviderLiveEvent, "runtim
 
 /** A command result that never calls an uncommitted mutation successful. */
 export type ExecutionWorkerResult =
-  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[]; readonly planQuestions?: ExecutionPlanQuestionsReceipt; readonly planOutput?: PlanRecord; readonly terminalPersistence?: ExecutionTerminalPersistenceReceipt; readonly parentEvent?: ExecutionParentEventResult }
+  | (Extract<ExecutionWriteReceipt, { kind: "committed" }> & { readonly parentEvent?: ExecutionParentEventResult })
   | { readonly kind: "released" }
   | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-text-routing" | "invalid-narrative-routing" | "invalid-stop-watermark" | "writer-conflict" | "writer-failure" };
 
 type WorkerCommand = ExecutionMailboxCommand<ExecutionWorkCommand>;
-const METADATA_MUTATIONS: ReadonlySet<WorkerCommand["kind"]> = new Set([
-  "checkpoint", "effect-result", "provider-outcome", "stage-terminal",
-]);
 
 interface ExecutionState {
   readonly execution: ExecutionIdentity;
@@ -293,8 +280,7 @@ export class ExecutionWorkerHandler {
       state.phase = "finalized";
       if (state.fileAttempt !== undefined) this.files.retire(state.execution, state.fileAttempt);
     }
-    const result = committedResult(receipt);
-    return prepared.parentEvent ? { ...result, parentEvent: prepared.parentEvent } : result;
+    return prepared.parentEvent ? { ...receipt, parentEvent: prepared.parentEvent } : receipt;
   }
 
   private prepareRequest(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): PreparedExecutionRequest | undefined {
@@ -432,9 +418,7 @@ export class ExecutionWorkerHandler {
       phase: "running",
       durableRevision: receipt.durableRevision,
     });
-    return started
-      ? { ...committedResult(receipt), parentEvent: started }
-      : committedResult(receipt);
+    return started ? { ...receipt, parentEvent: started } : receipt;
   }
 
   private admissionStart(
@@ -529,7 +513,7 @@ function syntheticTerminalInput(
 ): SyntheticTerminalInput | undefined {
   if (state.phase !== "running" && state.phase !== "stopping") return undefined;
   if (command.input.outcome !== command.outcome || command.input.providerId !== state.providerId
-    || !sameIdentity(command.input, state.execution)) return undefined;
+    || !sameExecution(command.input, state.execution)) return undefined;
   switch (command.outcome) {
     case "cancelled": return { outcome: "cancelled" };
     case "interrupted": return { outcome: "interrupted" };
@@ -556,16 +540,9 @@ function metadataOrTextMutation(
   execution: ExecutionIdentity,
   state: ExecutionState,
 ): ExecutionSemanticOperation["mutation"] | undefined {
-  if (isMetadataMutation(command)) return command;
+  if (command.kind !== "assistant-text") return command;
   return state.phase === "running" && validTextRouting(command.inputs, execution)
     ? { kind: "append-assistant-text", inputs: command.inputs } : undefined;
-}
-
-function isMetadataMutation(command: WorkerCommand): command is Extract<
-  WorkerCommand,
-  { readonly kind: "checkpoint" | "effect-result" | "provider-outcome" | "stage-terminal" }
-> {
-  return METADATA_MUTATIONS.has(command.kind);
 }
 
 function eventMutation(
@@ -637,7 +614,7 @@ function commandRejection(
   request: ExecutionWorkerRequest<WorkerCommand>,
   state: ExecutionState,
 ): Extract<ExecutionWorkerResult, { kind: "rejected" }>["reason"] | null {
-  if (!sameIdentity(state.execution, request.execution) || !sameLease(state.lease, request.lease)) return "stale-execution";
+  if (!sameExecution(state.execution, request.execution) || !sameLease(state.lease, request.lease)) return "stale-execution";
   if (validRecoveryRelease(request.command, state.lease)) return null;
   if (request.ordinal !== state.nextOrdinal) return "out-of-order";
   return null;
@@ -684,14 +661,12 @@ function invalidLiveEventReason(
 }
 
 function validEventRouting(events: readonly ProviderEventDraft[], execution: ExecutionIdentity): boolean {
-  return events.length > 0 && events.every((event) => event.routing.threadId === execution.threadId
-    && event.routing.turnId === execution.turnId && event.routing.executionId === execution.executionId);
+  return events.length > 0 && events.every((event) => sameExecution(event.routing, execution));
 }
 
 function validTextRouting(inputs: readonly ParentAssistantTextCheckpointInput[], execution: ExecutionIdentity): boolean {
   return Array.isArray(inputs) && inputs.length > 0 && inputs.every((input) => input
-    && input.threadId === execution.threadId
-    && input.turnId === execution.turnId && input.executionId === execution.executionId);
+    && sameExecution(input, execution));
 }
 
 function validLiveEventRouting(
@@ -787,9 +762,7 @@ function validFinishInput(
 ): boolean {
   return command.outcome === command.input.outcome
     && command.input.providerId === providerId
-    && command.input.threadId === execution.threadId
-    && command.input.turnId === execution.turnId
-    && command.input.executionId === execution.executionId;
+    && sameExecution(command.input, execution);
 }
 
 function operationFor(
@@ -830,26 +803,4 @@ function isDurableReceipt(
 ): receipt is Extract<ExecutionWriteReceipt, { kind: "committed" }> {
   return receipt.kind === "committed" && receipt.operationId === operationId(request)
     && Number.isSafeInteger(receipt.durableRevision) && receipt.durableRevision >= previousRevision;
-}
-
-function committedResult(receipt: Extract<ExecutionWriteReceipt, { kind: "committed" }>): Extract<ExecutionWorkerResult, { kind: "committed" }> {
-  return {
-    kind: "committed", operationId: receipt.operationId, durableRevision: receipt.durableRevision,
-    ...(receipt.providerCommit ? { providerCommit: receipt.providerCommit } : {}),
-    ...(receipt.providerEvents ? { providerEvents: receipt.providerEvents } : {}),
-    ...(receipt.assistantTextCheckpoint ? { assistantTextCheckpoint: receipt.assistantTextCheckpoint } : {}),
-    ...(receipt.livePublication ? { livePublication: receipt.livePublication } : {}),
-    ...(receipt.planQuestions ? { planQuestions: receipt.planQuestions } : {}),
-    ...(receipt.planOutput ? { planOutput: receipt.planOutput } : {}),
-    ...(receipt.terminalPersistence ? { terminalPersistence: receipt.terminalPersistence } : {}),
-  };
-}
-
-function sameIdentity(left: ExecutionIdentity, right: ExecutionIdentity): boolean {
-  return left.threadId === right.threadId && left.turnId === right.turnId && left.executionId === right.executionId;
-}
-
-function sameLease(left: ExecutionLease, right: ExecutionLease): boolean {
-  return left.ownerEpoch === right.ownerEpoch && left.workerIndex === right.workerIndex
-    && left.workerGeneration === right.workerGeneration && left.leaseId === right.leaseId;
 }

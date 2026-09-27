@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 
+import { sameExecution, sameLease } from "./execution-mailbox-protocol.js";
 import type {
   ExecutionIdentity,
   ExecutionLease,
@@ -19,6 +20,7 @@ export const EXECUTION_CONTROL_KINDS = [
   "checkpoint", "effect-result", "provider-outcome", "stage-terminal", "finalize", "release",
   "finish-from-state", "finish-live-event", "post-terminal-event",
 ] as const;
+/** A command kind that must still settle after Stop begins draining the mailbox. */
 export type ExecutionControlKind = typeof EXECUTION_CONTROL_KINDS[number];
 const CONTROL_KINDS: ReadonlySet<string> = new Set(EXECUTION_CONTROL_KINDS);
 
@@ -73,7 +75,7 @@ export interface ExecutionLostAssignment {
 /** Writer evidence that a lost worker's execution can release its thread and slot. */
 export type ExecutionRecoveryReceipt =
   | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number }
-  | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState: "not-started" | "already-terminal" };
+  | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState?: "not-started" | "already-terminal" };
 
 /** The host supplies durable owner epochs and a worker factory for each fixed slot. */
 export interface ExecutionMailboxOptions<Work extends { readonly kind: string }, Result> {
@@ -83,10 +85,12 @@ export interface ExecutionMailboxOptions<Work extends { readonly kind: string },
   readonly onWorkerLost: (assignments: readonly ExecutionLostAssignment[], workerIndex: number) => void;
 }
 
+/** The result of binding a turn attempt to a worker slot before its start is sent. */
 export type ExecutionClaim =
   | { readonly kind: "claimed"; readonly lease: ExecutionLease }
   | { readonly kind: "thread-busy" | "worker-unavailable" | "shutdown" };
 
+/** The result of admitting one command; an admitted command resolves through its completion promise. */
 export type ExecutionAdmission<Result> =
   | { readonly kind: "admitted"; readonly ordinal: number; readonly completion: Promise<ExecutionMailboxCompletion<Result>> }
   | { readonly kind: "stale-execution" | "overloaded" | "invalid-size" | "stop-already-requested" | "stopping" | "shutdown" };
@@ -281,7 +285,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
 
   private currentAssignment(execution: ExecutionIdentity, lease: ExecutionLease): Assignment<ExecutionMailboxCommand<Work>, Result> | undefined {
     const assignment = this.byThread.get(execution.threadId);
-    if (!assignment || !sameIdentity(assignment.execution, execution) || !sameLease(assignment.lease, lease)) return undefined;
+    if (!assignment || !sameExecution(assignment.execution, execution) || !sameLease(assignment.lease, lease)) return undefined;
     return assignment;
   }
 
@@ -413,15 +417,6 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
   }
 }
 
-function sameIdentity(left: ExecutionIdentity, right: ExecutionIdentity): boolean {
-  return left.threadId === right.threadId && left.turnId === right.turnId && left.executionId === right.executionId;
-}
-
-function sameLease(left: ExecutionLease, right: ExecutionLease): boolean {
-  return left.ownerEpoch === right.ownerEpoch && left.workerIndex === right.workerIndex
-    && left.workerGeneration === right.workerGeneration && left.leaseId === right.leaseId;
-}
-
 function validRecoveryReceipt(lease: ExecutionLease, receipt: ExecutionRecoveryReceipt): boolean {
   return receipt.operationId === `${lease.leaseId}:worker-lost`
     && (receipt.kind === "conflict" || Number.isSafeInteger(receipt.durableRevision));
@@ -429,7 +424,7 @@ function validRecoveryReceipt(lease: ExecutionLease, receipt: ExecutionRecoveryR
 
 function matchesReply<Command, Result>(request: ExecutionWorkerRequest<Command>, reply: ExecutionWorkerReply<Result>): boolean {
   return request.requestId === reply.requestId && request.ordinal === reply.ordinal
-    && sameIdentity(request.execution, reply.execution) && sameLease(request.lease, reply.lease);
+    && sameExecution(request.execution, reply.execution) && sameLease(request.lease, reply.lease);
 }
 
 function validIdentity(execution: ExecutionIdentity): boolean {

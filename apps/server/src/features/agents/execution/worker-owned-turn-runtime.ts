@@ -9,7 +9,7 @@ import { ExecutionMailboxOwner } from "./execution-mailbox-owner.js";
 import { ExecutionMailboxScheduler, type ExecutionMailboxLimits } from "./execution-mailbox-scheduler.js";
 import { ExecutionProviderEventOwnership } from "./execution-provider-event-ownership.js";
 import { ExecutionThreadWorkerPort } from "./execution-worker-port.js";
-import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
+import type { ExecutionIdentity, ExecutionLease } from "./execution-mailbox-protocol.js";
 import { ExecutionWorkerLossCoordinator, workerLossIncidentId } from "./execution-worker-loss-coordinator.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
 
@@ -84,18 +84,16 @@ export class WorkerOwnedTurnRuntime {
     }
   }
 
-  private async recoverRejectedOwned(execution: ExecutionIdentity, lease: NonNullable<ReturnType<ExecutionMailboxOwner["current"]>>["lease"]): Promise<void> {
+  private async recoverRejectedOwned(execution: ExecutionIdentity, lease: ExecutionLease): Promise<void> {
     const receipt = await this.writerPort.interruptWorkerLoss({
       execution, lease,
       reason: "The provider event could not be durably applied to this execution.",
       recoveryIncidentId: workerLossIncidentId({ execution, lease }),
     });
-    const recovery = receipt.kind === "committed" ? receipt
-      : receipt.recoveryState === "already-terminal"
-        ? { ...receipt, recoveryState: "already-terminal" as const }
-        : null;
-    if (!recovery) throw new Error("Rejected execution has no durable recovery evidence");
-    await this.owner.releaseRecovered(execution, recovery);
+    if (receipt.kind !== "committed" && receipt.recoveryState !== "already-terminal") {
+      throw new Error("Rejected execution has no durable recovery evidence");
+    }
+    await this.owner.releaseRecovered(execution, receipt);
     this.onRecovered?.(execution);
   }
 
