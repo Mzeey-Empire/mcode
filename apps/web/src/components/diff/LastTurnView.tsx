@@ -1,5 +1,6 @@
 import type { ReviewComparison } from "@mcode/contracts";
 import { FileList } from "./FileList";
+import { Badge } from "@/components/ui/badge";
 
 /** Props for LastTurnView. */
 interface LastTurnViewProps {
@@ -35,6 +36,15 @@ export function LastTurnView({ threadId, comparison, cacheVersion, refreshing, o
 
   return (
     <div data-testid="review-last-turn" className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border/15">
+        <span className="font-mono text-[11px] tabular-nums text-foreground/70">
+          {comparison.files.length}
+        </span>
+        <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+          {turnLabel(comparison)}
+        </span>
+        <TurnDiffSource comparison={comparison} />
+      </div>
       <FileList
         files={comparison.files}
         source="turn-diff"
@@ -49,4 +59,22 @@ export function LastTurnView({ threadId, comparison, cacheVersion, refreshing, o
       />
     </div>
   );
+}
+
+function turnLabel(comparison: ReviewComparison): string {
+  const files = comparison.files.length === 1 ? "file" : "files";
+  const phase = comparison.turnDiff?.phase === "live" ? "Live" : "last turn";
+  return `${files} · ${phase}`;
+}
+
+function TurnDiffSource({ comparison }: { comparison: ReviewComparison }) {
+  if (!comparison.turnDiff) return null;
+  return <Badge
+    variant="secondary"
+    data-testid="review-turn-source"
+    data-review-source={comparison.turnDiff.source}
+    data-review-fidelity={comparison.turnDiff.fidelity}
+  >
+    {comparison.turnDiff.source === "git" ? "Git fallback: same-file edits may appear" : comparison.turnDiff.source === "tracked" ? "Tracked file evidence" : "Agent changes"}
+  </Badge>;
 }
