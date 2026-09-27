@@ -4,6 +4,7 @@ export {
   createCopilotProvider,
   createCursorProvider,
   createDevinProvider,
+  createOpencodeProvider,
 } from "./factories.js";
 export type {
   ProviderBoundary,

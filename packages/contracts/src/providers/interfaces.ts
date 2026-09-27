@@ -16,7 +16,7 @@ import type { Provider } from "../compat/agent-model.js";
 
 /**
  * Identifier for a supported AI provider.
- * "opencode" remains catalog-only until a server adapter ships.
+ * "gemini" remains catalog-only until a server adapter ships.
  */
 export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode" | "devin";
 

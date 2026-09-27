@@ -37,6 +37,11 @@ export function createDevinProvider(input: ProviderFactoryInput): DevinProviderB
   return createDevinAcpProvider(input);
 }
 
+/** Prepares the OpenCode Provider boundary without inspecting or spawning its CLI. */
+export function createOpencodeProvider(input: ProviderFactoryInput): ProviderBoundary {
+  return createProviderBoundary("opencode", ["build", "plan", "permissions", "session-eviction"], input);
+}
+
 function validateCodexPorts(ports: NonNullable<ProviderFactoryInput["codex"]>): void {
   const methods = [
     ["settings", "get"],

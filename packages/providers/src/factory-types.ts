@@ -59,7 +59,7 @@ export interface DevinProviderPorts {
 
 /** Prepared Provider boundary returned without CLI inspection or process startup. */
 export interface ProviderBoundary {
-  readonly id: "claude" | "codex" | "copilot" | "cursor" | "devin";
+  readonly id: "claude" | "codex" | "copilot" | "cursor" | "devin" | "opencode";
   readonly descriptor: Provider;
 }
 

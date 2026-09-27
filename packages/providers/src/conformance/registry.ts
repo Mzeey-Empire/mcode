@@ -4,6 +4,7 @@ import {
   createCodexProvider,
   createCopilotProvider,
   createCursorProvider,
+  createOpencodeProvider,
 } from "../factories.js";
 import type { ProviderConformanceRegistration } from "./types.js";
 
@@ -96,6 +97,18 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
       oldestSupported: "0.21.0",
       currentTested: "0.21.0",
       source: "apps/server/package.json and bun.lock",
+    }],
+  },
+  {
+    providerId: "opencode",
+    factory: createOpencodeProvider,
+    requiredProfiles: ["core", "build", "plan", "permissions", "session-eviction"],
+    fixtureFiles: [fixtureFile("opencode")],
+    supportedVersions: [{
+      component: "opencode-cli",
+      oldestSupported: "legacy",
+      currentTested: "v2",
+      source: "apps/server/src/features/providers/adapters/opencode/opencode-http-client.ts (OpenCodeRequestVersion) and opencode-cli.ts",
     }],
   },
 ];

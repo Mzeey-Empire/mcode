@@ -3,7 +3,9 @@ import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type {
   AgentEvent,
+  ApprovalReviewSupport,
   IAgentProvider,
+  IApprovalReviewCapable,
   ISessionEvictable,
   PermissionDecision,
   PermissionQuestion,
@@ -243,7 +245,7 @@ function partRoleOf(
  * events; stop aborts the upstream session while the server stays warm.
  */
 @injectable()
-export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentProvider, ISessionEvictable {
+export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentProvider, ISessionEvictable, IApprovalReviewCapable {
   readonly id: ProviderId = "opencode";
   readonly descriptor = Object.freeze({
     id: "opencode" as const,
@@ -298,6 +300,25 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   /** Run a handoff prompt without a pooled turn; the parent session is untouched. */
   async runSideChannelQuery(): Promise<string> {
     throw Object.assign(new Error("OpenCode side-channel query is not available in the minimal turn slice"), { code: "ETIMEDOUT" });
+  }
+
+  /**
+   * Upstream OpenCode exposes only per-tool permission asks; no native
+   * turn-review verdict exists, so automatic approval review is honestly
+   * unavailable for every input. Side-effect-free: no probing, no I/O.
+   */
+  async getApprovalReviewSupport(_input: {
+    permissionMode: "full" | "supervised";
+    interactionMode: "plan" | "build";
+    requestedMode: "manual" | "automatic";
+    model: string;
+  }): Promise<ApprovalReviewSupport> {
+    return {
+      status: "unavailable",
+      supportedModes: ["manual"],
+      reason: "opencode-lacks-native-approval-review",
+      liveChangeScope: "none",
+    };
   }
 
   async listModels(): Promise<ProviderModelInfo[]> {
@@ -964,15 +985,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       deliveryAttempt: req.deliveryAttempt ?? 1,
     };
     if (reason === "permission-request") {
-      const request = synthesizeOpenCodePermissionRequest({ threadId, properties: normalized.properties });
-      if (!request) return this.emitAskDiagnostic(req, threadId);
-      if (this.pendingPermissions.has(request.requestId)) return;
-      this.pendingPermissions.set(request.requestId, {
-        request, sessionId: req.sessionId, upstreamSessionId: upstreamId, baseUrl,
-        kind: "permission", version: askVersion(normalized.type),
-        signal: state.abortController.signal, routing, replying: false,
-      });
-      this.emit("permission_request", request);
+      this.maybeEmitPermissionAsk(req, baseUrl, upstreamId, normalized, state, routing);
       return;
     }
     const synthesized = synthesizeOpenCodeQuestionRequest({ threadId, properties: normalized.properties });
@@ -984,6 +997,39 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       signal: state.abortController.signal, routing, replying: false,
     });
     this.emit("permission_request", synthesized);
+  }
+
+  /**
+   * Register one upstream permission ask, then either card it for the user
+   * (supervised) or auto-answer it "always" (full access — the serve API has
+   * no session-wide bypass, so the gate is adapter-side). The entry stays in
+   * the pending map either way so dedupe, draining, and session-invalidation
+   * bookkeeping stay identical.
+   */
+  private maybeEmitPermissionAsk(
+    req: TurnRequest<"opencode">,
+    baseUrl: string,
+    upstreamId: string,
+    normalized: { type: string; properties: Record<string, unknown> },
+    state: OpenCodeTurnState,
+    routing: CanonicalLiveEventRouting,
+  ): void {
+    const threadId = this.threadIdFor(req.sessionId);
+    const request = synthesizeOpenCodePermissionRequest({ threadId, properties: normalized.properties });
+    if (!request) return this.emitAskDiagnostic(req, threadId);
+    if (this.pendingPermissions.has(request.requestId)) return;
+    const entry: OpenCodePendingAsk = {
+      request, sessionId: req.sessionId, upstreamSessionId: upstreamId, baseUrl,
+      kind: "permission", version: askVersion(normalized.type),
+      signal: state.abortController.signal, routing, replying: false,
+    };
+    this.pendingPermissions.set(request.requestId, entry);
+    if (req.permissionMode === "full") {
+      entry.replying = true;
+      void this.relayDecision(entry, "allow-session");
+      return;
+    }
+    this.emit("permission_request", request);
   }
 
   private emitAskDiagnostic(
