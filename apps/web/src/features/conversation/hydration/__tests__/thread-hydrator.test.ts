@@ -14,7 +14,7 @@ import {
  * Asserts on store state after hydrate(), not internal sub-module calls.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore, extractPendingPlanQuestions } from "@/stores/threadStore";
+import { useThreadStore, extractPendingPlanQuestions, HISTORY_PAGE_SIZE } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { usePlanStore } from "@/stores/planStore";
@@ -41,7 +41,7 @@ import { coerceTaskStatus } from "@/stores/taskStore";
 import { getTransport } from "@/transport";
 import type { Message } from "@/transport";
 import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
-import type { ConversationPage, ConversationTail, GoalLookupResult, GoalState, TurnSnapshot } from "@mcode/contracts";
+import type { ConversationPage, GoalLookupResult, GoalState, TurnSnapshot } from "@mcode/contracts";
 import { CONVERSATION_OLDER_PAGE_MAX_BYTES } from "@mcode/contracts";
 import { clearScrollMemory, rememberScrollTop } from "@/components/chat/scrollPositionMemory";
 
@@ -93,8 +93,8 @@ function createStoreHydrator(): ThreadHydrator {
     getWorkspaceThread: (threadId) =>
       useWorkspaceStore.getState().threads.find((t) => t.id === threadId),
     flushPendingTextDeltas: () => {},
-    loadNarrativeForMessage: (messageId) =>
-      useThreadStore.getState().loadNarrativeForMessage(messageId),
+    loadNarrativeForMessage: (messageId, threadId) =>
+      useThreadStore.getState().loadNarrativeForMessage(messageId, threadId),
     setPlanQuestions: (threadId, questions) =>
       useThreadStore.getState().setPlanQuestions(threadId, questions),
     extractPendingPlanQuestions,
@@ -485,6 +485,47 @@ describe("ThreadHydrator", () => {
     expect(getCachedRecord(THREAD_A)?.messages).toEqual([msgA]);
   });
 
+  it("warms tail narrative detail for assistant messages during activation", async () => {
+    const assistant = createMockMessage({ id: "a-assistant", thread_id: THREAD_A, role: "assistant", sequence: 2 });
+    (mockTransport.loadConversationPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [msgA, assistant],
+      hasMore: false,
+      narrativeByMessage: {},
+    });
+    (mockTransport.loadTurn as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { kind: "assistantMessage", messageId: assistant.id, sequence: 2, body: "done", sortOrder: 0 },
+    ]);
+
+    await hydrator.hydrate(THREAD_A, "active");
+
+    await vi.waitFor(() => {
+      expect(mockTransport.loadTurn).toHaveBeenCalledWith(THREAD_A, {
+        limit: 1,
+        before: assistant.sequence + 1,
+        detail: { limit: 100 },
+      });
+    });
+    expect(useThreadStore.getState().isNarrativeLoaded(THREAD_A, assistant.id)).toBe(true);
+  });
+
+  it("skips tail narrative prefetch while the thread is running", async () => {
+    const assistant = createMockMessage({ id: "a-running-assistant", thread_id: THREAD_A, role: "assistant", sequence: 2 });
+    (mockTransport.loadConversationPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [msgA, assistant],
+      hasMore: false,
+      narrativeByMessage: {},
+    });
+    useThreadStore.setState({ runningThreadIds: new Set([THREAD_A]) });
+
+    await hydrator.hydrate(THREAD_A, "active");
+    await vi.waitFor(() => {
+      expect(readActiveThreadField((record) => record.loading)).toBe(false);
+    });
+
+    expect(mockTransport.loadTurn).not.toHaveBeenCalled();
+    expect(useThreadStore.getState().isNarrativeLoaded(THREAD_A, assistant.id)).toBe(false);
+  });
+
   it("does not let delayed snapshot hydration replace a running turn file summary", async () => {
     const liveSummary = {
       revision: 2,
@@ -672,7 +713,7 @@ describe("ThreadHydrator", () => {
       direction: "older",
       generation: 4,
       conversationRevision: expect.any(Number),
-      limit: 50,
+      limit: 25,
       maxBytes: CONVERSATION_OLDER_PAGE_MAX_BYTES,
     });
 
@@ -762,7 +803,8 @@ describe("ThreadHydrator", () => {
       },
     );
 
-    for (let index = 0; index < 4; index++) {
+    const pageCount = 200 / HISTORY_PAGE_SIZE;
+    for (let index = 0; index < pageCount; index++) {
       await useThreadStore.getState().loadOlderMessages(THREAD_A);
     }
 
@@ -771,7 +813,7 @@ describe("ThreadHydrator", () => {
     );
     expect(readActiveThreadField((record) => record.hasNewerMessages)).toBe(true);
 
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < pageCount; index++) {
       await useThreadStore.getState().loadNewerMessages(THREAD_A);
     }
 
@@ -1836,6 +1878,12 @@ describe("ThreadHydrator", () => {
     }));
     const tailLoader = vi.fn().mockResolvedValue({ messages: [msgA], sessionNotices, hasMore: true });
     mockTransport.loadConversationTail = tailLoader;
+    vi.mocked(mockTransport.loadConversationPage).mockResolvedValue({
+      messages: [msgA],
+      sessionNotices,
+      hasMore: true,
+      narrativeByMessage: {},
+    });
 
     try {
       await hydrator.hydrate(THREAD_A, "active");
@@ -1865,18 +1913,19 @@ describe("ThreadHydrator", () => {
         noticeKey: "fresh-warning",
       },
     });
-    let resolveTail!: (tail: ConversationTail) => void;
-    mockTransport.loadConversationTail = vi.fn().mockImplementation(
-      () => new Promise<ConversationTail>((resolve) => { resolveTail = resolve; }),
+    let resolvePage!: (page: ConversationPage) => void;
+    mockTransport.loadConversationTail = vi.fn().mockResolvedValue({ messages: [msgA], sessionNotices: [], hasMore: false });
+    vi.mocked(mockTransport.loadConversationPage).mockImplementation(
+      () => new Promise<ConversationPage>((resolve) => { resolvePage = resolve; }),
     );
 
     try {
       const hydration = hydrator.hydrate(THREAD_A, "active");
-      await vi.waitFor(() => expect(mockTransport.loadConversationTail).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(mockTransport.loadConversationPage).toHaveBeenCalled());
       useThreadStore.setState((state) => ({
         records: patchThreadRecord(state.records, THREAD_A, { sessionNotices: [] }),
       }));
-      resolveTail({ messages: [msgA], sessionNotices: [notice], hasMore: false });
+      resolvePage({ messages: [msgA], sessionNotices: [notice], hasMore: false, narrativeByMessage: {} });
       await hydration;
 
       expect(useThreadStore.getState().records.get(THREAD_A)?.sessionNotices).toEqual([notice]);
@@ -1901,14 +1950,15 @@ describe("ThreadHydrator", () => {
         noticeKey: "security-a",
       },
     });
-    let resolveTail!: (tail: ConversationTail) => void;
-    mockTransport.loadConversationTail = vi.fn().mockImplementation(
-      () => new Promise<ConversationTail>((resolve) => { resolveTail = resolve; }),
+    let resolvePage!: (page: ConversationPage) => void;
+    mockTransport.loadConversationTail = vi.fn().mockResolvedValue({ messages: [msgA], sessionNotices: [], hasMore: false });
+    vi.mocked(mockTransport.loadConversationPage).mockImplementation(
+      () => new Promise<ConversationPage>((resolve) => { resolvePage = resolve; }),
     );
 
     try {
       const hydration = hydrator.hydrate(THREAD_A, "active");
-      await vi.waitFor(() => expect(mockTransport.loadConversationTail).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(mockTransport.loadConversationPage).toHaveBeenCalled());
       useThreadStore.getState().handleAgentEvent({
         type: "system",
         threadId: THREAD_A,
@@ -1923,7 +1973,7 @@ describe("ThreadHydrator", () => {
           noticeKey: "warning-b",
         },
       });
-      resolveTail({ messages: [msgA], sessionNotices: [securityNotice], hasMore: false });
+      resolvePage({ messages: [msgA], sessionNotices: [securityNotice], hasMore: false, narrativeByMessage: {} });
       await hydration;
 
       expect(useThreadStore.getState().records.get(THREAD_A)?.sessionNotices.map((notice) => notice.id))
@@ -1961,18 +2011,19 @@ describe("ThreadHydrator", () => {
         sessionNotices: [fetchedNotice],
       }),
     }));
-    let resolveTail!: (tail: ConversationTail) => void;
-    mockTransport.loadConversationTail = vi.fn().mockImplementation(
-      () => new Promise<ConversationTail>((resolve) => { resolveTail = resolve; }),
+    let resolvePage!: (page: ConversationPage) => void;
+    mockTransport.loadConversationTail = vi.fn().mockResolvedValue({ messages: [msgA], sessionNotices: [], hasMore: false });
+    vi.mocked(mockTransport.loadConversationPage).mockImplementation(
+      () => new Promise<ConversationPage>((resolve) => { resolvePage = resolve; }),
     );
 
     try {
       const hydration = hydrator.hydrate(THREAD_A, "active");
-      await vi.waitFor(() => expect(mockTransport.loadConversationTail).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(mockTransport.loadConversationPage).toHaveBeenCalled());
       useThreadStore.setState((state) => ({
         records: patchThreadRecord(state.records, THREAD_A, { sessionNotices: [liveNotice] }),
       }));
-      resolveTail({ messages: [msgA], sessionNotices: [fetchedNotice], hasMore: false });
+      resolvePage({ messages: [msgA], sessionNotices: [fetchedNotice], hasMore: false, narrativeByMessage: {} });
       await hydration;
 
       expect(useThreadStore.getState().records.get(THREAD_A)?.sessionNotices).toEqual([liveNotice]);
@@ -2011,6 +2062,12 @@ describe("ThreadHydrator", () => {
       messages: [msgA],
       sessionNotices: [notice],
       hasMore: false,
+    });
+    vi.mocked(mockTransport.loadConversationPage).mockResolvedValue({
+      messages: [msgA],
+      sessionNotices: [notice],
+      hasMore: false,
+      narrativeByMessage: {},
     });
 
     try {
@@ -2078,6 +2135,11 @@ describe("ThreadHydrator", () => {
     delete tailMessage.files_changed;
     const tailLoader = vi.fn().mockResolvedValue({ messages: [tailMessage], hasMore: false });
     mockTransport.loadConversationTail = tailLoader;
+    vi.mocked(mockTransport.loadConversationPage).mockResolvedValue({
+      messages: [tailMessage],
+      hasMore: false,
+      narrativeByMessage: {},
+    });
 
     try {
       await hydrator.hydrate(THREAD_A, "active");

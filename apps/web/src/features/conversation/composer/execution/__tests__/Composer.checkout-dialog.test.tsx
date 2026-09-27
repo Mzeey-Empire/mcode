@@ -2,7 +2,7 @@ import React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentEvent, SelectedTextComment } from "@mcode/contracts";
+import { ORCHESTRATION_MODES, type AgentEvent, type SelectedTextComment } from "@mcode/contracts";
 import { Composer } from "../../Composer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
@@ -20,8 +20,9 @@ import {
 import { useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
+import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import { mockTransport, createMockThread, createMockWorkspace } from "@/__tests__/mocks/transport";
-import type { GitBranch } from "@/transport";
+import { INTERACTION_MODES, PERMISSION_MODES, type GitBranch } from "@/transport";
 
 let lastComposerText = "";
 let lastFileAutocompleteOptions: Record<string, unknown> | undefined;
@@ -723,6 +724,37 @@ describe("Composer checkout confirmation", () => {
     ).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("does not restore a Draft row while a lost response is replayed", async () => {
+    seedComposerState("worktree");
+    useThreadDraftStore.setState({ drafts: {} });
+    let resolveReply!: (value: unknown) => void;
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      new Promise((resolve) => { resolveReply = resolve; }),
+    );
+    const onThreadPreparing = vi.fn();
+    const onThreadCreated = vi.fn();
+    const onThreadCreationFailed = vi.fn();
+    render(<Composer isNewThread workspaceId="ws-1" onThreadPreparing={onThreadPreparing}
+      onThreadCreated={onThreadCreated} onThreadCreationFailed={onThreadCreationFailed} />);
+
+    await typeAndSend();
+    await waitFor(() => expect(onThreadPreparing).toHaveBeenCalledOnce());
+    const placeholderId = onThreadPreparing.mock.calls[0]?.[0].id;
+    expect(useComposerDraftStore.getState().getDraft(placeholderId)?.input).toBe("Build this");
+    expect(onThreadCreationFailed).not.toHaveBeenCalled();
+    expect(Object.keys(useThreadDraftStore.getState().drafts)).toHaveLength(0);
+
+    const durable = createMockThread({ id: "thread-replayed", workspace_id: "ws-1" });
+    await act(async () => {
+      resolveReply({ ...durable, runtimeSnapshot: { threadId: durable.id, turnExecutionId: "exec-replayed", phase: "running" } });
+    });
+    await waitFor(() => expect(onThreadCreated).toHaveBeenCalledWith(expect.objectContaining({ id: durable.id })));
+    expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual([durable.id]);
+    expect(useComposerDraftStore.getState().getDraft(placeholderId)).toBeUndefined();
+    expect(Object.keys(useThreadDraftStore.getState().drafts)).toHaveLength(0);
+    expect(onThreadCreationFailed).not.toHaveBeenCalled();
+  });
+
   it("reports a failed new-thread request after exposing its optimistic startup row", async () => {
     seedComposerState("worktree");
     (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockRejectedValue(
@@ -743,6 +775,64 @@ describe("Composer checkout confirmation", () => {
 
     await waitFor(() => expect(onThreadPreparing).toHaveBeenCalledOnce());
     expect(onThreadCreationFailed).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a failed saved-Draft submission with its preparing task", async () => {
+    seedComposerState("worktree");
+    useThreadDraftStore.setState({ drafts: {} });
+    const draftId = useThreadDraftStore.getState().saveDraft({
+      workspaceId: "ws-1",
+      draft: {
+        input: "Build from saved draft",
+        mentions: [],
+        selectedTextComments: [],
+        attachments: [],
+        modelId: "gpt-5.5",
+        provider: "codex",
+        reasoning: "high",
+      },
+      selection: {
+        interactionMode: INTERACTION_MODES.PLAN,
+        permissionMode: PERMISSION_MODES.FULL,
+        orchestrationMode: ORCHESTRATION_MODES.STANDARD,
+        approvalReviewMode: "manual",
+        copilotAgent: null,
+        thinking: null,
+      },
+      target: {
+        mode: "worktree",
+        branch: "feature/base",
+        branchSource: "branch",
+        customBranchName: "",
+        autoPreviewBranch: "",
+        selectedWorktree: null,
+        branchManuallySelected: false,
+      },
+    });
+    expect(draftId).not.toBeNull();
+    useWorkspaceStore.setState({ activeDraftId: draftId });
+    let rejectCreate!: (error: Error) => void;
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      new Promise((_resolve, reject) => { rejectCreate = reject; }),
+    );
+    const onThreadPreparing = vi.fn();
+    const onThreadCreationFailed = vi.fn();
+    render(<Composer isNewThread workspaceId="ws-1" draftId={draftId}
+      onThreadPreparing={onThreadPreparing} onThreadCreationFailed={onThreadCreationFailed} />);
+
+    await waitFor(() => expect(lastComposerText).toBe("Build from saved draft"));
+    await userEvent.setup().click(screen.getByLabelText("Send message"));
+    await waitFor(() => expect(onThreadPreparing).toHaveBeenCalledOnce());
+    const placeholderId = onThreadPreparing.mock.calls[0]?.[0].id;
+    expect(useThreadDraftStore.getState().drafts[draftId!]).toBeUndefined();
+    await act(async () => { rejectCreate(new Error("thread creation failed")); });
+
+    await waitFor(() => expect(onThreadCreationFailed).toHaveBeenCalledOnce());
+    expect(Object.keys(useThreadDraftStore.getState().drafts)).toHaveLength(0);
+    expect(useComposerDraftStore.getState().getDraft(placeholderId)?.input).toBe("Build from saved draft");
+    expect(useWorkspaceStore.getState().threads).toEqual([
+      expect.objectContaining({ id: placeholderId, clientError: "Error: thread creation failed" }),
+    ]);
   });
 
   it("clears annotations and comments after a successful feedback send", async () => {

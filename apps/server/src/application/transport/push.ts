@@ -13,12 +13,19 @@ import { getTransportPayloadValidator } from "./payload-validation.js";
 export const MAX_AGENT_EVENT_JOURNAL_EVENTS_PER_THREAD = 256;
 /** Maximum thread journals retained by the process. */
 export const MAX_AGENT_EVENT_JOURNAL_THREADS = 100;
+/** Maximum unsent push bytes for one connected client, excluding RPC response bytes. */
+export const MAX_QUEUED_PUSH_BYTES = 16 * 1_024 * 1_024;
 
 const clients = new Set<WebSocket>();
+const queuedPushBytes = new Map<WebSocket, number>();
 const threadSubscriptions = new Map<WebSocket, Set<string>>();
-const threadJournals = new Map<string, { events: unknown[] }>();
-const nextSequenceByThread = new Map<string, number>();
-const eventEpoch = NodeCrypto.randomUUID();
+interface AgentEventJournal {
+  epoch: string;
+  sequence: number;
+  events: unknown[];
+}
+
+const threadJournals = new Map<string, AgentEventJournal>();
 const SUBSCRIPTION_SCOPED_CHANNELS = new Set<WsChannelName>([
   "agent.event",
   "agent.canonical",
@@ -57,6 +64,7 @@ export function onSessionChange(cb: (count: number) => void): () => void {
 /** Register a WebSocket client for push event delivery. */
 export function addClient(ws: WebSocket): void {
   clients.add(ws);
+  queuedPushBytes.set(ws, 0);
   threadSubscriptions.set(ws, new Set());
   _sessionCount++;
   for (let i = 0; i < sessionChangeListeners.length; i++) sessionChangeListeners[i](_sessionCount);
@@ -65,6 +73,7 @@ export function addClient(ws: WebSocket): void {
 /** Remove a disconnected WebSocket client. No-op if already removed. */
 export function removeClient(ws: WebSocket): void {
   if (!clients.delete(ws)) return;
+  queuedPushBytes.delete(ws);
   threadSubscriptions.delete(ws);
   _sessionCount--;
   for (let i = 0; i < sessionChangeListeners.length; i++) sessionChangeListeners[i](_sessionCount);
@@ -129,10 +138,12 @@ function replayThreadSubscription(
 function requiresThreadHydration(
   rawCursor: NonNullable<SetThreadSubscriptionsInput["cursors"]>[string],
   cursor: number,
-  journal: { events: unknown[] } | undefined,
+  journal: AgentEventJournal | undefined,
 ): boolean {
-  if (typeof rawCursor !== "number" && rawCursor.epoch !== eventEpoch) return true;
+  if (typeof rawCursor === "number" && cursor > 0) return true;
   if (!journal) return cursor > 0;
+  if (typeof rawCursor !== "number" && rawCursor.epoch !== journal.epoch) return true;
+  if (cursor > journal.sequence) return true;
   return journal.events.length > 0 && cursor < (journal.events[0] as { sequence: number }).sequence - 1;
 }
 
@@ -201,21 +212,22 @@ export function broadcast(
 
 function decorateAgentEvent(channel: WsChannelName, data: unknown, threadId: string | undefined): unknown {
   if (channel !== "agent.event" || !threadId || !data || typeof data !== "object") return data;
-  const sequence = (nextSequenceByThread.get(threadId) ?? 0) + 1;
-  return { ...(data as Record<string, unknown>), sequence, epoch: eventEpoch };
+  const journal = threadJournals.get(threadId);
+  const sequence = (journal?.sequence ?? 0) + 1;
+  const epoch = journal?.epoch ?? NodeCrypto.randomUUID();
+  return { ...(data as Record<string, unknown>), sequence, epoch };
 }
 
 function retainAgentEvent(channel: WsChannelName, threadId: string | undefined, event: unknown): void {
   if (channel !== "agent.event" || !threadId) return;
-  nextSequenceByThread.delete(threadId);
-  nextSequenceByThread.set(threadId, (event as { sequence: number }).sequence);
+  if (!event || typeof event !== "object" || !("sequence" in event) || !("epoch" in event)) return;
+  if (typeof event.sequence !== "number" || typeof event.epoch !== "string") return;
   const existing = threadJournals.get(threadId);
   const events = existing ? [...existing.events, event] : [event];
   events.splice(0, Math.max(0, events.length - MAX_AGENT_EVENT_JOURNAL_EVENTS_PER_THREAD));
   threadJournals.delete(threadId);
-  threadJournals.set(threadId, { events });
+  threadJournals.set(threadId, { epoch: event.epoch, sequence: event.sequence, events });
   trimJournalMap(threadJournals);
-  trimJournalMap(nextSequenceByThread);
 }
 
 function trimJournalMap(map: Map<string, unknown>): void {
@@ -226,16 +238,60 @@ function trimJournalMap(map: Map<string, unknown>): void {
 
 function sendBroadcastPayload(channel: WsChannelName, threadId: string | undefined, payload: string): void {
   const requiresThreadSubscription = SUBSCRIPTION_SCOPED_CHANNELS.has(channel);
+  const payloadBytes = Buffer.byteLength(payload, "utf8");
   for (const ws of clients) {
     if (ws.readyState !== ws.OPEN) continue;
     if (requiresThreadSubscription && threadId && !threadSubscriptions.get(ws)?.has(threadId)) continue;
-    try {
-      ws.send(payload);
-    } catch {
-      // A socket can die between the readyState check and the send; one dead
-      // client must not abort the broadcast or take the server down.
-      logger.warn("Broadcast send failed", { channel });
-    }
+    sendPush(ws, channel, payload, payloadBytes);
+  }
+}
+
+/** Count only push writes, so a large RPC response cannot evict its own client. */
+function canSendPayload(ws: WebSocket, channel: WsChannelName | "terminal.data", payloadBytes: number): boolean {
+  const queuedBytes = queuedPushBytes.get(ws) ?? 0;
+  if (queuedBytes + payloadBytes <= MAX_QUEUED_PUSH_BYTES) return true;
+  logger.warn("Terminating slow WebSocket client for push recovery", {
+    channel,
+    queuedPushBytes: queuedBytes,
+    bufferedAmount: ws.bufferedAmount,
+    payloadBytes,
+  });
+  try {
+    ws.terminate();
+  } catch (error) {
+    logger.warn("Failed to terminate slow WebSocket client", {
+      channel,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  removeClient(ws);
+  return false;
+}
+
+function sendPush(
+  ws: WebSocket,
+  channel: WsChannelName | "terminal.data",
+  payload: string | Uint8Array,
+  payloadBytes: number,
+): boolean {
+  if (!canSendPayload(ws, channel, payloadBytes)) return false;
+  queuedPushBytes.set(ws, (queuedPushBytes.get(ws) ?? 0) + payloadBytes);
+  const complete = (error?: Error) => {
+    const queued = queuedPushBytes.get(ws);
+    if (queued !== undefined) queuedPushBytes.set(ws, Math.max(0, queued - payloadBytes));
+    if (error) logger.warn("Push delivery failed", { channel, error: error.message });
+  };
+  try {
+    if (typeof payload === "string") ws.send(payload, complete);
+    else ws.send(payload, { binary: true }, complete);
+    return true;
+  } catch (error) {
+    complete();
+    logger.warn("Push send failed", {
+      channel,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
   }
 }
 
@@ -250,16 +306,8 @@ export function sendToClient(
   if (!schema) return false;
   const validation = getTransportPayloadValidator().validatePush(channel, data, schema);
   if (!validation.ok) return false;
-  try {
-    ws.send(JSON.stringify({ type: "push" as const, channel, data: validation.data }));
-    return true;
-  } catch (error) {
-    logger.warn("Directed push delivery failed", {
-      channel,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
+  const payload = JSON.stringify({ type: "push" as const, channel, data: validation.data });
+  return sendPush(ws, channel, payload, Buffer.byteLength(payload, "utf8"));
 }
 
 /**
@@ -276,15 +324,7 @@ export function broadcastTerminalData(
   const frame = encodeTerminalDataFrame(ptyId, seq, payload);
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) {
-      try {
-        ws.send(frame, { binary: true });
-      } catch (err) {
-        // One bad socket must not interrupt delivery to the remaining clients.
-        // Log and continue — the client will reconnect and re-request state.
-        logger.warn("broadcastTerminalData: ws.send failed for a client", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      sendPush(ws, "terminal.data", frame, frame.byteLength);
     }
   }
 }
@@ -300,7 +340,7 @@ export function _resetForTest(): void {
   _sessionCount = 0;
   sessionChangeListeners.length = 0;
   clients.clear();
+  queuedPushBytes.clear();
   threadSubscriptions.clear();
   threadJournals.clear();
-  nextSequenceByThread.clear();
 }

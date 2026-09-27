@@ -143,6 +143,54 @@ describe("buildNarrativeItems counts", () => {
     ]);
   });
 
+  it("renders one subagent row for a Devin marker and its subagent_started call", () => {
+    // Devin emits a run_subagent marker plus a separate agentId-keyed
+    // subagent_started call; once both carry the same nativeThreadId they are
+    // one logical subagent and must not render as two rows.
+    const calls: ToolCall[] = [
+      mkTool({
+        id: "tc-parent",
+        toolName: "Agent",
+        toolInput: {
+          task: "survey",
+          description: "survey",
+          agentId: "agent-1",
+          nativeThreadId: "agent-1",
+        },
+        startedAt: 1000,
+      }),
+      mkTool({
+        id: "agent-1",
+        toolName: "Agent",
+        toolInput: { task: "survey", agentId: "agent-1", nativeThreadId: "agent-1" },
+        parentToolCallId: "tc-parent",
+        startedAt: 1100,
+      }),
+      mkTool({ id: "child-read", toolName: "Read", parentToolCallId: "agent-1", startedAt: 1200 }),
+    ];
+
+    const { items, counts } = buildNarrativeItems({
+      toolCalls: calls,
+      hooks: [],
+      thoughtSegments: [],
+      streamingText: "",
+      isAgentRunning: false,
+    });
+
+    expect(counts.subagents).toBe(1);
+    const rows = items.filter((item) => item.type === "subagent");
+    expect(rows).toHaveLength(1);
+    const participants = rows[0]?.type === "subagent"
+      ? rows[0].participants.map((participant) => participant.id)
+      : [];
+    expect(participants).toEqual(["tc-parent"]);
+    // The merged call's subtree is the agentId call's children, rebased.
+    const canonical = collapseSubagentCalls(calls).find((call) => call.id === "tc-parent");
+    expect(canonical?.isComplete).toBe(true);
+    const rebased = collapseSubagentCalls(calls).find((call) => call.id === "child-read");
+    expect(rebased?.parentToolCallId).toBe("tc-parent");
+  });
+
   it("rebases lifecycle marker source ids when a duplicate Agent call is collapsed", () => {
     const calls = [
       mkTool({

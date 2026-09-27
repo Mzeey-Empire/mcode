@@ -31,6 +31,8 @@ function fakeOpenSocket(received: Array<{ buf: Buffer; binary: boolean }>): WebS
   const ws: Partial<WebSocket> = {
     readyState: 1,
     OPEN: 1,
+    bufferedAmount: 0,
+    terminate: vi.fn(),
     send: ((data: unknown, opts?: { binary?: boolean }) => {
       const buf = Buffer.isBuffer(data)
         ? data
@@ -1068,6 +1070,7 @@ describe("routeMessage git.createBranch", () => {
     );
 
     expect(response.result).toEqual({ branch: "feat/from-thread" });
+    await vi.waitFor(() => expect(received).toHaveLength(1));
     expect(createBranchForThread).toHaveBeenCalledWith(
       "ws-1",
       "thread-1",
@@ -1432,6 +1435,10 @@ describe("routeMessage thread completion lifecycle", () => {
     }), deps);
 
     expect(response.result).toEqual(completed);
+    await vi.waitFor(() => {
+      expect(firstClient).toHaveLength(1);
+      expect(secondClient).toHaveLength(1);
+    });
     for (const received of [firstClient, secondClient]) {
       expect(JSON.parse(received[0].buf.toString("utf-8"))).toMatchObject({
         channel: "thread.lifecycleChanged",

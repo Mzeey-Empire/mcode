@@ -32,6 +32,10 @@ export interface CompletionOptions {
 /** Explicit provider file-tool start used to capture a mutation baseline without publishing narrative UI. */
 export interface ProviderFileMutationStart {
   threadId: string;
+  /** Exact dispatched attempt, when the provider can bind this private notification. */
+  turnExecutionId?: string;
+  /** Provider-bound retry ordinal for this private notification. */
+  deliveryAttempt?: number;
   toolCallId: string;
   toolName: string;
   toolInput: Record<string, unknown>;

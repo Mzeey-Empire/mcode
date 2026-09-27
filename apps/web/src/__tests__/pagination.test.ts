@@ -110,7 +110,7 @@ await activateTestConversation(threadId);
     expect(getTestThreadOldestLoadedSequence(threadId)).toBe(1);
     expect(getTestThreadHasMoreMessages(threadId)).toBe(false);
     expect(getTestThreadIsLoadingMore(threadId)).toBe(false);
-    expect(mockTransport.getMessages).toHaveBeenCalledWith(threadId, 50, 51);
+    expect(mockTransport.getMessages).toHaveBeenCalledWith(threadId, 25, 51);
   });
 
   it("loadOlderMessages is a no-op when hasMore is false", async () => {
@@ -541,7 +541,7 @@ await activateTestConversation(threadId);
 
     await useThreadStore.getState().loadOlderMessages(threadId);
 
-    expect(mockTransport.loadConversationPage).toHaveBeenCalledWith(threadId, 50, 5);
+    expect(mockTransport.loadConversationPage).toHaveBeenCalledWith(threadId, 25, 5);
     expect(getTestActiveMessages()).toEqual([
       older,
       residentAtSharedSequence,

@@ -5,6 +5,8 @@ import {
 } from "@mcode/contracts";
 import type { ParentTurnDurability } from "./parent-turn-durability.js";
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
+import { NarrativeRecoveryDelta } from "./narrative-recovery-delta.js";
 
 interface ParentNarrativeRecoveryCheckpoint {
   persist(): void;
@@ -13,7 +15,7 @@ interface ParentNarrativeRecoveryCheckpoint {
 
 /** Commits changed structured narrative records before AgentService publishes their source event. */
 export class ParentNarrativeRecoveryCoordinator {
-  private readonly fingerprintsByExecution = new Map<string, Map<string, string>>();
+  private readonly deltasByExecution = new Map<string, NarrativeRecoveryDelta>();
 
   constructor(
     private readonly canonicalSink: ParentTurnDurability,
@@ -22,10 +24,20 @@ export class ParentNarrativeRecoveryCoordinator {
 
   /** Commit only the semantic records changed by this accepted provider event. */
   checkpoint(event: AgentEvent): void {
-    const checkpoint = this.prepareCheckpoint(event);
+    if (!serverWorkTrace) {
+      const checkpoint = this.prepareCheckpoint(event);
+      if (!checkpoint) return;
+      checkpoint.persist();
+      checkpoint.confirm();
+      return;
+    }
+    const checkpoint = serverWorkTrace.measure("narrative-prepare", event.threadId,
+      event.turnExecutionId, () => this.prepareCheckpoint(event));
     if (!checkpoint) return;
-    checkpoint.persist();
-    checkpoint.confirm();
+    serverWorkTrace.measure("narrative-persist", event.threadId,
+      event.turnExecutionId, () => checkpoint.persist());
+    serverWorkTrace.measure("narrative-confirm", event.threadId,
+      event.turnExecutionId, () => checkpoint.confirm());
   }
 
   /** Prepare a recovery commit whose dedupe state advances only after its transaction commits. */
@@ -33,42 +45,32 @@ export class ParentNarrativeRecoveryCoordinator {
     event: AgentEvent,
     snapshot?: readonly ParentNarrativeRecoveryItem[],
   ): ParentNarrativeRecoveryCheckpoint | null {
-    if (!this.requiresStructuredRecovery(event) || !event.turnExecutionId) return null;
-    if (!this.canonicalSink.loadTurnByExecution(event.turnExecutionId)) return null;
+    const executionId = event.turnExecutionId;
+    if (!this.requiresStructuredRecovery(event) || !executionId) return null;
+    if (!this.canonicalSink.loadTurnByExecution(executionId)) return null;
     const snapshots = snapshot ?? this.narrativeStore.recoverySnapshot(event.threadId);
-
-    const fingerprints = this.fingerprintsByExecution.get(event.turnExecutionId) ?? new Map<string, string>();
-    const nextFingerprints = new Map<string, string>();
-    const currentKeys = new Set(snapshots.map((item) => `${item.kind}:${item.record.id}`));
-    const changed = snapshots.filter((item) => {
-      const key = `${item.kind}:${item.record.id}`;
-      const fingerprint = JSON.stringify(item);
-      nextFingerprints.set(key, fingerprint);
-      if (fingerprints.get(key) === fingerprint) return false;
-      return true;
-    });
-    const discardedItemIds = [...fingerprints.keys()]
-      .filter((key) => !currentKeys.has(key))
-      .map((key) => this.canonicalItemId(key));
-    if (changed.length === 0 && discardedItemIds.length === 0) return null;
+    const delta = this.deltasByExecution.get(executionId) ?? new NarrativeRecoveryDelta();
+    const prepared = delta.prepare(snapshots);
+    if (!prepared) return null;
+    this.deltasByExecution.set(executionId, delta);
     return {
       persist: () => {
         const committed = this.canonicalSink.recordParentNarrativeRecovery({
-          executionId: event.turnExecutionId!,
-          items: changed,
-          discardedItemIds,
+          executionId,
+          items: prepared.items,
+          discardedItemIds: prepared.discardedItemIds,
         });
         if (!committed) {
-          throw new Error(`Canonical parent turn was not found: ${event.turnExecutionId}`);
+          throw new Error(`Canonical parent turn was not found: ${executionId}`);
         }
       },
-      confirm: () => this.fingerprintsByExecution.set(event.turnExecutionId!, nextFingerprints),
+      confirm: () => prepared.acknowledge(),
     };
   }
 
   /** Forget volatile dedupe state after a terminal turn releases its buffers. */
   clear(executionId: string | undefined): void {
-    if (executionId) this.fingerprintsByExecution.delete(executionId);
+    if (executionId) this.deltasByExecution.delete(executionId);
   }
 
   private requiresStructuredRecovery(event: AgentEvent): boolean {
@@ -79,13 +81,4 @@ export class ParentNarrativeRecoveryCoordinator {
       || event.type === AgentEventType.HookStarted
       || event.type === AgentEventType.HookCompleted;
   }
-
-  private canonicalItemId(key: string): string {
-    const separator = key.indexOf(":");
-    const kind = separator < 0 ? "" : key.slice(0, separator);
-    const id = separator < 0 ? "" : key.slice(separator + 1);
-    if (!kind || !id) throw new Error(`Invalid narrative recovery identity: ${key}`);
-    return kind === "toolCall" ? `toolCall:${id}` : `${kind}:${id}`;
-  }
-
 }

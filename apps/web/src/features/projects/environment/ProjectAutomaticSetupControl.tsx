@@ -131,6 +131,7 @@ export function useProjectAutomaticSetup(threadId: string, enabled = true) {
 
   return {
     snapshot,
+    snapshotLoaded: !enabled || storedSnapshot !== undefined,
     busy,
     error,
     continueWithoutSetup,

@@ -55,6 +55,7 @@ interface ComposerContentSurfaceProps {
     readonly taskBubbleTasks: readonly ComponentProps<typeof TaskBubble>["tasks"][number][];
     readonly fileEffectSummary: ComponentProps<typeof TaskBubble>["fileEffects"];
     readonly isAgentRunning: boolean;
+    readonly isStopPending: boolean;
     readonly setupBlocked: boolean;
     readonly provider?: string;
     readonly planPending: boolean;
@@ -456,15 +457,17 @@ function ComposerContextWindowTracker({
   );
 }
 
-type ComposerSendButtonVisualState = "scaffold" | "queue" | "stop" | "send" | "empty";
-type ComposerSendButtonCopy = "choose-project" | "starting-thread" | "queue-message" | "stop-agent" | "send-message";
+export type ComposerSendButtonVisualState = "scaffold" | "queue" | "stop" | "stopping" | "send" | "empty";
+type ComposerSendButtonCopy = "choose-project" | "starting-thread" | "queue-message" | "stop-agent" | "stopping-agent" | "send-message";
 
-function getComposerSendButtonVisualState({
+export function getComposerSendButtonVisualState({
   isThreadScaffold,
   isAgentRunning,
+  isStopPending,
   hasContent,
-}: Pick<ComposerContentSurfaceProps["model"], "isThreadScaffold" | "isAgentRunning" | "hasContent">): ComposerSendButtonVisualState {
+}: Pick<ComposerContentSurfaceProps["model"], "isThreadScaffold" | "isAgentRunning" | "isStopPending" | "hasContent">): ComposerSendButtonVisualState {
   if (isThreadScaffold) return "scaffold";
+  if (isStopPending) return "stopping";
   if (isAgentRunning) return hasContent ? "queue" : "stop";
   return hasContent ? "send" : "empty";
 }
@@ -473,26 +476,30 @@ function getComposerSendButtonCopy({
   needsWorkspace,
   isThreadScaffold,
   isAgentRunning,
+  isStopPending,
   hasContent,
 }: {
   readonly needsWorkspace: boolean;
   readonly isThreadScaffold: boolean;
   readonly isAgentRunning: boolean;
+  readonly isStopPending: boolean;
   readonly hasContent: boolean;
 }): ComposerSendButtonCopy {
   if (needsWorkspace) return "choose-project";
   if (isThreadScaffold) return "starting-thread";
+  if (isStopPending) return "stopping-agent";
   if (isAgentRunning) return hasContent ? "queue-message" : "stop-agent";
   return "send-message";
 }
 
-function isComposerSendButtonDisabled({
+export function isComposerSendButtonDisabled({
   needsWorkspace,
   providerReason,
   isStaleWorktree,
   planPending,
   isThreadScaffold,
   isAgentRunning,
+  isStopPending,
   hasContent,
   setupBlocked,
 }: {
@@ -502,17 +509,19 @@ function isComposerSendButtonDisabled({
   readonly planPending: boolean;
   readonly isThreadScaffold: boolean;
   readonly isAgentRunning: boolean;
+  readonly isStopPending: boolean;
   readonly hasContent: boolean;
   readonly setupBlocked: boolean;
 }) {
   return setupBlocked || needsWorkspace || Boolean(providerReason) || isStaleWorktree || planPending
-    || isThreadScaffold || (!isAgentRunning && !hasContent);
+    || isThreadScaffold || isStopPending || (!isAgentRunning && !hasContent);
 }
 
 const SEND_BUTTON_CLASS_NAMES: Record<ComposerSendButtonVisualState, string> = {
   scaffold: "bg-primary text-primary-foreground",
   queue: "bg-primary/60 text-primary-foreground hover:bg-primary/75",
   stop: "bg-destructive text-white hover:bg-destructive/90",
+  stopping: "bg-destructive/60 text-white",
   send: "bg-primary text-primary-foreground hover:bg-primary/90",
   empty: "bg-muted text-muted-foreground opacity-40",
 };
@@ -522,6 +531,7 @@ const SEND_BUTTON_COPY: Record<ComposerSendButtonCopy, string> = {
   "starting-thread": "Starting thread",
   "queue-message": "Queue message",
   "stop-agent": "Stop agent",
+  "stopping-agent": "Stopping",
   "send-message": "Send message",
 };
 
@@ -547,7 +557,7 @@ function ComposerSendButton({
       className={cn("rounded-full transition-colors", SEND_BUTTON_CLASS_NAMES[visualState])}
       aria-label={SEND_BUTTON_COPY[copy]}
     >
-      {visualState === "scaffold" ? (
+      {visualState === "scaffold" || visualState === "stopping" ? (
         <Spinner size={14} className="text-current" />
       ) : visualState === "stop" ? (
         <div className="h-4 w-4 rounded-sm bg-current" />

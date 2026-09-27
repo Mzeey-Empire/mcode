@@ -78,6 +78,7 @@ import {
   prepareAgentEvent,
   type AgentEventHandlerTable,
 } from "./thread-store/agent-event-preflight";
+import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";
 import {
   hydrateRunningThreads as hydrateRunningThreadRecords,
   transferThreadRuntime as transferOptimisticThreadRuntime,
@@ -234,10 +235,6 @@ interface ThreadState {
 
   /** Fetch one bounded persisted-detail window for a rendered assistant message. */
   loadNarrativeForMessage: (messageId: string, threadId?: string) => Promise<void>;
-  /** Keep a persisted turn available while one of its virtual rows is mounted. */
-  retainNarrativeForMessage: (messageId: string, threadId?: string) => void;
-  /** Release a virtual-row lease and evict after all rows for the turn unmount. */
-  releaseNarrativeForMessage: (messageId: string, threadId?: string) => void;
   /** Return whether a complete narrative payload has been loaded for a message. */
   isNarrativeLoaded: (threadId: string, messageId: string) => boolean;
   /** Drop the cached narrative for a message and revoke any pending detail window. */
@@ -246,7 +243,7 @@ interface ThreadState {
   /** Handle server-side tool call persistence confirmation. */
   handleTurnPersisted: (payload: {
     threadId: string;
-    messageId: string;
+    messageId: string | null;
     turnId?: string | null;
     executionId?: string | null;
     outcome?: TurnOutcome | null;
@@ -300,46 +297,27 @@ interface ThreadState {
 const dequeueTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * Module-level detail-window leases. They stay outside Zustand because they
- * coordinate requests without changing transcript render state.
+ * Module-level detail-window bookkeeping. It stays outside Zustand because it
+ * coordinates requests without changing transcript render state. Loaded detail
+ * stays on the record until the narrative byte budget trims it or the thread is
+ * cleared, so revisiting a turn or switching threads does not refetch it.
  */
 const narrativeInflight = new Map<string, Promise<void>>();
 const narrativeGeneration = new Map<string, number>();
 const narrativeCursor = new Map<string, NarrativeDetailCursor>();
 /** Detail windows that ended before their effective limit. */
 const narrativeLoaded = new Set<string>();
-/** Mounted virtual rows that keep one persisted turn available while it is read. */
-const narrativeLeaseCounts = new Map<string, number>();
-/** Invalidates a queued release when another row for the same turn mounts. */
-const narrativeReleaseGeneration = new Map<string, number>();
 const NARRATIVE_DETAIL_LIMIT = 100;
 
 function narrativeKey(threadId: string, messageId: string): string {
   return `${threadId}\u0000${messageId}`;
 }
 
-function revokeNarrativeLease(key: string): void {
+function revokeNarrativeLoadState(key: string): void {
   narrativeGeneration.set(key, (narrativeGeneration.get(key) ?? 0) + 1);
   narrativeInflight.delete(key);
   narrativeCursor.delete(key);
   narrativeLoaded.delete(key);
-}
-
-function retainNarrativeLease(key: string): void {
-  narrativeLeaseCounts.set(key, (narrativeLeaseCounts.get(key) ?? 0) + 1);
-  narrativeReleaseGeneration.set(key, (narrativeReleaseGeneration.get(key) ?? 0) + 1);
-}
-
-function releaseNarrativeLease(key: string, release: () => void): void {
-  const count = narrativeLeaseCounts.get(key) ?? 0;
-  if (count <= 1) narrativeLeaseCounts.delete(key);
-  else narrativeLeaseCounts.set(key, count - 1);
-  const generation = (narrativeReleaseGeneration.get(key) ?? 0) + 1;
-  narrativeReleaseGeneration.set(key, generation);
-  queueMicrotask(() => {
-    if (narrativeLeaseCounts.has(key) || narrativeReleaseGeneration.get(key) !== generation) return;
-    release();
-  });
 }
 
 function clearNarrativeLoadState(threadId: string): void {
@@ -349,14 +327,10 @@ function clearNarrativeLoadState(threadId: string): void {
     ...narrativeInflight.keys(),
     ...narrativeGeneration.keys(),
     ...narrativeCursor.keys(),
-    ...narrativeLeaseCounts.keys(),
-    ...narrativeReleaseGeneration.keys(),
   ]);
   for (const key of keys) {
     if (!key.startsWith(prefix)) continue;
-    revokeNarrativeLease(key);
-    narrativeLeaseCounts.delete(key);
-    narrativeReleaseGeneration.delete(key);
+    revokeNarrativeLoadState(key);
   }
 }
 
@@ -367,6 +341,8 @@ interface NarrativeLoadContext {
   message: Message;
   generation: number;
   detailAfter: NarrativeDetailCursor | undefined;
+  /** True while the record still holds merged detail for this message. */
+  hasDetail: boolean;
 }
 
 function resolveNarrativeLoadContext(
@@ -384,10 +360,11 @@ function resolveNarrativeLoadContext(
     message,
     generation: narrativeGeneration.get(cacheKey) ?? 0,
     detailAfter: narrativeCursor.get(cacheKey),
+    hasDetail: current.narrativeByMessage[messageId] != null,
   };
 }
 
-function hasCurrentNarrativeLease(cacheKey: string, generation: number): boolean {
+function isCurrentNarrativeGeneration(cacheKey: string, generation: number): boolean {
   return (narrativeGeneration.get(cacheKey) ?? 0) === generation;
 }
 
@@ -563,6 +540,7 @@ function ensureAssistantMessageForTurnPersist(
   rec: ThreadRecord,
   threadId: string,
   localMessageId: string,
+  content = "",
 ): Message[] | undefined {
   if (rec.messages.some((m) => m.id === localMessageId)) {
     return undefined;
@@ -571,7 +549,7 @@ function ensureAssistantMessageForTurnPersist(
     id: localMessageId,
     thread_id: threadId,
     role: "assistant",
-    content: "",
+    content,
     tool_calls: null,
     files_changed: null,
     cost_usd: null,
@@ -643,7 +621,7 @@ export function countActiveSubagentCalls(calls: ToolCall[] | undefined): number 
 }
 
 /** Number of messages to fetch per directional pagination request. */
-export const HISTORY_PAGE_SIZE = 50;
+export const HISTORY_PAGE_SIZE = 25;
 
 /** Maximum messages kept in the in-memory sliding window. */
 export const MESSAGE_WINDOW_SIZE = 200;
@@ -1072,7 +1050,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     getWorkspaceThread: (threadId) =>
       useWorkspaceStore.getState().threads.find((t) => t.id === threadId),
     flushPendingTextDeltas,
-    loadNarrativeForMessage: (messageId) => get().loadNarrativeForMessage(messageId),
+    loadNarrativeForMessage: (messageId, threadId) => get().loadNarrativeForMessage(messageId, threadId),
     setPlanQuestions: (threadId, questions) => get().setPlanQuestions(threadId, questions),
     extractPendingPlanQuestions,
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
@@ -1407,7 +1385,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): void => {
     const fileEffectTurnId = typeof event.fileEffectTurnId === "string" ? event.fileEffectTurnId : "";
     const record = getRec(event.threadId);
-    if (get().runningThreadIds.has(event.threadId) && record.fileEffectTurnId === fileEffectTurnId) return;
+    const sameExecution = runtime.incomingExecutionId === undefined
+      || record.turnExecutionId === runtime.incomingExecutionId;
+    if (get().runningThreadIds.has(event.threadId) && sameExecution && record.fileEffectTurnId === fileEffectTurnId) return;
     clearStreamingTextUsage(event.threadId);
     useTaskStore.getState().prepareTaskBubbleForNewTurn(event.threadId);
     patchRec(event.threadId, (current) => ({
@@ -2084,6 +2064,40 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     };
   };
 
+  /**
+   * Reset ephemeral turn state for a terminal runtime snapshot. A user stop
+   * suppresses the provider's terminal event server-side, so the snapshot can
+   * be the only terminal signal — materialize the streaming buffer into an
+   * assistant row instead of dropping it.
+   */
+  const terminalSnapshotReset = (
+    record: ThreadRecord,
+    snapshot: TurnRuntimeSnapshot,
+  ): Partial<ThreadRecord> => {
+    const base = resetTurnEphemeral(record);
+    if (record.streaming.length === 0) return base;
+    const outcome: TurnOutcome | undefined =
+      snapshot.phase === "completed" || snapshot.phase === "cancelled"
+        || snapshot.phase === "interrupted" || snapshot.phase === "errored"
+        ? snapshot.phase
+        : undefined;
+    const message: Message = {
+      id: crypto.randomUUID(),
+      thread_id: snapshot.threadId,
+      role: "assistant",
+      content: record.streaming,
+      tool_calls: null,
+      files_changed: null,
+      cost_usd: null,
+      tokens_used: null,
+      timestamp: new Date().toISOString(),
+      sequence: messageSequenceFor(snapshot.threadId),
+      attachments: null,
+      ...(outcome !== undefined ? { outcome } : {}),
+    };
+    return appendStreamingTerminalMessage(record, base, message, null, snapshot.threadId);
+  };
+
   const resolvedTurnContextWindow = (event: Extract<AgentEvent, { type: "turnComplete" }>) => {
     const record = getRec(event.threadId);
     const thread = useWorkspaceStore.getState().threads.find((item) => item.id === event.threadId);
@@ -2499,8 +2513,12 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     payload: TurnPersistedPayload,
     localMessageId: string,
   ): Message[] | undefined => {
-    const ensured = payload.filesChanged.length > 0 || payload.toolCallCount > 0
-      ? ensureAssistantMessageForTurnPersist(record, payload.threadId, localMessageId)
+    // A user stop suppresses the provider's terminal event server-side, so a
+    // terminal persist is the last chance to materialize the streaming buffer
+    // before the terminal runtime patch clears it.
+    const unflushedStreaming = payload.outcome !== undefined && record.streaming.length > 0;
+    const ensured = payload.filesChanged.length > 0 || payload.toolCallCount > 0 || unflushedStreaming
+      ? ensureAssistantMessageForTurnPersist(record, payload.threadId, localMessageId, unflushedStreaming ? record.streaming : "")
       : undefined;
     if (payload.outcome === undefined) return ensured;
     return (ensured ?? record.messages).map((message) => message.id === localMessageId
@@ -2538,6 +2556,16 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     currentThreadId: string | null,
     terminalPhase: ThreadRecord["runtimePhase"] | undefined,
   ): Partial<ThreadRecord> => {
+    if (payload.messageId === null) {
+      return {
+        ...turnPersistStopState(record, payload),
+        ...(terminalPhase ? terminalRuntimePatch(record, terminalPhase) : {}),
+        ...(payload.fileEffects && payload.turnId === record.fileEffectTurnId
+          && payload.fileEffects.revision >= record.fileEffectSummary.revision
+          ? { fileEffectSummary: payload.fileEffects }
+          : {}),
+      };
+    }
     const localMessageId = resolveTurnPersistLocalMessageId(record, payload.messageId);
     const messages = persistedTurnMessages(record, payload, localMessageId);
     const stopState = turnPersistStopState(record, payload);
@@ -3125,6 +3153,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   applyThreadRuntimeSnapshot: (snapshot) => {
     const running = snapshot.phase === "running" || snapshot.phase === "finalizing";
+    if (!running) flushPendingTextDeltas();
     set((state) => {
       const nextRunning = new Set(state.runningThreadIds);
       if (running) nextRunning.add(snapshot.threadId);
@@ -3132,7 +3161,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       return {
         runningThreadIds: nextRunning,
         records: patchThreadRecord(state.records, snapshot.threadId, (rec) => ({
-          ...(running ? {} : resetTurnEphemeral(rec)),
+          ...(running ? {} : terminalSnapshotReset(rec, snapshot)),
           turnExecutionId: snapshot.turnExecutionId,
           runtimePhase: snapshot.phase,
           awaitingUserStopPersist: undefined,
@@ -3648,8 +3677,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (!currentId) return;
     const context = resolveNarrativeLoadContext(get().records, currentId, messageId);
     if (!context) return;
-    const { cacheKey, message, generation, detailAfter } = context;
-    if (narrativeLoaded.has(cacheKey)) return;
+    const { cacheKey, message, generation, detailAfter, hasDetail } = context;
+    if (narrativeLoaded.has(cacheKey) && hasDetail) return;
     const existing = narrativeInflight.get(cacheKey);
     if (existing) return existing;
     const p = getTransport()
@@ -3662,7 +3691,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         },
       })
       .then((entries) => {
-        if (!hasCurrentNarrativeLease(cacheKey, generation)) return;
+        if (!isCurrentNarrativeGeneration(cacheKey, generation)) return;
         const current = narrativeRecordWithMessage(get().records, currentId, messageId);
         if (!current) return;
         const merged = mergeNarrativeEntries(current.narrativeByMessage[messageId], entries);
@@ -3671,7 +3700,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           // later visible lease cannot silently skip detail that did not fit.
           return;
         }
-        if (!hasCurrentNarrativeLease(cacheKey, generation)) return;
+        if (!isCurrentNarrativeGeneration(cacheKey, generation)) return;
         recordNarrativeWindowCursor(cacheKey, entries);
         // The detail rows cause the loader effect to run immediately. Clear
         // this completed request first so that effect can request the next
@@ -3698,25 +3727,12 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return p;
   },
 
-  retainNarrativeForMessage: (messageId, explicitThreadId) => {
-    const threadId = explicitThreadId ?? get().currentThreadId;
-    if (!threadId) return;
-    retainNarrativeLease(narrativeKey(threadId, messageId));
-  },
-
-  releaseNarrativeForMessage: (messageId, explicitThreadId) => {
-    const threadId = explicitThreadId ?? get().currentThreadId;
-    if (!threadId) return;
-    const key = narrativeKey(threadId, messageId);
-    releaseNarrativeLease(key, () => get().evictNarrativeForMessage(messageId, threadId));
-  },
-
   isNarrativeLoaded: (threadId, messageId) => narrativeLoaded.has(narrativeKey(threadId, messageId)),
 
   evictNarrativeForMessage: (messageId, explicitThreadId) => {
     const currentId = explicitThreadId ?? get().currentThreadId;
     if (!currentId) return;
-    revokeNarrativeLease(narrativeKey(currentId, messageId));
+    revokeNarrativeLoadState(narrativeKey(currentId, messageId));
     patchRec(currentId, (rec) => {
       if (!(messageId in rec.narrativeByMessage)) return {};
       const next = { ...rec.narrativeByMessage };
@@ -3734,6 +3750,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   handleAgentEvent: (event) => {
     if (!hasAgentEventHandler(agentEventHandlers, event)) return;
     const runtime = prepareAgentEvent({
+      acceptPublication: (incoming) => stableAgentEventPublications.accept(incoming),
       clearApiRetry: (id) => patchRec(id, { apiRetry: undefined }),
       flushPendingTextDeltas,
       getCurrentThreadId: () => get().currentThreadId,

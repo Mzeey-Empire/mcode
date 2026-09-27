@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ApprovalReviewSupport, Thread, IProviderRegistry } from "@mcode/contracts";
 import { supportsInternalThreadControl } from "../../turns/turn-admission-dispatch-coordinator.js";
 import { createAgentServiceForTest } from "./agent-service-test-harness.js";
-import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
@@ -222,7 +222,7 @@ function buildService({
       undefined,
       threadControlMcp as never,
       undefined,
-      createCanonicalAgentEventSinkStub(db),
+      createCanonicalAgentBoundaryStub(db),
   );
   return {
     svc,
@@ -340,6 +340,8 @@ describe("AgentService.sendMessage — admission gates", () => {
         sourceTurnId: "source-turn",
         sourceProviderId: "claude",
       },
+      expect.any(String),
+      undefined,
     );
     expect(threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "active");
     expect(providerStub.sendTurn).toHaveBeenCalledTimes(1);

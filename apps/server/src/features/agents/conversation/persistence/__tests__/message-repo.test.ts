@@ -69,7 +69,7 @@ describe("MessageRepo", () => {
     const localRepo = new MessageRepo(localDb);
 
     localRepo.listByThread("thread-1", 10);
-    expect(preparedSql.some((sql) => sql.startsWith("INSERT"))).toBe(false);
+    expect(preparedSql.some((sql) => sql.toLowerCase().startsWith("insert"))).toBe(false);
 
     localRepo.create("thread-1", "user", "one", 1);
     localRepo.create("thread-1", "user", "two", 2);
@@ -90,9 +90,10 @@ describe("MessageRepo", () => {
     localRepo.publishAssistant("assistant-1");
     localRepo.publishAssistant("assistant-1");
 
-    expect(preparedSql.filter((sql) => sql.startsWith("INSERT INTO messages")).length).toBe(1);
-    expect(preparedSql.filter((sql) => sql.startsWith("INSERT OR IGNORE INTO messages")).length).toBe(1);
-    expect(preparedSql.filter((sql) => sql.startsWith("UPDATE messages SET is_internal")).length).toBe(1);
+    const inserts = preparedSql.filter((sql) => sql.toLowerCase().startsWith('insert into "messages"'));
+    expect(inserts.filter((sql) => !sql.includes("on conflict")).length).toBe(1);
+    expect(inserts.filter((sql) => sql.includes("on conflict")).length).toBe(1);
+    expect(preparedSql.filter((sql) => sql.toLowerCase().startsWith('update "messages" set "is_internal"')).length).toBe(1);
     localDb.close();
   });
 
@@ -163,6 +164,25 @@ describe("MessageRepo", () => {
   });
 
   describe("listByThread", () => {
+    it("does not let hidden provider notices displace the visible conversation tail", () => {
+      const user = repo.create("thread-1", "user", "Stop this turn", 1);
+      repo.createSystemNotice("thread-1", "Provider warning", 2, {
+        kind: "warning", presentation: "timeline", scope: "turn", sessionId: "session-1", noticeKey: "warning-1",
+      });
+      repo.createSystemNotice("thread-1", "Deprecated setting", 3, {
+        kind: "deprecation", presentation: "timeline", scope: "turn", sessionId: "session-1", noticeKey: "deprecation-1",
+      });
+
+      expect(repo.listByThread("thread-1", 2)).toMatchObject({
+        messages: [{ id: user.id }],
+        hasMore: false,
+      });
+      expect(repo.listByThreadAfter("thread-1", 2, 0)).toMatchObject({
+        messages: [{ id: user.id }],
+        hasMore: false,
+      });
+    });
+
     it("returns stored canonical legacy provenance without replacing it with the ambiguous fallback", () => {
       db.prepare(`
         INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, origin_type, legacy_provenance)

@@ -1,0 +1,367 @@
+import * as NodePath from "node:path";
+import * as NodeCrypto from "node:crypto";
+import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type {
+  CanonicalParentNarrativeClassificationReceipt,
+  CanonicalParentNarrativeRecoveryReceipt,
+  CanonicalProviderWriteInput,
+  CanonicalProviderWriteReceipt,
+  CanonicalWriterRequest,
+  CanonicalWriterResponse,
+} from "./canonical-agent-writer-protocol.js";
+import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "./canonical-agent-writer-protocol.js";
+import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
+import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execution/execution-worker-handler.js";
+import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
+
+const MAX_PENDING_WRITES = 64;
+const MAX_WORKER_ATTEMPTS = 3;
+const MAX_PENDING_ACKNOWLEDGEMENTS = 64;
+const MAX_ACK_RETRIES_BEFORE_WRITE = 8;
+const MAX_ACK_RETRIES_ON_CLOSE = 16;
+const WRITER_EXECUTION_ID = "writer:init";
+
+interface PendingRequest {
+  request: CanonicalWriterRequest;
+  onPublication?: (events: readonly CanonicalAgentEventEnvelope[]) => void;
+  resolve(response: CanonicalWriterResponse): void;
+  reject(error: Error): void;
+}
+
+interface PendingAcknowledgement {
+  executionId: string;
+  operationId: string;
+}
+
+class CanonicalWriterWorkerLost extends Error {}
+
+/** Sends cloneable canonical commands to a dedicated SQLite worker with bounded admission and crash retries. */
+export class CanonicalAgentWriterClient {
+  private worker: Worker | undefined;
+  private workerReady: Promise<void>;
+  private restart: Promise<void> | undefined;
+  private retryingAcknowledgements: Promise<void> | undefined;
+  private readonly pending = new Map<string, PendingRequest>();
+  private readonly pendingAcknowledgements = new Map<string, PendingAcknowledgement>();
+  private generation = 0;
+  private closing = false;
+  private stopping = false;
+
+  constructor(
+    private readonly dbPath: string,
+    private readonly createWorker: () => Worker = defaultCreateWorker,
+  ) {
+    if (!NodePath.isAbsolute(dbPath)) throw new Error("Canonical writer database path must be absolute");
+    this.workerReady = this.startWorker();
+  }
+
+  /** Waits until the worker has opened the already-migrated database. */
+  whenReady(): Promise<void> {
+    return this.workerReady;
+  }
+
+  /** Resolves with committed envelopes for main-loop publication; it never publishes them itself. */
+  async commit(operationId: string, input: CanonicalProviderWriteInput): Promise<CanonicalProviderWriteReceipt> {
+    if (!operationId || !input.executionId) throw new Error("Canonical writer operation and execution IDs are required");
+    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    const response = await this.sendWithRetry({
+      kind: "commit", requestId: NodeCrypto.randomUUID(), operationId, executionId: input.executionId, input,
+    });
+    if (response.kind !== "committed") throw new Error("Canonical writer returned an unexpected response");
+    return response.receipt;
+  }
+
+  /** Commits one execution operation and delivers bounded pages after each durable write. */
+  async transactSemantic(
+    operation: ExecutionSemanticOperation,
+    onPublication: (events: readonly CanonicalAgentEventEnvelope[]) => void,
+  ): Promise<ExecutionWriteReceipt> {
+    if (!operation.operationId || !operation.execution.executionId) {
+      throw new Error("Semantic writer operation and execution IDs are required");
+    }
+    const response = await this.sendWithRetry({
+      kind: "semantic-transact", requestId: NodeCrypto.randomUUID(),
+      operationId: operation.operationId, executionId: operation.execution.executionId, operation,
+    }, false, onPublication);
+    if (response.kind !== "semantic-transacted") throw new Error("Canonical writer returned an unexpected response");
+    return response.receipt;
+  }
+
+  /** Reconcile a lost execution and deliver bounded committed publication pages. */
+  async interruptWorkerLoss(
+    input: LostExecutionInterruption,
+    onPublication: (events: readonly CanonicalAgentEventEnvelope[]) => void,
+  ): Promise<ExecutionWriteReceipt> {
+    const operationId = `${input.lease.leaseId}:worker-lost`;
+    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    const response = await this.sendWithRetry({
+      kind: "semantic-worker-loss", requestId: NodeCrypto.randomUUID(), operationId,
+      executionId: input.execution.executionId, input,
+    }, false, onPublication);
+    if (response.kind !== "semantic-transacted") throw new Error("Canonical writer returned an unexpected response");
+    return response.receipt;
+  }
+
+  /** Resolves after recovery writes finish; a lost reply replays the durable receipt. */
+  async recordParentNarrativeRecovery(
+    operationId: string,
+    input: ParentNarrativeRecoveryCommitInput,
+  ): Promise<CanonicalParentNarrativeRecoveryReceipt> {
+    if (!operationId || !input.executionId) throw new Error("Canonical writer operation and execution IDs are required");
+    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    const response = await this.sendWithRetry({
+      kind: "record-parent-narrative-recovery", requestId: NodeCrypto.randomUUID(), operationId,
+      executionId: input.executionId, input,
+    });
+    if (response.kind !== "parent-narrative-recovery-recorded") {
+      throw new Error("Canonical writer returned an unexpected response");
+    }
+    return response.receipt;
+  }
+
+  /** Atomically persists recovery and resets provisional assistant text; the caller retires its journal after receipt. */
+  async classifyParentNarrativeRecovery(
+    operationId: string,
+    input: ParentNarrativeRecoveryCommitInput,
+  ): Promise<CanonicalParentNarrativeClassificationReceipt> {
+    if (!operationId || !input.executionId) throw new Error("Canonical writer operation and execution IDs are required");
+    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    const response = await this.sendWithRetry({
+      kind: "classify-parent-narrative-recovery", requestId: NodeCrypto.randomUUID(), operationId,
+      executionId: input.executionId, input,
+    });
+    if (response.kind !== "parent-narrative-recovery-classified") {
+      throw new Error("Canonical writer returned an unexpected response");
+    }
+    return response.receipt;
+  }
+
+  /** Releases a receipt after its caller has finished publication or journal discard. Never acknowledge before that work. */
+  async acknowledgeOperation(executionId: string, operationId: string): Promise<void> {
+    if (!executionId || !operationId) throw new Error("Canonical writer operation and execution IDs are required");
+    if (this.closing || this.stopping) throw new Error("Canonical writer closed");
+    const key = acknowledgementKey(executionId, operationId);
+    try {
+      await this.sendAcknowledgement({ executionId, operationId });
+      this.pendingAcknowledgements.delete(key);
+    } catch (error) {
+      if (!this.pendingAcknowledgements.has(key)) {
+        if (this.pendingAcknowledgements.size >= MAX_PENDING_ACKNOWLEDGEMENTS) {
+          throw new Error("Canonical writer acknowledgement retry queue is full", { cause: error });
+        }
+        this.pendingAcknowledgements.set(key, { executionId, operationId });
+      }
+      throw error;
+    }
+  }
+
+  /** Number of handled operations whose receipt deletion still needs a retry. */
+  get pendingAcknowledgementCount(): number {
+    return this.pendingAcknowledgements.size;
+  }
+
+  /** Closes the database after accepted writes settle, then releases the worker. */
+  async close(): Promise<void> {
+    if (this.closing || this.stopping) return;
+    this.closing = true;
+    let acknowledgementError: Error | undefined;
+    try {
+      await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_ON_CLOSE);
+      if (this.pendingAcknowledgements.size > 0) {
+        acknowledgementError = new Error(
+          `Canonical writer closed with ${this.pendingAcknowledgements.size} unacknowledged operations`,
+        );
+      }
+      await this.workerReady;
+      if (this.worker) {
+        await this.sendRaw({
+          kind: "close", requestId: NodeCrypto.randomUUID(), operationId: "writer:close",
+          executionId: WRITER_EXECUTION_ID,
+        });
+      }
+    } catch {
+      // A failed worker is already closed; caller writes have their own visible failures.
+    } finally {
+      this.stopping = true;
+      this.loseWorker(new Error("Canonical writer closed"));
+    }
+    if (acknowledgementError) throw acknowledgementError;
+  }
+
+  private sendAcknowledgement(acknowledgement: PendingAcknowledgement, allowDuringClose = false): Promise<void> {
+    return this.sendWithRetry({
+      kind: "ack-operation", requestId: NodeCrypto.randomUUID(), ...acknowledgement,
+    }, allowDuringClose).then((response) => {
+      if (response.kind !== "operation-acknowledged") {
+        throw new Error("Canonical writer returned an unexpected response");
+      }
+    });
+  }
+
+  private retryPendingAcknowledgements(limit: number): Promise<void> {
+    if (this.pendingAcknowledgements.size === 0) return Promise.resolve();
+    if (!this.retryingAcknowledgements) {
+      this.retryingAcknowledgements = this.drainAcknowledgements(limit)
+        .finally(() => { this.retryingAcknowledgements = undefined; });
+    }
+    return this.retryingAcknowledgements;
+  }
+
+  private async drainAcknowledgements(limit: number): Promise<void> {
+    for (const [key, acknowledgement] of [...this.pendingAcknowledgements].slice(0, limit)) {
+      try {
+        await this.sendAcknowledgement(acknowledgement, this.closing);
+        this.pendingAcknowledgements.delete(key);
+      } catch {
+        if (this.pendingAcknowledgements.get(key) !== acknowledgement) continue;
+        this.pendingAcknowledgements.delete(key);
+        this.pendingAcknowledgements.set(key, acknowledgement);
+      }
+    }
+  }
+
+  private async sendWithRetry(
+    request: CanonicalWriterRequest,
+    allowDuringClose = false,
+    onPublication?: (events: readonly CanonicalAgentEventEnvelope[]) => void,
+  ): Promise<CanonicalWriterResponse> {
+    let publishedCount = 0;
+    for (let attempt = 1; attempt <= MAX_WORKER_ATTEMPTS; attempt++) {
+      this.assertCanSend(allowDuringClose);
+      try {
+        await this.workerReady;
+        this.assertCanSend(allowDuringClose);
+        let attemptCount = 0;
+        const deliver = onPublication ? (events: readonly CanonicalAgentEventEnvelope[]) => {
+          const skipped = Math.min(events.length, Math.max(0, publishedCount - attemptCount));
+          if (skipped < events.length) onPublication(events.slice(skipped));
+          attemptCount += events.length;
+          publishedCount = Math.max(publishedCount, attemptCount);
+        } : undefined;
+        return await this.sendRaw(request, deliver);
+      } catch (error) {
+        if (!(error instanceof CanonicalWriterWorkerLost) || attempt === MAX_WORKER_ATTEMPTS) throw error;
+        await this.restartAfterLoss(allowDuringClose);
+      }
+    }
+    throw new Error("Canonical writer retry limit reached");
+  }
+
+  private assertCanSend(allowDuringClose: boolean): void {
+    if (this.stopping || (this.closing && !allowDuringClose)) throw new Error("Canonical writer closed");
+  }
+
+  private async restartAfterLoss(allowDuringClose: boolean): Promise<void> {
+    try {
+      await this.restartWorker(allowDuringClose);
+    } catch (error) {
+      if (!(error instanceof CanonicalWriterWorkerLost)) throw error;
+    }
+  }
+
+  private async restartWorker(allowDuringClose: boolean): Promise<void> {
+    if (this.stopping || (this.closing && !allowDuringClose)) throw new Error("Canonical writer closed");
+    if (!this.restart) {
+      this.restart = (async () => {
+        if (!this.worker) this.workerReady = this.startWorker();
+        await this.workerReady;
+      })().finally(() => { this.restart = undefined; });
+    }
+    await this.restart;
+  }
+
+  private async startWorker(): Promise<void> {
+    const generation = ++this.generation;
+    const worker = this.createWorker();
+    this.worker = worker;
+    worker.onmessage = (message: MessageEvent<CanonicalWriterResponse>) => {
+      if (this.generation === generation) this.receive(message.data);
+    };
+    worker.onerror = () => this.loseWorker(new CanonicalWriterWorkerLost("Canonical writer worker failed"), generation);
+    worker.addEventListener("close", () => {
+      this.loseWorker(new CanonicalWriterWorkerLost("Canonical writer worker closed"), generation);
+    });
+    const response = await this.sendRaw({
+      kind: "open", requestId: NodeCrypto.randomUUID(), operationId: "writer:open",
+      executionId: WRITER_EXECUTION_ID, dbPath: this.dbPath,
+    });
+    if (response.kind !== "opened") throw new Error("Canonical writer did not open its database");
+  }
+
+  private sendRaw(
+    request: CanonicalWriterRequest,
+    onPublication?: (events: readonly CanonicalAgentEventEnvelope[]) => void,
+  ): Promise<CanonicalWriterResponse> {
+    const worker = this.worker;
+    if (!worker) return Promise.reject(new CanonicalWriterWorkerLost("Canonical writer worker closed"));
+    if (request.kind !== "open" && request.kind !== "close" && this.pending.size >= MAX_PENDING_WRITES) {
+      return Promise.reject(new Error("Canonical writer admission is full"));
+    }
+    return new Promise((resolve, reject) => {
+      this.pending.set(request.requestId, { request, onPublication, resolve, reject });
+      try {
+        worker.postMessage(request);
+      } catch {
+        this.loseWorker(new CanonicalWriterWorkerLost("Canonical writer request could not be sent"));
+      }
+    });
+  }
+
+  private receive(response: CanonicalWriterResponse): void {
+    const pending = this.pending.get(response.requestId);
+    if (!pending) return;
+    if (pending.request.operationId !== response.operationId
+      || pending.request.executionId !== response.executionId) {
+      this.loseWorker(new Error("Canonical writer response identity mismatch"));
+      return;
+    }
+    if (response.kind === "semantic-publication") {
+      this.receivePublication(pending, response);
+      return;
+    }
+    this.pending.delete(response.requestId);
+    if (response.kind === "failed") {
+      pending.reject(new Error(`Canonical writer ${response.reason}`));
+      return;
+    }
+    pending.resolve(response);
+  }
+
+  private receivePublication(
+    pending: PendingRequest,
+    response: Extract<CanonicalWriterResponse, { kind: "semantic-publication" }>,
+  ): void {
+    if (!pending.onPublication || response.events.length === 0
+      || response.events.length > SEMANTIC_PUBLICATION_PAGE_SIZE) {
+      this.loseWorker(new Error("Canonical writer publication page is invalid"));
+      return;
+    }
+    try {
+      pending.onPublication(response.events);
+    } catch (error) {
+      this.pending.delete(response.requestId);
+      pending.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private loseWorker(error: Error, generation = this.generation): void {
+    if (generation !== this.generation) return;
+    const worker = this.worker;
+    this.worker = undefined;
+    worker?.terminate();
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+  }
+}
+
+function defaultCreateWorker(): Worker {
+  const workerFile = import.meta.url.endsWith(".cjs")
+    ? "./canonical-agent-writer.worker.cjs"
+    : "./canonical-agent-writer.worker.ts";
+  const workerOptions = { type: "module", smol: true } satisfies WorkerOptions & { smol: boolean };
+  return new Worker(new URL(workerFile, import.meta.url), workerOptions);
+}
+
+function acknowledgementKey(executionId: string, operationId: string): string {
+  return JSON.stringify([executionId, operationId]);
+}

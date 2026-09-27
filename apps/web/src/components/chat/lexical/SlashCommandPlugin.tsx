@@ -147,10 +147,11 @@ export function insertSlashCommandNode(
   commandName: string,
   namespace: SlashCommandNamespace,
   capabilityIdentity?: ProviderCapabilityIdentity,
+  path?: string,
 ): void {
   replaceActiveSlashTrigger(
     editor,
-    () => $createSlashCommandNode(commandName, namespace, capabilityIdentity),
+    () => $createSlashCommandNode(commandName, namespace, capabilityIdentity, path),
   );
 }
 

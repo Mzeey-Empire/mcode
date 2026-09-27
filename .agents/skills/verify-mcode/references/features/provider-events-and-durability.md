@@ -17,7 +17,8 @@
 1. Open the project for this worktree.
 2. Start a short thread with a selected provider and model.
 3. Wait for the final reply.
-4. Reload or reopen the conversation and confirm that the reply remains.
+4. Send a follow-up in the same conversation. Require its reply, cleared activity indicator, and restored Send control.
+5. Run the consecutive-turn journey below, then reload and confirm that replies remain.
 
 ## Driving it with verify-mcode
 
@@ -31,6 +32,28 @@ Confirm that the indicator disappears after completion and remains absent when y
 This fixture checks the production Codex event boundary, not a real model run or another provider's adapter.
 
 ## Runtime checks
+
+### Consecutive turns and navigation
+
+In the owned Electron app, select a real provider and model and create a direct
+task under `.dev/fixture-repo`. Record its ID before proceeding.
+
+1. Send a short prompt, wait for completion, then send a second prompt in the
+   same task. Require both replies and a restored Send control after each turn.
+2. Send a longer follow-up. After assistant text starts streaming, switch to
+   another fixture task and back before completion. Capture active runtime state
+   before leaving, while away, and after returning. The response must continue
+   and finish once, without cancellation or text appearing in the other task.
+3. Send another follow-up after navigation. Require a completed public runtime,
+   no Stop control or thinking indicator, and no reactivation for 40 seconds.
+4. Reload, reopen the same task, verify the durable replies through
+   `conversation.page`, and send one more follow-up to completion.
+5. Save a video of the mid-turn switch, settled screenshots, terminal outcomes,
+   provider/model, and exact owned IDs. Delete only the tasks created for proof.
+
+A first-turn server receipt does not cover this journey. Compare desktop state
+with the public runtime from that desktop's server; its isolated database can
+differ from the worktree server. Report which providers were actually exercised.
 
 Run `runtime health`, then run:
 

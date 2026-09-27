@@ -55,6 +55,7 @@ export function writeComposerContent(
             mention.label,
             mention.namespace,
             mention.capabilityIdentity,
+            mention.path,
           ),
         );
         cursor = mention.range.end;

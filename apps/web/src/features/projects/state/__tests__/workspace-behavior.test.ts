@@ -19,7 +19,7 @@ import {
   createMockWorkspace,
   createMockThread,
 } from "../../../../__tests__/mocks/transport";
-import type { CreateAndSendResult, SelectedTextComment, TurnRuntimeSnapshot } from "@mcode/contracts";
+import type { CreateAndSendResult, SelectedTextComment, ThreadStartup, TurnRuntimeSnapshot } from "@mcode/contracts";
 import { act, renderHook } from "@testing-library/react";
 import { useQueuedMessageDispatch } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";
 import { useThreadStartupStore } from "@/features/thread-startup";
@@ -72,6 +72,25 @@ function createMockCreateAndSendResult(
       phase: "running",
       ...runtimeSnapshot,
     },
+  };
+}
+
+function cancelledBeforeThread(startupId: string, workspaceId: string) {
+  return {
+    startupId,
+    workspaceId,
+    kind: "direct",
+    state: "cancelled",
+    phase: "thread",
+    steps: [
+      { phase: "thread", state: "cancelled" },
+      { phase: "agent", state: "pending" },
+    ],
+    transcript: [],
+    cancellation: "requested",
+    revision: 1,
+    createdAt: "2026-09-02T12:00:00.000Z",
+    updatedAt: "2026-09-02T12:00:00.000Z",
   };
 }
 
@@ -1325,6 +1344,319 @@ describe("Workspace Behavior", () => {
   });
 
   describe("optimistic thread scaffolding", () => {
+    it("rekeys a confirmed creation after its response is lost and refreshes the worktree list", async () => {
+      const ws = createMockWorkspace({ id: "ws-lost-response" });
+      const durable = createMockThread({
+        id: "durable-after-reconnect",
+        workspace_id: ws.id,
+        mode: "worktree",
+        worktree_path: "/repo/new-worktree",
+      });
+      let rejectRpc!: (reason: Error) => void;
+      let resolveWorktrees!: (value: Awaited<ReturnType<typeof mockTransport.listWorktrees>>) => void;
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+        new Promise<CreateAndSendResult>((_resolve, reject) => { rejectRpc = reject; }),
+      );
+      (mockTransport.listWorktrees as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+        new Promise((resolve) => { resolveWorktrees = resolve; }),
+      );
+      useWorkspaceStore.setState({
+        workspaces: [ws],
+        activeWorkspaceId: ws.id,
+        newThreadMode: "worktree",
+        newThreadBranch: "main",
+        worktreesLoadedForWorkspace: ws.id,
+        worktrees: [],
+      });
+
+      const sending = useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        startupId: placeholderId,
+        workspaceId: ws.id,
+        kind: "managed-worktree",
+        state: "running",
+        phase: "agent",
+        steps: [
+          { phase: "thread", state: "completed" },
+          { phase: "worktree", state: "completed" },
+          { phase: "setup", state: "completed" },
+          { phase: "agent", state: "running" },
+        ],
+        transcript: [],
+        cancellation: "none",
+        revision: 1,
+        threadId: durable.id,
+        createdAt: "2026-09-02T12:00:00.000Z",
+        updatedAt: "2026-09-02T12:00:00.000Z",
+      });
+      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+
+      await useWorkspaceStore.getState().recoverPreparingThreads();
+      expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id);
+      expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual([durable.id]);
+      expect(useWorkspaceStore.getState().pendingStartupByThreadId[durable.id]?.startupId).toBe(placeholderId);
+      expect(useWorkspaceStore.getState().worktreesLoadedForWorkspace).toBeNull();
+      expect(mockTransport.listWorktrees).toHaveBeenCalledWith(ws.id);
+
+      rejectRpc(new Error("Connection closed before reply"));
+      await expect(sending).rejects.toThrow("Connection closed before reply");
+      expect(useWorkspaceStore.getState().threads[0]?.clientError).toBeUndefined();
+      expect(mockTransport.createAndSendMessage).toHaveBeenCalledTimes(1);
+
+      const worktrees = [{ name: "new-worktree", path: durable.worktree_path!, branch: "main", managed: true }];
+      resolveWorktrees(worktrees);
+      await vi.waitFor(() => expect(useWorkspaceStore.getState().worktreesLoadedForWorkspace).toBe(ws.id));
+      expect(useWorkspaceStore.getState().worktrees).toEqual(worktrees);
+    });
+
+    it("uses a binding push when an in-flight lookup returns an older unbound startup", async () => {
+      const ws = createMockWorkspace({ id: "ws-late-binding-push" });
+      const durable = createMockThread({ id: "durable-late-binding", workspace_id: ws.id });
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error("Response lost"));
+      await expect(useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5"))
+        .rejects.toThrow("Response lost");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      let resolveLookup!: (record: ThreadStartup | null) => void;
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+        new Promise<ThreadStartup | null>((resolve) => { resolveLookup = resolve; }),
+      );
+      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      const recovery = useWorkspaceStore.getState().recoverPreparingThreads();
+      const startup: ThreadStartup = {
+        startupId: placeholderId,
+        workspaceId: ws.id,
+        kind: "direct",
+        state: "running",
+        phase: "thread",
+        steps: [{ phase: "thread", state: "running" }, { phase: "agent", state: "pending" }],
+        transcript: [],
+        cancellation: "none",
+        revision: 1,
+        createdAt: "2026-09-02T12:00:00.000Z",
+        updatedAt: "2026-09-02T12:00:00.000Z",
+      };
+      useThreadStartupStore.getState().apply({ ...startup, threadId: durable.id, revision: 2 });
+      resolveLookup(startup);
+      await recovery;
+
+      expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual([durable.id]);
+      expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id);
+      expect(mockTransport.listThreads).toHaveBeenCalledTimes(1);
+      expect(mockTransport.createAndSendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the unsent prompt when a bound startup is interrupted before agent admission", async () => {
+      const ws = createMockWorkspace({ id: "ws-interrupted-before-agent" });
+      const durable = createMockThread({
+        id: "durable-interrupted",
+        workspace_id: ws.id,
+        mode: "worktree",
+        worktree_path: "/repo/interrupted",
+      });
+      useWorkspaceStore.setState({
+        workspaces: [ws],
+        activeWorkspaceId: ws.id,
+        newThreadMode: "worktree",
+        newThreadBranch: "main",
+      });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error("Reply lost"));
+      await expect(useWorkspaceStore.getState().createAndSendMessage("Keep the whole prompt", "gpt-5.5"))
+        .rejects.toThrow("Reply lost");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      const parkedDraft = {
+        ...pendingComposerDraft,
+        input: "Keep the whole prompt",
+        attachments: [{
+          id: "pending-preview",
+          name: "preview.png",
+          mimeType: "image/png",
+          sizeBytes: 12,
+          filePath: "C:/tmp/preview.png",
+          previewUrl: "blob:pending-preview",
+        }],
+      };
+      useComposerDraftStore.getState().saveDraft(placeholderId, parkedDraft);
+      const revokePreview = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        startupId: placeholderId,
+        workspaceId: ws.id,
+        kind: "managed-worktree",
+        state: "interrupted",
+        phase: "worktree",
+        steps: [
+          { phase: "thread", state: "completed" },
+          { phase: "worktree", state: "interrupted" },
+          { phase: "setup", state: "pending" },
+          { phase: "agent", state: "pending" },
+        ],
+        transcript: [],
+        cancellation: "none",
+        revision: 1,
+        threadId: durable.id,
+        createdAt: "2026-09-02T12:00:00.000Z",
+        updatedAt: "2026-09-02T12:00:00.000Z",
+      });
+      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+
+      await useWorkspaceStore.getState().recoverPreparingThreads();
+
+      expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id);
+      expect(useComposerDraftStore.getState().getDraft(durable.id)).toEqual(parkedDraft);
+      expect(useComposerDraftStore.getState().getDraft(placeholderId)).toBeUndefined();
+      expect(revokePreview).not.toHaveBeenCalled();
+      expect(mockTransport.createAndSendMessage).toHaveBeenCalledTimes(1);
+      revokePreview.mockRestore();
+    });
+
+    it("finishes reconciliation when a startup binds after the reconnect lookup", async () => {
+      const ws = createMockWorkspace({ id: "ws-late-binding" });
+      const durable = createMockThread({ id: "durable-late-binding", workspace_id: ws.id });
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error("Response lost"));
+      await expect(useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5"))
+        .rejects.toThrow("Response lost");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      const unbound = {
+        startupId: placeholderId,
+        workspaceId: ws.id,
+        kind: "direct" as const,
+        state: "running" as const,
+        phase: "thread" as const,
+        steps: [
+          { phase: "thread" as const, state: "running" as const },
+          { phase: "agent" as const, state: "pending" as const },
+        ],
+        transcript: [],
+        cancellation: "none" as const,
+        revision: 1,
+        createdAt: "2026-09-02T12:00:00.000Z",
+        updatedAt: "2026-09-02T12:00:00.000Z",
+      };
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce(unbound);
+      await useWorkspaceStore.getState().recoverPreparingThreads();
+      expect(useWorkspaceStore.getState().activeThreadId).toBe(placeholderId);
+
+      const bound = {
+        ...unbound,
+        phase: "agent" as const,
+        steps: [
+          { phase: "thread" as const, state: "completed" as const },
+          { phase: "agent" as const, state: "running" as const },
+        ],
+        threadId: durable.id,
+        revision: 2,
+      };
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce(bound);
+      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      useThreadStartupStore.getState().apply(bound);
+
+      await vi.waitFor(() => expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id));
+      expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual([durable.id]);
+      expect(mockTransport.createAndSendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries an unconfirmed creation with its original startup id", async () => {
+      const ws = createMockWorkspace({ id: "ws-retry-same-startup" });
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error("Response lost"))
+        .mockResolvedValueOnce(createMockCreateAndSendResult({ id: "durable-retry", workspace_id: ws.id }));
+
+      await expect(useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5"))
+        .rejects.toThrow("Response lost");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      const editedDraft = { ...pendingComposerDraft, input: "Edited while disconnected" };
+      useComposerDraftStore.getState().saveDraft(placeholderId, editedDraft);
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+      await useWorkspaceStore.getState().retryPreparingThread(placeholderId);
+
+      const calls = (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.[0].startupId).toBe(placeholderId);
+      expect(calls[1]?.[0].startupId).toBe(placeholderId);
+      expect(calls[1]?.[0].content).toBe("Hello");
+      expect(useComposerDraftStore.getState().getDraft("durable-retry")).toEqual(editedDraft);
+    });
+
+    it("uses a new startup id only after the server confirms the original ended without a thread", async () => {
+      const ws = createMockWorkspace({ id: "ws-terminal-retry" });
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error("Cancelled"))
+        .mockResolvedValueOnce(createMockCreateAndSendResult({ id: "durable-new-attempt", workspace_id: ws.id }));
+
+      await expect(useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5"))
+        .rejects.toThrow("Cancelled");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        startupId: placeholderId,
+        workspaceId: ws.id,
+        kind: "direct",
+        state: "cancelled",
+        phase: "thread",
+        steps: [
+          { phase: "thread", state: "cancelled" },
+          { phase: "agent", state: "pending" },
+        ],
+        transcript: [],
+        cancellation: "requested",
+        revision: 1,
+        createdAt: "2026-09-02T12:00:00.000Z",
+        updatedAt: "2026-09-02T12:00:00.000Z",
+      });
+
+      const firstRetry = useWorkspaceStore.getState().retryPreparingThread(placeholderId);
+      const secondRetry = useWorkspaceStore.getState().retryPreparingThread(placeholderId);
+      expect(secondRetry).toBe(firstRetry);
+      await firstRetry;
+      const calls = (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(calls[1]?.[0].startupId).not.toBe(calls[0]?.[0].startupId);
+    });
+
+    it("does not retry while the startup lookup is uncertain", async () => {
+      const ws = createMockWorkspace({ id: "ws-uncertain-retry" });
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error("Connection lost"));
+      await expect(useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5"))
+        .rejects.toThrow("Connection lost");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error("Still offline"));
+
+      await expect(useWorkspaceStore.getState().retryPreparingThread(placeholderId))
+        .rejects.toThrow("Still offline");
+      expect(mockTransport.createAndSendMessage).toHaveBeenCalledTimes(1);
+      expect(useWorkspaceStore.getState().threads[0]?.id).toBe(placeholderId);
+    });
+
+    it("does not make a new startup for an interrupted unbound record", async () => {
+      const ws = createMockWorkspace({ id: "ws-interrupted-unbound" });
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>)
+        .mockRejectedValueOnce(new Error("Connection lost"));
+      await expect(useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5"))
+        .rejects.toThrow("Connection lost");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...cancelledBeforeThread(placeholderId, ws.id),
+        state: "interrupted",
+        cancellation: "none",
+        steps: [{ phase: "thread", state: "interrupted" }, { phase: "agent", state: "pending" }],
+      });
+
+      await expect(useWorkspaceStore.getState().retryPreparingThread(placeholderId))
+        .rejects.toThrow("Inspect this workspace before starting again");
+      expect(mockTransport.createAndSendMessage).toHaveBeenCalledTimes(1);
+      expect(useWorkspaceStore.getState().threads[0]?.id).toBe(placeholderId);
+    });
+
     it.each(["direct", "worktree"] as const)(
       "retains the pending composer draft through a cancelled new %s creation until acknowledgement",
       async (mode) => {
@@ -1379,6 +1711,8 @@ describe("Workspace Behavior", () => {
           selectedTextComments: [editedComment],
         };
         useComposerDraftStore.getState().saveDraft(placeholderId, editedDraft);
+        (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>)
+          .mockResolvedValueOnce(cancelledBeforeThread(placeholderId, ws.id));
 
         await useWorkspaceStore.getState().retryPreparingThread(placeholderId);
 
@@ -1430,6 +1764,8 @@ describe("Workspace Behavior", () => {
         }],
       };
       useComposerDraftStore.getState().saveDraft(placeholderId, commentOnlyDraft);
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(cancelledBeforeThread(placeholderId, ws.id));
 
       await useWorkspaceStore.getState().retryPreparingThread(placeholderId);
 
@@ -1517,6 +1853,8 @@ describe("Workspace Behavior", () => {
       )).rejects.toThrow("Creation failed");
 
       const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(cancelledBeforeThread(placeholderId, ws.id));
       await useWorkspaceStore.getState().retryPreparingThread(placeholderId);
 
       expect(revokeObjectUrl).toHaveBeenCalledOnce();

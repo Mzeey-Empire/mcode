@@ -130,6 +130,28 @@ describe("transcript viewport", () => {
     expect(position).toEqual({ kind: "reading", key: "9", offset: 25 });
   });
 
+  it("pins the reading row to its scrolled screen position while prepended rows settle", () => {
+    const tops = new Map(rows.map((row, index) => [row.id, index * 100]));
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const key = this.getAttribute("data-transcript-key");
+      const contentTop = key === null ? 0 : tops.get(key) ?? 0;
+      return new DOMRect(0, contentTop - view.viewport.scrollTop, 600, 100);
+    });
+    view.moveTo({ kind: "reading", key: "9", offset: 25 });
+    expect(view.viewport.scrollTop).toBe(925);
+    const anchor = hosts.find((host) => host.id === "9")!;
+    // Prepended rows mount at provisional heights but really measure 300 each.
+    for (const [id, top] of tops) tops.set(id, top + 400);
+    view.setRows([{ id: "older-1", height: 100 }, { id: "older-2", height: 100 }, ...rows]);
+    expect(anchor.element.getBoundingClientRect().top).toBe(-25);
+    expect(view.viewport.scrollTop).toBe(1325);
+    // A later measurement pass pushes the row again; the pin still wins.
+    for (const [id, top] of tops) tops.set(id, top + 100);
+    view.setRows([{ id: "older-1", height: 100 }, { id: "older-2", height: 100 }, ...rows]);
+    expect(anchor.element.getBoundingClientRect().top).toBe(-25);
+    expect(view.viewport.scrollTop).toBe(1425);
+  });
+
   it("preserves the reading row when history fills a previously short viewport", () => {
     const recent = [{ id: "recent", height: 120 }];
     view.setRows(recent);

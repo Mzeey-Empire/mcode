@@ -22,6 +22,35 @@ describe("MessageMentionSchema", () => {
     });
   });
 
+  it("preserves a command mention path for file-linked invocations", () => {
+    const result = MessageMentionSchema().safeParse({
+      id: "command:skill:deploy",
+      kind: "command",
+      label: "deploy",
+      namespace: "skill",
+      path: "C:/repo/.agents/skills/deploy/SKILL.md",
+      range: { start: 0, end: 7 },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      path: "C:/repo/.agents/skills/deploy/SKILL.md",
+    });
+  });
+
+  it("rejects command mention paths with control characters", () => {
+    const result = MessageMentionSchema().safeParse({
+      id: "command:skill:deploy",
+      kind: "command",
+      label: "deploy",
+      namespace: "skill",
+      path: "C:/repo/.agents/skills/\ndeploy/SKILL.md",
+      range: { start: 0, end: 7 },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("rejects unknown command namespaces", () => {
     const result = MessageMentionSchema().safeParse({
       id: "command:unknown:deploy",

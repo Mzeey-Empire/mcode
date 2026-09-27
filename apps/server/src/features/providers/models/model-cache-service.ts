@@ -10,11 +10,19 @@
 
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import type { ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+import type { ProviderAvailability, ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+import { broadcast } from "../../../application/transport/push.js";
 import { ModelCacheRepo } from "./persistence/model-cache-repo.js";
 
 /** How long a cached entry is considered "fresh" (no background refresh). */
 const CACHE_FRESH_MS = 60 * 60 * 1000; // 1 hour
+
+/** Select providers whose model lists can be warmed without starting OpenCode. */
+export function startupModelProviderIds(providers: readonly ProviderAvailability[]): ProviderId[] {
+  return providers
+    .filter((provider) => provider.id !== "opencode" && provider.enabled && provider.hasAdapter && !provider.comingSoon && provider.cli.status !== "not_found")
+    .map((provider) => provider.id);
+}
 
 /**
  * Parse a SQLite `datetime('now')` string as UTC. SQLite returns
@@ -146,15 +154,11 @@ export class ModelCacheService {
     }
   }
 
-  /**
-   * Refreshes all providers that support model listing.
-   * Called on WS connect to ensure the cache stays warm.
-   */
-  async refreshAll(): Promise<void> {
-    const providers = this.registry.resolveAll();
-    const promises = providers.map((p) =>
-      this.refreshProvider(p.id).catch((err) => {
-        logger.warn("Model refresh failed", { providerId: p.id, err: String(err) });
+  /** Refresh model lists for the providers selected by the caller. */
+  async refreshProviders(providerIds: readonly ProviderId[]): Promise<void> {
+    const promises = providerIds.map((providerId) =>
+      this.refreshProvider(providerId).catch((err) => {
+        logger.warn("Model refresh failed", { providerId, err: String(err) });
       }),
     );
     await Promise.allSettled(promises);
@@ -179,6 +183,9 @@ export class ModelCacheService {
 
     if (changed) {
       this.repo.upsert(providerId, models);
+      // Push the diff to clients so pickers converge without polling; the TTL
+      // refetch stays as a fallback for missed pushes.
+      broadcast("provider.modelsChanged", { providerId, models });
       logger.info("Model cache updated", {
         providerId,
         modelCount: models.length,

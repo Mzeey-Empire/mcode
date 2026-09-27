@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import { MODEL_PROVIDERS, type ModelDefinition } from "@/lib/model-registry";
+import type { ProviderModelInfo } from "@mcode/contracts";
+import {
+  MODEL_PROVIDERS,
+  registerProviderModels,
+  type ModelDefinition,
+} from "@/lib/model-registry";
 import { getTransport } from "@/transport";
 
 /**
@@ -7,6 +12,23 @@ import { getTransport } from "@/transport";
  * Repeated `listProviderModels` calls stay cheap while entries remain warm there.
  */
 const MODEL_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/** Maps a provider's wire model rows to registry-shaped definitions. */
+function toModelDefinitions(
+  providerId: string,
+  info: readonly ProviderModelInfo[],
+): ModelDefinition[] {
+  return info.map((m) => ({
+    id: m.id,
+    label: m.name,
+    providerId,
+    group: m.group,
+    multiplier: m.multiplier,
+    contextWindow: m.contextWindow,
+    supportedReasoningLevels: m.supportedReasoningEfforts,
+    defaultReasoningLevel: m.defaultReasoningEffort,
+  }));
+}
 
 /** State and actions for the provider models Zustand store. */
 interface ProviderModelsState {
@@ -23,6 +45,11 @@ interface ProviderModelsState {
    * No-ops if a fetch is in-flight or the cache is still fresh unless `force` is set.
    */
   fetchModels: (providerId: string, opts?: { force?: boolean }) => Promise<void>;
+  /**
+   * Replace one provider's model list from a server-pushed cache update and
+   * register the defs so `findModelById`/`getModelReasoningLevels` resolve them.
+   */
+  applyModels: (providerId: string, info: readonly ProviderModelInfo[]) => void;
   /**
    * Eagerly fetch models for all providers that support dynamic listing.
    * Called on WS connection and reconnection.
@@ -58,26 +85,24 @@ export const useProviderModelsStore = create<ProviderModelsState>((set, get) => 
       if (!Array.isArray(info)) {
         throw new Error("provider.listModels returned a non-array payload");
       }
-      const mapped: ModelDefinition[] = info.map((m) => ({
-        id: m.id,
-        label: m.name,
-        providerId,
-        group: m.group,
-        multiplier: m.multiplier,
-        contextWindow: m.contextWindow,
-        supportedReasoningLevels: m.supportedReasoningEfforts,
-        defaultReasoningLevel: m.defaultReasoningEffort,
-      }));
+      get().applyModels(providerId, info);
       set((s) => ({
-        models: { ...s.models, [providerId]: mapped },
         modes: { ...s.modes, [providerId]: modes },
-        lastFetched: { ...s.lastFetched, [providerId]: Date.now() },
         loading: { ...s.loading, [providerId]: false },
       }));
     } catch (err) {
       console.warn(`[providerModelsStore] Failed to fetch models for "${providerId}":`, err);
       set((s) => ({ loading: { ...s.loading, [providerId]: false } }));
     }
+  },
+
+  applyModels: (providerId: string, info: readonly ProviderModelInfo[]) => {
+    const mapped = toModelDefinitions(providerId, info);
+    registerProviderModels(providerId, mapped);
+    set((s) => ({
+      models: { ...s.models, [providerId]: mapped },
+      lastFetched: { ...s.lastFetched, [providerId]: Date.now() },
+    }));
   },
 
   initialize: () => {

@@ -26,6 +26,8 @@ import { estimateMessageListItemHeight, type MessageListItem } from "./message-l
 import { TranscriptViewport, type TranscriptHost, type TranscriptPosition } from "./transcript-viewport";
 
 const SOURCE_NAVIGATION_MAX_FRAMES = 20;
+const FILL_VIEWPORT_RATIO = 1.5;
+const MAX_FILL_PAGES = 3;
 
 /** A card source request that MessageList resolves through its resident transcript. */
 export interface SelectedTextCommentSourceNavigationRequest {
@@ -274,7 +276,8 @@ function loadHistoryAtBoundary(viewport: HTMLElement, data: MessageListData, dir
   const isOlder = direction === "older";
   const remaining = isOlder ? viewport.scrollTop : viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
   const available = isOlder ? data.hasMore && !data.isLoadingMore : data.hasNewer && !data.isLoadingNewer;
-  if (remaining > 200 || !available) return false;
+  // Fetch a page before the edge so the next page is resident on arrival.
+  if (remaining > viewport.clientHeight || !available) return false;
   const load = isOlder ? data.loadOlderMessages : data.loadNewerMessages;
   void load(data.renderedThreadId);
   return true;
@@ -383,6 +386,22 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   useEffect(() => {
     if (positionRef.current.kind !== "end") setHasNewContent(true);
   }, [data.streamingText, lastItemKey]);
+
+  const fillPages = useRef(0);
+  useEffect(() => {
+    fillPages.current = 0;
+  }, [data.renderedThreadId]);
+  // The tail paints fast but rarely covers the viewport; top up until it does.
+  useEffect(() => {
+    const view = controllerRef.current;
+    const current = latest.current.data;
+    if (!view || !restored.current || !current.isRenderedVisible || !current.renderedThreadId) return;
+    if (current.loading || current.isLoadingMore || !current.hasMore || fillPages.current >= MAX_FILL_PAGES) return;
+    const viewport = view.viewport;
+    if (viewport.scrollHeight >= viewport.clientHeight * FILL_VIEWPORT_RATIO) return;
+    fillPages.current += 1;
+    void current.loadOlderMessages(current.renderedThreadId);
+  }, [items, data.isLoadingMore, data.hasMore, data.renderedThreadId]);
 
   const loadRequestedHistory = useCallback(() => {
     const view = controllerRef.current;

@@ -25,6 +25,14 @@ export const FIXTURE_SUBAGENT_SUMMARY = "Fixture subagent finished its survey.";
 export const FIXTURE_SUBAGENT_CHILD_IDS = Object.freeze(["fx-child-read", "fx-child-search"]);
 /** Prompt keyword that switches the turn to the Devin subagent sequence. */
 export const SUBAGENT_PROMPT_KEYWORD = "subagent";
+/**
+ * Prompt keyword that simulates a wedged child: the fixture emits the first
+ * {@link HANG_UPDATE_COUNT} updates (through the first assistant text chunk)
+ * and then never responds, so `session/cancel` cannot settle the prompt and
+ * the provider has to kill the process and warm a replacement.
+ */
+export const HANG_PROMPT_KEYWORD = "hang";
+export const HANG_UPDATE_COUNT = 8;
 
 /**
  * The deterministic narrative sequence: two reasoning chunks, three lifecycle
@@ -144,8 +152,24 @@ export function parseFixtureArguments(argv) {
   throw new Error("Usage: acp-narrative-fixture.mjs <acp ...|models|about --format json|--version>");
 }
 
+/**
+ * ACP_NARRATIVE_LOAD_SESSION=1 advertises `loadSession` so Devin's
+ * fail-without-replacement recovery can reload the killed session on the
+ * warmed replacement child; `session/load` then resolves through the generic
+ * empty-result fallthrough.
+ */
+function fixtureSupportsLoadSession() {
+  return process.env.ACP_NARRATIVE_LOAD_SESSION === "1";
+}
+
+/** ACP_NARRATIVE_INTERVAL_MS slows streaming so live sessions can be cancelled mid-turn. */
+function fixtureIntervalMs() {
+  const override = Number(process.env.ACP_NARRATIVE_INTERVAL_MS);
+  return Number.isFinite(override) && override >= 0 ? override : UPDATE_INTERVAL_MS;
+}
+
 /** Runs the narrow ACP JSON-RPC surface that the production adapters need. */
-export function runFixtureAgent({ input = process.stdin, output = process.stdout, intervalMs = UPDATE_INTERVAL_MS } = {}) {
+export function runFixtureAgent({ input = process.stdin, output = process.stdout, intervalMs = fixtureIntervalMs() } = {}) {
   const lines = NodeReadline.createInterface({ input, crlfDelay: Infinity });
   const send = (message) => output.write(`${JSON.stringify(message)}\n`);
   const respond = (id, result) => send({ jsonrpc: "2.0", id, result });
@@ -169,7 +193,7 @@ function handleRequest(message, respond, notify, intervalMs) {
   if (method === "initialize") {
     respond(id, {
       protocolVersion: typeof params?.protocolVersion === "number" ? params.protocolVersion : 1,
-      agentCapabilities: { loadSession: false },
+      agentCapabilities: { loadSession: fixtureSupportsLoadSession() },
       authMethods: [],
     });
     return;
@@ -180,6 +204,10 @@ function handleRequest(message, respond, notify, intervalMs) {
   }
   if (method === "session/prompt") {
     const sessionId = typeof params?.sessionId === "string" ? params.sessionId : FIXTURE_SESSION_ID;
+    if (promptRequestsHang(params)) {
+      void emitHangSequence(sessionId, notify, intervalMs);
+      return;
+    }
     emitTurnSequence(sessionId, notify, intervalMs, promptRequestsSubagent(params)).then(() =>
       respond(id, { stopReason: "end_turn" }),
     );
@@ -194,6 +222,20 @@ function promptRequestsSubagent(params) {
   const blocks = Array.isArray(params?.prompt) ? params.prompt : [];
   const text = blocks.map((block) => block?.text).filter((part) => typeof part === "string").join(" ");
   return text.toLowerCase().includes(SUBAGENT_PROMPT_KEYWORD);
+}
+
+function promptRequestsHang(params) {
+  const blocks = Array.isArray(params?.prompt) ? params.prompt : [];
+  const text = blocks.map((block) => block?.text).filter((part) => typeof part === "string").join(" ");
+  return text.toLowerCase().includes(HANG_PROMPT_KEYWORD);
+}
+
+async function emitHangSequence(sessionId, notify, intervalMs) {
+  const idSuffix = `#${NodeCrypto.randomBytes(4).toString("hex")}`;
+  for (const entry of fixtureTurnUpdates(sessionId, idSuffix).slice(0, HANG_UPDATE_COUNT)) {
+    notify(entry.method, entry.params);
+    if (intervalMs > 0) await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 async function emitTurnSequence(sessionId, notify, intervalMs, withSubagent = false) {

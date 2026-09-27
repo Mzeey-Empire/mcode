@@ -11,8 +11,6 @@ import {
   supports1MContextWindow,
   supportsThinkingToggle,
   normalizeReasoningLevel,
-  getCodexReasoningLevels,
-  getCodexDefaultReasoningLevel,
   pickProviderModelsForSettings,
   providerSupportsReasoningLevels,
   type ModelDefinition,
@@ -54,8 +52,8 @@ const REASONING_OPTIONS_BASE = [
   { value: "high", label: "High" },
 ];
 
-/** Codex reasoning effort labels mapped from SDK level names. */
-const CODEX_REASONING_LABELS: Record<string, string> = {
+/** Display labels for provider-declared reasoning effort levels. */
+const REASONING_LEVEL_LABELS: Record<string, string> = {
   none: "None",
   minimal: "Minimal",
   low: "Low",
@@ -128,10 +126,17 @@ function isModelStale(
   );
 }
 
-function shouldShowReasoning(provider: string, modelId: string): boolean {
-  return providerSupportsReasoningLevels(provider) && (
-    provider !== "claude" || supportsEffortParameter(modelId)
-  );
+function shouldShowReasoning(
+  provider: string,
+  modelId: string,
+  declaredLevels: readonly string[] | null,
+): boolean {
+  if (!providerSupportsReasoningLevels(provider)) return false;
+  if (provider === "claude") return supportsEffortParameter(modelId);
+  // Devin bakes effort into the model id; a model without declared levels
+  // (bare ids, fusion composites) has no effort to choose.
+  if (provider === "devin") return declaredLevels != null && declaredLevels.length > 0;
+  return true;
 }
 
 function shouldShowThinking(provider: string, modelId: string): boolean {
@@ -211,13 +216,26 @@ export function ModelSection() {
   const dynamicCliPath = getProviderCliPath(provider, cliPaths);
   const utilityDynamicCliPath = getProviderCliPath(utilityEffectiveId, cliPaths);
 
+  // Respect the store TTL on mount and provider switches; only force a refetch
+  // when the provider's CLI path actually changed (Cursor/Copilot lists are
+  // path-dependent and the server invalidates its cache on that change).
+  const lastCliPathByProvider = useRef<Record<string, string>>({});
   useEffect(() => {
-    void fetchModels(provider, { force: true });
+    const prevCliPath = lastCliPathByProvider.current[provider];
+    lastCliPathByProvider.current[provider] = dynamicCliPath;
+    void fetchModels(provider, {
+      force: prevCliPath !== undefined && prevCliPath !== dynamicCliPath,
+    });
   }, [provider, dynamicCliPath, fetchModels]);
 
+  const lastUtilityCliPathRef = useRef<Record<string, string>>({});
   useEffect(() => {
+    const prevCliPath = lastUtilityCliPathRef.current[utilityEffectiveId];
+    lastUtilityCliPathRef.current[utilityEffectiveId] = utilityDynamicCliPath;
     if (!utilityProvider) return;
-    void fetchModels(utilityEffectiveId, { force: true });
+    void fetchModels(utilityEffectiveId, {
+      force: prevCliPath !== undefined && prevCliPath !== utilityDynamicCliPath,
+    });
   }, [utilityProvider, utilityEffectiveId, utilityDynamicCliPath, fetchModels]);
 
 
@@ -328,18 +346,21 @@ export function ModelSection() {
   );
 
 
-  // Gate on provider so Copilot models that share IDs with Codex models
-  // don't accidentally take the Codex reasoning branch.
-  const codexLevels = useMemo(
-    () => (provider === "codex" ? getCodexReasoningLevels(modelId) : null),
-    [provider, modelId],
+  // Levels are read off the selected model's row in the active provider's
+  // merged catalog, so a model id shared across providers can never pick up
+  // another provider's declared efforts.
+  const declaredLevels = useMemo(
+    () =>
+      mergedCatalogModels.find((m) => m.id === modelId)
+        ?.supportedReasoningLevels ?? null,
+    [mergedCatalogModels, modelId],
   );
 
   const reasoningOptions = useMemo(() => {
-    if (codexLevels) {
-      return codexLevels.map((level) => ({
+    if (declaredLevels) {
+      return declaredLevels.map((level) => ({
         value: level,
-        label: CODEX_REASONING_LABELS[level] ?? level,
+        label: REASONING_LEVEL_LABELS[level] ?? level,
       }));
     }
     if (provider === "copilot") {
@@ -352,31 +373,31 @@ export function ModelSection() {
       { value: "xhigh",      label: "X-High",     disabled: !isXhighEffortModel(modelId) },
       { value: "max",        label: "Max",        disabled: !isMaxEffortModel(modelId) },
     ];
-  }, [modelId, codexLevels, provider]);
+  }, [modelId, declaredLevels, provider]);
 
   const reasoningHint = useMemo(() => {
-    if (codexLevels) {
-      return "Reasoning effort for Codex models.";
+    if (declaredLevels) {
+      return `Reasoning effort for ${activeProvider?.name ?? provider} models.`;
     }
     if (provider === "copilot") {
       return "Reasoning effort passed to the Copilot model. Not all models support all levels.";
     }
     return "Default reasoning level. Max requires Fable 5, Sonnet 5, Opus 4.8/4.7/4.6, or Sonnet 4.6. X-High requires Opus 4.8 or Opus 4.7.";
-  }, [codexLevels, provider]);
+  }, [declaredLevels, provider, activeProvider]);
 
   const handleProviderChange = (v: string) => {
     void (async () => {
-      await useProviderModelsStore.getState().fetchModels(v, { force: true });
+      await useProviderModelsStore.getState().fetchModels(v);
       const newProvider = MODEL_PROVIDERS.find((p) => p.id === v);
       const dynamicFirst = useProviderModelsStore.getState().models[v]?.[0];
       const firstModel = dynamicFirst ?? newProvider?.models[0];
       let newReasoning: string = reasoning;
       if (firstModel) {
-        const codexLevels = getCodexReasoningLevels(firstModel.id);
-        if (codexLevels) {
-          newReasoning = codexLevels.includes(reasoning as never)
+        const declared = firstModel.supportedReasoningLevels;
+        if (declared) {
+          newReasoning = (declared as readonly string[]).includes(reasoning)
             ? reasoning
-            : (getCodexDefaultReasoningLevel(firstModel.id) ?? "medium");
+            : (firstModel.defaultReasoningLevel ?? "medium");
         } else {
           newReasoning = normalizeReasoningLevel(v, firstModel.id, reasoning);
         }
@@ -394,12 +415,13 @@ export function ModelSection() {
   };
 
   const handleModelChange = (v: string) => {
-    const codexLevels = getCodexReasoningLevels(v);
+    const selectedDef = modelsForDefaultPicker.find((m) => m.id === v);
+    const declared = selectedDef?.supportedReasoningLevels;
     let newReasoning: string = reasoning;
-    if (codexLevels) {
-      // For Codex models: if the stored level isn't valid for this model, use its default
-      if (!codexLevels.includes(reasoning as never)) {
-        newReasoning = getCodexDefaultReasoningLevel(v) ?? "medium";
+    if (declared) {
+      // If the stored level isn't valid for this model, use its default
+      if (!(declared as readonly string[]).includes(reasoning)) {
+        newReasoning = selectedDef?.defaultReasoningLevel ?? "medium";
       }
     } else {
       newReasoning = normalizeReasoningLevel(provider, v, reasoning);
@@ -429,7 +451,7 @@ export function ModelSection() {
       modelsLoading={modelsLoading}
       defaultModelStale={defaultModelStale}
       fallbackModelStale={fallbackModelStale}
-      showReasoning={shouldShowReasoning(provider, modelId)}
+      showReasoning={shouldShowReasoning(provider, modelId, declaredLevels)}
       reasoningOptions={reasoningOptions}
       reasoningHint={reasoningHint}
       showFastMode={provider === "codex"}

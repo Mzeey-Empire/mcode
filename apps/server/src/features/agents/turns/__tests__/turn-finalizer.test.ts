@@ -16,14 +16,14 @@ import { TurnSnapshotRepo } from "../persistence/turn-snapshot-repo.js";
 import type { TurnOutcome } from "../turn-outcome.js";
 import type { TurnFileTracker } from "../turn-file-tracker.js";
 import { broadcast } from "../../../../application/transport/push.js";
-import { CanonicalAgentEventSink } from "../../canonical/canonical-agent-event-sink.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { ParentAssistantTextCheckpointService } from "../parent-assistant-text-checkpoint-service.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 
 const THREAD = "thread-1";
 const IDEMPOTENT_SQL =
-  "UPDATE threads SET has_file_changes = 1 WHERE id = ? AND has_file_changes = 0";
+  'update "threads" set "has_file_changes" = ? where ("threads"."id" = ? and "threads"."has_file_changes" = ?)';
 
 /** Seed a workspace + thread so message/record foreign keys are satisfied. */
 function seedThread(db: Database): void {
@@ -355,7 +355,7 @@ describe("TurnFinalizer canonical commit recovery", () => {
       thoughtRepo,
       hookRepo,
     );
-    const sink = new CanonicalAgentEventSink(db, vi.fn());
+    const sink = new CanonicalAgentBoundary(db, vi.fn());
     sink.startParentTurn({
       thread: {
         id: THREAD,
@@ -824,7 +824,7 @@ describe("TurnFinalizer.finalize — git snapshot write", () => {
     await finalizer.finalize(THREAD, "completed");
 
     expect(db.prepare).toHaveBeenCalledWith(IDEMPOTENT_SQL);
-    expect(runSpy).toHaveBeenCalledWith(THREAD);
+    expect(runSpy).toHaveBeenCalledWith(1, THREAD, 0);
   });
 
   it("does not touch the has_file_changes flag when nothing changed", async () => {
@@ -889,7 +889,7 @@ describe("TurnFinalizer.finalize — git snapshot write", () => {
       filesChanged: [],
       fileEffects,
     }));
-    expect(runSpy).toHaveBeenCalledWith(THREAD);
+    expect(runSpy).toHaveBeenCalledWith(1, THREAD, 0);
   });
 
   it("uses a late ref update pinned before finalization waits", async () => {

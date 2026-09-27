@@ -12,14 +12,6 @@ import { getTransport } from "@/transport";
 const creationInFlight = new Map<string, symbol>();
 
 /**
- * Upper bound on one create request before its scope lock is released. Server
- * create can stall behind PTY host respawn; without a deadline a request that
- * never answers wedges the scope for the rest of the app session. A late
- * response still attaches through the normal success path.
- */
-const TERMINAL_CREATE_DEADLINE_MS = 20_000;
-
-/**
  * Resolve the workspace that owns a terminal scope. The scope is a thread id
  * when a thread is active, or a workspace id for the threadless new-thread
  * shell, so look the scope up as a thread first and fall back to a workspace.
@@ -49,20 +41,16 @@ export function createTerminalForScope(scopeId: string): void {
   const existing = useTerminalStore.getState().terminals[scopeId];
   if ((existing?.length ?? 0) >= MAX_TERMINALS_PER_SCOPE) return;
 
-  // A late release must only clear this attempt's lock: after the deadline the
-  // scope can be re-acquired by a retry while the stale request is still open.
   const attempt = Symbol();
   creationInFlight.set(scopeId, attempt);
   const release = () => {
     if (creationInFlight.get(scopeId) === attempt) creationInFlight.delete(scopeId);
   };
-  const timer = setTimeout(release, TERMINAL_CREATE_DEADLINE_MS);
   try {
     const transport = getTransport();
     transport
       .terminalCreate(scopeId)
       .then(({ ptyId, shell }) => {
-        clearTimeout(timer);
         release();
         try {
           // The panel record is per-thread (or the workspace fallback for the
@@ -96,17 +84,10 @@ export function createTerminalForScope(scopeId: string): void {
         }
       })
       .catch((error) => {
-        clearTimeout(timer);
-        // After the deadline a retry may own the lock; a stale failure must not
-        // toast over its result.
-        const superseded =
-          creationInFlight.has(scopeId) &&
-          creationInFlight.get(scopeId) !== attempt;
         release();
-        if (!superseded) showCreateFailure(error);
+        showCreateFailure(error);
       });
   } catch (error) {
-    clearTimeout(timer);
     release();
     showCreateFailure(error);
   }

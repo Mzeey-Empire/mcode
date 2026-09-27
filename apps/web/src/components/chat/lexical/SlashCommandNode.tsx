@@ -33,6 +33,7 @@ export interface SerializedSlashCommandNode extends SerializedLexicalNode {
   readonly commandName: string;
   readonly namespace: SlashCommandNamespace;
   readonly capabilityIdentity?: ProviderCapabilityIdentity;
+  readonly path?: string;
 }
 
 /** Valid namespace values for deserialisation fallback. */
@@ -67,6 +68,7 @@ export class SlashCommandNode extends DecoratorNode<JSX.Element> {
   __commandName: string;
   __namespace: SlashCommandNamespace;
   __capabilityIdentity?: ProviderCapabilityIdentity;
+  __path?: string;
 
   static getType(): string {
     return "slash-command";
@@ -77,6 +79,7 @@ export class SlashCommandNode extends DecoratorNode<JSX.Element> {
       node.__commandName,
       node.__namespace,
       node.__capabilityIdentity,
+      node.__path,
       node.__key,
     );
   }
@@ -85,12 +88,14 @@ export class SlashCommandNode extends DecoratorNode<JSX.Element> {
     commandName: string,
     namespace: SlashCommandNamespace,
     capabilityIdentity?: ProviderCapabilityIdentity,
+    path?: string,
     key?: NodeKey,
   ) {
     super(key);
     this.__commandName = commandName;
     this.__namespace = namespace;
     this.__capabilityIdentity = capabilityIdentity;
+    this.__path = path;
   }
 
   // -- Accessors ------------------------------------------------------------
@@ -105,6 +110,10 @@ export class SlashCommandNode extends DecoratorNode<JSX.Element> {
 
   getCapabilityIdentity(): ProviderCapabilityIdentity | undefined {
     return this.getLatest().__capabilityIdentity;
+  }
+
+  getPath(): string | undefined {
+    return this.getLatest().__path;
   }
 
   // -- Behavior -------------------------------------------------------------
@@ -137,6 +146,7 @@ export class SlashCommandNode extends DecoratorNode<JSX.Element> {
       commandName: this.__commandName,
       namespace: this.__namespace,
       ...(this.__capabilityIdentity ? { capabilityIdentity: this.__capabilityIdentity } : {}),
+      ...(this.__path ? { path: this.__path } : {}),
       version: 1,
     };
   }
@@ -154,6 +164,7 @@ export class SlashCommandNode extends DecoratorNode<JSX.Element> {
       serializedNode.commandName,
       ns,
       identity.success ? identity.data : undefined,
+      serializedNode.path,
     );
   }
 
@@ -178,8 +189,9 @@ export function $createSlashCommandNode(
   commandName: string,
   namespace: SlashCommandNamespace,
   capabilityIdentity?: ProviderCapabilityIdentity,
+  path?: string,
 ): SlashCommandNode {
-  return new SlashCommandNode(commandName, namespace, capabilityIdentity);
+  return new SlashCommandNode(commandName, namespace, capabilityIdentity, path);
 }
 
 /** Type guard: returns true when the node is a SlashCommandNode. */

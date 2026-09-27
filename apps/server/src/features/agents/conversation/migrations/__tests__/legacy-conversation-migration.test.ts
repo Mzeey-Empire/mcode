@@ -5,7 +5,7 @@ import * as NodeURL from "node:url";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { CanonicalAgentEventSink } from "../../../canonical/canonical-agent-event-sink.js";
+import { CanonicalAgentBoundary } from "../../../canonical/canonical-agent-boundary.js";
 import {
   LEGACY_CONVERSATION_MIGRATION_MAX_BYTES,
   LEGACY_CONVERSATION_MIGRATION_VERSION,
@@ -60,7 +60,7 @@ describe("LegacyConversationMigration", () => {
         provenance: "native",
       }]),
     });
-    const projection = new CanonicalAgentEventSink(db, vi.fn())
+    const projection = new CanonicalAgentBoundary(db, vi.fn())
       .loadConversationProjection("thread-v1", 10);
     expect(projection.messages).toEqual([
       expect.objectContaining({
@@ -144,7 +144,7 @@ describe("LegacyConversationMigration", () => {
       WHERE thread_id = 'thread-child-v1'
         AND json_extract(payload_json, '$.projection') = 'toolCall'
     `).get()).toEqual({ count: 1 });
-    const restoredSink = new CanonicalAgentEventSink(db, vi.fn());
+    const restoredSink = new CanonicalAgentBoundary(db, vi.fn());
     expect(restoredSink.loadThread("thread-child-v1")).toMatchObject({
       parentThreadId: "thread-child-parent-v1",
       rootThreadId: "thread-child-parent-v1",

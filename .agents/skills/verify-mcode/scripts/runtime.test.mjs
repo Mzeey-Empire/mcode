@@ -1,6 +1,7 @@
 import * as NodeAssertStrict from "node:assert/strict";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import * as NodeModule from "node:module";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
@@ -147,6 +148,28 @@ NodeTest.test("recognizes the provider-neutral OpenCode session invalidation sub
 NodeTest.test("rejects desktop verification sockets without loopback authentication", async () => {
   await NodeAssertStrict.rejects(openVerificationSocketUrl(process.cwd(), "ws://example.test/?token=token"), /loopback WebSocket URL/);
   await NodeAssertStrict.rejects(openVerificationSocketUrl(process.cwd(), "ws://localhost/"), /lacks its authentication token/);
+});
+
+NodeTest.test("lost RPC response does not satisfy the next request on the same socket", async () => {
+  const serverRequire = NodeModule.createRequire(NodePath.join(process.cwd(), "apps", "server", "package.json"));
+  const { WebSocketServer } = serverRequire("ws");
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  let socket;
+  try {
+    await new Promise((resolve) => server.once("listening", resolve));
+    server.on("connection", (connection) => {
+      connection.on("message", (raw) => {
+        const request = JSON.parse(raw.toString());
+        connection.send(JSON.stringify({ id: request.id, result: request.method }));
+      });
+    });
+    socket = await openVerificationSocketUrl(process.cwd(), `ws://127.0.0.1:${server.address().port}/?token=fixture`);
+    await socket.sendWithoutResponse("agent.createAndSend", { startupId: "fixture" });
+    NodeAssertStrict.equal(await socket.rpc("thread.startup.get", { startupId: "fixture" }), "thread.startup.get");
+  } finally {
+    await socket?.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 function writeTimestampedFile(path, modifiedMs) {

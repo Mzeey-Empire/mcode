@@ -417,4 +417,96 @@ describe("handleTurnPersisted", () => {
       fileCount: 1,
     });
   });
+
+  it("materializes buffered streaming text when a user stop persists a cancelled turn", () => {
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, {
+        runtimePhase: "running",
+        turnExecutionId: "execution-stop",
+        streaming: "partial answer before stop",
+        streamingPreview: "partial answer before stop",
+      }),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: THREAD_ID,
+      messageId: "server-stop-1",
+      toolCallCount: 0,
+      filesChanged: [],
+      outcome: "cancelled",
+      executionId: "execution-stop",
+    });
+
+    const messages = readThreadField(THREAD_ID, (record) => record.messages);
+    expect(messages).toEqual([
+      expect.objectContaining({
+        id: "server-stop-1",
+        role: "assistant",
+        content: "partial answer before stop",
+        outcome: "cancelled",
+      }),
+    ]);
+    expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("");
+  });
+
+  it("settles a stopped turn before any assistant message was written", () => {
+    const user = createMockMessage({
+      id: "user-stop",
+      thread_id: THREAD_ID,
+      role: "user",
+      content: "Stop this turn",
+    });
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, {
+        messages: [user],
+        runtimePhase: "finalizing",
+        turnExecutionId: "execution-early-stop",
+        awaitingUserStopPersist: true,
+      }),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: THREAD_ID,
+      messageId: null,
+      toolCallCount: 0,
+      filesChanged: [],
+      outcome: "cancelled",
+      executionId: "execution-early-stop",
+    });
+
+    expect(readThreadField(THREAD_ID, (record) => record.messages)).toEqual([user]);
+    expect(readThreadField(THREAD_ID, (record) => record.awaitingUserStopPersist)).toBeUndefined();
+    expect(readThreadField(THREAD_ID, (record) => record.runtimePhase)).toBe("cancelled");
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
+  });
+
+  it("materializes buffered streaming text when a terminal runtime snapshot arrives without a terminal event", () => {
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, {
+        runtimePhase: "running",
+        turnExecutionId: "execution-stop",
+        streaming: "streamed text orphaned by stop",
+        streamingPreview: "streamed text orphaned by stop",
+      }),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().applyThreadRuntimeSnapshot({
+      threadId: THREAD_ID,
+      turnExecutionId: "execution-stop",
+      phase: "cancelled",
+    });
+
+    const messages = readThreadField(THREAD_ID, (record) => record.messages);
+    expect(messages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: "streamed text orphaned by stop",
+        outcome: "cancelled",
+      }),
+    ]);
+    expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("");
+  });
 });

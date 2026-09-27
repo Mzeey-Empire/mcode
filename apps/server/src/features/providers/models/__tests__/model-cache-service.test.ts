@@ -6,15 +6,27 @@
 
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+const { broadcastMock } = vi.hoisted(() => ({ broadcastMock: vi.fn() }));
+vi.mock("../../../../application/transport/push.js", () => ({
+  broadcast: broadcastMock,
+}));
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ModelCacheRepo } from "../persistence/model-cache-repo.js";
-import { ModelCacheService } from "../model-cache-service.js";
-import type { ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
+import { ModelCacheService, startupModelProviderIds } from "../model-cache-service.js";
+import type { ProviderAvailability, ProviderId, ProviderModelInfo, IProviderRegistry } from "@mcode/contracts";
 
-function makeProvider(models: ProviderModelInfo[]) {
+function availableProvider(id: ProviderId, enabled: boolean): ProviderAvailability {
   return {
-    id: "test-provider",
+    id, enabled, hasAdapter: true, beta: false, comingSoon: false, capabilities: [],
+    cli: { status: "found", resolvedPath: id, configuredPath: "" },
+  };
+}
+
+function makeProvider(models: ProviderModelInfo[], id = "test-provider") {
+  return {
+    id,
     listModels: vi.fn().mockResolvedValue(models),
     sendTurn: vi.fn(),
     cancelSession: vi.fn(),
@@ -41,12 +53,34 @@ describe("ModelCacheService", () => {
   let repo: ModelCacheRepo;
 
   beforeEach(() => {
+    broadcastMock.mockClear();
     db = openMemoryDatabase();
     repo = new ModelCacheRepo(db);
   });
 
   afterEach(() => {
     db.close();
+  });
+
+  it("warms enabled providers without starting idle OpenCode", async () => {
+    const claude = makeProvider([{ id: "claude-model", name: "Claude Model" }], "claude");
+    const opencode = makeProvider([{ id: "open-model", name: "Open Model" }], "opencode");
+    const codex = makeProvider([{ id: "codex-model", name: "Codex Model" }], "codex");
+    const registry = makeRegistry(new Map([["claude", claude], ["opencode", opencode], ["codex", codex]]));
+    const service = new ModelCacheService(repo, registry);
+
+    const startupProviders = startupModelProviderIds([
+      availableProvider("claude", true),
+      availableProvider("opencode", true),
+      availableProvider("codex", false),
+    ]);
+    expect(startupProviders).toEqual(["claude"]);
+    await service.refreshProviders(startupProviders);
+
+    expect(service.getCached("claude")).toEqual([{ id: "claude-model", name: "Claude Model" }]);
+    expect(service.getCached("opencode")).toBeUndefined();
+    expect(opencode.listModels).not.toHaveBeenCalled();
+    expect(codex.listModels).not.toHaveBeenCalled();
   });
 
   it("returns cached models without calling provider when cache is fresh", async () => {
@@ -119,6 +153,33 @@ describe("ModelCacheService", () => {
     // The provider was called, but since IDs match, upsert should not run
     expect(provider.listModels).toHaveBeenCalledTimes(1);
     expect(upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it("broadcasts provider.modelsChanged when a refresh changes the list", async () => {
+    repo.upsert("devin", [{ id: "swe-1-7", name: "SWE-1.7" }]);
+    const fresh: ProviderModelInfo[] = [{ id: "swe-2", name: "SWE-2" }];
+    const provider = makeProvider(fresh);
+    const registry = makeRegistry(new Map([["devin", provider]]));
+    const service = new ModelCacheService(repo, registry);
+
+    await service.refreshProvider("devin");
+
+    expect(broadcastMock).toHaveBeenCalledWith("provider.modelsChanged", {
+      providerId: "devin",
+      models: fresh,
+    });
+  });
+
+  it("does not broadcast when a refresh returns an unchanged list", async () => {
+    const models: ProviderModelInfo[] = [{ id: "swe-2", name: "SWE-2" }];
+    repo.upsert("devin", models);
+    const provider = makeProvider(models);
+    const registry = makeRegistry(new Map([["devin", provider]]));
+    const service = new ModelCacheService(repo, registry);
+
+    await service.refreshProvider("devin");
+
+    expect(broadcastMock).not.toHaveBeenCalled();
   });
 
   it("persists changed order and labels across cache reconstruction", async () => {

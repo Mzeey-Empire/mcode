@@ -87,7 +87,7 @@ This is a single user-controlled value under `model.defaults`. When set, it over
 
 **Settings UI:** expose the field as a numeric input in the model defaults section of the settings page, pre-filled with the API-fetched or static value when no override is set.
 
-**Docs:** update `docs/guides/settings-schema.md` and `docs/settings/reference.md` with the new field.
+**Docs:** update `docs/internals/settings-schema.md` and `docs/settings/reference.md` with the new field.
 
 ### 4. Preference chain
 

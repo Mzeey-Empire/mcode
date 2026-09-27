@@ -11,7 +11,7 @@ This skill adapts the workflow from [Emanuele-web04/skills](https://github.com/E
 
 ## Workflow
 
-1. Read [`docs/guides/performance-audit.md`](../../../docs/guides/performance-audit.md). It owns Mcode's budgets, evidence rules, and runtime-specific controls.
+1. Read [`docs/internals/performance-audit.md`](../../../docs/internals/performance-audit.md). It owns Mcode's budgets, evidence rules, and runtime-specific controls.
 2. Name the exact user-visible or system-visible path. Define its environment, input, metric, and behavior invariants.
 3. Write one hypothesis: `<cost> is caused by <specific work> because <evidence>`.
 4. Capture a repeatable baseline before you edit. Separate cold from warm, development from release, and small from realistic input. Use multiple samples for noisy timings.

@@ -5,7 +5,7 @@ description: Verify Mcode behavior in the Electron desktop app and through publi
 
 # Verify Mcode
 
-Use this skill for requested live proof and for changes that cross an Electron UI, persistence, provider adapter, or managed-worktree boundary. Select focused checks with [the agent workflow](../../../docs/guides/agent-workflow.md#focused-checks); do not use a verifier area check as a repository-wide gate.
+Use this skill for requested live proof and for changes that cross an Electron UI, persistence, provider adapter, or managed-worktree boundary. Select focused checks with [the agent workflow](../../../docs/internals/agent-workflow.md#focused-checks); do not use a verifier area check as a repository-wide gate.
 
 1. Read `references/features/README.md`. Read each affected feature file. Read `multi-surface-journeys.md` when a workflow crosses product surfaces.
 2. Select the proof surface below. Run the health command for each area that needs live proof before proof collection.
@@ -73,7 +73,7 @@ Composer-queue `check` runs the deterministic verifier checks. Its tests do not 
 
 Use `runtime live --provider codex --model gpt-5.6-terra --scenario subagent --confirm-provider-call` for the Codex V2 subagent persistence journey. Read `references/features/codex-subagent-view.md` and complete its Electron steps for navigation, color, and reload proof.
 
-Run `runtime worktree-setup --confirm-cleanup` after changes to managed-worktree creation or automatic Setup. It creates an owned Git project, starts a queued New-worktree turn, proves automatic Setup reads the completed checkout, and removes all generated state without making a provider call. If a proof is interrupted, run `runtime worktree-setup-cleanup --confirm-cleanup` before retrying.
+Run `runtime worktree-setup --confirm-cleanup` after changes to managed-worktree creation or automatic Setup. It creates an owned Git project, drops the first `agent.createAndSend` response, then retries the same request after a second client observes its bound startup. It proves one persisted thread, worktree, and queued first turn, checks that Setup reads the completed checkout, and removes all generated state without making a provider call. If a proof is interrupted, run `runtime worktree-setup-cleanup --confirm-cleanup` before retrying.
 
 Run `runtime console-audit` after changes to child-process spawn, startup, or cleanup code on Windows. It lists visible windows owned by runtime-process descendants; the server tree must never own one. Use `--watch <seconds>` across a runtime restart or packaged launch to catch transient flashes, and read `references/features/windows-console-hygiene.md` for proof and Terminal-hosting limits.
 

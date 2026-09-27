@@ -32,6 +32,7 @@
     "db:info": "bun scripts/db-info.mjs",
     "db:seed": "bun scripts/db-seed.mjs",
     "perf:database": "bun apps/server/scripts/profile-sqlite.ts",
+    "perf:provider-events": "bun apps/server/scripts/benchmark-provider-event-workers.ts",
     "certify:database": "bun apps/server/scripts/profile-sqlite.ts --certify",
     "certify:conversation": "bun scripts/run-electron-node.mjs --workspace-cli vite-node dist/cli.mjs --config apps/web/vite.config.ts apps/web/scripts/certify-conversation-residency.ts",
     "perf:frontend": "bun scripts/perf/run-frontend-performance.mjs",

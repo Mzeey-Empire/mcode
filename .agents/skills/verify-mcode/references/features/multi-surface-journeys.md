@@ -2,6 +2,44 @@
 
 Read this file when a change crosses product surfaces. Use the linked feature files for selectors and surface-specific proof.
 
+## Seven active tasks and controls
+
+Run `runtime health` in this worktree. Then run the controlled workload:
+
+```sh
+bun scripts/perf/seven-thread-live-harness.mjs --run --confirm-run --label after
+```
+
+The harness uses seven direct tasks in `.dev/fixture-repo` and a checked-in Codex
+fixture. It does not call an upstream model. Inspect its receipt under
+`.dev/verification/performance/seven-thread-live/`. Require seven completed
+tasks, every expected event once and in order, durable final conversation data,
+model and terminal RPC results while tasks are active, and successful cleanup.
+If cleanup is incomplete, use the receipt's exact path with
+`--cleanup-receipt <receipt-path> --confirm-run` before another run. Do not
+delete tasks by title or age.
+
+For the worker-owned turn change in issue #1760, collect at least ten matched
+receipts. Compare server-loop delay, public event throughput, memory, and
+`metrics.workerQueue` peaks with the recorded baseline. Require model-picker
+and Stop acknowledgement within 2 seconds, terminal readiness within 5 seconds,
+and ordered durable events in every run. Run `--stop-one` as a separate case;
+require the six peers to finish and the stopped task to remain cancelled after
+reload. Trace and fix a missed budget before calling the run complete.
+
+In the owned Electron app, create separate direct tasks in `.dev/fixture-repo`.
+Open and close the model picker, open a Terminal, switch tasks, and reload.
+Capture the settled controls and terminal output in a screenshot, record the
+visible state after reload, and remove only those Electron-owned tasks.
+Use [provider events and durability](provider-events-and-durability.md) for the
+final conversation check and [Electron live testing](../../../electorn-live-testing/SKILL.md)
+for the desktop control and capture. Report any unavailable control or missing
+capture as a gap. A public RPC receipt alone does not prove the desktop path.
+
+Also run the [consecutive-turn navigation journey](provider-events-and-durability.md#consecutive-turns-and-navigation)
+with real Codex. The seven-task fixture starts one turn per task and cannot prove
+successful follow-ups or renderer state while switching during streaming.
+
 ## Provider completeness
 
 Use this journey when a change affects turn diffs, Review, provider events, automatic review, or workspace invalidation. Resolve the upstream Codex source with the OpenSrc command in the repository instructions before a Codex run. Record the resolved upstream commit in the receipt. The cache is read-only.
@@ -117,8 +155,8 @@ Use `runtime check` for both protocol shapes. Use `runtime live --scenario subag
 
 ## Managed-worktree Setup readiness
 
-1. Create a New-worktree first turn through the public agent API.
-2. Wait for Git to finish the checkout before the thread is returned.
+1. Send a New-worktree first turn through the public agent API with one startup ID and discard its response.
+2. From a second client, observe that the startup is bound to a thread, close the first client, and retry the exact request. The response must wait for Git checkout to finish. Confirm one durable startup, thread, worktree, queued first turn, and user prompt.
 3. Keep the first turn queued while automatic Setup reads every tracked fixture file, records its PID, and writes its proof marker.
 4. Cancel startup through the public API. Confirm the terminal startup state, stopped Setup process, interrupted Setup attempt, queued first turn, and no agent runtime.
 5. Remove the generated thread, worktree, workspace, and fixture repository.

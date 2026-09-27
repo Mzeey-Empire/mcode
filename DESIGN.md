@@ -327,7 +327,7 @@ This file is the implementation contract for product UI. An agent should be
 able to make a routine design decision from it without opening a reference app.
 Read `PRODUCT.md` first for product intent and `CONTEXT.md` for domain language.
 Then use this file for visual and interaction choices. Use
-`docs/guides/ui-components.md` for the component registry and live-verification
+`docs/internals/ui-components.md` for the component registry and live-verification
 requirements.
 
 When guidance conflicts, apply this order:
@@ -345,7 +345,7 @@ Within this file, each decision has one normative owner:
 | Domain ownership and lifecycle | `CONTEXT.md`; this file describes presentation only. |
 | Layout, component anatomy, interaction, motion, and accessibility | The matching section in Sections 3 through 10. |
 | Product-state composition | Canonical compositions; recipes assemble existing rules and do not redefine them. |
-| Implementation workflow | Before an agent changes UI and `docs/guides/ui-components.md`. |
+| Implementation workflow | Before an agent changes UI and `docs/internals/ui-components.md`. |
 | Prohibitions | Section 12. |
 
 Later checklists point to these owners. They do not create alternate token
@@ -850,7 +850,7 @@ semantics; color and motion remain supplementary.
   action, target, outcome, and duration. Its full payload remains available by
   disclosure.
 - Parallel sub-agents and nested tool calls use the narrative rail documented
-  in `docs/guides/narrative-pipeline.md`. Do not invent a second timeline
+  in `docs/internals/narrative-pipeline.md`. Do not invent a second timeline
   grammar.
 - Streaming motion stays local to the newest content. Existing content must not
   reflow or flash as tokens arrive.
@@ -1139,7 +1139,7 @@ state the condition; supporting copy explains the next useful move.
 6. Check that keyboard, pointer, reduced-motion, and accessible-name paths agree.
 7. Compare the result with neighboring Mcode patterns and the reference
    translation above. Preserve Mcode when the two differ.
-8. Run the live UI checks in `docs/guides/ui-components.md`, add a focused
+8. Run the live UI checks in `docs/internals/ui-components.md`, add a focused
    behavior test, and run typecheck.
 
 ### Implementation status

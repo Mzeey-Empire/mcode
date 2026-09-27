@@ -24,7 +24,7 @@ Run `runtime health`, then run:
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime live --provider codex --model <id> --scenario stop --confirm-provider-call
 ```
 
-The harness waits for `turnStarted`. It sends two `agent.stop` RPCs together. It requires matching cancelled results with one turn execution and dispatch state. It then checks a stopped event. It requires `agent.activeCount` to reach zero. It requires `agent.listRunning` to retain the matching cancelled snapshot for reconnect hydration.
+The harness waits for `turnStarted`. It sends two `agent.stop` RPCs together. The call that terminalizes the turn returns `cancelled`; a concurrent peer returns `already-terminal` for the same turn execution and cancelled snapshot, because stop terminalizes synchronously. It then checks a stopped event. It requires `agent.activeCount` to reach zero. It requires `agent.listRunning` to retain the matching cancelled snapshot for reconnect hydration.
 
 ## Gotchas
 

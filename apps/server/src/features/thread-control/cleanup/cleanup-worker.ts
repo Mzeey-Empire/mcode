@@ -65,6 +65,7 @@ export class CleanupWorker {
   private running = false;
   private stopped = false;
   private pollPromise: Promise<void> | null = null;
+  private workspacePath: string | undefined;
   private readonly mutationReservations: ThreadControlMutationReservationService;
 
   constructor(
@@ -89,10 +90,12 @@ export class CleanupWorker {
   }
 
   /**
-   * Start the worker and begin polling for due jobs.
+   * Start polling, optionally restricted to the agent runtime's fixture workspace.
    */
-  start(): void {
+  start(workspacePath?: string): void {
     if (this.pollTimer !== null) return;
+    // Agent setup copies user projects into its database; cleanup must leave them untouched.
+    this.workspacePath = workspacePath;
     const removedArtifacts = pruneStaleToolOutputArtifacts();
     if (removedArtifacts > 0) {
       logger.info("Pruned stale tool-output artifacts", { removed: removedArtifacts });
@@ -156,11 +159,13 @@ export class CleanupWorker {
     // that arrives during the async job execution sees running=true.
     this.running = true;
     try {
-      const retentionJobsEnqueued = this.cleanupJobRepo.enqueueExpiredCompleted(new Date().toISOString());
+      const retentionJobsEnqueued = this.cleanupJobRepo.enqueueExpiredCompleted(
+        new Date().toISOString(), undefined, this.workspacePath,
+      );
       const nowMs = Date.now();
-      const jobs = this.cleanupJobRepo.findDue(nowMs);
+      const jobs = this.cleanupJobRepo.findDue(nowMs, undefined, this.workspacePath);
       if (jobs.length > 0 || retentionJobsEnqueued > 0) {
-        const dueCounts = this.cleanupJobRepo.getDueCounts(nowMs);
+        const dueCounts = this.cleanupJobRepo.getDueCounts(nowMs, this.workspacePath);
         const selectedExplicitJobs = jobs.filter((job) => job.kind === "explicit").length;
         const selectedRetentionJobs = jobs.length - selectedExplicitJobs;
         logger.info("CleanupWorker batch selected", {
@@ -429,12 +434,13 @@ export class CleanupWorker {
    * hard-deletes it immediately.
    */
   async reconcileOnStartup(): Promise<void> {
-    const requeued = this.cleanupJobRepo.requeueExhaustedJobs();
+    const requeued = this.cleanupJobRepo.requeueExhaustedJobs(this.workspacePath);
     if (requeued > 0) {
       logger.info("Requeued exhausted cleanup jobs", { requeued });
     }
 
-    const deletingWorkspaces = this.workspaceRepo.findDeleting();
+    const deletingWorkspaces = this.workspaceRepo.findDeleting()
+      .filter((workspace) => this.workspacePath === undefined || workspace.path === this.workspacePath);
 
     for (const ws of deletingWorkspaces) {
       const threads = this.threadRepo.listAllByWorkspace(ws.id);
@@ -534,7 +540,7 @@ export class CleanupWorker {
 
   /** Process a single due cleanup job. Returns true if a job was processed. Exported for testing. */
   async processOneJob(): Promise<boolean> {
-    const jobs = this.cleanupJobRepo.findDue(Date.now());
+    const jobs = this.cleanupJobRepo.findDue(Date.now(), undefined, this.workspacePath);
     if (jobs.length === 0) return false;
     await this.executeJob(jobs[0]);
     return true;

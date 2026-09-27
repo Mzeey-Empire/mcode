@@ -555,7 +555,7 @@ present and rechecks the remote URL and ancestry before pushing.
 Failure cleanup removes only refs, branches, directories, and managed remotes
 created by that attempt. Reused worktrees remain unmanaged. Thread deletion also
 keeps a managed worktree while another active thread uses its path. See
-[`docs/guides/pull-request-review-worktrees.md`](docs/guides/pull-request-review-worktrees.md)
+[`docs/internals/pull-request-review-worktrees.md`](docs/internals/pull-request-review-worktrees.md)
 for the operational invariants.
 
 ### 7.4 Pull request remote data and mutation boundary
@@ -586,7 +586,7 @@ cleanup. An unknown outcome remains unknown rather than reporting success.
 Successful mutations invalidate server read caches and the web inbox, detail,
 Timeline, checks, comments, files, and patch snapshots. The web store clears only
 draft IDs accepted by a successful review. See
-[`docs/guides/pull-request-mutations.md`](docs/guides/pull-request-mutations.md)
+[`docs/internals/pull-request-mutations.md`](docs/internals/pull-request-mutations.md)
 for the operational contract.
 
 ### 7.5 Request Validation

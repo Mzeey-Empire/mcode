@@ -3,6 +3,8 @@ import type { ProviderProcessPort } from "../host-ports.js";
 
 const DEFAULT_IDLE_TTL_MS = 10 * 60 * 1_000;
 const EVICTION_INTERVAL_MS = 60 * 1_000;
+/** Bound on an acquire's wait for a previous incarnation's teardown. */
+const TEARDOWN_REUSE_TIMEOUT_MS = 5_000;
 
 /** Arguments supplied to one private protocol adapter spawn. */
 export interface SpawnArgs {
@@ -56,6 +58,7 @@ export class SessionRuntime<TState> {
   private readonly sessions = new Map<string, PoolEntry<TState>>();
   private readonly pendingSpawns = new Map<string, Promise<TState>>();
   private readonly stopsDuringSpawn = new Set<string>();
+  private readonly teardowns = new Map<string, Promise<void>>();
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
   private readonly idleTtlMs: number;
   private shuttingDown = false;
@@ -83,6 +86,12 @@ export class SessionRuntime<TState> {
   }): Promise<TState> {
     if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
     this.ensureEvictionTimer();
+    const teardown = this.teardowns.get(args.sessionId);
+    if (teardown) {
+      // Providers can hold exclusive resources (state DBs, sockets) that a
+      // spawn would race while the previous incarnation is still closing.
+      await Promise.race([teardown, delay(TEARDOWN_REUSE_TIMEOUT_MS)]);
+    }
     const existing = this.sessions.get(args.sessionId);
     if (existing) {
       if (this.adapter.isStale(existing.state, args)) await this.stop(args.sessionId);
@@ -139,6 +148,18 @@ export class SessionRuntime<TState> {
 
   /** Stops one session and closes a spawn that completes after the stop request. */
   async stop(sessionId: string): Promise<void> {
+    // Recorded before the work begins so a racing acquire waits instead of
+    // spawning alongside teardown or joining a spawn that is being stopped.
+    const work = this.performStop(sessionId);
+    this.teardowns.set(sessionId, work);
+    try {
+      await work;
+    } finally {
+      if (this.teardowns.get(sessionId) === work) this.teardowns.delete(sessionId);
+    }
+  }
+
+  private async performStop(sessionId: string): Promise<void> {
     const pending = this.pendingSpawns.get(sessionId);
     if (pending) {
       this.stopsDuringSpawn.add(sessionId);
@@ -243,6 +264,13 @@ export class SessionRuntime<TState> {
       resolve();
     })));
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 }
 
 function errorMessage(error: unknown): string {

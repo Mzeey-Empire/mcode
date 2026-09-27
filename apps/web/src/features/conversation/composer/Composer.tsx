@@ -411,6 +411,9 @@ export function Composer({
   const isAgentRunning = useThreadStore(
     (s) => threadId ? isThreadExecuting(threadId, s) : false,
   );
+  const isStopPending = useThreadStore(
+    (s) => threadId ? (s.pendingStopCounts[threadId] ?? 0) > 0 : false,
+  );
   const surfaceState = useComposerSurfaceState({
     threadId,
     workspaceId,
@@ -595,7 +598,7 @@ export function Composer({
       if (cmd.action) {
         removeSlashCommandTrigger(editorRef.current);
       } else if (!insertSelectedPluginMention(editorRef.current, cmd)) {
-        insertSlashCommandNode(editorRef.current, cmd.name, cmd.namespace, cmd.identity);
+        insertSlashCommandNode(editorRef.current, cmd.name, cmd.namespace, cmd.identity, cmd.path);
       }
     }
   }, [editorRef, slashCommand]);
@@ -653,6 +656,7 @@ export function Composer({
             taskBubbleTasks,
             fileEffectSummary,
             isAgentRunning,
+            isStopPending,
             setupBlocked,
             provider,
             planPending,

@@ -14,10 +14,12 @@ import { AgentEventPublicationRegistry } from "../agent-event-publication-regist
 import {
   createAgentServiceForTest,
   goalLifecycleForAgentServiceTest,
+  startAgentServiceIngressForTest,
   startProviderTurnForTest,
+  waitForAgentServiceIngressForTest,
   wrapProviderEmitterForRuntimeEvents,
 } from "./agent-service-test-harness.js";
-import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -174,7 +176,7 @@ function buildService(db: Database) {
       undefined,
       undefined,
       undefined,
-      createCanonicalAgentEventSinkStub(db),
+      createCanonicalAgentBoundaryStub(db),
       undefined,
       undefined,
       undefined,
@@ -186,6 +188,7 @@ function buildService(db: Database) {
   );
   eventPublication.bind(() => undefined);
   eventPublication.start();
+  startAgentServiceIngressForTest(svc);
   const goals = new GoalLifecycleService(
     threadRepo,
     providerRegistry,
@@ -595,7 +598,7 @@ describe("AgentService.sendMessage — /goal command", () => {
   });
 
   it("persists a Codex goal completion receipt that arrives after TurnComplete", async () => {
-    const { svc: _svc, providerStub, messageRepo } = buildService(db);
+    const { svc, providerStub, messageRepo } = buildService(db);
 
     messageRepo.create(thread.id, "user", "/goal ship it", 1);
 
@@ -607,6 +610,7 @@ describe("AgentService.sendMessage — /goal command", () => {
       tokensIn: 0,
       tokensOut: 0,
     });
+    await waitForAgentServiceIngressForTest(svc, thread.id);
 
     providerStub.emit("event", {
       type: AgentEventType.Message,
@@ -614,6 +618,7 @@ describe("AgentService.sendMessage — /goal command", () => {
       content: "Goal achieved in 19s.",
       tokens: null,
     });
+    await waitForAgentServiceIngressForTest(svc, thread.id);
 
     const { messages } = messageRepo.listByThread(thread.id, 100);
     expect(messages.map((m) => m.content)).toEqual([

@@ -4,6 +4,7 @@ import { OpenInAppButton } from "./OpenInAppButton";
 import { ThreadOverview } from "./ThreadOverview";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { resolveThreadDirPath } from "@/lib/worktree";
 import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -48,7 +49,7 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
     <div className="flex items-center justify-end gap-1">
       <div className="flex items-center gap-0.5 bg-muted/20 rounded-md px-1 py-0.5">
         <OpenInAppButton
-          dirPath={thread.worktree_path ?? workspacePath}
+          dirPath={resolveThreadDirPath(thread, workspacePath)}
           threadId={thread.id}
           threadOverride={thread.default_open_in_app ?? null}
         />

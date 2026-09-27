@@ -1,0 +1,418 @@
+import type { ProviderEventDraft } from "@mcode/providers";
+import { describe, expect, it } from "vitest";
+
+import type {
+  DataOnlyParentTurnFinishInput,
+  DataOnlyParentTurnStartInput,
+} from "../../canonical/canonical-parent-turn-write.js";
+import type { ParentNarrativeRecoveryCommit } from "../../turns/parent-turn-durability.js";
+import {
+  ExecutionMailboxScheduler,
+  type ExecutionMailboxCommand,
+  type ExecutionMailboxLimits,
+  type ExecutionLostAssignment,
+} from "../execution-mailbox-scheduler.js";
+import type {
+  ExecutionIdentity,
+  ExecutionLease,
+  ExecutionWorkerPort,
+  ExecutionWorkerReply,
+  ExecutionWorkerRequest,
+} from "../execution-mailbox-protocol.js";
+import {
+  ExecutionWorkerHandler,
+  type ExecutionLivePublicationIntent,
+  type ExecutionSemanticOperation,
+  type ExecutionSemanticWriter,
+  type ExecutionWorkCommand,
+  type ExecutionWorkerResult,
+  type ExecutionWriteReceipt,
+} from "../execution-worker-handler.js";
+
+type Command = ExecutionMailboxCommand<ExecutionWorkCommand>;
+
+const EXECUTION: ExecutionIdentity = {
+  threadId: "fixture-thread",
+  turnId: "fixture-turn",
+  executionId: "00000000-0000-4000-8000-000000000001",
+};
+
+const START_INPUT: DataOnlyParentTurnStartInput = {
+  thread: { id: EXECUTION.threadId, workspaceId: "fixture-workspace", providerId: "codex", createdAt: "2026-09-24T12:00:00.000Z" },
+  turnId: EXECUTION.turnId,
+  executionId: EXECUTION.executionId,
+  permissionMode: "full",
+  providerIdentities: [],
+  userMessage: { kind: "create", content: "Test", sequence: 1 },
+};
+
+const FINISH_INPUT: DataOnlyParentTurnFinishInput = {
+  threadId: EXECUTION.threadId,
+  turnId: EXECUTION.turnId,
+  executionId: EXECUTION.executionId,
+  providerId: "codex",
+  providerIdentities: [],
+  outcome: "cancelled",
+  projection: { message: null, narrative: [] },
+};
+
+const NARRATIVE_INPUT: ParentNarrativeRecoveryCommit = {
+  executionId: EXECUTION.executionId,
+  items: [{
+    kind: "narrationSegment",
+    record: {
+      id: "thought-1", message_id: "message-1", text: "Working",
+      started_at: "2026-09-24T12:00:00.000Z", ended_at: null, sort_order: 1,
+    },
+  }],
+};
+
+const PUBLICATION = {
+  after: "writer",
+  event: { type: "turnStarted", threadId: EXECUTION.threadId },
+} satisfies ExecutionLivePublicationIntent;
+
+const TEXT_INPUT = {
+  ...EXECUTION,
+  sequence: 1,
+  text: "Hello",
+};
+
+const LIMITS: ExecutionMailboxLimits = {
+  maxPending: 12,
+  maxPendingBytes: 12_000,
+  reservedControl: 6,
+  reservedControlBytes: 6_000,
+  maxPerExecutionPending: 8,
+  maxPerExecutionBytes: 8_000,
+  reservedPerExecutionControl: 5,
+  reservedPerExecutionControlBytes: 5_000,
+};
+
+class RecordingWriter implements ExecutionSemanticWriter {
+  readonly operations: ExecutionSemanticOperation[] = [];
+  beforeCommit: ((operation: ExecutionSemanticOperation) => Promise<void>) | undefined;
+  conflictKind: ExecutionSemanticOperation["mutation"]["kind"] | undefined;
+
+  async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
+    this.operations.push(operation);
+    await this.beforeCommit?.(operation);
+    if (operation.mutation.kind === this.conflictKind) {
+      return { kind: "conflict", operationId: operation.operationId };
+    }
+    return { kind: "committed", operationId: operation.operationId, durableRevision: this.operations.length };
+  }
+}
+
+class InlineWorker implements ExecutionWorkerPort<Command, ExecutionWorkerResult> {
+  onmessage: ((event: MessageEvent<ExecutionWorkerReply<ExecutionWorkerResult>>) => void) | null = null;
+  onerror: ((event: ErrorEvent) => void) | null = null;
+  onclose: (() => void) | null = null;
+  readonly requests: ExecutionWorkerRequest<Command>[] = [];
+  terminated = false;
+
+  constructor(private readonly handler: ExecutionWorkerHandler) {}
+
+  postMessage(request: ExecutionWorkerRequest<Command>): void {
+    this.requests.push(request);
+    void this.handler.handle(request)
+      .then((reply) => this.onmessage?.(new MessageEvent("message", { data: reply })))
+      .catch(() => this.onerror?.(new ErrorEvent("error")));
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+}
+
+function fixture(writer = new RecordingWriter()) {
+  const workers: InlineWorker[] = [];
+  const handlers: ExecutionWorkerHandler[] = [];
+  const lost: ExecutionLostAssignment[][] = [];
+  const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
+    workerCount: 1,
+    limits: LIMITS,
+    createWorker: () => {
+      const handler = new ExecutionWorkerHandler(writer);
+      const worker = new InlineWorker(handler);
+      handlers.push(handler);
+      workers.push(worker);
+      return worker;
+    },
+    onWorkerLost: (executions) => lost.push([...executions]),
+  });
+  const claim = scheduler.claim(EXECUTION, 1);
+  if (claim.kind !== "claimed") throw new Error(`Claim failed: ${claim.kind}`);
+  return { scheduler, worker: workers[0]!, handler: handlers[0]!, writer, lost, lease: claim.lease };
+}
+
+function submit(
+  scheduler: ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>,
+  lease: ExecutionLease,
+  command: Command,
+) {
+  const admission = scheduler.submit({ execution: EXECUTION, lease, command, byteLength: 1_000 });
+  if (admission.kind !== "admitted") throw new Error(`Admission failed: ${admission.kind}`);
+  return admission;
+}
+
+function eventDraft(): ProviderEventDraft {
+  return {
+    eventId: "fixture-event-1",
+    routing: { ...EXECUTION, itemId: "fixture-item-1" },
+    sourceProviderId: "codex",
+    sourceIdentities: [],
+    sourceSequence: 1,
+    payload: { type: "turn.started", startedAt: "2026-09-24T12:00:00.000Z" },
+  };
+}
+
+async function committed(admission: ReturnType<typeof submit>, revision: number): Promise<void> {
+  await expect(admission.completion).resolves.toMatchObject({
+    kind: "reply",
+    result: { kind: "committed", durableRevision: revision },
+  });
+}
+
+describe("ExecutionWorkerHandler through its scheduler", () => {
+  it("commits a canonical draft and its parent effects in one operation", async () => {
+    const { scheduler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await committed(submit(scheduler, lease, {
+      kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()],
+      parentLive: { text: { kind: "append", inputs: [TEXT_INPUT] }, narrative: NARRATIVE_INPUT },
+      livePublication: [PUBLICATION],
+    }), 2);
+    expect(writer.operations[1]).toMatchObject({
+      mutation: {
+        kind: "append-events", events: [eventDraft()],
+        parentLive: { text: { kind: "append", inputs: [TEXT_INPUT] }, narrative: NARRATIVE_INPUT },
+      },
+      livePublication: [PUBLICATION],
+    });
+    expect(writer.operations).toHaveLength(2);
+    scheduler.shutdown();
+  });
+
+  it("rejects a compound event with mismatched parent routing or publication count", async () => {
+    const { scheduler, handler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    for (const command of [
+      { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()],
+        parentLive: { text: { kind: "append", inputs: [{ ...TEXT_INPUT, executionId: "other" }] } }, livePublication: [PUBLICATION] },
+      { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()],
+        parentLive: { text: { kind: "unchanged" } }, livePublication: [] },
+    ] as const) {
+      await expect(handler.handle({
+        requestId: 2, execution: EXECUTION, lease, ordinal: 2, command,
+      })).resolves.toMatchObject({
+        result: { kind: "rejected", reason: "invalid-text-routing" },
+      });
+    }
+    expect(writer.operations).toHaveLength(1);
+    scheduler.shutdown();
+  });
+
+  it("commits one compound live event and forwards its publication receipt", async () => {
+    class PublicationWriter extends RecordingWriter {
+      override async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
+        const receipt = await super.transact(operation);
+        return receipt.kind === "committed" && operation.livePublication
+          ? { ...receipt, livePublication: operation.livePublication.map((intent) => ({
+            ...intent, publicationId: `${operation.operationId}:0`,
+          })) }
+          : receipt;
+      }
+    }
+
+    const { scheduler, writer, lease } = fixture(new PublicationWriter());
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    const admission = submit(scheduler, lease, {
+      kind: "live-event", text: { kind: "append", inputs: [TEXT_INPUT] },
+      narrative: NARRATIVE_INPUT, publication: PUBLICATION,
+    });
+    await expect(admission.completion).resolves.toMatchObject({
+      kind: "reply",
+      result: {
+        kind: "committed", operationId: `${lease.leaseId}:2`, durableRevision: 2,
+        livePublication: [{ ...PUBLICATION, publicationId: `${lease.leaseId}:2:0` }],
+      },
+    });
+    expect(writer.operations).toHaveLength(2);
+    expect(writer.operations[1]).toEqual({
+      operationId: `${lease.leaseId}:2`, execution: EXECUTION, lease, ordinal: 2,
+      mutation: {
+        kind: "live-event", text: { kind: "append", inputs: [TEXT_INPUT] }, narrative: NARRATIVE_INPUT,
+      },
+      livePublication: [PUBLICATION],
+    });
+    scheduler.shutdown();
+  });
+
+  it("rejects live-event text or narrative for a different execution before writing", async () => {
+    const { scheduler, handler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+
+    for (const command of [
+      { kind: "live-event", text: { kind: "append", inputs: [{ ...TEXT_INPUT, turnId: "other-turn" }] }, publication: PUBLICATION },
+      { kind: "live-event", text: { kind: "promote", input: { ...TEXT_INPUT, executionId: "other-execution" } }, publication: PUBLICATION },
+    ] as const) {
+      await expect(handler.handle({
+        requestId: 2, execution: EXECUTION, lease, ordinal: 2, command,
+      })).resolves.toMatchObject({
+        result: { kind: "rejected", reason: "invalid-text-routing" },
+      });
+    }
+    await expect(handler.handle({
+      requestId: 2, execution: EXECUTION, lease, ordinal: 2,
+      command: {
+        kind: "live-event", text: { kind: "unchanged" },
+        narrative: { ...NARRATIVE_INPUT, executionId: "other-execution" }, publication: PUBLICATION,
+      },
+    })).resolves.toMatchObject({
+      result: { kind: "rejected", reason: "invalid-narrative-routing" },
+    });
+    expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin"]);
+    scheduler.shutdown();
+  });
+
+  it("maps a running narrative delta to one fenced semantic operation", async () => {
+    const { scheduler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await committed(submit(scheduler, lease, { kind: "narrative-delta", input: NARRATIVE_INPUT }), 2);
+
+    expect(writer.operations[1]).toMatchObject({
+      operationId: `${lease.leaseId}:2`, execution: EXECUTION, lease, ordinal: 2,
+      mutation: { kind: "narrative-delta", input: NARRATIVE_INPUT },
+    });
+    scheduler.shutdown();
+  });
+
+  it("rejects a narrative delta for another execution before it reaches the writer", async () => {
+    const { scheduler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await expect(submit(scheduler, lease, {
+      kind: "narrative-delta", input: { ...NARRATIVE_INPUT, executionId: "another-execution" },
+    }).completion).resolves.toEqual({
+      kind: "reply", result: { kind: "rejected", reason: "invalid-narrative-routing" },
+    });
+    expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin"]);
+    scheduler.shutdown();
+  });
+
+  it("rejects a narrative delta once the execution is stopping", async () => {
+    const { scheduler, handler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await committed(submit(scheduler, lease, { kind: "stop", requestId: "stop-1" }), 2);
+    const reply = await handler.handle({
+      requestId: 3, execution: EXECUTION, lease, ordinal: 3,
+      command: { kind: "narrative-delta", input: NARRATIVE_INPUT },
+    });
+    expect(reply.result).toEqual({ kind: "rejected", reason: "invalid-transition" });
+    expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin", "stop-requested"]);
+    scheduler.shutdown();
+  });
+
+  it("runs one synthetic turn from start through Stop, checkpoint, and finalization", async () => {
+    const { scheduler, worker, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await committed(submit(scheduler, lease, { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] }), 2);
+    const stop = submit(scheduler, lease, { kind: "stop", requestId: "stop-1" });
+    expect(scheduler.submit({
+      execution: EXECUTION,
+      lease,
+      command: { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] },
+      byteLength: 1_000,
+    })).toEqual({ kind: "stopping" });
+    await committed(stop, 3);
+    await committed(submit(scheduler, lease, { kind: "checkpoint", phase: "stopping", nativeCursor: "cursor-1" }), 4);
+    await committed(submit(scheduler, lease, { kind: "effect-result", effectId: "file-1", settled: true }), 5);
+    await committed(submit(scheduler, lease, { kind: "provider-outcome", outcome: "cancelled" }), 6);
+    await committed(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled", input: FINISH_INPUT }), 7);
+    await expect(submit(scheduler, lease, { kind: "release" }).completion).resolves.toEqual({
+      kind: "reply",
+      result: { kind: "released" },
+    });
+    expect(scheduler.release(EXECUTION, lease)).toBe(true);
+
+    expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual([
+      "begin", "append-events", "stop-requested", "checkpoint", "effect-result", "provider-outcome", "finish",
+    ]);
+    expect(writer.operations[2]?.mutation).toEqual({
+      kind: "stop-requested", requestId: "stop-1", lastAdmittedOrdinal: 2,
+    });
+    expect(worker.requests.map((request) => request.ordinal)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(worker.requests.every((request) => request.execution.executionId === EXECUTION.executionId
+      && request.lease.leaseId === lease.leaseId)).toBe(true);
+    expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 0 });
+    scheduler.shutdown();
+  });
+
+  it("does not acknowledge a worker command until its writer receipt arrives", async () => {
+    const writer = new RecordingWriter();
+    let releaseWrite: (() => void) | undefined;
+    writer.beforeCommit = () => new Promise<void>((resolve) => { releaseWrite = resolve; });
+    const { scheduler, worker, lease } = fixture(writer);
+    const start = submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT });
+    const event = submit(scheduler, lease, { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] });
+    await Promise.resolve();
+    expect(worker.requests).toHaveLength(1);
+    expect(scheduler.depth()).toMatchObject({ pending: 2 });
+    releaseWrite?.();
+    await committed(start, 1);
+    expect(worker.requests).toHaveLength(2);
+    releaseWrite?.();
+    await committed(event, 2);
+    scheduler.shutdown();
+  });
+
+  it("rejects a start whose transaction input names another execution", async () => {
+    const { scheduler, writer, lease } = fixture();
+    const input = { ...START_INPUT, executionId: "another-execution" };
+    await expect(submit(scheduler, lease, { kind: "start", providerId: "codex", input }).completion)
+      .resolves.toEqual({ kind: "reply", result: { kind: "rejected", reason: "invalid-transition" } });
+    expect(writer.operations).toEqual([]);
+    scheduler.shutdown();
+  });
+
+  it("rejects finalization when its projected outcome disagrees with the command", async () => {
+    const { scheduler, writer, lease } = fixture();
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    const input = { ...FINISH_INPUT, outcome: "completed" as const };
+    await expect(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled", input }).completion)
+      .resolves.toEqual({ kind: "reply", result: { kind: "rejected", reason: "invalid-transition" } });
+    expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin"]);
+    scheduler.shutdown();
+  });
+
+  it("rejects a writer conflict without reporting a durable command", async () => {
+    const writer = new RecordingWriter();
+    writer.conflictKind = "append-events";
+    const { scheduler, lease } = fixture(writer);
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await expect(submit(scheduler, lease, { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] }).completion).resolves.toEqual({
+      kind: "reply",
+      result: { kind: "rejected", reason: "writer-conflict" },
+    });
+    await expect(submit(scheduler, lease, { kind: "checkpoint", phase: "running", nativeCursor: null }).completion)
+      .resolves.toEqual({ kind: "reply", result: { kind: "rejected", reason: "out-of-order" } });
+    scheduler.shutdown();
+  });
+
+  it("revokes the execution when the writer fails instead of acknowledging its event", async () => {
+    const writer = new RecordingWriter();
+    writer.beforeCommit = async (operation) => {
+      if (operation.mutation.kind === "append-events") throw new Error("database unavailable");
+    };
+    const { scheduler, worker, lost, lease } = fixture(writer);
+    await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
+    await expect(submit(scheduler, lease, { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft()] }).completion)
+      .resolves.toEqual({ kind: "worker-lost" });
+    expect(lost).toEqual([[{ execution: EXECUTION, lease }]]);
+    expect(worker.terminated).toBe(true);
+    expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 1 });
+    expect(scheduler.claim(EXECUTION, 2)).toEqual({ kind: "thread-busy" });
+    expect(scheduler.replaceWorker(0)).toBe(false);
+    scheduler.shutdown();
+  });
+});

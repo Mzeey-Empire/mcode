@@ -82,8 +82,8 @@ Before calling frontend or feature work done, verify all applicable dimensions:
 - **Providers**: Codex, Claude, Cursor each have an adapter in `packages/providers`. Provider-shaped features need a decision per adapter.
 - **Contracts**: Anything crossing the wire is typed in `packages/contracts`. Update schemas and call sites together using `lazySchema`.
 - **Reverse states**: If you add a way in, add the way out and the way to see it. Snooze needs unsnooze. Start needs cancel.
-- **Timeline**: Check that narrative indicators, typing state, and turn footers transition cleanly. See **[docs/guides/narrative-pipeline.md](docs/guides/narrative-pipeline.md)**.
-- **Docs**: User-facing behavior changes belong in `docs/guides/`, `docs/specs/`, or another appropriate existing docs directory; architecture and contributor changes belong in `docs/adr/` or `docs/guides/`.
+- **Timeline**: Check that narrative indicators, typing state, and turn footers transition cleanly. See **[docs/internals/narrative-pipeline.md](docs/internals/narrative-pipeline.md)**.
+- **Docs**: Check whether the change makes existing docs inaccurate. Apply the [documentation rules](#documentation) before adding anything.
 
 ## Dev servers & Runtime contract
 
@@ -123,10 +123,10 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 
 ## Subsystem guides
 
-- **Narrative Timeline & Event Traps:** [`docs/guides/narrative-pipeline.md`](docs/guides/narrative-pipeline.md)
-- **UI Component Registry & Rules:** [`docs/guides/ui-components.md`](docs/guides/ui-components.md)
-- **Provider Architecture:** [`docs/guides/provider-architecture.md`](docs/guides/provider-architecture.md)
-- **Database Migrations:** [`docs/guides/db-migrations.md`](docs/guides/db-migrations.md)
+- **Narrative Timeline & Event Traps:** [`docs/internals/narrative-pipeline.md`](docs/internals/narrative-pipeline.md)
+- **UI Component Registry & Rules:** [`docs/internals/ui-components.md`](docs/internals/ui-components.md)
+- **Provider Architecture:** [`docs/internals/provider-architecture.md`](docs/internals/provider-architecture.md)
+- **Database Migrations:** [`docs/internals/db-migrations.md`](docs/internals/db-migrations.md)
 - **Live Desktop Testing:** [`.agents/skills/electorn-live-testing/SKILL.md`](.agents/skills/electorn-live-testing/SKILL.md)
 
 ## Verifying
@@ -137,6 +137,19 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 - Lint and complexity check: `bun run lint`
 - Type checking: `bun run typecheck`
 - Do not run repo wide checks, CI owns the full test suite
+
+## Documentation
+
+Most code changes do not need a documentation update. Agents can read the code. The page index lives in [docs/README.md](docs/README.md).
+
+- `docs/internals/` holds architectural decisions and their reasons, constraints that span components, and implementation traps that are hard to discover from the source. Before adding a paragraph, ask what a maintainer would get wrong without it. If reading the relevant code answers the question, leave it out.
+- Do not document every feature, enumerate fields or methods, narrate control flow, maintain file catalogs, or append PR summaries. Types, tests, and code already record the implementation.
+- Keep a local implementation explanation in a nearby code comment. Use an internal doc when the reasoning crosses boundaries or needs context the code cannot carry. Link to the relevant source instead of copying it.
+- When a documented decision or constraint changes, rewrite or remove the affected text. Do not append a second account of the new behavior. A new internal page needs a distinct, durable reason to exist.
+- `docs/adr/` records point-in-time decisions. A new decision gets a new file with the next free number from the [index](docs/README.md). Do not renumber or rewrite existing ADRs.
+- `docs/specs/` holds dated pre-implementation design docs. They are snapshots. When shipped behavior drifts, update `docs/internals/` or write a new ADR, not the spec.
+- `docs/agents/` holds runbooks for agents operating this repo. `docs/user/` holds task-oriented docs in the product's voice, without implementation details.
+- `docs/research/`, `docs/plans/`, `docs/prototypes/`, `docs/design/`, and `docs/performance/` hold point-in-time working material. Do not maintain them after the fact; move durable knowledge into `docs/internals/` or an ADR.
 
 ## Pull requests
 

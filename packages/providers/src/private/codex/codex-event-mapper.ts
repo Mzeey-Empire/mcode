@@ -37,6 +37,12 @@ type ChildNotificationContext = {
   nativeTurnId: string | undefined;
 };
 
+/** Native identity retained until the provider binds this private notification to an execution. */
+export interface CodexPendingFileMutationStart extends ProviderFileMutationStart {
+  nativeThreadId?: string;
+  nativeTurnId?: string;
+}
+
 const NOTICE_KIND_BY_SUBTYPE: Record<string, SystemNoticeMetadata["kind"]> = {
   "provider.notice.unknown-event": "diagnostic",
 };
@@ -225,7 +231,7 @@ export class CodexEventMapper {
   constructor(
     threadId: string,
     mainCodexThreadId?: string,
-    private readonly onPendingMutationStart?: (event: ProviderFileMutationStart) => void,
+    private readonly onPendingMutationStart?: (event: CodexPendingFileMutationStart) => void,
   ) {
     this.threadId = threadId;
     this.mainCodexThreadId = mainCodexThreadId;
@@ -542,6 +548,8 @@ export class CodexEventMapper {
     if (!toolUse || toolUse.type !== AgentEventType.ToolUse) return;
     this.onPendingMutationStart({
       threadId: toolUse.threadId,
+      nativeThreadId: this.notificationThreadId(notification),
+      nativeTurnId: this.nativeTurnId(notification),
       toolCallId: toolUse.toolCallId,
       toolName: toolUse.toolName,
       toolInput: toolUse.toolInput,

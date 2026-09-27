@@ -110,7 +110,8 @@ await activateTestConversation("t1");
     ] satisfies NarrativeEntry[]);
 
     await activateTestConversation("t1");
-    expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(false);
+    // Activation prefetches tail detail, so the window is already resident.
+    expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(true);
 
     await useThreadStore.getState().loadNarrativeForMessage(assistant.id, "t1");
 
@@ -166,8 +167,8 @@ await activateTestConversation("t1");
       ] satisfies NarrativeEntry[]);
 
     await activateTestConversation("t1");
-    await useThreadStore.getState().loadNarrativeForMessage(assistant.id, "t1");
 
+    // The activation prefetch consumes the first window and leaves the cursor.
     expect(mockTransport.loadTurn).toHaveBeenCalledTimes(1);
     expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(false);
 
@@ -300,7 +301,7 @@ await activateTestConversation("t1");
       .mockResolvedValueOnce(tooLargeWindow);
 
     await activateTestConversation("t1");
-    await useThreadStore.getState().loadNarrativeForMessage(assistant.id, "t1");
+    // The activation prefetch consumed the first window; this requests the next.
     await useThreadStore.getState().loadNarrativeForMessage(assistant.id, "t1");
 
     const record = getThreadRecord(useThreadStore.getState().records, "t1");
@@ -368,8 +369,8 @@ await activateTestConversation("t1");
     expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(false);
   });
 
-  it("keeps detail through a virtual-row handoff and evicts after the final row releases", async () => {
-    const assistant = createMockMessage({ id: "assistant-lease", thread_id: "t1", role: "assistant" });
+  it("retains loaded detail across a thread switch round trip", async () => {
+    const assistant = createMockMessage({ id: "assistant-retain", thread_id: "t1", role: "assistant" });
     (mockTransport.loadConversationPage as ReturnType<typeof vi.fn>).mockResolvedValue({
       messages: [assistant], hasMore: false, narrativeByMessage: {},
     });
@@ -379,18 +380,19 @@ await activateTestConversation("t1");
 
     await activateTestConversation("t1");
     await useThreadStore.getState().loadNarrativeForMessage(assistant.id, "t1");
-    useThreadStore.getState().retainNarrativeForMessage(assistant.id, "t1");
-    useThreadStore.getState().retainNarrativeForMessage(assistant.id, "t1");
-    useThreadStore.getState().releaseNarrativeForMessage(assistant.id, "t1");
-    await Promise.resolve();
+    expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(true);
+    const detailCalls = vi.mocked(mockTransport.loadTurn).mock.calls.length;
 
-    expect(getThreadRecord(useThreadStore.getState().records, "t1").narrativeByMessage[assistant.id]).toBeDefined();
+    useThreadStore.setState((s) => ({
+      currentThreadId: "t2",
+      records: patchThreadRecord(s.records, "t2", { messages: [] }),
+    }));
+    await activateTestConversation("t1");
 
-    useThreadStore.getState().releaseNarrativeForMessage(assistant.id, "t1");
-    await Promise.resolve();
-
-    expect(getThreadRecord(useThreadStore.getState().records, "t1").narrativeByMessage[assistant.id]).toBeUndefined();
-    expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(false);
+    const record = getThreadRecord(useThreadStore.getState().records, "t1");
+    expect(record.narrativeByMessage[assistant.id]).toBeDefined();
+    expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(true);
+    expect(vi.mocked(mockTransport.loadTurn).mock.calls.length).toBe(detailCalls);
   });
 
   it("on cache hit, does not call conversation.page and renders from cache", async () => {

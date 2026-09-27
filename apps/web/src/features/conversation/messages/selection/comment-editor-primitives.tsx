@@ -183,7 +183,7 @@ export function CommentEditorComposer({
     if (!editor) return;
     slashCommand.onSelect(command, () => {});
     if (!insertSelectedPluginMention(editor, command)) {
-      insertSlashCommandNode(editor, command.name, command.namespace, command.identity);
+      insertSlashCommandNode(editor, command.name, command.namespace, command.identity, command.path);
     }
   }, [editorRef, slashCommand]);
 

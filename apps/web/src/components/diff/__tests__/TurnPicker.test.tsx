@@ -93,6 +93,29 @@ describe("TurnPicker", () => {
     );
   }, 15_000);
 
+  it("numbers turns by order among turns with changes, not all snapshots", async () => {
+    useDiffStore.setState({
+      snapshotsByThread: {
+        "thread-1": [
+          snapshot("msg-old", "2026-09-20T10:00:00Z", 2),
+          snapshot("msg-empty", "2026-09-20T11:00:00Z", 0),
+          snapshot("msg-new", "2026-09-20T12:00:00Z", 3),
+        ],
+      },
+    });
+    render(<TurnPicker threadId="thread-1" />);
+
+    // The zero-change middle snapshot must not consume a number: the two
+    // diff turns are "Turn 1" and "Turn 2", with the newest seeded.
+    await waitFor(() =>
+      expect(screen.getByTestId("turn-picker")).toHaveTextContent("Turn 2"),
+    );
+
+    await userEvent.click(screen.getByTestId("turn-picker"));
+    expect(screen.getByTestId("turn-picker-item-msg-new")).toHaveTextContent("Turn 2");
+    expect(screen.getByTestId("turn-picker-item-msg-old")).toHaveTextContent("Turn 1");
+  }, 15_000);
+
   it("reports an empty state when no turn changed files", () => {
     useDiffStore.setState({
       snapshotsByThread: {

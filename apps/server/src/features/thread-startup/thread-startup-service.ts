@@ -42,10 +42,12 @@ export class ThreadStartupService {
   ) {}
 
   /** Start one lifecycle or return its existing snapshot when the request matches. */
-  start(input: ThreadStartupStartInput): ThreadStartup {
+  start(input: ThreadStartupStartInput, requestFingerprint?: string): ThreadStartup {
     const existing = this.startupRepo.findById(input.startupId);
     if (existing) {
-      if (existing.workspaceId === input.workspaceId && existing.kind === input.kind) return existing;
+      const persistedFingerprint = this.startupRepo.requestFingerprint(input.startupId);
+      if (existing.workspaceId === input.workspaceId && existing.kind === input.kind
+        && (!persistedFingerprint || !requestFingerprint || persistedFingerprint === requestFingerprint)) return existing;
       throw new ThreadStartupConflictError(input.startupId);
     }
 
@@ -62,8 +64,17 @@ export class ThreadStartupService {
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    this.startupRepo.insert(startup);
+    this.startupRepo.insert(startup, requestFingerprint);
     return this.publish(startup);
+  }
+
+  /** Bind a newly persisted direct thread in the same SQLite commit. */
+  createAndBindThread<T extends { id: string }>(startupId: string, create: () => T): T {
+    return this.startupRepo.transaction(() => {
+      const thread = create();
+      this.bindThread(startupId, thread.id);
+      return thread;
+    });
   }
 
   /** Read one authoritative lifecycle snapshot. */
@@ -118,6 +129,13 @@ export class ThreadStartupService {
     const startup = this.require(startupId);
     if (isTerminal(startup) || startup.threadId === threadId) return startup;
     return this.persistNext({ ...startup, threadId });
+  }
+
+  /** Remove a binding after the owning creation flow confirms that its child was deleted. */
+  clearThreadBinding(startupId: string): ThreadStartup {
+    const startup = this.require(startupId);
+    if (!startup.threadId) return startup;
+    return this.persistNext({ ...startup, threadId: undefined });
   }
 
   /** Append one bounded output entry and retain only the newest bounded transcript. */

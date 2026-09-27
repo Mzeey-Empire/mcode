@@ -123,7 +123,7 @@ describe("OpenCodeProvider idle confirmation", () => {
     await provider.sendTurn(turnRequest());
     expect(http.getSessionStatus).toHaveBeenCalledTimes(2);
     expect(endedOutcomes(submitted)).toEqual(["completed"]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("treats a drained session as quiet, not as a poll failure", async () => {
@@ -131,7 +131,7 @@ describe("OpenCodeProvider idle confirmation", () => {
     const { provider, submitted } = testProvider(http as never);
     await provider.sendTurn(turnRequest());
     expect(endedOutcomes(submitted)).toEqual(["completed"]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("restarts confirmation when mapped activity arrives between idles", async () => {
@@ -166,7 +166,7 @@ describe("OpenCodeProvider idle confirmation", () => {
     await sending;
     expect(endedOutcomes(submitted)).toEqual(["completed"]);
     expect(polls).toBeGreaterThanOrEqual(3);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("abandons confirmation while the session reports busy", async () => {
@@ -189,7 +189,7 @@ describe("OpenCodeProvider idle confirmation", () => {
     await sending;
     expect(endedOutcomes(submitted)).toEqual(["completed"]);
     expect(http.getSessionStatus.mock.calls.length).toBeGreaterThanOrEqual(3);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("never settles while a permission card is pending", async () => {
@@ -216,7 +216,7 @@ describe("OpenCodeProvider idle confirmation", () => {
     expect(provider.resolvePermission("per_1", "allow")).toBe(true);
     await sending;
     expect(endedOutcomes(submitted)).toEqual(["completed"]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("settles errored after repeated status poll failures", async () => {
@@ -231,7 +231,7 @@ describe("OpenCodeProvider idle confirmation", () => {
     const events = submittedEvents(submitted);
     expect(events.filter((event) => event.type === "error")).toHaveLength(1);
     expect(endedOutcomes(submitted)).toEqual(["errored"]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("aborts a hung status poll when Stop cancels the turn", async () => {
@@ -251,7 +251,7 @@ describe("OpenCodeProvider idle confirmation", () => {
 
     expect(statusSignal?.aborted).toBe(true);
     expect(endedOutcomes(submitted)).toEqual(["cancelled"]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("emits one terminal outcome for duplicate idles", async () => {
@@ -259,6 +259,6 @@ describe("OpenCodeProvider idle confirmation", () => {
     const { provider, submitted } = testProvider(http as never);
     await provider.sendTurn(turnRequest());
     expect(endedOutcomes(submitted)).toEqual(["completed"]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 });

@@ -3,7 +3,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StickyUserMessage } from "@/components/chat/StickyUserMessage";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import type { SelectedTextComment } from "@mcode/contracts";
-import { useMemo, type RefObject } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import type { Message } from "@/transport/types";
 import { ScrollToBottomButton } from "./ScrollToBottomButton";
@@ -79,8 +79,8 @@ export function MessageListOverlays({
           </div>
         </div>
       )}
-      {isLoadingMore && <PaginationIndicator placement="top" />}
-      {isLoadingNewer && <PaginationIndicator placement="bottom" />}
+      {isLoadingMore && <PaginationIndicator placement="top" delayMs={300} />}
+      {isLoadingNewer && <PaginationIndicator placement="bottom" delayMs={300} />}
       {onSelectedTextComment && (
         <SelectedTextCommentControls
           key={renderedThreadId ?? "no-rendered-thread"}
@@ -128,8 +128,17 @@ export function MessageListOverlays({
 }
 
 /** Displays progress while directional message history is loading. */
-function PaginationIndicator({ placement }: { readonly placement: "top" | "bottom" }) {
+function PaginationIndicator({ placement, delayMs = 0 }: { readonly placement: "top" | "bottom"; readonly delayMs?: number }) {
+  // Local history fetches usually resolve fast enough that showing the spinner
+  // every time would flash; it only earns visibility on slow loads.
+  const [visible, setVisible] = useState(delayMs === 0);
+  useEffect(() => {
+    if (delayMs === 0) return;
+    const timer = setTimeout(() => setVisible(true), delayMs);
+    return () => clearTimeout(timer);
+  }, [delayMs]);
   const positionClass = placement === "top" ? "top-2" : "bottom-2";
+  if (!visible) return null;
   return (
     <div className={`absolute ${positionClass} left-1/2 z-10 -translate-x-1/2`}>
       <div className="rounded-md border border-border/40 bg-background/80 px-2 py-1 backdrop-blur-sm">

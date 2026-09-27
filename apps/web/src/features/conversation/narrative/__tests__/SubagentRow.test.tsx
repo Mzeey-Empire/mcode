@@ -231,6 +231,63 @@ describe("SubagentRow", () => {
     expect(openSubagentDetail).toHaveBeenLastCalledWith("thread:codex-child:worker", "finished");
   });
 
+  it("opens the marker's projected detail when its in-thread child carries the identity", async () => {
+    const marker = agent({
+      id: "run-subagent",
+      toolInput: { description: "Explore the codebase" },
+    });
+    const started = agent({
+      id: "agent-1",
+      toolInput: { description: "Explore the codebase", nativeThreadId: "agent-1" },
+      parentToolCallId: "run-subagent",
+    });
+    render(
+      <SubagentRow
+        toolCall={marker}
+        participants={[marker]}
+        lifecycle="started"
+        children={[started]}
+        hooks={[]}
+        allToolCalls={[marker, started]}
+        onSubagentSelect={openSubagentDetail}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /Explore the codebase subagent details/ }));
+
+    expect(openSubagentDetail).toHaveBeenCalledWith("run-subagent", "active");
+    expect(screen.queryByTestId("subagent-transcript-unavailable")).not.toBeInTheDocument();
+  });
+
+  it("keeps the transcript notice on a nested marker with no top-level row", async () => {
+    const nested = agent({
+      id: "nested-run",
+      toolInput: { description: "Nested explore" },
+      parentToolCallId: "run-subagent",
+    });
+    const nestedStarted = agent({
+      id: "agent-2",
+      toolInput: { nativeThreadId: "agent-2" },
+      parentToolCallId: "nested-run",
+    });
+    render(
+      <SubagentRow
+        toolCall={nested}
+        participants={[nested]}
+        lifecycle="started"
+        children={[nestedStarted]}
+        hooks={[]}
+        allToolCalls={[nested, nestedStarted]}
+        onSubagentSelect={openSubagentDetail}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /Nested explore subagent details/ }));
+
+    expect(openSubagentDetail).not.toHaveBeenCalled();
+    expect(screen.getByTestId("subagent-transcript-unavailable")).toBeInTheDocument();
+  });
+
   it("explains unavailable Cursor detail without selecting a canonical child", async () => {
     const cursorAgent = agent({
       toolInput: {

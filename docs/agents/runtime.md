@@ -1,6 +1,6 @@
 # Mcode Agent Runtime
 
-Read the repository [agent guidance](../../AGENTS.md) before you work. This runbook covers the worktree-local runtime. For implementation and focused checks, see the [agent workflow](../guides/agent-workflow.md).
+Read the repository [agent guidance](../../AGENTS.md) before you work. This runbook covers the worktree-local runtime. For implementation and focused checks, see the [agent workflow](../internals/agent-workflow.md).
 
 ## Setup
 
@@ -91,4 +91,4 @@ The desktop waits up to 10 minutes for server readiness after it spawns the serv
 
 ## Focused verification
 
-Run the smallest test that covers the changed behavior. Follow the repository [verification rules](../../AGENTS.md#verifying) and the [agent workflow](../guides/agent-workflow.md#focused-checks). For desktop-only behavior, use the [live Electron workflow](../../.agents/skills/electorn-live-testing/SKILL.md).
+Run the smallest test that covers the changed behavior. Follow the repository [verification rules](../../AGENTS.md#verifying) and the [agent workflow](../internals/agent-workflow.md#focused-checks). For desktop-only behavior, use the [live Electron workflow](../../.agents/skills/electorn-live-testing/SKILL.md).

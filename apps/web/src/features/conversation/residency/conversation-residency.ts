@@ -278,6 +278,11 @@ export function registerConversationResidency(residency: ConversationResidency):
   registeredConversationResidency = residency;
 }
 
+/** Return the registered residency authority, or null before the thread store initializes it. */
+export function tryGetConversationResidency(): ConversationResidency | null {
+  return registeredConversationResidency;
+}
+
 /** Return the internal residency authority after the thread store initializes it. */
 export function getConversationResidency(): ConversationResidency {
   if (!registeredConversationResidency) {

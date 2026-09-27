@@ -247,12 +247,10 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
   useEffect(() => {
     const previousStatus = previousConnectionStatusRef.current;
     previousConnectionStatusRef.current = state.connectionStatus;
-    if (previousStatus !== "connected") return;
-    if (state.connectionStatus !== "reconnecting" && state.connectionStatus !== "authFailed") return;
-    const activeThreadId = useWorkspaceStore.getState().activeThreadId;
-    if (!activeThreadId) return;
-    const thread = useWorkspaceStore.getState().threads.find((candidate) => candidate.id === activeThreadId);
-    if (thread?.clientPreparing) useWorkspaceStore.getState().failPreparingThreadOnConnectionLost(activeThreadId);
+    const hasFailedPlaceholder = useWorkspaceStore.getState().threads.some((thread) => thread.clientError != null);
+    if (state.connectionStatus === "connected" && (previousStatus !== "connected" || hasFailedPlaceholder)) {
+      void useWorkspaceStore.getState().recoverPreparingThreads();
+    }
   }, [state.connectionStatus]);
 
   useThreadSubscriptionReconciler({

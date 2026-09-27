@@ -295,6 +295,88 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
     expect(gitWorktrees.removeWorktree).toHaveBeenCalledOnce();
   });
 
+  it("restricts startup recovery and cleanup admission to the fixture workspace", async () => {
+    const fixture = workspaces.create("Fixture", "/fixture");
+    const user = workspaces.create("Copied user project", "/fixture-other");
+    const deleting = workspaces.create("Deleting user project", "/user-deleting");
+    const empty = workspaces.create("Empty deleting user project", "/user-empty");
+    workspaces.softDelete(deleting.id);
+    workspaces.softDelete(empty.id);
+    addThread(deleting.id, "user-missing-job", "/user-worktree", "user", null);
+
+    for (const workspace of [fixture, user]) {
+      const expiredId = `${workspace.id}-expired`;
+      const explicitId = `${workspace.id}-explicit`;
+      addThread(workspace.id, expiredId, `${workspace.path}/expired`, "expired", new Date(0).toISOString());
+      addThread(workspace.id, explicitId, `${workspace.path}/explicit`, "explicit", null);
+      threads.softDelete(explicitId);
+      const job = cleanupJobs.insert({
+        thread_id: explicitId,
+        workspace_path: workspace.path,
+        worktree_path: `${workspace.path}/explicit`,
+        branch: "explicit",
+      });
+      database.prepare("UPDATE cleanup_jobs SET attempts = 5, last_error = 'original error' WHERE id = ?")
+        .run(job.id);
+    }
+    for (const kind of ["explicit", "retention"] as const) {
+      cleanupJobs.insert({
+        thread_id: `user-orphan-${kind}`,
+        workspace_path: user.path,
+        worktree_path: null,
+        branch: null,
+        kind,
+      });
+    }
+    const userRows = () => ({
+      workspaces: database.prepare("SELECT * FROM workspaces WHERE id != ? ORDER BY id").all(fixture.id),
+      threads: database.prepare("SELECT * FROM threads WHERE workspace_id != ? ORDER BY id").all(fixture.id),
+      jobs: database.prepare("SELECT * FROM cleanup_jobs WHERE workspace_path != ? ORDER BY id").all(fixture.path),
+    });
+    const before = userRows();
+
+    worker.start(fixture.path);
+    try {
+      await worker.reconcileOnStartup();
+      await worker.poll();
+
+      expect(userRows()).toEqual(before);
+      expect(threads.findById(`${fixture.id}-expired`)).toBeNull();
+      expect(threads.findById(`${fixture.id}-explicit`)).toBeNull();
+      expect(cleanupJobs.countByWorkspacePath(fixture.path)).toBe(0);
+      expect(gitWorktrees.removeWorktree).toHaveBeenCalledTimes(2);
+      expect(cleanupJobs.getDueCounts(Date.now(), fixture.path)).toEqual({ explicit: 0, retention: 0 });
+      expect(await worker.processOneJob()).toBe(false);
+      expect(userRows()).toEqual(before);
+    } finally {
+      await worker.shutdown();
+    }
+  });
+
+  it("leaves all copied rows untouched when the fixture path has no matching workspace", async () => {
+    const user = workspaces.create("Copied user project", "/user");
+    addThread(user.id, "user-expired", "/user/expired", "expired", new Date(0).toISOString());
+    const job = cleanupJobs.insert({
+      thread_id: "user-orphan", workspace_path: user.path, worktree_path: null, branch: null,
+    });
+    database.prepare("UPDATE cleanup_jobs SET attempts = 5 WHERE id = ?").run(job.id);
+    const threadBefore = threads.findById("user-expired");
+    const jobBefore = cleanupJobs.findById(job.id);
+
+    worker.start("/missing-fixture");
+    try {
+      await worker.reconcileOnStartup();
+      await worker.poll();
+      expect(await worker.processOneJob()).toBe(false);
+      expect(threads.findById("user-expired")).toEqual(threadBefore);
+      expect(cleanupJobs.findById(job.id)).toEqual(jobBefore);
+      expect(cleanupJobs.count()).toBe(1);
+      expect(gitWorktrees.removeWorktree).not.toHaveBeenCalled();
+    } finally {
+      await worker.shutdown();
+    }
+  });
+
   it("deletes exhausted orphan job rows on the next poll after startup requeue", async () => {
     const job = cleanupJobs.insert({
       thread_id: "thread-already-gone",

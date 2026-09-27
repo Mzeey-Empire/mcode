@@ -16,9 +16,6 @@ export { SubagentLifecycleService } from "./collaboration/subagent-lifecycle-ser
 /** Full canonical agent system boundary used by the server composition roots. */
 export { CanonicalAgentBoundary } from "./canonical/canonical-agent-boundary.js";
 
-/** Temporary compatibility façade for callers migrating to the named boundary. */
-export { CanonicalAgentEventSink } from "./canonical/canonical-agent-event-sink.js";
-
 /** Publishes canonical agent events for the server composition roots. */
 export { publishCanonicalAgentEvents } from "./canonical/canonical-agent-boundary.js";
 

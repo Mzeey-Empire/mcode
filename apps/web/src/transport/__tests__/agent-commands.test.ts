@@ -254,4 +254,112 @@ describe("agent command transport", () => {
     await pending;
     transport.close();
   });
+
+  it("keeps a startup request pending and replays its exact params after socket loss", async () => {
+    useSettingsStore.setState({ loaded: true });
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const transport = createWsTransport("ws://localhost:1234");
+    mockWs.simulateOpen();
+    const startupId = "00000000-0000-4000-8000-000000000073";
+    const pending = transport.createAndSendMessage({
+      workspaceId: "workspace-1",
+      content: "Build once",
+      model: "gpt-5",
+      mode: "worktree",
+      branch: "main",
+      startupId,
+    });
+    const settled = vi.fn();
+    void pending.then(settled, settled);
+    await vi.waitFor(() => expect(mockWs.sent.some((row) => JSON.parse(row).method === "agent.createAndSend")).toBe(true));
+    const firstSocket = mockWs;
+    const firstRequest = firstSocket.sent.map((row) => JSON.parse(row) as { id: string; method: string; params: Record<string, unknown> })
+      .find((row) => row.method === "agent.createAndSend")!;
+    expect(firstRequest.params).toMatchObject({ startupId, maxBudgetUsd: expect.anything(), maxTurns: expect.anything() });
+
+    // A healthy server request can outlast the offline wait budget.
+    now += 121_000;
+    firstSocket.close();
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(mockWs).not.toBe(firstSocket), { timeout: 3000 });
+    mockWs.simulateOpen();
+    await vi.waitFor(() => expect(mockWs.sent.some((row) => JSON.parse(row).method === "agent.createAndSend")).toBe(true));
+    const replay = mockWs.sent.map((row) => JSON.parse(row) as { id: string; method: string; params: Record<string, unknown> })
+      .find((row) => row.method === "agent.createAndSend")!;
+    expect(replay.params).toEqual(firstRequest.params);
+    expect(replay.id).not.toBe(firstRequest.id);
+    mockWs.respond(replay.id, { thread: {}, handoff: null });
+    await expect(pending).resolves.toBeDefined();
+    expect(settled).toHaveBeenCalledOnce();
+    transport.close();
+  });
+
+  it("sends an offline startup after its initial socket fails and reconnects", async () => {
+    const transport = createWsTransport("ws://localhost:1234");
+    const pending = transport.createAndSendMessage({
+      workspaceId: "workspace-1", content: "Build once", model: "gpt-5", mode: "direct", branch: "main",
+      startupId: "00000000-0000-4000-8000-000000000075",
+    });
+    const initialSocket = mockWs;
+    expect(initialSocket.sent).toHaveLength(0);
+    initialSocket.close();
+    await vi.waitFor(() => expect(mockWs).not.toBe(initialSocket), { timeout: 3000 });
+    mockWs.simulateOpen();
+    await vi.waitFor(() => expect(mockWs.sent.some((row) => JSON.parse(row).method === "agent.createAndSend")).toBe(true));
+    const request = mockWs.sent.map((row) => JSON.parse(row) as { id: string; method: string; params: { startupId: string } })
+      .find((row) => row.method === "agent.createAndSend")!;
+    expect(request.params.startupId).toBe("00000000-0000-4000-8000-000000000075");
+    mockWs.respond(request.id, { thread: {}, handoff: null });
+    await expect(pending).resolves.toBeDefined();
+    transport.close();
+  });
+
+  it("bounds a startup submitted while the socket remains offline", async () => {
+    const transport = createWsTransport("ws://localhost:1234");
+    vi.useFakeTimers();
+    try {
+      const pending = transport.createAndSendMessage({
+        workspaceId: "workspace-1", content: "Build once", model: "gpt-5", mode: "direct", branch: "main",
+        startupId: "00000000-0000-4000-8000-000000000076",
+      });
+      const rejection = expect(pending).rejects.toThrow("Could not connect to server");
+      await vi.advanceTimersByTimeAsync(120_001);
+      await rejection;
+      expect(mockWs.sent).toHaveLength(0);
+    } finally {
+      transport.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not replay an intentional transport close", async () => {
+    const transport = createWsTransport("ws://localhost:1234");
+    mockWs.simulateOpen();
+    const pending = transport.createAndSendMessage({
+      workspaceId: "workspace-1", content: "Build once", model: "gpt-5", mode: "direct", branch: "main",
+      startupId: "00000000-0000-4000-8000-000000000074",
+    });
+    await vi.waitFor(() => expect(mockWs.sent.some((row) => JSON.parse(row).method === "agent.createAndSend")).toBe(true));
+    transport.close();
+    await expect(pending).rejects.toThrow("Transport closed");
+    expect(mockWs.sent.filter((row) => JSON.parse(row).method === "agent.createAndSend")).toHaveLength(1);
+  });
+
+  it("does not replay a server error whose text resembles a disconnect", async () => {
+    const transport = createWsTransport("ws://localhost:1234");
+    mockWs.simulateOpen();
+    const pending = transport.createAndSendMessage({
+      workspaceId: "workspace-1", content: "Build once", model: "gpt-5", mode: "direct", branch: "main",
+      startupId: "00000000-0000-4000-8000-000000000077",
+    });
+    await vi.waitFor(() => expect(mockWs.sent.some((row) => JSON.parse(row).method === "agent.createAndSend")).toBe(true));
+    const request = mockWs.sent.map((row) => JSON.parse(row) as { id: string; method: string })
+      .find((row) => row.method === "agent.createAndSend")!;
+    mockWs.onmessage?.({ data: JSON.stringify({ id: request.id, error: { code: "SERVER_FAILURE", message: "WebSocket disconnected" } }) });
+    await expect(pending).rejects.toMatchObject({ name: "RpcError", code: "SERVER_FAILURE" });
+    expect(mockWs.sent.filter((row) => JSON.parse(row).method === "agent.createAndSend")).toHaveLength(1);
+    transport.close();
+  });
 });

@@ -6,7 +6,10 @@
 
 import { inject, injectable } from "tsyringe";
 import type { Database } from "bun:sqlite";
+import { eq, sql } from "drizzle-orm";
+import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { ProviderModelInfo } from "@mcode/contracts";
+import { providerModelCache } from "../../../../runtime/persistence/sqlite/schema.js";
 
 /** A cached model list row from `provider_model_cache`. */
 export interface CachedModelEntry {
@@ -16,71 +19,72 @@ export interface CachedModelEntry {
   modelCount: number;
 }
 
-/** Row shape for the `provider_model_cache` table. */
-interface CacheRow {
-  provider_id: string;
-  models_json: string;
-  fetched_at: string;
-  model_count: number;
-}
+type CacheRow = typeof providerModelCache.$inferSelect;
 
 /** Data access for the `provider_model_cache` SQLite table. */
 @injectable()
 export class ModelCacheRepo {
-  constructor(@inject("Database") private readonly db: Database) {}
+  private readonly orm: BunSQLiteDatabase;
+
+  constructor(@inject("Database") db: Database) {
+    this.orm = drizzle(db);
+  }
 
   /** Read cached models for a provider. Returns null if no cache entry exists. */
   get(providerId: string): CachedModelEntry | null {
-    const row = this.db
-      .prepare(
-        "SELECT provider_id, models_json, fetched_at, model_count FROM provider_model_cache WHERE provider_id = ?",
-      )
-      .get(providerId) as CacheRow | undefined;
+    const row = this.orm
+      .select()
+      .from(providerModelCache)
+      .where(eq(providerModelCache.providerId, providerId))
+      .get();
 
     if (!row) return null;
 
-    return {
-      providerId: row.provider_id,
-      models: JSON.parse(row.models_json) as ProviderModelInfo[],
-      fetchedAt: row.fetched_at,
-      modelCount: row.model_count,
-    };
+    return rowToEntry(row);
   }
 
   /** Read all cached provider entries. Used at startup to pre-populate memory. */
   getAll(): CachedModelEntry[] {
-    const rows = this.db
-      .prepare(
-        "SELECT provider_id, models_json, fetched_at, model_count FROM provider_model_cache",
-      )
-      .all() as CacheRow[];
+    const rows = this.orm.select().from(providerModelCache).all();
 
-    return rows.map((row) => ({
-      providerId: row.provider_id,
-      models: JSON.parse(row.models_json) as ProviderModelInfo[],
-      fetchedAt: row.fetched_at,
-      modelCount: row.model_count,
-    }));
+    return rows.map(rowToEntry);
   }
 
   /** Insert or replace cached models for a provider. */
   upsert(providerId: string, models: ProviderModelInfo[]): void {
-    this.db
-      .prepare(
-        `INSERT INTO provider_model_cache (provider_id, models_json, fetched_at, model_count)
-         VALUES (?, ?, datetime('now'), ?)
-         ON CONFLICT(provider_id) DO UPDATE SET
-           models_json = excluded.models_json,
-           fetched_at  = excluded.fetched_at,
-           model_count = excluded.model_count`,
-      )
-      .run(providerId, JSON.stringify(models), models.length);
+    this.orm
+      .insert(providerModelCache)
+      .values({
+        providerId,
+        modelsJson: JSON.stringify(models),
+        fetchedAt: sql`datetime('now')`,
+        modelCount: models.length,
+      })
+      .onConflictDoUpdate({
+        target: providerModelCache.providerId,
+        set: {
+          modelsJson: sql`excluded.models_json`,
+          fetchedAt: sql`excluded.fetched_at`,
+          modelCount: sql`excluded.model_count`,
+        },
+      })
+      .run();
   }
 
   /** Remove cached models for a provider (e.g. when provider is disabled). */
   delete(providerId: string): void {
-    this.db
-      .prepare("DELETE FROM provider_model_cache WHERE provider_id = ?")
-      .run(providerId);
+    this.orm
+      .delete(providerModelCache)
+      .where(eq(providerModelCache.providerId, providerId))
+      .run();
   }
+}
+
+function rowToEntry(row: CacheRow): CachedModelEntry {
+  return {
+    providerId: row.providerId,
+    models: JSON.parse(row.modelsJson) as ProviderModelInfo[],
+    fetchedAt: row.fetchedAt,
+    modelCount: row.modelCount,
+  };
 }

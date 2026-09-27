@@ -7,6 +7,7 @@ import {
   type ProviderId,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 
 import { broadcast } from "../../../application/transport/push.js";
 import { BrowserNarrativeEventSanitizer } from "../../browser-automation/index.js";
@@ -31,6 +32,10 @@ import {
 } from "../orchestration/turn-runtime-event-control.js";
 import { AgentEventPublicationRegistry } from "../orchestration/agent-event-publication-registry.js";
 
+const OWNED_LATE_HOOK_COMPLETION = Symbol("ownedLateHookCompletion");
+
+type EventApplicationResult = boolean | typeof OWNED_LATE_HOOK_COMPLETION | undefined;
+
 /** Applies normalized provider events after the runtime controller admits them in pipeline order. */
 @injectable()
 export class ProviderTurnEventApplication implements TurnEventApplication {
@@ -49,7 +54,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   >();
   private readonly lastContextByThread = new Map<string, number>();
   private readonly lastContextWindowByThread = new Map<string, number>();
-  private readonly ownedLateHookCompletions = new WeakSet<object>();
+  private readonly terminalProjectionByThread = new Map<string, Promise<boolean>>();
 
   constructor(
     @inject(TURN_FINALIZER) private readonly finalizer: TurnFinalizer,
@@ -77,7 +82,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       checkpoints,
       (update) => {
         broadcast("turn.savingStatus", update);
-        queueMicrotask(() => this.runtime.resumeEventPipeline(update.threadId));
+        if (update.mode !== "saving-delayed") {
+          queueMicrotask(() => this.runtime.resumeEventPipeline(update.threadId));
+        }
       },
     );
     this.parentNarrativeRecovery = new ParentNarrativeRecoveryCoordinator(parentDurability, narrative);
@@ -103,6 +110,11 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     const queued = this.queueVisibleAssistantText(input, event, publish);
     if (queued !== undefined) return queued;
     return this.applyPreparedEvent(input, event, publish);
+  }
+
+  /** Publish an execution-writer event without repeating any turn persistence. */
+  publishCommitted(event: AgentEvent): void {
+    this.publish(event);
   }
 
   /** Record a provider file mutation before its public event is available. */
@@ -251,7 +263,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     if (accepted === false) return true;
     if (terminal && accepted !== true) return false;
     if (!this.checkpointNarrative(event, publish)) return false;
-    if (publish && this.ownedLateHookCompletions.delete(event as object)) return true;
+    if (publish && accepted === OWNED_LATE_HOOK_COMPLETION) return true;
     if (publish) this.publishAfterDurability(event, terminal);
     return true;
   }
@@ -269,11 +281,11 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return queued === "blocked" ? false : queued;
   }
 
-  private applyEvent(providerId: ProviderId, event: AgentEvent, publish: boolean): boolean | undefined {
+  private applyEvent(providerId: ProviderId, event: AgentEvent, publish: boolean): EventApplicationResult {
     return this.applyNarrativeEvent(providerId, event) ?? this.applyLifecycleEvent(providerId, event, publish);
   }
 
-  private applyNarrativeEvent(providerId: ProviderId, event: AgentEvent): boolean | undefined {
+  private applyNarrativeEvent(providerId: ProviderId, event: AgentEvent): EventApplicationResult {
     switch (event.type) {
       case AgentEventType.TextDelta: return this.applyTextDelta(event);
       case AgentEventType.GeneratedAttachment: return this.applyGeneratedAttachment(event);
@@ -287,7 +299,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     }
   }
 
-  private applyLifecycleEvent(providerId: ProviderId, event: AgentEvent, publish: boolean): boolean | undefined {
+  private applyLifecycleEvent(providerId: ProviderId, event: AgentEvent, publish: boolean): EventApplicationResult {
     switch (event.type) {
       case AgentEventType.TurnStarted: return this.applyTurnStarted(event);
       case AgentEventType.TurnComplete: return this.applyTurnComplete(event, publish);
@@ -384,7 +396,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return true;
   }
 
-  private applyHookCompleted(event: Extract<AgentEvent, { type: "hookCompleted" }>): boolean {
+  private applyHookCompleted(event: Extract<AgentEvent, { type: "hookCompleted" }>): EventApplicationResult {
     const open = this.narrative.peekOpenHook(event.threadId, event.hookName);
     if (!open) return true;
     const completed = {
@@ -402,8 +414,8 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     this.narrative.pushClosedHook(event.threadId, { ...completed, messageId: "" });
     this.narrative.removeOpenHook(event.threadId, event.hookName);
     if (this.turnCompleteSeenByThread.has(event.threadId)) {
-      this.ownedLateHookCompletions.add(event);
-      this.lateHookCompletions.schedule(event.threadId, completed, this.fileEffects.previousFinalization(event.threadId));
+      this.lateHookCompletions.schedule(event.threadId, completed, this.terminalProjection(event.threadId));
+      return OWNED_LATE_HOOK_COMPLETION;
     }
     return true;
   }
@@ -453,7 +465,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       return false;
     }
     this.turnCompleteSeenByThread.add(event.threadId);
-    void this.runtime.finalizeTerminalTurn(event.threadId, "completed", "turnComplete");
+    this.beginTerminalProjection(event.threadId, "completed", "turnComplete");
     this.featureEffects.refreshAfterTurn(event.threadId);
     this.recordContextUsage(event, false);
     return true;
@@ -472,7 +484,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       this.warnRejectedTerminal(held.event.threadId, held.event.type, held.event.turnExecutionId);
       return;
     }
-    void this.runtime.finalizeTerminalTurn(held.event.threadId, "completed", "turnComplete");
+    this.beginTerminalProjection(held.event.threadId, "completed", "turnComplete");
     this.featureEffects.refreshAfterTurn(held.event.threadId);
     this.recordContextUsage(held.event, false);
     if (held.publish) this.publishAfterDurability(held.event, true);
@@ -485,7 +497,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       this.warnRejectedTerminal(event.threadId, event.type, event.turnExecutionId);
       return false;
     }
-    void this.runtime.finalizeTerminalTurn(event.threadId, "errored", "error");
+    this.beginTerminalProjection(event.threadId, "errored", "error");
     this.runtime.clearTerminalState(event.threadId);
     return true;
   }
@@ -545,7 +557,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     }
     if (event.outcome === undefined) return true;
     const outcome = event.outcome === "cancelled" ? "interrupted" : event.outcome;
-    void this.runtime.finalizeTerminalTurn(event.threadId, outcome, "ended");
+    this.beginTerminalProjection(event.threadId, outcome, "ended");
     this.runtime.clearTerminalState(event.threadId);
     return true;
   }
@@ -582,7 +594,10 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private checkpointNarrative(event: AgentEvent, publish: boolean): boolean {
     if (!publish || this.isUnsavedNarrationBoundary(event)) return true;
     try {
-      this.parentNarrativeRecovery.checkpoint(event);
+      if (serverWorkTrace) {
+        serverWorkTrace.measure("narrative-checkpoint", event.threadId, event.turnExecutionId,
+          () => this.parentNarrativeRecovery.checkpoint(event));
+      } else this.parentNarrativeRecovery.checkpoint(event);
       return true;
     } catch {
       this.runtime.stopForEventApplicationFailure(event, "Parent narrative recovery checkpoint failed");
@@ -595,7 +610,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       this.publish(event);
       return;
     }
-    const finalization = this.fileEffects.previousFinalization(event.threadId);
+    const finalization = this.terminalProjection(event.threadId);
     if (!finalization) {
       this.publish(event);
       return;
@@ -611,6 +626,32 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
         ? { ...event, outcome: "interrupted" }
         : event,
     );
+  }
+
+  /** Retain terminal durability from its scheduling point until every dependent publication observes it. */
+  private beginTerminalProjection(
+    threadId: string,
+    outcome: "completed" | "errored" | "interrupted" | "cancelled",
+    source: string,
+  ): void {
+    const projection = this.runtime.finalizeTerminalTurn(threadId, outcome, source);
+    if (!projection) return;
+    this.terminalProjectionByThread.set(threadId, projection);
+    void projection.then(
+      () => this.clearTerminalProjection(threadId, projection),
+      () => this.clearTerminalProjection(threadId, projection),
+    );
+  }
+
+  /** Return the current terminal fence or the finished file-effect generation for a late event. */
+  private terminalProjection(threadId: string): Promise<boolean> | undefined {
+    return this.terminalProjectionByThread.get(threadId) ?? this.fileEffects.previousFinalization(threadId);
+  }
+
+  private clearTerminalProjection(threadId: string, projection: Promise<boolean>): void {
+    if (this.terminalProjectionByThread.get(threadId) === projection) {
+      this.terminalProjectionByThread.delete(threadId);
+    }
   }
 
   private recordDiagnostic(input: ProviderEventIngressEvent, event: AgentEvent): void {

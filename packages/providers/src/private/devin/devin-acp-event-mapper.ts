@@ -338,7 +338,37 @@ function subagentStartedEvents(
     state.accumulator.pendingToolCalls.add(toolCallId);
   }
   state.accumulator.hasFiredToolThisTurn = true;
-  return [{
+  const toolInput = {
+    task,
+    title,
+    profile,
+    // Narrative label/summary extractors read description and subagentType;
+    // without them every Devin row renders "Subagent task".
+    description: task,
+    subagentType: profile,
+    is_background: started.isBackground === true,
+    agentId: toolCallId,
+    nativeThreadId: toolCallId,
+  };
+  const events: AgentEvent[] = [];
+  if (parentToolCallId) {
+    // The marker and this lifecycle call are one logical subagent. Stamping
+    // the agentId onto the marker lets the narrative collapse the pair into a
+    // single row; without it the chat renders both as separate subagent chips.
+    // Undefined values are dropped so the merge cannot clobber input the
+    // marker already carried.
+    const markerInput = Object.fromEntries(
+      Object.entries(toolInput).filter(([, value]) => value !== undefined),
+    );
+    events.push({
+      type: AgentEventType.ToolUse,
+      threadId,
+      toolCallId: parentToolCallId,
+      toolName: "Agent",
+      toolInput: markerInput,
+    });
+  }
+  events.push({
     type: AgentEventType.ToolUse,
     threadId,
     toolCallId,
@@ -346,20 +376,10 @@ function subagentStartedEvents(
     // agentId is Devin's native subagent identity; surfacing it as
     // nativeThreadId gives the card a canonical-alias detail target so the
     // detail view can open instead of rendering "transcript unavailable".
-    toolInput: {
-      task,
-      title,
-      profile,
-      // Narrative label/summary extractors read description and subagentType;
-      // without them every Devin row renders "Subagent task".
-      description: task,
-      subagentType: profile,
-      is_background: started.isBackground === true,
-      agentId: toolCallId,
-      nativeThreadId: toolCallId,
-    },
+    toolInput,
     ...(parentToolCallId ? { parentToolCallId } : {}),
-  }];
+  });
+  return events;
 }
 
 /**

@@ -81,9 +81,17 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
 
 import { BrowserAutomationSessionLease, CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import { AgentEventSchema, AgentEventType } from "@mcode/contracts";
-import type { ProviderRuntimeEvent, ProviderTurnDiffUpdate } from "@mcode/contracts";
+import type { ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate } from "@mcode/contracts";
+import type { ProviderEventBatch, ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "../../host-ports.js";
 
 const schemaValidExecutionId = "00000000-0000-4000-8000-000000000001";
+const acceptedEventReceipt: ProviderEventSubmissionReceipt = {
+  commit: {
+    outcome: "committed", conversationRevision: 1, rosterRevision: 1,
+    acceptedThrough: 1, durableThrough: 1, eventCount: 1,
+  },
+  delivery: { ingress: "queued" },
+};
 
 function makeProvider(
   catalogService: {
@@ -108,6 +116,7 @@ function makeProvider(
     createCodexConfiguration?: () => Promise<unknown>;
     close?: (sessionId: string) => Promise<void>;
   } = undefined as never,
+  eventSink?: ProviderEventSinkPort,
 ): CodexProvider {
   return new CodexProvider(
     { get: async () => ({ provider: { cli: { codex: "codex" } } }) } as never,
@@ -116,6 +125,7 @@ function makeProvider(
     catalogService as never,
     browserAutomationLease,
     threadControlMcp as never,
+    eventSink,
   );
 }
 
@@ -215,6 +225,63 @@ describe("CodexProvider first turn on new session", () => {
     ]);
     unsubscribe();
     provider.shutdown();
+  });
+
+  it("keeps repeated public item IDs on their native attempts and rejects old server callbacks", async () => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    const mutations: ProviderFileMutationStart[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    provider.on("file_mutation_start", (event: ProviderFileMutationStart) => mutations.push(event));
+    sendTurnMock.mockResolvedValueOnce("native-attempt-1").mockResolvedValueOnce("native-attempt-2");
+    const request = {
+      turnId: "mcode-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 1,
+      sessionId, workspaceId: "workspace-test", threadId, message: "edit", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build" as const, providerOptions: {},
+      permissionMode: "supervised" as const, approvalReviewMode: "automatic" as const,
+    };
+    const notifyTool = (server: (typeof appServers)[number], turnId: string) => server.emit("notification", {
+      method: "item/started",
+      params: {
+        threadId: "sdk-thread-1", turnId,
+        item: { type: "fileChange", id: "same-native-item", changes: [{ path: "tracked.txt", kind: "edit" }] },
+      },
+    });
+    const notifyUnknownChild = (server: (typeof appServers)[number]) => server.emit("notification", {
+      method: "item/started",
+      params: {
+        threadId: "unknown-child",
+        item: { type: "fileChange", id: "unbound-child-edit", changes: [{ path: "child.txt", kind: "edit" }] },
+      },
+    });
+
+    await provider.sendTurn(request);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const firstServer = appServers[0]!;
+    notifyTool(firstServer, "native-attempt-1");
+    notifyUnknownChild(firstServer);
+    await provider.discardSession(sessionId);
+
+    await provider.sendTurn({ ...request, deliveryAttempt: 2, resumeFrom: undefined });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const retryServer = appServers[1]!;
+    notifyTool(firstServer, "native-attempt-1");
+    notifyUnknownChild(firstServer);
+    notifyTool(retryServer, "native-attempt-2");
+    notifyUnknownChild(retryServer);
+    retryServer.emit("notification", {
+      method: "turn/completed",
+      params: { threadId: "sdk-thread-1", turn: { id: "native-attempt-2", status: "completed", usage: {} } },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(events.filter((event) => event.event.type === AgentEventType.ToolUse
+      && event.event.toolCallId === "same-native-item").map((event) => event.deliveryAttempt)).toEqual([1, 2]);
+    expect(mutations.filter((event) => event.toolCallId === "unbound-child-edit")
+      .map((event) => event.deliveryAttempt)).toEqual([undefined, undefined]);
+    expect(events.find((event) => event.event.type === AgentEventType.Ended
+      && event.event.turnExecutionId === schemaValidExecutionId && event.deliveryAttempt === 2)).toBeDefined();
+    await provider.shutdown();
   });
 
   it("passes loopback browser MCP config and a child-only bearer token", async () => {
@@ -585,6 +652,177 @@ describe("CodexProvider first turn on new session", () => {
     await ended;
   });
 
+  it("submits an attempt-bound parent event through the canonical sink only when enabled", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+
+    await provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: schemaValidExecutionId,
+      deliveryAttempt: 2,
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "hey",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const server = appServers[0]!;
+    server.emit("notification", {
+      method: "item/agentMessage/delta",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", delta: "Hello" },
+    });
+    await vi.waitFor(() => expect(submit).toHaveBeenCalled());
+
+    const batches = submit.mock.calls.map(([batch]) => batch);
+    expect(batches.some((batch) => batch.events.some((event) => event.payload.type === "item.recorded"
+      && event.payload.item.payload.projection === "providerRuntimeEvent"
+      && event.payload.item.payload.runtimeEvent.event.type === AgentEventType.TextDelta))).toBe(true);
+    expect(batches.every((batch) => batch.deliveryAttempt === 2 && batch.turnId === "test-turn")).toBe(true);
+    expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(false);
+  });
+
+  it("keeps Codex on the existing event channel until canonical delivery is enabled", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+
+    await provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: schemaValidExecutionId,
+      deliveryAttempt: 2,
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "hey",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    appServers[0]!.emit("notification", {
+      method: "item/agentMessage/delta",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", delta: "Hello" },
+    });
+
+    expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(true);
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("fences duplicate parent Ended callbacks for an owned attempt", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "hey", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto",
+    });
+    const emit = (provider as unknown as { emitRuntimeEvent(event: ProviderRuntimeEvent): void }).emitRuntimeEvent.bind(provider);
+    const ended: ProviderRuntimeEvent = { event: { type: AgentEventType.Ended,
+      threadId, turnExecutionId: schemaValidExecutionId, outcome: "completed" } };
+    emit(ended);
+    emit(ended);
+    await provider.waitForCanonicalTurnEvents({
+      threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 2,
+    });
+
+    expect(submit.mock.calls.flatMap(([batch]) => batch.events).filter((event) =>
+      event.payload.type === "item.recorded"
+      && event.payload.item.payload.projection === "providerRuntimeEvent"
+      && event.payload.item.payload.runtimeEvent.event.type === AgentEventType.Ended)).toHaveLength(1);
+    expect(legacy.some((event) => event.event.type === AgentEventType.Ended)).toBe(false);
+  });
+
+  it("stamps the admitted attempt on an early parent event before native turn binding", async () => {
+    let resolveNativeTurn!: (turnId: string) => void;
+    sendTurnMock.mockImplementationOnce(() => new Promise<string>((resolve) => { resolveNativeTurn = resolve; }));
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+
+    await provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: schemaValidExecutionId,
+      deliveryAttempt: 3,
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "hey",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "auto",
+    });
+    await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalled());
+    const server = appServers[0]!;
+    server.emit("notification", {
+      method: "item/agentMessage/delta",
+      params: { threadId: "sdk-thread-1", turnId: "early-native-turn", delta: "Early" },
+    });
+    await vi.waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({
+      deliveryAttempt: 3,
+      events: [{ payload: { item: { payload: { runtimeEvent: {
+        deliveryAttempt: 3,
+        event: { type: AgentEventType.TextDelta, turnExecutionId: schemaValidExecutionId },
+      } } } } }],
+    });
+    expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(false);
+
+    resolveNativeTurn("early-native-turn");
+    server.emit("notification", {
+      method: "turn/completed",
+      params: { threadId: "sdk-thread-1", turn: { id: "early-native-turn", status: "completed" } },
+    });
+    await provider.waitForCanonicalTurnEvents({
+      threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 3,
+    });
+  });
+
+  it("fences new parent events synchronously while draining already queued batches", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "hey", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const emitText = (delta: string) => appServers[0]!.emit("notification", {
+      method: "item/agentMessage/delta",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", delta },
+    });
+    emitText("Before stop");
+    const drained = provider.fenceCanonicalTurnEvents({
+      threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 2,
+    });
+    emitText("After stop");
+    await drained;
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(false);
+  });
+
   it("cancels the main turn and reuses its app-server for the next turn", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
@@ -649,6 +887,164 @@ describe("CodexProvider first turn on new session", () => {
       state?.abortPendingTurnWait?.();
       await provider.discardSession(sessionId);
     }
+  });
+
+  it("holds a follow-up send behind the stop drain, then reuses the warm session", async () => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: "test-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "stop this turn",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const runtime = (provider as unknown as {
+      runtime: {
+        get: (id: string) => { abortPendingTurnWait?: () => void; interruptDrain?: Promise<boolean> } | undefined;
+      };
+    }).runtime;
+    const state = runtime.get(sessionId);
+    expect(state).toBeDefined();
+
+    try {
+      // Hold the interrupt drain open so the follow-up send must wait on it.
+      const server = appServers[0]!;
+      let releaseDrain!: () => void;
+      const drainGate = new Promise<void>((resolve) => { releaseDrain = resolve; });
+      server.interruptTurnAndDrain = vi.fn(async (turnId: string) => {
+        await drainGate;
+        server.emit("notification", {
+          method: "turn/completed",
+          params: { threadId: "sdk-thread-1", turn: { id: turnId, status: "interrupted" } },
+        });
+      });
+
+      const stop = provider.stopSession(sessionId);
+      await vi.waitFor(() => expect(state!.interruptDrain).toBeDefined());
+      sendTurnMock.mockResolvedValueOnce("next-native-turn");
+      const send = provider.sendTurn({
+        turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+        workspaceId: "workspace-test", threadId, message: "continue",
+        cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+        providerOptions: {}, permissionMode: "auto",
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      // The send is queued behind the drain: no second turn/start yet.
+      expect(sendTurnMock).toHaveBeenCalledTimes(1);
+      releaseDrain();
+      await Promise.all([stop, send]);
+      await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(2));
+      expect(appServers).toHaveLength(1);
+      expect(server.isAlive).toBe(true);
+    } finally {
+      state?.abortPendingTurnWait?.();
+      await provider.discardSession(sessionId);
+    }
+  });
+
+  it("discards and respawns when a follow-up send outlives a wedged stop drain", async () => {
+    const provider = makeProvider();
+    // Shrink the reuse bound so the test does not wait seconds.
+    (provider as unknown as { stopDrainReuseTimeoutMs: number }).stopDrainReuseTimeoutMs = 25;
+
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: "test-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "stop this turn",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const runtime = (provider as unknown as {
+      runtime: {
+        get: (id: string) => { abortPendingTurnWait?: () => void; interruptDrain?: Promise<boolean> } | undefined;
+      };
+    }).runtime;
+    const state = runtime.get(sessionId);
+    expect(state).toBeDefined();
+
+    // A wedged drain: the interrupt drain never settles.
+    state!.interruptDrain = new Promise<boolean>(() => {});
+    sendTurnMock.mockResolvedValueOnce("next-native-turn");
+    const send = provider.sendTurn({
+      turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "continue",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await send;
+    await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(2));
+    expect(appServers).toHaveLength(2);
+    expect(appServers[0]!.isAlive).toBe(false);
+    expect(appServers[1]!.isAlive).toBe(true);
+
+    // A killed server's late exit must not evict the replacement session.
+    appServers[0]!.emit("exit");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(appServers[1]!.isAlive).toBe(true);
+
+    state?.abortPendingTurnWait?.();
+    await provider.discardSession(sessionId);
+  });
+
+  it("keeps the respawned session when a rejected stop drain settles after replacement", async () => {
+    const provider = makeProvider();
+
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: "test-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "stop this turn",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const runtime = (provider as unknown as {
+      runtime: {
+        get: (id: string) => { abortPendingTurnWait?: () => void; interruptDrain?: Promise<boolean> } | undefined;
+      };
+    }).runtime;
+    const state = runtime.get(sessionId);
+    expect(state).toBeDefined();
+
+    const server = appServers[0]!;
+    let releaseDrain!: () => void;
+    const drainGate = new Promise<void>((resolve) => { releaseDrain = resolve; });
+    server.interruptTurnAndDrain = vi.fn(async (turnId: string) => {
+      await drainGate;
+      server.emit("notification", {
+        method: "turn/completed",
+        params: { threadId: "sdk-thread-1", turn: { id: turnId, status: "interrupted" } },
+      });
+      throw new Error("drain rejected");
+    });
+
+    const stop = provider.stopSession(sessionId);
+    await vi.waitFor(() => expect(state!.interruptDrain).toBeDefined());
+    sendTurnMock.mockResolvedValueOnce("next-native-turn");
+    const send = provider.sendTurn({
+      turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "continue",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    releaseDrain();
+    await Promise.all([stop, send]);
+    await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(2));
+    expect(appServers).toHaveLength(2);
+    // Whoever observed the failed drain first may own the discard; the
+    // replacement must survive both the teardown and the dead server's exit.
+    expect(appServers[0]!.isAlive).toBe(false);
+    appServers[0]!.emit("exit");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(appServers[1]!.isAlive).toBe(true);
+    expect(runtime.get(sessionId)).not.toBe(state);
+
+    state?.abortPendingTurnWait?.();
+    await provider.discardSession(sessionId);
   });
 
   it("cancels a staged turn before turn/start without closing the app-server", async () => {
@@ -717,7 +1113,7 @@ describe("CodexProvider first turn on new session", () => {
     await provider.discardSession(sessionId);
   });
 
-  it("reports provider_lost without an outcome when main-turn drain fails", async () => {
+  it("reports provider_lost and discards the session when main-turn drain fails", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
@@ -753,10 +1149,13 @@ describe("CodexProvider first turn on new session", () => {
     const state = runtime.get(sessionId);
 
     try {
-      await expect(provider.stopSession(sessionId)).rejects.toThrow();
+      // A failed interrupt is treated like a wedged drain: the stop resolves
+      // and the untrusted session is discarded so the next turn respawns.
+      await provider.stopSession(sessionId);
       expect(interruptRejected).toBe(true);
-      expect(server.isAlive).toBe(true);
+      expect(server.isAlive).toBe(false);
       expect(events).toContainEqual({
+        deliveryAttempt: 1,
         event: {
           type: AgentEventType.Ended,
           threadId,
@@ -1455,6 +1854,45 @@ describe("CodexProvider first turn on new session", () => {
     }
 
     expect(sendTurnMock.mock.calls[0][0]).toEqual([{ type: "text", text: "/goal clear" }]);
+  });
+
+  it("links a selected slash command to its backing file when no native channel matches", async () => {
+    const provider = makeProvider();
+
+    await provider.sendTurn({
+      turnId: "test-turn",
+      turnExecutionId: "test-execution",
+      sessionId: "mcode-command-link",
+      workspaceId: "workspace-test",
+      threadId: "command-link",
+      message: "/deploy staging",
+      mentions: [{
+        id: "command:skill:deploy",
+        kind: "command",
+        label: "deploy",
+        namespace: "skill",
+        capabilityIdentity: {
+          providerId: "codex",
+          kind: "skill",
+          nativeId: "deploy",
+        },
+        path: "C:\\skills\\deploy\\SKILL.md",
+        range: { start: 0, end: 7 },
+      }],
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build",
+      providerOptions: {},
+      permissionMode: "auto",
+    });
+
+    for (let i = 0; i < 20 && sendTurnMock.mock.calls.length === 0; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(sendTurnMock.mock.calls[0][0]).toEqual([
+      { type: "text", text: "[/deploy](C:\\skills\\deploy\\SKILL.md) staging" },
+    ]);
   });
 
   it("runs side-channel handoff turns at low effort", async () => {

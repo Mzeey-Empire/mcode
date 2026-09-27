@@ -120,7 +120,9 @@ vi.mock("@/stores/diffStore", async (importOriginal) => {
 });
 
 vi.mock("./OpenInAppButton", () => ({
-  OpenInAppButton: () => <div data-testid="open-in-app" />,
+  OpenInAppButton: ({ dirPath }: { dirPath: string | null }) => (
+    <div data-testid="open-in-app" data-dir-path={dirPath ?? ""} />
+  ),
 }));
 
 vi.mock("./CreatePrDialog", () => ({
@@ -543,6 +545,27 @@ describe("HeaderActions - consolidated header", () => {
 
     const icon = screen.getByTestId("thread-overview-local-mode-icon");
     expect(icon.querySelector('path[d="M12 12H3.75M12 12L19.5 19.5M12 12L19.5 4.5"]')).toBeInTheDocument();
+  });
+
+  it("does not fall back to the workspace checkout for a worktree thread without a worktree path", () => {
+    renderHeaderActions(makeThread({ mode: "worktree", worktree_path: null }));
+
+    expect(screen.getByTestId("open-in-app")).toHaveAttribute("data-dir-path", "");
+    expect(screen.getByTestId("thread-overview-local-path")).toHaveTextContent("Unavailable");
+    expect(screen.getByTestId("thread-overview-local-path")).not.toHaveTextContent("/test");
+  });
+
+  it("opens the workspace checkout for a direct thread", () => {
+    renderHeaderActions(makeThread({ mode: "direct", worktree_path: null }));
+
+    expect(screen.getByTestId("open-in-app")).toHaveAttribute("data-dir-path", "/test");
+    expect(screen.getByTestId("thread-overview-local-path")).toHaveTextContent("/test");
+  });
+
+  it("opens the thread worktree for a worktree thread", () => {
+    renderHeaderActions(makeThread({ mode: "worktree", worktree_path: "/repo/worktrees/feat-x" }));
+
+    expect(screen.getByTestId("open-in-app")).toHaveAttribute("data-dir-path", "/repo/worktrees/feat-x");
   });
 
   it("keeps older cached recap visible and exposes coverage times through the affordance", async () => {

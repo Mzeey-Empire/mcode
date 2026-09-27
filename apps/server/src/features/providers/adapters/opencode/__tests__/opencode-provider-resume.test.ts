@@ -106,7 +106,7 @@ describe("OpenCodeProvider resume cursor", () => {
     expect(http.promptAsync).toHaveBeenCalledWith("http://127.0.0.1:4096", "ses_kept", expect.anything());
     const events = submittedEvents(submitted);
     expect(events).toContainEqual(expect.objectContaining({ subtype: "sdk_session_id:ses_kept" }));
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("ignores an unknown cursor version and starts fresh", async () => {
@@ -117,7 +117,7 @@ describe("OpenCodeProvider resume cursor", () => {
     }));
     expect(http.createSession).toHaveBeenCalledTimes(1);
     expect(http.promptAsync).toHaveBeenCalledWith("http://127.0.0.1:4096", "ses_brand_new", expect.anything());
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("starts fresh with a visible notice when the adopted session is gone (deleted upstream)", async () => {
@@ -137,7 +137,7 @@ describe("OpenCodeProvider resume cursor", () => {
       type: "system",
       subtype: "sdk_session_invalidated",
     }));
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("starts fresh with a visible notice on a prompt-time 404 race", async () => {
@@ -155,7 +155,7 @@ describe("OpenCodeProvider resume cursor", () => {
       type: "system",
       subtype: "sdk_session_invalidated",
     }));
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("leaves other threads alone when one upstream session is recreated", async () => {
@@ -182,7 +182,7 @@ describe("OpenCodeProvider resume cursor", () => {
     expect(http.createSession).toHaveBeenCalledTimes(1);
     const prompted = http.promptAsync.mock.calls.map(([, sessionId]) => sessionId);
     expect(prompted).toEqual(["ses_a", "ses_fresh_other", "ses_a"]);
-    provider.shutdown();
+    await provider.shutdown();
   });
 
   it("only a confirmed 404 starts fresh; other verify failures propagate without reset", async () => {
@@ -195,6 +195,6 @@ describe("OpenCodeProvider resume cursor", () => {
     await provider.sendTurn(turnRequest({ resumeFrom: "ses_live" }));
     expect(http.createSession).not.toHaveBeenCalled();
     expect(http.promptAsync).not.toHaveBeenCalled();
-    provider.shutdown();
+    await provider.shutdown();
   });
 });

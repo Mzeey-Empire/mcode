@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import React from "react";
@@ -181,5 +181,37 @@ describe("ModelSelector", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Select GPT-5.6 Sol" }));
 
     expect(onSelect).toHaveBeenCalledWith("gpt-5.6-sol", "codex");
+  });
+
+  it("clears model loading after a timed-out request and keeps the cached models visible", async () => {
+    useProviderAvailabilityStore.setState((state) => ({
+      providers: state.providers.map((provider) => ({ ...provider, enabled: true })),
+    }));
+    let rejectModelRequest: (reason?: unknown) => void = () => {
+      throw new Error("Model request did not start");
+    };
+    listProviderModels.mockImplementationOnce(
+      () => new Promise<never>((_resolve, reject) => {
+        rejectModelRequest = reject;
+      }),
+    );
+
+    render(
+      <ModelSelector
+        selectedModelId="gpt-5.6-sol"
+        selectedProviderId="codex"
+        onSelect={vi.fn()}
+        locked={false}
+      />,
+    );
+
+    await userEvent.click(screen.getAllByRole("button")[0]);
+    expect(screen.getByText("Loading models")).toBeInTheDocument();
+    rejectModelRequest(new Error("Request timed out. Try again."));
+
+    const dialog = screen.getByRole("dialog", { name: "Choose model and provider" });
+    await waitFor(() => expect(dialog).not.toHaveTextContent("Loading models"));
+    expect(dialog).toHaveTextContent("GPT-5.6 Sol");
+    expect(screen.queryByText("Loading models")).toBeNull();
   });
 });

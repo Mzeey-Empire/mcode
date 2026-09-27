@@ -441,8 +441,19 @@ NodeTest.describe("frontend performance runner", () => {
       visibleStreamingUpdates: 200,
       visualStreamingCommitted: true,
       tailFollowed: true,
+      readerLeftTail: true,
       userAwayPreserved: true,
     }), ["streamed response text differs"]);
+    NodeAssertStrict.default.deepEqual(validateWorkloadCheck("streaming", {
+      expectedText: "complete response",
+      streamingText: "complete response",
+      storeUpdateCommits: 200,
+      visibleStreamingUpdates: 200,
+      visualStreamingCommitted: true,
+      tailFollowed: true,
+      readerLeftTail: false,
+      userAwayPreserved: true,
+    }), ["streaming did not register the reader leaving the tail"]);
     NodeAssertStrict.default.deepEqual(validateWorkloadCheck("markdownShiki", {
       codeBlocks: 10,
       highlightedBlocks: 9,
@@ -588,6 +599,7 @@ NodeTest.describe("frontend performance runner", () => {
       visibleStreamingUpdates: 199,
       visualStreamingCommitted: true,
       tailFollowed: true,
+      readerLeftTail: true,
       userAwayPreserved: true,
     }), ["streaming did not visibly commit 200 updates"]);
   });
