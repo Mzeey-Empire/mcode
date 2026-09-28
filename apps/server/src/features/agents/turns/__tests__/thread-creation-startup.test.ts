@@ -66,8 +66,8 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     const { db, workspace, threads, threadService, startups, parent, fork, makeCoordinator } = branchHarness();
     let failProvision: ((error: Error) => void) | undefined;
     vi.mocked(threadService.create).mockImplementation(async (workspaceId, title, _mode, branch, options) => {
-      const child = threads.create(workspaceId, title, "worktree", branch, true, "claude");
-      options.lifecycle?.onThreadPersisted(child);
+      const child = threads.create(workspaceId, title, "worktree", branch, true, options?.provider);
+      options?.lifecycle?.onThreadPersisted(child);
       await new Promise<void>((_resolve, reject) => { failProvision = reject; });
       return child;
     });
@@ -108,8 +108,8 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
   it("clears a managed branch binding when checkout failure deletes its child", async () => {
     const { db, workspace, threads, threadService, startups, parent, fork, makeCoordinator } = branchHarness();
     vi.mocked(threadService.create).mockImplementation(async (workspaceId, title, _mode, branch, options) => {
-      const child = threads.create(workspaceId, title, "worktree", branch, true, "claude");
-      options.lifecycle?.onThreadPersisted(child);
+      const child = threads.create(workspaceId, title, "worktree", branch, true, options?.provider);
+      options?.lifecycle?.onThreadPersisted(child);
       threads.hardDelete(child.id);
       throw new Error("Checkout failed");
     });
@@ -121,6 +121,68 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     expect(startups.get(managedStartupId)).toMatchObject({ state: "failed", phase: "worktree" });
     expect(startups.get(managedStartupId)?.threadId).toBeUndefined();
     expect(threads.listByWorkspace(workspace.id)).toHaveLength(1);
+    db.close();
+  });
+
+  it("inserts a managed thread row with the selected provider before checkout runs", async () => {
+    const { db, workspace, threads, threadService, admissions, coordinator } = harness();
+    let providerAtBind: string | undefined;
+    vi.mocked(threadService.create).mockImplementation(async (workspaceId, title, _mode, branch, options) => {
+      const thread = threads.create(workspaceId, title, "worktree", branch, true, options?.provider);
+      providerAtBind = threads.findById(thread.id)?.provider;
+      options?.lifecycle?.onThreadPersisted(thread);
+      return thread;
+    });
+    admissions.admitInitialAutomaticTurn.mockResolvedValue({ kind: "queued" });
+
+    const created = await coordinator.createInitialTurn({
+      workspaceId: workspace.id,
+      content: "Managed Devin turn",
+      mode: "worktree",
+      branch: "feature/devin",
+      provider: "devin",
+      startupId: managedStartupId,
+    });
+
+    expect(threadService.create).toHaveBeenCalledWith(
+      workspace.id, expect.any(String), "worktree", "feature/devin",
+      expect.objectContaining({ provider: "devin" }),
+    );
+    expect(providerAtBind).toBe("devin");
+    expect(created.thread.provider).toBe("devin");
+    expect(threads.findById(created.thread.id)?.provider).toBe("devin");
+    db.close();
+  });
+
+  it("inserts a managed branch row with the selected provider before checkout runs", async () => {
+    const { db, workspace, threads, threadService, parent, fork, makeCoordinator } = branchHarness();
+    let providerAtBind: string | undefined;
+    vi.mocked(threadService.create).mockImplementation(async (workspaceId, title, _mode, branch, options) => {
+      const thread = threads.create(workspaceId, title, "worktree", branch, true, options?.provider);
+      providerAtBind = threads.findById(thread.id)?.provider;
+      options?.lifecycle?.onThreadPersisted(thread);
+      return thread;
+    });
+
+    const created = await makeCoordinator().createInitialTurn({
+      workspaceId: workspace.id,
+      content: "Branch to Devin",
+      mode: "worktree",
+      branch: "feature/devin-branch",
+      parentThreadId: parent.id,
+      forkedFromMessageId: fork.id,
+      provider: "devin",
+      startupId: managedStartupId,
+    });
+
+    expect(threadService.create).toHaveBeenCalledWith(
+      workspace.id, expect.any(String), "worktree", "feature/devin-branch",
+      expect.objectContaining({ provider: "devin" }),
+    );
+    expect(providerAtBind).toBe("devin");
+    expect(created).toMatchObject({ kind: "dispatch", thread: { provider: "devin" } });
+    if (created.kind !== "dispatch") throw new Error("Expected dispatch result");
+    expect(threads.findById(created.thread.id)?.provider).toBe("devin");
     db.close();
   });
 
