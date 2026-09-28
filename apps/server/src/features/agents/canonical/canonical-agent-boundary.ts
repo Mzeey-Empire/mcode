@@ -495,7 +495,8 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       : this.eventStore.commit(this.toEventStoreCommitInput(input));
   }
 
-  private commitInsideTransaction(input: CanonicalAgentCommitInput): CanonicalAgentCommitResult {
+  /** Commit inside the caller's transaction. The caller publishes result.events after that commit. */
+  commitInsideTransaction(input: CanonicalAgentCommitInput): CanonicalAgentCommitResult {
     return serverWorkTrace
       ? serverWorkTrace.measure("canonical-write", input.threadId, input.executionId,
         () => this.eventStore.applyWithinTransaction(this.toEventStoreCommitInput(input)))

@@ -108,6 +108,8 @@ const AGENT_EVENT_REDUCERS: Record<AgentEventType, AgentEventReducer> = {
       event as AgentEventFor<"collaboration-action.recorded">,
       acceptedInputState,
     ),
+  "publication.recorded": (state, _event, acceptedInputState) =>
+    reduceVolatileTruncation(state, acceptedInputState),
 };
 
 /** Create an empty canonical reducer state. */
