@@ -284,7 +284,7 @@ describe("canonical SQLite writer", () => {
     const receipt = await writer.transactSemantic(delta, (events) => published.push(...events.map((event) => event.eventId)));
     expect(receipt).toMatchObject({ kind: "committed", operationId: "narrative-lease:2" });
     expect(created).toBe(2);
-    expect(published).toEqual([]);
+    expect(published).toEqual([expect.stringContaining(`narrative:${EXECUTION_ID}:toolCall:writer-recovery-tool:`)]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
       .get("toolCall:writer-recovery-tool")).toEqual({ count: 1 });
     await writer.close();

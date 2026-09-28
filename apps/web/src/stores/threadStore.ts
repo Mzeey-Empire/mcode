@@ -115,6 +115,14 @@ function deriveRunningThreadIds(records: Map<string, ThreadRecord>): Set<string>
   );
 }
 
+/** True when a canonical batch mutates a parent narrative recovery item. */
+function batchTouchesParentNarrative(events: readonly CanonicalAgentEventEnvelope[]): boolean {
+  return events.some((event) =>
+    event.payload.type === "item.recorded"
+    && (event.payload.item.payload.projection === "narrativeRecovery"
+      || event.payload.item.payload.projection === "narrativeRecoveryDiscarded"));
+}
+
 function preserveRunningThreadIds(previous: Set<string>, next: Set<string>): Set<string> {
   return previous.size === next.size && [...next].every((id) => previous.has(id)) ? previous : next;
 }
@@ -2760,7 +2768,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         if (update.installedSnapshot) streamingTextByteSizes.delete(recovery.threadId);
         records = patchThreadRecord(records, recovery.threadId, {
           canonicalAgent: update.replica,
-          ...(update.installedSnapshot ? recoverParentNarrative(recovery.threadId, update.replica.state) : {}),
+          ...((update.installedSnapshot
+            || (recovery.mode === "delta" && batchTouchesParentNarrative(recovery.events)))
+            ? recoverParentNarrative(recovery.threadId, update.replica.state)
+            : {}),
         });
         const reconciled = reconcileCanonicalRuntime(records, runningThreadIds, recovery.threadId);
         records = reconciled.records;
@@ -2786,7 +2797,12 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const update = applyCanonicalPushEvents(current.canonicalAgent, threadId, events);
       if (update.replica === current.canonicalAgent) return {};
       accepted = true;
-      const records = patchThreadRecord(state.records, threadId, { canonicalAgent: update.replica });
+      const records = patchThreadRecord(state.records, threadId, {
+        canonicalAgent: update.replica,
+        ...(batchTouchesParentNarrative(events)
+          ? recoverParentNarrative(threadId, update.replica.state)
+          : {}),
+      });
       const reconciled = reconcileCanonicalRuntime(records, state.runningThreadIds, threadId);
       return {
         records: reconciled.records,

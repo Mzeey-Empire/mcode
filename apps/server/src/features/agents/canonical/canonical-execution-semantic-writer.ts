@@ -550,14 +550,14 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private recordNarrativeDelta(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
     const mutation = operation.mutation;
     if (mutation.kind !== "narrative-delta") return conflict(operation);
-    return this.db.transaction(() => {
+    return this.withBufferedPublication(() => this.db.transaction(() => {
       const head = this.requireNextHead(operation);
       this.requireUnfinishedCheckpoint(operation.execution);
       this.persistNarrativeDelta(mutation.input);
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...head, ordinal: operation.ordinal });
       return this.storeReceipt(operation, hash, receipt);
-    }).immediate();
+    }).immediate());
   }
 
   private applyLiveRecovery(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
@@ -569,7 +569,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private recordLiveEvent(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
     const mutation = operation.mutation;
     if (mutation.kind !== "live-event") return conflict(operation);
-    const receipt = this.db.transaction(() => {
+    const receipt = this.withBufferedPublication(() => this.db.transaction(() => {
       const head = this.requireNextHead(operation);
       if (!validPublicationProvider(operation, head.providerId)) throw new SemanticConflict();
       this.requireUnfinishedCheckpoint(operation.execution);
@@ -580,7 +580,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.storeHead({ ...head, ordinal: operation.ordinal,
         ...(mutation.message ? { assignedMessageId: mutation.message.messageId } : {}) });
       return this.storeReceipt(operation, hash, committedReceipt, livePublication);
-    }).immediate();
+    }).immediate());
     if (mutation.text.kind === "reclassify") {
       this.assistantText.discardRecoveryJournal(operation.execution.executionId);
     }
