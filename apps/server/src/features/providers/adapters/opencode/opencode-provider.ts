@@ -14,11 +14,13 @@ import type {
   ProviderId,
   ProviderModelInfo,
   ProviderIdentity,
+  ProviderTurnDiffUpdate,
   SessionForker,
   TurnRequest,
 } from "@mcode/contracts";
 import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
+import { OpenCodeNativeTurnDiff } from "@mcode/providers";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
 import { CleanForker } from "../../../handoff/index.js";
@@ -42,7 +44,7 @@ import {
 import { formatOpenCodeResumeCursor, parseOpenCodeResumeCursor } from "./opencode-resume-cursor.js";
 import { probeOpenCodeCli } from "./opencode-cli.js";
 
-const OPENCODE_SUPPORTED_CAPABILITIES = ["build", "plan", "permissions", "session-eviction"] as const;
+const OPENCODE_SUPPORTED_CAPABILITIES = ["build", "plan", "permissions", "session-eviction", "turn-diff"] as const;
 
 /** Visible notice when a missing upstream session forces a fresh start. */
 const OPENCODE_SESSION_INVALIDATED_SUBTYPE = "sdk_session_invalidated";
@@ -115,6 +117,9 @@ interface OpenCodeTurnState {
   messageRoles: Map<string, string>;
   /** Text already forwarded per message, for exactly-once streaming. */
   forwardedText: Map<string, string>;
+  /** Native turn-diff accumulator and its monotonic push cursor for this turn. */
+  nativeDiff: OpenCodeNativeTurnDiff;
+  nativeDiffRevision: number;
 }
 
 function nestedSessionId(holder: unknown): string | undefined {
@@ -261,6 +266,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private readonly canonicalEventPublisher: CanonicalLiveEventPublisher | undefined;
   private readonly pendingPermissions = new Map<string, OpenCodePendingAsk>();
   private readonly seenNotices = new Map<string, Set<string>>();
+  private readonly turnDiffListeners = new Set<(event: ProviderTurnDiffUpdate) => void>();
   private pool: OpenCodeServerPool;
   private http: OpenCodeHttpClient;
   private probeCli: (cliPath: string, platform: string) => Promise<{ binaryPath: string; version: string }>;
@@ -568,6 +574,8 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       idleConfirmPromise: null,
       messageRoles: new Map<string, string>(),
       forwardedText: new Map<string, string>(),
+      nativeDiff: new OpenCodeNativeTurnDiff(),
+      nativeDiffRevision: 0,
     };
     this.turns.set(sessionId, created);
     return created;
@@ -615,6 +623,8 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     state.abortController = new AbortController();
     state.messageRoles.clear();
     state.forwardedText.clear();
+    state.nativeDiff = new OpenCodeNativeTurnDiff();
+    state.nativeDiffRevision = 0;
     emit({ type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent);
     const entry = await this.acquireTurnEntry(req, routing, state, emit);
     if (!entry) {
@@ -765,6 +775,37 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     emit({ type: AgentEventType.System, threadId, subtype: `sdk_session_id:${created.id}` } satisfies AgentEvent);
   }
 
+  /** Subscribe to complete native turn diffs without routing their bytes through renderer events. */
+  onTurnDiff(handler: (event: ProviderTurnDiffUpdate) => void): () => void {
+    this.turnDiffListeners.add(handler);
+    return () => this.turnDiffListeners.delete(handler);
+  }
+
+  /**
+   * Fold one upstream `session.diff` event into the turn's native aggregate
+   * and push the complete result. Upstream diffs are computed between its own
+   * step snapshots, so they carry agent-attributed evidence; the event mapper
+   * keeps classifying these envelopes as noise for the narrative timeline.
+   */
+  private publishNativeTurnDiff(
+    req: TurnRequest<"opencode">,
+    state: OpenCodeTurnState,
+    properties: Record<string, unknown>,
+  ): void {
+    const result = state.nativeDiff.observe(Array.isArray(properties.diff) ? properties.diff : []);
+    if (result === null) return;
+    const identity = {
+      turnId: req.turnId,
+      turnExecutionId: req.turnExecutionId,
+      deliveryAttempt: req.deliveryAttempt ?? 1,
+      revision: ++state.nativeDiffRevision,
+    };
+    const event: ProviderTurnDiffUpdate = result.state === "snapshot"
+      ? { ...identity, ...result, nativeFidelity: "agent" }
+      : { ...identity, ...result };
+    for (const listener of this.turnDiffListeners) listener(event);
+  }
+
   private handleTurnEnvelope(
     envelope: unknown,
     req: TurnRequest<"opencode">,
@@ -780,6 +821,9 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       this.trackMessageRole(state, normalized);
       const owner = sessionIdOfNormalized(normalized);
       if (owner && owner !== upstreamId) return;
+      if (normalized.type === "session.diff") {
+        this.publishNativeTurnDiff(req, state, normalized.properties);
+      }
     }
     const mapped = mapOpenCodeEnvelope(envelope, {
       threadId,
