@@ -206,10 +206,6 @@ export type CanonicalParentTurnFinishInput = ParentTurnFinishInput;
 /** Canonical alias for the structured parent recovery durability input. */
 export type ParentNarrativeRecoveryCommitInput = ParentNarrativeRecoveryCommit;
 
-type ParentNarrativeRecoveryOperation =
-  | { kind: "persist"; item: ParentNarrativeRecoveryItem }
-  | { kind: "discard"; itemId: string };
-
 export type {
   CanonicalChildTurnFinishInput,
   CodexChildDeliveryInput,
@@ -326,6 +322,17 @@ function narrativeItemKind(entryKind: Exclude<NarrativeEntry["kind"], "assistant
 function narrativeParentItem(entry: NarrativeEntry): { parentItemId?: string } {
   if (entry.kind !== "toolCall" || !("parent_tool_call_id" in entry.record)) return {};
   return entry.record.parent_tool_call_id ? { parentItemId: `toolCall:${entry.record.parent_tool_call_id}` } : {};
+}
+
+/** Byte size of the retained narrative content: persisted items plus the ids retained for discarded ones. */
+function retainedNarrativeRecoveryBytes(input: ParentNarrativeRecoveryCommitInput): number {
+  const persistedBytes = input.items.reduce((total, item) => (
+    total + Buffer.byteLength(JSON.stringify(item), "utf8")
+  ), 0);
+  const discardedBytes = (input.discardedItemIds ?? []).reduce((total, itemId) => (
+    total + Buffer.byteLength(itemId, "utf8")
+  ), 0);
+  return persistedBytes + discardedBytes;
 }
 
 function parentTerminalPayload(
@@ -1746,17 +1753,20 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   /**
    * Upsert the current structured parent narrative recovery projection before
    * its corresponding provider event reaches the renderer.
+   *
+   * Items commit as `item.recorded` envelopes instead of silent writes so
+   * subscribed replicas observe every mutation between snapshots.
    */
   recordParentNarrativeRecovery(
     input: ParentNarrativeRecoveryCommitInput,
   ): boolean {
-    const turn = this.loadTurnByExecution(input.executionId);
-    if (!turn) return false;
-    const thread = this.loadThread(turn.threadId);
-    if (!thread) throw new Error(`Canonical parent thread not found: ${turn.threadId}`);
-    if (input.items.length === 0 && (input.discardedItemIds?.length ?? 0) === 0) return true;
-    const now = new Date().toISOString();
-    this.persistParentNarrativeRecoveryBatched(input, thread, turn, now);
+    const prepared = this.prepareParentNarrativeRecovery(input);
+    if (prepared === undefined) return false;
+    if (prepared === null) return true;
+    const envelopes: CanonicalAgentEventEnvelope[] = [];
+    runBoundedWriteBatchesSync(this.narrativeRecoveryBatches(prepared, envelopes));
+    if (envelopes.length > 0) this.publish(envelopes);
+    this.dropDiscardedNarrativeItems(prepared.discardedItemIds);
     return true;
   }
 
@@ -1764,20 +1774,46 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   async recordParentNarrativeRecoveryYielding(
     input: ParentNarrativeRecoveryCommitInput,
   ): Promise<boolean> {
-    const turn = this.loadTurnByExecution(input.executionId);
-    if (!turn) return false;
-    const thread = this.loadThread(turn.threadId);
-    if (!thread) throw new Error(`Canonical parent thread not found: ${turn.threadId}`);
-    if (input.items.length === 0 && (input.discardedItemIds?.length ?? 0) === 0) return true;
-    const batch = this.parentNarrativeRecoveryBatchInput(input, thread, turn, new Date().toISOString());
-    if (!batch) return true;
+    const prepared = this.prepareParentNarrativeRecovery(input);
+    if (prepared === undefined) return false;
+    if (prepared === null) return true;
+    const envelopes: CanonicalAgentEventEnvelope[] = [];
     await runBoundedWriteBatches({
-      ...batch,
+      ...this.narrativeRecoveryBatches(prepared, envelopes),
       beginImmediate: true,
       // A macrotask-only yield can reacquire SQLite before another connection's busy waiter wakes.
       yieldControl: () => new Promise<void>((resolve) => setTimeout(resolve, 2)),
     });
+    if (envelopes.length > 0) this.publish(envelopes);
+    this.dropDiscardedNarrativeItems(prepared.discardedItemIds);
     return true;
+  }
+
+  /** Commits one `item.recorded` draft per batch row so the elapsed-bounded batcher keeps its pacing. */
+  private narrativeRecoveryBatches(
+    prepared: {
+      commit: Omit<CanonicalAgentCommitInput, "events">;
+      drafts: readonly CanonicalAgentEventDraft[];
+    },
+    envelopes: CanonicalAgentEventEnvelope[],
+  ): RunBoundedWriteBatchesInput<CanonicalAgentEventDraft> {
+    return {
+      db: this.db,
+      items: [...prepared.drafts],
+      limits: ACTIVE_TURN_WRITE_BATCH_LIMITS,
+      byteLength: (draft) => Buffer.byteLength(JSON.stringify(draft), "utf8"),
+      write: (draft) => envelopes.push(
+        ...this.commitInsideTransaction({ ...prepared.commit, events: [draft] }).events,
+      ),
+    };
+  }
+
+  /** A crash between the tombstone envelope and the delete leaves the tombstone, which is already the correct end state. */
+  private dropDiscardedNarrativeItems(itemIds: readonly string[]): void {
+    for (const itemId of itemIds) {
+      this.displayMaterializer.discardItem(itemId);
+      this.orm.delete(canonicalAgentItems).where(eq(canonicalAgentItems.id, itemId)).run();
+    }
   }
 
   /** Completes the canonical-to-display startup migration before provider recovery begins. */
@@ -1785,70 +1821,99 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     await this.displayMaterializer.runToCompletion();
   }
 
-  private persistParentNarrativeRecoveryBatched(
+  /**
+   * Resolve the recovery input into commit-scoped item drafts.
+   * Returns undefined when the turn is unknown, null when there is nothing to write.
+   */
+  private prepareParentNarrativeRecovery(
     input: ParentNarrativeRecoveryCommitInput,
-    thread: AgentThread,
-    turn: AgentTurn,
-    now: string,
-  ): void {
-    const batch = this.parentNarrativeRecoveryBatchInput(input, thread, turn, now);
-    if (batch) runBoundedWriteBatchesSync(batch);
-  }
-
-  private parentNarrativeRecoveryBatchInput(
-    input: ParentNarrativeRecoveryCommitInput,
-    thread: AgentThread,
-    turn: AgentTurn,
-    now: string,
-  ): RunBoundedWriteBatchesInput<ParentNarrativeRecoveryOperation> | null {
+  ): { commit: Omit<CanonicalAgentCommitInput, "events">; drafts: CanonicalAgentEventDraft[]; discardedItemIds: string[] } | null | undefined {
+    const turn = this.loadTurnByExecution(input.executionId);
+    if (!turn) return undefined;
+    const thread = this.loadThread(turn.threadId);
+    if (!thread) throw new Error(`Canonical parent thread not found: ${turn.threadId}`);
+    if (input.items.length === 0 && (input.discardedItemIds?.length ?? 0) === 0) return null;
     const checkpoint = this.loadCheckpoint(input.executionId);
     if (!checkpoint) throw new Error(`Canonical parent checkpoint was not found: ${input.executionId}`);
     if (checkpoint.terminalOutcome) return null;
-    const operations: ParentNarrativeRecoveryOperation[] = [
-      ...input.items.map((item) => ({ kind: "persist" as const, item })),
-      ...(input.discardedItemIds ?? []).map((itemId) => ({ kind: "discard" as const, itemId })),
-    ];
-    const byteLength = (operation: (typeof operations)[number]) => operation.kind === "persist"
-      ? Buffer.byteLength(JSON.stringify(operation.item), "utf8")
-      : Buffer.byteLength(operation.itemId, "utf8");
-    assertActiveTurnRecoveryRetention(
-      operations.length,
-      operations.reduce((total, operation) => total + byteLength(operation), 0),
-    );
+    const drafts = this.parentNarrativeRecoveryDrafts(input, thread, turn);
+    // Retention bounds the retained narrative, not the envelope transport overhead.
+    assertActiveTurnRecoveryRetention(drafts.length, retainedNarrativeRecoveryBytes(input));
     return {
-      db: this.db,
-      items: operations,
-      limits: ACTIVE_TURN_WRITE_BATCH_LIMITS,
-      byteLength,
-      write: (operation) => {
-        if (operation.kind === "persist") {
-          this.persistParentNarrativeRecoveryItem(operation.item, thread, turn, now);
-          return;
-        }
-        this.discardParentNarrativeRecoveryItem(operation.itemId, thread, turn);
+      commit: {
+        threadId: thread.id,
+        turnId: turn.id,
+        executionId: input.executionId,
+        phase: checkpoint.phase,
       },
+      drafts,
+      discardedItemIds: [...(input.discardedItemIds ?? [])],
     };
   }
 
-  private persistParentNarrativeRecoveryItem(
-    item: ParentNarrativeRecoveryItem,
+  /** Build one item.recorded draft per recovery mutation; discards become tombstones so replicas drop them. */
+  private parentNarrativeRecoveryDrafts(
+    input: ParentNarrativeRecoveryCommitInput,
     thread: AgentThread,
     turn: AgentTurn,
-    now: string,
-  ): void {
-    const itemId = this.parentNarrativeRecoveryItemId(item);
-    this.persistItem({
-      id: itemId,
-      threadId: thread.id,
-      turnId: turn.id,
-      ...this.parentNarrativeRecoveryParent(item),
-      kind: this.parentNarrativeRecoveryItemKind(item),
-      providerIdentities: turn.providerIdentities,
-      payload: this.parentNarrativeRecoveryPayload(item, itemId),
-      createdAt: item.record.started_at,
-      updatedAt: now,
+  ): CanonicalAgentEventDraft[] {
+    const persisted = input.items.map((item): CanonicalAgentEventDraft => {
+      const itemId = this.parentNarrativeRecoveryItemId(item);
+      return {
+        eventId: `narrative:${input.executionId}:${itemId}:${hashCodexKey(JSON.stringify(item))}`,
+        routing: { threadId: thread.id, turnId: turn.id, executionId: input.executionId, itemId },
+        sourceProviderId: thread.providerId,
+        sourceIdentities: [],
+        payload: {
+          type: "item.recorded",
+          item: {
+            id: itemId,
+            threadId: thread.id,
+            turnId: turn.id,
+            ...this.parentNarrativeRecoveryParent(item),
+            kind: this.parentNarrativeRecoveryItemKind(item),
+            providerIdentities: turn.providerIdentities,
+            payload: this.parentNarrativeRecoveryPayload(item, itemId),
+            createdAt: item.record.started_at,
+            // Deterministic so a retried commit dedupes on eventId instead of conflicting.
+            updatedAt: item.kind === "toolCall"
+              ? item.record.completed_at ?? item.record.started_at
+              : item.record.ended_at ?? item.record.started_at,
+          },
+        },
+      };
     });
-    this.displayMaterializer.materializeItems([itemId]);
+    const discarded = (input.discardedItemIds ?? []).map((itemId) =>
+      this.parentNarrativeRecoveryDiscardDraft(input, thread, turn, itemId));
+    return [...persisted, ...discarded];
+  }
+
+  /** A discard re-records the item under a marker projection so replicas drop it without a delete event. */
+  private parentNarrativeRecoveryDiscardDraft(
+    input: ParentNarrativeRecoveryCommitInput,
+    thread: AgentThread,
+    turn: AgentTurn,
+    itemId: string,
+  ): CanonicalAgentEventDraft {
+    const existing = this.loadItem(itemId);
+    const projection = typeof existing?.payload.projection === "string" ? existing.payload.projection : null;
+    if (!existing || existing.threadId !== thread.id || existing.turnId !== turn.id
+      || (projection !== "narrativeRecovery" && projection !== "narrativeRecoveryDiscarded")) {
+      throw new Error(`Canonical narrative recovery item was not found: ${itemId}`);
+    }
+    return {
+      eventId: `narrative-discard:${input.executionId}:${itemId}:${hashCodexKey(JSON.stringify(existing.payload))}`,
+      routing: { threadId: thread.id, turnId: turn.id, executionId: input.executionId, itemId },
+      sourceProviderId: thread.providerId,
+      sourceIdentities: [],
+      payload: {
+        type: "item.recorded",
+        item: {
+          ...existing,
+          payload: { ...existing.payload, projection: "narrativeRecoveryDiscarded" },
+        },
+      },
+    };
   }
 
   private parentNarrativeRecoveryItemId(item: ParentNarrativeRecoveryItem): string {
@@ -1900,24 +1965,6 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     value: unknown,
   ): void {
     if (typeof value === "string") metadata[key] = value;
-  }
-
-  private discardParentNarrativeRecoveryItem(
-    itemId: string,
-    thread: AgentThread,
-    turn: AgentTurn,
-  ): void {
-    const existing = this.loadItem(itemId);
-    if (!existing || existing.threadId !== thread.id || existing.turnId !== turn.id) {
-      throw new Error(`Canonical narrative recovery item was not found: ${itemId}`);
-    }
-    const projection = typeof existing.payload.projection === "string"
-      ? existing.payload.projection
-      : null;
-    if (projection === "narrativeRecovery" || projection === "narrativeRecoveryDiscarded") {
-      this.displayMaterializer.discardItem(itemId);
-      this.orm.delete(canonicalAgentItems).where(eq(canonicalAgentItems.id, itemId)).run();
-    }
   }
 
   /** Load the newest durable structured narrative snapshot for an unfinished parent turn. */

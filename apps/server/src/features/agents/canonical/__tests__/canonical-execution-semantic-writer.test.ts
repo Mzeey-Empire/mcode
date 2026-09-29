@@ -863,7 +863,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect((await writer.transact(first)).kind).toBe("committed");
     initialDelta.acknowledge();
     expect(canonical.loadParentNarrativeRecovery(TURN_ID)).toHaveLength(1);
-    expect(published).toHaveLength(publicationCount);
+    expect(published).toHaveLength(publicationCount + 1);
     const discardedDelta = reducer.prepare([]);
     if (!discardedDelta) throw new Error("Expected a discarded narrative delta");
     const discard = operation(3, { kind: "narrative-delta", input: {
@@ -880,7 +880,8 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const receipt = await writer.transact(latest);
     expect(receipt).toMatchObject({ kind: "committed", operationId: "lease-1:4" });
     latestDelta.acknowledge();
-    expect(published).toHaveLength(publicationCount);
+    // One envelope per persist and one per discard tombstone.
+    expect(published).toHaveLength(publicationCount + 3);
 
     db.close(true);
     db = openDatabase({ dbPath: path });
