@@ -26,7 +26,6 @@ function buildOrchestration() {
     })),
     updateStatus: vi.fn(),
   };
-  const publishedEvents: AgentEvent[] = [];
   const publishThreadStatus = vi.fn();
   const pullRequestCompletionEffect = { schedule: vi.fn() };
 
@@ -34,10 +33,8 @@ function buildOrchestration() {
     runtime,
     publicationRegistry,
     threadRepo,
-    narrativeStore: { getCurrentParentToolCallId: vi.fn(() => "agent-parent") },
     pullRequestCompletionEffect,
     providerRegistry: { resolveAll: vi.fn(() => []) },
-    publishAgentEvent: (event: AgentEvent) => publishedEvents.push(event),
     publishPermissionRequest: vi.fn(),
     publishPermissionResolved: vi.fn(),
     publishThreadStatus,
@@ -48,52 +45,12 @@ function buildOrchestration() {
     publish,
     runtime,
     threadRepo,
-    publishedEvents,
     publishThreadStatus,
     pullRequestCompletionEffect,
   };
 }
 
 describe("agent orchestration", () => {
-  it("publishes enriched parent events once while keeping attachments private", () => {
-    const orchestration = buildOrchestration();
-
-    orchestration.publish({
-      type: AgentEventType.ToolUse,
-      threadId: "thread-1",
-      toolCallId: "tool-1",
-      toolName: "Edit",
-      toolInput: {
-        file_path: "src/app.ts",
-        old_string: "secret",
-        new_string: "replacement",
-      },
-    });
-
-    expect(orchestration.publishedEvents).toHaveLength(1);
-    expect(orchestration.publishedEvents[0]).toMatchObject({
-      type: AgentEventType.ToolUse,
-      parentToolCallId: "agent-parent",
-      toolInput: { file_path: "src/app.ts" },
-    });
-    expect(orchestration.publishedEvents[0]).not.toMatchObject({
-      toolInput: { old_string: expect.anything(), new_string: expect.anything() },
-    });
-
-    orchestration.publish({
-      type: AgentEventType.GeneratedAttachment,
-      threadId: "thread-1",
-      attachment: {
-        id: "attachment-1",
-        name: "capture.png",
-        mimeType: "image/png",
-        sizeBytes: 1,
-      },
-    });
-
-    expect(orchestration.publishedEvents).toHaveLength(1);
-  });
-
   it("keeps terminal status publication on the parent event path", () => {
     const orchestration = buildOrchestration();
     const event: AgentEvent = {
@@ -107,7 +64,6 @@ describe("agent orchestration", () => {
 
     orchestration.publish(event);
 
-    expect(orchestration.publishedEvents).toEqual([event]);
     expect(orchestration.threadRepo.updateStatus).toHaveBeenCalledWith("thread-1", "completed");
     expect(orchestration.publishThreadStatus).toHaveBeenCalledWith({
       threadId: "thread-1",
@@ -116,18 +72,17 @@ describe("agent orchestration", () => {
     expect(orchestration.pullRequestCompletionEffect.schedule).toHaveBeenCalledWith("thread-1");
   });
 
-  it("releases a committed terminal receipt even when the legacy runtime suppression is set", () => {
+  it("suppresses a replayed terminal status but releases a committed terminal receipt", () => {
     const orchestration = buildOrchestration();
     orchestration.runtime.shouldSuppressTurnComplete.mockReturnValue(true);
     const legacy: AgentEvent = { type: AgentEventType.TurnComplete, threadId: "thread-1",
       reason: "completed", costUsd: null, tokensIn: 1, tokensOut: 1 };
     orchestration.publish(legacy);
-    expect(orchestration.publishedEvents).toEqual([]);
+    expect(orchestration.threadRepo.updateStatus).not.toHaveBeenCalled();
 
     const committed: AgentEvent = { ...legacy,
       turnExecutionId: "00000000-0000-4000-8000-000000000001", publicationId: "1" };
     orchestration.publish(committed);
-    expect(orchestration.publishedEvents).toEqual([committed]);
     expect(orchestration.threadRepo.updateStatus).not.toHaveBeenCalled();
     expect(orchestration.publishThreadStatus).not.toHaveBeenCalled();
     expect(orchestration.pullRequestCompletionEffect.schedule).toHaveBeenCalledWith("thread-1");

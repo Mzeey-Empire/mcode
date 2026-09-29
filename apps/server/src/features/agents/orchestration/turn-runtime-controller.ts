@@ -574,12 +574,15 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
     this.eventApplication.beginPreparedTurn(lease.threadId, lease.turnExecutionId, request.turnId);
     this.turnAdmissions.markDispatchActive(lease.threadId);
+    // The tracker generation must exist before turnStarted is ingested so its
+    // canonical publication embed carries the same fileEffectTurnId the wire path enriched.
+    await this.ensureTurnFileTracking(lease.threadId, prepared.cwd);
     this.emitProviderEvent(prepared.provider, {
       type: "turnStarted",
       threadId: lease.threadId,
       turnExecutionId: lease.turnExecutionId,
+      fileEffectTurnId: this.turnFileEffects.currentTurnId(lease.threadId),
     } satisfies AgentEvent);
-    await this.ensureTurnFileTracking(lease.threadId, prepared.cwd);
     await this.turnFileEffects.get(lease.threadId);
     this.eventApplication.recordContextSeed(lease.threadId, prepared.contextSeed, prepared.contextWindow ?? undefined);
   }

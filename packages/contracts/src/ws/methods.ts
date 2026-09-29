@@ -235,12 +235,6 @@ const ThreadSubscriptionIdSchema = z.string().trim().min(1).max(CONVERSATION_TAI
 /** Maximum identity length for a settled UUID or native Live comparison. */
 const TURN_DIFF_COMPARISON_ID_MAX_LENGTH = 512;
 
-/** Cursor identity for one server-process event stream. */
-const AgentEventCursorSchema = z.object({
-  epoch: z.string().uuid(),
-  sequence: z.number().int().nonnegative(),
-});
-
 /** Complete desired push subscription set for one WebSocket connection. */
 export const SetThreadSubscriptionsSchema = lazySchema(() =>
   z.object({
@@ -249,18 +243,6 @@ export const SetThreadSubscriptionsSchema = lazySchema(() =>
         context.addIssue({ code: z.ZodIssueCode.custom, message: "threadIds must be unique" });
       }
     }),
-    /** Last applied agent-event sequence per thread; omitted for legacy subscribe calls. */
-    cursors: z.record(
-      ThreadSubscriptionIdSchema,
-      z.union([z.number().int().nonnegative(), AgentEventCursorSchema]),
-    ).superRefine((cursors, context) => {
-      if (Object.keys(cursors).length > MAX_THREAD_SUBSCRIPTIONS) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `cursors must contain at most ${MAX_THREAD_SUBSCRIPTIONS} entries`,
-        });
-      }
-    }).optional(),
     /** Last installed canonical revisions per desired thread. */
     revisions: z.record(
       ThreadSubscriptionIdSchema,
@@ -282,8 +264,6 @@ export type SetThreadSubscriptionsInput = z.infer<ReturnType<typeof SetThreadSub
 /** Result of an atomic subscription replacement and any synchronous replay. */
 export const SetThreadSubscriptionsResultSchema = lazySchema(() =>
   z.object({
-    hydrationRequiredThreadIds: z.array(ThreadSubscriptionIdSchema),
-    replayedThrough: z.record(ThreadSubscriptionIdSchema, z.number().int().positive()),
     canonicalRecoveries: z.array(CanonicalAgentReconnectRecoverySchema())
       .max(MAX_THREAD_SUBSCRIPTIONS),
   }),

@@ -38,7 +38,6 @@ type SubscriptionRefs = {
 type AtomicSubscriptionInput = {
   readonly input: SetThreadSubscriptionsInput;
   readonly revisions: NonNullable<SetThreadSubscriptionsInput["revisions"]>;
-  readonly cursorAuthority: Map<string, { epoch?: string; sequence?: number }>;
 };
 
 type AtomicRequestContext = {
@@ -47,7 +46,6 @@ type AtomicRequestContext = {
   readonly requestId: number;
   readonly sentThreadIds: Set<string>;
   readonly revisions: NonNullable<SetThreadSubscriptionsInput["revisions"]>;
-  readonly cursorAuthority: Map<string, { epoch?: string; sequence?: number }>;
 };
 
 type SubscriptionReconcileContext = {
@@ -104,23 +102,11 @@ function hasCanonicalRecovery(threadIds: readonly string[]): boolean {
 }
 
 function atomicSubscriptionInput(threadIds: string[]): AtomicSubscriptionInput {
-  const cursors: NonNullable<SetThreadSubscriptionsInput["cursors"]> = {};
   const revisions: NonNullable<SetThreadSubscriptionsInput["revisions"]> = {};
-  const cursorAuthority = new Map<string, { epoch?: string; sequence?: number }>();
   for (const threadId of threadIds) {
-    const record = readThreadRecord(threadId);
-    revisions[threadId] = record.canonicalAgent.revision;
-    const sequence = record.lastAgentEventSequence;
-    if (typeof sequence !== "number" || sequence <= 0) continue;
-    cursorAuthority.set(threadId, { epoch: record.lastAgentEventEpoch, sequence });
-    cursors[threadId] = record.lastAgentEventEpoch
-      ? { epoch: record.lastAgentEventEpoch, sequence }
-      : sequence;
+    revisions[threadId] = readThreadRecord(threadId).canonicalAgent.revision;
   }
-  const input = Object.keys(cursors).length > 0
-    ? { threadIds, cursors, revisions }
-    : { threadIds, revisions };
-  return { input, revisions, cursorAuthority };
+  return { input: { threadIds, revisions }, revisions };
 }
 
 function createAtomicRequest(
@@ -140,7 +126,6 @@ function createAtomicRequest(
     requestId,
     sentThreadIds: new Set(threadIds),
     revisions: subscription.revisions,
-    cursorAuthority: subscription.cursorAuthority,
   };
 }
 
@@ -185,51 +170,6 @@ function applyCanonicalRecovery(
   if (recovery.threadId === activeThreadId) refreshConversation(activeThreadId);
 }
 
-function recordOwnsCursor(
-  record: ReturnType<typeof readThreadRecord>,
-  expected: { epoch?: string; sequence?: number } | undefined,
-): boolean {
-  if (expected?.epoch) {
-    return record.lastAgentEventEpoch === expected.epoch
-      && record.lastAgentEventSequence === expected.sequence;
-  }
-  return record.lastAgentEventEpoch === undefined
-    && record.lastAgentEventSequence === expected?.sequence;
-}
-
-function clearHydrationCursor(threadId: string, expected: { epoch?: string; sequence?: number } | undefined): void {
-  useThreadStore.setState((state) => {
-    const record = state.records.get(threadId);
-    if (!record || !recordOwnsCursor(record, expected)) return state;
-    const records = new Map(state.records);
-    records.set(threadId, {
-      ...record,
-      lastAgentEventEpoch: undefined,
-      lastAgentEventSequence: undefined,
-    });
-    return { records };
-  });
-}
-
-function applyHydrationRequired(
-  threadIds: readonly string[],
-  request: AtomicRequestContext,
-  context: SubscriptionReconcileContext,
-): boolean {
-  const residency = getConversationResidency();
-  for (const threadId of threadIds) {
-    if (!atomicResponseIsCurrent(context.refs, request)) return false;
-    clearHydrationCursor(threadId, request.cursorAuthority.get(threadId));
-    if (!atomicResponseIsCurrent(context.refs, request)) return false;
-    residency.invalidateConversation(threadId);
-    if (threadId === context.activeThreadId && context.runningThreadIds.has(threadId)) {
-      if (!atomicResponseIsCurrent(context.refs, request)) return false;
-      refreshConversation(threadId);
-    }
-  }
-  return true;
-}
-
 function applyAtomicResponse(
   result: SetThreadSubscriptionsResult,
   request: AtomicRequestContext,
@@ -243,7 +183,6 @@ function applyAtomicResponse(
   for (const recovery of canonicalRecoveries) {
     applyCanonicalRecovery(recovery, request.revisions, context.activeThreadId);
   }
-  if (!applyHydrationRequired(result.hydrationRequiredThreadIds, request, context)) return;
   if (!atomicResponseIsCurrent(context.refs, request)) return;
   context.refs.confirmedThreadIds.current = request.sentThreadIds;
   context.refs.retryAttempt.current = 0;

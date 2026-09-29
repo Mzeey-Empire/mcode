@@ -1573,8 +1573,7 @@ describe("AgentService Ended finalization", () => {
       new SubagentLifecycleService(canonicalSink, providerRegistry),
     );
     startAgentServiceIngressForTest(service, (event) => {
-      publishParentProviderEvent(event, event, {
-        publishAgentEvent: vi.fn(),
+      publishParentProviderEvent(event, {
         updateThreadStatus: (threadId, status) => threadRepo.updateStatus(threadId, status),
         publishThreadStatus: (payload) => broadcast("thread.status", payload),
       });

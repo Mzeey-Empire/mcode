@@ -9,7 +9,7 @@ export interface AgentEventRuntime {
   runtimeRecord: ThreadRecord;
 }
 
-/** Handler signature for one validated and sequenced agent event type. */
+/** Handler signature for one validated agent event type. */
 export type AgentEventHandler<T extends AgentEvent["type"]> = (
   event: Extract<AgentEvent, { type: T }>,
   runtime: AgentEventRuntime,
@@ -20,7 +20,7 @@ export type AgentEventHandlerTable = {
   [Type in AgentEvent["type"]]: AgentEventHandler<Type>;
 };
 
-/** Narrow store operations needed to validate and sequence one agent event. */
+/** Narrow store operations needed to validate one agent event. */
 export interface AgentEventPreflightContext {
   clearApiRetry: (threadId: string) => void;
   acceptPublication?: (event: AgentEvent) => boolean;
@@ -32,9 +32,7 @@ export interface AgentEventPreflightContext {
   invalidateDeferredNarrativeEvents: (threadId: string) => void;
   invalidatePermissionSnapshots: (threadId: string) => void;
   isDisplayConversationLeased: (threadId: string) => boolean;
-  patchRecord: (threadId: string, patch: Partial<ThreadRecord>) => void;
   promoteDeferredNarrativeEvents: (threadId: string) => void;
-  recordBackgroundEventDropped: (threadId: string) => void;
   scheduleDeferredNarrativeCleanup: (threadId: string) => void;
 }
 
@@ -72,47 +70,6 @@ function acceptsExecution(
     && runtimeRecord.turnExecutionId
     && incomingExecutionId !== runtimeRecord.turnExecutionId
   );
-}
-
-function incomingSequence(event: AgentEvent): number | undefined {
-  if (typeof event.sequence !== "number") return undefined;
-  return event.sequence > 0 ? event.sequence : undefined;
-}
-
-function isStaleSequence(
-  record: ThreadRecord,
-  sequence: number,
-  epoch: string | undefined,
-): boolean {
-  if (epoch !== undefined && epoch !== record.lastAgentEventEpoch) return false;
-  const lastSequence = record.lastAgentEventSequence;
-  return lastSequence !== undefined && sequence <= lastSequence;
-}
-
-function recordSequence(
-  context: AgentEventPreflightContext,
-  event: AgentEvent,
-  sequence: number,
-  epoch: string | undefined,
-): void {
-  context.patchRecord(event.threadId, {
-    lastAgentEventSequence: sequence,
-    ...(epoch !== undefined ? { lastAgentEventEpoch: epoch } : {}),
-  });
-}
-
-function acceptsSequence(context: AgentEventPreflightContext, event: AgentEvent): boolean {
-  const sequence = incomingSequence(event);
-  if (sequence === undefined) return true;
-  const epoch = typeof event.epoch === "string" ? event.epoch : undefined;
-  if (isStaleSequence(context.getRecord(event.threadId), sequence, epoch)) {
-    if (context.getCurrentThreadId() !== event.threadId) {
-      context.recordBackgroundEventDropped(event.threadId);
-    }
-    return false;
-  }
-  recordSequence(context, event, sequence, epoch);
-  return true;
 }
 
 function isLifecycleExit(event: AgentEvent): boolean {
@@ -187,7 +144,6 @@ export function prepareAgentEvent(
   const runtimeActive = isRuntimeActive(runtimeRecord, runningThreadIds, event.threadId);
   const incomingExecutionId = eventExecutionId(event);
   if (!acceptsExecution(event, runtimeRecord, incomingExecutionId)) return null;
-  if (!acceptsSequence(context, event)) return null;
   if (context.acceptPublication && !context.acceptPublication(event)) return null;
 
   const currentThreadId = context.getCurrentThreadId();

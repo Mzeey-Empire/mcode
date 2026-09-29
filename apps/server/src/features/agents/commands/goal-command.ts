@@ -11,7 +11,7 @@ import {
 import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { CommandContext, CommandOutcome, McodeCommand } from "./command-router.js";
 
-/** Publishes synthesized agent events through the canonical stream and the legacy broadcast. */
+/** Publishes synthesized agent events through the canonical stream. */
 type PublishSynthesizedFn = (threadId: string, events: readonly AgentEvent[]) => void;
 
 /** Repositories and database handle the command needs to persist its rows. */

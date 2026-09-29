@@ -20,15 +20,13 @@ function storage(): Pick<Storage, "getItem" | "setItem"> {
 }
 
 describe("stable AgentEvent publications", () => {
-  it("rejects a publish-then-crash replay after recreating the client and changing server epoch", () => {
+  it("rejects a publish-then-crash replay after recreating the client", () => {
     const shared = storage();
     const firstClient = new StableAgentEventPublications(() => shared);
     const published = event(7);
-    expect(firstClient.accept({ ...published, epoch: "00000000-0000-4000-8000-000000000004" }))
-      .toBe(true);
+    expect(firstClient.accept(published)).toBe(true);
     const reloadedClient = new StableAgentEventPublications(() => shared);
-    expect(reloadedClient.accept({ ...published, epoch: "00000000-0000-4000-8000-000000000005" }))
-      .toBe(false);
+    expect(reloadedClient.accept(published)).toBe(false);
     expect(reloadedClient.accept(event(8))).toBe(true);
     expect(reloadedClient.accept(event(7))).toBe(false);
   });

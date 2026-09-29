@@ -19,7 +19,7 @@ describe("PortPush", () => {
 
   it("does nothing when no port is attached", () => {
     // Should not throw
-    portPush.send("agent.event", { type: "delta", threadId: "t1" });
+    portPush.send("agent.canonical", { type: "delta", threadId: "t1" });
   });
 
   it("sends structured clone message via attached port", () => {
@@ -27,10 +27,10 @@ describe("PortPush", () => {
     portPush.attach(port);
 
     const data = { type: "delta", threadId: "t1", delta: "hello" };
-    portPush.send("agent.event", data);
+    portPush.send("agent.canonical", data);
 
     expect(port.postMessage).toHaveBeenCalledWith({
-      channel: "agent.event",
+      channel: "agent.canonical",
       data,
     });
   });
@@ -40,7 +40,7 @@ describe("PortPush", () => {
     portPush.attach(port);
     portPush.detach();
 
-    portPush.send("agent.event", { type: "delta", threadId: "t1" });
+    portPush.send("agent.canonical", { type: "delta", threadId: "t1" });
 
     expect(port.postMessage).toHaveBeenCalledTimes(0);
   });
@@ -75,7 +75,7 @@ describe("PortPush", () => {
     expect(portPush.isActive).toBe(true);
 
     // New port receives messages, old one does not
-    portPush.send("agent.event", { type: "delta" });
+    portPush.send("agent.canonical", { type: "delta" });
     expect(port2.postMessage).toHaveBeenCalledOnce();
     expect(port1.postMessage).not.toHaveBeenCalled();
   });
@@ -97,14 +97,14 @@ describe("PortPush", () => {
     });
 
     portPush.attach(port);
-    portPush.send("agent.event", { type: "delta" });
+    portPush.send("agent.canonical", { type: "delta" });
 
     // Port should have been closed and detached
     expect(port.close).toHaveBeenCalled();
     expect(portPush.isActive).toBe(false);
 
     // Subsequent sends are no-ops
-    portPush.send("agent.event", { type: "delta" });
+    portPush.send("agent.canonical", { type: "delta" });
     expect(port.postMessage).toHaveBeenCalledOnce(); // only the failed call
   });
 });

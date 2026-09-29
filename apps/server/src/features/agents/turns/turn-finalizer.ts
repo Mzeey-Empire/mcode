@@ -631,8 +631,9 @@ export class TurnFinalizer {
    * emitted a `Message` — the accumulated streaming text. The deterministic
    * per-turn id makes a replayed write an `INSERT OR IGNORE` no-op.
    *
-   * For the interrupted streaming-text path it also broadcasts `agent.event` so
-   * clients align their in-memory transcript with the new DB row; the provider
+   * For the interrupted streaming-text path it also publishes a canonical
+   * Message event so clients align their in-memory transcript with the new DB
+   * row; the provider
    * body path needs no broadcast because the `Message` event already carried
    * this id to the client. Returns null only when the write throws.
    */
@@ -713,11 +714,7 @@ export class TurnFinalizer {
       messageId: materialized.id,
       ...(materialized.attachments.length > 0 ? { attachments: materialized.attachments } : {}),
     } satisfies AgentEvent;
-    // Without a canonical sink there is no durable publication, so keep the legacy-only copy.
-    if (!this.canonicalSink) {
-      broadcast("agent.event", event);
-      return;
-    }
+    if (!this.canonicalSink) return;
     publishSynthesizedAgentEvents(this.canonicalSink, threadId, [event]);
   }
 

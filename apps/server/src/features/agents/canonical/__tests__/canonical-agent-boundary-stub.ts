@@ -1,4 +1,5 @@
 import type { CanonicalAgentBoundary } from "../../index.js";
+import { broadcast } from "../../../../application/transport/push.js";
 import type { Database } from "bun:sqlite";
 
 /** Creates an AgentService test seam that runs compatibility writes without canonical persistence. */
@@ -26,15 +27,19 @@ export function createCanonicalAgentBoundaryStub(
     finishCanonicalChildTurn: () => null,
     recordProviderDiagnostic: () => undefined,
     recordCodexChildRoutingDiagnostic: () => false,
-    // Synthesized publications bypass persistence but keep the publication.recorded shape so the
-    // legacy broadcast side effect survives in tests without a canonical store.
+    // Synthesized publications bypass persistence but keep the publication-stamped wire shape
+    // so tests can observe the same event payload the renderer would project.
     recordSynthesizedPublications: (_threadId: string, events: readonly Record<string, unknown>[]) =>
-      events.map((event, index) => ({
-        payload: {
-          type: "publication.recorded",
-          publicationId: String(index + 1),
-          event: { ...event, publicationId: String(index + 1) },
-        },
-      })),
+      events.map((event, index) => {
+        const stamped = { ...event, publicationId: String(index + 1) };
+        broadcast("agent.event", stamped);
+        return {
+          payload: {
+            type: "publication.recorded",
+            publicationId: String(index + 1),
+            event: stamped,
+          },
+        };
+      }),
   } as unknown as CanonicalAgentBoundary;
 }

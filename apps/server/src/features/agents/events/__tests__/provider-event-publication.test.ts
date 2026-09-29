@@ -4,7 +4,6 @@ import { publishParentProviderEvent } from "../provider-event-publication.js";
 
 function buildPublicationDeps() {
   return {
-    publishAgentEvent: vi.fn(),
     updateThreadStatus: vi.fn(),
     publishThreadStatus: vi.fn(),
   };
@@ -12,7 +11,7 @@ function buildPublicationDeps() {
 
 describe("provider event publication ownership", () => {
 
-  it("does not publish generated attachments to the parent UI", () => {
+  it("does not apply a status for generated attachments", () => {
     const deps = buildPublicationDeps();
     const event: AgentEvent = {
       type: AgentEventType.GeneratedAttachment,
@@ -25,8 +24,9 @@ describe("provider event publication ownership", () => {
       },
     };
 
-    expect(publishParentProviderEvent(event, event, deps)).toBe(false);
-    expect(deps.publishAgentEvent).not.toHaveBeenCalled();
+    expect(publishParentProviderEvent(event, deps)).toBe(false);
+    expect(deps.updateThreadStatus).not.toHaveBeenCalled();
+    expect(deps.publishThreadStatus).not.toHaveBeenCalled();
   });
 
   it("publishes a parent completion and updates its status", () => {
@@ -40,8 +40,7 @@ describe("provider event publication ownership", () => {
       tokensOut: 1,
     };
 
-    expect(publishParentProviderEvent(parentEvent, parentEvent, deps)).toBe(true);
-    expect(deps.publishAgentEvent).toHaveBeenCalledWith(parentEvent);
+    expect(publishParentProviderEvent(parentEvent, deps)).toBe(true);
     expect(deps.updateThreadStatus).toHaveBeenCalledWith("parent-thread", "completed");
     expect(deps.publishThreadStatus).toHaveBeenCalledWith({
       threadId: "parent-thread",
@@ -49,7 +48,7 @@ describe("provider event publication ownership", () => {
     });
   });
 
-  it("publishes a committed terminal replay without changing a newer thread status", () => {
+  it("skips the status transition for a committed terminal replay", () => {
     const deps = buildPublicationDeps();
     const event: AgentEvent = {
       type: AgentEventType.TurnComplete,
@@ -62,8 +61,7 @@ describe("provider event publication ownership", () => {
       tokensOut: 1,
     };
 
-    expect(publishParentProviderEvent(event, event, deps)).toBe(true);
-    expect(deps.publishAgentEvent).toHaveBeenCalledWith(event);
+    expect(publishParentProviderEvent(event, deps)).toBe(true);
     expect(deps.updateThreadStatus).not.toHaveBeenCalled();
     expect(deps.publishThreadStatus).not.toHaveBeenCalled();
   });
@@ -76,8 +74,7 @@ describe("provider event publication ownership", () => {
       error: "parent provider disconnected",
     };
 
-    expect(publishParentProviderEvent(parentEvent, parentEvent, deps)).toBe(true);
-    expect(deps.publishAgentEvent).toHaveBeenCalledWith(parentEvent);
+    expect(publishParentProviderEvent(parentEvent, deps)).toBe(true);
     expect(deps.updateThreadStatus).toHaveBeenCalledWith("parent-thread", "errored");
     expect(deps.publishThreadStatus).toHaveBeenCalledWith({
       threadId: "parent-thread",
@@ -99,7 +96,7 @@ describe("provider event publication ownership", () => {
       outcome,
     };
 
-    expect(publishParentProviderEvent(event, event, deps)).toBe(true);
+    expect(publishParentProviderEvent(event, deps)).toBe(true);
     expect(deps.updateThreadStatus).toHaveBeenCalledWith("parent-thread", status);
     expect(deps.publishThreadStatus).toHaveBeenCalledWith({
       threadId: "parent-thread",
@@ -107,7 +104,7 @@ describe("provider event publication ownership", () => {
     });
   });
 
-  it("does not publish a terminal status for an outcome-less Ended", () => {
+  it("does not apply a terminal status for an outcome-less Ended", () => {
     const deps = buildPublicationDeps();
     const event: AgentEvent = {
       type: AgentEventType.Ended,
@@ -115,8 +112,7 @@ describe("provider event publication ownership", () => {
       turnExecutionId: "00000000-0000-4000-8000-000000000001",
     };
 
-    expect(publishParentProviderEvent(event, event, deps)).toBe(false);
-    expect(deps.publishAgentEvent).not.toHaveBeenCalled();
+    expect(publishParentProviderEvent(event, deps)).toBe(false);
     expect(deps.updateThreadStatus).not.toHaveBeenCalled();
     expect(deps.publishThreadStatus).not.toHaveBeenCalled();
   });
@@ -130,8 +126,7 @@ describe("provider event publication ownership", () => {
       reason: "provider_lost",
     };
 
-    expect(publishParentProviderEvent(event, event, deps)).toBe(true);
-    expect(deps.publishAgentEvent).toHaveBeenCalledWith(event);
+    expect(publishParentProviderEvent(event, deps)).toBe(true);
     expect(deps.updateThreadStatus).not.toHaveBeenCalled();
     expect(deps.publishThreadStatus).not.toHaveBeenCalled();
   });
