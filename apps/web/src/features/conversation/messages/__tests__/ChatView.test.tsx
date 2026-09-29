@@ -358,11 +358,20 @@ function disableAtomicSubscriptionTransport() {
   });
 }
 
+/** One canonical delta recovery that always counts as newer than a fresh replica. */
+function deltaRecovery(threadId: string) {
+  return {
+    mode: "delta" as const,
+    threadId,
+    from: { conversationRevision: 0, rosterRevision: 0 },
+    through: { conversationRevision: 1, rosterRevision: 0 },
+    events: [],
+  };
+}
+
 /** Enable the atomic transport path and return its caller-boundary spy. */
 function enableAtomicSubscriptionTransport() {
   const setThreadSubscriptions = vi.fn().mockResolvedValue({
-    hydrationRequiredThreadIds: [],
-    replayedThrough: {},
     canonicalRecoveries: [],
   });
   Object.defineProperty(chatViewTransportMock, "setThreadSubscriptions", {
@@ -1687,7 +1696,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(new Set(input.threadIds).size).toBe(100);
   });
 
-  it("sends observed cursors without reconciling cursor-only changes", async () => {
+  it("sends observed revisions without reconciling unchanged records", async () => {
     const setThreadSubscriptions = enableAtomicSubscriptionTransport();
     const runningThreadIds = new Set<string>();
     const emptyRecord = createEmptyThreadRecord();
@@ -1697,7 +1706,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
         ...emptyRecord.canonicalAgent,
         revision: { conversationRevision: 4, rosterRevision: 2 },
       },
-      lastAgentEventSequence: 7,
     };
     setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: "thread-1" }));
     chatViewThreadMockRef.current = defaultThreadState({
@@ -1711,12 +1719,11 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     await waitFor(() => {
       expect(setThreadSubscriptions).toHaveBeenCalledWith({
         threadIds: ["thread-1"],
-        cursors: { "thread-1": 7 },
         revisions: { "thread-1": { conversationRevision: 4, rosterRevision: 2 } },
       });
     });
 
-    const secondRecord = { ...firstRecord, lastAgentEventSequence: 8 };
+    const secondRecord = { ...firstRecord };
     chatViewThreadMockRef.current = defaultThreadState({
       currentThreadId: "thread-1",
       runningThreadIds,
@@ -1739,8 +1746,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       },
     };
     const setThreadSubscriptions = vi.fn().mockResolvedValue({
-      hydrationRequiredThreadIds: [],
-      replayedThrough: {},
       canonicalRecoveries: [recovery],
     });
     Object.defineProperty(chatViewTransportMock, "setThreadSubscriptions", {
@@ -1887,10 +1892,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(2);
   });
 
-  it("ignores stale atomic hydration responses before mutating cursor or residency state", async () => {
-    const requests: Array<(result: { hydrationRequiredThreadIds: string[] }) => void> = [];
+  it("ignores stale atomic recovery responses before mutating canonical or residency state", async () => {
+    const requests: Array<(result: { canonicalRecoveries: unknown[] }) => void> = [];
     const setThreadSubscriptions = vi.fn(
-      () => new Promise<{ hydrationRequiredThreadIds: string[] }>((resolve) => {
+      () => new Promise<{ canonicalRecoveries: unknown[] }>((resolve) => {
         requests.push(resolve);
       }),
     );
@@ -1904,17 +1909,18 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(1));
     chatViewConnectionStatusRef.current = "reconnecting";
     rerender(<ChatView />);
-    requests[0]?.({ hydrationRequiredThreadIds: ["thread-1"] });
+    requests[0]?.({ canonicalRecoveries: [deltaRecovery("thread-1")] });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(chatViewThreadStoreSetStateMock).not.toHaveBeenCalled();
+    expect(chatViewApplyCanonicalRecoveriesMock).not.toHaveBeenCalled();
     expect(chatViewResidencyMock.invalidateConversation).not.toHaveBeenCalled();
     expect(chatViewResidencyMock.refresh).not.toHaveBeenCalled();
   });
 
-  it("swallows rejected atomic hydration refreshes", async () => {
+  it("swallows rejected atomic recovery refreshes", async () => {
     const setThreadSubscriptions = vi.fn().mockResolvedValue({
-      hydrationRequiredThreadIds: ["thread-1"],
+      canonicalRecoveries: [deltaRecovery("thread-1")],
     });
     Object.defineProperty(chatViewTransportMock, "setThreadSubscriptions", {
       configurable: true,
@@ -1937,10 +1943,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
   });
 
-  it("ignores same-epoch stale atomic hydration responses after the target changes", async () => {
-    const requests: Array<(result: { hydrationRequiredThreadIds: string[] }) => void> = [];
+  it("ignores same-epoch stale atomic recovery responses after the target changes", async () => {
+    const requests: Array<(result: { canonicalRecoveries: unknown[] }) => void> = [];
     const setThreadSubscriptions = vi.fn(
-      () => new Promise<{ hydrationRequiredThreadIds: string[] }>((resolve) => {
+      () => new Promise<{ canonicalRecoveries: unknown[] }>((resolve) => {
         requests.push(resolve);
       }),
     );
@@ -1951,11 +1957,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     const thread1 = makeThread({ id: "thread-1", title: "Thread 1" });
     const thread2 = makeThread({ id: "thread-2", title: "Thread 2", status: "active" });
-    const record = {
-      ...createEmptyThreadRecord(),
-      lastAgentEventEpoch: "epoch-a",
-      lastAgentEventSequence: 7,
-    };
+    const record = createEmptyThreadRecord();
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: thread1.id,
       threads: [thread1, thread2],
@@ -1978,15 +1980,16 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     rerender(<ChatView />);
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
 
-    requests[0]?.({ hydrationRequiredThreadIds: [thread1.id] });
+    requests[0]?.({ canonicalRecoveries: [deltaRecovery(thread1.id)] });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(chatViewThreadStoreSetStateMock).not.toHaveBeenCalled();
+    expect(chatViewApplyCanonicalRecoveriesMock).not.toHaveBeenCalled();
     expect(chatViewResidencyMock.invalidateConversation).not.toHaveBeenCalled();
     expect(chatViewResidencyMock.refresh).not.toHaveBeenCalled();
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(2));
 
-    requests[1]?.({ hydrationRequiredThreadIds: [] });
+    requests[1]?.({ canonicalRecoveries: [] });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(2);
   });

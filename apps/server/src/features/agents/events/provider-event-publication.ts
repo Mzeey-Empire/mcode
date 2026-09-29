@@ -2,20 +2,16 @@ import type { AgentEvent } from "@mcode/contracts";
 
 /** Dependencies used to publish one normalized provider event to the parent UI. */
 export interface ParentProviderEventPublicationDeps {
-  publishAgentEvent: (event: AgentEvent) => void;
   updateThreadStatus: (threadId: string, status: "completed" | "errored" | "interrupted") => void;
   publishThreadStatus: (payload: { threadId: string; status: "completed" | "errored" | "interrupted" }) => void;
 }
 
-/** Publish a normalized parent event and apply its legacy parent status transition. */
+/** Apply the status transition of a publishable normalized provider event. */
 export function publishParentProviderEvent(
   event: AgentEvent,
-  enrichedEvent: AgentEvent,
   deps: ParentProviderEventPublicationDeps,
 ): boolean {
   if (!shouldPublishParentEvent(event)) return false;
-
-  deps.publishAgentEvent(enrichedEvent);
   // A semantic writer committed this status before releasing its terminal event.
   // A late replay must not overwrite the status of a newer execution.
   if (event.publicationId !== undefined) return true;

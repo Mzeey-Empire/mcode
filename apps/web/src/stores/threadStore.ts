@@ -26,7 +26,6 @@ import { findModelById } from "@/lib/model-registry";
 import { resolveContextWindow } from "@/lib/resolve-context-window";
 import { useSettingsStore } from "./settingsStore";
 import { createConversationResidency, registerConversationResidency } from "@/features/conversation/residency/conversation-residency";
-import { recordBackgroundEventDropped } from "@/lib/thread-switch-telemetry";
 import {
   clearPendingTurnPersistMessage,
   projectTurnResponse,
@@ -125,8 +124,8 @@ function batchTouchesParentNarrative(events: readonly CanonicalAgentEventEnvelop
 }
 
 /**
- * Canonical envelopes carrying numbered renderer-facing publications replay through the same
- * dispatch as the agent.event copy; the publication cursor accepts whichever copy arrives first.
+ * Canonical envelopes carrying numbered renderer-facing publications feed the shared
+ * agent-event projection; the publication cursor drops duplicates across replays.
  */
 function dispatchCanonicalPublications(events: readonly CanonicalAgentEventEnvelope[]): void {
   const handle = useThreadStore.getState().handleAgentEvent;
@@ -3399,8 +3398,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           latestTurnWithChanges: null,
           serverMessageIds: {},
           narrativeByMessage: {},
-          lastAgentEventEpoch: undefined,
-          lastAgentEventSequence: undefined,
         }),
       }));
     }
@@ -3831,9 +3828,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       invalidateDeferredNarrativeEvents,
       invalidatePermissionSnapshots: (id) => threadHydrator.invalidatePermissionSnapshots(id),
       isDisplayConversationLeased: (id) => conversationResidency.isDisplayConversationLeased(id),
-      patchRecord: patchRec,
       promoteDeferredNarrativeEvents,
-      recordBackgroundEventDropped,
       scheduleDeferredNarrativeCleanup,
     }, event);
     if (!runtime) return;

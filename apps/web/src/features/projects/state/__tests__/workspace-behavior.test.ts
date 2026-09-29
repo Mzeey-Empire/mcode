@@ -2311,8 +2311,6 @@ describe("Workspace Behavior", () => {
             currentTurnResponseKey: "authoritative-response",
             streaming: "authoritative response",
             toolCalls: [persistedTool],
-            lastAgentEventSequence: 4,
-            lastAgentEventEpoch: "server-epoch",
           },
         ),
       }));
@@ -2330,8 +2328,6 @@ describe("Workspace Behavior", () => {
       expect(record?.streaming).toBe("authoritative response");
       expect(record?.toolCalls).toEqual([persistedTool]);
       expect(record?.toolCalls).not.toContainEqual({ id: "placeholder-tool" });
-      expect(record?.lastAgentEventSequence).toBe(4);
-      expect(record?.lastAgentEventEpoch).toBe("server-epoch");
       expect(useThreadStore.getState().runningThreadIds.has("persisted-authoritative")).toBe(true);
       expect(useThreadStore.getState().records.has(placeholderId)).toBe(false);
     });

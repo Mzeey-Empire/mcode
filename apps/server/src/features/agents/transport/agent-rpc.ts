@@ -144,6 +144,9 @@ const agentHandlers: AgentRpcHandlerMap = {
   },
   "agent.stop": (deps, params) => deps.agentService.stopSession(params.threadId),
   "agent.activeCount": (deps) => deps.agentService.runtimeAccess().activeCount(),
+  // The runtime registry is the reconnect snapshot authority: startup recovery
+  // interrupts every unfinished canonical checkpoint, so registry entries are
+  // exactly the executions canonical state still considers live.
   "agent.listRunning": (deps) => deps.agentService.runtimeAccess().runtimeSnapshots(),
   "agent.answerQuestions": async (deps, params) => {
     await deps.planTurnService.answerQuestions(

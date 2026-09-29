@@ -134,7 +134,7 @@ function handleTerminalData(data: unknown): void {
  * appropriate Zustand stores. Call once at app startup.
  *
  * Push channels handled:
- * - `agent.event` -- agent stream events forwarded to threadStore
+ * - `agent.canonical` -- canonical semantic batches forwarded to threadStore
  * - `terminal.data` -- PTY output forwarded to xterm via ptyDataRegistry
  * - `terminal.exit` -- PTY exit forwarded via ptyDataRegistry
  * - Reconnect-gap banners are emitted from ws-transport after `terminal.reattach` RPC
@@ -169,17 +169,6 @@ function handleTerminalData(data: unknown): void {
 export function startPushListeners(): void {
   // Guard against double-init
   stopPushListeners();
-
-  const handleAgentEvent = useThreadStore.getState().handleAgentEvent;
-
-  // agent.event: the server wraps each sidecar event with { threadId, type, ... }
-  unsubs.push(
-    pushEmitter.on("agent.event", (data) => {
-      const parsed = WS_CHANNELS["agent.event"].safeParse(data);
-      if (!parsed.success) return;
-      handleAgentEvent(parsed.data);
-    }),
-  );
 
   unsubs.push(
     pushEmitter.on("agent.canonical", (data) => {

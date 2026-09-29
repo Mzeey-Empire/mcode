@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { AgentEventSchema } from "../events/agent-event.js";
 import { CanonicalAgentEventEnvelopeSchema } from "../compat/agent-model.js";
 import { ThreadStatusSchema } from "../models/enums.js";
 import { ThreadSchema } from "../models/thread.js";
@@ -69,7 +68,6 @@ export const WS_CHANNELS = {
       reason: z.enum(["credential-revoked", "provider-session-ended"]),
     })
     .strict(),
-  "agent.event": AgentEventSchema(),
   /** Canonical semantic batches published only after their durable transaction commits. */
   "agent.canonical": z.object({
     threadId: z.string().min(1),

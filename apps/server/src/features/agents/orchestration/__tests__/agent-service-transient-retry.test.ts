@@ -343,8 +343,7 @@ describe("AgentService transient-failure auto-retry", () => {
   it("does not publish an interrupted status for suppressed retry teardown", async () => {
     const { service, sendTurn, providerEmitter, threadRepo } = buildService();
     startAgentServiceIngressForTest(service, (event) => {
-      publishParentProviderEvent(event, event, {
-        publishAgentEvent: vi.fn(),
+      publishParentProviderEvent(event, {
         updateThreadStatus: threadRepo.updateStatus,
         publishThreadStatus: vi.fn(),
       });

@@ -28,15 +28,15 @@ const pushSubscriptionHandlers: Record<
     if (client) unsubscribeClientFromThread(client, params.threadId);
   },
   "push.setThreadSubscriptions": (deps, params, client) => {
-    if (!client) return emptySubscriptionReplay();
-    const replay = setClientThreadSubscriptions(client, params.threadIds, params.cursors);
+    if (!client) return { canonicalRecoveries: [] };
+    setClientThreadSubscriptions(client, params.threadIds);
     const canonicalRecoveries = params.revisions
       ? params.threadIds.flatMap((threadId: string) => {
           const revision = params.revisions?.[threadId];
           return revision ? [deps.canonicalSink.recoverThread(threadId, revision)] : [];
         })
       : [];
-    return { ...replay, canonicalRecoveries };
+    return { canonicalRecoveries };
   },
 };
 
@@ -56,12 +56,4 @@ export function routePushSubscriptionRpc(
     throw new Error(`Unsupported push subscription method: ${method}`);
   }
   return pushSubscriptionHandlers[method](deps, params, client);
-}
-
-function emptySubscriptionReplay(): {
-  hydrationRequiredThreadIds: string[];
-  replayedThrough: Record<string, never>;
-  canonicalRecoveries: unknown[];
-} {
-  return { hydrationRequiredThreadIds: [], replayedThrough: {}, canonicalRecoveries: [] };
 }

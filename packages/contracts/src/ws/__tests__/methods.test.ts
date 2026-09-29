@@ -93,22 +93,6 @@ describe("thread switching WebSocket contracts", () => {
     expect(method.params.safeParse({ threadIds: [""] }).success).toBe(false);
     expect(method.params.safeParse({
       threadIds: ["thread-1"],
-      cursors: { "thread-1": { epoch: "00000000-0000-4000-8000-000000000001", sequence: 4 } },
-    }).success).toBe(true);
-    expect(method.params.safeParse({
-      threadIds: ["thread-1"],
-      cursors: { "thread-1": 4 },
-    }).success).toBe(true);
-    expect(method.params.safeParse({
-      threadIds: ["thread-1"],
-      cursors: { "thread-1": -1 },
-    }).success).toBe(false);
-    expect(method.params.safeParse({
-      threadIds: ["thread-1"],
-      cursors: { "thread-1": 1.5 },
-    }).success).toBe(false);
-    expect(method.params.safeParse({
-      threadIds: ["thread-1"],
       revisions: {
         "thread-1": { conversationRevision: 4, rosterRevision: 2 },
       },
@@ -121,19 +105,18 @@ describe("thread switching WebSocket contracts", () => {
     }).success).toBe(false);
     expect(method.params.safeParse({
       threadIds: ["thread-1"],
-      cursors: Object.fromEntries(
-        Array.from({ length: MAX_THREAD_SUBSCRIPTIONS + 1 }, (_, index) => [`thread-${index}`, index]),
+      revisions: Object.fromEntries(
+        Array.from({ length: MAX_THREAD_SUBSCRIPTIONS + 1 }, (_, index) => [
+          `thread-${index}`,
+          { conversationRevision: 0, rosterRevision: 0 },
+        ]),
       ),
     }).success).toBe(false);
   });
 
-  it("parses structured hydration and replay results", () => {
+  it("parses structured canonical recovery results", () => {
     const method = WS_METHODS()["push.setThreadSubscriptions"];
-    const result = {
-      hydrationRequiredThreadIds: ["thread-1"],
-      replayedThrough: { "thread-2": 12 },
-      canonicalRecoveries: [],
-    };
+    const result = { canonicalRecoveries: [] };
 
     const parsed = method.result.safeParse(result);
 
@@ -148,9 +131,7 @@ describe("thread switching WebSocket contracts", () => {
     const method = WS_METHODS()["push.setThreadSubscriptions"];
 
     expect(method.result.safeParse({
-      hydrationRequiredThreadIds: ["thread-1"],
-      replayedThrough: { "thread-2": 0 },
-      canonicalRecoveries: [],
+      canonicalRecoveries: [{ threadId: "thread-1" }],
     }).success).toBe(false);
   });
 

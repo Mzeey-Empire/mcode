@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentEvent, PermissionRequest, ThreadStartup } from "@mcode/contracts";
+import type { PermissionRequest, ThreadStartup } from "@mcode/contracts";
 import type { Thread } from "@/transport";
 
 vi.mock("@/transport", () => ({
@@ -288,38 +288,6 @@ describe("ws-events provider.catalogChanged", () => {
   });
 });
 
-describe("ws-events agent.event", () => {
-  afterEach(() => {
-    stopPushListeners();
-    vi.restoreAllMocks();
-  });
-
-  it("drops malformed data before it reaches the thread store", () => {
-    const handleAgentEvent = vi.spyOn(useThreadStore.getState(), "handleAgentEvent");
-    startPushListeners();
-
-    pushEmitter.emit("agent.event", { type: "message", threadId: 42, content: "invalid" });
-
-    expect(handleAgentEvent).not.toHaveBeenCalled();
-  });
-
-  it("forwards a valid parsed event exactly once", () => {
-    const event = {
-      type: "message",
-      threadId: "thread-1",
-      content: "valid",
-      tokens: null,
-    } satisfies AgentEvent;
-    const handleAgentEvent = vi.spyOn(useThreadStore.getState(), "handleAgentEvent");
-    startPushListeners();
-
-    pushEmitter.emit("agent.event", event);
-
-    expect(handleAgentEvent).toHaveBeenCalledOnce();
-    expect(handleAgentEvent).toHaveBeenCalledWith(event);
-  });
-});
-
 describe("ws-events permission.request", () => {
   afterEach(() => {
     stopPushListeners();
@@ -335,19 +303,6 @@ describe("ws-events permission.request", () => {
     } satisfies PermissionRequest;
     startPushListeners();
 
-    pushEmitter.emit("agent.event", {
-      type: "system",
-      threadId: request.threadId,
-      subtype: "approval.review.manual-required",
-      message: "Manual approval is required before Codex can continue.",
-      systemNotice: {
-        kind: "diagnostic",
-        presentation: "timeline",
-        scope: "turn",
-        sessionId: "notice-session",
-        noticeKey: "approval-review-manual-required",
-      },
-    } satisfies AgentEvent);
     expect(buildVolatileItems([], undefined, undefined, undefined, useThreadStore.getState().records.get(request.threadId)?.permissions))
       .not.toContainEqual(expect.objectContaining({ type: "permission-request" }));
     pushEmitter.emit("permission.request", request);

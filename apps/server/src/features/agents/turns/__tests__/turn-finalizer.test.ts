@@ -17,6 +17,7 @@ import type { TurnOutcome } from "../turn-outcome.js";
 import type { TurnFileTracker } from "../turn-file-tracker.js";
 import { broadcast } from "../../../../application/transport/push.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
+import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { ParentAssistantTextCheckpointService } from "../parent-assistant-text-checkpoint-service.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
@@ -87,6 +88,8 @@ describe("TurnFinalizer.finalize — turn outcome → tool-call status", () => {
       snapshotService,
       turnSnapshotRepo,
       db,
+      undefined,
+      createCanonicalAgentBoundaryStub(db),
     );
   });
 

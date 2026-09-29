@@ -752,7 +752,7 @@ export type {
 } from "./models/browser-narrative.js";
 
 // Events
-export { AgentEventSchema, AgentEventType, AgentEventEpochSchema } from "./events/agent-event.js";
+export { AgentEventSchema, AgentEventType } from "./events/agent-event.js";
 export type { AgentEvent } from "./events/agent-event.js";
 export {
   CodexChildEvidenceSchema,

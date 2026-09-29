@@ -866,13 +866,8 @@ async function bootstrapServer(): Promise<void> {
       runtime: container.resolve(AgentEventPublicationRuntimePort),
       publicationRegistry: container.resolve(AgentEventPublicationRegistry),
       threadRepo,
-      narrativeStore,
       pullRequestCompletionEffect,
       providerRegistry,
-      publishAgentEvent: (event) => {
-        const sequencedEvent = broadcast("agent.event", event) ?? event;
-        portPush.send("agent.event", sequencedEvent);
-      },
       publishThreadStatus: (status) => {
         broadcast("thread.status", status);
         portPush.send("thread.status", status);

@@ -43,17 +43,6 @@ function mergePendingPersistMessageIds(
   ])];
 }
 
-function applyPersistedSequence(
-  patch: Partial<ThreadRecord>,
-  persisted: ThreadRecord,
-  persistedExists: boolean,
-): void {
-  const sequence = persistedExists ? (persisted.lastAgentEventSequence ?? 0) : 0;
-  if (sequence === 0) return;
-  patch.lastAgentEventSequence = sequence;
-  patch.lastAgentEventEpoch = persisted.lastAgentEventEpoch;
-}
-
 function runtimeIdentityPatch(
   placeholder: ThreadRecord,
   persisted: ThreadRecord,
@@ -111,7 +100,6 @@ function createRuntimePatch(
     ...runtimeIdentityPatch(placeholder, persisted, placeholderRunning),
     ...runtimeNarrativePatch(placeholder, persisted, persistedId, createTurnResponseKey),
   };
-  applyPersistedSequence(patch, persisted, persistedExists);
   if (!persistedExists || persisted.error === null) patch.error = placeholder.error;
   return patch;
 }

@@ -4,30 +4,17 @@
  */
 
 import type { WebSocket } from "ws";
-import * as NodeCrypto from "node:crypto";
-import { WS_CHANNELS, type WsChannelName, type SetThreadSubscriptionsInput, encodeTerminalDataFrame } from "@mcode/contracts";
+import { WS_CHANNELS, type WsChannelName, encodeTerminalDataFrame } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { getTransportPayloadValidator } from "./payload-validation.js";
 
-/** Maximum transient agent events retained for one thread. */
-export const MAX_AGENT_EVENT_JOURNAL_EVENTS_PER_THREAD = 256;
-/** Maximum thread journals retained by the process. */
-export const MAX_AGENT_EVENT_JOURNAL_THREADS = 100;
 /** Maximum unsent push bytes for one connected client, excluding RPC response bytes. */
 export const MAX_QUEUED_PUSH_BYTES = 16 * 1_024 * 1_024;
 
 const clients = new Set<WebSocket>();
 const queuedPushBytes = new Map<WebSocket, number>();
 const threadSubscriptions = new Map<WebSocket, Set<string>>();
-interface AgentEventJournal {
-  epoch: string;
-  sequence: number;
-  events: unknown[];
-}
-
-const threadJournals = new Map<string, AgentEventJournal>();
 const SUBSCRIPTION_SCOPED_CHANNELS = new Set<WsChannelName>([
-  "agent.event",
   "agent.canonical",
   "turn.fileEffectsUpdated",
   "turn.diffChanged",
@@ -96,65 +83,9 @@ export function unsubscribeClientFromThread(ws: WebSocket, threadId: string): vo
 export function setClientThreadSubscriptions(
   ws: WebSocket,
   threadIds: readonly string[],
-  cursors?: NonNullable<SetThreadSubscriptionsInput["cursors"]>,
-): { hydrationRequiredThreadIds: string[]; replayedThrough: Record<string, number> } {
-  if (!clients.has(ws)) return { hydrationRequiredThreadIds: [], replayedThrough: {} };
-  threadSubscriptions.set(ws, new Set(threadIds));
-  const hydrationRequiredThreadIds: string[] = [];
-  const replayedThrough: Record<string, number> = {};
-  if (!cursors) return { hydrationRequiredThreadIds, replayedThrough };
-
-  for (const threadId of threadIds) {
-    replayThreadSubscription(
-      ws,
-      threadId,
-      cursors[threadId],
-      hydrationRequiredThreadIds,
-      replayedThrough,
-    );
-  }
-  return { hydrationRequiredThreadIds, replayedThrough };
-}
-
-function replayThreadSubscription(
-  ws: WebSocket,
-  threadId: string,
-  rawCursor: NonNullable<SetThreadSubscriptionsInput["cursors"]>[string] | undefined,
-  hydrationRequiredThreadIds: string[],
-  replayedThrough: Record<string, number>,
 ): void {
-  if (rawCursor === undefined) return;
-  const cursor = typeof rawCursor === "number" ? rawCursor : rawCursor.sequence;
-  const journal = threadJournals.get(threadId);
-  if (requiresThreadHydration(rawCursor, cursor, journal)) {
-    hydrationRequiredThreadIds.push(threadId);
-    return;
-  }
-  if (!journal) return;
-  const deliveredThrough = replayJournalEvents(ws, cursor, journal.events);
-  if (deliveredThrough !== cursor) replayedThrough[threadId] = deliveredThrough;
-}
-
-function requiresThreadHydration(
-  rawCursor: NonNullable<SetThreadSubscriptionsInput["cursors"]>[string],
-  cursor: number,
-  journal: AgentEventJournal | undefined,
-): boolean {
-  if (typeof rawCursor === "number" && cursor > 0) return true;
-  if (!journal) return cursor > 0;
-  if (typeof rawCursor !== "number" && rawCursor.epoch !== journal.epoch) return true;
-  if (cursor > journal.sequence) return true;
-  return journal.events.length > 0 && cursor < (journal.events[0] as { sequence: number }).sequence - 1;
-}
-
-function replayJournalEvents(ws: WebSocket, cursor: number, events: readonly unknown[]): number {
-  let deliveredThrough = cursor;
-  for (const event of events) {
-    if ((event as { sequence: number }).sequence <= cursor) continue;
-    if (!sendToClient(ws, "agent.event", event)) break;
-    deliveredThrough = (event as { sequence: number }).sequence;
-  }
-  return deliveredThrough;
+  if (!clients.has(ws)) return;
+  threadSubscriptions.set(ws, new Set(threadIds));
 }
 
 /** Get the current number of connected clients. */
@@ -197,10 +128,8 @@ export function broadcast(
   }
 
   const threadId = payloadThreadId(data);
-  const candidate = decorateAgentEvent(channel, data, threadId);
-  const validation = getTransportPayloadValidator().validatePush(channel, candidate, schema);
+  const validation = getTransportPayloadValidator().validatePush(channel, data, schema);
   if (!validation.ok) return undefined;
-  retainAgentEvent(channel, threadId, validation.data);
   const payload = JSON.stringify({
     type: "push" as const,
     channel,
@@ -208,32 +137,6 @@ export function broadcast(
   });
   sendBroadcastPayload(channel, threadId, payload);
   return validation.data;
-}
-
-function decorateAgentEvent(channel: WsChannelName, data: unknown, threadId: string | undefined): unknown {
-  if (channel !== "agent.event" || !threadId || !data || typeof data !== "object") return data;
-  const journal = threadJournals.get(threadId);
-  const sequence = (journal?.sequence ?? 0) + 1;
-  const epoch = journal?.epoch ?? NodeCrypto.randomUUID();
-  return { ...(data as Record<string, unknown>), sequence, epoch };
-}
-
-function retainAgentEvent(channel: WsChannelName, threadId: string | undefined, event: unknown): void {
-  if (channel !== "agent.event" || !threadId) return;
-  if (!event || typeof event !== "object" || !("sequence" in event) || !("epoch" in event)) return;
-  if (typeof event.sequence !== "number" || typeof event.epoch !== "string") return;
-  const existing = threadJournals.get(threadId);
-  const events = existing ? [...existing.events, event] : [event];
-  events.splice(0, Math.max(0, events.length - MAX_AGENT_EVENT_JOURNAL_EVENTS_PER_THREAD));
-  threadJournals.delete(threadId);
-  threadJournals.set(threadId, { epoch: event.epoch, sequence: event.sequence, events });
-  trimJournalMap(threadJournals);
-}
-
-function trimJournalMap(map: Map<string, unknown>): void {
-  while (map.size > MAX_AGENT_EVENT_JOURNAL_THREADS) {
-    map.delete(map.keys().next().value as string);
-  }
 }
 
 function sendBroadcastPayload(channel: WsChannelName, threadId: string | undefined, payload: string): void {
@@ -342,5 +245,4 @@ export function _resetForTest(): void {
   clients.clear();
   queuedPushBytes.clear();
   threadSubscriptions.clear();
-  threadJournals.clear();
 }

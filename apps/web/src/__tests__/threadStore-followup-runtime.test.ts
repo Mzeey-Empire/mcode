@@ -57,9 +57,9 @@ describe("follow-up runtime ownership", () => {
       original.call(this, key, value);
     });
     const handle = useThreadStore.getState().handleAgentEvent;
-    handle({ type: "turnStarted", threadId: THREAD_ID, turnExecutionId: "second", sequence: 1, publicationId: "1" });
-    handle({ type: "textDelta", threadId: THREAD_ID, turnExecutionId: "second", sequence: 2, publicationId: "2", delta: "Visible reply" });
-    handle({ type: "ended", threadId: THREAD_ID, turnExecutionId: "second", sequence: 3, publicationId: "3", outcome: "completed" });
+    handle({ type: "turnStarted", threadId: THREAD_ID, turnExecutionId: "second", publicationId: "1" });
+    handle({ type: "textDelta", threadId: THREAD_ID, turnExecutionId: "second", publicationId: "2", delta: "Visible reply" });
+    handle({ type: "ended", threadId: THREAD_ID, turnExecutionId: "second", publicationId: "3", outcome: "completed" });
     expect(record()?.runtimePhase).toBe("completed");
     expect(record()?.messages.map((message) => message.content)).toContain("Visible reply");
     expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
