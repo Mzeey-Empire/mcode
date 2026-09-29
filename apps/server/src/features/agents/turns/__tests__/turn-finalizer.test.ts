@@ -495,11 +495,13 @@ describe("TurnFinalizer canonical commit recovery", () => {
     expect(broadcast).not.toHaveBeenCalledWith("turn.persisted", expect.anything());
     expect(checkpoints.restore(executionId)).toBe("answer");
     expect(sink.loadParentNarrativeRecovery(turnId)).toHaveLength(2);
+    // Recovery envelopes commit independently of the finalize projection, so a finalize
+    // rollback must not remove the durable canonical copies.
     expect(db.prepare(`
       SELECT COUNT(*) AS count
       FROM canonical_agent_events
       WHERE json_extract(envelope_json, '$.payload.item.payload.projection') = 'narrativeRecovery'
-    `).get()).toEqual({ count: 0 });
+    `).get()).toEqual({ count: 2 });
     db.exec("DROP TRIGGER reject_canonical_tool");
 
     await finalizer.finalize(THREAD, "completed", Promise.resolve(), executionId);
@@ -516,11 +518,13 @@ describe("TurnFinalizer canonical commit recovery", () => {
     expect(sink.loadItem("toolCall:tool-0")?.payload).toMatchObject({
       projection: "toolCall",
     });
+    // Canonical history is append-only: the recorded recovery envelopes stay committed
+    // while the terminal commit removes the item rows they hydrated.
     expect(db.prepare(`
       SELECT COUNT(*) AS count
       FROM canonical_agent_events
       WHERE json_extract(envelope_json, '$.payload.item.payload.projection') = 'narrativeRecovery'
-    `).get()).toEqual({ count: 0 });
+    `).get()).toEqual({ count: 2 });
   });
 
   it("replays terminal post-commit effects from the canonical projection", async () => {
