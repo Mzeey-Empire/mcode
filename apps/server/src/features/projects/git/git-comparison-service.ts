@@ -75,8 +75,7 @@ export class GitComparisonService {
       const args = ["-C", repoPath, "diff", "--find-renames", range];
       if (filePath) args.push("--", filePath);
       const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
-      const result = stdout.trim();
-      return truncate ? truncateUnifiedDiff(result, maxLines) : result;
+      return truncate ? truncateUnifiedDiff(stdout, maxLines) : stdout;
     };
     try {
       return await readDiff(`${sha}~1..${sha}`, true);
@@ -138,8 +137,7 @@ export class GitComparisonService {
     if (filePath) args.push("--", filePath);
     try {
       const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
-      const result = stdout.trim();
-      return truncateUnifiedDiff(result, maxLines);
+      return truncateUnifiedDiff(stdout, maxLines);
     } catch {
       return "";
     }
@@ -204,8 +202,7 @@ export class GitComparisonService {
     if (filePath) args.push("--", filePath);
     try {
       const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
-      const result = stdout.trim();
-      return truncateUnifiedDiff(result, maxLines);
+      return truncateUnifiedDiff(stdout, maxLines);
     } catch {
       return "";
     }
