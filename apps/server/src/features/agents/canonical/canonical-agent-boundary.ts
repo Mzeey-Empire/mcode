@@ -324,6 +324,17 @@ function narrativeParentItem(entry: NarrativeEntry): { parentItemId?: string } {
   return entry.record.parent_tool_call_id ? { parentItemId: `toolCall:${entry.record.parent_tool_call_id}` } : {};
 }
 
+/** Byte size of the retained narrative content: persisted items plus the ids retained for discarded ones. */
+function retainedNarrativeRecoveryBytes(input: ParentNarrativeRecoveryCommitInput): number {
+  const persistedBytes = input.items.reduce((total, item) => (
+    total + Buffer.byteLength(JSON.stringify(item), "utf8")
+  ), 0);
+  const discardedBytes = (input.discardedItemIds ?? []).reduce((total, itemId) => (
+    total + Buffer.byteLength(itemId, "utf8")
+  ), 0);
+  return persistedBytes + discardedBytes;
+}
+
 function parentTerminalPayload(
   outcome: TurnOutcome,
   error: string | undefined,
@@ -1827,13 +1838,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     if (checkpoint.terminalOutcome) return null;
     const drafts = this.parentNarrativeRecoveryDrafts(input, thread, turn);
     // Retention bounds the retained narrative, not the envelope transport overhead.
-    const persistedBytes = input.items.reduce((total, item) => (
-      total + Buffer.byteLength(JSON.stringify(item), "utf8")
-    ), 0);
-    const discardedBytes = (input.discardedItemIds ?? []).reduce((total, itemId) => (
-      total + Buffer.byteLength(itemId, "utf8")
-    ), 0);
-    assertActiveTurnRecoveryRetention(drafts.length, persistedBytes + discardedBytes);
+    assertActiveTurnRecoveryRetention(drafts.length, retainedNarrativeRecoveryBytes(input));
     return {
       commit: {
         threadId: thread.id,
