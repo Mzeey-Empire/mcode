@@ -245,6 +245,7 @@ export function createAgentServiceForTest(
     messageRepo,
     db,
     runtimeCommands,
+    parentDurability,
   );
   const featureEffects = new TurnFeatureEffects(
     resolvedPlans,
@@ -291,7 +292,7 @@ export function createAgentServiceForTest(
   testContainer.registerInstance(TURN_FILE_EFFECTS, fileEffects);
   testContainer.registerInstance(TURN_ADMISSION_DISPATCH_COORDINATOR, admissions);
   testContainer.registerInstance(TurnConversationProjectionService, conversationProjection);
-  testContainer.registerInstance(PostTerminalHookCompletionEffect, new PostTerminalHookCompletionEffect(hookExecutionRepo, finalizer));
+  testContainer.registerInstance(PostTerminalHookCompletionEffect, new PostTerminalHookCompletionEffect(hookExecutionRepo, finalizer, parentDurability));
   testContainer.registerInstance(ProviderSessionCursorPersistence, new ProviderSessionCursorPersistence(runtimePersistence, parentDurability));
   testContainer.registerInstance(ThreadCreationCoordinator, new ThreadCreationCoordinator(
     threadRepo,

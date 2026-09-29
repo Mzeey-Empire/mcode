@@ -21,7 +21,8 @@ export class StableAgentEventPublications {
   /** Reserve a publication before applying its UI effects, retaining failed writes in memory. */
   accept(event: AgentEvent): boolean {
     if (!event.publicationId) return true;
-    if (!event.turnExecutionId || publicationSequence(event.publicationId) === null) return false;
+    // Synthesized publications belong to no execution; the thread-scoped sequence is the dedup key.
+    if (publicationSequence(event.publicationId) === null) return false;
     try {
       return this.reserve(event.threadId, event.publicationId);
     } catch {

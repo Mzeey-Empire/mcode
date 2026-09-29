@@ -22,6 +22,7 @@ import {
 import { logger, validateBranchName } from "@mcode/shared";
 import { isExplicitMcodeThreadRequest } from "@mcode/thread-orchestration";
 import { broadcast } from "../../../application/transport/push.js";
+import { publishSynthesizedAgentEvents } from "../canonical/synthesized-agent-event-publication.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { FileService } from "../../projects/files/file-service.js";
 import { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
@@ -493,13 +494,13 @@ export class TurnAdmissionDispatchCoordinator {
 
   private publishProviderUnavailable(threadId: string, providerId: ProviderId, error: unknown): void {
     if (!(error instanceof ProviderDisabledError) && !(error instanceof ProviderCliMissingError)) return;
-    broadcast("agent.event", {
+    publishSynthesizedAgentEvents(this.parentTurns, threadId, [{
       type: AgentEventType.ProviderUnavailable,
       threadId,
       providerId,
       reason: error instanceof ProviderDisabledError ? "disabled" : "cli_missing",
       configuredPath: error instanceof ProviderCliMissingError ? error.configuredPath : undefined,
-    });
+    }]);
   }
 
   private requireWorkspace(workspaceId: string): Exclude<ReturnType<WorkspaceRepo["findById"]>, null> {

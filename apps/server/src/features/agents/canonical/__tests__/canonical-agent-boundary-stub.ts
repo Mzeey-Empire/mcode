@@ -26,5 +26,15 @@ export function createCanonicalAgentBoundaryStub(
     finishCanonicalChildTurn: () => null,
     recordProviderDiagnostic: () => undefined,
     recordCodexChildRoutingDiagnostic: () => false,
+    // Synthesized publications bypass persistence but keep the publication.recorded shape so the
+    // legacy broadcast side effect survives in tests without a canonical store.
+    recordSynthesizedPublications: (_threadId: string, events: readonly Record<string, unknown>[]) =>
+      events.map((event, index) => ({
+        payload: {
+          type: "publication.recorded",
+          publicationId: String(index + 1),
+          event: { ...event, publicationId: String(index + 1) },
+        },
+      })),
   } as unknown as CanonicalAgentBoundary;
 }

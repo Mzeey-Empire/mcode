@@ -77,7 +77,7 @@ describe("GoalCommand", () => {
   function build() {
     return new GoalCommand(
       { messageRepo, db },
-      broadcast as unknown as (channel: "agent.event", data: AgentEvent) => void,
+      (_threadId, events) => events.forEach((event) => broadcast("agent.event", event)),
     );
   }
 

@@ -1,12 +1,12 @@
 import { inject, injectable } from "tsyringe";
 import { AgentEventType } from "@mcode/contracts";
-import type { AgentEvent } from "@mcode/contracts";
 
-import { broadcast } from "../../../application/transport/push.js";
 import {
   HookExecutionRepo,
   type CreateHookExecutionInput,
 } from "../events/persistence/hook-execution-repo.js";
+import { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
+import { publishSynthesizedAgentEvents } from "../canonical/synthesized-agent-event-publication.js";
 import { TURN_FINALIZER, TurnFinalizer } from "./turn-finalizer.js";
 
 /** Schedules durable hook completion records after their parent turn has materialized. */
@@ -15,6 +15,7 @@ export class PostTerminalHookCompletionEffect {
   constructor(
     @inject(HookExecutionRepo) private readonly hooks: HookExecutionRepo,
     @inject(TURN_FINALIZER) private readonly finalizer: TurnFinalizer,
+    @inject(CanonicalAgentBoundary) private readonly canonical: Pick<CanonicalAgentBoundary, "recordSynthesizedPublications">,
   ) {}
 
   /** Persist and publish a late hook only after the terminal turn projection verifies. */
@@ -37,7 +38,7 @@ export class PostTerminalHookCompletionEffect {
     const messageId = this.finalizer.getLastPersistedMessageId(threadId);
     if (!messageId) return;
     this.hooks.bulkCreate([{ ...hook, messageId }]);
-    broadcast("agent.event", {
+    publishSynthesizedAgentEvents(this.canonical, threadId, [{
       type: AgentEventType.HookCompleted,
       threadId,
       hookName: hook.hookName,
@@ -46,6 +47,6 @@ export class PostTerminalHookCompletionEffect {
       didBlock: hook.didBlock,
       persistedMessageId: messageId,
       persistedHookId: hook.id,
-    } satisfies AgentEvent);
+    }]);
   }
 }
