@@ -971,7 +971,7 @@ describe("AgentService.createAndSend existing worktree attach", () => {
       "Work from feature base",
       "worktree",
       "feature/base",
-      { branchless: true },
+      { branchless: true, provider: "claude" },
     );
     expect(thread).toMatchObject({
       mode: "worktree",
@@ -1015,7 +1015,7 @@ describe("AgentService.createAndSend existing worktree attach", () => {
       "Review PR",
       "worktree",
       "contributor/pr-branch",
-      { branchless: false },
+      { branchless: false, provider: "claude" },
     );
     expect(thread).toMatchObject({
       mode: "worktree",

@@ -134,3 +134,27 @@ describe("ThreadService.delete", () => {
     expect(teardownThread).toHaveBeenCalledExactlyOnceWith(parent.id);
   });
 });
+
+describe("ThreadService.create", () => {
+  it("persists the selected provider on the inserted row", async () => {
+    const database = openMemoryDatabase();
+    const threads = new ThreadRepo(database);
+    const workspaces = new WorkspaceRepo(database);
+    const service = new ThreadService(
+      threads,
+      {} as ProjectWorktreeService,
+      {} as AttachmentService,
+      {} as HandoffStorage,
+      {} as ThreadDeletionTeardownService,
+    );
+    const workspace = workspaces.create("Project", "/repo");
+
+    const thread = await service.create(workspace.id, "Devin work", "direct", "main", { provider: "devin" });
+    expect(thread.provider).toBe("devin");
+    expect(threads.findById(thread.id)?.provider).toBe("devin");
+
+    const fallback = await service.create(workspace.id, "Other", "direct", "main");
+    expect(fallback.provider).toBe("claude");
+    database.close();
+  });
+});

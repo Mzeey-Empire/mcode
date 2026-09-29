@@ -74,3 +74,8 @@ export {
   isProviderVersionAtLeast,
   warmCodexProviderVersion,
 } from "./availability.js";
+export {
+  OpenCodeNativeTurnDiff,
+  type OpenCodeFileDiff,
+  type OpenCodeNativeTurnDiffResult,
+} from "./private/opencode/opencode-native-turn-diff.js";
