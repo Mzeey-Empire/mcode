@@ -25,6 +25,7 @@ function canonicalTurn(status: AgentTurn["status"], trigger: AgentTurn["trigger"
   return {
     id: "canonical-turn", threadId: THREAD, status, trigger, permissionMode: "full",
     approvalReviewMode: "manual", approvalReviewReason: "manual-requested",
+    executionId: "00000000-0000-4000-8000-000000000042",
     providerIdentities: [], startedAt: NOW, endedAt: null, createdAt: NOW, updatedAt: NOW,
   };
 }

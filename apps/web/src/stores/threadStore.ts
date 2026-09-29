@@ -105,7 +105,7 @@ import {
 } from "./thread-store/usage";
 export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
-import { getCanonicalRuntimePhase, isThreadRuntimeActive } from "./thread-lifecycle";
+import { getCanonicalRuntimeTurn, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
 
 function deriveRunningThreadIds(records: Map<string, ThreadRecord>): Set<string> {
   return new Set(
@@ -2724,11 +2724,20 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     threadId: string,
   ): { records: Map<string, ThreadRecord>; runningThreadIds: Set<string> } => {
     const record = getThreadRecord(records, threadId);
-    const phase = getCanonicalRuntimePhase(threadId, record);
-    if (phase === null) return { records, runningThreadIds };
+    const turn = getCanonicalRuntimeTurn(threadId, record);
+    if (!turn) return { records, runningThreadIds };
+    const phase = phaseForTurnStatus(turn.status);
     let nextRecords = records;
-    if (record.runtimePhase !== phase) {
-      nextRecords = patchThreadRecord(records, threadId, { runtimePhase: phase });
+    const patch: Partial<ThreadRecord> = {};
+    if (record.runtimePhase !== phase) patch.runtimePhase = phase;
+    // Stamp the execution identity on live claims so later reconciles and the
+    // child lifecycle gate can keep correlating this turn to the record.
+    if (record.turnExecutionId === null && turn.executionId
+      && (turn.status === "Pending" || turn.status === "Running")) {
+      patch.turnExecutionId = turn.executionId;
+    }
+    if (Object.keys(patch).length > 0) {
+      nextRecords = patchThreadRecord(records, threadId, patch);
     }
     const running = phase === "running";
     if (runningThreadIds.has(threadId) === running) {
