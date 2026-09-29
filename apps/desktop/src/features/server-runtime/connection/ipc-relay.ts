@@ -12,6 +12,11 @@ import * as NodeNet from "node:net";
  *  a corrupt or malicious length prefix; the socket is destroyed immediately. */
 const MAX_FRAME_SIZE = 8 * 1024 * 1024;
 
+/** Reconnect backoff bounds. A dropped relay silently degraded the renderer to
+ *  the WebSocket path forever before this existed. */
+const MIN_RECONNECT_MS = 500;
+const MAX_RECONNECT_MS = 15_000;
+
 /** Minimal subset of BrowserWindow required by the relay. */
 interface RelayWindow {
   isDestroyed(): boolean;
@@ -28,57 +33,84 @@ interface RelayWindow {
  * Wire format: each frame is a 4-byte big-endian length prefix followed by
  * the UTF-8 encoded JSON body.
  *
+ * On socket close the renderer is told to fall back to WebSocket and the
+ * relay reconnects with exponential backoff. The renderer re-suppresses
+ * channels as frames resume, so no reconnect handshake is required.
+ *
  * @returns A cleanup function. Call it when the window closes to destroy
  *   the socket and prevent a named-pipe handle leak on Windows.
  */
 export function startIpcRelay(ipcPath: string, window: RelayWindow): () => void {
   if (!ipcPath) return () => { /* no-op: no socket was opened */ };
 
-  const socket = NodeNet.connect(ipcPath);
-  const chunks: Buffer[] = [];
-  let totalLen = 0;
+  let stopped = false;
+  let socket: NodeNet.Socket | null = null;
+  let reconnectTimer: NodeJS.Timeout | null = null;
+  let reconnectDelay = MIN_RECONNECT_MS;
 
-  socket.on("data", (chunk: Buffer) => {
-    chunks.push(chunk);
-    totalLen += chunk.length;
+  const windowAlive = () => !window.isDestroyed() && !window.webContents.isDestroyed();
 
-    // Avoid concat overhead when only one chunk is buffered.
-    let buffer = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, totalLen);
-    chunks.length = 0;
-    totalLen = 0;
+  const connect = (): void => {
+    if (stopped || !windowAlive()) return;
+    const current = NodeNet.connect(ipcPath);
+    socket = current;
+    const chunks: Buffer[] = [];
+    let totalLen = 0;
 
-    while (buffer.length >= 4) {
-      const frameLen = buffer.readUInt32BE(0);
-      if (frameLen > MAX_FRAME_SIZE) {
-        socket.destroy();
-        return;
-      }
-      if (buffer.length < 4 + frameLen) break;
+    current.on("connect", () => {
+      reconnectDelay = MIN_RECONNECT_MS;
+    });
 
-      const json = buffer.subarray(4, 4 + frameLen).toString("utf-8");
-      buffer = buffer.subarray(4 + frameLen);
+    current.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+      totalLen += chunk.length;
 
-      try {
-        const data = JSON.parse(json) as unknown;
-        if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
-          window.webContents.send("ipc-push-message", data);
+      // Avoid concat overhead when only one chunk is buffered.
+      let buffer = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, totalLen);
+      chunks.length = 0;
+      totalLen = 0;
+
+      while (buffer.length >= 4) {
+        const frameLen = buffer.readUInt32BE(0);
+        if (frameLen > MAX_FRAME_SIZE) {
+          current.destroy();
+          return;
         }
-      } catch { /* malformed frame - skip */ }
-    }
+        if (buffer.length < 4 + frameLen) break;
 
-    // Retain leftover bytes for the next data event.
-    if (buffer.length > 0) {
-      chunks.push(buffer);
-      totalLen = buffer.length;
-    }
-  });
+        const json = buffer.subarray(4, 4 + frameLen).toString("utf-8");
+        buffer = buffer.subarray(4 + frameLen);
 
-  socket.on("error", () => socket.destroy());
-  socket.on("close", () => {
-    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+        try {
+          const data = JSON.parse(json) as unknown;
+          if (windowAlive()) {
+            window.webContents.send("ipc-push-message", data);
+          }
+        } catch { /* malformed frame - skip */ }
+      }
+
+      // Retain leftover bytes for the next data event.
+      if (buffer.length > 0) {
+        chunks.push(buffer);
+        totalLen = buffer.length;
+      }
+    });
+
+    current.on("error", () => current.destroy());
+    current.on("close", () => {
+      if (socket === current) socket = null;
+      if (stopped || !windowAlive()) return;
       window.webContents.send("ipc-push-disconnect");
-    }
-  });
+      reconnectTimer = setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_MS);
+    });
+  };
 
-  return () => socket.destroy();
+  connect();
+
+  return () => {
+    stopped = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    socket?.destroy();
+  };
 }

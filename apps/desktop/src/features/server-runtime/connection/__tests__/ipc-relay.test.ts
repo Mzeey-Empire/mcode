@@ -224,4 +224,97 @@ describe("startIpcRelay", () => {
       expect(win.webContents.send).toHaveBeenCalledWith("ipc-push-message", message);
     });
   });
+
+  describe("reconnect", () => {
+    interface TrackedSocket {
+      on: ReturnType<typeof vi.fn>;
+      destroy: ReturnType<typeof vi.fn>;
+      handlers: Record<string, (...args: unknown[]) => void>;
+    }
+
+    function trackedSockets(): TrackedSocket[] {
+      const sockets: TrackedSocket[] = [];
+      vi.mocked(NodeNet.connect).mockImplementation(() => {
+        const socket: TrackedSocket = {
+          on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+            socket.handlers[event] = handler;
+            return socket;
+          }),
+          destroy: vi.fn(),
+          handlers: {},
+        };
+        sockets.push(socket);
+        return socket as unknown as ReturnType<typeof NodeNet.connect>;
+      });
+      return sockets;
+    }
+
+    it("reconnects with backoff after the socket closes", async () => {
+      vi.useFakeTimers();
+      try {
+        const sockets = trackedSockets();
+        startIpcRelay("/tmp/mcode.sock", makeWindow() as never);
+
+        sockets[0]!.handlers["close"]?.();
+        await vi.advanceTimersByTimeAsync(500);
+        expect(sockets).toHaveLength(2);
+
+        sockets[1]!.handlers["close"]?.();
+        await vi.advanceTimersByTimeAsync(999);
+        expect(sockets).toHaveLength(2);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(sockets).toHaveLength(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("resets the backoff after a successful connect", async () => {
+      vi.useFakeTimers();
+      try {
+        const sockets = trackedSockets();
+        startIpcRelay("/tmp/mcode.sock", makeWindow() as never);
+
+        sockets[0]!.handlers["close"]?.();
+        await vi.advanceTimersByTimeAsync(500);
+        sockets[1]!.handlers["connect"]?.();
+        sockets[1]!.handlers["close"]?.();
+        await vi.advanceTimersByTimeAsync(500);
+        expect(sockets).toHaveLength(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not reconnect after cleanup", async () => {
+      vi.useFakeTimers();
+      try {
+        const sockets = trackedSockets();
+        const cleanup = startIpcRelay("/tmp/mcode.sock", makeWindow() as never);
+
+        cleanup();
+        sockets[0]!.handlers["close"]?.();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(sockets).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("stops reconnecting when the window is destroyed", async () => {
+      vi.useFakeTimers();
+      try {
+        const sockets = trackedSockets();
+        const win = makeWindow(false);
+        startIpcRelay("/tmp/mcode.sock", win as never);
+        win.isDestroyed.mockReturnValue(true);
+
+        sockets[0]!.handlers["close"]?.();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(sockets).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });
