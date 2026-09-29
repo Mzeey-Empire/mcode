@@ -13,7 +13,8 @@ import {
   type ProviderId,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { broadcast } from "../../../application/transport/push.js";
+import { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
+import { publishSynthesizedAgentEvents } from "../canonical/synthesized-agent-event-publication.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { GoalCommand } from "../commands/goal-command.js";
 import type {
@@ -71,8 +72,10 @@ export class GoalLifecycleService {
     @inject(MessageRepo) messages: MessageRepo,
     @inject("Database") database: Database,
     @inject(AgentRuntimeCommandPort) private readonly runtime: AgentRuntimeCommandPort,
+    @inject(CanonicalAgentBoundary) private readonly canonical: Pick<CanonicalAgentBoundary, "recordSynthesizedPublications">,
   ) {
-    this.command = new GoalCommand({ messageRepo: messages, db: database }, broadcast);
+    this.command = new GoalCommand({ messageRepo: messages, db: database },
+      (threadId, events) => publishSynthesizedAgentEvents(canonical, threadId, events));
   }
 
   /** Route a goal command before the owning execution facade dispatches a provider turn. */
@@ -258,18 +261,17 @@ export class GoalLifecycleService {
       return;
     }
     const now = Date.now();
-    broadcast("agent.event", {
+    publishSynthesizedAgentEvents(this.canonical, event.threadId, [{
       type: AgentEventType.GoalUpdated,
       threadId: event.threadId,
       goal: { ...goal, status: "complete", timeUsedSeconds: this.elapsedSeconds(goal, now), updatedAt: now, controls: { ...goal.controls, canClear: false } },
-    } satisfies AgentEvent);
-    broadcast("agent.event", {
+    }, {
       type: AgentEventType.GoalCleared,
       threadId: event.threadId,
       providerId: goal.providerId ?? "unknown",
       reason: "completed",
       turnId: goal.turnId ?? null,
-    } satisfies AgentEvent);
+    }]);
   }
 
   private async refreshNativeGoal(
@@ -283,18 +285,17 @@ export class GoalLifecycleService {
     const result = await native.runNativeGoalCommand(sessionId, "/goal");
     if (result?.kind !== "empty") return;
     const now = Date.now();
-    broadcast("agent.event", {
+    publishSynthesizedAgentEvents(this.canonical, threadId, [{
       type: AgentEventType.GoalUpdated,
       threadId,
       goal: { ...before, status: "complete", timeUsedSeconds: this.elapsedSeconds(before, now), updatedAt: now, controls: { ...before.controls, canClear: false } },
-    } satisfies AgentEvent);
-    broadcast("agent.event", {
+    }, {
       type: AgentEventType.GoalCleared,
       threadId,
       providerId: before.providerId ?? "claude",
       reason: "completed",
       turnId: before.turnId ?? null,
-    } satisfies AgentEvent);
+    }]);
   }
 
   private async lookup(
@@ -354,19 +355,19 @@ export class GoalLifecycleService {
   }
 
   private broadcastGoalUpdated(threadId: string, goal: GoalState): void {
-    broadcast("agent.event", {
+    publishSynthesizedAgentEvents(this.canonical, threadId, [{
       type: AgentEventType.GoalUpdated,
       threadId,
       goal,
-    } satisfies AgentEvent);
+    }]);
   }
 
   private broadcastGoalCleared(threadId: string, reason: "rollback"): void {
-    broadcast("agent.event", {
+    publishSynthesizedAgentEvents(this.canonical, threadId, [{
       type: AgentEventType.GoalCleared,
       threadId,
       reason,
-    } satisfies AgentEvent);
+    }]);
   }
 
   private requireThread(threadId: string) {

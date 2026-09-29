@@ -34,6 +34,7 @@ import type { TurnOutcome } from "./turn-outcome.js";
 import type { TurnFileTracker } from "./turn-file-tracker.js";
 import type { TurnFileEffectSummary } from "@mcode/contracts";
 import type { ParentTurnDurability } from "./parent-turn-durability.js";
+import { publishSynthesizedAgentEvents } from "../canonical/synthesized-agent-event-publication.js";
 import type { ParentAssistantTextCheckpointService } from "./parent-assistant-text-checkpoint-service.js";
 import { deriveTurnAssistantMessageId } from "./turn-assistant-message-id.js";
 import type { TurnDiffService, SettleTurnDiff } from "./turn-diff-service.js";
@@ -704,14 +705,20 @@ export class TurnFinalizer {
 
   private broadcastMaterializedAssistant(threadId: string, materialized: MaterializedAssistantRow): void {
     if (!materialized.shouldBroadcast) return;
-    broadcast("agent.event", {
+    const event = {
       type: AgentEventType.Message,
       threadId,
       content: materialized.content,
       tokens: null,
       messageId: materialized.id,
       ...(materialized.attachments.length > 0 ? { attachments: materialized.attachments } : {}),
-    } satisfies AgentEvent);
+    } satisfies AgentEvent;
+    // Without a canonical sink there is no durable publication, so keep the legacy-only copy.
+    if (!this.canonicalSink) {
+      broadcast("agent.event", event);
+      return;
+    }
+    publishSynthesizedAgentEvents(this.canonicalSink, threadId, [event]);
   }
 
   private commitAssistantMaterialization(threadId: string): void {

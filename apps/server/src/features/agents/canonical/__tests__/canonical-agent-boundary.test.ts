@@ -29,6 +29,7 @@ import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import {
   CANONICAL_AGENT_CONTROL_EVENT_RESERVE,
+  CANONICAL_SYNTHESIZED_EXECUTION_ID,
   CanonicalAgentBoundary,
   type CanonicalAgentEventDraft,
 } from "../canonical-agent-boundary.js";
@@ -3316,5 +3317,40 @@ describe("CanonicalAgentBoundary", () => {
       .toBe(1);
     expect(db.prepare("SELECT deleted_at FROM threads WHERE id = ?")
       .get(delegation.childThread.id)).toMatchObject({ deleted_at: null });
+  });
+
+  it("records synthesized publications on the shared per-thread sequence and replays them", () => {
+    startCanonicalParent(sink, db);
+
+    const first = sink.recordSynthesizedPublications(THREAD_ID, [
+      { type: "goalUpdated", threadId: THREAD_ID },
+    ]);
+    const second = sink.recordSynthesizedPublications(THREAD_ID, [
+      { type: "goalCleared", threadId: THREAD_ID, reason: "cleared" },
+    ]);
+
+    // Writer and synthesized publications share the per-thread sequence head, so a
+    // synthesized event can never collide with a writer-allocated publicationId.
+    expect(first.map((envelope) => envelope.payload)).toEqual([
+      expect.objectContaining({ type: "publication.recorded", publicationId: "1" }),
+    ]);
+    expect(second.map((envelope) => envelope.payload)).toEqual([
+      expect.objectContaining({ type: "publication.recorded", publicationId: "2" }),
+    ]);
+
+    // Execution-correlation preflight drops events carrying a foreign execution id, so
+    // thread-scoped synthesized events must ship with a publicationId only.
+    const event = (first[0]!.payload as { event: Record<string, unknown> }).event;
+    expect(event).toMatchObject({ publicationId: "1", type: "goalUpdated" });
+    expect(event).not.toHaveProperty("turnExecutionId");
+
+    // Synthesized commits hold no execution checkpoint; their events still replay through
+    // the thread-scoped delta channel a reconnecting client consumes.
+    expect(sink.loadCheckpoint(CANONICAL_SYNTHESIZED_EXECUTION_ID)).toBeNull();
+    const recovery = sink.recoverThread(THREAD_ID, { conversationRevision: 0, rosterRevision: 0 });
+    const recovered = recovery.mode === "delta" ? recovery.events : [];
+    expect(recovered.filter((envelope) => envelope.payload.type === "publication.recorded"))
+      .toHaveLength(2);
+    expect(published).toHaveBeenCalled();
   });
 });

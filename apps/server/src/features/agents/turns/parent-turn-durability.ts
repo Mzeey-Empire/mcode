@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   AgentThread,
   AgentTurn,
+  CanonicalAgentEventEnvelope,
   Message,
   NarrativeEntry,
   ParentNarrativeRecoveryItem,
@@ -108,6 +109,10 @@ export interface ParentTurnDurability {
     event: AgentEvent;
     terminal: boolean;
   }): void;
+  recordSynthesizedPublications(
+    threadId: string,
+    events: readonly Record<string, unknown>[],
+  ): readonly CanonicalAgentEventEnvelope[];
 }
 
 /** Injection token for parent-turn durability. */

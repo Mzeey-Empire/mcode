@@ -153,6 +153,7 @@ function buildService(db: Database) {
   } as unknown as ProviderAvailabilityService;
 
   const eventPublication = new AgentEventPublicationRegistry();
+  const canonicalStub = createCanonicalAgentBoundaryStub(db);
   const svc = createAgentServiceForTest(
     threadRepo,
     workspaceRepo,
@@ -176,7 +177,7 @@ function buildService(db: Database) {
       undefined,
       undefined,
       undefined,
-      createCanonicalAgentBoundaryStub(db),
+      canonicalStub,
       undefined,
       undefined,
       undefined,
@@ -195,6 +196,7 @@ function buildService(db: Database) {
     messageRepo,
     db,
     svc.runtimeAccess() as never,
+    canonicalStub,
   );
 
   // Provider adapters always stamp turn-scoped events with the active execution

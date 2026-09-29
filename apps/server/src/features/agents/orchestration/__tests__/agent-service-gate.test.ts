@@ -264,14 +264,16 @@ describe("AgentService.sendMessage — admission gates", () => {
     // Provider must NOT be resolved — no agent session started
     expect(resolveProvider).not.toHaveBeenCalled();
 
-    // A providerUnavailable event must have been broadcast on the agent.event channel
-    expect(broadcast).toHaveBeenCalledWith("agent.event", {
+    // A providerUnavailable event must have been broadcast on the agent.event channel.
+    // The canonical publication stamps a shared publicationId on the legacy copy.
+    expect(broadcast).toHaveBeenCalledWith("agent.event", expect.objectContaining({
       type: "providerUnavailable",
       threadId: THREAD_ID,
       providerId: "codex",
       reason: "disabled",
       configuredPath: undefined,
-    });
+      publicationId: expect.any(String),
+    }));
   });
 
   it.each(["failed", "stopped", "archived", "deleted"] as const)("rejects composer sends to %s threads before persistence", async (threadStatus) => {

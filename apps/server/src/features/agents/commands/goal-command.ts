@@ -11,8 +11,8 @@ import {
 import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { CommandContext, CommandOutcome, McodeCommand } from "./command-router.js";
 
-/** Broadcast function shape used to push agent events to connected clients. */
-type BroadcastFn = (channel: "agent.event", data: AgentEvent) => void;
+/** Publishes synthesized agent events through the canonical stream and the legacy broadcast. */
+type PublishSynthesizedFn = (threadId: string, events: readonly AgentEvent[]) => void;
 
 /** Repositories and database handle the command needs to persist its rows. */
 interface GoalCommandDeps {
@@ -50,7 +50,7 @@ function asClaudeNativeGoalCommandProvider(
 export class GoalCommand implements McodeCommand {
   constructor(
     private readonly deps: GoalCommandDeps,
-    private readonly broadcast: BroadcastFn,
+    private readonly publishSynthesized: PublishSynthesizedFn,
   ) {}
 
   /** The session id the goal hook keys on, derived from the thread id. */
@@ -177,11 +177,11 @@ export class GoalCommand implements McodeCommand {
     threadId: string,
     reason: "cleared" | "rollback" | "completed",
   ): void {
-    this.broadcast("agent.event", {
+    this.publishSynthesized(threadId, [{
       type: AgentEventType.GoalCleared,
       threadId,
       reason,
-    } satisfies AgentEvent);
+    }]);
   }
 
   /**
@@ -204,12 +204,12 @@ export class GoalCommand implements McodeCommand {
       assistantMsgId = a.id;
     })();
 
-    this.broadcast("agent.event", {
+    this.publishSynthesized(threadId, [{
       type: AgentEventType.Message,
       threadId,
       content: replyText,
       tokens: null,
       messageId: assistantMsgId,
-    } satisfies AgentEvent);
+    }]);
   }
 }

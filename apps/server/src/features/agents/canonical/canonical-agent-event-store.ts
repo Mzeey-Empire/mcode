@@ -80,6 +80,7 @@ export interface CanonicalAgentEventStoreOperations {
     events: readonly CanonicalAgentEventEnvelope[],
   ): void;
   insertEvent(event: CanonicalAgentEventEnvelope): void;
+  lastAcceptedSequence(threadId: string, executionId: string): number;
   persistCheckpoint(checkpoint: CanonicalAgentEventStoreCheckpoint): void;
   materializeItems(events: readonly CanonicalAgentEventEnvelope[]): void;
   recover(input: CanonicalAgentEventStoreInput, error: unknown): CanonicalAgentCommitResult | null;
@@ -171,7 +172,9 @@ export class CanonicalAgentEventStore {
   ): CanonicalAgentCommitResult {
     const acceptedAt = new Date().toISOString();
     const candidateRevision = (context.thread?.conversationRevision ?? 0) + 1;
-    let acceptedSequence = context.checkpoint?.lastAcceptedSequence ?? 0;
+    // Checkpoint-less executions (synthesized publications) sequence from their own event rows.
+    let acceptedSequence = context.checkpoint?.lastAcceptedSequence
+      ?? this.operations.lastAcceptedSequence(input.threadId, input.executionId);
     let envelopes = newDrafts.map((draft) => {
       acceptedSequence += 1;
       return this.operations.createEnvelope(draft, acceptedSequence, candidateRevision, acceptedAt);

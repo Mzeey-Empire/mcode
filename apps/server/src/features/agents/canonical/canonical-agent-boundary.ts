@@ -110,6 +110,13 @@ import { ConversationDisplayMaterializer } from "../conversation/migrations/conv
 
 /** Capacity held back so volatile input cannot consume every semantic batch slot. */
 export const CANONICAL_AGENT_CONTROL_EVENT_RESERVE = 16;
+
+/**
+ * Reserved execution identity for `publication.recorded` envelopes synthesized outside a provider
+ * execution, such as goal broadcasts and admission failures. The sequence space is shared across
+ * all threads because each envelope is keyed by its thread-scoped publicationId.
+ */
+export const CANONICAL_SYNTHESIZED_EXECUTION_ID = "00000000-0000-4000-8000-000000000000";
 const CANONICAL_EXECUTION_DIAGNOSTIC_INDEX_CAPACITY = 128;
 const CANONICAL_DIAGNOSTIC_EXPORT_EVENT_CAPACITY = 1_024;
 
@@ -387,6 +394,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   private readonly loadCommitTurnStatement: ReturnType<CanonicalAgentBoundary["buildLoadCommitTurnStatement"]>;
   private readonly loadCommitSequenceCollisionStatement: ReturnType<CanonicalAgentBoundary["buildLoadCommitSequenceCollisionStatement"]>;
   private readonly loadLastAcceptedSequenceStatement: ReturnType<CanonicalAgentBoundary["buildLoadLastAcceptedSequenceStatement"]>;
+  private readonly advanceLivePublicationHead: ReturnType<Database["prepare"]>;
   private readonly diagnostics = new CanonicalAgentDiagnostics();
   private readonly turnIdByExecution = new Map<string, string>();
   private readonly eventStore: CanonicalAgentEventStore;
@@ -410,6 +418,10 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     this.loadCommitTurnStatement = this.buildLoadCommitTurnStatement();
     this.loadCommitSequenceCollisionStatement = this.buildLoadCommitSequenceCollisionStatement();
     this.loadLastAcceptedSequenceStatement = this.buildLoadLastAcceptedSequenceStatement();
+    // Synthesized publications share the writer's per-thread sequence so client dedup sees one order.
+    this.advanceLivePublicationHead = db.prepare(`INSERT INTO canonical_writer_live_publication_heads (thread_id, last_sequence)
+      VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET last_sequence = last_sequence + excluded.last_sequence
+      WHERE last_sequence <= 9007199254740991 - excluded.last_sequence RETURNING last_sequence`);
     this.displayMaterializer = new ConversationDisplayMaterializer(db);
     this.eventStore = new CanonicalAgentEventStore(db, {
       loadThread: (threadId) => this.loadThread(threadId),
@@ -427,6 +439,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       persistState: (state, threadId, turnId, executionId, conversationChanged, events) =>
         this.persistState(state, threadId, turnId, executionId, conversationChanged, events),
       insertEvent: (event) => this.insertEvent(event),
+      lastAcceptedSequence: (threadId, executionId) => this.lastAcceptedSequence(threadId, executionId),
       persistCheckpoint: (checkpoint) => this.persistCheckpoint(this.toCanonicalCheckpoint(checkpoint)!),
       materializeItems: (events) => this.materializeRecordedItems(events),
       recover: (input, error) => this.recoverCommit(this.toCanonicalCommitInput(input), error),
@@ -504,6 +517,50 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       ? serverWorkTrace.measure("canonical-write", input.threadId, input.executionId,
         () => this.eventStore.commit(this.toEventStoreCommitInput(input)))
       : this.eventStore.commit(this.toEventStoreCommitInput(input));
+  }
+
+  /**
+   * Record renderer-facing events that no provider execution publishes, such as goal broadcasts,
+   * as canonical publications. The drafts and their sequence advance commit in one transaction,
+   * and the committed envelopes publish through the canonical channel.
+   */
+  recordSynthesizedPublications(
+    threadId: string,
+    events: readonly Record<string, unknown>[],
+  ): readonly CanonicalAgentEventEnvelope[] {
+    if (events.length === 0) return [];
+    const thread = this.loadThread(threadId);
+    const result = this.commit({
+      threadId,
+      turnId: "",
+      executionId: CANONICAL_SYNTHESIZED_EXECUTION_ID,
+      phase: "synthesized",
+      persistCheckpoint: false,
+      events: () => {
+        const head = this.advanceLivePublicationHead.get(threadId, events.length) as
+          | { last_sequence: number }
+          | undefined;
+        if (!head) throw new Error(`Live publication sequence exhausted for thread ${threadId}`);
+        const first = head.last_sequence - events.length + 1;
+        return events.map((event, index): CanonicalAgentEventDraft => {
+          const publicationId = String(first + index);
+          return {
+            eventId: `publication:${threadId}:${publicationId}`,
+            routing: { threadId, executionId: CANONICAL_SYNTHESIZED_EXECUTION_ID },
+            sourceProviderId: thread?.providerId ?? "server",
+            sourceIdentities: [],
+            payload: {
+              type: "publication.recorded",
+              publicationId,
+              // The publicationId alone is the dedup key; stamping an execution id would break
+              // execution-correlation preflight for events that belong to no turn.
+              event: { ...event, publicationId },
+            },
+          };
+        });
+      },
+    });
+    return result.events;
   }
 
   /** Commit inside the caller's transaction. The caller publishes result.events after that commit. */
