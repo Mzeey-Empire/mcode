@@ -107,6 +107,13 @@ const TERMINAL_LATE_CREATE_CLEANUP_TIMEOUT_MS = 10_000;
 /** Maximum Terminal creates whose late responses still need exact cleanup. */
 const MAX_PENDING_TERMINAL_CREATE_CLEANUPS = 8;
 
+/** Interval between liveness probes on an open socket. */
+const HEARTBEAT_INTERVAL_MS = 30_000;
+/** How long a heartbeat may go unanswered before the socket is treated as dead. */
+const HEARTBEAT_TIMEOUT_MS = 10_000;
+/** Deadline for `agent.send` so a composer submit cannot park forever on a dead socket. */
+const SEND_MESSAGE_TIMEOUT_MS = 20_000;
+
 /** Last thread-list refresh timestamp per workspace, triggered on WS reconnect. */
 const lastLoadThreadsAtByWorkspace = new Map<string, number>();
 /** Minimum interval between reconnect-triggered thread-list fetches to avoid rapid-reconnect storms. */
@@ -386,6 +393,8 @@ export function createWsTransport(
   let closed = false;
   let reconnectDelay = MIN_RECONNECT_MS;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let heartbeatInFlight = false;
   let terminalSelectionPromise: Promise<TerminalBackendCapabilities> | null = null;
   // Track consecutive auth failures so we apply backoff after 3 immediate
   // retries, preventing a tight loop when the token is persistently wrong.
@@ -554,6 +563,7 @@ export function createWsTransport(
       setAttachmentTransportWsUrl(url);
       resolveReady();
       options?.onStatusChange?.("connected");
+      startHeartbeat();
       invalidateLiveTurnDiff();
       void selectTerminalClientWithRecovery();
 
@@ -614,6 +624,7 @@ export function createWsTransport(
 
     ws.onclose = (event: CloseEvent) => {
       freshTurnDiffThreads.clear();
+      stopHeartbeat();
       rejectPending("WebSocket disconnected");
       lateResponseHandlers = new Map();
       pendingTerminalCreateCleanups.clear();
@@ -638,6 +649,35 @@ export function createWsTransport(
       reject(new Error(reason));
     }
     pending = new Map();
+  }
+
+  // A half-open socket answers nothing and never fires `close`; without a
+  // probe, reconnect and runtime resync wait forever while the UI shows stale
+  // streaming state. The probe is a cheap existing RPC bounded by timeoutMs;
+  // on timeout we close locally so onclose drives the recovery ladder.
+  function heartbeatTick(): void {
+    if (heartbeatInFlight || closed || ws.readyState !== WebSocket.OPEN) return;
+    heartbeatInFlight = true;
+    rpc<string>("app.version", {}, { timeoutMs: HEARTBEAT_TIMEOUT_MS })
+      .catch(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.close();
+      })
+      .finally(() => {
+        heartbeatInFlight = false;
+      });
+  }
+
+  function startHeartbeat(): void {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(heartbeatTick, HEARTBEAT_INTERVAL_MS);
+  }
+
+  function stopHeartbeat(): void {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    heartbeatInFlight = false;
   }
 
   function invalidateLiveTurnDiff(): void {
@@ -1153,7 +1193,7 @@ export function createWsTransport(
         ...(replyToMessageId && { replyToMessageId }),
         ...(quotedText && { quotedText }),
         ...guardrails,
-      });
+      }, { timeoutMs: SEND_MESSAGE_TIMEOUT_MS });
     },
     getRecoveryIncident: () =>
       rpc<import("@mcode/contracts").RecoveryIncident | null>("agent.recoveryIncident", {}),
@@ -1543,6 +1583,7 @@ export function createWsTransport(
     // Lifecycle
     close: () => {
       closed = true;
+      stopHeartbeat();
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
