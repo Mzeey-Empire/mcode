@@ -1826,10 +1826,14 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     if (!checkpoint) throw new Error(`Canonical parent checkpoint was not found: ${input.executionId}`);
     if (checkpoint.terminalOutcome) return null;
     const drafts = this.parentNarrativeRecoveryDrafts(input, thread, turn);
-    assertActiveTurnRecoveryRetention(
-      drafts.length,
-      drafts.reduce((total, draft) => total + Buffer.byteLength(JSON.stringify(draft), "utf8"), 0),
-    );
+    // Retention bounds the retained narrative, not the envelope transport overhead.
+    const persistedBytes = input.items.reduce((total, item) => (
+      total + Buffer.byteLength(JSON.stringify(item), "utf8")
+    ), 0);
+    const discardedBytes = (input.discardedItemIds ?? []).reduce((total, itemId) => (
+      total + Buffer.byteLength(itemId, "utf8")
+    ), 0);
+    assertActiveTurnRecoveryRetention(drafts.length, persistedBytes + discardedBytes);
     return {
       commit: {
         threadId: thread.id,
