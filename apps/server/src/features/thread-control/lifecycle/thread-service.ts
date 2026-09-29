@@ -6,7 +6,7 @@
 
 import { delay, injectable, inject } from "tsyringe";
 import { validateBranchName, logger } from "@mcode/shared";
-import type { Thread, RecentThread, ThreadMode, ContextWindowMode } from "@mcode/contracts";
+import type { Thread, RecentThread, ThreadMode, ContextWindowMode, ProviderId } from "@mcode/contracts";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { ProjectWorktreeService } from "../../projects/index.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
@@ -41,7 +41,7 @@ export class ThreadService {
     title: string,
     mode: string,
     branch: string,
-    options: { branchless?: boolean; lifecycle?: ThreadCreateLifecycle } = {},
+    options: { branchless?: boolean; provider?: ProviderId; lifecycle?: ThreadCreateLifecycle } = {},
   ): Promise<Thread & { warnings?: string[] }> {
     validateBranchName(branch);
 
@@ -58,7 +58,7 @@ export class ThreadService {
       threadMode,
       branch,
       true,
-      "claude",
+      options.provider,
       undefined,
       options.branchless ? "branchless" : "named",
       options.branchless ? branch : null,

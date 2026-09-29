@@ -401,6 +401,7 @@ export class ThreadCreationCoordinator {
   ): Promise<Thread & { warnings?: string[] }> {
     const created = await this.threadService().create(input.workspaceId, input.title, "worktree", input.branch, {
       branchless: input.worktreeBranchMode !== "named",
+      provider: input.provider,
       ...this.managedLifecycle(startupId),
     });
     if (startupId && this.startups()?.isCancellationRequested(startupId)) {
@@ -492,7 +493,6 @@ export class ThreadCreationCoordinator {
     created: Thread & { warnings?: string[] },
     input: CreateThreadForTurnInput,
   ): Thread & { warnings?: string[] } {
-    this.threads.updateProvider(created.id, input.provider);
     this.threads.updateModel(created.id, input.model);
     this.threads.updateSettings(created.id, this.settings(input));
     return this.configuredThread(created, input);

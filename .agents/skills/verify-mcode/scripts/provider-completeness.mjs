@@ -348,28 +348,44 @@ export async function runWorkspaceInvalidationJourney({ repoRoot, workspace, run
     await observer.rpc("file.refresh", { workspaceId });
     recordOwnedFile(run.run, ownerFile);
     recordOwnedFile(run.run, observerFile);
+    const ownerPath = expectedChangePath(ownerFile);
+    const observerPath = expectedChangePath(observerFile);
     await io.writeFile(ownerFile, "WATCHER_OWNER_MARKER\n", "utf8");
     await owner.rpc("file.refresh", { workspaceId });
     await Promise.all([
-      waitForExactWorkspaceInvalidation(ownerEvents, workspaceId, NodePath.basename(ownerFile), timeoutMs),
-      waitForExactWorkspaceInvalidation(observerEvents, workspaceId, NodePath.basename(ownerFile), timeoutMs),
+      waitForExactWorkspaceInvalidation(ownerEvents, workspaceId, ownerPath, timeoutMs),
+      waitForExactWorkspaceInvalidation(observerEvents, workspaceId, ownerPath, timeoutMs),
     ]);
     await owner.close();
     const ownerEventCount = ownerEvents.length;
     const observerStart = observerEvents.length;
     await io.appendFile(observerFile, "WATCHER_OBSERVER_MARKER\n", "utf8");
     await observer.rpc("file.refresh", { workspaceId });
-    await waitForExactWorkspaceInvalidation(observerEvents, workspaceId, NodePath.basename(observerFile), timeoutMs, observerStart);
+    await waitForExactWorkspaceInvalidation(observerEvents, workspaceId, observerPath, timeoutMs, observerStart);
     if (ownerEvents.length !== ownerEventCount) throw new Error("Condition: disconnected client received a later files.changed push.");
     return {
       kind: "live-rpc-proof",
       control: "public file.refresh RPC and files.changed push",
       workspaceId,
-      owner: { closed: true, changes: [NodePath.basename(ownerFile)] },
-      observer: { active: true, changes: [NodePath.basename(ownerFile), NodePath.basename(observerFile)] },
+      owner: { closed: true, changes: [ownerPath] },
+      observer: { active: true, changes: [ownerPath, observerPath] },
     };
   } finally {
     await Promise.all([owner.close(), observer.close()]);
+  }
+}
+
+/** `files.changed` reports git-root-relative paths; a fixture inside a parent repo carries its directory prefix. */
+function expectedChangePath(file) {
+  try {
+    const prefix = NodeChildProcess.execFileSync(
+      "git",
+      ["-C", NodePath.dirname(file), "rev-parse", "--show-prefix"],
+      { encoding: "utf8", timeout: 10_000 },
+    ).trim();
+    return prefix + NodePath.basename(file);
+  } catch {
+    return NodePath.basename(file);
   }
 }
 
@@ -405,8 +421,10 @@ function recordOwnedFile(run, file) {
 async function waitForExactWorkspaceInvalidation(events, workspaceId, path, timeoutMs, start = 0) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    // files.changed is a global broadcast; unrelated workspaces and scopes
+    // legitimately push during the wait. Only the absence of the exact owned
+    // push (timeout) proves a defect.
     const changes = events.slice(start).filter(isFilesChangedPush);
-    if (changes.some((event) => !isExactWorkspaceInvalidation(event, workspaceId, path))) throw new Error(`Condition: files.changed push did not match the owned ${path} watcher scope.`);
     if (changes.some((event) => isExactWorkspaceInvalidation(event, workspaceId, path))) return;
     await delay(25);
   }
