@@ -11,10 +11,15 @@ function latestCanonicalTurn(threadId: string, record: ThreadRecord): AgentTurn 
 
 /** Selects the provider-owned child lifecycle when no local execution is active. */
 export function getCanonicalLifecycleTurn(threadId: string, record: ThreadRecord): AgentTurn | undefined {
-  if (record.runtimePhase === "running" || record.runtimePhase === "finalizing") return undefined;
   const latest = latestCanonicalTurn(threadId, record);
   if (latest?.trigger.kind !== "child") return undefined;
-  if (record.runtimePhase !== "idle" && (latest.status === "Pending" || latest.status === "Running")) return undefined;
+  // A runtime phase stamped by this same canonical turn must not gate it out;
+  // only a locally-owned phase suppresses the child lifecycle.
+  const locallyOwnedPhase = getCanonicalRuntimeTurn(threadId, record)?.id === latest.id
+    ? "idle"
+    : record.runtimePhase;
+  if (locallyOwnedPhase === "running" || locallyOwnedPhase === "finalizing") return undefined;
+  if (locallyOwnedPhase !== "idle" && (latest.status === "Pending" || latest.status === "Running")) return undefined;
   return latest;
 }
 
@@ -40,7 +45,8 @@ export function getCanonicalRuntimeTurn(threadId: string, record: ThreadRecord):
   return latest;
 }
 
-function phaseForTurnStatus(status: AgentTurnStatus): TurnRuntimePhase {
+/** Runtime phase equivalent of one canonical turn status. */
+export function phaseForTurnStatus(status: AgentTurnStatus): TurnRuntimePhase {
   switch (status) {
     case "Pending":
     case "Running": return "running";
