@@ -77,6 +77,14 @@ export const CanonicalAgentEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("item.recorded"), item: AgentItemSchema }).strict(),
   z
     .object({
+      type: z.literal("publication.recorded"),
+      publicationId: z.string().regex(/^[1-9]\d*$/).max(16),
+      /** Renderer-facing agent event; opaque here because the canonical layer is provider-agnostic. */
+      event: z.record(z.unknown()),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("collaboration-action.recorded"),
       collaborationAction: CollaborationActionSchema,
     })

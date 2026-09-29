@@ -950,7 +950,9 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?")
       .get(THREAD_ID)).toEqual({ last_sequence: 1 });
     expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
-    expect(published).toHaveLength(publicationCount);
+    // The committed publication envelope stays durable; the rolled-back reclassification added nothing.
+    expect(published).toHaveLength(publicationCount + 1);
+    expect(published).toContain(`publication:${THREAD_ID}:1`);
     db.run("DROP TRIGGER fail_compound_receipt");
     const reclassifiedReceipt = await writer.transact(reclassified);
     expect(reclassifiedReceipt).toMatchObject({ kind: "committed", livePublication: [

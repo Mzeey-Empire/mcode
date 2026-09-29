@@ -4,6 +4,7 @@ import type { AgentEvent, CanonicalAgentEventEnvelope, CanonicalAgentReconnectRe
 import type { DevinMode, PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { recoverParentNarrative } from "./parent-narrative-recovery";
 import {
+  AgentEventSchema,
   PERMISSION_MODES,
   INTERACTION_MODES,
   ProviderIdSchema,
@@ -121,6 +122,20 @@ function batchTouchesParentNarrative(events: readonly CanonicalAgentEventEnvelop
     event.payload.type === "item.recorded"
     && (event.payload.item.payload.projection === "narrativeRecovery"
       || event.payload.item.payload.projection === "narrativeRecoveryDiscarded"));
+}
+
+/**
+ * Canonical envelopes carrying numbered renderer-facing publications replay through the same
+ * dispatch as the agent.event copy; the publication cursor accepts whichever copy arrives first.
+ */
+function dispatchCanonicalPublications(events: readonly CanonicalAgentEventEnvelope[]): void {
+  const handle = useThreadStore.getState().handleAgentEvent;
+  for (const envelope of events) {
+    if (envelope.payload.type !== "publication.recorded") continue;
+    const parsed = AgentEventSchema().safeParse(envelope.payload.event);
+    if (!parsed.success) continue;
+    handle({ ...parsed.data, publicationId: envelope.payload.publicationId });
+  }
 }
 
 function preserveRunningThreadIds(previous: Set<string>, next: Set<string>): Set<string> {
@@ -2791,6 +2806,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         ? { records, ...(runningThreadIds === state.runningThreadIds ? {} : { runningThreadIds }) }
         : {};
     });
+    for (const recovery of recoveries) {
+      if (recovery.mode === "delta") dispatchCanonicalPublications(recovery.events);
+    }
   },
 
   handleCanonicalAgentEvents: (threadId, events) => {
@@ -2825,6 +2843,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     ) {
       void conversationResidency.refreshVisibleConversation(threadId);
     }
+    dispatchCanonicalPublications(events);
   },
 
   cacheToolCallRecords: (key, records) => {

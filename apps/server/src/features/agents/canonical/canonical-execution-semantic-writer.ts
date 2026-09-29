@@ -12,6 +12,8 @@ import {
   ProviderIdSchema,
   ProviderIdentitySchema,
   TurnOutcomeSchema,
+  type AgentEvent,
+  type CanonicalAgentEventEnvelope,
   type ProviderIdentity,
   type ParentNarrativeRecoveryItem,
   type TurnOutcome,
@@ -33,8 +35,9 @@ import type {
   ExecutionPlanQuestionsReceipt,
   ExecutionTerminalPersistenceReceipt,
 } from "../execution/execution-worker-handler.js";
-import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
+import type { CanonicalAgentEventDraft, CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
 import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
@@ -240,6 +243,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private bufferedPublication: Parameters<CanonicalAgentEventPublisher>[0][] | null = null;
   private bufferedPublicationCount = 0;
   private groupedPublication: Parameters<CanonicalAgentEventPublisher>[0][] | null = null;
+  /** Canonical envelopes committed by operation paths that own no publication buffer. */
+  private pendingCanonicalEvents: CanonicalAgentEventEnvelope[][] = [];
 
   constructor(private readonly db: Database, private readonly publish: CanonicalAgentEventPublisher) {
     this.turns = new CanonicalParentTurnWrite(db, (events) => {
@@ -287,8 +292,12 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       return existing;
     }
     try {
-      return await this.applySupported(operation, hash);
+      const receipt = await this.applySupported(operation, hash);
+      this.flushCanonicalEvents();
+      return receipt;
     } catch (error) {
+      // A rolled-back transaction leaves staged envelopes that must never publish.
+      this.pendingCanonicalEvents = [];
       if (error instanceof SemanticConflict) return conflict(operation);
       throw error;
     }
@@ -1041,6 +1050,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     publicationOverride?: readonly ExecutionLivePublicationIntent[],
   ): Extract<ExecutionWriteReceipt, { kind: "committed" }> {
     const publication = this.numberLivePublication(operation, publicationOverride);
+    if (publication?.length) this.commitLivePublicationEvents(operation, hash, publication);
     const storedReceipt = publication ? { ...receipt, livePublication: publication } : receipt;
     const receiptJson = JSON.stringify({ ...storedReceipt, publicationVersion: 1 });
     if (operation.livePublication && Buffer.byteLength(receiptJson, "utf8") > MAX_LIVE_RECEIPT_BYTES) {
@@ -1061,6 +1071,53 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       receiptJson,
     );
     return storedReceipt;
+  }
+
+  /**
+   * Records each numbered live publication as a canonical envelope inside the same operation
+   * transaction, so a canonical replay or gap recovery carries the same renderer-facing events.
+   */
+  private commitLivePublicationEvents(
+    operation: ExecutionSemanticOperation,
+    hash: string,
+    publication: readonly ExecutionLivePublicationReceipt[],
+  ): void {
+    const thread = this.canonical.loadThread(operation.execution.threadId);
+    const checkpoint = this.canonical.loadCheckpoint(operation.execution.executionId);
+    if (!thread || !checkpoint) throw new SemanticConflict();
+    const result = this.canonical.commitInsideTransaction({
+      threadId: operation.execution.threadId,
+      turnId: operation.execution.turnId,
+      executionId: operation.execution.executionId,
+      phase: checkpoint.phase,
+      events: publication.map((entry): CanonicalAgentEventDraft => ({
+        eventId: `publication:${operation.execution.threadId}:${entry.publicationId}`,
+        routing: {
+          threadId: operation.execution.threadId,
+          turnId: operation.execution.turnId,
+          executionId: operation.execution.executionId,
+        },
+        sourceProviderId: thread.providerId,
+        sourceIdentities: [],
+        payload: {
+          type: "publication.recorded",
+          publicationId: entry.publicationId,
+          // Canonical copies reach clients on replay, so they carry the same sanitized
+          // tool input the wire publication applies in AgentEventPublicationService.
+          event: sanitizePublicationEvent(entry.event),
+        },
+      })),
+    });
+    if (result.outcome !== "committed" && result.outcome !== "duplicate"
+      && result.outcome !== "terminal-outcome-confirmed") {
+      throw new SemanticConflict();
+    }
+    if (result.events.length === 0) return;
+    this.storePublicationChunks(operation.execution.executionId, hash,
+      result.events.map((envelope) => envelope.acceptedSequence));
+    // Unbuffered operation paths publish from the pending queue only after their transaction commits.
+    if (this.bufferedPublication) this.bufferPublication([...result.events]);
+    else this.pendingCanonicalEvents.push([...result.events]);
   }
 
   private numberLivePublication(
@@ -1216,6 +1273,24 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (this.groupedPublication) this.groupedPublication.push(events);
     else this.publish(events);
   }
+
+  private flushCanonicalEvents(): void {
+    const pending = this.pendingCanonicalEvents;
+    if (pending.length === 0) return;
+    this.pendingCanonicalEvents = [];
+    for (const events of pending) this.publishCommitted(events);
+  }
+}
+
+/** Strip raw file contents the way the wire publication does so canonical replay cannot leak them. */
+function sanitizePublicationEvent(event: AgentEvent): AgentEvent {
+  if (event.type === AgentEventType.ToolUse) {
+    return { ...event, toolInput: sanitizePublicToolInput(event.toolInput, event.toolName) };
+  }
+  if (event.type === AgentEventType.ToolResult && event.toolInput) {
+    return { ...event, toolInput: sanitizePublicToolInput(event.toolInput) };
+  }
+  return event;
 }
 
 function validOperation(operation: ExecutionSemanticOperation): boolean {
