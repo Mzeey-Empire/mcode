@@ -12,6 +12,7 @@ import {
   ProviderIdSchema,
   ProviderIdentitySchema,
   TurnOutcomeSchema,
+  type AgentEvent,
   type CanonicalAgentEventEnvelope,
   type ProviderIdentity,
   type ParentNarrativeRecoveryItem,
@@ -36,6 +37,7 @@ import type {
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventDraft, CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
 import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
@@ -1100,7 +1102,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         payload: {
           type: "publication.recorded",
           publicationId: entry.publicationId,
-          event: entry.event,
+          // Canonical copies reach clients on replay, so they carry the same sanitized
+          // tool input the wire publication applies in AgentEventPublicationService.
+          event: sanitizePublicationEvent(entry.event),
         },
       })),
     });
@@ -1276,6 +1280,17 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.pendingCanonicalEvents = [];
     for (const events of pending) this.publishCommitted(events);
   }
+}
+
+/** Strip raw file contents the way the wire publication does so canonical replay cannot leak them. */
+function sanitizePublicationEvent(event: AgentEvent): AgentEvent {
+  if (event.type === AgentEventType.ToolUse) {
+    return { ...event, toolInput: sanitizePublicToolInput(event.toolInput, event.toolName) };
+  }
+  if (event.type === AgentEventType.ToolResult && event.toolInput) {
+    return { ...event, toolInput: sanitizePublicToolInput(event.toolInput) };
+  }
+  return event;
 }
 
 function validOperation(operation: ExecutionSemanticOperation): boolean {
