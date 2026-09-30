@@ -173,7 +173,7 @@ async function executeDiffBatches(
       gitDiffArgs(cwd, format, refBefore, refAfter, pathspecs),
       { timeout: RealGitExecutor.DEFAULT_TIMEOUT },
     );
-    const output = stdout.trim();
+    const output = format === "unified" ? stdout : stdout.trim();
     if (output) outputs.push(output);
   }
   return outputs;

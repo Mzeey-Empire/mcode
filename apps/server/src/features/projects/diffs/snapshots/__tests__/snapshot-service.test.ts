@@ -4,6 +4,67 @@ import { FakeGitExecutor } from "../../../git/execution/fake-git-executor.js";
 import type { GitExecutor } from "../../../git/execution/types.js";
 import { SnapshotService } from "../snapshot-service.js";
 
+const PATCH = [
+  "diff --git a/example.txt b/example.txt",
+  "index 1111111..2222222 100644",
+  "--- a/example.txt",
+  "+++ b/example.txt",
+  "@@ -1,3 +1,3 @@",
+  "-before",
+  "+after",
+  " keep",
+  " ",
+  "",
+].join("\n");
+
+describe("SnapshotService unified output", () => {
+  let fake: FakeGitExecutor;
+  let service: SnapshotService;
+  const args = ["diff", "--find-renames", "before", "after"];
+
+  beforeEach(() => {
+    fake = new FakeGitExecutor();
+    service = new SnapshotService(fake);
+  });
+
+  it("preserves blank context in full and limited patches, and returns empty diffs", async () => {
+    await expect(service.getDiff("/repo", "before", "after")).resolves.toBe("");
+    fake.setResponse(args, { stdout: PATCH, stderr: "" });
+
+    await expect(service.getDiff("/repo", "before", "after")).resolves.toBe(PATCH);
+    await expect(service.getDiff("/repo", "before", "after", undefined, 20)).resolves.toBe(PATCH);
+    await expect(service.getDiff("/repo", "before", "after", undefined, 9)).resolves.toBe(PATCH.slice(0, -1));
+    await expect(service.getDiff("/repo", "before", "after", undefined, 8)).resolves.toBe("");
+  });
+
+  it("preserves the trailing blank context of every attributed path batch", async () => {
+    const paths = Array.from({ length: 129 }, (_, index) => `src/file-${index}.txt`);
+    const pathspecs = paths.map((path) => `:(literal)${path}`);
+    const secondPatch = PATCH.replaceAll("example.txt", "second.txt");
+    fake.setResponse([...args, "--", ...pathspecs.slice(0, 128)], { stdout: PATCH, stderr: "" });
+    fake.setResponse([...args, "--", ...pathspecs.slice(128)], { stdout: secondPatch, stderr: "" });
+
+    await expect(service.getDiff(
+      "/repo", "before", "after", undefined, undefined, paths,
+    )).resolves.toBe(`${PATCH}\n${secondPatch}`);
+  });
+
+  it("still parses newline-terminated stats and file statuses", async () => {
+    fake.setResponse(
+      ["diff", "--numstat", "--find-renames", "before", "after"],
+      { stdout: "\n1\t2\texample.txt\n\n", stderr: "" },
+    );
+    fake.setResponse(
+      ["diff", "--name-status", "--find-renames", "before", "after"],
+      { stdout: "\nM\texample.txt\n\n", stderr: "" },
+    );
+
+    await expect(service.getDiffStats("/repo", "before", "after")).resolves.toEqual([
+      { filePath: "example.txt", additions: 1, deletions: 2, changeType: "modified" },
+    ]);
+  });
+});
+
 describe("SnapshotService.captureRef", () => {
   let fake: FakeGitExecutor;
   let service: SnapshotService;
