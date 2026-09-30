@@ -49,6 +49,31 @@ describe("Codex model discovery", () => {
     ]);
   });
 
+  it("preserves native Sol capabilities and order while filtering Ultra from reasoning efforts", async () => {
+    const { client } = catalog([{
+      data: [
+        model("gpt-6-astra", "GPT-6-Astra"),
+        {
+          ...model("gpt-6.1-sol", "GPT-6.1-Sol"),
+          supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"]
+            .map((reasoningEffort) => ({ reasoningEffort })),
+        },
+      ],
+      nextCursor: null,
+    }]);
+    expect(await listCodexModels(client)).toEqual([
+      {
+        id: "gpt-6-astra", name: "GPT-6 Astra", group: "OpenAI", supportsVision: true,
+        supportsReasoning: true, supportedReasoningEfforts: ["low", "high"], defaultReasoningEffort: "low",
+      },
+      {
+        id: "gpt-6.1-sol", name: "GPT-6.1 Sol", group: "OpenAI", supportsVision: true,
+        supportsReasoning: true, supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+        defaultReasoningEffort: "low",
+      },
+    ]);
+  });
+
   it("rejects malformed responses instead of returning the static catalog", async () => {
     const { client } = catalog([{ data: [{ model: 7 }], nextCursor: null }]);
     await expect(listCodexModels(client)).rejects.toMatchObject({ name: "ZodError" });

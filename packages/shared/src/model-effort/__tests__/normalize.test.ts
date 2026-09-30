@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import type { ReasoningLevel } from "@mcode/contracts";
 import {
   isXhighEffortModel,
   isMaxEffortModel,
@@ -250,6 +251,23 @@ describe("normalizeReasoningLevelForModel", () => {
 
     it("claude-haiku-4-5-20251001 short-circuits to high (recognized as haiku)", () => {
       expect(normalizeReasoningLevelForModel("claude-haiku-4-5-20251001", "low")).toBe("high");
+    });
+  });
+
+  describe("OpenAI Codex GPT-6.1 Sol", () => {
+    it.each(["gpt-6.1-sol", "gpt-6.1-sol-20260930"])(
+      "normalizes unsupported lower tiers and preserves ordinary efforts for %s",
+      (modelId) => {
+        const levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] satisfies ReasoningLevel[];
+        expect(levels.map((level) => normalizeReasoningLevelForModel(modelId, level))).toEqual([
+          "low", "low", "low", "medium", "high", "xhigh", "max",
+        ]);
+      },
+    );
+
+    it("keeps the existing policy for a different model with the same prefix", () => {
+      expect(normalizeReasoningLevelForModel("gpt-6.1-solstice", "none")).toBe("none");
+      expect(normalizeReasoningLevelForModel("gpt-6.1-solstice", "minimal")).toBe("minimal");
     });
   });
 

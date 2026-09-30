@@ -117,7 +117,12 @@ function normalizeCodexReasoningLevel(modelId: string, level: ReasoningLevel): R
 }
 
 function allowedCodexTiers(modelId: string): ReadonlySet<ReasoningLevel> {
-  if (modelId.startsWith("gpt-5.6-") || modelId.startsWith("gpt-6-")) {
+  if (
+    modelId.startsWith("gpt-5.6-") ||
+    modelId.startsWith("gpt-6-") ||
+    modelId === "gpt-6.1-sol" ||
+    modelId.startsWith("gpt-6.1-sol-")
+  ) {
     return new Set<ReasoningLevel>(["low", "medium", "high", "xhigh", "max"]);
   }
   const base = new Set<ReasoningLevel>(["none", "minimal", "low", "medium", "high"]);
