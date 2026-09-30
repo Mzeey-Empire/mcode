@@ -350,7 +350,7 @@ describe("CodexProvider first turn on new session", () => {
     await provider.stopSession("mcode-without-browser-grant");
   });
 
-  it("routes an explicit child brief through provider collaboration guidance", async () => {
+  it.each(["gpt-5.4", "gpt-6.1-sol"])("routes an explicit child brief with native model %s", async (model) => {
     const provider = makeProvider();
     const childBrief = "Spawn one nested child and return NESTED_DONE exactly.";
 
@@ -362,7 +362,7 @@ describe("CodexProvider first turn on new session", () => {
       threadId: "child-routing",
       message: childBrief,
       cwd: process.cwd(),
-      model: "gpt-5.4",
+      model,
       interactionMode: "build",
       providerOptions: {},
       permissionMode: "supervised",
@@ -375,7 +375,7 @@ describe("CodexProvider first turn on new session", () => {
     expect(server.options.developerInstructions).toContain("does not authorize Mcode thread control");
     expect(sendTurnMock).toHaveBeenCalledWith(
       [{ type: "text", text: childBrief }],
-      { model: "gpt-5.4", approvalsReviewer: "user" },
+      { model, approvalsReviewer: "user" },
     );
     await provider.stopSession("mcode-child-routing");
   });

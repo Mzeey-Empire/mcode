@@ -1,11 +1,20 @@
 import type { ProviderModelInfo } from "./models.js";
 
 /**
- * Static Codex model rows. Codex does not support dynamic model discovery,
- * so these are returned directly from `CodexProvider.listModels()`.
- * Single source for both server and web model-registry fallback.
+ * Static Codex fallback rows and capability metadata.
+ * Native model discovery owns availability and order when it returns models.
  */
 export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
+  {
+    id: "gpt-6.1-sol",
+    name: "GPT-6.1 Sol",
+    group: "OpenAI",
+    supportsVision: true,
+    supportsReasoning: true,
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultReasoningEffort: "low",
+    supportsUltraOrchestration: true,
+  },
   {
     id: "gpt-6-astra",
     name: "GPT-6 Astra",

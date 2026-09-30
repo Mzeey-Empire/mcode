@@ -21,13 +21,19 @@ import {
 } from "@/lib/model-registry";
 
 describe("pickProviderModelsForSettings", () => {
-  it("keeps Codex provider order and excludes stale static entries", () => {
-    const staticModels = [{ id: "a", label: "A", providerId: "codex" }];
+  it("keeps Codex provider order and excludes unavailable static entries", () => {
+    const staticModels = MODEL_PROVIDERS.find((provider) => provider.id === "codex")?.models ?? [];
     const dynamic = [
-      { id: "z", label: "Z", providerId: "codex" },
-      { id: "b", label: "B", providerId: "codex" },
+      { id: "gpt-6-astra", label: "GPT-6 Astra", providerId: "codex" },
+      { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", providerId: "codex" },
     ];
-    expect(pickProviderModelsForSettings(staticModels, dynamic)).toEqual(dynamic);
+    expect(pickProviderModelsForSettings(staticModels, dynamic)).toEqual([
+      { id: "gpt-6-astra", label: "GPT-6 Astra", providerId: "codex" },
+      { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", providerId: "codex" },
+    ]);
+    expect(pickProviderModelsForSettings(staticModels, dynamic.slice(0, 1))).toEqual([
+      { id: "gpt-6-astra", label: "GPT-6 Astra", providerId: "codex" },
+    ]);
   });
   const staticModels = [{ id: "a", label: "A", providerId: "cursor" }];
 
@@ -277,19 +283,35 @@ describe("ReasoningLevelSchema", () => {
 });
 
 describe("Codex model catalog", () => {
-  it("lists GPT-6 models before GPT-5.6 and older Codex models", () => {
-    const codex = MODEL_PROVIDERS.find((provider) => provider.id === "codex");
-    expect(codex?.models.slice(0, 6).map((model) => model.id)).toEqual([
-      "gpt-6-astra",
-      "gpt-6-sol",
-      "gpt-6-luna",
-      "gpt-5.6-sol",
-      "gpt-5.6-terra",
-      "gpt-5.6-luna",
-    ]);
+  it("lists GPT-6.1 Sol first when live Codex discovery is unavailable", () => {
+    const staticModels = MODEL_PROVIDERS.find((provider) => provider.id === "codex")?.models ?? [];
+    for (const dynamic of [undefined, []]) {
+      const models = pickProviderModelsForSettings(staticModels, dynamic);
+      expect(models.slice(0, 7).map((model) => model.id)).toEqual([
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+      ]);
+    }
   });
 
   it("uses the Codex model catalog reasoning levels and defaults", () => {
+    expect(findModelById("gpt-6.1-sol")).toMatchObject({
+      id: "gpt-6.1-sol",
+      label: "GPT-6.1 Sol",
+      providerId: "codex",
+      group: "OpenAI",
+      supportedReasoningLevels: ["low", "medium", "high", "xhigh", "max"],
+      defaultReasoningLevel: "low",
+    });
+    expect(getCodexReasoningLevels("gpt-6.1-sol")).toEqual([
+      "low", "medium", "high", "xhigh", "max",
+    ]);
+    expect(getCodexDefaultReasoningLevel("gpt-6.1-sol")).toBe("low");
     expect(getCodexReasoningLevels("gpt-6-astra")).toEqual([
       "low",
       "medium",
@@ -348,7 +370,7 @@ describe("Codex model catalog", () => {
       },
     });
 
-    expect(getDefaultModelId()).toBe("gpt-6-astra");
+    expect(getDefaultModelId()).toBe("gpt-6.1-sol");
   });
 });
 
