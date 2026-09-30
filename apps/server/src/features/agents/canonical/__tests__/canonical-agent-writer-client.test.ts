@@ -447,7 +447,7 @@ describe("canonical SQLite writer", () => {
     await writer.commit("slow-recovery-start", {
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
     });
-    db.run("CREATE TABLE writer_lock_probe (id TEXT PRIMARY KEY)");
+    db.run("CREATE TABLE writer_lock_probe (id TEXT PRIMARY KEY, recovered_count INTEGER NOT NULL)");
     db.run(`CREATE TRIGGER slow_recovery BEFORE INSERT ON canonical_agent_items
       WHEN NEW.id LIKE 'toolCall:slow-%' BEGIN SELECT randomblob(8000000); END`);
     const input = {
@@ -465,11 +465,15 @@ describe("canonical SQLite writer", () => {
     expect(settled).toBe(false);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
       .get("slow-recovery")).toEqual({ count: 0 });
-    const started = performance.now();
-    db.prepare("INSERT INTO writer_lock_probe (id) VALUES (?)").run("main-write");
-    const mainWriteMs = performance.now() - started;
-    expect(mainWriteMs).toBeLessThan(250);
+    db.prepare(`INSERT INTO writer_lock_probe (id, recovered_count)
+      SELECT ?, COUNT(*) FROM canonical_agent_items WHERE id LIKE 'toolCall:slow-%'`).run("main-write");
+    const probe = db.prepare<{ recovered_count: number }, []>(
+      "SELECT recovered_count FROM writer_lock_probe WHERE id = 'main-write'",
+    ).get();
+    expect(probe?.recovered_count).toBeGreaterThan(0);
+    expect(probe?.recovered_count).toBeLessThan(input.items.length);
     await recovery;
+    expect(count.get()).toEqual({ count: input.items.length });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
       .get("slow-recovery")).toEqual({ count: 1 });
   }, 30_000);
