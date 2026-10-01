@@ -181,19 +181,9 @@ function mergedMessages(messages: readonly Message[], projected: readonly Messag
   return [...messagesById.values()].sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id));
 }
 
-function projectedResponse(messages: readonly Message[], projected: readonly Message[], terminal: boolean) {
+function projectedResponse(messages: readonly Message[], projected: readonly Message[]) {
   const assistantMessage = [...projected].reverse().find((message) => message.role === "assistant");
-  if (terminal || !assistantMessage?.content) {
-    return { assistantMessage, messages: mergedMessages(messages, projected), streamingText: undefined };
-  }
-  return {
-    assistantMessage,
-    messages: mergedMessages(
-      messages.filter((message) => message.id !== assistantMessage.id),
-      projected.filter((message) => message.id !== assistantMessage.id),
-    ),
-    streamingText: assistantMessage.content,
-  };
+  return { assistantMessage, messages: mergedMessages(messages, projected), streamingText: undefined };
 }
 
 function projectedToolCallStart(item: AgentItem, nativeItemId: string): ToolCall {
@@ -328,7 +318,7 @@ export function projectCanonicalMessageList({
   const projected = projectedMessages(items);
   const projectedCalls = projectedToolCalls(items);
   const projectedThoughts = projectedThoughtSegments(items, terminal);
-  const response = projectedResponse(messages, projected, terminal);
+  const response = projectedResponse(messages, projected);
   const responseKey = `canonical-turn-response:${latestTurn.id}`;
 
   return {
