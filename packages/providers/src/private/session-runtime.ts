@@ -90,7 +90,9 @@ export class SessionRuntime<TState> {
     if (teardown) {
       // Providers can hold exclusive resources (state DBs, sockets) that a
       // spawn would race while the previous incarnation is still closing.
-      await Promise.race([teardown, delay(TEARDOWN_REUSE_TIMEOUT_MS)]);
+      await Promise.race([teardown, delay(TEARDOWN_REUSE_TIMEOUT_MS).then(() => {
+        throw new Error(`Provider session teardown is still pending: ${args.sessionId}`);
+      })]);
       if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
     }
     const existing = this.sessions.get(args.sessionId);

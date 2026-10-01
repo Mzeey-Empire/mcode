@@ -2,6 +2,52 @@ import { describe, expect, it, vi } from "vitest";
 import { SessionRuntime, type ProtocolAdapter } from "../session-runtime.js";
 
 describe("SessionRuntime", () => {
+  it("rejects a timed-out teardown wait without spawning an overlapping session", async () => {
+    vi.useFakeTimers();
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
+    let generation = 0;
+    const adapter: ProtocolAdapter<{ generation: number }> = {
+      spawn: vi.fn(async () => ({ state: { generation: ++generation }, pids: [] })),
+      isBusy: () => false,
+      interrupt: () => undefined,
+      close: vi.fn((state) => state.generation === 1 ? closeGate : Promise.resolve()),
+      isStale: () => false,
+    };
+    const runtime = new SessionRuntime(adapter, {
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
+      envService: { getEnv: () => ({}) },
+    });
+    const request = { sessionId: "session", threadId: "thread", cwd: ".", permissionMode: "default" };
+    try {
+      expect(await runtime.acquire(request)).toEqual({ generation: 1 });
+      const stopping = runtime.stop(request.sessionId);
+      await vi.advanceTimersByTimeAsync(0);
+      const acquiring = Promise.allSettled([runtime.acquire(request)]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await acquiring).toEqual([{ status: "rejected", reason: expect.objectContaining({ message: "Provider session teardown is still pending: session" }) }]);
+      expect(adapter.spawn).toHaveBeenCalledOnce();
+      expect(runtime.get(request.sessionId)).toBeUndefined();
+
+      let repeatedStopFinished = false;
+      const repeatedStop = runtime.stop(request.sessionId).then(() => { repeatedStopFinished = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(repeatedStopFinished).toBe(false);
+      expect(adapter.close).toHaveBeenCalledOnce();
+
+      releaseClose();
+      await Promise.all([stopping, repeatedStop]);
+      expect(await runtime.acquire(request)).toEqual({ generation: 2 });
+      expect(adapter.spawn).toHaveBeenCalledTimes(2);
+      await runtime.shutdown();
+      await expect(runtime.acquire(request)).rejects.toThrow("shutting down");
+    } finally {
+      releaseClose();
+      await runtime.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
   it("waits for an existing teardown and prevents a waiting acquire from respawning during shutdown", async () => {
     let releaseClose!: () => void;
     const state = { id: "state" };
