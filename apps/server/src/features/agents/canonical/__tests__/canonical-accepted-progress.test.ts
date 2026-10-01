@@ -422,7 +422,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect(progress.getTasks(execution.threadId)).toEqual(new (await import("../../orchestration/persistence/task-repo.js")).TaskRepo(db).get(execution.threadId));
   });
 
-  it("retains a rejected older late hook and interrupts only the currently active execution sharing its blocked owner", async () => {
+  it("retains a rejected older late hook while the current execution continues on its bounded owner", async () => {
     await send(1, start("codex"));
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 1, "textDelta", { delta: "Original", isFinalResponse: true })] });
@@ -441,14 +441,20 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     });
     progress.acceptLateHook(execution.threadId, execution.executionId, { id: "blocked-hook", hookName: "Stop", toolName: null,
       phase: "stop", payload: "{}", durationMs: 10, didBlock: false, startedAt: NOW, endedAt: NOW, sortOrder: 1 });
-    await expect.poll(() => affected).toEqual([next.executionId]);
-    expect(recovery().retained.some((event) => event.payload.type === "turn.interrupted" && event.routing.executionId === next.executionId)).toBe(true);
+    await expect.poll(() => progress.savingStatuses(execution.threadId).find((status) => status.executionId === execution.executionId)?.mode).toBe("saving-failed");
+    expect(affected).toEqual([]);
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "Current turn continues", isFinalResponse: true }, next)] }, next, nextLease)).result.kind).toBe("accepted");
+    expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 2, "turnComplete", {}, next)], terminalInput: { ...next, providerId: "codex",
+        providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } }, next, nextLease)).result.kind).toBe("accepted");
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
     db.run("DROP TRIGGER fail_late_hook");
     expect(progress.retry(execution.threadId)).toBe(true);
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(db.prepare("SELECT id FROM hook_executions WHERE id = 'blocked-hook'").get()).toEqual({ id: "blocked-hook" });
-    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(next.turnId)).toEqual({ status: "Interrupted" });
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(next.turnId)).toEqual({ status: "Completed" });
+    expect(affected).toEqual([]);
   });
 
   it("rejects an empty terminal hook without attaching it to a prior assistant response", async () => {
@@ -791,7 +797,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
   }, 30_000);
 
-  it("reports a permanent save failure, interrupts the exact accepted execution and retries the retained batches", async () => {
+  it("reports a permanent save failure while the provider continues and retries its retained completion", async () => {
     await send(1, start("codex"));
     db.run("CREATE TRIGGER fail_progress BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.operation_id = 'live-lease:2' BEGIN SELECT RAISE(ABORT, 'disk checkpoint unavailable'); END");
     const failures: string[] = [];
@@ -801,19 +807,25 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     });
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 1, "textDelta", { delta: "Before failed save", isFinalResponse: true })] });
-    await expect.poll(() => failures.length).toBe(1);
-    expect(failures[0]).toContain(`${execution.executionId}:`);
-    expect(failures[0]).toContain("disk checkpoint unavailable");
-    expect(recovery().retained.some((event) => event.payload.type === "turn.interrupted")).toBe(true);
+    await expect.poll(() => progress.savingStatuses(execution.threadId)[0]?.mode).toBe("saving-failed");
+    expect(failures).toEqual([]);
     await expect(progress.beforeDurableCommand(execution.threadId)).rejects.toThrow("disk checkpoint unavailable");
+    expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 2, "textDelta", { delta: " and after failed save", isFinalResponse: true })] })).result.kind).toBe("accepted");
+    expect((await send(4, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 3, "turnComplete")], terminalInput: { ...execution, providerId: "codex",
+        providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } })).result.kind).toBe("accepted");
+    expect(recovery().retained.some((event) => event.payload.type === "turn.interrupted")).toBe(false);
     db.run("DROP TRIGGER fail_progress");
     expect(progress.retry(execution.threadId)).toBe(true);
     await expect.poll(() => progress.depth().pending).toBe(0);
-    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Interrupted" });
-    expect(failures).toHaveLength(1);
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
+    expect(db.prepare("SELECT content FROM messages WHERE role = 'assistant' AND is_internal = 0").all())
+      .toEqual([{ content: "Before failed save and after failed save" }]);
+    expect(failures).toEqual([]);
   });
 
-  it("contains a notice save failure while another provider completes and retries the original notice ID", async () => {
+  it("keeps both providers running after a notice save failure and retries the original notice ID", async () => {
     await send(1, start("codex"));
     const other = { threadId: "devin-thread", turnId: "devin-turn", executionId: "00000000-0000-4000-8000-000000000155" };
     const otherLease = { ...lease, workerIndex: 1, leaseId: "devin-lease" };
@@ -830,9 +842,15 @@ describe("accepted parent progress with the actual SQLite writer", () => {
       systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "session", sessionId: "session" } });
     expect(notice.turnExecutionId).toBeUndefined();
     expect(notice.messageId).toBeDefined();
-    await expect.poll(() => affected).toEqual([execution.executionId]);
+    await expect.poll(() => progress.savingStatuses(execution.threadId).find((status) => status.executionId === execution.executionId)?.mode).toBe("saving-failed");
+    expect(affected).toEqual([]);
     expect(progress.savingStatuses(execution.threadId).find((status) => status.executionId === execution.executionId)?.mode).toBe("saving-failed");
     expect(db.prepare("SELECT id FROM messages WHERE id = ?").get(notice.messageId!)).toBeNull();
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "Affected provider continues", isFinalResponse: true })] })).result.kind).toBe("accepted");
+    expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 2, "turnComplete")], terminalInput: { ...execution, providerId: "codex",
+        providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } })).result.kind).toBe("accepted");
     expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("devin", 1, "textDelta", { delta: "Other provider continues", isFinalResponse: true }, other)] }, other, otherLease)).result.kind).toBe("accepted");
     expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
@@ -849,7 +867,9 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect(db.prepare("SELECT id, content FROM messages WHERE id = ?").all(notice.messageId!))
       .toEqual([{ id: notice.messageId, content: "Session save fails" }]);
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(other.turnId)).toEqual({ status: "Completed" });
-    expect(affected).toEqual([execution.executionId]);
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
+    expect(recovery().retained.some((event) => event.payload.type === "turn.interrupted")).toBe(false);
+    expect(affected).toEqual([]);
   });
 
   it("rejects headless thread notices without writing a main-connection message", () => {

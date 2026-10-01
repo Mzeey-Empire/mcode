@@ -27,7 +27,6 @@ import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../../turns/turn-featu
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { TurnConversationProjectionService } from "../../turns/turn-conversation-projection-service.js";
 import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { addClient, removeClient, subscribeClientToThread } from "../../../../application/transport/push.js";
