@@ -21,7 +21,7 @@ import {
 import { z } from "zod";
 
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
-import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
 import { sameExecution, sameLease } from "../execution/execution-mailbox-protocol.js";
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import type {
@@ -37,7 +37,7 @@ import type {
   ParentLiveEffects,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventDraft, CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
-import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
@@ -46,16 +46,16 @@ import { CanonicalCodexSystemErrorProjection } from "./canonical-codex-system-er
 import { matchesCodexSystemIntents } from "./codex-system-intents.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
 import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type DataOnlyParentTurnFinishInput } from "./canonical-parent-turn-write.js";
-import { TaskRepo } from "../orchestration/persistence/task-repo.js";
-import { PlanRepo } from "../planning/persistence/plan-repo.js";
-import { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js";
+import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
+import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
+import { HookExecutionStore as HookExecutionRepo } from "../events/persistence/hook-execution-store.js";
 import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import {
-  ParentAssistantTextCheckpointService,
+  ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService,
   PARENT_ASSISTANT_TEXT_QUEUE_POLICY,
   type ParentAssistantTextCheckpointInput,
   type ParentAssistantTextCheckpointResult,
-} from "../turns/parent-assistant-text-checkpoint-service.js";
+} from "../turns/parent-assistant-text-checkpoint-store.js";
 
 const HEAD_ID = "semantic:head";
 const HEAD_KIND = "semantic-head";

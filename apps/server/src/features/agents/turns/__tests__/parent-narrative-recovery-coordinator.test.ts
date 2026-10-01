@@ -25,17 +25,21 @@ const recoveryItems = [
 ] satisfies ParentNarrativeRecoveryItem[];
 
 describe("ParentNarrativeRecoveryCoordinator", () => {
-  it("retries an uncommitted parent recovery snapshot before deduplicating it", () => {
-    const recordParentNarrativeRecovery = vi.fn()
-      .mockReturnValueOnce(false)
-      .mockReturnValue(true);
+  it("retries an uncommitted parent recovery snapshot before deduplicating it", async () => {
+    const recordParentNarrativeRecovery = vi.fn<ParentTurnDurability["recordParentNarrativeRecovery"]>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
     const durability = {
-      loadTurnByExecution: vi.fn(() => ({ id: "turn-1" })),
+      loadTurnByExecution: vi.fn<ParentTurnDurability["loadTurnByExecution"]>(() => ({ id: "turn-1",
+        threadId: THREAD_ID, executionId: EXECUTION_ID, status: "Running", trigger: { kind: "user" },
+        permissionMode: "supervised", approvalReviewMode: "manual", approvalReviewReason: "fixture",
+        providerIdentities: [], startedAt: "2026-08-28T12:00:00.000Z", endedAt: null,
+        createdAt: "2026-08-28T12:00:00.000Z", updatedAt: "2026-08-28T12:00:00.000Z" })),
       recordParentNarrativeRecovery,
-    } as unknown as ParentTurnDurability;
+    } satisfies Pick<ParentTurnDurability, "loadTurnByExecution" | "recordParentNarrativeRecovery">;
     const narrativeStore = {
-      recoverySnapshot: vi.fn(() => recoveryItems),
-    } as unknown as NarrativeStore;
+      terminalSnapshot: vi.fn(() => recoveryItems),
+    } satisfies Pick<NarrativeStore, "terminalSnapshot">;
     const coordinator = new ParentNarrativeRecoveryCoordinator(durability, narrativeStore);
     const event: AgentEvent = {
       type: AgentEventType.TextDelta,
@@ -49,12 +53,12 @@ describe("ParentNarrativeRecoveryCoordinator", () => {
       discardedItemIds: [],
     };
 
-    expect(() => coordinator.checkpoint(event)).toThrow(
+    await expect(coordinator.checkpoint(event)).rejects.toThrow(
       `Canonical parent turn was not found: ${EXECUTION_ID}`,
     );
 
-    coordinator.checkpoint(event);
-    coordinator.checkpoint(event);
+    await coordinator.checkpoint(event);
+    await coordinator.checkpoint(event);
 
     expect(recordParentNarrativeRecovery).toHaveBeenCalledTimes(2);
     expect(recordParentNarrativeRecovery).toHaveBeenNthCalledWith(1, expectedCommit);

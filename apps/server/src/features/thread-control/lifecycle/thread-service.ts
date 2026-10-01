@@ -12,10 +12,11 @@ import { ProjectWorktreeService } from "../../projects/index.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { HandoffStorage } from "../../handoff/index.js";
 import { ThreadDeletionTeardownService } from "./thread-deletion-teardown-service.js";
+import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 /** Receives the durable thread record before managed checkout mutation begins. */
 export interface ThreadCreateLifecycle {
-  onThreadPersisted(thread: Thread): void;
+  onThreadPersisted(thread: Thread): Promise<void>;
 }
 
 /** Handles thread creation, deletion, worktree provisioning, and lifecycle. */
@@ -41,7 +42,7 @@ export class ThreadService {
   /**
    * Create a thread with optional worktree provisioning.
    * If mode is "worktree", creates a git worktree on disk and persists its path.
-   * Rolls back DB record on any failure.
+   * Rolls back known provisioning failures. Unknown storage outcomes remain for reconciliation.
    */
   async create(
     workspaceId: string,
@@ -59,7 +60,7 @@ export class ThreadService {
             throw new Error(`Unknown thread mode: ${mode}`);
           })();
 
-    const thread = this.threadRepo.create(
+    const thread = await this.threadRepo.create(
       workspaceId,
       title,
       threadMode,
@@ -73,7 +74,7 @@ export class ThreadService {
 
     if (threadMode === "worktree") {
       try {
-        options.lifecycle?.onThreadPersisted(thread);
+        await options.lifecycle?.onThreadPersisted(thread);
         return await this.projectWorktreeService.provisionThreadWorktree(
           thread,
           workspaceId,
@@ -81,7 +82,8 @@ export class ThreadService {
           options,
         );
       } catch (err) {
-        this.threadRepo.hardDelete(thread.id);
+        if (err instanceof DatabaseWriteOutcomeUnknown) throw err;
+        await this.threadRepo.hardDelete(thread.id);
         throw err;
       }
     }
@@ -136,7 +138,7 @@ export class ThreadService {
   }
 
   /** Update a thread's display title. */
-  updateTitle(threadId: string, title: string): boolean {
+  updateTitle(threadId: string, title: string): Promise<boolean> {
     return this.threadRepo.updateTitle(threadId, title);
   }
 
@@ -154,7 +156,7 @@ export class ThreadService {
       codex_fast_mode?: boolean | null;
       default_open_in_app?: string | null;
     },
-  ): boolean {
+  ): Promise<boolean> {
     return this.threadRepo.updateSettings(threadId, {
       ...(settings.reasoning_level !== undefined && { reasoning_level: settings.reasoning_level }),
       ...(settings.interaction_mode !== undefined && { interaction_mode: settings.interaction_mode }),
@@ -169,18 +171,18 @@ export class ThreadService {
   }
 
   /** Link a GitHub PR to a thread by updating pr_number and pr_status. Throws on failure. */
-  linkPr(threadId: string, prNumber: number, prStatus: string): void {
-    const ok = this.threadRepo.updatePr(threadId, prNumber, prStatus);
+  async linkPr(threadId: string, prNumber: number, prStatus: string): Promise<void> {
+    const ok = await this.threadRepo.updatePr(threadId, prNumber, prStatus);
     if (!ok) {
       throw new Error(`Failed to link PR #${prNumber} to thread ${threadId}`);
     }
   }
 
   /** Mark a thread as viewed, dismissing the completed badge if present. */
-  markViewed(threadId: string): void {
+  async markViewed(threadId: string): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread || thread.status !== "completed") return;
-    this.threadRepo.updateStatus(threadId, "paused");
+    await this.threadRepo.updateStatus(threadId, "paused");
   }
 
   /** Find a thread by its primary key. */

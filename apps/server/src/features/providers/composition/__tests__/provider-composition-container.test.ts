@@ -7,13 +7,13 @@ import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
 import {
   AgentEventType,
-  type ProviderEventBatch,
 } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
 
 import { setupContainer } from "../../../../application/composition/container.js";
 import { WorkerOwnedTurnRuntime } from "../../../agents/execution/worker-owned-turn-runtime.js";
-import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ProviderRegistry } from "../provider-registry.js";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { ProviderEventIngress, type ProviderEventIngressEvent } from "../provider-event-ingress.js";
@@ -30,7 +30,7 @@ function seedThread(db: Database): void {
   ).run("thread-1", "workspace-1", "Thread", "main", "cursor", NOW, NOW);
 }
 
-function runtimeBatch(): ProviderEventBatch {
+function runtimeBatch(): Parameters<ProviderHostPorts["events"]["submit"]>[0] {
   return {
     threadId: "thread-1",
     turnId: "turn-1",
@@ -78,23 +78,28 @@ function runtimeBatch(): ProviderEventBatch {
 
 describe("provider composition container", () => {
   let database: Database | undefined;
+  let seedDatabase: Database | undefined;
   let temporaryDirectory: string | undefined;
   const previousDatabasePath = process.env.MCODE_DB_PATH;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     container.reset();
     temporaryDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-provider-composition-"));
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
-    setupContainer(temporaryDirectory);
+    await setupContainer(temporaryDirectory);
     database = container.resolve<Database>("Database");
+    seedDatabase = openDatabase({ dbPath: process.env.MCODE_DB_PATH });
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
     await container.resolve(ProviderRegistry).shutdown();
+    await container.resolve(ProviderEventIngress).stopAdmissionAndDrain();
     await container.resolve(WorkerOwnedTurnRuntime).close();
-    container.resolve(ProviderEventIngress).shutdown();
     container.resolve(SettingsService).dispose();
+    await container.resolve(ApplicationDatabaseWriter).close();
+    seedDatabase?.close(true);
+    seedDatabase = undefined;
     database?.close(true);
     database = undefined;
     container.reset();
@@ -117,10 +122,13 @@ describe("provider composition container", () => {
 
     ingress.start(registry, {
       handleProviderEvent: (event) => received.push(event),
+      handleProjectedCommitted: (event) => received.push(event),
       handleProviderFileMutation: () => undefined,
+      handleProviderTurnDiff: () => undefined,
     });
 
-    seedThread(database!);
+    if (!seedDatabase) throw new Error("The fixture seed database must be initialized");
+    seedThread(seedDatabase);
     const runtime = container.resolve(WorkerOwnedTurnRuntime);
     const execution = { threadId: "thread-1", turnId: "turn-1", executionId: EXECUTION_ID };
     await runtime.owner.start({

@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
-import { WorkspaceRepo } from "../../../persistence/workspace-repo.js";
-import { ProjectActionRunRepo } from "../project-action-run-repo.js";
+import { ThreadStore } from "../../../../thread-control/persistence/thread-store.js";
+import { WorkspaceStore } from "../../../persistence/workspace-store.js";
+import { ProjectActionRunStore } from "../project-action-run-store.js";
 
 const RETAINED_ACTION_RUNS_PER_THREAD = 256;
 
@@ -42,17 +42,17 @@ function run(
   };
 }
 
-describe("ProjectActionRunRepo retention", () => {
+describe("ProjectActionRunStore retention", () => {
   let db: Database;
-  let repo: ProjectActionRunRepo;
+  let repo: ProjectActionRunStore;
   let threadId: string;
   let workspaceId: string;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    const workspace = new WorkspaceRepo(db).create("Action retention", "C:\\repo");
-    const thread = new ThreadRepo(db).create(workspace.id, "Thread", "direct", "main");
-    repo = new ProjectActionRunRepo(db);
+    const workspace = new WorkspaceStore(db).create("Action retention", "C:\\repo");
+    const thread = new ThreadStore(db).create(workspace.id, "Thread", "direct", "main");
+    repo = new ProjectActionRunStore(db);
     threadId = thread.id;
     workspaceId = workspace.id;
   });

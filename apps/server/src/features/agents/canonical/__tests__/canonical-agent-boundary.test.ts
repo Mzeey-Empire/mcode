@@ -24,18 +24,17 @@ import {
   type ProviderRuntimeExtension,
 } from "@mcode/contracts";
 import { openDatabase, openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
+import { ThreadStore as ThreadRepo } from "../../../thread-control/persistence/thread-store.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import {
   CANONICAL_AGENT_CONTROL_EVENT_RESERVE,
   CANONICAL_SYNTHESIZED_EXECUTION_ID,
-  CanonicalAgentBoundary,
+  CanonicalAgentStore as CanonicalAgentBoundary,
   type CanonicalAgentEventDraft,
-} from "../canonical-agent-boundary.js";
+} from "../canonical-agent-store.js";
 import { CodexCollaborationEventAdapter } from "../../collaboration/adapters/codex-collaboration-event-adapter.js";
-import type { CodexCollaborationDurability } from "../../collaboration/codex-collaboration-durability.js";
 
 const THREAD_ID = "thread-1";
 const TURN_ID = "turn-1";
@@ -2710,23 +2709,7 @@ describe("CanonicalAgentBoundary", () => {
       nativeThreadId: "native-child-adapter-stream",
       nativeTurnId: "native-turn-adapter-stream",
     });
-    const durability = {
-      loadCodexChildDelegationByReceiverThreadId: () => delegation,
-      loadThread: (threadId: string) => sink.loadThread(threadId),
-      loadTurn: (turnId: string) => sink.loadTurn(turnId),
-      loadTurnByExecution: (executionId: string) => sink.loadTurnByExecution(executionId),
-      loadExecutionIdForTurn: () => EXECUTION_ID,
-      registerCodexReceiverThreadIds: (value: Parameters<typeof sink.registerCodexReceiverThreadIds>[0]) => (
-        sink.registerCodexReceiverThreadIds(value)
-      ),
-      bindCodexChildIdentity: (value: Parameters<typeof sink.bindCodexChildIdentity>[0]) => (
-        sink.bindCodexChildIdentity(value)
-      ),
-      recordCodexChildItem: (value: Parameters<typeof sink.recordCodexChildItem>[0]) => (
-        sink.recordCodexChildItem(value)
-      ),
-    } as CodexCollaborationDurability;
-    const adapter = new CodexCollaborationEventAdapter(durability);
+    const adapter = new CodexCollaborationEventAdapter(sink);
     const extension: ProviderRuntimeExtension = {
       providerId: "codex",
       kind: "codex-collaboration",

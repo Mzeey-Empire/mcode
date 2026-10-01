@@ -40,7 +40,7 @@ export class HandoffCheckoutService {
 
     const branch = await this.gitRepository.createBranch(path, name);
     if (threadId) {
-      const updated = this.threadRepo.updateCheckoutToNamedBranch(threadId, branch);
+      const updated = await this.threadRepo.updateCheckoutToNamedBranch(threadId, branch);
       if (!updated) {
         throw new Error(
           `Failed to update checkout state for thread ${threadId}`,

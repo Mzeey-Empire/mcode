@@ -13,6 +13,7 @@ import { ThreadRepo } from "../../../features/thread-control/persistence/thread-
 import { ThreadService } from "../../../features/thread-control/lifecycle/thread-service.js";
 import { ThreadDeletionTeardownService } from "../../../features/thread-control/lifecycle/thread-deletion-teardown-service.js";
 import { setupContainer } from "../container.js";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 describe("server container thread deletion composition", () => {
   let database: Database | undefined;
@@ -25,17 +26,18 @@ describe("server container thread deletion composition", () => {
     container.reset();
     temporaryDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-container-thread-deletion-"));
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
-    setupContainer(temporaryDirectory);
+    await setupContainer(temporaryDirectory);
     database = container.resolve<Database>("Database");
     workerRuntime = container.resolve(WorkerOwnedTurnRuntime);
     await workerRuntime.whenReady();
   });
 
   afterEach(async () => {
-    ciWatcher?.dispose();
+    await ciWatcher?.dispose();
     ciWatcher = undefined;
     await workerRuntime?.close();
     workerRuntime = undefined;
+    if (container.isRegistered(ApplicationDatabaseWriter)) await container.resolve(ApplicationDatabaseWriter).close();
     database?.close(true);
     database = undefined;
     container.reset();
@@ -57,9 +59,9 @@ describe("server container thread deletion composition", () => {
     const deletion = container.resolve(ThreadDeletionTeardownService);
     deletion.bindAcceptedProgress(progress);
     expect(container.resolve(ThreadDeletionTeardownService)).toBe(deletion);
-    const workspace = container.resolve(WorkspaceRepo).create("deletion-composition", temporaryDirectory);
+    const workspace = await container.resolve(WorkspaceRepo).create("deletion-composition", temporaryDirectory);
     const threads = container.resolve(ThreadRepo);
-    const thread = threads.create(workspace.id, "Deletion composition", "direct", "main", true, "codex");
+    const thread = await threads.create(workspace.id, "Deletion composition", "direct", "main", true, "codex");
 
     await deletion.deletePersistentData([thread.id], async () => threads.hardDelete(thread.id));
 

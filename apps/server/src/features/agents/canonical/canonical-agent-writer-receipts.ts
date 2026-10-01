@@ -9,6 +9,7 @@ import {
   canonicalWriterOperationReceipts,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "./canonical-agent-writer-protocol.js";
+import { StoredCanonicalProviderProjectionSchema } from "./canonical-provider-projection.js";
 
 type WriteRequest = Extract<CanonicalWriterRequest, {
   kind: "commit" | "append-accepted" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery";
@@ -33,6 +34,7 @@ const storedReceiptSchema = z.discriminatedUnion("kind", [
       acceptedThrough: z.number().int(),
       durableThrough: z.number().int(),
       eventIds: z.array(z.string()),
+      providerProjection: StoredCanonicalProviderProjectionSchema.optional(),
     }),
   }),
   z.object({
@@ -68,7 +70,7 @@ export class CanonicalAgentWriterReceipts {
       const existing = this.loadReceipt(request);
       if (existing) return this.replayMatching(request, inputHash, existing);
       this.assertCapacity(request.executionId);
-      const response = apply();
+      const response = structuredClone(apply());
       this.orm.insert(canonicalWriterOperationReceipts).values({
         executionId: request.executionId,
         operationId: request.operationId,
@@ -158,6 +160,10 @@ export class CanonicalAgentWriterReceipts {
           acceptedThrough: stored.receipt.acceptedThrough,
           durableThrough: stored.receipt.durableThrough,
           events: stored.receipt.eventIds.map((eventId) => this.loadEvent(request.executionId, eventId)),
+          ...(stored.receipt.providerProjection ? { providerProjection: {
+            events: stored.receipt.providerProjection.events,
+            publications: stored.receipt.providerProjection.publications.map((event) => this.loadEvent(event.executionId, event.eventId)),
+          } } : {}),
         },
       };
     }
@@ -193,18 +199,24 @@ function compactReceipt(response: WriteResponse): string {
   if (response.kind !== "committed") {
     return JSON.stringify({ kind: response.kind, receipt: response.receipt });
   }
-  const { events, ...receipt } = response.receipt;
-  return JSON.stringify({
+  const { events, providerProjection, ...receipt } = response.receipt;
+  return JSON.stringify(storedReceiptSchema.parse({
     kind: response.kind,
-    receipt: { ...receipt, eventIds: events.map((event) => event.eventId) },
-  });
+    receipt: { ...receipt, eventIds: events.map((event) => event.eventId),
+      ...(providerProjection ? { providerProjection: { events: providerProjection.events,
+        publications: providerProjection.publications.map((event) => ({
+          executionId: event.routing.executionId, eventId: event.eventId,
+        })) } } : {}),
+    },
+  }));
 }
 
 function fingerprint(request: WriteRequest): string {
   if (!request.operationId || request.operationId.length > 256 || !request.executionId) {
     throw new Error("Canonical writer operation and execution IDs are required and bounded");
   }
-  const input = stableJson({ kind: request.kind, input: request.input });
+  const input = stableJson({ kind: request.kind, input: request.input,
+    ...(request.kind === "commit" && request.projectProviderEvents ? { projectProviderEvents: true } : {}) });
   return NodeCrypto.createHash("sha256").update(input).digest("hex");
 }
 

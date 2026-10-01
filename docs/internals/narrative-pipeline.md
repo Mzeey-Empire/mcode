@@ -134,7 +134,7 @@ Provider event ownership fences the admitted execution
     │
     ▼
 broadcast("agent.canonical", acceptedFrame)
-    └─ bounded save queue → dedicated SQLite writer → saved acknowledgement
+    └─ bounded save queue → shared application SQLite writer → saved acknowledgement
     │
     ▼
 ws-events.ts validates canonical progress and recovery frames

@@ -1,3 +1,4 @@
+import { logger } from "@mcode/shared";
 import { AgentEventType } from "@mcode/contracts";
 import type { ProviderRuntimeEvent } from "@mcode/contracts";
 import type { ProviderIdentity } from "@mcode/agent-model";
@@ -23,6 +24,9 @@ interface CursorExecutionQueue {
 /** Serializes Cursor live events into canonical item drafts for one execution. */
 export class CursorCanonicalEventPublisher {
   private readonly queues = new Map<string, CursorExecutionQueue>();
+  private admissionStopped = false;
+  private shutdownTask: Promise<void> | undefined;
+  private lateEventReported = false;
 
   constructor(private readonly sink: ProviderEventSinkPort) {}
 
@@ -32,6 +36,13 @@ export class CursorCanonicalEventPublisher {
     runtimeEvent: ProviderRuntimeEvent,
     sourceIdentities: readonly ProviderIdentity[],
   ): void {
+    if (this.admissionStopped) {
+      if (!this.lateEventReported) {
+        this.lateEventReported = true;
+        logger.warn("Cursor canonical event rejected after shutdown", { executionId: routing.executionId });
+      }
+      return;
+    }
     const queue = this.queueFor(routing);
     if (queue.failure) return;
     if (queue.pendingEventCount >= MAX_PENDING_EVENTS_PER_EXECUTION) {
@@ -72,6 +83,20 @@ export class CursorCanonicalEventPublisher {
     await queue.tail;
     this.queues.delete(key);
     if (queue.failure) throw queue.failure;
+  }
+
+  /** Fences late callbacks and drains every event admitted before provider shutdown. */
+  stopAdmissionAndDrain(): Promise<void> {
+    this.admissionStopped = true;
+    this.shutdownTask ??= this.drainAcceptedQueues([...this.queues.values()]);
+    return this.shutdownTask;
+  }
+
+  private async drainAcceptedQueues(queues: readonly CursorExecutionQueue[]): Promise<void> {
+    await Promise.all(queues.map((queue) => queue.tail));
+    this.queues.clear();
+    const failures = queues.flatMap((queue) => queue.failure ? [queue.failure] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Cursor canonical event shutdown failed");
   }
 
   private queueFor(routing: CursorCanonicalEventRouting): CursorExecutionQueue {

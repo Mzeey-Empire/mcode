@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Database } from "bun:sqlite";
-import { MessageRepo } from "../message-repo.js";
+import { MessageStore } from "../message-store.js";
 import { openBunMemoryDatabase } from "../../../../../runtime/persistence/sqlite/__tests__/bun-sqlite.js";
 
 function createTestDb(): Database {
@@ -49,13 +49,13 @@ function createTestDb(): Database {
   return db;
 }
 
-describe("MessageRepo", () => {
+describe("MessageStore", () => {
   let db: Database;
-  let repo: MessageRepo;
+  let repo: MessageStore;
 
   beforeEach(() => {
     db = createTestDb();
-    repo = new MessageRepo(db);
+    repo = new MessageStore(db);
   });
 
   it("prepares each active write statement lazily and only once", () => {
@@ -66,7 +66,7 @@ describe("MessageRepo", () => {
       preparedSql.push(sql);
       return originalPrepare(sql);
     }) as Database["prepare"];
-    const localRepo = new MessageRepo(localDb);
+    const localRepo = new MessageStore(localDb);
 
     localRepo.listByThread("thread-1", 10);
     expect(preparedSql.some((sql) => sql.toLowerCase().startsWith("insert"))).toBe(false);

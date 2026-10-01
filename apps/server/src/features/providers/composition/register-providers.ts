@@ -13,14 +13,12 @@ import { WorkerOwnedTurnRuntime } from "../../agents/execution/worker-owned-turn
 import { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
 import { EnvService } from "../../../runtime/environment/env-service.js";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
-import { CodexCollaborationEventAdapter } from "../../agents/collaboration/adapters/codex-collaboration-event-adapter.js";
 import {
   logProviderEventIngressDiagnostic,
   PROVIDER_EVENT_INGRESS_DIAGNOSTIC_SINK,
   ProviderEventIngress,
   type ProviderEventIngressDiagnosticSink,
 } from "./provider-event-ingress.js";
-import { CODEX_PROVIDER_EVENT_ADAPTER, type ProviderEventAdapter } from "./provider-event-adapter.js";
 import {
   PROVIDER_EVENT_WORKER_POOL,
   ThreadEventWorkerPool,
@@ -31,14 +29,6 @@ import {
 export function registerProviderAdapters(container: DependencyContainer): void {
   container.register<ProviderEventWorkerPool>(PROVIDER_EVENT_WORKER_POOL, {
     useFactory: instanceCachingFactory(() => new ThreadEventWorkerPool()),
-  });
-  container.register(
-    CodexCollaborationEventAdapter,
-    { useClass: CodexCollaborationEventAdapter },
-    { lifecycle: Lifecycle.Singleton },
-  );
-  container.register<ProviderEventAdapter>(CODEX_PROVIDER_EVENT_ADAPTER, {
-    useFactory: (c) => c.resolve(CodexCollaborationEventAdapter),
   });
   container.register(
     ProviderEventIngress,

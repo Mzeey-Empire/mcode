@@ -6,6 +6,7 @@ import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { CanonicalExecutionWriterPort } from "../../canonical/canonical-execution-writer-port.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -60,6 +61,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
   let directory: string;
   let db: Database;
   let writer: CanonicalAgentWriterClient;
+  let owner: ApplicationDatabaseWriter;
   let coordinator: ExecutionWorkerLossCoordinator;
   let workers: CrashingPort[];
   let published: string[];
@@ -73,7 +75,8 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
       .run("lost-worker-workspace", "Workspace", directory, NOW, NOW);
     db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run(execution.threadId, "lost-worker-workspace", "Thread", "main", "codex", NOW, NOW);
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    owner = new ApplicationDatabaseWriter(NodePath.join(directory, "app.sqlite"));
+    writer = new CanonicalAgentWriterClient(owner);
     published = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -99,7 +102,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
 
   afterEach(async () => {
     coordinator.scheduler.shutdown();
-    await writer.close();
+    await owner.close();
     db.close(true);
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
@@ -200,7 +203,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     }]);
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(execution.executionId)).toEqual({ terminal_outcome: "completed" });
-    expect(new MessageRepo(db).listIncludingInternal(execution.threadId)).toContainEqual(expect.objectContaining({
+    expect(new MessageRepo(db, owner).listIncludingInternal(execution.threadId)).toContainEqual(expect.objectContaining({
       role: "assistant", content: "Done", outcome: "completed", is_internal: false,
     }));
     expect(db.prepare("SELECT id, status FROM tool_call_records WHERE id = ?").get("transport-tool"))
@@ -218,7 +221,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
 
   it("interrupts a crashed worker before replacing its slot", async () => {
     const lease = await start(coordinator);
-    new ParentAssistantTextCheckpointService(db).appendChunk([{ ...execution, sequence: 1, text: "Partial answer" }]);
+    await new ParentAssistantTextCheckpointService(db, owner).appendChunk([{ ...execution, sequence: 1, text: "Partial answer" }]);
     workers[0]?.crash();
     expect(await coordinator.waitForRecovery(0)).toEqual({ kind: "recovered", workerIndex: 0 });
     expect(recoveredAssignments).toEqual([{ execution, lease }]);
@@ -226,7 +229,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     expect(db.prepare("SELECT terminal_outcome, recovery_incident_id FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(execution.executionId)).toMatchObject({ terminal_outcome: "interrupted",
         recovery_incident_id: expect.stringMatching(/^worker-loss:[0-9a-f]{64}$/) });
-    expect(new MessageRepo(db).listIncludingInternal(execution.threadId)).toContainEqual(expect.objectContaining({
+    expect(new MessageRepo(db, owner).listIncludingInternal(execution.threadId)).toContainEqual(expect.objectContaining({
       role: "assistant", content: "Partial answer", outcome: "interrupted", is_internal: false,
     }));
     expect(published).toContain(`${execution.executionId}:recovery-interrupted`);

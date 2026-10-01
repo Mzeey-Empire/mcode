@@ -6,8 +6,8 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
-import { ThreadRepo } from "../thread-repo.js";
+import { WorkspaceStore as WorkspaceRepo } from "../../../projects/persistence/workspace-store.js";
+import { ThreadStore as ThreadRepo } from "../thread-store.js";
 
 describe("ThreadRepo.countActiveByWorkspaceIds", () => {
   let db: Database;

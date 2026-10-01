@@ -30,7 +30,7 @@ describe("thread startup RPC", () => {
   it("routes get, list, and cancellation intent through the typed WebSocket router", async () => {
     const get = vi.fn(() => startup);
     const list = vi.fn(() => [startup]);
-    const cancel = vi.fn(() => ({ ...startup, cancellation: "requested" as const, revision: 2 }));
+    const cancel = vi.fn(async () => ({ ...startup, cancellation: "requested" as const, revision: 2 }));
     const deps = { threadStartupService: { get, list, cancel } } as unknown as RouterDeps;
 
     const getResponse = await routeMessage(JSON.stringify({
@@ -79,7 +79,7 @@ describe("thread startup RPC", () => {
         { phase: "agent", state: "pending" },
       ],
     };
-    const markCancelled = vi.fn(() => cancelled);
+    const markCancelled = vi.fn(async () => cancelled);
     const stopAutomaticSetup = vi.fn(async () => {
       expect(markCancelled).not.toHaveBeenCalled();
       return stoppedSetup;
@@ -88,7 +88,7 @@ describe("thread startup RPC", () => {
       threadStartupService: {
         get: vi.fn(() => cancellationRequested),
         list: vi.fn(() => []),
-        cancel: vi.fn(() => cancellationRequested),
+        cancel: vi.fn(async () => cancellationRequested),
         markCancelled,
       },
       workspaceEnvironmentService: { stopAutomaticSetup },
@@ -132,7 +132,7 @@ describe("thread startup RPC", () => {
     };
     let allowStop!: () => void;
     const stopped = new Promise<void>((resolve) => { allowStop = resolve; });
-    const markCancelled = vi.fn(() => cancelled);
+    const markCancelled = vi.fn(async () => cancelled);
     const stopAutomaticSetup = vi.fn(async () => {
       await stopped;
       return stoppedSetup;
@@ -141,13 +141,13 @@ describe("thread startup RPC", () => {
       threadStartupService: {
         get: vi.fn(() => cancellationRequested),
         list: vi.fn(() => []),
-        cancel: vi.fn(() => cancellationRequested),
+        cancel: vi.fn(async () => cancellationRequested),
         markCancelled,
       },
       workspaceEnvironmentService: { stopAutomaticSetup },
     });
 
-    expect(stopAutomaticSetup).toHaveBeenCalledWith({ threadId: "thread-1" });
+    await vi.waitFor(() => expect(stopAutomaticSetup).toHaveBeenCalledWith({ threadId: "thread-1" }));
     expect(markCancelled).not.toHaveBeenCalled();
     allowStop();
     await expect(result).resolves.toEqual(cancelled);
@@ -169,7 +169,7 @@ describe("thread startup RPC", () => {
       threadId: "thread-1",
     };
     const requested = { ...agentStartup, cancellation: "requested" as const, revision: 2 };
-    const cancel = vi.fn(() => requested);
+    const cancel = vi.fn(async () => requested);
     const stopAutomaticSetup = vi.fn();
     const markCancelled = vi.fn();
 
@@ -197,7 +197,7 @@ describe("thread startup RPC", () => {
       threadStartupService: {
         get: vi.fn(() => cancellationRequested),
         list: vi.fn(() => []),
-        cancel: vi.fn(() => cancellationRequested),
+        cancel: vi.fn(async () => cancellationRequested),
         markCancelled,
       },
       workspaceEnvironmentService: {

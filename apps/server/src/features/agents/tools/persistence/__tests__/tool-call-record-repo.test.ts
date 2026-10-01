@@ -2,8 +2,8 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { ToolCallRecordRepo } from "../tool-call-record-repo.js";
-import type { CreateToolCallRecordInput } from "../tool-call-record-repo.js";
+import { ToolCallRecordStore } from "../tool-call-record-store.js";
+import type { CreateToolCallRecordInput } from "../tool-call-record-store.js";
 
 /** Seed a workspace, thread, and message so foreign keys are satisfied. */
 function seedFixtures(db: Database): {
@@ -68,14 +68,14 @@ describe("V7 migration", () => {
   });
 });
 
-describe("ToolCallRecordRepo", () => {
+describe("ToolCallRecordStore", () => {
   let db: Database;
-  let repo: ToolCallRecordRepo;
+  let repo: ToolCallRecordStore;
   let messageId: string;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    repo = new ToolCallRecordRepo(db);
+    repo = new ToolCallRecordStore(db);
     const fixtures = seedFixtures(db);
     messageId = fixtures.messageId;
   });

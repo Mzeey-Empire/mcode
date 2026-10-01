@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
+import { logger } from "@mcode/shared";
 import type {
   WorkspaceEnvironmentActionRun,
   WorkspaceEnvironmentActionSlotInput,
@@ -155,10 +156,10 @@ export class ProjectActionService {
   }
 
   /** Converts surviving persisted running rows to interrupted after startup recovery has reaped terminals. */
-  recoverStaleRuns(): WorkspaceEnvironmentActionRun[] {
+  async recoverStaleRuns(): Promise<WorkspaceEnvironmentActionRun[]> {
     const interrupted: WorkspaceEnvironmentActionRun[] = [];
     while (true) {
-      const runs = this.runs.interruptRunning(this.runFactory.timestamp());
+      const runs = await this.runs.interruptRunning(this.runFactory.timestamp());
       for (const run of runs) this.publisher.publish(run);
       interrupted.push(...runs);
       if (runs.length < 256) return interrupted;
@@ -203,17 +204,17 @@ export class ProjectActionService {
         script: resolved.script,
         expectedLaunch: { terminal: resolved.snapshot.terminal },
       });
-      return this.retainLaunchedAction(context, resolved, session);
+      return await this.retainLaunchedAction(context, resolved, session);
     } catch (error) {
       return await this.handleLaunchFailure(context, resolved, session, error);
     }
   }
 
-  private retainLaunchedAction(
+  private async retainLaunchedAction(
     context: ProjectActionStartContext,
     resolved: Extract<ProjectActionResolution, { readonly kind: "launch" }>,
     session: PreparedTerminalCommandSession,
-  ): WorkspaceEnvironmentActionRun {
+  ): Promise<WorkspaceEnvironmentActionRun> {
     const active: ActiveProjectAction = {
       state: "running",
       threadId: context.thread.id,
@@ -228,9 +229,9 @@ export class ProjectActionService {
       stopping: false,
     };
     this.active.set(context.slot, active);
-    this.publisher.persistAndPublish(active.run);
+    await this.publisher.persistAndPublish(active.run);
     session.onOutput((data) => this.runLifecycle.recordOutput(context.slot, active.run.runId, data));
-    session.onExit((exit) => this.runLifecycle.finish(context.slot, active.run.runId, exit.exitCode));
+    session.onExit((exit) => this.finishAction(context.slot, active.run.runId, exit.exitCode));
     this.settleStartingReservation(context);
     return active.run;
   }
@@ -269,7 +270,7 @@ export class ProjectActionService {
       error,
       session,
       active: active?.state === "starting" ? null : active ?? null,
-      onExit: (runId, exit) => this.runLifecycle.finish(context.slot, runId, exit.exitCode),
+      onExit: (runId, exit) => this.finishAction(context.slot, runId, exit.exitCode),
       settleStart: () => this.settleStartingReservation(context),
     });
   }
@@ -293,6 +294,12 @@ export class ProjectActionService {
     };
   }
 
+  private finishAction(slot: string, runId: string, exitCode: number | null): void {
+    void this.runLifecycle.finish(slot, runId, exitCode).catch((error: unknown) => {
+      logger.error("Project Action completion publication failed", { runId, error: error instanceof Error ? error.message : String(error) });
+    });
+  }
+
   private releaseStartingReservation(context: ProjectActionStartContext): void {
     if (this.active.get(context.slot) !== context.reservation) return;
     this.active.delete(context.slot);
@@ -310,11 +317,11 @@ export class ProjectActionService {
     return state.state === "starting" ? await state.settled : state;
   }
 
-  private retryFinalization(
+  private async retryFinalization(
     input: WorkspaceEnvironmentActionSlotInput,
     active: ActiveProjectAction,
-  ): WorkspaceEnvironmentActionRun | null {
-    this.runLifecycle.retryPendingFinalization(slotKey(input.threadId, input.actionId), active);
+  ): Promise<WorkspaceEnvironmentActionRun | null> {
+    await this.runLifecycle.retryPendingFinalization(slotKey(input.threadId, input.actionId), active);
     return this.runs.get(input.threadId, input.actionId);
   }
 
@@ -327,7 +334,7 @@ export class ProjectActionService {
       await active.session.stop();
     } finally {
       const current = this.active.get(slotKey(input.threadId, input.actionId));
-      if (current?.state === "pending-finalization") this.runLifecycle.retryPendingFinalization(slotKey(input.threadId, input.actionId), current);
+      if (current?.state === "pending-finalization") await this.runLifecycle.retryPendingFinalization(slotKey(input.threadId, input.actionId), current);
     }
     return this.runs.get(input.threadId, input.actionId);
   }

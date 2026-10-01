@@ -20,6 +20,7 @@ import type {
   CanonicalAgentEvent,
   CollaborationAction,
   NarrativeEntry,
+  ParentNarrativeRecoveryItem,
   ProviderIdentity,
 } from "@mcode/contracts";
 import type {
@@ -273,18 +274,35 @@ export class CanonicalCodexCollaborationCoordinator {
   }
 
   /** Finds parent tool calls whose projected output is owned by Codex child coordination. */
-  ownedToolCallIds(narrative: readonly NarrativeEntry[]): ReadonlySet<string> {
+  ownedToolCallIds(threadId: string, turnId: string, narrative: readonly (NarrativeEntry | ParentNarrativeRecoveryItem)[]): ReadonlySet<string> {
     const childrenByParent = new Map<string, string[]>();
-    const owned = new Set<string>();
+    const owned = this.delegationToolCallIds(threadId, turnId);
     for (const entry of narrative) {
       if (entry.kind !== "toolCall") continue;
-      const record = entry.record as Record<string, unknown>;
+      const record = entry.record;
       if (typeof record.id !== "string") continue;
       if (isCodexSpawnRecord(record)) owned.add(record.id);
       this.indexChildToolCall(childrenByParent, record);
     }
     this.addDescendantToolCalls(owned, childrenByParent);
     return owned;
+  }
+
+  /** Keep parent delegation anchors while excluding tool descendants owned by their child threads. */
+  parentOwnedNarrative<T extends NarrativeEntry | ParentNarrativeRecoveryItem>(threadId: string, turnId: string, narrative: readonly T[]): readonly T[] {
+    const anchors = this.delegationToolCallIds(threadId, turnId);
+    const owned = this.ownedToolCallIds(threadId, turnId, narrative);
+    return narrative.filter((entry) => entry.kind !== "toolCall" || !owned.has(entry.record.id) || anchors.has(entry.record.id));
+  }
+
+  private delegationToolCallIds(threadId: string, turnId: string): Set<string> {
+    const rows = this.orm.select({ itemId: canonicalCollaborationActions.sourceItemId })
+      .from(canonicalCollaborationActions).where(and(
+        eq(canonicalCollaborationActions.sourceThreadId, threadId),
+        eq(canonicalCollaborationActions.sourceTurnId, turnId),
+        eq(canonicalCollaborationActions.kind, "delegate"),
+      )).all();
+    return new Set(rows.filter((row) => row.itemId.startsWith("toolCall:")).map((row) => row.itemId.slice("toolCall:".length)));
   }
 
   /** Persists a recoverable diagnostic item when Codex child routing cannot be attributed. */

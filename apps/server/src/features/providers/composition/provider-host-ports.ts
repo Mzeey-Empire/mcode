@@ -4,7 +4,6 @@ import type {
   ProviderHostPorts,
   ProviderEventSubmissionReceipt,
 } from "@mcode/providers";
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
 import type { EnvService } from "../../../runtime/environment/env-service.js";
@@ -163,11 +162,11 @@ async function submitWorkerEvents(
   };
 }
 
-function submitLegacyEvents(
+async function submitLegacyEvents(
   dependencies: ProviderHostPortDependencies,
   batch: ProviderEventBatch,
-): ProviderEventSubmissionReceipt {
-  const result = dependencies.events.commit({
+): Promise<ProviderEventSubmissionReceipt> {
+  const result = await dependencies.events.commit({
     threadId: batch.threadId,
     turnId: batch.turnId,
     executionId: batch.executionId,
@@ -182,16 +181,16 @@ function submitLegacyEvents(
     acceptedThrough: result.acceptedThrough,
     durableThrough: result.durableThrough,
     eventCount: result.events.length,
-  }, result.events);
+  }, result.providerProjection.events);
 }
 
 function deliverCommitted(
   ingress: ProviderEventIngress,
   commit: ProviderEventCommitReceipt,
-  events: readonly CanonicalAgentEventEnvelope[],
+  events: readonly ProjectedCommittedProviderEvent[],
 ): ProviderEventSubmissionReceipt {
   const handoff = commit.outcome === "committed" && events.length > 0;
-  if (handoff) ingress.acceptCommitted(events);
+  if (handoff) ingress.acceptLegacyProjected(events);
   return { commit, delivery: { ingress: handoff ? "queued" : "not-required" } };
 }
 

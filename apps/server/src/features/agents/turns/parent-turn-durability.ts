@@ -1,14 +1,11 @@
 import type {
-  AgentEvent,
-  AgentThread,
-  AgentTurn,
-  CanonicalAgentEventEnvelope,
   Message,
   NarrativeEntry,
   ParentNarrativeRecoveryItem,
   ProviderIdentity,
   TurnOutcome,
 } from "@mcode/contracts";
+import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 
 /** The parent-turn records needed to begin one provider execution. */
 export interface ParentTurnStartInput {
@@ -75,6 +72,7 @@ export interface ParentTurnInterruptionInput {
   executionId: string;
   reason: string;
   recoveryIncidentId?: string;
+  endedAt?: string;
   stagedAssistant?: Message;
   finalizeCompatibility?: (
     assistant: Message,
@@ -84,36 +82,11 @@ export interface ParentTurnInterruptionInput {
 }
 
 /** Durable parent-turn operations that orchestration can receive by construction. */
-export interface ParentTurnDurability {
-  startParentTurn(input: ParentTurnStartInput): ParentTurnCommitResult;
-  finishParentTurnBatched(input: ParentTurnFinishInput): Promise<ParentTurnCommitResult>;
-  interruptUnfinishedExecution(
-    executionId: string,
-    reason: string,
-    stagedAssistant?: Message,
-    finalizeCompatibility?: (
-      assistant: Message,
-      narrative: readonly ParentNarrativeRecoveryItem[],
-    ) => void,
-    recoveredNarrative?: readonly ParentNarrativeRecoveryItem[],
-    recoveryIncidentId?: string,
-  ): ParentTurnCommitResult;
-  loadTurnByExecution(executionId: string): AgentTurn | null;
-  loadThread(threadId: string): AgentThread | null;
-  loadCheckpoint(executionId: string): ParentTurnCheckpoint | null;
-  loadTerminalProjection(turnId: string): ParentTurnTerminalProjection;
-  recordNativeCursor(executionId: string, nativeCursor: ProviderIdentity): boolean;
-  recordParentNarrativeRecovery(input: ParentNarrativeRecoveryCommit): boolean;
-  recordProviderDiagnostic(input: {
-    executionId: string;
-    event: AgentEvent;
-    terminal: boolean;
-  }): void;
-  recordSynthesizedPublications(
-    threadId: string,
-    events: readonly Record<string, unknown>[],
-  ): readonly (CanonicalAgentEventEnvelope | import("@mcode/contracts").AcceptedCanonicalAgentEventEnvelope)[];
-}
+export type ParentTurnDurability = Pick<CanonicalAgentBoundary,
+  "startParentTurn" | "finishParentTurnBatched" | "interruptUnfinishedExecution"
+  | "loadTurnByExecution" | "loadParentTurnUserMessage" | "loadThread" | "loadCheckpoint" | "loadTerminalProjection"
+  | "recordNativeCursor" | "recordParentNarrativeRecovery" | "classifyParentNarrativeRecovery" | "recordProviderDiagnostic"
+  | "recordSynthesizedPublications">;
 
 /** Injection token for parent-turn durability. */
 export const PARENT_TURN_DURABILITY = Symbol("ParentTurnDurability");

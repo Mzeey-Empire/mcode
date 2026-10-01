@@ -5,12 +5,12 @@ import * as NodeURL from "node:url";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { CanonicalAgentBoundary } from "../../../canonical/canonical-agent-boundary.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "../../../canonical/canonical-agent-store.js";
 import {
   LEGACY_CONVERSATION_MIGRATION_MAX_BYTES,
   LEGACY_CONVERSATION_MIGRATION_VERSION,
-  LegacyConversationMigration,
-} from "../legacy-conversation-migration.js";
+  LegacyConversationMigrationStore,
+} from "../legacy-conversation-migration-store.js";
 
 const fixtureDirectory = NodePath.join(
   NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
@@ -22,7 +22,7 @@ function applyFixture(db: Database, name: string): void {
   db.exec(NodeFS.readFileSync(NodePath.join(fixtureDirectory, name), "utf8"));
 }
 
-describe("LegacyConversationMigration", () => {
+describe("LegacyConversationMigrationStore", () => {
   let db: Database;
 
   beforeEach(() => {
@@ -35,7 +35,7 @@ describe("LegacyConversationMigration", () => {
 
   it("migrates the versioned parent-pair fixture with native and source provenance", async () => {
     applyFixture(db, "v1-parent-pair.sql");
-    const migration = new LegacyConversationMigration(db);
+    const migration = new LegacyConversationMigrationStore(db);
 
     const result = await migration.runToCompletion();
 
@@ -83,7 +83,7 @@ describe("LegacyConversationMigration", () => {
     // Regression: legacy migration previously filtered out every thread with a parent_thread_id,
     // losing child messages and narrative items during canonical cutover.
     applyFixture(db, "v1-child-pair.sql");
-    const migration = new LegacyConversationMigration(db);
+    const migration = new LegacyConversationMigrationStore(db);
 
     const result = await migration.runToCompletion();
 
@@ -173,7 +173,7 @@ describe("LegacyConversationMigration", () => {
   it("migrates nested children by structural depth before lexical child order", async () => {
     // Regression: lexical ordering can process a grandchild before its canonical parent.
     applyFixture(db, "v1-nested-child-pair.sql");
-    const migration = new LegacyConversationMigration(db);
+    const migration = new LegacyConversationMigrationStore(db);
 
     const result = await migration.runToCompletion();
 
@@ -192,7 +192,7 @@ describe("LegacyConversationMigration", () => {
 
   it("keeps an ambiguous fixture on the legacy projection with explicit provenance", async () => {
     applyFixture(db, "v1-ambiguous.sql");
-    const migration = new LegacyConversationMigration(db);
+    const migration = new LegacyConversationMigrationStore(db);
 
     await migration.runToCompletion();
 
@@ -210,7 +210,7 @@ describe("LegacyConversationMigration", () => {
 
   it("rolls back a crash before the checkpoint and resumes without duplicates", async () => {
     applyFixture(db, "v1-parent-pair.sql");
-    const migration = new LegacyConversationMigration(db);
+    const migration = new LegacyConversationMigrationStore(db);
 
     expect(() => migration.runBatch({
       beforeCheckpoint: () => {
@@ -238,7 +238,7 @@ describe("LegacyConversationMigration", () => {
         ('user-v1-2', 'thread-v1', 'user', 'Second question', '2026-01-01T00:03:00.000Z', 3),
         ('assistant-v1-2', 'thread-v1', 'assistant', 'Second answer', '2026-01-01T00:04:00.000Z', 4)
     `).run();
-    const migration = new LegacyConversationMigration(db);
+    const migration = new LegacyConversationMigrationStore(db);
 
     expect(() => migration.runBatch({
       afterCheckpoint: () => {
@@ -255,7 +255,7 @@ describe("LegacyConversationMigration", () => {
     // Regression: a crash at either side of a child checkpoint must preserve all
     // child turns and leave the repeat-safe migration cursor at one outcome.
     applyFixture(db, "v1-child-pair.sql");
-    const migration = new LegacyConversationMigration(db);
+    const migration = new LegacyConversationMigrationStore(db);
 
     expect(() => migration.runBatch({
       beforeCheckpoint: () => {
@@ -294,7 +294,7 @@ describe("LegacyConversationMigration", () => {
     applyFixture(db, "v1-parent-pair.sql");
     db.prepare("UPDATE messages SET content = ? WHERE id = 'assistant-v1'")
       .run("x".repeat(LEGACY_CONVERSATION_MIGRATION_MAX_BYTES));
-    const migration = new LegacyConversationMigration(db);
+    const migration = new LegacyConversationMigrationStore(db);
 
     const result = await migration.runToCompletion();
 

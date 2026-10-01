@@ -3,20 +3,36 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../testing/owned-test-database.js";
+import type { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { reapOrphanedPtys } from "../../../../runtime/process/orphan-cleanup.js";
 import { PtyPidRegistry } from "../../../terminal/host/pty-pid-registry.js";
 import { WorkspaceEnvironmentService, type WorkspaceEnvironmentServiceOptions } from "../workspace-environment-service.js";
 import { WorkspaceEnvironmentAutomaticRepository } from "../workspace-environment-automatic-repository.js";
-import type { TerminalCommandCompletion, TerminalCommandPreparation } from "../../../terminal/commands/terminal-command-service.js";
+import type { TerminalCommandCloseResult, TerminalCommandCompletion, TerminalCommandPreparation } from "../../../terminal/commands/terminal-command-service.js";
 import type { Database } from "bun:sqlite";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import type { ThreadStartup } from "@mcode/contracts";
 
 const roots: string[] = [];
+const ownedDatabases = new Map<Database, OwnedTestDatabase>();
+const readers = new Map<Database, Database>();
+function openOwnedDatabase(): Database { const owned = createOwnedTestDatabase(); ownedDatabases.set(owned.db, owned); return owned.db; }
+function databaseWriter(db: Database): ApplicationDatabaseWriter { const writer = ownedDatabases.get(db)?.writer; if (!writer) throw new Error("Missing test database owner"); return writer; }
+function databaseReader(db: Database): Database {
+  let reader = readers.get(db);
+  if (!reader) { reader = openReadOnlyDatabase(db.filename); readers.set(db, reader); }
+  return reader;
+}
 
 afterEach(async () => {
+  for (const reader of readers.values()) reader.close(true);
+  readers.clear();
+  for (const owned of ownedDatabases.values()) await owned.close();
+  ownedDatabases.clear();
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
 });
 
@@ -43,14 +59,14 @@ async function eventually(assertion: () => void): Promise<void> {
 async function automaticHarness({ setup = true, prepareFailure = false, attachmentStorage, threadStartups, threadIds = ["thread-1"] }: {
   readonly setup?: boolean;
   readonly prepareFailure?: boolean;
-  readonly attachmentStorage?: { removeStoredAttachments: ReturnType<typeof vi.fn> };
+  readonly attachmentStorage?: WorkspaceEnvironmentServiceOptions["attachmentStorage"];
   readonly threadStartups?: WorkspaceEnvironmentServiceOptions["threadStartups"]
-    | ((database: Database) => NonNullable<WorkspaceEnvironmentServiceOptions["threadStartups"]>);
+    | ((database: Database, writer: ApplicationDatabaseWriter) => NonNullable<WorkspaceEnvironmentServiceOptions["threadStartups"]>);
   readonly threadIds?: readonly string[];
 } = {}) {
   const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-automatic-setup-"));
   roots.push(root);
-  const db = openMemoryDatabase();
+  const db = openOwnedDatabase();
   let milliseconds = Date.parse("2026-08-24T12:00:00.000Z");
   db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES ('workspace-1', 'Project', '/project', '{}')").run();
   for (const threadId of threadIds) {
@@ -58,8 +74,8 @@ async function automaticHarness({ setup = true, prepareFailure = false, attachme
   }
   const completion = deferred<TerminalCommandCompletion>();
   const start = vi.fn(() => completion.promise);
-  const close = vi.fn(async () => ({ kind: "contained" as const }));
-  const prepare = vi.fn(async (_input?: unknown) => {
+  const close = vi.fn(async (): Promise<TerminalCommandCloseResult> => ({ kind: "contained" }));
+  const prepare = vi.fn(async (_input?: unknown): Promise<TerminalCommandPreparation> => {
     if (prepareFailure) throw new Error("terminal preparation failed");
     return {
       kind: "ready" as const,
@@ -77,12 +93,13 @@ async function automaticHarness({ setup = true, prepareFailure = false, attachme
   const terminalRecovery = { create: vi.fn(() => ({ ptyId: "recovery-pty", shell: "sh" })) };
   const service = new WorkspaceEnvironmentService({
     mcodeDir: root,
-    database: db,
+    database: databaseReader(db),
+    databaseWriter: databaseWriter(db),
     threads: { findById: (id) => threadIds.includes(id) ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
     terminalCommands,
     terminalRecovery,
     attachmentStorage,
-    threadStartups: typeof threadStartups === "function" ? threadStartups(db) : threadStartups,
+    threadStartups: typeof threadStartups === "function" ? threadStartups(databaseReader(db), databaseWriter(db)) : threadStartups,
     platform: "linux",
     now: () => new Date(milliseconds++),
   });
@@ -142,20 +159,20 @@ describe("automatic Project Setup", () => {
       updatedAt: "2026-09-02T10:00:00.000Z",
     };
     const threadStartups = {
-      appendOutput: vi.fn(() => cancelledStartup),
-      block: vi.fn(() => cancelledStartup),
-      complete: vi.fn(() => cancelledStartup),
+      appendOutput: vi.fn(async () => cancelledStartup),
+      block: vi.fn(async () => cancelledStartup),
+      complete: vi.fn(async () => cancelledStartup),
       findByThreadId: vi.fn(() => cancelledStartup),
       listInterrupted: vi.fn(() => []),
-      markCancelled: vi.fn(() => cancelledStartup),
-      resume: vi.fn(() => cancelledStartup),
-      skip: vi.fn(() => cancelledStartup),
+      markCancelled: vi.fn(async () => cancelledStartup),
+      resume: vi.fn(async () => cancelledStartup),
+      skip: vi.fn(async () => cancelledStartup),
     } satisfies NonNullable<WorkspaceEnvironmentServiceOptions["threadStartups"]>;
     const { service, prepare, start } = await automaticHarness({ threadStartups });
     const dispatch = vi.fn().mockResolvedValue({ completion: Promise.resolve() });
     service.setAutomaticSetupDispatcher({ dispatch });
 
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(prepare).not.toHaveBeenCalled();
@@ -180,7 +197,7 @@ describe("automatic Project Setup", () => {
     });
     service.setAutomaticSetupDispatcher({ dispatch });
 
-    expect(service.queueAutomaticFirstTurn(queuedInput())).toMatchObject({
+    expect(await service.queueAutomaticFirstTurn(queuedInput())).toMatchObject({
       gate: "blocked",
       attempt: { state: "queued" },
       queuedTurns: [{ state: "queued", messageId: "message-1" }],
@@ -191,6 +208,7 @@ describe("automatic Project Setup", () => {
     completion.resolve({ kind: "exited", exitCode: 0, output: "done", outputTruncated: false });
     await eventually(() => expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ messageId: "message-1" })));
 
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).queuedTurns[0]?.state).toBe("dispatched"));
     expect(service.getAutomaticSetup({ threadId: "thread-1" })).toMatchObject({
       gate: "released-by-pass",
       attempt: {
@@ -222,7 +240,7 @@ describe("automatic Project Setup", () => {
     }];
     const input = queuedInput();
 
-    service.queueAutomaticFirstTurn({
+    await service.queueAutomaticFirstTurn({
       ...input,
       submission: { ...input.submission, selectedTextComments },
     });
@@ -240,11 +258,12 @@ describe("automatic Project Setup", () => {
     const dispatch = vi.fn().mockResolvedValue({ completion: Promise.resolve() });
     service.setAutomaticSetupDispatcher({ dispatch });
 
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ messageId: "message-1" })));
 
     expect(prepare).not.toHaveBeenCalled();
     expect(start).not.toHaveBeenCalled();
+    await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).queuedTurns[0]?.state).toBe("dispatched"));
     expect(service.getAutomaticSetup({ threadId: "thread-1" })).toMatchObject({
       gate: "not-required",
       attempt: null,
@@ -267,7 +286,7 @@ describe("automatic Project Setup", () => {
     const { service } = await automaticHarness({ setup: false, threadStartups: startup });
     service.setAutomaticSetupDispatcher({ dispatch: vi.fn().mockResolvedValue({ completion: Promise.resolve() }) });
 
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
 
     await eventually(() => expect(startup.skip).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
@@ -289,7 +308,7 @@ describe("automatic Project Setup", () => {
     } as unknown as NonNullable<WorkspaceEnvironmentServiceOptions["threadStartups"]>;
     const { service, completion, prepare, start } = await automaticHarness({ threadStartups: startup });
 
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     const preparedInput = prepare.mock.calls[0]?.[0] as { onOutput?: (chunk: Uint8Array) => void } | undefined;
     preparedInput?.onOutput?.(Buffer.from("installing\\n"));
@@ -322,7 +341,7 @@ describe("automatic Project Setup", () => {
     } as unknown as NonNullable<WorkspaceEnvironmentServiceOptions["threadStartups"]>;
     const { service, completion, start } = await automaticHarness({ threadStartups: startup });
 
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(startup.block).toHaveBeenCalledOnce());
@@ -341,7 +360,7 @@ describe("automatic Project Setup", () => {
     const baseCheckout = NodePath.join(root, "base");
     const worktreeCheckout = NodePath.join(root, "worktree");
     await NodeFSPromises.mkdir(worktreeCheckout, { recursive: true });
-    const db = openMemoryDatabase();
+    const db = openOwnedDatabase();
     db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES ('workspace-1', 'Project', '/project', '{}')").run();
     db.prepare("INSERT INTO threads (id, workspace_id, title, mode, branch, worktree_managed, provider) VALUES ('thread-1', 'workspace-1', 'First Turn', 'worktree', 'main', 1, 'claude')").run();
     const prepare = vi.fn(async () => ({
@@ -355,7 +374,8 @@ describe("automatic Project Setup", () => {
     }));
     const service = new WorkspaceEnvironmentService({
       mcodeDir: root,
-      database: db,
+      database: databaseReader(db),
+    databaseWriter: databaseWriter(db),
       workspaces: { findById: (id) => id === "workspace-1" ? { id, path: baseCheckout } : null },
       threads: { findById: (id) => id === "thread-1" ? {
         id,
@@ -375,7 +395,7 @@ describe("automatic Project Setup", () => {
       sourceRevision: null,
       document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
     });
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state).toBe("awaiting-approval"));
     const approval = service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.snapshot?.approval;
     if (!approval) throw new Error("Expected shared Setup approval");
@@ -395,8 +415,8 @@ describe("automatic Project Setup", () => {
 
   it("cancels only the targeted queued Turn and leaves the Setup command running", async () => {
     const { db, service, close, start } = await automaticHarness();
-    service.queueAutomaticFirstTurn(queuedInput());
-    service.queueAutomaticFirstTurn(queuedInput(2));
+    await service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput(2));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     const firstQueuedTurn = service.getAutomaticSetup({ threadId: "thread-1" }).queuedTurns[0]!;
     const cancelled = await service.cancelQueuedAutomaticTurn({ threadId: "thread-1", queuedTurnId: firstQueuedTurn.id });
@@ -416,7 +436,7 @@ describe("automatic Project Setup", () => {
     const firstAttachment = { id: "queued-file-1", name: "first.png", mimeType: "image/png", sizeBytes: 4 };
     const secondAttachment = { id: "queued-file-2", name: "second.png", mimeType: "image/png", sizeBytes: 4 };
     for (const [messageId, attachment] of [["message-1", firstAttachment], ["message-2", secondAttachment]] as const) {
-      service.queueAutomaticFirstTurn({
+      await service.queueAutomaticFirstTurn({
         threadId: "thread-1",
         messageId,
         content: messageId,
@@ -447,11 +467,11 @@ describe("automatic Project Setup", () => {
   it("rejects the next active queued Turn at the per-Thread capacity boundary", async () => {
     const { service } = await automaticHarness();
 
-    for (let index = 1; index <= 64; index += 1) service.queueAutomaticFirstTurn(queuedInput(index));
+    for (let index = 1; index <= 64; index += 1) await service.queueAutomaticFirstTurn(queuedInput(index));
 
     let error: unknown;
     try {
-      service.queueAutomaticFirstTurn(queuedInput(65));
+      await service.queueAutomaticFirstTurn(queuedInput(65));
     } catch (caught) {
       error = caught;
     }
@@ -461,7 +481,7 @@ describe("automatic Project Setup", () => {
 
   it("retains only the latest terminal queued Turns without pruning active rows", async () => {
     const { service } = await automaticHarness();
-    for (let index = 1; index <= 33; index += 1) service.queueAutomaticFirstTurn(queuedInput(index));
+    for (let index = 1; index <= 33; index += 1) await service.queueAutomaticFirstTurn(queuedInput(index));
 
     for (const queuedTurn of service.getAutomaticSetup({ threadId: "thread-1" }).queuedTurns) {
       await service.cancelQueuedAutomaticTurn({ threadId: "thread-1", queuedTurnId: queuedTurn.id });
@@ -477,7 +497,7 @@ describe("automatic Project Setup", () => {
     const { service, completion, start } = await automaticHarness();
     const dispatch = vi.fn().mockResolvedValue({ completion: Promise.resolve() });
     service.setAutomaticSetupDispatcher({ dispatch });
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
@@ -499,7 +519,7 @@ describe("automatic Project Setup", () => {
 
   it("rejects Continue while automatic Setup is still running without releasing queued Turns", async () => {
     const { service, start } = await automaticHarness();
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     await expect(service.continueAutomaticSetup({ threadId: "thread-1" })).rejects.toMatchObject({
@@ -518,8 +538,8 @@ describe("automatic Project Setup", () => {
     const dispatch = vi.fn().mockResolvedValue({ completion: Promise.resolve() });
     service.setAutomaticSetupDispatcher({ dispatch });
 
-    service.queueAutomaticFirstTurn(queuedInput());
-    service.queueAutomaticFirstTurn(queuedInput(2));
+    await service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput(2));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state).toBe("failed"));
@@ -529,7 +549,7 @@ describe("automatic Project Setup", () => {
       service.continueAutomaticSetup({ threadId: "thread-1" }),
     ]);
 
-    expect(dispatch).toHaveBeenCalledTimes(2);
+    await eventually(() => expect(dispatch).toHaveBeenCalledTimes(2));
     expect(dispatch.mock.calls.map(([submission]) => submission.messageId)).toEqual(["message-1", "message-2"]);
     completion.resolve({ kind: "exited", exitCode: 0, output: "done", outputTruncated: false });
   });
@@ -543,8 +563,8 @@ describe("automatic Project Setup", () => {
       return { completion: submission.messageId === "message-1" ? firstCompletion.promise : Promise.resolve() };
     });
     service.setAutomaticSetupDispatcher({ dispatch });
-    service.queueAutomaticFirstTurn(queuedInput());
-    service.queueAutomaticFirstTurn(queuedInput(2));
+    await service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput(2));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
@@ -576,9 +596,9 @@ describe("automatic Project Setup", () => {
         return { completion: Promise.resolve() };
       }),
     });
-    service.queueAutomaticFirstTurn(queuedInput());
-    service.queueAutomaticFirstTurn(queuedInput(2));
-    service.queueAutomaticFirstTurn(queuedInput(3));
+    await service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput(2));
+    await service.queueAutomaticFirstTurn(queuedInput(3));
     db.prepare("UPDATE workspace_environment_queued_turns SET created_at = ? WHERE thread_id = ?")
       .run("2026-08-24T12:00:00.000Z", "thread-1");
     await eventually(() => expect(start).toHaveBeenCalledOnce());
@@ -597,7 +617,7 @@ describe("automatic Project Setup", () => {
     const start = vi.fn();
     const close = vi.fn(async () => ({ kind: "contained" as const }));
     prepare.mockImplementation(() => pending.promise);
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(prepare).toHaveBeenCalledOnce());
 
     const releaseDeletion = service.beginThreadDeletion("thread-1");
@@ -629,7 +649,7 @@ describe("automatic Project Setup", () => {
     const start = vi.fn();
     const close = vi.fn(async () => ({ kind: "contained" as const }));
     prepare.mockImplementation(() => pending.promise);
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(prepare).toHaveBeenCalledOnce());
 
     const releaseDeletion = service.beginWorkspaceDeletion("workspace-1");
@@ -654,7 +674,7 @@ describe("automatic Project Setup", () => {
     const { service, prepare } = await automaticHarness();
     const pendingRead = deferred<Awaited<ReturnType<WorkspaceEnvironmentService["read"]>>>();
     vi.spyOn(service, "read").mockReturnValue(pendingRead.promise);
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
 
     const disposing = service.dispose();
     let disposed = false;
@@ -674,7 +694,7 @@ describe("automatic Project Setup", () => {
 
   it("closes a running automatic command before Thread deletion cleanup returns", async () => {
     const { service, close, start } = await automaticHarness();
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     const releaseDeletion = service.beginThreadDeletion("thread-1");
@@ -687,7 +707,7 @@ describe("automatic Project Setup", () => {
 
   it("fails closed for malformed persisted automatic snapshots and queued submissions", async () => {
     const { db, service, prepare, start } = await automaticHarness();
-    const repository = new WorkspaceEnvironmentAutomaticRepository(db, () => "2026-08-24T12:00:00.000Z");
+    const repository = new WorkspaceEnvironmentAutomaticRepository(databaseReader(db), () => "2026-08-24T12:00:00.000Z", databaseWriter(db));
     db.prepare("INSERT INTO workspace_environment_setup_gates (thread_id, state, attempt_id, created_at, updated_at) VALUES (?, 'blocked', ?, ?, ?)")
       .run("thread-1", "attempt-corrupt", "2026-08-24T12:00:00.000Z", "2026-08-24T12:00:00.000Z");
     db.prepare("INSERT INTO workspace_environment_automatic_setup_attempts (id, thread_id, state, reason, launch_snapshot_json, created_at) VALUES (?, ?, 'failed', 'setup_failed', ?, ?)")
@@ -703,7 +723,7 @@ describe("automatic Project Setup", () => {
     db.prepare("INSERT INTO workspace_environment_queued_turns (id, thread_id, message_id, state, submission_json, created_at, released_at) VALUES (?, ?, ?, 'released', ?, ?, ?)")
       .run("queued-corrupt", "thread-1", "message-corrupt", "{", "2026-08-24T12:00:00.000Z", "2026-08-24T12:00:00.000Z");
 
-    expect(() => repository.claimReleasedTurn("thread-1")).toThrow("Invalid persisted automatic Setup submission");
+    await expect(repository.claimReleasedTurn("thread-1")).rejects.toThrow("Invalid persisted automatic Setup submission");
     expect(service.getAutomaticSetup({ threadId: "thread-1" }).queuedTurns).toMatchObject([
       { id: "queued-corrupt", state: "released" },
     ]);
@@ -715,7 +735,7 @@ describe("automatic Project Setup", () => {
     const { db, service, completion, start } = await automaticHarness();
     const dispatch = vi.fn();
     service.setAutomaticSetupDispatcher({ dispatch });
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state).toBe("failed"));
@@ -736,7 +756,7 @@ describe("automatic Project Setup", () => {
     const { root, db, service, completion, start, terminalCommands } = await automaticHarness();
     const failedDispatch = vi.fn().mockRejectedValue(new Error("provider unavailable"));
     service.setAutomaticSetupDispatcher({ dispatch: failedDispatch });
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     completion.resolve({ kind: "exited", exitCode: 0, output: "done", outputTruncated: false });
@@ -745,7 +765,8 @@ describe("automatic Project Setup", () => {
 
     const reloaded = new WorkspaceEnvironmentService({
       mcodeDir: root,
-      database: db,
+      database: databaseReader(db),
+    databaseWriter: databaseWriter(db),
       threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
       terminalCommands,
       platform: "linux",
@@ -760,8 +781,10 @@ describe("automatic Project Setup", () => {
 
   it("classifies read and preparation failures without leaving a queued attempt unresolved", async () => {
     const readFailure = await automaticHarness();
-    vi.spyOn(readFailure.service as never, "readForThread").mockRejectedValue(new Error("filesystem unavailable"));
-    readFailure.service.queueAutomaticFirstTurn(queuedInput());
+    const documentPath = readFailure.service.filePath("workspace-1");
+    await NodeFSPromises.unlink(documentPath);
+    await NodeFSPromises.mkdir(documentPath);
+    await readFailure.service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(readFailure.service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state).toBe("failed"));
     expect(readFailure.service.getAutomaticSetup({ threadId: "thread-1" })).toMatchObject({
       gate: "blocked",
@@ -770,7 +793,7 @@ describe("automatic Project Setup", () => {
     });
 
     const preparationFailure = await automaticHarness({ prepareFailure: true });
-    preparationFailure.service.queueAutomaticFirstTurn(queuedInput());
+    await preparationFailure.service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(preparationFailure.service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state).toBe("failed"));
     expect(preparationFailure.service.getAutomaticSetup({ threadId: "thread-1" })).toMatchObject({
       gate: "blocked",
@@ -783,17 +806,19 @@ describe("automatic Project Setup", () => {
     const { root, db, completion, start, terminalCommands } = await automaticHarness();
     const service = new WorkspaceEnvironmentService({
       mcodeDir: root,
-      database: db,
+      database: databaseReader(db),
+    databaseWriter: databaseWriter(db),
       threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
       terminalCommands,
       platform: "linux",
     });
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     const reloaded = new WorkspaceEnvironmentService({
       mcodeDir: root,
-      database: db,
+      database: databaseReader(db),
+    databaseWriter: databaseWriter(db),
       threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
       terminalCommands,
       platform: "linux",
@@ -817,7 +842,7 @@ describe("automatic Project Setup", () => {
     const { service, close, start } = await automaticHarness();
     const containment = deferred<{ readonly kind: "contained" }>();
     close.mockImplementationOnce(async () => await containment.promise);
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     const stopping = service.stopAutomaticSetup({ threadId: "thread-1" });
@@ -840,7 +865,7 @@ describe("automatic Project Setup", () => {
 
   it("retries from the current environment into a new immutable automatic Setup snapshot", async () => {
     const { db, service, completion, prepare, start } = await automaticHarness();
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state).toBe("failed"));
@@ -869,7 +894,7 @@ describe("automatic Project Setup", () => {
     const { service, close, prepare, start } = await automaticHarness();
     const closeCompletion = deferred<{ readonly kind: "contained" }>();
     close.mockImplementationOnce(async () => await closeCompletion.promise);
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     const stopping = service.stopAutomaticSetup({ threadId: "thread-1" });
@@ -887,7 +912,7 @@ describe("automatic Project Setup", () => {
     const { service, close, prepare, start } = await automaticHarness();
     const closeCompletion = deferred<{ readonly kind: "contained" }>();
     close.mockImplementationOnce(async () => await closeCompletion.promise);
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     const retrying = service.retryAutomaticSetup({ threadId: "thread-1" });
@@ -914,7 +939,7 @@ describe("automatic Project Setup", () => {
         waitForRelease: async () => await released.promise,
       },
     }));
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     completion.resolve({ kind: "containment_failure", output: "orphaned process", outputTruncated: false });
@@ -945,7 +970,7 @@ describe("automatic Project Setup", () => {
 
     for (const action of actions) {
       const { service, completion, close, start } = await automaticHarness();
-      service.queueAutomaticFirstTurn(queuedInput());
+      await service.queueAutomaticFirstTurn(queuedInput());
       await eventually(() => expect(start).toHaveBeenCalledOnce());
       completion.resolve({ kind: "containment_failure", output: "orphaned process", outputTruncated: false });
       await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.outcome).toBe("containment_failure"));
@@ -958,7 +983,7 @@ describe("automatic Project Setup", () => {
   it("keeps automatic Setup ownership after containment failure and rejects Retry and disposal", async () => {
     const { service, close, prepare, start } = await automaticHarness();
     close.mockResolvedValueOnce({ kind: "containment_failure" });
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     await expect(service.stopAutomaticSetup({ threadId: "thread-1" })).rejects.toThrow("Automatic Project Setup process containment failed");
@@ -994,7 +1019,7 @@ describe("automatic Project Setup", () => {
       const { service, close, start } = await automaticHarness();
       const closeCompletion = deferred<{ readonly kind: "contained" }>();
       close.mockImplementationOnce(async () => await closeCompletion.promise);
-      service.queueAutomaticFirstTurn(queuedInput());
+      await service.queueAutomaticFirstTurn(queuedInput());
       await eventually(() => expect(start).toHaveBeenCalledOnce());
 
       const stopping = service.stopAutomaticSetup({ threadId: "thread-1" });
@@ -1016,7 +1041,7 @@ describe("automatic Project Setup", () => {
     const firstTurnCompletion = deferred<void>();
     const dispatch = vi.fn(async () => await accepted.promise);
     service.setAutomaticSetupDispatcher({ dispatch });
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state).toBe("failed"));
@@ -1042,7 +1067,7 @@ describe("automatic Project Setup", () => {
     const { service, close, prepare, start } = await automaticHarness();
     const closeCompletion = deferred<{ readonly kind: "contained" }>();
     close.mockImplementationOnce(async () => await closeCompletion.promise);
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     const stopping = service.stopAutomaticSetup({ threadId: "thread-1" });
@@ -1059,7 +1084,7 @@ describe("automatic Project Setup", () => {
 
   it("opens a recovery Terminal without resuming Setup or releasing its gate", async () => {
     const { service, start, terminalRecovery } = await automaticHarness();
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     const before = service.getAutomaticSetup({ threadId: "thread-1" });
 
@@ -1071,7 +1096,7 @@ describe("automatic Project Setup", () => {
 
   it("reaps a stale automatic Setup command before restart marks its attempt interrupted", async () => {
     const { root, db, service, start, terminalCommands } = await automaticHarness();
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     const registry = new PtyPidRegistry(root);
@@ -1085,7 +1110,8 @@ describe("automatic Project Setup", () => {
 
     const reloaded = new WorkspaceEnvironmentService({
       mcodeDir: root,
-      database: db,
+      database: databaseReader(db),
+    databaseWriter: databaseWriter(db),
       threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
       terminalCommands,
       platform: "linux",
@@ -1101,7 +1127,7 @@ describe("automatic Project Setup", () => {
 
   it("preserves a Continue release without recording Setup as passed", async () => {
     const { root, db, service, start, completion, terminalCommands } = await automaticHarness();
-    service.queueAutomaticFirstTurn(queuedInput());
+    await service.queueAutomaticFirstTurn(queuedInput());
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(service.getAutomaticSetup({ threadId: "thread-1" }).attempt?.state).toBe("failed"));
@@ -1109,7 +1135,8 @@ describe("automatic Project Setup", () => {
 
     const reloaded = new WorkspaceEnvironmentService({
       mcodeDir: root,
-      database: db,
+      database: databaseReader(db),
+    databaseWriter: databaseWriter(db),
       threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
       terminalCommands,
       platform: "linux",
@@ -1129,25 +1156,25 @@ describe("automatic Project Setup", () => {
     const threadId = "00000000-0000-4000-8000-0000000000a1";
     const { service, start } = await automaticHarness({
       threadIds: [threadId],
-      threadStartups: (database) => {
-        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+      threadStartups: (database, writer) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database, writer), writer, () => new Date());
         return startups;
       },
     });
-    startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
-    startups.advance(startupId, "thread");
-    startups.bindThread(startupId, threadId);
-    startups.advance(startupId, "worktree");
-    startups.advance(startupId, "setup");
+    await startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    await startups.advance(startupId, "thread");
+    await startups.bindThread(startupId, threadId);
+    await startups.advance(startupId, "worktree");
+    await startups.advance(startupId, "setup");
     const dispatch = vi.fn().mockResolvedValue({ completion: Promise.resolve() });
     service.setAutomaticSetupDispatcher({ dispatch });
 
-    service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await service.queueAutomaticFirstTurn(queuedInput(1, threadId));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
     // Mirror a server restart: bootstrap interrupts the startup record first,
     // then reconciles the automatic Setup attempt.
-    startups.interruptNonterminalOnStartup();
+    await startups.interruptNonterminalOnStartup();
     await service.reconcileAutomaticSetup();
     expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
 
@@ -1164,23 +1191,23 @@ describe("automatic Project Setup", () => {
     const threadId = "00000000-0000-4000-8000-0000000000b1";
     const { service, start, completion } = await automaticHarness({
       threadIds: [threadId],
-      threadStartups: (database) => {
-        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+      threadStartups: (database, writer) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database, writer), writer, () => new Date());
         return startups;
       },
     });
-    startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
-    startups.advance(startupId, "thread");
-    startups.bindThread(startupId, threadId);
-    startups.advance(startupId, "worktree");
-    startups.advance(startupId, "setup");
+    await startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    await startups.advance(startupId, "thread");
+    await startups.bindThread(startupId, threadId);
+    await startups.advance(startupId, "worktree");
+    await startups.advance(startupId, "setup");
     service.setAutomaticSetupDispatcher({ dispatch: vi.fn() });
 
-    service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await service.queueAutomaticFirstTurn(queuedInput(1, threadId));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(service.getAutomaticSetup({ threadId }).attempt?.state).toBe("failed"));
-    expect(startups.findByThreadId(threadId)?.state).toBe("blocked");
+    await eventually(() => expect(startups.findByThreadId(threadId)?.state).toBe("blocked"));
 
     const queued = service.getAutomaticSetup({ threadId }).queuedTurns[0]!;
     await service.cancelQueuedAutomaticTurn({ threadId, queuedTurnId: queued.id });
@@ -1195,17 +1222,17 @@ describe("automatic Project Setup", () => {
     const threadId = "00000000-0000-4000-8000-0000000000c1";
     const { service } = await automaticHarness({
       threadIds: [threadId],
-      threadStartups: (database) => {
-        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+      threadStartups: (database, writer) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database, writer), writer, () => new Date());
         return startups;
       },
     });
     // A direct startup never opens a Setup gate; nothing can drive it past
     // interrupted, so reconciliation must settle it instead of pinning the shell.
-    startups.start({ startupId, workspaceId: "workspace-1", kind: "direct" });
-    startups.advance(startupId, "thread");
-    startups.bindThread(startupId, threadId);
-    startups.interruptNonterminalOnStartup();
+    await startups.start({ startupId, workspaceId: "workspace-1", kind: "direct" });
+    await startups.advance(startupId, "thread");
+    await startups.bindThread(startupId, threadId);
+    await startups.interruptNonterminalOnStartup();
     expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
 
     await service.reconcileAutomaticSetup();
@@ -1219,21 +1246,21 @@ describe("automatic Project Setup", () => {
     const threadId = "00000000-0000-4000-8000-0000000000d1";
     const { service, start } = await automaticHarness({
       threadIds: [threadId],
-      threadStartups: (database) => {
-        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+      threadStartups: (database, writer) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database, writer), writer, () => new Date());
         return startups;
       },
     });
-    startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
-    startups.advance(startupId, "thread");
-    startups.bindThread(startupId, threadId);
-    startups.advance(startupId, "worktree");
-    startups.advance(startupId, "setup");
+    await startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    await startups.advance(startupId, "thread");
+    await startups.bindThread(startupId, threadId);
+    await startups.advance(startupId, "worktree");
+    await startups.advance(startupId, "setup");
 
-    service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await service.queueAutomaticFirstTurn(queuedInput(1, threadId));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
 
-    startups.interruptNonterminalOnStartup();
+    await startups.interruptNonterminalOnStartup();
     await service.reconcileAutomaticSetup();
 
     // The interrupted attempt still offers Continue and Retry, so the startup
@@ -1248,18 +1275,18 @@ describe("automatic Project Setup", () => {
     const threadId = "00000000-0000-4000-8000-0000000000e1";
     const { service, start, completion } = await automaticHarness({
       threadIds: [threadId],
-      threadStartups: (database) => {
-        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+      threadStartups: (database, writer) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database, writer), writer, () => new Date());
         return startups;
       },
     });
-    startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
-    startups.advance(startupId, "thread");
-    startups.bindThread(startupId, threadId);
-    startups.advance(startupId, "worktree");
-    startups.advance(startupId, "setup");
+    await startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    await startups.advance(startupId, "thread");
+    await startups.bindThread(startupId, threadId);
+    await startups.advance(startupId, "worktree");
+    await startups.advance(startupId, "setup");
 
-    service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await service.queueAutomaticFirstTurn(queuedInput(1, threadId));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(service.getAutomaticSetup({ threadId }).attempt?.state).toBe("failed"));
@@ -1272,7 +1299,7 @@ describe("automatic Project Setup", () => {
 
     // A second restart interrupts the startup while its gate is already
     // released; the stale failed attempt must not keep the shell pinned.
-    startups.interruptNonterminalOnStartup();
+    await startups.interruptNonterminalOnStartup();
     expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
     await service.reconcileAutomaticSetup();
 

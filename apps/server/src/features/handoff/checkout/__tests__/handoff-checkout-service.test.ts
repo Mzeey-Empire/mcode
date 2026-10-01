@@ -1,39 +1,51 @@
 import "reflect-metadata";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
-import type { GitService } from "../../../projects/index.js";
+import { FakeGitExecutor } from "../../../projects/git/execution/index.js";
+import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
+import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { HandoffCheckoutService } from "../handoff-checkout-service.js";
 
 describe("HandoffCheckoutService", () => {
   let db: Database;
+  let owned: OwnedTestDatabase;
   let threadRepo: ThreadRepo;
   let workspaceRepo: WorkspaceRepo;
-  let gitService: GitService;
+  let gitService: GitRepositoryService;
+  let gitWorktrees: GitWorktreeService;
   let service: HandoffCheckoutService;
 
   beforeEach(() => {
-    db = openMemoryDatabase();
-    threadRepo = new ThreadRepo(db);
-    workspaceRepo = new WorkspaceRepo(db);
-    gitService = {
-      resolveWorkingDir: vi.fn(),
-      createBranch: vi.fn(),
-      getCurrentBranchAt: vi.fn(),
-    } as unknown as GitService;
+    owned = createOwnedTestDatabase();
+    db = openReadOnlyDatabase(owned.db.filename);
+    threadRepo = new ThreadRepo(db, owned.writer);
+    workspaceRepo = new WorkspaceRepo(db, owned.writer);
+    const gitExecutor = new FakeGitExecutor();
+    gitService = new GitRepositoryService(workspaceRepo, gitExecutor);
+    gitWorktrees = new GitWorktreeService(workspaceRepo, gitExecutor, hostRuntime);
     service = new HandoffCheckoutService(
       threadRepo,
       workspaceRepo,
       gitService,
-      gitService,
+      gitWorktrees,
     );
   });
 
+  afterEach(async () => {
+    await owned.writer.barrier();
+    db.close(true);
+    await owned.close();
+    vi.restoreAllMocks();
+  });
+
   it("creates a branch for a thread and marks its checkout state named", async () => {
-    const workspace = workspaceRepo.create("test", "/tmp/test");
-    const thread = threadRepo.create(
+    const workspace = await workspaceRepo.create("test", "/tmp/test");
+    const thread = await threadRepo.create(
       workspace.id,
       "Branchless Thread",
       "worktree",
@@ -44,9 +56,9 @@ describe("HandoffCheckoutService", () => {
       "branchless",
       "release",
     );
-    threadRepo.updateWorktreePath(thread.id, "/tmp/wt/main");
-    (gitService.resolveWorkingDir as ReturnType<typeof vi.fn>).mockReturnValue("/tmp/wt/main");
-    (gitService.createBranch as ReturnType<typeof vi.fn>).mockResolvedValue("feat/from-thread");
+    await threadRepo.updateWorktreePath(thread.id, "/tmp/wt/main");
+    vi.spyOn(gitWorktrees, "resolveWorkingDir").mockReturnValue("/tmp/wt/main");
+    vi.spyOn(gitService, "createBranch").mockResolvedValue("feat/from-thread");
 
     const branch = await service.createBranchForThread(
       workspace.id,
@@ -55,7 +67,7 @@ describe("HandoffCheckoutService", () => {
     );
 
     expect(branch).toBe("feat/from-thread");
-    expect(gitService.resolveWorkingDir).toHaveBeenCalledWith(
+    expect(gitWorktrees.resolveWorkingDir).toHaveBeenCalledWith(
       "/tmp/test",
       "worktree",
       "/tmp/wt/main",
@@ -72,10 +84,10 @@ describe("HandoffCheckoutService", () => {
   });
 
   it("syncs a branchless thread worktree to a named external branch", async () => {
-    const workspace = workspaceRepo.create("test", "/tmp/test");
-    const thread = threadRepo.create(workspace.id, "Branchless", "worktree", "release", true, "claude", undefined, "branchless", "release");
-    threadRepo.updateWorktreePath(thread.id, "/tmp/wt/main");
-    (gitService.getCurrentBranchAt as ReturnType<typeof vi.fn>).mockResolvedValue("feat/external");
+    const workspace = await workspaceRepo.create("test", "/tmp/test");
+    const thread = await threadRepo.create(workspace.id, "Branchless", "worktree", "release", true, "claude", undefined, "branchless", "release");
+    await threadRepo.updateWorktreePath(thread.id, "/tmp/wt/main");
+    vi.spyOn(gitService, "getCurrentBranchAt").mockResolvedValue("feat/external");
 
     const result = await service.syncCheckoutFromHead(thread.id);
 
@@ -88,10 +100,10 @@ describe("HandoffCheckoutService", () => {
   });
 
   it("syncs a named thread worktree to detached HEAD", async () => {
-    const workspace = workspaceRepo.create("test", "/tmp/test");
-    const thread = threadRepo.create(workspace.id, "Named", "worktree", "feat/base");
-    threadRepo.updateWorktreePath(thread.id, "/tmp/wt/base");
-    (gitService.getCurrentBranchAt as ReturnType<typeof vi.fn>).mockResolvedValue("HEAD");
+    const workspace = await workspaceRepo.create("test", "/tmp/test");
+    const thread = await threadRepo.create(workspace.id, "Named", "worktree", "feat/base");
+    await threadRepo.updateWorktreePath(thread.id, "/tmp/wt/base");
+    vi.spyOn(gitService, "getCurrentBranchAt").mockResolvedValue("HEAD");
 
     const result = await service.syncCheckoutFromHead(thread.id);
 

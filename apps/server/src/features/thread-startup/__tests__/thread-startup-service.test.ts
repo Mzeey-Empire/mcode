@@ -1,294 +1,134 @@
 import "reflect-metadata";
-import { describe, expect, it } from "vitest";
-import { openMemoryDatabase } from "../../../runtime/persistence/sqlite/database.js";
+import * as NodeCrypto from "node:crypto";
+import type { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES,
-  type ThreadStartupStartInput,
+  THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS,
+  THREAD_STARTUP_TRANSCRIPT_MAX_CHARS,
 } from "@mcode/contracts";
+import { broadcast } from "../../../application/transport/push.js";
+import { DatabaseWriterAdmissionFull } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { openReadOnlyDatabase } from "../../../runtime/persistence/sqlite/read-only-database.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../projects/testing/owned-test-database.js";
 import { ThreadStartupRepo } from "../persistence/thread-startup-repo.js";
-import { ThreadStartupConflictError, ThreadStartupService } from "../thread-startup-service.js";
+import { ThreadStartupConflictError, ThreadStartupService, type ThreadStartupThreadCreation } from "../thread-startup-service.js";
 
-const firstStartupId = "00000000-0000-4000-8000-000000000001";
-const secondStartupId = "00000000-0000-4000-8000-000000000002";
-const thirdStartupId = "00000000-0000-4000-8000-000000000003";
-const threadId = "00000000-0000-4000-8000-000000000004";
+vi.mock("../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 
-function createHarness() {
-  const db = openMemoryDatabase();
-  db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES (?, ?, ?, ?)")
-    .run("workspace-1", "First", "/first", "{}");
-  db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES (?, ?, ?, ?)")
-    .run("workspace-2", "Second", "/second", "{}");
+const harnesses: Array<{ owned: OwnedTestDatabase; reader: Database }> = [];
+beforeEach(() => vi.mocked(broadcast).mockReset());
+afterEach(async () => {
+  for (const { owned, reader } of harnesses.splice(0)) {
+    await owned.writer.barrier();
+    reader.close(true);
+    await owned.close();
+  }
+});
+
+function harness() {
+  const owned = createOwnedTestDatabase();
+  owned.db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES (?, ?, ?, ?)").run("workspace-1", "Fixture", "/fixture", "{}");
+  owned.db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES (?, ?, ?, ?)").run("workspace-2", "Other fixture", "/other-fixture", "{}");
+  const reader = openReadOnlyDatabase(owned.db.filename);
+  harnesses.push({ owned, reader });
+  const repo = new ThreadStartupRepo(reader, owned.writer);
   let time = Date.parse("2026-09-02T10:00:00.000Z");
-  const service = new ThreadStartupService(
-    new ThreadStartupRepo(db),
-    () => new Date(time++),
-  );
-  return { db, service };
+  const service = new ThreadStartupService(repo, owned.writer, () => new Date(time++));
+  const startupId = NodeCrypto.randomUUID();
+  const input = { startupId, workspaceId: "workspace-1", kind: "direct" as const };
+  const creation: ThreadStartupThreadCreation = {
+    args: ["workspace-1", "Fixture thread", "direct", "main", false, "codex", undefined, undefined, undefined],
+  };
+  return { ...owned, reader, repo, service, startupId, input, creation };
 }
 
-function input(
-  startupId = firstStartupId,
-  workspaceId = "workspace-1",
-  kind: ThreadStartupStartInput["kind"] = "direct",
-): ThreadStartupStartInput {
-  return { startupId, workspaceId, kind };
-}
-
-describe("ThreadStartupService", () => {
-  it("increments revisions for each lifecycle change", () => {
-    const { db, service } = createHarness();
-    const created = service.start(input());
-    const thread = service.advance(firstStartupId, "thread");
-    const agent = service.advance(firstStartupId, "agent");
-
-    expect([created.revision, thread.revision, agent.revision]).toEqual([1, 2, 3]);
-    db.close();
-  });
-
-  it("retains only a bounded transcript", () => {
-    const { db, service } = createHarness();
-    service.start(input());
-    for (let index = 0; index <= THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES; index += 1) {
-      service.appendOutput(firstStartupId, String(index).padStart(4, "0").padEnd(512, "x"));
-    }
-
-    const transcript = service.get(firstStartupId)?.transcript;
-    expect(transcript).toHaveLength(THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES);
-    expect(transcript?.[0]?.content.startsWith("0001")).toBe(true);
-    expect(transcript?.at(-1)?.content.startsWith("0032")).toBe(true);
-    db.close();
-  });
-
-  it("returns the existing record for identical start input and rejects conflicting reuse", () => {
-    const { db, service } = createHarness();
-    const created = service.start(input());
-
-    expect(service.start(input())).toEqual(created);
-    expect(() => service.start(input(firstStartupId, "workspace-2")))
-      .toThrow(ThreadStartupConflictError);
-    db.close();
-  });
-
-  it("rejects a changed durable request identity after a new service instance opens the same database", () => {
-    const { db, service } = createHarness();
-    service.start(input(), "first-request");
-    const restarted = new ThreadStartupService(new ThreadStartupRepo(db));
-
-    expect(restarted.start(input(), "first-request").startupId).toBe(firstStartupId);
-    expect(() => restarted.start(input(), "changed-request")).toThrow(ThreadStartupConflictError);
-
-    // Rows created before the fingerprint migration remain readable and replayable.
-    service.start(input(secondStartupId));
-    expect(restarted.start(input(secondStartupId), "new-request").startupId).toBe(secondStartupId);
-    db.close();
-  });
-
-  it("keeps terminal records stable", () => {
-    const { db, service } = createHarness();
-    service.start(input());
-    service.advance(firstStartupId, "thread");
-    service.advance(firstStartupId, "agent");
-    const completed = service.complete(firstStartupId);
-
-    expect(service.advance(firstStartupId, "agent")).toEqual(completed);
-    expect(service.fail(firstStartupId, {
-      code: "unexpected",
-      message: "This must not replace completion",
-      retryable: false,
-    })).toEqual(completed);
-    db.close();
-  });
-
-  it("binds a created thread and preserves structured failure detail", () => {
-    const { db, service } = createHarness();
-    db.prepare(
-      "INSERT INTO threads (id, workspace_id, title, branch, mode, worktree_managed, provider) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).run(threadId, "workspace-1", "Started", "main", "direct", 0, "claude");
-    service.start(input());
-    const bound = service.bindThread(firstStartupId, threadId);
-    service.advance(firstStartupId, "thread");
-    const failed = service.fail(firstStartupId, {
-      code: "worktree_unavailable",
-      message: "The worktree could not start",
-      retryable: true,
+describe("ThreadStartupService with the actual SQLite owner", () => {
+  it("serializes identical starts, preserves conflict identity, and publishes only committed revisions", async () => {
+    const { service, repo, reader, input, startupId, writer } = harness();
+    vi.mocked(broadcast).mockImplementation((method, value) => {
+      if (method === "thread.startup.updated") expect(repo.findById(startupId)).toEqual(value);
     });
-
-    expect(bound.threadId).toBe(threadId);
-    expect(failed).toMatchObject({
-      state: "failed",
-      phase: "thread",
-      error: { code: "worktree_unavailable", retryable: true },
-    });
-    db.close();
+    expect(() => reader.run("DELETE FROM thread_startups")).toThrow(/readonly/i);
+    const results = await Promise.all([service.start(input, "request-a"), service.start(input, "request-a")]);
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0].createdAt).toBe("2026-09-02T10:00:00.000Z");
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    const reopened = new ThreadStartupService(repo, writer);
+    await expect(reopened.start(input, "request-b")).rejects.toBeInstanceOf(ThreadStartupConflictError);
+    await expect(service.start({ ...input, workspaceId: "workspace-2" })).rejects.toBeInstanceOf(ThreadStartupConflictError);
+    expect(service.get(startupId)).toEqual(results[0]);
+    expect(broadcast).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps blocked Setup recoverable through Retry and Continue", () => {
-    const { db, service } = createHarness();
-    db.prepare(
-      "INSERT INTO threads (id, workspace_id, title, branch, mode, worktree_managed, provider) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).run(threadId, "workspace-1", "Started", "main", "worktree", 1, "claude");
-    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
-    service.advance(firstStartupId, "thread");
-    service.bindThread(firstStartupId, threadId);
-    service.advance(firstStartupId, "worktree");
-    service.advance(firstStartupId, "setup");
-
-    const blocked = service.block(firstStartupId, {
-      code: "SETUP_FAILED",
-      message: "Project Setup did not complete successfully",
-      actions: ["retry", "continue"],
-    });
-    expect(service.interruptNonterminalOnStartup()).toEqual([]);
-    const resumed = service.resume(firstStartupId);
-    const skipped = service.skip(firstStartupId, "setup");
-
-    expect(blocked).toMatchObject({
-      state: "blocked",
-      phase: "setup",
-      steps: expect.arrayContaining([{ phase: "setup", state: "blocked" }]),
-      block: { actions: ["retry", "continue"] },
-    });
-    expect(resumed).toMatchObject({ state: "running", phase: "setup", block: undefined });
-    expect(skipped).toMatchObject({
-      state: "running",
-      phase: "agent",
-      steps: expect.arrayContaining([{ phase: "setup", state: "skipped" }, { phase: "agent", state: "running" }]),
-    });
-    expect(service.findByThreadId(threadId)?.startupId).toBe(firstStartupId);
-    db.close();
+  it("rolls back a failed transition without publication and continues processing the next write", async () => {
+    const { db, service, input, startupId } = harness();
+    const original = await service.start(input);
+    vi.mocked(broadcast).mockClear();
+    db.run("CREATE TRIGGER reject_startup_transition BEFORE UPDATE ON thread_startups BEGIN SELECT RAISE(ABORT, 'forced transition failure'); END");
+    await expect(service.advance(startupId, "thread")).rejects.toThrow("forced transition failure");
+    expect(service.get(startupId)).toEqual(original);
+    expect(broadcast).not.toHaveBeenCalled();
+    db.run("DROP TRIGGER reject_startup_transition");
+    const running = await service.advance(startupId, "thread");
+    expect(running).toMatchObject({ state: "running", revision: 2 });
+    expect(broadcast).toHaveBeenCalledWith("thread.startup.updated", running);
+    await expect(service.complete(startupId)).rejects.toThrow("final phase");
+    expect(service.get(startupId)).toEqual(running);
+    expect(broadcast).toHaveBeenCalledTimes(1);
   });
 
-  it("finds a terminal cancellation bound to a thread after its Setup owner settles", () => {
-    const { db, service } = createHarness();
-    db.prepare(
-      "INSERT INTO threads (id, workspace_id, title, branch, mode, worktree_managed, provider) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).run(threadId, "workspace-1", "Started", "main", "worktree", 1, "claude");
-    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
-    service.advance(firstStartupId, "thread");
-    service.bindThread(firstStartupId, threadId);
-    service.advance(firstStartupId, "worktree");
-    service.advance(firstStartupId, "setup");
-    service.cancel(firstStartupId);
-    service.markCancelled(firstStartupId);
-
-    expect(service.findByThreadId(threadId)).toMatchObject({
-      startupId: firstStartupId,
-      state: "cancelled",
-      cancellation: "requested",
-    });
-    db.close();
+  it("rolls back thread creation when binding fails, then commits and reuses exactly one bound thread", async () => {
+    const { db, reader, service, input, startupId, creation } = harness();
+    const startup = await service.start(input);
+    vi.mocked(broadcast).mockClear();
+    db.run("CREATE TRIGGER reject_startup_binding BEFORE UPDATE OF thread_id ON thread_startups WHEN NEW.thread_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'forced binding failure'); END");
+    await expect(service.createAndBindThread(startupId, creation)).rejects.toThrow("forced binding failure");
+    expect(reader.query("SELECT id FROM threads").all()).toHaveLength(0);
+    expect(service.get(startupId)).toEqual(startup);
+    expect(broadcast).not.toHaveBeenCalled();
+    db.run("DROP TRIGGER reject_startup_binding");
+    const thread = await service.createAndBindThread(startupId, { ...creation, worktreePath: "/fixture/.worktrees/test" });
+    expect(thread.worktree_path).toBe("/fixture/.worktrees/test");
+    expect(service.get(startupId)).toMatchObject({ threadId: thread.id, revision: 2 });
+    expect(await service.createAndBindThread(startupId, creation)).toEqual(thread);
+    expect(reader.query("SELECT id FROM threads").all()).toHaveLength(1);
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    const otherWorkspaceCreation: ThreadStartupThreadCreation = { ...creation, args: [...creation.args] };
+    otherWorkspaceCreation.args[0] = "workspace-2";
+    await expect(service.createAndBindThread(startupId, otherWorkspaceCreation)).rejects.toBeInstanceOf(ThreadStartupConflictError);
   });
 
-  it("scopes list results to one workspace", () => {
-    const { db, service } = createHarness();
-    service.start(input(firstStartupId, "workspace-1"));
-    service.start(input(secondStartupId, "workspace-2"));
-
-    expect(service.list("workspace-1").map((startup) => startup.startupId)).toEqual([firstStartupId]);
-    db.close();
+  it("rejects over-budget commands and invalid snapshots while retaining bounded output", async () => {
+    const { service, repo, input, startupId, creation } = harness();
+    const original = await service.start(input);
+    vi.mocked(broadcast).mockClear();
+    await expect(service.appendOutput(startupId, "x".repeat(THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS + 1))).rejects.toThrow();
+    await expect(service.createAndBindThread(startupId, { ...creation, worktreePath: "x".repeat(17 * 1024 * 1024) })).rejects.toBeInstanceOf(DatabaseWriterAdmissionFull);
+    await expect(repo.update({ ...original, steps: Array.from({ length: 5 }, () => original.steps[0]) })).rejects.toThrow();
+    await expect(repo.update({ ...original, steps: [original.steps[0], original.steps[0]] })).rejects.toThrow();
+    expect(service.get(startupId)).toEqual(original);
+    expect(broadcast).not.toHaveBeenCalled();
+    for (let index = 0; index < 6; index += 1) await service.appendOutput(startupId, String(index).padEnd(THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS, "x"));
+    const transcript = service.get(startupId)?.transcript ?? [];
+    expect(transcript).toHaveLength(4);
+    expect(transcript[0].content.startsWith("2")).toBe(true);
+    expect(transcript.reduce((total, entry) => total + entry.content.length, 0)).toBe(THREAD_STARTUP_TRANSCRIPT_MAX_CHARS);
   });
 
-  it("records cancellation intent without claiming the startup stopped", () => {
-    const { db, service } = createHarness();
-    service.start(input());
-    const cancelled = service.cancel(firstStartupId);
-
-    expect(cancelled).toMatchObject({ state: "pending", cancellation: "requested", revision: 2 });
-    expect(service.isCancellationRequested(firstStartupId)).toBe(true);
-    expect(service.cancel(firstStartupId)).toEqual(cancelled);
-    db.close();
-  });
-
-  it("marks nonterminal startup records interrupted after restart", () => {
-    const { db, service } = createHarness();
-    service.start(input(firstStartupId));
-    service.start(input(secondStartupId, "workspace-1", "managed-worktree"));
-    service.advance(secondStartupId, "thread");
-    service.start(input(thirdStartupId, "workspace-2"));
-    service.advance(thirdStartupId, "thread");
-    service.advance(thirdStartupId, "agent");
-    service.complete(thirdStartupId);
-
-    const interrupted = service.interruptNonterminalOnStartup();
-
-    expect(interrupted.map((startup) => startup.startupId).sort()).toEqual([
-      firstStartupId,
-      secondStartupId,
-    ]);
-    expect(service.get(firstStartupId)).toMatchObject({ state: "interrupted", phase: "thread" });
-    expect(service.get(firstStartupId)?.steps[0]).toEqual({ phase: "thread", state: "interrupted" });
-    expect(service.get(secondStartupId)).toMatchObject({ state: "interrupted", phase: "thread" });
-    expect(service.get(secondStartupId)?.steps[0]).toEqual({ phase: "thread", state: "interrupted" });
-    expect(service.get(thirdStartupId)?.state).toBe("completed");
-    db.close();
-  });
-
-  it("completes an interrupted startup when the user continues without it", () => {
-    const { db, service } = createHarness();
-    db.prepare(
-      "INSERT INTO threads (id, workspace_id, title, branch, mode, worktree_managed, provider) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).run(threadId, "workspace-1", "Started", "main", "worktree", 1, "claude");
-    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
-    service.advance(firstStartupId, "thread");
-    service.bindThread(firstStartupId, threadId);
-    service.advance(firstStartupId, "worktree");
-    service.advance(firstStartupId, "setup");
-
-    const [interrupted] = service.interruptNonterminalOnStartup();
-    const completed = service.complete(firstStartupId);
-
-    expect(interrupted).toMatchObject({ state: "interrupted", phase: "setup" });
-    expect(completed).toMatchObject({
-      state: "completed",
-      phase: "agent",
-      steps: [
-        { phase: "thread", state: "completed" },
-        { phase: "worktree", state: "completed" },
-        { phase: "setup", state: "skipped" },
-        { phase: "agent", state: "completed" },
-      ],
-    });
-    db.close();
-  });
-
-  it("marks a cancelled interrupted startup cancelled instead of completed", () => {
-    const { db, service } = createHarness();
-    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
-    service.advance(firstStartupId, "thread");
-    service.advance(firstStartupId, "worktree");
-    service.advance(firstStartupId, "setup");
-
-    service.interruptNonterminalOnStartup();
-    const cancelled = service.markCancelled(firstStartupId);
-
-    expect(cancelled).toMatchObject({
-      state: "cancelled",
-      cancellation: "requested",
-      steps: expect.arrayContaining([{ phase: "setup", state: "cancelled" }]),
-    });
-    db.close();
-  });
-
-  it("lets an interrupted Setup resume when the user retries", () => {
-    const { db, service } = createHarness();
-    db.prepare(
-      "INSERT INTO threads (id, workspace_id, title, branch, mode, worktree_managed, provider) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).run(threadId, "workspace-1", "Started", "main", "worktree", 1, "claude");
-    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
-    service.advance(firstStartupId, "thread");
-    service.bindThread(firstStartupId, threadId);
-    service.advance(firstStartupId, "worktree");
-    service.advance(firstStartupId, "setup");
-
-    service.interruptNonterminalOnStartup();
-    const resumed = service.resume(firstStartupId);
-
-    expect(resumed).toMatchObject({
-      state: "running",
-      phase: "setup",
-      steps: expect.arrayContaining([{ phase: "setup", state: "running" }]),
-    });
-    db.close();
+  it("recovers multiple bounded pages without leaving pending records or repeating publication", async () => {
+    const { service, reader, db } = harness();
+    const inputs = Array.from({ length: 105 }, () => ({ startupId: NodeCrypto.randomUUID(), workspaceId: "workspace-1", kind: "direct" as const }));
+    await Promise.all(inputs.map((input) => service.start(input)));
+    const malformedId = "00000000-0000-4000-8000-000000000001";
+    await service.start({ startupId: malformedId, workspaceId: "workspace-1", kind: "direct" });
+    db.prepare("UPDATE thread_startups SET steps_json = '[]' WHERE startup_id = ?").run(malformedId);
+    vi.mocked(broadcast).mockClear();
+    const interrupted = await service.interruptNonterminalOnStartup();
+    expect(interrupted).toHaveLength(105);
+    expect(interrupted.every((record) => record.state === "interrupted" && record.revision === 2)).toBe(true);
+    expect(reader.query("SELECT startup_id FROM thread_startups WHERE state IN ('pending', 'running')").all()).toEqual([{ startup_id: malformedId }]);
+    expect(broadcast).toHaveBeenCalledTimes(105);
+    expect(await service.interruptNonterminalOnStartup()).toEqual([]);
+    expect(broadcast).toHaveBeenCalledTimes(105);
   });
 });

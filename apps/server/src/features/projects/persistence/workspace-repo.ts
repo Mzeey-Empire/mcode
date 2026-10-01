@@ -1,342 +1,87 @@
-/**
- * Workspace data access layer.
- * Provides CRUD operations for workspace records in SQLite.
- */
-
-import * as NodeCrypto from "node:crypto";
-import { injectable, inject } from "tsyringe";
+import { inject, injectable } from "tsyringe";
 import type { Database } from "bun:sqlite";
-import { and, asc, count, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
-import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type { Workspace } from "@mcode/contracts";
-import { threads, workspaces } from "../../../runtime/persistence/sqlite/schema.js";
-import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { WorkspaceStore } from "./workspace-store.js";
+import { workspaceWriteOperations } from "./workspace-write-operations.js";
 
-type WorkspaceRow = typeof workspaces.$inferSelect;
-
-function rowToWorkspace(row: WorkspaceRow): Workspace {
-  return {
-    id: row.id,
-    name: row.name,
-    path: row.path,
-    provider_config: JSON.parse(row.providerConfig) as Record<
-      string,
-      unknown
-    >,
-    is_git_repo: row.isGitRepo === 1,
-    created_at: row.createdAt,
-    updated_at: row.updatedAt,
-    pinned: row.pinned === 1,
-    last_opened_at: normalizeLastOpenedAt(row.lastOpenedAt),
-    sort_order: row.sortOrder,
-    deleted_at: row.deletedAt ?? null,
-  };
-}
-
-function normalizeLastOpenedAt(value: number | string | null): number | null {
-  if (value === null || typeof value === "number") return value;
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) throw new Error("Workspace last_opened_at is not a Unix timestamp or ISO date.");
-  return timestamp;
-}
-
-/** Repository for workspace CRUD operations against SQLite. */
+/** Read-only queries and committed mutations for WorkspaceRepo. */
 @injectable()
 export class WorkspaceRepo {
-  private readonly orm: BunSQLiteDatabase;
+  private readonly reader: WorkspaceStore;
 
-  constructor(@inject("Database") db: Database) {
-    this.orm = drizzle(db);
+  constructor(@inject("Database") db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
+    this.reader = new WorkspaceStore(db);
   }
 
-  /** Create a new workspace and return the fully-populated record. */
-  create(name: string, path: string, isGitRepo = true): Workspace {
-    const id = NodeCrypto.randomUUID();
-    const now = new Date().toISOString();
-
-    this.orm.transaction((tx) => {
-      // Evict a soft-deleted row occupying this path only if it has no remaining
-      // child threads (i.e. async cleanup already finished). If threads still
-      // exist the CleanupWorker will hard-delete the workspace once done.
-      const stale = tx
-        .select({ id: workspaces.id })
-        .from(workspaces)
-        .where(and(eq(workspaces.path, path), isNotNull(workspaces.deletedAt)))
-        .get();
-      if (stale) {
-        const threadCount = tx
-          .select({ n: count() })
-          .from(threads)
-          .where(eq(threads.workspaceId, stale.id))
-          .get();
-        if (threadCount?.n === 0) {
-          tx.delete(workspaces).where(eq(workspaces.id, stale.id)).run();
-        }
-      }
-      tx
-        .update(workspaces)
-        .set({ sortOrder: sql`${workspaces.sortOrder} + 1` })
-        .run();
-      tx
-        .insert(workspaces)
-        .values({
-          id,
-          name,
-          path,
-          isGitRepo: isGitRepo ? 1 : 0,
-          createdAt: now,
-          updatedAt: now,
-          sortOrder: 0,
-        })
-        .run();
-    });
-
-    return {
-      id,
-      name,
-      path,
-      provider_config: {},
-      is_git_repo: isGitRepo,
-      created_at: now,
-      updated_at: now,
-      pinned: false,
-      last_opened_at: null,
-      sort_order: 0,
-      deleted_at: null,
-    };
+  create(name: Parameters<WorkspaceStore["create"]>[0], path: Parameters<WorkspaceStore["create"]>[1], isGitRepo: Parameters<WorkspaceStore["create"]>[2] = true): Promise<ReturnType<WorkspaceStore["create"]>> {
+    return this.writer.execute(workspaceWriteOperations.create, [name, path, isGitRepo]);
   }
 
-  /** Move an existing workspace to the top of the sidebar (sort_order 0). */
-  prependToSortOrder(id: string): void {
-    const row = this.orm
-      .select({ sortOrder: workspaces.sortOrder })
-      .from(workspaces)
-      .where(eq(workspaces.id, id))
-      .get();
-    if (!row || row.sortOrder === 0) return;
-
-    this.orm.transaction((tx) => {
-      tx
-        .update(workspaces)
-        .set({ sortOrder: sql`${workspaces.sortOrder} + 1` })
-        .where(lt(workspaces.sortOrder, row.sortOrder))
-        .run();
-      tx
-        .update(workspaces)
-        .set({ sortOrder: 0 })
-        .where(eq(workspaces.id, id))
-        .run();
-    });
+  prependToSortOrder(id: Parameters<WorkspaceStore["prependToSortOrder"]>[0]): Promise<ReturnType<WorkspaceStore["prependToSortOrder"]>> {
+    return this.writer.execute(workspaceWriteOperations.prependToSortOrder, [id]);
   }
 
-  /**
-   * Reorder a workspace to a zero-based index in the current sort_order ordering.
-   * Rebuilds sequential sort_order values to handle duplicates from legacy migrations.
-   */
-  reorderToIndex(id: string, newIndex: number): void {
-    const rows = this.orm
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .orderBy(asc(workspaces.sortOrder), asc(workspaces.id))
-      .all();
-
-    const oldIdx = rows.findIndex((r) => r.id === id);
-    if (oldIdx < 0) return;
-
-    const n = rows.length;
-    const idx = Math.max(0, Math.min(newIndex, n - 1));
-    if (oldIdx === idx) return;
-
-    const ids = rows.map((r) => r.id);
-    const [moved] = ids.splice(oldIdx, 1);
-    ids.splice(idx, 0, moved!);
-
-    this.orm.transaction((tx) => {
-      for (let i = 0; i < ids.length; i++) {
-        tx
-          .update(workspaces)
-          .set({ sortOrder: i })
-          .where(eq(workspaces.id, ids[i]!))
-          .run();
-      }
-    });
+  reorderToIndex(id: Parameters<WorkspaceStore["reorderToIndex"]>[0], newIndex: Parameters<WorkspaceStore["reorderToIndex"]>[1]): Promise<ReturnType<WorkspaceStore["reorderToIndex"]>> {
+    return this.writer.execute(workspaceWriteOperations.reorderToIndex, [id, newIndex]);
   }
 
-  /** Find a workspace by its primary key. Returns null if not found or soft-deleted. */
-  findById(id: string): Workspace | null {
-    const row = this.orm
-      .select()
-      .from(workspaces)
-      .where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt)))
-      .get();
-
-    return row ? rowToWorkspace(row) : null;
+  findById(id: Parameters<WorkspaceStore["findById"]>[0]): ReturnType<WorkspaceStore["findById"]> {
+    return this.reader.findById(id);
   }
 
-  /** Find a workspace by its filesystem path. Returns null if not found or soft-deleted. */
-  findByPath(path: string): Workspace | null {
-    const row = this.orm
-      .select()
-      .from(workspaces)
-      .where(and(eq(workspaces.path, path), isNull(workspaces.deletedAt)))
-      .get();
-
-    return row ? rowToWorkspace(row) : null;
+  findByPath(path: Parameters<WorkspaceStore["findByPath"]>[0]): ReturnType<WorkspaceStore["findByPath"]> {
+    return this.reader.findByPath(path);
   }
 
-  /** List all non-deleted workspaces ordered by ascending sidebar sort_order. */
-  listAll(): Workspace[] {
-    const rows = this.orm
-      .select()
-      .from(workspaces)
-      .where(isNull(workspaces.deletedAt))
-      .orderBy(asc(workspaces.sortOrder), asc(workspaces.id))
-      .all();
-
-    return rows.map(rowToWorkspace);
+  listAll(): ReturnType<WorkspaceStore["listAll"]> {
+    return this.reader.listAll();
   }
 
-  /** Search registered non-deleted workspaces by name or repository path. */
-  search(query: string, limit: number): Workspace[] {
-    const normalized = query.trim();
-    if (!normalized) {
-      return this.orm
-        .select()
-        .from(workspaces)
-        .where(isNull(workspaces.deletedAt))
-        .orderBy(
-          sql`${workspaces.lastOpenedAt} DESC NULLS LAST`,
-          desc(workspaces.updatedAt),
-          asc(workspaces.id),
-        )
-        .limit(limit)
-        .all()
-        .map(rowToWorkspace);
-    }
-    const pattern = `%${normalized.replace(/[\\%_]/g, "\\$&")}%`;
-    return this.orm
-      .select()
-      .from(workspaces)
-      .where(
-        and(
-          isNull(workspaces.deletedAt),
-          or(
-            sql`${workspaces.name} LIKE ${pattern} ESCAPE '\\'`,
-            sql`${workspaces.path} LIKE ${pattern} ESCAPE '\\'`,
-          ),
-        ),
-      )
-      .orderBy(
-        sql`${workspaces.lastOpenedAt} DESC NULLS LAST`,
-        desc(workspaces.updatedAt),
-        asc(workspaces.id),
-      )
-      .limit(limit)
-      .all()
-      .map(rowToWorkspace);
+  search(query: Parameters<WorkspaceStore["search"]>[0], limit: Parameters<WorkspaceStore["search"]>[1]): ReturnType<WorkspaceStore["search"]> {
+    return this.reader.search(query, limit);
   }
 
-  /** Rename a non-deleted workspace and return its updated record. */
-  rename(id: string, name: string): Workspace | null {
-    const result = runChanges(this.orm
-      .update(workspaces)
-      .set({ name, updatedAt: new Date().toISOString() })
-      .where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt)))
-      );
-    return result.changes > 0 ? this.findById(id) : null;
+  rename(id: Parameters<WorkspaceStore["rename"]>[0], name: Parameters<WorkspaceStore["rename"]>[1]): Promise<ReturnType<WorkspaceStore["rename"]>> {
+    return this.writer.execute(workspaceWriteOperations.rename, [id, name]);
   }
 
-  /** Set the pinned flag for a workspace. Pinned workspaces always sort above recents. */
-  setPinned(id: string, pinned: boolean): void {
-    this.orm
-      .update(workspaces)
-      .set({ pinned: pinned ? 1 : 0 })
-      .where(eq(workspaces.id, id))
-      .run();
+  setPinned(id: Parameters<WorkspaceStore["setPinned"]>[0], pinned: Parameters<WorkspaceStore["setPinned"]>[1]): Promise<ReturnType<WorkspaceStore["setPinned"]>> {
+    return this.writer.execute(workspaceWriteOperations.setPinned, [id, pinned]);
   }
 
-  /** Update last_opened_at to now without touching updated_at. Used to track recency separately from edits. */
-  touchLastOpened(id: string): void {
-    this.orm
-      .update(workspaces)
-      .set({ lastOpenedAt: Date.now() })
-      .where(eq(workspaces.id, id))
-      .run();
+  touchLastOpened(id: Parameters<WorkspaceStore["touchLastOpened"]>[0]): Promise<ReturnType<WorkspaceStore["touchLastOpened"]>> {
+    return this.writer.execute(workspaceWriteOperations.touchLastOpened, [id]);
   }
 
-  /** Clear last_opened_at and pinned, removing the workspace from the recents/pinned list. */
-  removeRecent(id: string): void {
-    this.orm
-      .update(workspaces)
-      .set({ lastOpenedAt: null, pinned: 0 })
-      .where(eq(workspaces.id, id))
-      .run();
+  removeRecent(id: Parameters<WorkspaceStore["removeRecent"]>[0]): Promise<ReturnType<WorkspaceStore["removeRecent"]>> {
+    return this.writer.execute(workspaceWriteOperations.removeRecent, [id]);
   }
 
-  /** Soft-delete a workspace by setting deleted_at. Returns true if a row was changed. */
-  softDelete(id: string): boolean {
-    const now = new Date().toISOString();
-    const result = runChanges(this.orm
-      .update(workspaces)
-      .set({ deletedAt: now, updatedAt: now })
-      .where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt)))
-      );
-    return result.changes > 0;
+  softDelete(id: Parameters<WorkspaceStore["softDelete"]>[0]): Promise<ReturnType<WorkspaceStore["softDelete"]>> {
+    return this.writer.execute(workspaceWriteOperations.softDelete, [id]);
   }
 
-  /** Permanently remove a workspace and all its children (via FK cascade). */
-  hardDelete(id: string): boolean {
-    const result = runChanges(this.orm
-      .delete(workspaces)
-      .where(eq(workspaces.id, id))
-      );
-    return result.changes > 0;
+  hardDelete(id: Parameters<WorkspaceStore["hardDelete"]>[0]): Promise<ReturnType<WorkspaceStore["hardDelete"]>> {
+    return this.writer.execute(workspaceWriteOperations.hardDelete, [id]);
   }
 
-  /** Find all workspaces currently in the soft-deleted (deleting) state. */
-  findDeleting(): Array<{ id: string; path: string; deletedAt: string }> {
-    return this.orm
-      .select({ id: workspaces.id, path: workspaces.path, deletedAt: workspaces.deletedAt })
-      .from(workspaces)
-      .where(isNotNull(workspaces.deletedAt))
-      .all() as Array<{ id: string; path: string; deletedAt: string }>;
+  findDeleting(): ReturnType<WorkspaceStore["findDeleting"]> {
+    return this.reader.findDeleting();
   }
 
-  /** Find a single soft-deleted workspace by path. O(1) lookup for finalization. */
-  findDeletingByPath(path: string): { id: string; path: string; deletedAt: string } | null {
-    const row = this.orm
-      .select({ id: workspaces.id, path: workspaces.path, deletedAt: workspaces.deletedAt })
-      .from(workspaces)
-      .where(and(eq(workspaces.path, path), isNotNull(workspaces.deletedAt)))
-      .get();
-    return (row ?? null) as { id: string; path: string; deletedAt: string } | null;
+  findDeletingByPath(path: Parameters<WorkspaceStore["findDeletingByPath"]>[0]): ReturnType<WorkspaceStore["findDeletingByPath"]> {
+    return this.reader.findDeletingByPath(path);
   }
 
-  /** Find a workspace by ID regardless of deletion status. Used during cleanup. */
-  findByIdIncludeDeleted(id: string): Workspace | null {
-    const row = this.orm
-      .select()
-      .from(workspaces)
-      .where(eq(workspaces.id, id))
-      .get();
-    return row ? rowToWorkspace(row) : null;
+  findByIdIncludeDeleted(id: Parameters<WorkspaceStore["findByIdIncludeDeleted"]>[0]): ReturnType<WorkspaceStore["findByIdIncludeDeleted"]> {
+    return this.reader.findByIdIncludeDeleted(id);
   }
 
-  /** Bump updated_at to the current time so the workspace sorts to the top of the recent list. */
-  touch(id: string): void {
-    this.orm
-      .update(workspaces)
-      .set({ updatedAt: new Date().toISOString() })
-      .where(eq(workspaces.id, id))
-      .run();
+  touch(id: Parameters<WorkspaceStore["touch"]>[0]): Promise<ReturnType<WorkspaceStore["touch"]>> {
+    return this.writer.execute(workspaceWriteOperations.touch, [id]);
   }
 
-  /** Update the is_git_repo flag (e.g. after the user runs `git init`). */
-  setIsGitRepo(id: string, isGitRepo: boolean): void {
-    this.orm
-      .update(workspaces)
-      .set({ isGitRepo: isGitRepo ? 1 : 0 })
-      .where(eq(workspaces.id, id))
-      .run();
+  setIsGitRepo(id: Parameters<WorkspaceStore["setIsGitRepo"]>[0], isGitRepo: Parameters<WorkspaceStore["setIsGitRepo"]>[1]): Promise<ReturnType<WorkspaceStore["setIsGitRepo"]>> {
+    return this.writer.execute(workspaceWriteOperations.setIsGitRepo, [id, isGitRepo]);
   }
 }

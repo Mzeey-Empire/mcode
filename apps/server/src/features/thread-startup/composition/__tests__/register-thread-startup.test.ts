@@ -8,24 +8,26 @@ import type { Database } from "bun:sqlite";
 import { container } from "tsyringe";
 import { setupContainer } from "../../../../application/composition/container.js";
 import { ThreadStartupService } from "../../thread-startup-service.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 
 describe("registerThreadStartupServices", () => {
   let database: Database | undefined;
   let temporaryDirectory: string | undefined;
   const previousDatabasePath = process.env.MCODE_DB_PATH;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     container.reset();
     temporaryDirectory = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "mcode-thread-startup-composition-"),
     );
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
-    setupContainer(temporaryDirectory);
+    await setupContainer(temporaryDirectory);
     database = container.resolve<Database>("Database");
   });
 
-  afterEach(() => {
-    database?.close();
+  afterEach(async () => {
+    if (container.isRegistered(ApplicationDatabaseWriter)) await container.resolve(ApplicationDatabaseWriter).close();
+    database?.close(true);
     database = undefined;
     container.reset();
     if (previousDatabasePath === undefined) delete process.env.MCODE_DB_PATH;

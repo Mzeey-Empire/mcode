@@ -1,16 +1,19 @@
 import "reflect-metadata";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ApprovalReviewSupport, Thread, IProviderRegistry } from "@mcode/contracts";
 import { supportsInternalThreadControl } from "../../turns/turn-admission-dispatch-coordinator.js";
-import { createAgentServiceForTest } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, drainAgentServicePersistenceForTest } from "./agent-service-test-harness.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { ProviderDisabledError } from "../../../providers/availability/provider-availability-errors.js";
-import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
-import type { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
+import type { AgentService } from "../agent-service.js";
 import type { GitService } from "../../../projects/index.js";
 import type { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import type { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
@@ -21,16 +24,33 @@ import type { SettingsService } from "../../../settings/settings-service.js";
 import type { ThreadService } from "../../../thread-control/index.js";
 import * as NodeEvents from "node:events";
 
-// Mock the broadcast transport so we can assert agent.event emissions
+// Capture canonical progress published by the real service.
 // without a real WebSocket server.
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 import { broadcast } from "../../../../application/transport/push.js";
+function publishedEvents() {
+  return vi.mocked(broadcast).mock.calls.flatMap(([topic, payload]) => {
+    if (topic !== "agent.canonical") return [];
+    const frame = CanonicalAgentProgressFrameSchema().parse(payload);
+    if (frame.phase !== "accepted") return [];
+    return frame.events.flatMap((envelope) => envelope.payload.type === "publication.recorded" ? [envelope.payload.event] : []);
+  });
+}
+
 
 const THREAD_ID = "thread-abc";
+const ownedFixtures: Array<{ database: OwnedTestDatabase; service: AgentService }> = [];
+
+afterEach(async () => {
+  for (const fixture of ownedFixtures.splice(0)) {
+    try { await drainAgentServicePersistenceForTest(fixture.service); }
+    finally { await fixture.database.close(); }
+  }
+});
 type PersistedThreadStatus = Thread["status"] | "failed" | "idle" | "stopped";
 type PersistedThread = Omit<Thread, "status"> & { status: PersistedThreadStatus };
 
-function makeThread(overrides: Partial<PersistedThread> = {}): PersistedThread {
+function makeThread(overrides: Partial<PersistedThread> = {}): Thread {
   return {
     id: THREAD_ID,
     workspace_id: "ws-1",
@@ -81,38 +101,18 @@ function buildService({
   threadControlMcp?: { activate: ReturnType<typeof vi.fn>; revoke: ReturnType<typeof vi.fn> };
 } = {}) {
   const thread = makeThread({ status: threadStatus });
-
-  const threadRepo = {
-    findById: vi.fn(() => thread),
-    updateStatus: vi.fn(),
-    updateModel: vi.fn(),
-    updateProvider: vi.fn(),
-    updateSettings: vi.fn(),
-    create: vi.fn(),
-    softDelete: vi.fn(),
-    updateWorktreePath: vi.fn(),
-    updateContextUsage: vi.fn(),
-    updateSdkSessionId: vi.fn(),
-    updateCompactSummary: vi.fn(),
-    updateLineage: vi.fn(),
-  } as unknown as ThreadRepo;
+  const database = createOwnedTestDatabase();
+  const { db, writer } = database;
+  db.run("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)", ["ws-1", "Fixture", process.cwd()]);
+  db.run("INSERT INTO threads (id, workspace_id, title, branch, provider) VALUES (?, ?, ?, ?, ?)", [THREAD_ID, "ws-1", thread.title, "main", "codex"]);
+  const threadRepo = new ThreadRepo(db, writer);
+  vi.spyOn(threadRepo, "findById").mockReturnValue(thread);
 
   const workspaceRepo = {
     findById: vi.fn(() => ({ id: "ws-1", path: process.cwd() })),
   } as unknown as WorkspaceRepo;
 
-  let latestSequence = 0;
-  const messageRepo = {
-    listByThread: vi.fn(() => ({ messages: [] })),
-    getLatestSequenceIncludingInternal: vi.fn(() => latestSequence),
-    create: vi.fn((_threadId: string, _role: string, _content: string, sequence: number) => {
-      latestSequence = Math.max(latestSequence, sequence);
-      return { id: "msg-1", sequence };
-    }),
-    findByIdInThread: vi.fn(),
-    listByThreadUpToSequence: vi.fn(() => []),
-    setAssistantOutcome: vi.fn(),
-  } as unknown as MessageRepo;
+  const messageRepo = new MessageRepo(db, writer);
 
   const gitService = {
     resolveWorkingDir: vi.fn(() => process.cwd()),
@@ -178,22 +178,6 @@ function buildService({
     assertUsable,
   } as unknown as ProviderAvailabilityService;
 
-  const db = {
-    filename: ":memory:",
-    transaction: vi.fn((fn) => fn),
-    prepare: vi.fn(() => ({ run: vi.fn() })),
-  } as unknown as import("bun:sqlite").Database;
-
-  // AgentService constructor (15 params):
-  //   threadRepo, workspaceRepo, messageRepo, gitService, attachmentService,
-  //   providerRegistry, threadService, toolCallRecordRepo, turnSnapshotRepo,
-  //   snapshotService, db, memoryPressureService, taskRepo, settingsService, availability
-  const planQuestionAnswersRepo = {
-    markAnswered: vi.fn(),
-    isAnswered: vi.fn(() => false),
-    listAnsweredForThread: vi.fn(() => []),
-  } as unknown as import("../../planning/persistence/plan-question-answers-repo.js").PlanQuestionAnswersRepo;
-
   const svc = createAgentServiceForTest(
     threadRepo,
     workspaceRepo,
@@ -202,14 +186,12 @@ function buildService({
     attachmentService,
     providerRegistry,
     threadService,
-    { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../events/persistence/hook-execution-repo.js").HookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,
     db,
     memoryPressureService,
     settingsService,
     availability,
-    planQuestionAnswersRepo,
       { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       new NarrativeStore(
@@ -218,13 +200,25 @@ function buildService({
         { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../conversation/narrative/persistence/thought-segment-repo.js").ThoughtSegmentRepo,
         { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../events/persistence/hook-execution-repo.js").HookExecutionRepo,
       ),
-      new ParentAssistantTextCheckpointService(db),
+      new ParentAssistantTextCheckpointService(db, writer),
       undefined,
       threadControlMcp as never,
       undefined,
-      createCanonicalAgentBoundaryStub(db),
+      createCanonicalAgentBoundaryStub(db, writer),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    writer,
   );
+  ownedFixtures.push({ database, service: svc });
   return {
+    db,
     svc,
     threadRepo,
     messageRepo,
@@ -266,7 +260,7 @@ describe("AgentService.sendMessage — admission gates", () => {
 
     // A providerUnavailable event must have been broadcast on the agent.event channel.
     // The canonical publication stamps a shared publicationId on the legacy copy.
-    expect(broadcast).toHaveBeenCalledWith("agent.event", expect.objectContaining({
+    expect(publishedEvents()).toContainEqual(expect.objectContaining({
       type: "providerUnavailable",
       threadId: THREAD_ID,
       providerId: "codex",
@@ -293,7 +287,7 @@ describe("AgentService.sendMessage — admission gates", () => {
   });
 
   it.each(["completed", "interrupted", "errored"] as const)("allows a direct follow-up to the %s thread through persistence and provider dispatch", async (threadStatus) => {
-    const { svc, threadRepo, messageRepo, providerStub } = buildService({ threadStatus });
+    const { svc, db, messageRepo, providerStub } = buildService({ threadStatus });
 
     await svc.sendMessage({
       threadId: THREAD_ID,
@@ -304,13 +298,15 @@ describe("AgentService.sendMessage — admission gates", () => {
       provider: "codex",
     });
 
-    expect(messageRepo.create).toHaveBeenCalled();
-    expect(threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "active");
+    expect(messageRepo.listByThread(THREAD_ID, 100).messages).toEqual([
+      expect.objectContaining({ role: "user", content: "Continue from the completed turn", sequence: 1 }),
+    ]);
+    expect(db.query("SELECT status FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ status: "active" });
     expect(providerStub.sendTurn).toHaveBeenCalledTimes(1);
   });
 
   it.each(["completed", "interrupted"] as const)("allows a fully-provenanced cross-thread send to a %s thread", async (threadStatus) => {
-    const { svc, threadRepo, messageRepo, providerStub } = buildService({ threadStatus });
+    const { svc, db, providerStub } = buildService({ threadStatus });
 
     await svc.sendMessage({
       threadId: THREAD_ID,
@@ -324,28 +320,11 @@ describe("AgentService.sendMessage — admission gates", () => {
       sourceProviderId: "claude",
     });
 
-    expect(messageRepo.create).toHaveBeenCalledWith(
-      THREAD_ID,
-      "user",
-      "Delegated follow-up resumes the target task",
-      1,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        type: "thread",
-        sourceThreadId: "source-thread",
-        sourceTurnId: "source-turn",
-        sourceProviderId: "claude",
-      },
-      expect.any(String),
-      undefined,
-    );
-    expect(threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "active");
+    expect(db.query("SELECT content, sequence, origin_type, source_thread_id, source_turn_id, source_provider_id FROM messages WHERE thread_id = ?").all(THREAD_ID)).toEqual([{
+      content: "Delegated follow-up resumes the target task", sequence: 1, origin_type: "thread",
+      source_thread_id: "source-thread", source_turn_id: "source-turn", source_provider_id: "claude",
+    }]);
+    expect(db.query("SELECT status FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ status: "active" });
     expect(providerStub.sendTurn).toHaveBeenCalledTimes(1);
   });
 
@@ -402,19 +381,19 @@ describe("AgentService.sendMessage — admission gates", () => {
       model: "claude-sonnet-4-6",
     });
     expect(memoryPressureService.markActive).not.toHaveBeenCalled();
-    expect(messageRepo.create).not.toHaveBeenCalled();
+    expect(messageRepo.listByThread(THREAD_ID, 100).messages).toEqual([]);
     expect(settingsService.get).not.toHaveBeenCalled();
     expect(providerStub.sendTurn).not.toHaveBeenCalled();
   });
 });
 
 describe("AgentService internal MCP provider allowlist", () => {
-  it.each(["claude", "codex", "cursor", "copilot"])("includes %s for initial and retry activation", (provider) => {
+  it.each(["claude", "codex", "cursor", "copilot"] as const)("includes %s for initial and retry activation", (provider) => {
     expect(supportsInternalThreadControl(provider)).toBe(true);
   });
 
   it("excludes unsupported providers", () => {
-    expect(supportsInternalThreadControl("unknown")).toBe(false);
+    expect(Reflect.apply(supportsInternalThreadControl, undefined, ["unknown"])).toBe(false);
   });
 
   it.each([

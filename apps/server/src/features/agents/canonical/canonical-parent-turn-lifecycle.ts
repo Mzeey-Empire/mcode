@@ -122,7 +122,7 @@ export class CanonicalParentTurnLifecycle {
   interrupt(input: CanonicalParentTurnInterruptionInput): CanonicalAgentCommitResult {
     const context = this.unfinishedContext(input.executionId);
     this.assertStagedAssistant(input.stagedAssistant, context.checkpoint, input.executionId);
-    const endedAt = new Date().toISOString();
+    const endedAt = input.endedAt ?? new Date().toISOString();
     const recoveryProjection = this.recoveryProjection(
       input.stagedAssistant ?? this.operations.loadTerminalProjection(context.checkpoint.turnId).message,
       input.executionId,

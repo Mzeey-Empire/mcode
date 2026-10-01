@@ -1,20 +1,20 @@
 /**
- * Tests for WorkspaceRepo pin/recency methods added in the modern project selector feature.
+ * Tests for WorkspaceStore pin/recency methods added in the modern project selector feature.
  */
 
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { WorkspaceRepo } from "../workspace-repo.js";
+import { WorkspaceStore } from "../workspace-store.js";
 
-describe("WorkspaceRepo pinning + recency", () => {
+describe("WorkspaceStore pinning + recency", () => {
   let db: Database;
-  let repo: WorkspaceRepo;
+  let repo: WorkspaceStore;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    repo = new WorkspaceRepo(db);
+    repo = new WorkspaceStore(db);
   });
 
   it("setPinned toggles pinned flag", () => {
@@ -78,5 +78,6 @@ describe("WorkspaceRepo pinning + recency", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    db.close(true);
   });
 });

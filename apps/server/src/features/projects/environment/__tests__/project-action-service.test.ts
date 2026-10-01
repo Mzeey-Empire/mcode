@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { logger } from "@mcode/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
   WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES,
@@ -16,14 +17,14 @@ class Runs {
   private readonly values = new Map<string, WorkspaceEnvironmentActionRun>();
   get(threadId: string, actionId: string) { return this.values.get(`${threadId}\0${actionId}`) ?? null; }
   list(threadId: string) { return [...this.values.values()].filter((run) => run.threadId === threadId); }
-  replace(run: WorkspaceEnvironmentActionRun) { this.values.set(`${run.threadId}\0${run.actionId}`, run); return run; }
-  updateIfCurrent(run: WorkspaceEnvironmentActionRun) {
+  async replace(run: WorkspaceEnvironmentActionRun) { this.values.set(`${run.threadId}\0${run.actionId}`, run); return run; }
+  async updateIfCurrent(run: WorkspaceEnvironmentActionRun) {
     const current = this.get(run.threadId, run.actionId);
     if (!current || current.runId !== run.runId) return false;
-    this.replace(run);
+    await this.replace(run);
     return true;
   }
-  interruptRunning() { return []; }
+  async interruptRunning() { return []; }
 }
 
 function session(
@@ -192,6 +193,7 @@ describe("ProjectActionService", () => {
 
     first.emit("old output");
     first.exit(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(runs.get("thread-1", "build")).toMatchObject({ status: "completed", revision: 2 });
     expect(runs.get("thread-1", "test")?.status).toBe("running");
   });
@@ -260,6 +262,7 @@ describe("ProjectActionService", () => {
     const stop = vi.fn(async () => {
       await stopBarrier.promise;
       first.exit(null);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     });
     first = session("terminal-1", undefined, stop);
     const second = session("terminal-2");
@@ -672,6 +675,7 @@ describe("ProjectActionService", () => {
     );
     await service.start({ threadId: "thread-1", actionId: "build" });
     first.exit(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     const restarted = await service.restart({ threadId: "thread-1", actionId: "build" });
 
@@ -706,6 +710,7 @@ describe("ProjectActionService", () => {
     );
     await service.start({ threadId: "thread-1", actionId: "build" });
     prepared.exit(3);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     await service.dispose();
     await service.stop({ threadId: "thread-1", actionId: "build" });
@@ -746,7 +751,11 @@ describe("ProjectActionService", () => {
       if (update.run.status === "completed") throw listenerFailure;
     });
 
-    expect(() => first.exit(0)).toThrow(listenerFailure);
+    const publicationFailure = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    first.exit(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await vi.waitFor(() => expect(publicationFailure).toHaveBeenCalledWith("Project Action completion publication failed", expect.objectContaining({ error: listenerFailure.message })));
+    publicationFailure.mockRestore();
     expect(runs.get("thread-1", "build")?.status).toBe("completed");
     await expect(service.start({ threadId: "thread-1", actionId: "build" })).resolves.toMatchObject({
       terminalSessionId: "terminal-2",
@@ -775,6 +784,7 @@ describe("ProjectActionService", () => {
 
     expect(() => prepared.emit("retained output")).not.toThrow();
     prepared.exit(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(runs.get("thread-1", "build")).toMatchObject({
       status: "completed",
@@ -801,6 +811,7 @@ describe("ProjectActionService", () => {
 
     prepared.emit(`x😀${"z".repeat(WORKSPACE_ENVIRONMENT_ACTION_TRANSCRIPT_MAX_BYTES - 3)}`);
     prepared.exit(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     const run = runs.get("thread-1", "build");
     expect(run).toMatchObject({
@@ -835,6 +846,7 @@ describe("ProjectActionService", () => {
     expect(runs.get("thread-1", "build")).toMatchObject({ revision: 0, transcript: "" });
     prepared.emitBytes(new Uint8Array([0x98, 0x80]));
     prepared.exit(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     const run = runs.get("thread-1", "build");
     expect(run).toMatchObject({
@@ -889,6 +901,7 @@ describe("ProjectActionService", () => {
 
     prepared.emitBytes(new Uint8Array([0xf0, 0x9f]));
     prepared.exit(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     const run = runs.get("thread-1", "build");
     expect(run).toMatchObject({ status: "completed", revision: 2, transcript: "�" });
@@ -949,6 +962,7 @@ describe("ProjectActionService", () => {
     );
     await service.start({ threadId: "thread-1", actionId: "build" });
     first.exit(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
     first.emit("after finalization");
 
     expect(runs.get("thread-1", "build")).toMatchObject({
@@ -1029,7 +1043,7 @@ describe("ProjectActionService", () => {
     expect(startPreparedCommand).not.toHaveBeenCalled();
   });
 
-  it("reaps every stale Action batch instead of stopping after the first 256 rows", () => {
+  it("reaps every stale Action batch instead of stopping after the first 256 rows", async () => {
     const first = Array.from({ length: 256 }, (_, index) => ({ actionId: `first-${index}` } as WorkspaceEnvironmentActionRun));
     const second = Array.from({ length: 2 }, (_, index) => ({ actionId: `second-${index}` } as WorkspaceEnvironmentActionRun));
     const interruptRunning = vi.fn()
@@ -1043,7 +1057,7 @@ describe("ProjectActionService", () => {
       () => new Date("2026-08-22T12:00:00.000Z"),
     );
 
-    expect(service.recoverStaleRuns()).toHaveLength(258);
+    expect(await service.recoverStaleRuns()).toHaveLength(258);
     expect(interruptRunning).toHaveBeenCalledTimes(2);
   });
 });

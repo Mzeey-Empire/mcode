@@ -4,10 +4,10 @@ import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import {
   ExternalThreadControlPairingError,
-  ExternalThreadControlPairingService,
+  ExternalThreadControlPairingStore as ExternalThreadControlPairingService,
   type ExternalThreadControlAuthenticatedPairing,
   type ExternalThreadControlPairingInput,
-} from "../external-thread-control-pairing-service.js";
+} from "../external-thread-control-pairing-store.js";
 
 interface DeliverySeed {
   pairing_id: string;

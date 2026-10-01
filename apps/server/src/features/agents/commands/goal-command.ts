@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import {
   type IAgentProvider,
   type AgentEvent,
@@ -8,16 +7,16 @@ import {
   isGoalCapable,
   isGoalOpen,
 } from "@mcode/contracts";
-import type { MessageRepo } from "../conversation/persistence/message-repo.js";
+import type { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { goalCommandWriteOperations } from "./goal-command-write-operations.js";
 import type { CommandContext, CommandOutcome, McodeCommand } from "./command-router.js";
 
 /** Publishes synthesized agent events through the canonical stream. */
 type PublishSynthesizedFn = (threadId: string, events: readonly AgentEvent[]) => void;
 
-/** Repositories and database handle the command needs to persist its rows. */
+/** The shared writer commits complete goal command rows. */
 interface GoalCommandDeps {
-  readonly messageRepo: MessageRepo;
-  readonly db: Database;
+  readonly writer: ApplicationDatabaseWriter;
 }
 
 /** Matches `/goal`, optionally followed by an argument, across newlines. */
@@ -121,7 +120,7 @@ export class GoalCommand implements McodeCommand {
     const lower = arg.toLowerCase();
     if (this.isControlArgument(arg, lower)) return this.handleControl(ctx, provider, arg, lower);
     if (arg.length > MAX_GOAL_OBJECTIVE_CHARS) {
-      this.persistControlReply(
+      await this.persistControlReply(
         ctx.threadId,
         ctx.content,
         `Goal is too long. Keep goals under ${MAX_GOAL_OBJECTIVE_CHARS} characters.`,
@@ -145,7 +144,7 @@ export class GoalCommand implements McodeCommand {
     const nativeContent = this.nativeControlContent(ctx, lower);
     if (nativeContent) return { kind: "rewrite", content: nativeContent };
     const replyText = await this.controlReply(ctx, provider, arg, lower);
-    this.persistControlReply(ctx.threadId, ctx.content, replyText);
+    await this.persistControlReply(ctx.threadId, ctx.content, replyText);
     return { kind: "handled" };
   }
 
@@ -195,21 +194,15 @@ export class GoalCommand implements McodeCommand {
    * client mirror skips the optimistic running-state for control commands, so
    * there is nothing for an Ended to clear in the idle case either.
    */
-  private persistControlReply(threadId: string, userText: string, replyText: string): void {
-    const baseSeq = this.deps.messageRepo.getLatestSequenceIncludingInternal(threadId);
-    let assistantMsgId = "";
-    this.deps.db.transaction(() => {
-      this.deps.messageRepo.create(threadId, "user", userText, baseSeq + 1);
-      const a = this.deps.messageRepo.create(threadId, "assistant", replyText, baseSeq + 2);
-      assistantMsgId = a.id;
-    })();
+  private async persistControlReply(threadId: string, userText: string, replyText: string): Promise<void> {
+    const { assistantMessageId } = await this.deps.writer.execute(goalCommandWriteOperations.persistControlReply, { threadId, userText, replyText });
 
     this.publishSynthesized(threadId, [{
       type: AgentEventType.Message,
       threadId,
       content: replyText,
       tokens: null,
-      messageId: assistantMsgId,
+      messageId: assistantMessageId,
     }]);
   }
 }

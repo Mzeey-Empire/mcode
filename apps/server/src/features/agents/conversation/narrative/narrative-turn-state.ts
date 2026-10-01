@@ -80,7 +80,7 @@ export interface BufferToolCallEvent {
 
 /** Complete narrative rows prepared for one terminal persistence pass. */
 export interface PreparedNarrativePersistence {
-  toolCalls: BufferedToolCall[];
+  toolCalls: CreateToolCallRecordInput[];
   thoughts: CreateThoughtSegmentInput[];
   hooks: CreateHookExecutionInput[];
 }
@@ -940,9 +940,10 @@ export class NarrativeTurnState {
   recoverySnapshotWithStagedNarration(
     threadId: string,
     staged: StagedNarrationSegment,
+    enforceRetention = true,
   ): ParentNarrativeRecoveryItem[] {
     this.assertThread(threadId);
-    const snapshot = this.recoverySnapshot(threadId).filter((item) => (
+    const snapshot = this.createRecoverySnapshot(threadId, enforceRetention).filter((item) => (
       item.kind !== "narrationSegment" || item.record.id !== staged.id
     ));
     snapshot.push({
@@ -961,7 +962,7 @@ export class NarrativeTurnState {
       const itemBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
       this.assertRecoveryItemFitsWriteBatch(itemBytes, threadId);
       bytes += itemBytes;
-      assertActiveTurnRecoveryRetention(index + 1, bytes);
+      if (enforceRetention) assertActiveTurnRecoveryRetention(index + 1, bytes);
     }
     return snapshot.sort((left, right) => (
       left.record.sort_order - right.record.sort_order || left.record.id.localeCompare(right.record.id)
@@ -1095,7 +1096,11 @@ export class NarrativeTurnState {
     this.closeOpenHooksForPersistence(threadId);
     const thoughts = this.prepareThoughtsForPersistence(threadId, messageId, messageContent);
     const hooks = this.prepareHooksForPersistence(threadId, messageId);
-    return { toolCalls, thoughts, hooks };
+    return {
+      toolCalls: toolCalls.map(({ _rawToolInput, _subagentPresentation, ...record }) => record),
+      thoughts,
+      hooks,
+    };
   }
 
   private prepareToolCallsForPersistence(

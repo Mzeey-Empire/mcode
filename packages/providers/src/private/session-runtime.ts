@@ -91,10 +91,14 @@ export class SessionRuntime<TState> {
       // Providers can hold exclusive resources (state DBs, sockets) that a
       // spawn would race while the previous incarnation is still closing.
       await Promise.race([teardown, delay(TEARDOWN_REUSE_TIMEOUT_MS)]);
+      if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
     }
     const existing = this.sessions.get(args.sessionId);
     if (existing) {
-      if (this.adapter.isStale(existing.state, args)) await this.stop(args.sessionId);
+      if (this.adapter.isStale(existing.state, args)) {
+        await this.stop(args.sessionId);
+        if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
+      }
       else {
         existing.lastUsedAt = Date.now();
         return existing.state;
@@ -148,6 +152,8 @@ export class SessionRuntime<TState> {
 
   /** Stops one session and closes a spawn that completes after the stop request. */
   async stop(sessionId: string): Promise<void> {
+    const existing = this.teardowns.get(sessionId);
+    if (existing) return existing;
     // Recorded before the work begins so a racing acquire waits instead of
     // spawning alongside teardown or joining a spawn that is being stopped.
     const work = this.performStop(sessionId);
@@ -179,10 +185,12 @@ export class SessionRuntime<TState> {
       clearInterval(this.evictionTimer);
       this.evictionTimer = null;
     }
-    await Promise.all([
-      ...[...this.pendingSpawns.keys()].map((sessionId) => this.stop(sessionId)),
-      ...[...this.sessions.keys()].map((sessionId) => this.stop(sessionId)),
-    ]);
+    // A session leaves the pool before native close finishes, so pool entries alone miss active teardowns.
+    const teardowns = [...this.teardowns.values()];
+    const sessionIds = new Set([...this.pendingSpawns.keys(), ...this.sessions.keys()]);
+    const results = await Promise.allSettled([...teardowns, ...[...sessionIds].map((sessionId) => this.stop(sessionId))]);
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Provider session shutdown failed");
   }
 
   private async spawn(args: {

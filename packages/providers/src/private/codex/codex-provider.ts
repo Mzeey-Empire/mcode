@@ -2969,14 +2969,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     // (close drains per-session), but draining all here also clears any
     // permissions whose session never landed in the pool.
     this.drainPending(() => true);
-    await this.runtime.shutdown();
-    await this.codexPorts.catalog.shutdown();
+    const results = await Promise.allSettled([this.runtime.shutdown(), this.codexPorts.catalog.shutdown()]);
+    results.push(...await Promise.allSettled([this.canonicalEventPublisher.stopAdmissionAndDrain()]));
     this.sdkSessionIds.clear();
     this.pendingSpawnTurns.clear();
     this.pendingBrowserAccess.clear();
     this.liveSessionIds.clear();
     this.activeCodexServers.clear();
     this.canonicalTurnRoutingsByThread.clear();
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Codex provider shutdown failed");
     logger.info("CodexProvider shutdown complete");
   }
 }

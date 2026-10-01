@@ -1,11 +1,12 @@
 import "reflect-metadata";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Database } from "bun:sqlite";
 import type * as NodeFS from "node:fs";
 import * as NodeEvents from "node:events";
 
 const { watchMock, existsSyncMock, broadcastMock } = vi.hoisted(() => ({
   watchMock: vi.fn(),
-  existsSyncMock: vi.fn(() => true),
+  existsSyncMock: vi.fn<typeof NodeFS.existsSync>(() => true),
   broadcastMock: vi.fn(),
 }));
 
@@ -23,9 +24,11 @@ vi.mock("../../../../application/transport/push.js", () => ({
 }));
 
 import { GitWatcherService } from "../git-watcher-service.js";
-import type { WorkspaceRepo } from "../../persistence/workspace-repo.js";
+import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
+import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../testing/owned-test-database.js";
 import type { GitExecutor } from "../execution/index.js";
-import type { GitService } from "../git-service.js";
+import { GitRepositoryService } from "../git-repository-service.js";
 import type { HandoffCheckoutService } from "../../../handoff/index.js";
 
 class MockWatcher extends NodeEvents.EventEmitter {
@@ -35,8 +38,29 @@ class MockWatcher extends NodeEvents.EventEmitter {
 describe("GitWatcherService", () => {
   let callbacks: Array<(eventType: string, filename: string) => void>;
   let service: GitWatcherService;
-  let gitService: GitService;
+  let gitService: GitRepositoryService;
   let handoffCheckoutService: HandoffCheckoutService;
+  let owned: OwnedTestDatabase;
+  let reader: Database;
+  let workspaceRepo: WorkspaceRepo;
+
+  beforeAll(async () => {
+    const actual = await vi.importActual<typeof import("fs")>("fs");
+    existsSyncMock.mockImplementation(actual.existsSync);
+    owned = createOwnedTestDatabase();
+    reader = openReadOnlyDatabase(owned.db.filename);
+    workspaceRepo = new WorkspaceRepo(reader, owned.writer);
+  });
+
+  afterEach(() => {
+    service.dispose();
+    vi.useRealTimers();
+  });
+
+  afterAll(async () => {
+    reader.close(true);
+    await owned.close();
+  });
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -52,9 +76,8 @@ describe("GitWatcherService", () => {
     const gitExecutor = {
       exec: vi.fn().mockResolvedValue({ stdout: ".git\n" }),
     } as unknown as GitExecutor;
-    gitService = {
-      getCurrentBranchAt: vi.fn().mockResolvedValue("main"),
-    } as unknown as GitService;
+    gitService = new GitRepositoryService(workspaceRepo, gitExecutor);
+    vi.spyOn(gitService, "getCurrentBranchAt").mockResolvedValue("main");
     handoffCheckoutService = {
       syncCheckoutFromHead: vi.fn().mockResolvedValue({
         changed: true,
@@ -70,7 +93,7 @@ describe("GitWatcherService", () => {
       }),
     } as unknown as HandoffCheckoutService;
     service = new GitWatcherService(
-      {} as WorkspaceRepo,
+      workspaceRepo,
       gitExecutor,
       gitService,
       handoffCheckoutService,

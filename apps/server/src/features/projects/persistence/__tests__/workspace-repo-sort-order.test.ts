@@ -3,18 +3,19 @@
  */
 
 import "reflect-metadata";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { WorkspaceRepo } from "../workspace-repo.js";
+import { WorkspaceStore } from "../workspace-store.js";
 
-describe("WorkspaceRepo sort_order", () => {
+describe("WorkspaceStore sort_order", () => {
+  afterEach(() => db.close(true));
   let db: Database;
-  let repo: WorkspaceRepo;
+  let repo: WorkspaceStore;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    repo = new WorkspaceRepo(db);
+    repo = new WorkspaceStore(db);
   });
 
   it("listAll returns every workspace ordered by sort_order ascending", () => {

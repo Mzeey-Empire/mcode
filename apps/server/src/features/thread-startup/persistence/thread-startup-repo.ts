@@ -1,173 +1,51 @@
-import type { Database } from "bun:sqlite";
 import { inject, injectable } from "tsyringe";
-import { asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { logger } from "@mcode/shared";
-import {
-  ThreadStartupSchema,
-  type ThreadStartup,
-} from "@mcode/contracts";
-import { threadStartups } from "../../../runtime/persistence/sqlite/schema.js";
+import type { Database } from "bun:sqlite";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { ThreadStartupStore } from "./thread-startup-store.js";
+import { threadStartupWriteOperations } from "./thread-startup-write-operations.js";
 
-type ThreadStartupRow = typeof threadStartups.$inferSelect;
-
-/** SQLite repository for server-owned thread startup lifecycle snapshots. */
+/** Read-only queries and committed mutations for ThreadStartupRepo. */
 @injectable()
 export class ThreadStartupRepo {
-  private readonly orm: BunSQLiteDatabase;
+  private readonly reader: ThreadStartupStore;
 
-  constructor(@inject("Database") db: Database) {
-    this.orm = drizzle(db);
+  constructor(@inject("Database") db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
+    this.reader = new ThreadStartupStore(db);
   }
 
-  /** Insert one new startup snapshot. */
-  insert(startup: ThreadStartup, requestFingerprint?: string): void {
-    this.orm.insert(threadStartups).values({
-      startupId: startup.startupId,
-      workspaceId: startup.workspaceId,
-      kind: startup.kind,
-      state: startup.state,
-      phase: startup.phase,
-      stepsJson: JSON.stringify(startup.steps),
-      transcriptJson: JSON.stringify(startup.transcript),
-      cancellation: startup.cancellation,
-      revision: startup.revision,
-      requestFingerprint: requestFingerprint ?? null,
-      threadId: startup.threadId ?? null,
-      errorJson: startup.error ? JSON.stringify(startup.error) : null,
-      blockJson: startup.block ? JSON.stringify(startup.block) : null,
-      createdAt: startup.createdAt,
-      updatedAt: startup.updatedAt,
-    }).run();
+  insert(startup: Parameters<ThreadStartupStore["insert"]>[0], requestFingerprint?: Parameters<ThreadStartupStore["insert"]>[1]): Promise<ReturnType<ThreadStartupStore["insert"]>> {
+    return this.writer.execute(threadStartupWriteOperations.insert, [startup, requestFingerprint]);
   }
 
-  /** Return the private request identity without exposing it in lifecycle snapshots. */
-  requestFingerprint(startupId: string): string | null {
-    const row = this.orm
-      .select({ requestFingerprint: threadStartups.requestFingerprint })
-      .from(threadStartups)
-      .where(eq(threadStartups.startupId, startupId))
-      .get();
-    return row?.requestFingerprint ?? null;
+  requestFingerprint(startupId: Parameters<ThreadStartupStore["requestFingerprint"]>[0]): ReturnType<ThreadStartupStore["requestFingerprint"]> {
+    return this.reader.requestFingerprint(startupId);
   }
 
-  /** Commit direct thread creation and its startup binding together. */
-  transaction<T>(operation: () => T): T {
-    return this.orm.transaction(operation);
+  findById(startupId: Parameters<ThreadStartupStore["findById"]>[0]): ReturnType<ThreadStartupStore["findById"]> {
+    return this.reader.findById(startupId);
   }
 
-  /** Return one startup snapshot by its client-generated identity. */
-  findById(startupId: string): ThreadStartup | null {
-    const row = this.orm
-      .select()
-      .from(threadStartups)
-      .where(eq(threadStartups.startupId, startupId))
-      .get();
-    return row ? rowToStartup(row) : null;
+  listByWorkspace(workspaceId: Parameters<ThreadStartupStore["listByWorkspace"]>[0], limit: Parameters<ThreadStartupStore["listByWorkspace"]>[1] = 100): ReturnType<ThreadStartupStore["listByWorkspace"]> {
+    return this.reader.listByWorkspace(workspaceId, limit);
   }
 
-  /** Return a bounded reverse-chronological list for one workspace. */
-  listByWorkspace(workspaceId: string, limit = 100): ThreadStartup[] {
-    const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
-    const rows = this.orm
-      .select()
-      .from(threadStartups)
-      .where(eq(threadStartups.workspaceId, workspaceId))
-      .orderBy(desc(threadStartups.updatedAt), desc(threadStartups.startupId))
-      .limit(boundedLimit)
-      .all();
-    return rows.map(rowToStartup);
+  listInterruptible(): ReturnType<ThreadStartupStore["listInterruptible"]> {
+    return this.reader.listInterruptible();
   }
 
-  /** Return startups with in-flight work that cannot survive a server restart. */
-  listInterruptible(): ThreadStartup[] {
-    const rows = this.orm
-      .select()
-      .from(threadStartups)
-      .where(inArray(threadStartups.state, ["pending", "running"]))
-      .all();
-    return mapStartupRows(rows);
+  interruptibleBatch(afterStartupId?: Parameters<ThreadStartupStore["interruptibleBatch"]>[0]): ReturnType<ThreadStartupStore["interruptibleBatch"]> {
+    return this.reader.interruptibleBatch(afterStartupId);
   }
 
-  /** Return startups left interrupted by a server restart. */
-  listInterrupted(): ThreadStartup[] {
-    const rows = this.orm
-      .select()
-      .from(threadStartups)
-      .where(eq(threadStartups.state, "interrupted"))
-      .all();
-    return mapStartupRows(rows);
+  listInterrupted(): ReturnType<ThreadStartupStore["listInterrupted"]> {
+    return this.reader.listInterrupted();
   }
 
-  /** Return an active startup or the newest terminal startup bound to one Thread. */
-  findByThreadId(threadId: string): ThreadStartup | null {
-    const row = this.orm
-      .select()
-      .from(threadStartups)
-      .where(eq(threadStartups.threadId, threadId))
-      .orderBy(
-        asc(sql`CASE WHEN ${threadStartups.state} IN ('pending', 'running', 'blocked') THEN 0 ELSE 1 END`),
-        desc(threadStartups.updatedAt),
-        desc(threadStartups.startupId),
-      )
-      .limit(1)
-      .get();
-    return row ? rowToStartup(row) : null;
+  findByThreadId(threadId: Parameters<ThreadStartupStore["findByThreadId"]>[0]): ReturnType<ThreadStartupStore["findByThreadId"]> {
+    return this.reader.findByThreadId(threadId);
   }
 
-  /** Replace one persisted startup snapshot after its next revision is calculated. */
-  update(startup: ThreadStartup): void {
-    this.orm
-      .update(threadStartups)
-      .set({
-        state: startup.state,
-        phase: startup.phase,
-        stepsJson: JSON.stringify(startup.steps),
-        transcriptJson: JSON.stringify(startup.transcript),
-        cancellation: startup.cancellation,
-        revision: startup.revision,
-        threadId: startup.threadId ?? null,
-        errorJson: startup.error ? JSON.stringify(startup.error) : null,
-        blockJson: startup.block ? JSON.stringify(startup.block) : null,
-        updatedAt: startup.updatedAt,
-      })
-      .where(eq(threadStartups.startupId, startup.startupId))
-      .run();
+  update(startup: Parameters<ThreadStartupStore["update"]>[0]): Promise<ReturnType<ThreadStartupStore["update"]>> {
+    return this.writer.execute(threadStartupWriteOperations.update, [startup]);
   }
-}
-
-// Boot-path scans must not let one schema-drifted row kill the server, so
-// invalid rows are logged and skipped instead of thrown.
-function mapStartupRows(rows: ThreadStartupRow[]): ThreadStartup[] {
-  const startups: ThreadStartup[] = [];
-  for (const row of rows) {
-    try {
-      startups.push(rowToStartup(row));
-    } catch (error) {
-      logger.warn("Skipping invalid thread startup row", {
-        startupId: row.startupId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  return startups;
-}
-
-function rowToStartup(row: ThreadStartupRow): ThreadStartup {
-  return ThreadStartupSchema().parse({
-    startupId: row.startupId,
-    workspaceId: row.workspaceId,
-    kind: row.kind,
-    state: row.state,
-    phase: row.phase,
-    steps: JSON.parse(row.stepsJson),
-    transcript: JSON.parse(row.transcriptJson),
-    cancellation: row.cancellation,
-    revision: row.revision,
-    ...(row.threadId ? { threadId: row.threadId } : {}),
-    ...(row.errorJson ? { error: JSON.parse(row.errorJson) } : {}),
-    ...(row.blockJson ? { block: JSON.parse(row.blockJson) } : {}),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  });
 }

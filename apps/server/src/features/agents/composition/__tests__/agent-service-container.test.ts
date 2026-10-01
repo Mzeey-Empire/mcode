@@ -10,6 +10,7 @@ import { container } from "tsyringe";
 import type { AgentEvent, IAgentProvider, IProviderRegistry, TurnRequest } from "@mcode/contracts";
 
 import { setupContainer } from "../../../../application/composition/container.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { WorkerOwnedTurnRuntime } from "../../execution/worker-owned-turn-runtime.js";
 import { ExecutionThreadWorkerPort } from "../../execution/execution-worker-port.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
@@ -34,6 +35,7 @@ import { addClient, removeClient, subscribeClientToThread } from "../../../../ap
 describe("AgentService container composition", () => {
   let database: Database | undefined;
   let workerRuntime: WorkerOwnedTurnRuntime | undefined;
+  let databaseWriter: ApplicationDatabaseWriter | undefined;
   let temporaryDirectory: string | undefined;
   let pushClient: WebSocket | undefined;
   const previousDatabasePath = process.env.MCODE_DB_PATH;
@@ -42,7 +44,8 @@ describe("AgentService container composition", () => {
     container.reset();
     temporaryDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-service-composition-"));
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
-    setupContainer(temporaryDirectory);
+    await setupContainer(temporaryDirectory);
+    databaseWriter = container.resolve(ApplicationDatabaseWriter);
     database = container.resolve<Database>("Database");
     workerRuntime = container.resolve(WorkerOwnedTurnRuntime);
     await workerRuntime.whenReady();
@@ -53,6 +56,8 @@ describe("AgentService container composition", () => {
     pushClient = undefined;
     await workerRuntime?.close();
     workerRuntime = undefined;
+    await databaseWriter?.close();
+    databaseWriter = undefined;
     database?.close(true);
     database = undefined;
     container.reset();
@@ -72,6 +77,9 @@ describe("AgentService container composition", () => {
   it("starts one writer and a fixed execution pool from the opened database", async () => {
     workerRuntime = container.resolve(WorkerOwnedTurnRuntime);
     await workerRuntime.whenReady();
+    expect(container.resolve(ApplicationDatabaseWriter)).toBe(databaseWriter);
+    expect(() => database?.run("UPDATE workspaces SET name = 'forbidden'"))
+      .toThrow(/readonly/i);
 
     expect(container.resolve(CanonicalAgentWriterClient)).toBe(workerRuntime.writer);
     expect(container.resolve(CanonicalExecutionWriterPort)).toBe(workerRuntime.writerPort);
@@ -123,10 +131,10 @@ describe("AgentService container composition", () => {
     const registry = container.resolve(AgentEventPublicationRegistry);
     registry.bind((event) => published.push(event));
     registry.start();
-    const workspace = container.resolve(WorkspaceRepo).create("worker-test", temporaryDirectory!);
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-test", temporaryDirectory!);
     const threads = container.resolve(ThreadRepo);
-    const thread = threads.create(workspace.id, "Worker turn", "direct", "main", true, "claude");
-    threads.updateSettings(thread.id, { thinking: true });
+    const thread = await threads.create(workspace.id, "Worker turn", "direct", "main", true, "claude");
+    await threads.updateSettings(thread.id, { thinking: true });
 
     await container.resolve(AgentService).sendMessage({
       threadId: thread.id, content: "hello", provider: "codex", model: "gpt-5.6-luna",
@@ -157,8 +165,8 @@ describe("AgentService container composition", () => {
     publication.start();
     const pushes: Array<{ channel: string; data: unknown }> = [];
     pushClient = capturePushes(pushes);
-    const workspace = container.resolve(WorkspaceRepo).create("notice-owner", temporaryDirectory!);
-    const thread = container.resolve(ThreadRepo).create(workspace.id, "Notice turn", "direct", "main", true, "codex");
+    const workspace = await container.resolve(WorkspaceRepo).create("notice-owner", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Notice turn", "direct", "main", true, "codex");
     subscribeClientToThread(pushClient, thread.id);
     await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "hello", provider: "codex", permissionMode: "full" });
     await waitFor(() => workerRuntime?.owner.current(thread.id) !== undefined);
@@ -201,8 +209,8 @@ describe("AgentService container composition", () => {
     const registry = container.resolve(AgentEventPublicationRegistry);
     registry.bind((event) => published.push(event));
     registry.start();
-    const workspace = container.resolve(WorkspaceRepo).create("worker-stop", temporaryDirectory!);
-    const thread = container.resolve(ThreadRepo).create(workspace.id, "Worker stop", "direct", "main", true, "codex");
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-stop", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Worker stop", "direct", "main", true, "codex");
     const service = container.resolve(AgentService);
 
     await service.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "default" });
@@ -218,8 +226,8 @@ describe("AgentService container composition", () => {
     const registry = container.resolve(AgentEventPublicationRegistry);
     registry.bind(() => undefined);
     registry.start();
-    const workspace = container.resolve(WorkspaceRepo).create("worker-empty-stop", temporaryDirectory!);
-    const thread = container.resolve(ThreadRepo).create(workspace.id, "Empty worker stop", "direct", "main", true, "codex");
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-empty-stop", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Empty worker stop", "direct", "main", true, "codex");
     const service = container.resolve(AgentService);
 
     await service.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "default" });
@@ -241,8 +249,8 @@ describe("AgentService container composition", () => {
     const registry = container.resolve(AgentEventPublicationRegistry);
     registry.bind((event) => published.push(event));
     registry.start();
-    const workspace = container.resolve(WorkspaceRepo).create("worker-cancelled", temporaryDirectory!);
-    const thread = container.resolve(ThreadRepo).create(workspace.id, "Provider cancelled", "direct", "main", true, "codex");
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-cancelled", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Provider cancelled", "direct", "main", true, "codex");
 
     await container.resolve(AgentService).sendMessage({ threadId: thread.id,
       content: "hello", permissionMode: "default" });
@@ -270,8 +278,8 @@ describe("AgentService container composition", () => {
     const published: AgentEvent[] = [];
     registry.bind((event) => published.push(event));
     registry.start();
-    const workspace = container.resolve(WorkspaceRepo).create("worker-delivery", temporaryDirectory!);
-    const thread = container.resolve(ThreadRepo).create(workspace.id, "Delivery failure", "direct", "main", true, "codex");
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-delivery", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Delivery failure", "direct", "main", true, "codex");
 
     await container.resolve(AgentService).sendMessage({ threadId: thread.id,
       content: "hello", permissionMode: "default" });
@@ -300,9 +308,9 @@ describe("AgentService container composition", () => {
     const published: AgentEvent[] = [];
     registry.bind((event) => published.push(event));
     registry.start();
-    const workspace = container.resolve(WorkspaceRepo).create("worker-concurrent", temporaryDirectory!);
-    const threads = Array.from({ length: 7 }, (_, index) =>
-      container.resolve(ThreadRepo).create(workspace.id, `Concurrent ${index}`, "direct", "main", true, "codex"));
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-concurrent", temporaryDirectory!);
+    const threads = await Promise.all(Array.from({ length: 7 }, (_, index) =>
+      container.resolve(ThreadRepo).create(workspace.id, `Concurrent ${index}`, "direct", "main", true, "codex")));
     const service = container.resolve(AgentService);
 
     await Promise.all(threads.map((thread) => service.sendMessage({ threadId: thread.id,
@@ -334,8 +342,8 @@ describe("AgentService container composition", () => {
     const registry = container.resolve(AgentEventPublicationRegistry);
     registry.bind(() => undefined);
     registry.start();
-    const workspace = container.resolve(WorkspaceRepo).create("worker-rejected", temporaryDirectory!);
-    const thread = container.resolve(ThreadRepo).create(workspace.id, "Rejected event", "direct", "main", true, "codex");
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-rejected", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Rejected event", "direct", "main", true, "codex");
 
     await container.resolve(AgentService).sendMessage({ threadId: thread.id,
       content: "hello", permissionMode: "default" });
@@ -353,10 +361,10 @@ describe("AgentService container composition", () => {
     const registry = container.resolve(AgentEventPublicationRegistry);
     registry.bind(() => undefined);
     registry.start();
-    const workspace = container.resolve(WorkspaceRepo).create("worker-crash", temporaryDirectory!);
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-crash", temporaryDirectory!);
     const threads = container.resolve(ThreadRepo);
-    const lost = threads.create(workspace.id, "Lost worker", "direct", "main", true, "codex");
-    const peer = threads.create(workspace.id, "Peer worker", "direct", "main", true, "codex");
+    const lost = await threads.create(workspace.id, "Lost worker", "direct", "main", true, "codex");
+    const peer = await threads.create(workspace.id, "Peer worker", "direct", "main", true, "codex");
     const service = container.resolve(AgentService);
     await service.sendMessage({ threadId: lost.id, content: "one", permissionMode: "default" });
     await service.sendMessage({ threadId: peer.id, content: "two", permissionMode: "default" });
@@ -379,11 +387,9 @@ describe("AgentService container composition", () => {
 
   function registerFakeCodex(provider: IAgentProvider): void {
     container.registerInstance<IProviderRegistry>("IProviderRegistry", {
-      resolve: () => provider, resolveAll: () => [provider], shutdown: () => undefined,
+      resolve: () => provider, resolveAll: () => [provider], shutdown: async () => undefined,
     });
-    container.registerInstance(ProviderAvailabilityService, {
-      assertUsable: () => undefined,
-    } as ProviderAvailabilityService);
+    vi.spyOn(container.resolve(ProviderAvailabilityService), "assertUsable").mockReturnValue(undefined);
   }
 });
 
@@ -393,10 +399,11 @@ function fakeCodexProvider(
 ): IAgentProvider {
   return Object.assign(new NodeEvents.EventEmitter(), {
     id: "codex" as const,
-    descriptor: { id: "codex" },
+    descriptor: { id: "codex" as const, capabilities: [] },
     supportsCompletion: false,
     sessionForkOnResume: "unsupported" as const,
     maxInputCharactersPerTurn: 16000,
+    forker: { fork: async () => { throw new Error("Session forks are outside this composition fixture"); } },
     sendTurn,
     stopSession,
     shutdown: () => undefined,
@@ -405,7 +412,7 @@ function fakeCodexProvider(
     setCanonicalTurnDeliveryFailureHandler: () => undefined,
     fenceCanonicalTurnEvents: async () => undefined,
     retireCanonicalTurnEvents: async () => undefined,
-  }) as IAgentProvider;
+  });
 }
 
 async function submitCodexEvent(

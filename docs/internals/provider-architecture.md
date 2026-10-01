@@ -74,14 +74,17 @@ evidence that must not reach the renderer.
 
 An admitted worker-owned execution sends its canonical provider drafts to the
 execution's ordered mailbox. One of a fixed number of workers owns that task
-for the execution lifetime. It reduces parent events and file observations,
-then awaits the single execution SQLite writer for the event, turn state, and
-publication receipt. The server publishes the committed result without
-applying that event again through `ProviderTurnEventApplication`. Stop,
+for the execution lifetime. It reduces parent events and file observations.
+Accepted progress publishes before its retained save completes, so a blocked
+SQLite save does not block live narration or provider completion. The shared
+application database writer commits the event, turn state, and publication
+receipt together. The server advances saved progress after that receipt and
+does not apply the event again through `ProviderTurnEventApplication`. Stop,
 terminalization, and late events use the same execution fence. The mailbox has
 bounded capacity and schedules tasks fairly when they share a worker.
-Worker ownership currently admits user-dispatched Codex turns. Claude, Cursor,
-and provider-originated resumes still use the legacy route.
+User-dispatched turns use this ownership route whenever the parent-start owner
+is bound, regardless of provider. Provider-originated resumes can still use
+the legacy route.
 
 Executions without a worker owner still use provider ingress, cloneable event
 preprocessing, the provider adapter, and `TurnEventPipeline`. That route
@@ -95,8 +98,10 @@ send generic runtime events and do not invoke that adapter. A new provider adds
 an adapter only when it has private native evidence that requires server-side
 projection.
 
-Canonical commits on the legacy route hand their committed runtime envelopes
-to ingress. A worker-owned receipt instead covers the parent event and its
+Canonical commits on the legacy route project native collaboration evidence
+inside the database writer. Raw events, child state, and the receipt commit
+together. Their provider-neutral events then enter legacy ingress for parent
+finalization. A worker-owned receipt instead covers the parent event and its
 turn effects together. Neither receipt alone proves the renderer displayed the
 event.
 

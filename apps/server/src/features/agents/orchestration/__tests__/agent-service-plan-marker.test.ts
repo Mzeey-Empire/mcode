@@ -1,15 +1,17 @@
 import "reflect-metadata";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
 import type { Thread, IProviderRegistry } from "@mcode/contracts";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { createAgentServiceForTest } from "./agent-service-test-harness.js";
+import { AgentRuntimeCommandPort, AgentTurnCommandPort } from "../agent-turn-command-port.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { PlanQuestionService } from "../../planning/plan-question-service.js";
@@ -36,6 +38,7 @@ import { broadcast } from "../../../../application/transport/push.js";
 function buildService(db: Database) {
   container.reset();
   container.registerInstance("Database", db);
+  container.registerInstance(ApplicationDatabaseWriter, agentStorageTestWriter(db));
 
   const threadRepo = container.resolve(ThreadRepo);
   const workspaceRepo = container.resolve(WorkspaceRepo);
@@ -105,48 +108,53 @@ function buildService(db: Database) {
     attachmentService,
     providerRegistry,
     threadService,
-    { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../events/persistence/hook-execution-repo.js").HookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,
     db,
     memoryPressureService,
     settingsService,
     availability,
-    planQuestionAnswersRepo,
       { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       container.resolve(NarrativeStore),
-      new ParentAssistantTextCheckpointService(db),
+      new ParentAssistantTextCheckpointService(db, agentStorageTestWriter(db)),
       undefined,
       undefined,
       undefined,
       createCanonicalAgentBoundaryStub(db),
   );
+  const runtimeCommands = new AgentRuntimeCommandPort();
+  runtimeCommands.bind({
+    sendMessage: (command) => svc.sendMessage(command),
+    runtimeSnapshots: () => svc.runtimeAccess().runtimeSnapshots(),
+  });
   const plans = new PlanTurnService(
     threadRepo,
     providerRegistry,
     container.resolve(PlanQuestionService),
-    new PlanRepo(db),
-    svc,
+    new PlanRepo(db, agentStorageTestWriter(db)),
+    new AgentTurnCommandPort(runtimeCommands),
   );
   (svc as unknown as { planTurns: PlanTurnService }).planTurns = plans;
 
   return { svc, plans, threadRepo, workspaceRepo, messageRepo, planQuestionAnswersRepo };
 }
 
+afterEach(closeAgentStorageTestDatabases);
+
 describe("AgentService.sendMessage — plan-questions answered marker", () => {
   let db: Database;
   let thread: Thread;
   let assistantMessageId: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    db = openMemoryDatabase();
+    db = openAgentStorageTestDatabase();
     const { workspaceRepo, threadRepo, messageRepo } = buildService(db);
-    const ws = workspaceRepo.create("test-ws", process.cwd(), false);
-    thread = threadRepo.create(ws.id, "thread", "direct", "main");
+    const ws = await workspaceRepo.create("test-ws", process.cwd(), false);
+    thread = await threadRepo.create(ws.id, "thread", "direct", "main");
     // Pre-existing assistant message that contains the plan-questions fence.
-    const assistantMsg = messageRepo.create(
+    const assistantMsg = await messageRepo.create(
       thread.id,
       "assistant",
       "```plan-questions\n[]\n```",
@@ -200,8 +208,8 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
     // Fresh thread/workspace with NO plan-questions assistant message.
     const { plans, workspaceRepo, threadRepo, planQuestionAnswersRepo } =
       buildService(db);
-    const ws2 = workspaceRepo.create("plain-ws", `${process.cwd()}#alt`, false);
-    const plainThread = threadRepo.create(ws2.id, "plain", "direct", "main");
+    const ws2 = await workspaceRepo.create("plain-ws", `${process.cwd()}#alt`, false);
+    const plainThread = await threadRepo.create(ws2.id, "plain", "direct", "main");
 
     await expect(
       plans.answerQuestions(plainThread.id, [
@@ -270,10 +278,10 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
     expect(calls).toEqual([]);
   });
 
-  it("dismissPlanQuestions marks the latest fence answered and broadcasts plan.dismissed", () => {
+  it("dismissPlanQuestions marks the latest fence answered and broadcasts plan.dismissed", async () => {
     const { plans, planQuestionAnswersRepo } = buildService(db);
 
-    plans.dismissQuestions(thread.id);
+    await plans.dismissQuestions(thread.id);
 
     expect(planQuestionAnswersRepo.isAnswered(assistantMessageId)).toBe(true);
     expect(broadcast).toHaveBeenCalledWith("plan.dismissed", {
@@ -288,24 +296,24 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
     expect(answeredCalls).toEqual([]);
   });
 
-  it("dismissPlanQuestions is idempotent — repeat calls don't fail and re-broadcast", () => {
+  it("dismissPlanQuestions is idempotent — repeat calls don't fail and re-broadcast", async () => {
     const { plans, planQuestionAnswersRepo } = buildService(db);
 
-    plans.dismissQuestions(thread.id);
-    plans.dismissQuestions(thread.id);
+    await plans.dismissQuestions(thread.id);
+    await plans.dismissQuestions(thread.id);
 
     expect(planQuestionAnswersRepo.listAnsweredForThread(thread.id)).toEqual([
       assistantMessageId,
     ]);
   });
 
-  it("dismissPlanQuestions is a no-op when the thread has no plan-questions fence", () => {
+  it("dismissPlanQuestions is a no-op when the thread has no plan-questions fence", async () => {
     const { plans, workspaceRepo, threadRepo, planQuestionAnswersRepo } =
       buildService(db);
-    const ws2 = workspaceRepo.create("dismiss-ws", `${process.cwd()}#dismiss`, false);
-    const plainThread = threadRepo.create(ws2.id, "plain", "direct", "main");
+    const ws2 = await workspaceRepo.create("dismiss-ws", `${process.cwd()}#dismiss`, false);
+    const plainThread = await threadRepo.create(ws2.id, "plain", "direct", "main");
 
-    plans.dismissQuestions(plainThread.id);
+    await plans.dismissQuestions(plainThread.id);
 
     expect(planQuestionAnswersRepo.listAnsweredForThread(plainThread.id)).toEqual([]);
     const calls = (broadcast as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -346,13 +354,13 @@ describe("AgentService.sendMessage completed-thread lifecycle", () => {
   let db: Database;
   let thread: Thread;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    db = openMemoryDatabase();
+    db = openAgentStorageTestDatabase();
     const { workspaceRepo, threadRepo } = buildService(db);
-    const workspace = workspaceRepo.create("test-ws", process.cwd(), false);
-    thread = threadRepo.create(workspace.id, "completed thread", "direct", "main");
-    threadRepo.complete(
+    const workspace = await workspaceRepo.create("test-ws", process.cwd(), false);
+    thread = await threadRepo.create(workspace.id, "completed thread", "direct", "main");
+    await threadRepo.complete(
       thread.id,
       "2026-08-12T08:00:00.000Z",
       "2026-08-15T08:00:00.000Z",

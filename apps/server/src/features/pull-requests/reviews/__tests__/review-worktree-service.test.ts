@@ -2,13 +2,13 @@ import "reflect-metadata";
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openAgentStorageTestDatabase as openMemoryDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../../agents/__tests__/agent-storage-fixture.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import { PullRequestReviewLinkRepo } from "../persistence/pull-request-review-link-repo.js";
-import { PullRequestReviewGitError, type GitService } from "../../../projects/index.js";
+import { PullRequestReviewGitError, type PullRequestReviewGitService, type GitRepositoryService } from "../../../projects/index.js";
 import type { AgentService } from "../../../agents/index.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
 import type { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
@@ -25,6 +25,9 @@ const identity = {
 const managedStartupId = "00000000-0000-4000-8000-000000000011";
 const reuseStartupId = "00000000-0000-4000-8000-000000000012";
 const failedStartupId = "00000000-0000-4000-8000-000000000013";
+type ReviewGitTestPort = Pick<PullRequestReviewGitService,
+  "findCompatiblePullRequestReviewWorktrees" | "getReviewWorktreeDestination" | "provisionPullRequestReviewWorktree" | "provisionPullRequestReviewWorktreeAndCommit">
+  & Pick<GitRepositoryService, "listNormalizedRemotes">;
 
 function reviewSource(): PullRequestReviewTaskSource {
   return {
@@ -112,12 +115,14 @@ function reviewSource(): PullRequestReviewTaskSource {
   };
 }
 
+afterEach(closeAgentStorageTestDatabases);
+
 describe("ReviewWorktreeService", () => {
   let db: Database;
   let workspaceRepo: WorkspaceRepo;
   let threadRepo: ThreadRepo;
   let reviewLinkRepo: PullRequestReviewLinkRepo;
-  let gitService: GitService;
+  let gitService: ReviewGitTestPort;
   let pullRequestService: PullRequestService;
   let agentService: AgentService;
   let startups: ThreadStartupService;
@@ -125,10 +130,10 @@ describe("ReviewWorktreeService", () => {
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    workspaceRepo = new WorkspaceRepo(db);
-    threadRepo = new ThreadRepo(db);
-    reviewLinkRepo = new PullRequestReviewLinkRepo(db);
-    startups = new ThreadStartupService(new ThreadStartupRepo(db));
+    workspaceRepo = new WorkspaceRepo(db, agentStorageTestWriter(db));
+    threadRepo = new ThreadRepo(db, agentStorageTestWriter(db));
+    reviewLinkRepo = new PullRequestReviewLinkRepo(db, agentStorageTestWriter(db));
+    startups = new ThreadStartupService(new ThreadStartupRepo(db, agentStorageTestWriter(db)), agentStorageTestWriter(db));
     gitService = {
       listNormalizedRemotes: vi.fn().mockResolvedValue([{
         name: "origin",
@@ -168,7 +173,7 @@ describe("ReviewWorktreeService", () => {
         if (provisioned.kind === "requires_reuse") return provisioned;
         return { kind: "committed", value: await commit(provisioned) };
       }),
-    } as unknown as GitService;
+    } as unknown as ReviewGitTestPort;
     pullRequestService = {
       loadReviewTaskSource: vi.fn().mockResolvedValue(reviewSource()),
     } as unknown as PullRequestService;
@@ -212,14 +217,14 @@ describe("ReviewWorktreeService", () => {
   afterEach(() => db.close());
 
   it("returns the canonical active task without another remote or Git read", async () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
-    const thread = threadRepo.create(
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const thread = await threadRepo.create(
       workspace.id,
       "Review #42",
       "worktree",
       "feature/review",
     );
-    reviewLinkRepo.insert({
+    await reviewLinkRepo.insert({
       worktreeId: NodeCrypto.randomUUID(),
       provider: "github",
       repositoryNodeId: identity.repositoryNodeId,
@@ -259,17 +264,17 @@ describe("ReviewWorktreeService", () => {
     expect(pullRequestService.loadReviewTaskSource).not.toHaveBeenCalled();
   });
 
-  it("recognizes a cleared canonical link and fails its push resolution closed", () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
-    const thread = threadRepo.create(
+  it("recognizes a cleared canonical link and fails its push resolution closed", async () => {
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const thread = await threadRepo.create(
       workspace.id,
       "Review #42",
       "worktree",
       "feature/review",
     );
-    threadRepo.updateWorktreePath(thread.id, "C:/managed/review-42");
-    threadRepo.updatePr(thread.id, 42, "OPEN");
-    const link = reviewLinkRepo.insert({
+    await threadRepo.updateWorktreePath(thread.id, "C:/managed/review-42");
+    await threadRepo.updatePr(thread.id, 42, "OPEN");
+    const link = await reviewLinkRepo.insert({
       worktreeId: NodeCrypto.randomUUID(),
       provider: "github",
       repositoryNodeId: identity.repositoryNodeId,
@@ -289,14 +294,14 @@ describe("ReviewWorktreeService", () => {
       pushRef: "feature/review",
       primaryThreadId: thread.id,
     });
-    reviewLinkRepo.updatePrimaryThread(link, null);
+    await reviewLinkRepo.updatePrimaryThread(link, null);
 
     expect(service.resolvePushTarget(thread.id)).toEqual({ kind: "invalid_review" });
   });
 
   it("returns bounded candidates when repository mapping is ambiguous", async () => {
-    workspaceRepo.create("first", "C:/repos/first", true);
-    workspaceRepo.create("second", "C:/repos/second", true);
+    await workspaceRepo.create("first", "C:/repos/first", true);
+    await workspaceRepo.create("second", "C:/repos/second", true);
 
     const result = await service.createReviewTask({
       action: "prepare",
@@ -314,9 +319,9 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("finds a valid Workspace match after the first 50 projects", async () => {
-    const tail = workspaceRepo.create("tail match", "C:/repos/tail-match", true);
+    const tail = await workspaceRepo.create("tail match", "C:/repos/tail-match", true);
     for (let index = 0; index < 55; index++) {
-      workspaceRepo.create(`other ${index}`, `C:/repos/other-${index}`, true);
+      await workspaceRepo.create(`other ${index}`, `C:/repos/other-${index}`, true);
     }
     vi.mocked(gitService.listNormalizedRemotes).mockImplementation(async (repoPath) =>
       repoPath === tail.path
@@ -345,10 +350,10 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("reports duplicate matches that both occur after the first 50 projects", async () => {
-    const firstTail = workspaceRepo.create("tail duplicate one", "C:/repos/tail-duplicate-1", true);
-    const secondTail = workspaceRepo.create("tail duplicate two", "C:/repos/tail-duplicate-2", true);
+    const firstTail = await workspaceRepo.create("tail duplicate one", "C:/repos/tail-duplicate-1", true);
+    const secondTail = await workspaceRepo.create("tail duplicate two", "C:/repos/tail-duplicate-2", true);
     for (let index = 0; index < 55; index++) {
-      workspaceRepo.create(`other ${index}`, `C:/repos/duplicate-other-${index}`, true);
+      await workspaceRepo.create(`other ${index}`, `C:/repos/duplicate-other-${index}`, true);
     }
     vi.mocked(gitService.listNormalizedRemotes).mockImplementation(async (repoPath) =>
       repoPath.includes("tail-duplicate")
@@ -381,7 +386,7 @@ describe("ReviewWorktreeService", () => {
 
   it("scans every matching Workspace while retaining only 50 ambiguity candidates", async () => {
     for (let index = 0; index < 55; index++) {
-      workspaceRepo.create(`match ${index}`, `C:/repos/match-${index}`, true);
+      await workspaceRepo.create(`match ${index}`, `C:/repos/match-${index}`, true);
     }
 
     const result = await service.createReviewTask({
@@ -401,7 +406,7 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("serializes concurrent creation and seeds one bounded hidden provider context", async () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
     const request = {
       action: "create_new" as const,
       operationId: "create-42",
@@ -458,7 +463,7 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("records the managed Review checkout lifecycle and Git transcript", async () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
 
     await expect(service.createReviewTask({
       action: "create_new",
@@ -491,7 +496,7 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("cancels a reused Review checkout after Git without removing it", async () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
     const rollback = vi.fn().mockResolvedValue(undefined);
     vi.mocked(gitService.provisionPullRequestReviewWorktreeAndCommit).mockImplementationOnce(async (
       _repoPath,
@@ -511,7 +516,7 @@ describe("ReviewWorktreeService", () => {
         managedRemoteName: null,
         rollback,
       };
-      startups.cancel(reuseStartupId);
+      await startups.cancel(reuseStartupId);
       try {
         return { kind: "committed" as const, value: await commit(provisioned) };
       } catch (error) {
@@ -545,7 +550,7 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("records a Git failure on the worktree phase without changing the pull request error", async () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
     vi.mocked(gitService.provisionPullRequestReviewWorktreeAndCommit).mockRejectedValueOnce(
       new PullRequestReviewGitError("conflict", "The pull request head changed while the Review worktree was being prepared."),
     );
@@ -575,7 +580,7 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("does not create a startup record for preparation or a request without startupId", async () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
 
     await service.createReviewTask({ action: "prepare", operationId: "prepare-no-startup", identity, workspaceId: workspace.id });
     await service.createReviewTask({
@@ -592,7 +597,7 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("completes create_new while the repository mutation lock is re-entered by provisioning", async () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
     const creation = service.createReviewTask({
       action: "create_new",
       operationId: "create-no-deadlock",
@@ -610,7 +615,7 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("keeps the task and returns a warning when provider startup rejects during the grace window", async () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
     vi.mocked(agentService.sendMessage).mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       throw new Error("provider did not start");
@@ -639,7 +644,7 @@ describe("ReviewWorktreeService", () => {
   });
 
   it("marks seeded provider context as a bounded partial first page", async () => {
-    const workspace = workspaceRepo.create("mcode", "C:/repos/mcode", true);
+    const workspace = await workspaceRepo.create("mcode", "C:/repos/mcode", true);
     const partial = reviewSource();
     partial.bounds = {
       checksHasNextPage: true,

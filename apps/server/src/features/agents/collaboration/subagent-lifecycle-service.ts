@@ -71,7 +71,7 @@ export class SubagentLifecycleService {
     })));
     const ids = targets.map((target) => target.childThread.id);
     if (!this.acceptedProgress?.interruptSubagentTurns(ids, "Interrupted by parent stop")) {
-      this.durability.interruptSubagentTurns(ids, "Interrupted by parent stop");
+      await this.durability.interruptSubagentTurns(ids, "Interrupted by parent stop");
     }
   }
 
@@ -127,14 +127,14 @@ export class SubagentLifecycleService {
       outcome: "interrupted" as const,
       error: "Interrupted by user",
     };
-    const finished = this.finishStop(input);
+    const finished = await this.finishStop(input);
     return {
       childThreadId: request.childThreadId,
       status: finished.status === "Interrupted" ? "interrupted" : "already-terminal",
     };
   }
 
-  private finishStop(input: Parameters<SubagentLifecycleDurability["finishSubagentTurn"]>[0]): { status: string } {
+  private async finishStop(input: Parameters<SubagentLifecycleDurability["finishSubagentTurn"]>[0]): Promise<{ status: string }> {
     return this.acceptedProgress?.finishSubagentTurn(input) ?? this.durability.finishSubagentTurn(input);
   }
 

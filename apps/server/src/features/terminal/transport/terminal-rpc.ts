@@ -85,17 +85,17 @@ const terminalManagementHandlers: TerminalManagementHandlers = {
       params.defaultProfileId,
     ),
   }),
-  "terminal.workspacePreferences.reset": (deps, params) => {
-    deps.terminalProfileService.resetWorkspaceDefault(params.workspaceId);
+  "terminal.workspacePreferences.reset": async (deps, params) => {
+    await deps.terminalProfileService.resetWorkspaceDefault(params.workspaceId);
     return { reset: true };
   },
-  "terminal.preferences.reset": (deps, params) => {
+  "terminal.preferences.reset": async (deps, params) => {
     if (params.workspaceId) {
       deps.workspaceTerminalPreferencesService.get(params.workspaceId);
     }
     deps.settingsService.resetTerminalPreferences();
     if (params.workspaceId) {
-      deps.terminalProfileService.resetWorkspaceDefault(params.workspaceId);
+      await deps.terminalProfileService.resetWorkspaceDefault(params.workspaceId);
     }
     return { reset: true };
   },

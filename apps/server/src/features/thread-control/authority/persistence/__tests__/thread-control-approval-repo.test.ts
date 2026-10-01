@@ -1,9 +1,9 @@
 import "reflect-metadata";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
-import { ThreadControlApprovalRepo } from "../thread-control-approval-repo.js";
-import { ThreadRepo } from "../../../persistence/thread-repo.js";
-import { WorkspaceRepo } from "../../../../projects/persistence/workspace-repo.js";
+import { ThreadControlApprovalStore as ThreadControlApprovalRepo } from "../thread-control-approval-store.js";
+import { ThreadStore as ThreadRepo } from "../../../persistence/thread-store.js";
+import { WorkspaceStore as WorkspaceRepo } from "../../../../projects/persistence/workspace-store.js";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
 
 describe("ThreadControlApprovalRepo", () => {

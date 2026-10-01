@@ -233,7 +233,8 @@ export function openDatabase(opts?: OpenDatabaseOptions): Database {
   return db;
 }
 
-function resolveDatabasePath(opts: OpenDatabaseOptions | undefined): string {
+/** Resolve the application database filename without opening a writable connection. */
+export function resolveDatabasePath(opts?: OpenDatabaseOptions): string {
   return opts?.dbPath ?? process.env.MCODE_DB_PATH ?? resolveDbPath(getMcodeDir(), {
     branch: opts?.branch ?? process.env.MCODE_GIT_BRANCH,
     gitToplevel: opts?.gitToplevel ?? process.env.MCODE_GIT_TOPLEVEL,

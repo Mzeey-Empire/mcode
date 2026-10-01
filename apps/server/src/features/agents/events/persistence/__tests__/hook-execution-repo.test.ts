@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { HookExecutionRepo } from "../hook-execution-repo.js";
+import { HookExecutionStore } from "../hook-execution-store.js";
 
 function seedFixtures(db: Database): { messageId: string } {
   const now = new Date().toISOString();
@@ -18,14 +18,14 @@ function seedFixtures(db: Database): { messageId: string } {
   return { messageId: "msg-1" };
 }
 
-describe("HookExecutionRepo", () => {
+describe("HookExecutionStore", () => {
   let db: Database;
-  let repo: HookExecutionRepo;
+  let repo: HookExecutionStore;
   let messageId: string;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    repo = new HookExecutionRepo(db);
+    repo = new HookExecutionStore(db);
     ({ messageId } = seedFixtures(db));
   });
 

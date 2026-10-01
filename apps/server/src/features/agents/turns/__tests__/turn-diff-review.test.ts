@@ -11,7 +11,8 @@ import { ThoughtSegmentRepo } from "../../conversation/narrative/persistence/tho
 import { HookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { TurnFinalizer } from "../turn-finalizer.js";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
@@ -28,8 +29,11 @@ const nativePatch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1
 
 describe("Last turn Review public comparison boundary", () => {
   let db: Database;
+  let setup: Database;
   let directory: string;
   let deps: TurnDiffRouterDeps;
+  let snapshots: TurnSnapshotRepo;
+  let snapshotService: SnapshotService;
   const scratch = NodePath.resolve(process.cwd(), "../../.codex/tmp");
 
   beforeEach(async () => {
@@ -40,27 +44,33 @@ describe("Last turn Review public comparison boundary", () => {
     NodeChildProcess.execFileSync("git", ["-C", directory, "add", "a.txt"]);
     NodeChildProcess.execFileSync("git", ["-C", directory, "-c", `core.hooksPath=${NodePath.join(directory, ".git/no-hooks")}`,
       "-c", "commit.gpgSign=false", "-c", "user.name=Verifier", "-c", "user.email=verifier@example.invalid", "commit", "--quiet", "-m", "fixture"]);
-    db = openMemoryDatabase();
+    setup = openAgentStorageTestDatabase();
     const now = new Date().toISOString();
-    db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run("ws-1", "Test", directory, now, now);
-    db.prepare("INSERT INTO threads (id, workspace_id, title, branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(identity.threadId, "ws-1", "Test", "main", now, now);
-    db.prepare("INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)").run("message-1", identity.threadId, "assistant", "Done", now, 1);
-    deps = { turnDiffs: new TurnDiffService(new TurnDiffRepo(db)), turnSnapshotRepo: new TurnSnapshotRepo(db),
-      snapshotService: new SnapshotService(new RealGitExecutor()), threadService: new ThreadRepo(db), workspaceService: new WorkspaceRepo(db),
+    setup.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run("ws-1", "Test", directory, now, now);
+    setup.prepare("INSERT INTO threads (id, workspace_id, title, branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(identity.threadId, "ws-1", "Test", "main", now, now);
+    setup.prepare("INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)").run("message-1", identity.threadId, "assistant", "Done", now, 1);
+    db = openReadOnlyDatabase(setup.filename);
+    snapshots = new TurnSnapshotRepo(db, writer());
+    snapshotService = new SnapshotService(new RealGitExecutor());
+    deps = { turnDiffs: new TurnDiffService(new TurnDiffRepo(db, writer())), turnSnapshotRepo: snapshots,
+      snapshotService, threadService: new ThreadRepo(db, writer()), workspaceService: new WorkspaceRepo(db, writer()),
       gitWorktrees: { resolveWorkingDir: GitWorktreeService.prototype.resolveWorkingDir } };
   });
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    db.close(true);
+    await closeAgentStorageTestDatabases();
     if (NodePath.dirname(directory) !== scratch) throw new Error("Fixture outside scratch root");
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
+
+  function writer() { return agentStorageTestWriter(setup); }
 
   async function snapshotBothEdits(refBefore?: string) {
     const service = new SnapshotService(new RealGitExecutor());
     const before = refBefore ?? await service.captureRef(directory);
     NodeFS.writeFileSync(NodePath.join(directory, "a.txt"), "AGENT=after\nUSER=after\n");
     const after = await service.captureRef(directory);
-    return new TurnSnapshotRepo(db).create({ messageId: "message-1", threadId: identity.threadId,
+    return new TurnSnapshotRepo(db, writer()).create({ messageId: "message-1", threadId: identity.threadId,
       refBefore: before, refAfter: after, filesChanged: ["a.txt"], worktreePath: null });
   }
 
@@ -73,8 +83,8 @@ describe("Last turn Review public comparison boundary", () => {
     expect(live.turnDiff?.phase).toBe("live");
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: live.turnDiff!.id, filePath: "a.txt" }, deps)).toBe(nativePatch);
     await snapshotBothEdits(before);
-    deps.turnDiffs.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
-    deps.turnDiffs = new TurnDiffService(new TurnDiffRepo(db));
+    await deps.turnDiffs.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
+    deps.turnDiffs = new TurnDiffService(new TurnDiffRepo(db, writer()));
     const settled = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(settled.turnDiff).toMatchObject({ phase: "settled", source: "native", fidelity: "agent" });
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: settled.turnDiff!.id, filePath: "a.txt" }, deps)).toBe(nativePatch);
@@ -97,12 +107,12 @@ describe("Last turn Review public comparison boundary", () => {
   it("reads a picked turn by message id instead of the latest turn", async () => {
     const first = await snapshotBothEdits();
     const service = new SnapshotService(new RealGitExecutor());
-    db.prepare("INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)")
-      .run("message-2", identity.threadId, "assistant", "Done", new Date().toISOString(), 2);
+    await new MessageRepo(db, writer()).create(identity.threadId, "assistant", "Done", 2,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, { type: "composer" }, "message-2");
     const beforeSecond = await service.captureRef(directory);
     NodeFS.writeFileSync(NodePath.join(directory, "a.txt"), "AGENT=again\nUSER=after\n");
     const afterSecond = await service.captureRef(directory);
-    const second = deps.turnSnapshotRepo.create({ messageId: "message-2", threadId: identity.threadId,
+    const second = await snapshots.create({ messageId: "message-2", threadId: identity.threadId,
       refBefore: beforeSecond, refAfter: afterSecond, filesChanged: ["a.txt"], worktreePath: null });
 
     const picked = ReviewComparisonSchema().parse(
@@ -126,9 +136,9 @@ describe("Last turn Review public comparison boundary", () => {
     const before = await service.captureRef(directory);
     NodeFS.writeFileSync(NodePath.join(directory, "a.txt"), "AGENT=after\nUSER=after\n");
     const after = await service.captureRef(directory);
-    db.prepare("INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)")
-      .run("message-2", identity.threadId, "assistant", "Done", new Date().toISOString(), 2);
-    deps.turnSnapshotRepo.create({ messageId: "message-2", threadId: identity.threadId,
+    await new MessageRepo(db, writer()).create(identity.threadId, "assistant", "Done", 2,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, { type: "composer" }, "message-2");
+    await snapshots.create({ messageId: "message-2", threadId: identity.threadId,
       refBefore: before, refAfter: after, filesChanged: ["a.txt"], worktreePath: null });
     const next = { ...identity, turnId: "turn-2", turnExecutionId: "execution-2" };
     deps.turnDiffs.begin(next);
@@ -138,7 +148,7 @@ describe("Last turn Review public comparison boundary", () => {
     expect(deps.turnDiffs.liveComparison(identity.threadId)).toBeNull();
     const afterEmpty = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     expect(afterEmpty.turnDiff).toMatchObject({ phase: "settled", source: "git", fidelity: "same-file-changes-possible" });
-    deps.turnDiffs.prepareFinalization(identity.threadId, next.turnExecutionId, "completed")("message-2", {
+    await deps.turnDiffs.prepareFinalization(identity.threadId, next.turnExecutionId, "completed")("message-2", {
       revision: 2, fileCount: 1, additions: 1, deletions: 1,
       effects: [{ path: "a.txt", scope: "workspace", kind: "edited", additions: 1, deletions: 1, binary: false, toolCallIds: [] }],
     });
@@ -150,7 +160,7 @@ describe("Last turn Review public comparison boundary", () => {
   it("keeps the previous settled Review after explicit invalidation clears the next Live diff", async () => {
     deps.turnDiffs.begin(identity);
     deps.turnDiffs.push({ ...identity, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
-    deps.turnDiffs.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
+    await deps.turnDiffs.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
     const previous = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
     const next = { ...identity, turnId: "turn-2", turnExecutionId: "execution-2" };
     deps.turnDiffs.begin(next);
@@ -182,15 +192,15 @@ describe("Last turn Review public comparison boundary", () => {
     ["cancelled", true], ["errored", false], ["errored", true],
   ] as const)("does not expose %s Git snapshots as Last turn, prior legacy=%s", async (outcome, hasPrevious) => {
     const previous = hasPrevious ? await snapshotBothEdits() : null;
-    const messages = new MessageRepo(db);
-    messages.create(identity.threadId, "user", "Make the next edit", 2);
-    const narrative = new NarrativeStore(messages, new ToolCallRecordRepo(db), new ThoughtSegmentRepo(db), new HookExecutionRepo(db));
-    const finalizer = new TurnFinalizer(messages, new ThreadRepo(db), narrative, deps.snapshotService,
-      deps.turnSnapshotRepo, db, undefined, undefined, undefined, deps.turnDiffs);
+    const messages = new MessageRepo(db, writer());
+    await messages.create(identity.threadId, "user", "Make the next edit", 2);
+    const narrative = new NarrativeStore(messages, new ToolCallRecordRepo(db, writer()), new ThoughtSegmentRepo(db, writer()), new HookExecutionRepo(db, writer()));
+    const finalizer = new TurnFinalizer(messages, new ThreadRepo(db, writer()), narrative, snapshotService,
+      snapshots, writer(), undefined, undefined, undefined, deps.turnDiffs);
     const executionId = "execution-2";
     deps.turnDiffs.begin({ ...identity, turnExecutionId: executionId });
     deps.turnDiffs.push({ ...identity, turnExecutionId: executionId, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
-    finalizer.recordTurnRef(identity.threadId, await deps.snapshotService.captureRef(directory), directory);
+    finalizer.recordTurnRef(identity.threadId, await snapshotService.captureRef(directory), directory);
     finalizer.bufferAssistantBody(identity.threadId, "Partial agent edit", "test-model");
     NodeFS.writeFileSync(NodePath.join(directory, "a.txt"), "PARTIAL=edit\n");
     await finalizer.finalize(identity.threadId, outcome, Promise.resolve(), executionId);

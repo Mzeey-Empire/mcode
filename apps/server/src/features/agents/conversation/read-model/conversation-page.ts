@@ -13,13 +13,13 @@ import type { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-qu
 
 /** Dependencies needed to load one paginated conversation page. */
 export interface ConversationPageDeps {
-  messageRepo: MessageRepo;
-  planQuestionAnswersRepo: PlanQuestionAnswersRepo;
+  messageRepo: Pick<MessageRepo, "listByThread" | "listByThreadAfter" | "listSessionNotices">;
+  planQuestionAnswersRepo: Pick<PlanQuestionAnswersRepo, "listAnsweredForThread">;
 }
 
 /** Dependencies needed to load a bounded conversation tail. */
 export interface ConversationTailDeps {
-  messageRepo: MessageRepo;
+  messageRepo: Pick<MessageRepo, "listByThread" | "listSessionNotices">;
 }
 
 /** Loads one compact display-table message page. Narrative details hydrate on demand. */

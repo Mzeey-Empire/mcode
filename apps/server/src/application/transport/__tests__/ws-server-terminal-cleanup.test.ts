@@ -58,6 +58,7 @@ const terminalCreateCases = [
 describe("disconnected Terminal creates", () => {
   let server: NodeHTTP.Server | undefined;
   let websocketServer: WebSocketServer | undefined;
+  let stopAdmissionAndDrain: () => Promise<void>;
 
   afterEach(async () => {
     if (websocketServer) {
@@ -70,20 +71,30 @@ describe("disconnected Terminal creates", () => {
   });
 
   it.each(terminalCreateCases)(
-    "closes $method when its response completes after the client timed out and disconnected",
+    "drains $method and its cleanup when the requesting client disconnected",
     async ({ method, params, result }) => {
       const createStarted = createDeferred<void>();
       const clientDisconnected = createDeferred<void>();
       const cleanupCompleted = createDeferred<void>();
+      const cleanupStarted = createDeferred<void>();
+      const cleanupAllowed = createDeferred<void>();
       const created = createDeferred<unknown>();
-      const kill = vi.fn(async () => { cleanupCompleted.resolve(); });
-      const routeV1 = vi.fn((routeMethod: string) => {
+      const kill = vi.fn(async () => {
+        cleanupStarted.resolve();
+        await cleanupAllowed.promise;
+        cleanupCompleted.resolve();
+      });
+      const routeV1 = vi.fn(async (routeMethod: string) => {
         if (routeMethod === "terminal.session.create") {
           createStarted.resolve();
           return created.promise;
         }
-        if (routeMethod === "terminal.session.close") cleanupCompleted.resolve();
-        return Promise.resolve(undefined);
+        if (routeMethod === "terminal.session.close") {
+          cleanupStarted.resolve();
+          await cleanupAllowed.promise;
+          cleanupCompleted.resolve();
+        }
+        return undefined;
       });
       const terminalService = {
         create: vi.fn(() => {
@@ -96,7 +107,7 @@ describe("disconnected Terminal creates", () => {
         disconnectClient: vi.fn(() => clientDisconnected.resolve()),
       };
 
-      ({ httpServer: server, wss: websocketServer } = createWsServer({
+      ({ httpServer: server, wss: websocketServer, stopAdmissionAndDrain } = createWsServer({
         authToken: "test-token",
         singleInstance: false,
         shutdown: () => undefined,
@@ -112,8 +123,25 @@ describe("disconnected Terminal creates", () => {
 
       await closeClient(client);
       await clientDisconnected.promise;
+      let drained = false;
+      const drain = stopAdmissionAndDrain().then(() => { drained = true; });
+      const lateClient = await openClient(server!);
+      const rejection = nextResponse(lateClient);
+      lateClient.send(JSON.stringify({ id: "late-create", method, params }));
+      await expect(rejection).resolves.toEqual({
+        id: "late-create",
+        error: { code: "SERVER_SHUTTING_DOWN", message: "Server is shutting down" },
+      });
+      expect(drained).toBe(false);
+      await closeClient(lateClient);
       created.resolve(result);
+      await cleanupStarted.promise;
+      expect(drained).toBe(false);
+      cleanupAllowed.resolve();
       await cleanupCompleted.promise;
+      await drain;
+      expect(drained).toBe(true);
+      await stopAdmissionAndDrain();
 
       if (method === "terminal.create") {
         expect(kill).toHaveBeenCalledExactlyOnceWith("pty-late");
@@ -231,5 +259,14 @@ function closeClient(client: WebSocket): Promise<void> {
   return new Promise((resolve) => {
     client.once("close", () => resolve());
     client.close();
+  });
+}
+
+function nextResponse(client: WebSocket): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    client.once("message", (data) => {
+      try { resolve(JSON.parse(data.toString())); }
+      catch (error) { reject(error); }
+    });
   });
 }

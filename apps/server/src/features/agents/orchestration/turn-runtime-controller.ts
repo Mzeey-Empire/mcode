@@ -573,7 +573,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       return;
     }
     this.eventApplication.beginPreparedTurn(lease.threadId, lease.turnExecutionId, request.turnId);
-    this.turnAdmissions.markDispatchActive(lease.threadId);
+    await this.turnAdmissions.markDispatchActive(lease.threadId);
     // The tracker generation must exist before turnStarted is ingested so its
     // canonical publication embed carries the same fileEffectTurnId the wire path enriched.
     await this.ensureTurnFileTracking(lease.threadId, prepared.cwd);
@@ -621,7 +621,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       codex.setCanonicalTurnDeliveryFailureHandler((routing, error) => this.handleWorkerDeliveryFailure(routing, error));
       codex.setCanonicalTurnEventDeliveryEnabled(true);
     }
-    this.turnAdmissions.markDispatchActive(execution.threadId);
+    await this.turnAdmissions.markDispatchActive(execution.threadId);
   }
 
   private executionFor(prepared: PreparedTurnDispatch): ExecutionIdentity {
@@ -1127,7 +1127,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Start a prepared first-turn command and return its authoritative admission outcome. */
   private async sendInitialMessageAndSnapshot(
     command: SendMessageCommand,
-    onError: (error: unknown) => void,
+    onError: (error: unknown) => Promise<void>,
     canReserve?: () => boolean,
   ): Promise<{ runtimeSnapshot: TurnRuntimeSnapshot; providerAdmitted: boolean; failed: boolean }> {
     let providerAdmitted = false;
@@ -1146,8 +1146,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       started.then(() => "started" as const),
       send.then(
         () => "finished" as const,
-        (error) => {
-          onError(error);
+        async (error) => {
+          await onError(error);
           return "failed" as const;
         },
       ),
@@ -1404,7 +1404,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       });
     this.disarmTurnRetryWindow(prepared.threadId);
     this.clearTurnEndedState(prepared.threadId);
-    this.runtimePersistence.setRuntimeStatus(prepared.threadId, "paused");
+    await this.runtimePersistence.setRuntimeStatus(prepared.threadId, "paused");
     broadcast("thread.status", { threadId: prepared.threadId, status: "paused" });
     this.trackSessionEnded(prepared.threadId, prepared.runtime.turnExecutionId);
     return {
@@ -1687,12 +1687,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.evictRetrySession(threadId, dispatch);
     if (!this.getCurrentRetryDispatch(threadId, identity)) return false;
     this.applyThreadControlLease(dispatch.threadControl);
-    this.clearRetrySessionCursor(threadId);
+    await this.clearRetrySessionCursor(threadId);
     if (!this.getCurrentRetryDispatch(threadId, identity)) return false;
     this.logTransientRetry(threadId, dispatch, triggerErr);
     dispatch.attempt += 1;
     dispatch.turnRequest = { ...dispatch.turnRequest, deliveryAttempt: dispatch.attempt, resumeFrom: undefined };
-    if (!this.eventApplication.resetAssistantTextForRetry(threadId, dispatch.turnRequest.turnExecutionId)) return false;
+    if (!await this.eventApplication.resetAssistantTextForRetry(threadId, dispatch.turnRequest.turnExecutionId)) return false;
     this.endedSuppressionThreads.delete(threadId);
     return true;
   }
@@ -1713,8 +1713,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Clear a stale native cursor before retrying against a fresh provider session. */
-  private clearRetrySessionCursor(threadId: string): void {
-    this.eventApplication.clearSessionCursorForRetry(threadId);
+  private async clearRetrySessionCursor(threadId: string): Promise<void> {
+    await this.eventApplication.clearSessionCursorForRetry(threadId);
   }
 
   /** Record a bounded retry with the original error available for diagnosis. */
@@ -1850,7 +1850,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       });
     }
 
-    this.turnAdmissions.markDispatchErrored(threadId);
+    await this.turnAdmissions.markDispatchErrored(threadId);
   }
 
   /** Subscribe to provider ingress after the service has assembled its event pipeline. */
@@ -1918,22 +1918,22 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   ): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[] }> {
     let runtimeSnapshot: TurnRuntimeSnapshot;
     try {
-      this.threadCreation.startInitialAgent(created.startupId);
-      const initialDispatch = await this.sendInitialMessageAndSnapshot(created.command, (err) => {
+      await this.threadCreation.startInitialAgent(created.startupId);
+      const initialDispatch = await this.sendInitialMessageAndSnapshot(created.command, async (err) => {
         logger.error("createAndSend initial send failed", {
           threadId: created.thread.id,
           error: err instanceof Error ? err.message : String(err),
         });
-        this.threadCreation.failInitialAgent(created.startupId);
+        await this.threadCreation.failInitialAgent(created.startupId);
       }, () => this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId));
       runtimeSnapshot = initialDispatch.runtimeSnapshot;
       if (!initialDispatch.failed && (
         initialDispatch.providerAdmitted || this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId)
       )) {
-        this.threadCreation.completeInitialAgent(created.startupId);
+        await this.threadCreation.completeInitialAgent(created.startupId);
       }
     } catch (error) {
-      this.threadCreation.failInitialAgent(created.startupId);
+      await this.threadCreation.failInitialAgent(created.startupId);
       throw error;
     }
     return {
@@ -1947,7 +1947,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   async dispatchQueuedAutomaticTurn(
     submission: WorkspaceEnvironmentQueuedTurnSubmission,
   ): Promise<WorkspaceEnvironmentAutomaticSetupDispatch> {
-    const startupId = this.threadCreation.startQueuedAgent(submission.threadId);
+    const startupId = await this.threadCreation.startQueuedAgent(submission.threadId);
     if (startupId === null) return { completion: Promise.resolve() };
     let resolveStarted!: () => void;
     const started = new Promise<void>((resolve) => {
@@ -1962,7 +1962,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       ...this.turnAdmissions.queuedCommand(submission),
       onTurnStarted: (runtime) => {
         this.automaticQueuedTurnCompletionResolvers.set(runtime.turnExecutionId!, resolveCompletion);
-        this.threadCreation.completeInitialAgent(startupId);
         resolveStarted();
       },
     }, () => {
@@ -1978,8 +1977,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
           throw new Error(`Queued Turn finished without runtime dispatch: ${submission.threadId}`);
         }),
       ]);
+      if (!cancellationWon) await this.threadCreation.completeInitialAgent(startupId);
     } catch (error) {
-      this.threadCreation.failInitialAgent(startupId);
+      await this.threadCreation.failInitialAgent(startupId);
       throw error;
     }
     if (cancellationWon) return { completion: Promise.resolve() };

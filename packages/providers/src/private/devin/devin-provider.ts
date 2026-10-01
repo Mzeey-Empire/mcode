@@ -342,8 +342,17 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   // Turn dispatch
   // ---------------------------------------------------------------------
 
+  private readonly turnTasks = new Set<Promise<void>>();
+
   /** Queues an ACP `session/prompt` on the thread's Devin session. */
-  async sendTurn(req: TurnRequest<"devin">): Promise<void> {
+  sendTurn(req: TurnRequest<"devin">): Promise<void> {
+    const task = this.dispatchTurnRequest(req);
+    this.turnTasks.add(task);
+    void task.then(() => { this.turnTasks.delete(task); }, () => { this.turnTasks.delete(task); });
+    return task;
+  }
+
+  private async dispatchTurnRequest(req: TurnRequest<"devin">): Promise<void> {
     const routing: DevinCanonicalEventRouting = {
       threadId: req.threadId,
       turnId: req.turnId,
@@ -830,7 +839,11 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   /** Tears down every Devin session. */
   async shutdown(): Promise<void> {
-    await this.sessions.shutdown();
+    const results = await Promise.allSettled([this.sessions.shutdown()]);
+    results.push(...await Promise.allSettled(this.turnTasks));
+    results.push(...await Promise.allSettled([this.canonicalEvents.stopAdmissionAndDrain()]));
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Devin provider shutdown failed");
   }
 
   /**

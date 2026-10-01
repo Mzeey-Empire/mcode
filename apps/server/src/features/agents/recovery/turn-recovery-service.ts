@@ -1,10 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
 import { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
-import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
-import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
-import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import type { SendMessageCommand } from "../orchestration/agent-service.js";
@@ -24,23 +21,22 @@ export class TurnRecoveryService {
     @inject(AttachmentService) private readonly attachmentService: AttachmentService,
     @inject(ParentAssistantTextCheckpointService)
     private readonly parentAssistantTextCheckpoints: ParentAssistantTextCheckpointService,
-    @inject(MessageRepo) private readonly messageRepo: MessageRepo,
-    @inject(NarrativeStore) private readonly narrativeStore: NarrativeStore,
   ) {}
 
   /** Interrupt executions for which no current provider can prove the exact live execution. */
-  reconcileOnStartup(): { interrupted: string[] } {
-    this.parentAssistantTextCheckpoints.importRecoveryJournals();
-    this.reopenMaterializableTerminalCheckpoints();
-    this.parentAssistantTextCheckpoints.retireTerminalCheckpoints();
-    this.canonicalSink.interruptSavedFamilyChildren(UNPROVED_EXECUTION_REASON);
+  async reconcileOnStartup(): Promise<{ interrupted: string[] }> {
+    await this.parentAssistantTextCheckpoints.importRecoveryJournals();
+    await this.reopenMaterializableTerminalCheckpoints();
+    await this.parentAssistantTextCheckpoints.retireTerminalCheckpoints();
+    await this.canonicalSink.interruptSavedFamilyChildren(UNPROVED_EXECUTION_REASON);
     const checkpoints = this.canonicalSink.listUnfinishedCheckpoints();
     if (checkpoints.length === 0) {
       this.currentIncident = null;
       return { interrupted: [] };
     }
     const incident = { id: NodeCrypto.randomUUID(), createdAt: new Date().toISOString() };
-    const interrupted = checkpoints.map((checkpoint) => this.interruptUnfinishedCheckpoint(checkpoint, incident.id));
+    const interrupted: string[] = [];
+    for (const checkpoint of checkpoints) interrupted.push(await this.interruptUnfinishedCheckpoint(checkpoint, incident));
     const entries = this.canonicalSink.listRecoveryIncidentEntries(incident.id).map((entry) => ({
       ...entry,
       durationMs: this.durationMs(entry.startedAt, entry.interruptedAt),
@@ -49,97 +45,33 @@ export class TurnRecoveryService {
     return { interrupted };
   }
 
-  private reopenMaterializableTerminalCheckpoints(): void {
+  private async reopenMaterializableTerminalCheckpoints(): Promise<void> {
     for (const checkpoint of this.canonicalSink.listUnmaterializedTerminalCheckpoints()) {
       const hasChunks = this.parentAssistantTextCheckpoints.restoreChunks(checkpoint.executionId).length > 0;
       const hasNarrative = this.canonicalSink.loadParentNarrativeRecovery(checkpoint.turnId).length > 0;
-      if (hasChunks || hasNarrative) this.reopenTerminalCheckpoint(checkpoint.executionId);
+      if (hasChunks || hasNarrative) await this.reopenTerminalCheckpoint(checkpoint.executionId);
     }
   }
 
-  private reopenTerminalCheckpoint(executionId: string): void {
-    if (!this.canonicalSink.reopenUnmaterializedTerminalCheckpoint(executionId)) {
+  private async reopenTerminalCheckpoint(executionId: string): Promise<void> {
+    if (!await this.canonicalSink.reopenUnmaterializedTerminalCheckpoint(executionId)) {
       throw new Error(`Unmaterialized terminal checkpoint was not recoverable: ${executionId}`);
     }
   }
 
-  private interruptUnfinishedCheckpoint(
+  private async interruptUnfinishedCheckpoint(
     checkpoint: ReturnType<CanonicalAgentBoundary["listUnfinishedCheckpoints"]>[number],
-    recoveryIncidentId: string,
-  ): string {
-    const checkpointChunks = this.parentAssistantTextCheckpoints.restoreChunks(checkpoint.executionId);
-    const canonicalAssistant = this.canonicalSink.loadTerminalProjection(checkpoint.turnId).message;
-    const recoveredNarrative = this.canonicalSink.loadParentNarrativeRecovery(checkpoint.turnId);
-    const recoveredText = canonicalAssistant ? "" : checkpointChunks.map((chunk) => chunk.text).join("");
-    const stagedAssistant = this.stageRecoveredAssistant(
-      checkpoint.threadId,
-      checkpoint.executionId,
-      canonicalAssistant !== null,
-      recoveredText,
-      recoveredNarrative.length,
-    );
-    this.canonicalSink.markUnresolvedCodexChildDeliveriesUnknown(checkpoint.executionId);
-    this.canonicalSink.interruptUnfinishedExecution(
-      checkpoint.executionId,
-      UNPROVED_EXECUTION_REASON,
-      stagedAssistant,
-      this.persistInterruptedNarrative(recoveredNarrative.length),
-      recoveredNarrative,
-      recoveryIncidentId,
-    );
-    this.retireRecoveredChunks(checkpoint.executionId, checkpointChunks.length);
-    this.threadRepo.updateStatus(checkpoint.threadId, "interrupted");
-    return checkpoint.executionId;
-  }
-
-  private stageRecoveredAssistant(
-    threadId: string,
-    executionId: string,
-    hasCanonicalAssistant: boolean,
-    recoveredText: string,
-    narrativeCount: number,
-  ) {
-    if (hasCanonicalAssistant || (recoveredText.length === 0 && narrativeCount === 0)) return undefined;
-    return this.stageRecoveredAssistantProjection(threadId, executionId, recoveredText);
-  }
-
-  private persistInterruptedNarrative(recoveredNarrativeCount: number) {
-    return (assistant: { id: string }, interruptedNarrative: Parameters<NarrativeStore["persistRecoveredNarrative"]>[1]) => {
-      if (recoveredNarrativeCount > 0) {
-        this.narrativeStore.persistRecoveredNarrative(assistant.id, interruptedNarrative);
-      }
-    };
-  }
-
-  private retireRecoveredChunks(executionId: string, chunkCount: number): void {
-    if (chunkCount === 0) return;
-    if (!this.parentAssistantTextCheckpoints.retire(executionId)) {
-      throw new Error(`Recovered assistant text checkpoint was not retired: ${executionId}`);
-    }
-  }
-
-  /** Stage recovered visible content before the canonical interruption makes it visible. */
-  private stageRecoveredAssistantProjection(threadId: string, executionId: string, content: string) {
-    const sequence = this.messageRepo.getLatestSequenceIncludingInternal(threadId) + 1;
-    const messageId = deriveTurnAssistantMessageId(
-      threadId,
-      `recovery:${executionId}`,
-    );
-    this.messageRepo.createAssistantIdempotent({
-      id: messageId,
-      threadId,
-      content,
-      sequence,
-      model: this.threadRepo.findById(threadId)?.model ?? null,
-      isInternal: true,
+    incident: { id: string; createdAt: string },
+  ): Promise<string> {
+    const chunkCount = this.parentAssistantTextCheckpoints.restoreChunks(checkpoint.executionId).length;
+    await this.canonicalSink.interruptUnfinishedExecution({
+      threadId: checkpoint.threadId, turnId: checkpoint.turnId, executionId: checkpoint.executionId,
+      reason: UNPROVED_EXECUTION_REASON, recoveryIncidentId: incident.id, endedAt: incident.createdAt,
     });
-    const staged = this.messageRepo
-      .listIncludingInternal(threadId)
-      .find((message) => message.id === messageId);
-    if (!staged) throw new Error(`Recovered assistant message was not staged: ${messageId}`);
-    // A row staged by an earlier attempt is authoritative: its content was recovered
-    // while the provisional chunks were still available, so a re-run can see less.
-    return staged;
+    if (chunkCount > 0 && !await this.parentAssistantTextCheckpoints.retire(checkpoint.executionId)) {
+      throw new Error(`Recovered assistant text checkpoint was not retired: ${checkpoint.executionId}`);
+    }
+    return checkpoint.executionId;
   }
 
   /** Read unresolved entries from the incident created by this server startup. */

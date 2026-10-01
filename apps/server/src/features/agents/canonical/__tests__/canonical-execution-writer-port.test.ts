@@ -7,7 +7,8 @@ import { AgentEventType, type AgentEvent, type ProviderRuntimeExtension } from "
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
 import { ExecutionMailboxScheduler } from "../../execution/execution-mailbox-scheduler.js";
 import type { ExecutionLease } from "../../execution/execution-mailbox-protocol.js";
@@ -88,8 +89,11 @@ describe("execution semantic writer transport", () => {
   let directory: string;
   let db: Database;
   let writer: CanonicalAgentWriterClient | undefined;
+  let owner: ApplicationDatabaseWriter | undefined;
 
   beforeEach(() => {
+    writer = undefined;
+    owner = undefined;
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-execution-writer-"));
     db = openDatabase({ dbPath: NodePath.join(directory, "app.sqlite") });
     db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
@@ -99,13 +103,19 @@ describe("execution semantic writer transport", () => {
   });
 
   afterEach(async () => {
-    await writer?.close();
+    await owner?.close();
     db.close(true);
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
 
+  function createWriter(createWorker?: () => Worker): CanonicalAgentWriterClient {
+    if (owner) throw new Error("Writer fixture already owns the database");
+    owner = new ApplicationDatabaseWriter(NodePath.join(directory, "app.sqlite"), createWorker);
+    return new CanonicalAgentWriterClient(owner);
+  }
+
   it("releases live receipts in order after their writer and terminal barriers", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const published: AgentEvent[] = [];
     registry.bind((event) => published.push(event));
@@ -166,7 +176,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("carries a live publication from the execution worker to the bound host publisher", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const published: AgentEvent[] = [];
     registry.bind((event) => published.push(event));
@@ -207,7 +217,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("releases a compound live event after its single writer receipt", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const published: AgentEvent[] = [];
     registry.bind((event) => published.push(event));
@@ -227,7 +237,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("replays a committed live receipt when the public publisher becomes available", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const release = new ExecutionLivePublicationRelease(registry);
     const port = new CanonicalExecutionWriterPort(writer, () => {}, release);
@@ -248,7 +258,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("replays the same public identity when publication succeeds before the host loses its reply", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const published: AgentEvent[] = [];
     let loseReply = true;
@@ -323,7 +333,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("commits and replays a semantic start through the dedicated SQLite worker", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -344,7 +354,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("delivers a large committed event batch in bounded publication pages", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const pageSizes: number[] = [];
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
@@ -376,7 +386,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("does not acknowledge a failed database write and accepts a clean retry", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const port = new CanonicalExecutionWriterPort(writer, () => {});
     db.run(`CREATE TRIGGER reject_semantic_start BEFORE INSERT ON canonical_agent_events
       BEGIN SELECT RAISE(FAIL, 'injected write failure'); END`);
@@ -392,7 +402,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("commits and replays worker-loss interruption through the SQLite writer worker", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -441,7 +451,7 @@ describe("execution semantic writer transport", () => {
         },
       });
     };
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"), createWorker);
+    writer = createWriter(createWorker);
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -456,7 +466,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("stages and finalizes assistant rows in one writer operation", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -491,7 +501,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("rolls back failed compound terminal preparation and retries at the same ordinal", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const port = new CanonicalExecutionWriterPort(writer, () => {});
     expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
     const stage: ExecutionSemanticOperation = {
@@ -518,7 +528,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("fences a stopped execution to a cancelled durable outcome", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const port = new CanonicalExecutionWriterPort(writer, () => {});
     const op = (ordinal: number, mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation => ({
       operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation,
@@ -546,7 +556,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("runs a complete assistant turn through an execution worker and the sole writer worker", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -615,7 +625,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("stages a partial assistant after Stop before the cancelled terminal commit", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const port = new CanonicalExecutionWriterPort(writer, () => {});
     const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
       workerCount: 1,
@@ -653,7 +663,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("projects Codex parent and child events on the writer and replays without repeating child writes", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));

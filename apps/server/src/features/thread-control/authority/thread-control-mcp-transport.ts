@@ -227,11 +227,11 @@ function createToolHandlers(
     },
     thread_search: async (arguments_) => {
       const input = ThreadSearchInputSchema().parse(arguments_);
-      return ThreadSearchResultSchema().parse(service.threadSearch(authority, input));
+      return ThreadSearchResultSchema().parse(await service.threadSearch(authority, input));
     },
     thread_get: async (arguments_) => {
       const input = ThreadGetInputSchema().parse(arguments_);
-      return ThreadGetResultSchema().parse(service.threadGet(authority, input));
+      return ThreadGetResultSchema().parse(await service.threadGet(authority, input));
     },
     thread_send: async (arguments_) => {
       const input = ThreadSendInputSchema().parse(arguments_);

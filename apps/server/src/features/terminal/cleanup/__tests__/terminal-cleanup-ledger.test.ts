@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { PtyHostCleanupLedger } from "../terminal-cleanup-ledger.js";
+import { TerminalCleanupLedgerStore } from "../terminal-cleanup-ledger-store.js";
 
 const SESSION_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SESSION_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -43,7 +43,7 @@ async function openLedgerTestDatabase(): Promise<Database> {
   return openMemoryDatabase();
 }
 
-describe("PtyHostCleanupLedger", () => {
+describe("TerminalCleanupLedgerStore", () => {
   let db: Database | null = null;
 
   afterEach(() => {
@@ -53,7 +53,7 @@ describe("PtyHostCleanupLedger", () => {
 
   it("persists bounded process identity until the matching generation removes it", async () => {
     db = await openLedgerTestDatabase();
-    const ledger = new PtyHostCleanupLedger(db, 2);
+    const ledger = new TerminalCleanupLedgerStore(db, 2);
     ledger.record({
       sessionId: SESSION_A,
       hostGeneration: "1",
@@ -62,7 +62,7 @@ describe("PtyHostCleanupLedger", () => {
       containment: "job-object",
     });
 
-    const reopened = new PtyHostCleanupLedger(db, 2);
+    const reopened = new TerminalCleanupLedgerStore(db, 2);
     expect(reopened.forGeneration("1")).toEqual([
       expect.objectContaining({
         sessionId: SESSION_A,
@@ -79,7 +79,7 @@ describe("PtyHostCleanupLedger", () => {
 
   it("rejects stale session generations and records above the configured bound", async () => {
     db = await openLedgerTestDatabase();
-    const ledger = new PtyHostCleanupLedger(db, 2);
+    const ledger = new TerminalCleanupLedgerStore(db, 2);
     ledger.record({
       sessionId: SESSION_A,
       hostGeneration: "1",

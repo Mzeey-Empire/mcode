@@ -4,7 +4,8 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
+let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { CleanupJobRepo, MAX_CLEANUP_ATTEMPTS } from "../persistence/cleanup-job-repo.js";
@@ -57,10 +58,10 @@ describe("completed thread cleanup Git safety", () => {
     NodeChildProcess.execFileSync("git", ["-C", repositoryPath, "add", "tracked.txt"]);
     NodeChildProcess.execFileSync("git", ["-C", repositoryPath, "commit", "-m", "initial"]);
     NodeChildProcess.execFileSync("git", ["-C", repositoryPath, "worktree", "add", "--detach", worktreePath, "main"]);
-    database = openMemoryDatabase();
-    workspaceRepo = new WorkspaceRepo(database);
-    threadRepo = new ThreadRepo(database);
-    cleanupJobRepo = new CleanupJobRepo(database);
+    database = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
+    workspaceRepo = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    threadRepo = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    cleanupJobRepo = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     externalTargetPath = null;
     escapingLinkContainerPath = null;
     const executor = new RealGitExecutor();
@@ -72,15 +73,13 @@ describe("completed thread cleanup Git safety", () => {
 
   afterEach(() => {
     worker.dispose();
-    database.close();
-    NodeFS.rmSync(testRootPath, { recursive: true, force: true });
+        NodeFS.rmSync(testRootPath, { recursive: true, force: true });
     if (escapingLinkContainerPath) NodeFS.rmSync(escapingLinkContainerPath, { recursive: true, force: true });
     if (externalTargetPath) NodeFS.rmSync(externalTargetPath, { recursive: true, force: true });
   }, 30_000);
 
   function createWorker(): CleanupWorker {
     return new CleanupWorker(
-      database,
       cleanupJobRepo,
       threadRepo,
       { waitForSessionExit: vi.fn().mockResolvedValue(undefined) } as unknown as ClaudeProvider,
@@ -99,7 +98,7 @@ describe("completed thread cleanup Git safety", () => {
     );
   }
 
-  function addCompletedThread(options: {
+  async function addCompletedThread(options: {
     title: string;
     mode?: "direct" | "worktree";
     path?: string | null;
@@ -108,8 +107,8 @@ describe("completed thread cleanup Git safety", () => {
     deadline?: string;
     branch?: string;
   }) {
-    const workspace = workspaceRepo.listAll()[0] ?? workspaceRepo.create("Project", repositoryPath);
-    const thread = threadRepo.create(
+    const workspace = workspaceRepo.listAll()[0] ?? (await workspaceRepo.create("Project", repositoryPath));
+    const thread = (await threadRepo.create(
       workspace.id,
       options.title,
       options.mode ?? "worktree",
@@ -119,7 +118,7 @@ describe("completed thread cleanup Git safety", () => {
       undefined,
       options.checkoutState ?? "branchless",
       options.baseBranch === undefined ? "main" : options.baseBranch,
-    );
+    ));
     database.prepare(
       `UPDATE threads
        SET worktree_path = ?, user_completed_at = ?, scheduled_deletion_at = ?
@@ -161,7 +160,7 @@ describe("completed thread cleanup Git safety", () => {
   }, 30_000);
 
   it("deletes an expired direct thread without repository cleanup", async () => {
-    const thread = addCompletedThread({ title: "Direct", mode: "direct", path: null });
+    const thread = (await addCompletedThread({ title: "Direct", mode: "direct", path: null }));
 
     await worker.poll();
 
@@ -170,7 +169,7 @@ describe("completed thread cleanup Git safety", () => {
   }, 30_000);
 
   it("removes a clean managed branchless worktree without deleting a branch", async () => {
-    const thread = addCompletedThread({ title: "Clean" });
+    const thread = (await addCompletedThread({ title: "Clean" }));
 
     await worker.poll();
 
@@ -181,9 +180,9 @@ describe("completed thread cleanup Git safety", () => {
   }, 30_000);
 
   it("removes a clean worktree when a sibling record points to a missing directory", async () => {
-    const thread = addCompletedThread({ title: "Missing sibling" });
+    const thread = (await addCompletedThread({ title: "Missing sibling" }));
     const workspace = workspaceRepo.listAll()[0]!;
-    const sibling = threadRepo.create(
+    const sibling = (await threadRepo.create(
       workspace.id,
       "Stale sibling",
       "worktree",
@@ -193,7 +192,7 @@ describe("completed thread cleanup Git safety", () => {
       undefined,
       "branchless",
       "main",
-    );
+    ));
     database.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?").run(
       NodePath.join(repositoryPath, "missing-worktree"),
       sibling.id,
@@ -207,7 +206,7 @@ describe("completed thread cleanup Git safety", () => {
   }, 30_000);
 
   it("removes a managed directory after Git no longer registers the worktree", async () => {
-    const thread = addCompletedThread({ title: "Git-pruned directory" });
+    const thread = (await addCompletedThread({ title: "Git-pruned directory" }));
     NodeFS.rmSync(NodePath.join(worktreePath, ".git"), { force: true });
     NodeChildProcess.execFileSync("git", ["-C", repositoryPath, "worktree", "prune"]);
 
@@ -225,7 +224,7 @@ describe("completed thread cleanup Git safety", () => {
 
   it("removes a dirty sandbox worktree", async () => {
     NodeFS.writeFileSync(NodePath.join(worktreePath, "tracked.txt"), "changed\n");
-    const thread = addCompletedThread({ title: "Dirty" });
+    const thread = (await addCompletedThread({ title: "Dirty" }));
 
     await worker.poll();
 
@@ -234,11 +233,11 @@ describe("completed thread cleanup Git safety", () => {
   }, 30_000);
 
   it("removes linked completed threads from the same sandbox worktree", async () => {
-    const due = addCompletedThread({ title: "Due" });
-    const remaining = addCompletedThread({
+    const due = (await addCompletedThread({ title: "Due" }));
+    const remaining = (await addCompletedThread({
       title: "Remaining",
       deadline: "2099-08-12T09:01:00.000Z",
-    });
+    }));
 
     await worker.poll();
 
@@ -250,12 +249,12 @@ describe("completed thread cleanup Git safety", () => {
   it("removes a named sandbox checkout and its branch", async () => {
     NodeChildProcess.execFileSync("git", ["-C", repositoryPath, "branch", "mcode/named", "main"]);
     NodeChildProcess.execFileSync("git", ["-C", worktreePath, "checkout", "mcode/named"]);
-    const thread = addCompletedThread({
+    const thread = (await addCompletedThread({
       title: "Named",
       checkoutState: "named",
       baseBranch: null,
       branch: "mcode/named",
-    });
+    }));
 
     await worker.poll();
 
@@ -275,7 +274,7 @@ describe("completed thread cleanup Git safety", () => {
       skip();
       return;
     }
-    const thread = addCompletedThread({ title: "Escaping link", path: escapingLink });
+    const thread = (await addCompletedThread({ title: "Escaping link", path: escapingLink }));
 
     await worker.poll();
 
@@ -310,7 +309,7 @@ describe("completed thread cleanup Git safety", () => {
     NodeFS.writeFileSync(NodePath.join(worktreePath, "unique.txt"), "unique\n");
     NodeChildProcess.execFileSync("git", ["-C", worktreePath, "add", "unique.txt"]);
     NodeChildProcess.execFileSync("git", ["-C", worktreePath, "commit", "-m", "unique"]);
-    const thread = addCompletedThread({ title: "Unique" });
+    const thread = (await addCompletedThread({ title: "Unique" }));
 
     await worker.poll();
 
@@ -319,7 +318,7 @@ describe("completed thread cleanup Git safety", () => {
   }, 30_000);
 
   it("deletes a thread when its registered worktree path is already missing", async () => {
-    const thread = addCompletedThread({ title: "Missing" });
+    const thread = (await addCompletedThread({ title: "Missing" }));
     NodeFS.rmSync(worktreePath, { recursive: true, force: true });
 
     await worker.poll();
@@ -330,12 +329,12 @@ describe("completed thread cleanup Git safety", () => {
   it("prunes a missing named sandbox checkout and removes its saved branch", async () => {
     NodeChildProcess.execFileSync("git", ["-C", repositoryPath, "branch", "mcode/missing", "main"]);
     NodeChildProcess.execFileSync("git", ["-C", worktreePath, "checkout", "mcode/missing"]);
-    const thread = addCompletedThread({
+    const thread = (await addCompletedThread({
       title: "Missing named",
       checkoutState: "named",
       baseBranch: null,
       branch: "mcode/missing",
-    });
+    }));
     NodeFS.rmSync(worktreePath, { recursive: true, force: true });
 
     await worker.poll();
@@ -347,12 +346,12 @@ describe("completed thread cleanup Git safety", () => {
 
   it("keeps a branchless checkout's saved non-default base branch", async () => {
     NodeChildProcess.execFileSync("git", ["-C", repositoryPath, "branch", "release", "main"]);
-    const thread = addCompletedThread({
+    const thread = (await addCompletedThread({
       title: "Missing branchless",
       checkoutState: "branchless",
       baseBranch: "release",
       branch: "release",
-    });
+    }));
     NodeFS.rmSync(worktreePath, { recursive: true, force: true });
 
     await worker.poll();
@@ -363,7 +362,7 @@ describe("completed thread cleanup Git safety", () => {
   }, 30_000);
 
   it("preserves retry state across worker restart and blocks after exhaustion", async () => {
-    const thread = addCompletedThread({ title: "Retry" });
+    const thread = (await addCompletedThread({ title: "Retry" }));
     vi.spyOn(gitWorktrees, "removeWorktree").mockRejectedValue(new Error("transient lock"));
 
     await worker.poll();
@@ -385,7 +384,7 @@ describe("completed thread cleanup Git safety", () => {
     });
     expect(NodeFS.existsSync(worktreePath)).toBe(true);
 
-    expect(threadRepo.reopen(thread.id)).toMatchObject({
+    expect((await threadRepo.reopen(thread.id))).toMatchObject({
       cleanup_state: null,
       user_completed_at: null,
     });

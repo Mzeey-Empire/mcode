@@ -25,10 +25,10 @@ export interface AgentRuntimeSeedDeps {
  * as they do today. The workspace service keeps the operation idempotent by
  * returning an existing workspace for the same path.
  */
-export function seedAgentRuntimeWorkspace(
+export async function seedAgentRuntimeWorkspace(
   env: AgentRuntimeSeedEnv,
   deps: AgentRuntimeSeedDeps,
-): void {
+): Promise<void> {
   if (env.MCODE_AGENT_RUNTIME !== "1") return;
 
   const fixtureRepo = env.MCODE_AGENT_FIXTURE_REPO?.trim();
@@ -41,8 +41,8 @@ export function seedAgentRuntimeWorkspace(
 
   const existing = deps.workspaceRepo.findByPath(fixtureRepo);
   if (existing) {
-    deps.workspaceRepo.touch(existing.id);
-    deps.workspaceRepo.prependToSortOrder(existing.id);
+    await deps.workspaceRepo.touch(existing.id);
+    await deps.workspaceRepo.prependToSortOrder(existing.id);
     logger.info("Agent runtime fixture workspace already seeded", {
       workspaceId: existing.id,
       path: fixtureRepo,
@@ -50,7 +50,7 @@ export function seedAgentRuntimeWorkspace(
     return;
   }
 
-  const workspace = deps.workspaceRepo.create(
+  const workspace = await deps.workspaceRepo.create(
     NodePath.basename(fixtureRepo) || "fixture-repo",
     fixtureRepo,
     true,

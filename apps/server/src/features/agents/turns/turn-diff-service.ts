@@ -69,11 +69,11 @@ export class TurnDiffService {
   /** Freeze native evidence at the terminal fence before asynchronous file settlement. */
   prepareFinalization(threadId: string, executionId: string | undefined, outcome: TurnOutcome): SettleTurnDiff {
     const current = this.takeFinalizationEvidence(threadId, executionId);
-    if (!current) return () => {};
-    return (messageId, effects, reconstructionPatch) => {
+    if (!current) return async () => {};
+    return async (messageId, effects, reconstructionPatch) => {
       const selected = selectTurnDiffSettlement(current, outcome, effects, reconstructionPatch);
       if (!selected) return;
-      this.repo.create({ id: NodeCrypto.randomUUID(), message_id: messageId, ...selected });
+      await this.repo.create({ id: NodeCrypto.randomUUID(), message_id: messageId, ...selected });
       this.changed(threadId);
     };
   }
@@ -124,7 +124,7 @@ export class TurnDiffService {
 }
 
 /** Persists a frozen terminal candidate after the assistant message and file effects exist. */
-export type SettleTurnDiff = (messageId: string, effects: TurnFileEffectSummary | undefined, reconstructionPatch?: string) => void;
+export type SettleTurnDiff = (messageId: string, effects: TurnFileEffectSummary | undefined, reconstructionPatch?: string) => Promise<void>;
 
 function liveId(current: ActiveDiff): string {
   return `live:${current.turnId}:${current.turnExecutionId}:${current.deliveryAttempt}:${current.revision}`;

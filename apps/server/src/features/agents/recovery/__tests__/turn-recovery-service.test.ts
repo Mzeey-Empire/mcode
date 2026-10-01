@@ -3,15 +3,18 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { agentStorageTestWriter, closeAgentStorageTestDatabases, openAgentStorageTestDatabase } from "../../__tests__/agent-storage-fixture.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { MessageStore } from "../../conversation/persistence/message-store.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import {
-  CanonicalAgentBoundary,
+  CanonicalAgentStore,
   type CanonicalAgentEventPublisher,
-} from "../../canonical/canonical-agent-boundary.js";
+} from "../../canonical/canonical-agent-store.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
+import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
@@ -29,15 +32,17 @@ const EXECUTION_ID = "00000000-0000-4000-8000-000000000015";
 
 describe("TurnRecoveryService", () => {
   let db: Database;
-  let sink: CanonicalAgentBoundary;
+  let sink: CanonicalAgentStore;
+  let runtimeSink: CanonicalAgentBoundary;
   let threadRepo: ThreadRepo;
-  let messageRepo: MessageRepo;
+  let messageRepo: MessageStore;
   let defaultCheckpoints: ParentAssistantTextCheckpointService;
   let narrativeStore: NarrativeStore;
   let published: ReturnType<typeof vi.fn<CanonicalAgentEventPublisher>>;
 
   beforeEach(() => {
-    db = openMemoryDatabase();
+    db = openAgentStorageTestDatabase();
+    const writer = agentStorageTestWriter(db);
     db.prepare(
       "INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     ).run("workspace-recovery", "Workspace", "C:/workspace", NOW, NOW);
@@ -45,15 +50,16 @@ describe("TurnRecoveryService", () => {
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "workspace-recovery", "Recovery", "main", "codex", "active", NOW, NOW);
     published = vi.fn();
-    sink = new CanonicalAgentBoundary(db, published);
-    threadRepo = new ThreadRepo(db);
-    messageRepo = new MessageRepo(db);
-    defaultCheckpoints = new ParentAssistantTextCheckpointService(db);
+    sink = new CanonicalAgentStore(db, published);
+    runtimeSink = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), published);
+    threadRepo = new ThreadRepo(db, writer);
+    messageRepo = new MessageStore(db);
+    defaultCheckpoints = new ParentAssistantTextCheckpointService(db, writer);
     narrativeStore = new NarrativeStore(
-      messageRepo,
-      new ToolCallRecordRepo(db),
-      new ThoughtSegmentRepo(db),
-      new HookExecutionRepo(db),
+      new MessageRepo(db, writer),
+      new ToolCallRecordRepo(db, writer),
+      new ThoughtSegmentRepo(db, writer),
+      new HookExecutionRepo(db, writer),
     );
     sink.startParentTurn({
       thread: {
@@ -74,6 +80,8 @@ describe("TurnRecoveryService", () => {
       projectUserMessage: () => messageRepo.create(THREAD_ID, "user", "repeat only when asked", 1),
     });
   });
+
+  afterEach(async () => { await closeAgentStorageTestDatabases(); });
 
   function startUnfinishedTurn(input: {
     workspaceId: string;
@@ -104,17 +112,15 @@ describe("TurnRecoveryService", () => {
     });
   }
 
-  it("interrupts every execution that lacks exact provider proof at startup", () => {
+  it("interrupts every execution that lacks exact provider proof at startup", async () => {
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
 
-    const result = service.reconcileOnStartup();
+    const result = await service.reconcileOnStartup();
 
     expect(result).toEqual({ interrupted: [EXECUTION_ID] });
     expect(sink.loadTurn(TURN_ID)?.status).toBe("Interrupted");
@@ -125,7 +131,7 @@ describe("TurnRecoveryService", () => {
     expect(threadRepo.findById(THREAD_ID)?.status).toBe("interrupted");
   });
 
-  it("marks an existing assistant projection interrupted with its original execution identity", () => {
+  it("marks an existing assistant projection interrupted with its original execution identity", async () => {
     const assistant = messageRepo.createAssistantIdempotent({
       id: "assistant-recovery",
       threadId: THREAD_ID,
@@ -166,7 +172,7 @@ describe("TurnRecoveryService", () => {
         },
       }],
     });
-    defaultCheckpoints.appendChunk([{
+    await defaultCheckpoints.appendChunk([{
       executionId: EXECUTION_ID,
       threadId: THREAD_ID,
       turnId: TURN_ID,
@@ -175,14 +181,12 @@ describe("TurnRecoveryService", () => {
     }]);
 
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
-    service.reconcileOnStartup();
+    await service.reconcileOnStartup();
 
     expect(messageRepo.findById(assistant.id)).toMatchObject({
       outcome: "interrupted",
@@ -199,16 +203,16 @@ describe("TurnRecoveryService", () => {
     expect(defaultCheckpoints.restore(EXECUTION_ID)).toBe("");
   });
 
-  it("restores exact checkpoint text in order, interrupts it, and retires the checkpoint", () => {
-    const checkpoints = new ParentAssistantTextCheckpointService(db);
-    checkpoints.appendChunk([{
+  it("restores exact checkpoint text in order, interrupts it, and retires the checkpoint", async () => {
+    const checkpoints = new ParentAssistantTextCheckpointService(db, agentStorageTestWriter(db));
+    await checkpoints.appendChunk([{
       executionId: EXECUTION_ID,
       threadId: THREAD_ID,
       turnId: TURN_ID,
       sequence: 1,
       text: "First durable ",
     }]);
-    checkpoints.appendChunk([
+    await checkpoints.appendChunk([
       {
         executionId: EXECUTION_ID,
         threadId: THREAD_ID,
@@ -225,15 +229,13 @@ describe("TurnRecoveryService", () => {
       },
     ]);
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       checkpoints,
-      messageRepo,
-      narrativeStore,
     );
 
-    expect(service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
     expect(messageRepo.listByThread(THREAD_ID, 10).messages).toEqual([
       expect.objectContaining({ role: "user", content: "repeat only when asked" }),
       expect.objectContaining({
@@ -251,13 +253,13 @@ describe("TurnRecoveryService", () => {
     });
     expect(checkpoints.restore(EXECUTION_ID)).toBe("");
 
-    expect(service.reconcileOnStartup()).toEqual({ interrupted: [] });
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [] });
     expect(messageRepo.listByThread(THREAD_ID, 10).messages).toHaveLength(2);
   });
 
-  it("imports a fsynced recovery journal before it restores the interrupted assistant text", () => {
+  it("imports a fsynced recovery journal before it restores the interrupted assistant text", async () => {
     const journalDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-recovery-journal-"));
-    const checkpoints = new ParentAssistantTextCheckpointService(db, undefined, { directory: journalDirectory });
+    const checkpoints = new ParentAssistantTextCheckpointService(db, agentStorageTestWriter(db), { directory: journalDirectory });
     checkpoints.recoveryJournal.append([{
       executionId: EXECUTION_ID,
       threadId: THREAD_ID,
@@ -266,16 +268,14 @@ describe("TurnRecoveryService", () => {
       text: "Journal text survives the SQLite outage.",
     }]);
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       checkpoints,
-      messageRepo,
-      narrativeStore,
     );
 
     try {
-      expect(service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+      expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
       expect(sink.loadTerminalProjection(TURN_ID).message).toMatchObject({
         content: "Journal text survives the SQLite outage.",
         outcome: "interrupted",
@@ -286,7 +286,7 @@ describe("TurnRecoveryService", () => {
     }
   });
 
-  it("restores ordered narration, interrupted tools, completed hooks, and explicit parallel parents", () => {
+  it("restores ordered narration, interrupted tools, completed hooks, and explicit parallel parents", async () => {
     narrativeStore.beginTurn(THREAD_ID);
     narrativeStore.resetTurnCounters(THREAD_ID);
     narrativeStore.openOrExtendThought(THREAD_ID, "I will inspect both children.");
@@ -348,15 +348,13 @@ describe("TurnRecoveryService", () => {
       items: narrativeStore.recoverySnapshot(THREAD_ID),
     });
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
 
-    expect(service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
     const assistant = messageRepo.listByThread(THREAD_ID, 10).messages.at(-1)!;
     expect(assistant).toMatchObject({ role: "assistant", content: "", outcome: "interrupted" });
     const recovered = narrativeStore.loadForMessages([assistant]);
@@ -396,7 +394,7 @@ describe("TurnRecoveryService", () => {
     expect(sink.loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
   });
 
-  it("repairs a terminal checkpoint whose assistant projection was not materialized before process loss", () => {
+  it("repairs a terminal checkpoint whose assistant projection was not materialized before process loss", async () => {
     narrativeStore.beginTurn(THREAD_ID);
     narrativeStore.resetTurnCounters(THREAD_ID);
     narrativeStore.openOrExtendThought(THREAD_ID, "I will run the command.");
@@ -411,7 +409,7 @@ describe("TurnRecoveryService", () => {
       executionId: EXECUTION_ID,
       items: narrativeStore.recoverySnapshot(THREAD_ID),
     });
-    defaultCheckpoints.appendChunk([{
+    await defaultCheckpoints.appendChunk([{
       executionId: EXECUTION_ID,
       threadId: THREAD_ID,
       turnId: TURN_ID,
@@ -429,15 +427,13 @@ describe("TurnRecoveryService", () => {
       WHERE execution_id = ?
     `).run(EXECUTION_ID);
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
 
-    expect(service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
     const projection = sink.loadConversationProjection(THREAD_ID, 10);
     expect(projection.messages).toEqual([
       expect.objectContaining({ role: "user", content: "repeat only when asked" }),
@@ -456,9 +452,9 @@ describe("TurnRecoveryService", () => {
     expect(defaultCheckpoints.restore(EXECUTION_ID)).toBe("");
   });
 
-  it("removes a stale checkpoint when a completed canonical message already exists", () => {
-    const checkpoints = new ParentAssistantTextCheckpointService(db);
-    checkpoints.appendChunk([{
+  it("removes a stale checkpoint when a completed canonical message already exists", async () => {
+    const checkpoints = new ParentAssistantTextCheckpointService(db, agentStorageTestWriter(db));
+    await checkpoints.appendChunk([{
       executionId: EXECUTION_ID,
       threadId: THREAD_ID,
       turnId: TURN_ID,
@@ -488,15 +484,13 @@ describe("TurnRecoveryService", () => {
       }),
     });
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       checkpoints,
-      messageRepo,
-      narrativeStore,
     );
 
-    expect(service.reconcileOnStartup()).toEqual({ interrupted: [] });
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [] });
     expect(messageRepo.listByThread(THREAD_ID, 10).messages).toEqual([
       expect.objectContaining({ role: "user", content: "repeat only when asked" }),
       expect.objectContaining({
@@ -512,7 +506,7 @@ describe("TurnRecoveryService", () => {
     expect(checkpoints.restore(EXECUTION_ID)).toBe("");
   });
 
-  it("marks an unresolved child delivery unknown before interrupting its parent execution", () => {
+  it("marks an unresolved child delivery unknown before interrupting its parent execution", async () => {
     // Regression: restart must not classify a dispatched child as rejected or make
     // its uncertain identity eligible for reuse.
     const delegation = sink.startCodexChildDelegation({
@@ -525,15 +519,13 @@ describe("TurnRecoveryService", () => {
     });
     published.mockClear();
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
 
-    service.reconcileOnStartup();
+    await service.reconcileOnStartup();
 
     expect(sink.loadCollaborationAction(delegation.collaborationAction.id)).toMatchObject({
       status: "Dispatched",
@@ -551,7 +543,7 @@ describe("TurnRecoveryService", () => {
     }).mode).toBe("snapshot");
   });
 
-  it("reports only the exact turns interrupted by the current restart", () => {
+  it("reports only the exact turns interrupted by the current restart", async () => {
     const other = {
       workspaceId: "workspace-other",
       workspaceName: "Other workspace",
@@ -599,15 +591,13 @@ describe("TurnRecoveryService", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-10T09:03:00.000Z"));
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
     try {
-      expect(service.reconcileOnStartup()).toEqual({
+      expect(await service.reconcileOnStartup()).toEqual({
         interrupted: [EXECUTION_ID, other.executionId, completed.executionId],
       });
       const incident = service.currentRecoveryIncident();
@@ -639,14 +629,12 @@ describe("TurnRecoveryService", () => {
       expect(incident?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 
       const cleanRestart = new TurnRecoveryService(
-        sink,
+        runtimeSink,
         threadRepo,
         new AttachmentService(),
         defaultCheckpoints,
-        messageRepo,
-        narrativeStore,
       );
-      expect(cleanRestart.reconcileOnStartup()).toEqual({ interrupted: [] });
+      expect(await cleanRestart.reconcileOnStartup()).toEqual({ interrupted: [] });
       expect(cleanRestart.currentRecoveryIncident()).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -655,14 +643,12 @@ describe("TurnRecoveryService", () => {
 
   it("dispatches an explicit Retry as a fresh execution with the accepted user input", async () => {
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
-    service.reconcileOnStartup();
+    await service.reconcileOnStartup();
     const dispatched: SendMessageCommand[] = [];
     const dispatch = vi.fn(async (command: SendMessageCommand) => {
       dispatched.push(command);
@@ -691,7 +677,7 @@ describe("TurnRecoveryService", () => {
       permissionMode: "supervised",
       providerIdentities: [],
       retryOfExecutionId: retryCommand.retryOfExecutionId,
-      projectUserMessage: () => new MessageRepo(db).create(
+      projectUserMessage: () => new MessageStore(db).create(
         THREAD_ID,
         "user",
         retryCommand.content,
@@ -715,22 +701,20 @@ describe("TurnRecoveryService", () => {
       error: "provider failed",
       projectTurn: () => ({ message: null, narrative: [] }),
     });
-    threadRepo.updateStatus(THREAD_ID, "errored");
+    await threadRepo.updateStatus(THREAD_ID, "errored");
 
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
     const dispatch = vi.fn(async () => undefined);
     await expect(service.retry(EXECUTION_ID, dispatch)).rejects.toThrow();
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("interrupts an execution whose recovered narrative exceeds one semantic batch", () => {
+  it("interrupts an execution whose recovered narrative exceeds one semantic batch", async () => {
     // Regression: a single interruption commit must never overflow the canonical
     // event batch cap; recovered narrative materializes in bounded commits first.
     narrativeStore.beginTurn(THREAD_ID);
@@ -747,15 +731,13 @@ describe("TurnRecoveryService", () => {
       items: narrativeStore.recoverySnapshot(THREAD_ID),
     });
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
 
-    expect(service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
     expect(sink.loadTurn(TURN_ID)?.status).toBe("Interrupted");
     expect(sink.loadCheckpoint(EXECUTION_ID)).toMatchObject({
       phase: "interrupted",
@@ -769,10 +751,10 @@ describe("TurnRecoveryService", () => {
         AND json_extract(payload_json, '$.projection') = 'toolCall'
     `).get(TURN_ID) as { count: number };
     expect(materialized.count).toBe(CANONICAL_AGENT_EVENT_BATCH_MAX);
-    expect(service.reconcileOnStartup()).toEqual({ interrupted: [] });
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [] });
   });
 
-  it("recovers an execution whose earlier interruption overflowed the canonical batch", () => {
+  it("recovers an execution whose earlier interruption overflowed the canonical batch", async () => {
     // Regression: the first post-crash boot left a durable ingest-overflow record,
     // a staged internal assistant row, and retired text chunks. The next boot must
     // reopen the checkpoint and finish the interruption without crashing.
@@ -819,15 +801,13 @@ describe("TurnRecoveryService", () => {
     });
     expect(overflow.outcome).toBe("ingest-overflow");
     const service = new TurnRecoveryService(
-      sink,
+      runtimeSink,
       threadRepo,
       new AttachmentService(),
       defaultCheckpoints,
-      messageRepo,
-      narrativeStore,
     );
 
-    expect(service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
     expect(sink.loadCheckpoint(EXECUTION_ID)).toMatchObject({
       phase: "interrupted",
       terminalOutcome: "interrupted",
@@ -838,10 +818,10 @@ describe("TurnRecoveryService", () => {
       outcomeExecutionId: EXECUTION_ID,
     });
     expect(sink.loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
-    expect(service.reconcileOnStartup()).toEqual({ interrupted: [] });
+    expect(await service.reconcileOnStartup()).toEqual({ interrupted: [] });
   });
 
-  it("treats a repeated structural overflow as a duplicate of the durable record", () => {
+  it("treats a repeated structural overflow as a duplicate of the durable record", async () => {
     // Regression: re-recording an overflow for a reopened execution must dedupe
     // against the durable ingest-overflow event instead of throwing an identity conflict.
     const thread = sink.loadThread(THREAD_ID);

@@ -101,8 +101,8 @@ One per-thread owner assigns stable event identities and order before publishing
 accepted progress on `agent.canonical`. Execution progress and completion do not
 wait for successful saves.
 
-A bounded, fair save queue sends those immutable operations to the dedicated
-SQLite writer. Saved receipts confirm actual commits and advance the saved
+A bounded, fair save queue sends those immutable operations to the shared
+application SQLite writer. Saved receipts confirm actual commits and advance the saved
 prefix. They cannot replay provider commands or renderer publication effects.
 Execution state and saving state are independent: a completed turn can still be
 saving. Durable turn admission waits for the preceding accepted suffix before
@@ -388,7 +388,22 @@ Forward-only migrations are applied on startup by `database.ts` using a `_migrat
 
 ### 5.3 Repository Pattern
 
-Each entity has a dedicated repo class (`WorkspaceRepo`, `ThreadRepo`, `MessageRepo`). Repos accept a `Database` instance via constructor injection and return typed objects. Services depend on repos through DI; no module reads the database directly.
+Repositories expose synchronous queries through a physically read-only runtime
+connection and asynchronous mutations through
+[`ApplicationDatabaseWriter`](apps/server/src/runtime/persistence/sqlite/application-database-writer.ts).
+After startup migrations, one worker per server process owns the writable
+connection. Ordinary feature commands and canonical saves share its bounded FIFO.
+Complete read/write transactions execute inside that worker; callers await
+committed results before performing dependent actions. Shutdown stops write
+producers before draining and closing the owner.
+
+A failed command does not poison later jobs. Canonical commands can resolve lost
+replies using durable receipts. An ordinary dispatched command whose reply is lost
+reports an unknown outcome and is not automatically replayed: repeating a claim,
+counter update or generated insertion could duplicate its effects. Separate server
+processes still contend through SQLite's WAL and busy timeout. See the
+[owner implementation](apps/server/src/runtime/persistence/sqlite/application-database-writer.ts)
+and [connection policy](apps/server/src/runtime/persistence/sqlite/sqlite-connection-policy.ts).
 
 ## 6. WebSocket RPC Protocol
 
@@ -524,18 +539,11 @@ execution's stream.
 
 ### 7.1 Composition Root
 
-The server uses tsyringe for dependency injection. All services, repositories, and providers are registered as singletons in `apps/server/src/container.ts`.
-
-```typescript
-// Simplified registration flow:
-container.register("Database", { useValue: openDatabase() });
-container.register(WorkspaceRepo, { useClass: WorkspaceRepo }, { lifecycle: Lifecycle.Singleton });
-container.register(ClaudeProvider, { useClass: ClaudeProvider }, { lifecycle: Lifecycle.Singleton });
-container.register("IAgentProvider", { useFactory: (c) => c.resolve(ClaudeProvider) });
-container.register(ProviderRegistry, { useClass: ProviderRegistry }, { lifecycle: Lifecycle.Singleton });
-container.register(AgentService, { useClass: AgentService }, { lifecycle: Lifecycle.Singleton });
-// ... all other services
-```
+The server uses tsyringe for dependency injection. The
+[composition root](apps/server/src/application/composition/container.ts) registers
+the process-owned database writer and read-only reader, then the services,
+repositories and providers. Feature runtimes borrow the writer; they do not open
+or close competing application writers.
 
 ### 7.2 Layer Responsibilities
 

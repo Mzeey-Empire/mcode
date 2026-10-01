@@ -1,9 +1,10 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { createCursorProvider, type ProviderFactoryInput, type ProviderHostPorts } from "@mcode/providers";
-import type { ForkRequest, HandoffArtifact, Settings } from "@mcode/contracts";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { SettingsSchema, type ForkRequest } from "@mcode/contracts";
+import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
 import type { Client } from "@agentclientprotocol/sdk";
@@ -14,6 +15,7 @@ import type { Client } from "@agentclientprotocol/sdk";
  */
 describe("Cursor clean side-channel fork", () => {
   let db: Database;
+  let owned: OwnedTestDatabase;
   let threadRepo: ThreadRepo;
   let messageRepo: MessageRepo;
   let provider: ReturnType<typeof createCursorProvider>;
@@ -21,11 +23,12 @@ describe("Cursor clean side-channel fork", () => {
   const SUMMARY = "Parent was fixing the auth middleware; tests added next.";
 
   beforeEach(() => {
-    db = openMemoryDatabase();
-    threadRepo = new ThreadRepo(db);
-    messageRepo = new MessageRepo(db);
+    owned = createOwnedTestDatabase();
+    db = openReadOnlyDatabase(owned.db.filename);
+    threadRepo = new ThreadRepo(db, owned.writer);
+    messageRepo = new MessageRepo(db, owned.writer);
 
-    db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run(
+    owned.db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run(
       "ws-1",
       "test",
       "/tmp/test",
@@ -46,13 +49,13 @@ describe("Cursor clean side-channel fork", () => {
       },
       threadControl: { bootstrap: async () => null, close: async () => undefined },
       grants: { consume: () => false },
-      events: { submit: async () => undefined },
+      events: { submit: async () => { throw new Error("The handoff side-channel must not publish runtime events"); } },
     };
     const input: ProviderFactoryInput = {
       configuration: { cliPath: "cursor-agent", idleSessionTtlMs: 30 * 60 * 1_000 },
       host,
       cursor: {
-        settings: { get: () => ({ provider: { cursor: { idleSessionTtlMinutes: 30 }, cli: {} } } as Settings) },
+        settings: { get: () => SettingsSchema().parse({ provider: { cursor: { idleSessionTtlMinutes: 30 } } }) },
         skills: { list: () => [] },
       },
     };
@@ -87,14 +90,21 @@ describe("Cursor clean side-channel fork", () => {
     };
   });
 
+  afterEach(async () => {
+    await provider.shutdown();
+    await owned.writer.barrier();
+    db.close(true);
+    await owned.close();
+  });
+
   it("produces a path-B handoff without mutating the parent session", async () => {
-    const parent = threadRepo.create("ws-1", "Fix auth bug", "direct", "main", true, "cursor");
-    messageRepo.create(parent.id, "user", "Fix the auth bug", 1);
-    messageRepo.create(parent.id, "assistant", "Fixed the middleware.", 2);
-    threadRepo.updateSdkSessionId(parent.id, "cursor-parent-session");
+    const parent = await threadRepo.create("ws-1", "Fix auth bug", "direct", "main", true, "cursor");
+    await messageRepo.create(parent.id, "user", "Fix the auth bug", 1);
+    await messageRepo.create(parent.id, "assistant", "Fixed the middleware.", 2);
+    await threadRepo.updateSdkSessionId(parent.id, "cursor-parent-session");
     const seededParent = threadRepo.findById(parent.id)!;
 
-    const child = threadRepo.create("ws-1", "Branch: add tests", "direct", "main", true, "cursor", {
+    const child = await threadRepo.create("ws-1", "Branch: add tests", "direct", "main", true, "cursor", {
       parentThreadId: parent.id,
       forkedFromMessageId: "msg-2",
     });
@@ -116,9 +126,7 @@ describe("Cursor clean side-channel fork", () => {
       childThreadId: child.id,
     };
 
-    const artifact = await (provider as unknown as {
-      forker: { fork(request: ForkRequest): Promise<HandoffArtifact> };
-    }).forker.fork(req);
+    const artifact = await provider.forker.fork(req);
 
     expect(artifact.markdown).toContain(SUMMARY);
     expect(artifact.markdown.length).toBeGreaterThan(0);
@@ -136,10 +144,10 @@ describe("Cursor clean side-channel fork", () => {
   });
 
   it("degrades to a transient error (path-D trigger) when the parent has no session", async () => {
-    const parent = threadRepo.create("ws-1", "No session", "direct", "main", true, "cursor");
-    messageRepo.create(parent.id, "user", "Do a thing", 1);
+    const parent = await threadRepo.create("ws-1", "No session", "direct", "main", true, "cursor");
+    await messageRepo.create(parent.id, "user", "Do a thing", 1);
     const seededParent = threadRepo.findById(parent.id)!;
-    const child = threadRepo.create("ws-1", "child", "direct", "main", true, "cursor", {
+    const child = await threadRepo.create("ws-1", "child", "direct", "main", true, "cursor", {
       parentThreadId: parent.id,
       forkedFromMessageId: "msg-1",
     });
@@ -156,8 +164,6 @@ describe("Cursor clean side-channel fork", () => {
       childThreadId: child.id,
     };
 
-    await expect((provider as unknown as {
-      forker: { fork(request: ForkRequest): Promise<HandoffArtifact> };
-    }).forker.fork(req)).rejects.toMatchObject({ code: "ETIMEDOUT" });
+    await expect(provider.forker.fork(req)).rejects.toMatchObject({ code: "ETIMEDOUT" });
   });
 });

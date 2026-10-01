@@ -47,6 +47,31 @@ function assertPositiveLimit(value: number, name: keyof WriteBatchLimits): void 
   }
 }
 
+/** Commit one bounded cursor checkpoint for a writer command that must remain synchronous. */
+export function runBoundedWriteBatch<T>(
+  input: RunBoundedWriteBatchesInput<T>,
+  cursor: number,
+): { cursor: number; writeBatches: WriteBatchResult } {
+  if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor >= input.items.length) {
+    throw new Error("Bounded write cursor is outside the input");
+  }
+  const prepared = prepareBoundedWriteInput(input);
+  const now = input.now ?? NodePerfHooks.performance.now.bind(NodePerfHooks.performance);
+  let committed = { cursor, batchRows: prepared.batchOverheadRows, batchBytes: prepared.batchOverheadBytes };
+  const transaction = input.db.transaction(() => {
+    const startedAt = now();
+    input.onBatchStarted?.();
+    committed = writeBatchTransaction(input, prepared, cursor, cursor,
+      prepared.batchOverheadBytes, prepared.batchOverheadRows, startedAt, now);
+    input.onBatchFinishing?.();
+  });
+  if (input.beginImmediate) transaction.immediate();
+  else transaction();
+  const writeBatches = { batches: 1, rows: committed.batchRows, bytes: committed.batchBytes };
+  input.onBatchCommitted?.(writeBatches);
+  return { cursor: committed.cursor, writeBatches };
+}
+
 /** Commit ordered rows in bounded transactions and yield only after each commit. */
 export async function runBoundedWriteBatches<T>(
   input: RunBoundedWriteBatchesInput<T>,

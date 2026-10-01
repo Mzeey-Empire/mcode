@@ -7,6 +7,8 @@ import { afterEach, expect, it } from "vitest";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { AgentEventPublicationRegistry } from "../../orchestration/agent-event-publication-registry.js";
 import { WorkerOwnedTurnRuntime } from "../worker-owned-turn-runtime.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 
 const NOW = "2026-09-25T10:00:00.000Z";
 const identities = Array.from({ length: 5 }, (_, index) => ({
@@ -18,12 +20,15 @@ const identities = Array.from({ length: 5 }, (_, index) => ({
 let directory: string | undefined;
 let database: ReturnType<typeof openDatabase> | undefined;
 let runtime: WorkerOwnedTurnRuntime | undefined;
+let writer: ApplicationDatabaseWriter | undefined;
 
 afterEach(async () => {
   await runtime?.close();
+  await writer?.close();
   database?.close(true);
   if (directory) NodeFS.rmSync(directory, { recursive: true, force: true });
   runtime = undefined;
+  writer = undefined;
   database = undefined;
   directory = undefined;
 });
@@ -38,7 +43,8 @@ it("contains a rejected writer operation to its execution while a slot peer keep
   for (const identity of identities) {
     insertThread.run(identity.threadId, "failure-isolation-workspace", "Thread", "main", "codex", NOW, NOW);
   }
-  runtime = new WorkerOwnedTurnRuntime(dbPath, new AgentEventPublicationRegistry());
+  writer = new ApplicationDatabaseWriter(dbPath);
+  runtime = new WorkerOwnedTurnRuntime(new CanonicalAgentWriterClient(writer), new AgentEventPublicationRegistry());
   await runtime.whenReady();
   for (const identity of identities) {
     await runtime.owner.start({ execution: identity, ownerEpoch: 1, providerId: "codex", parentTurn: {

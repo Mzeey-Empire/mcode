@@ -176,6 +176,9 @@ export class ProviderEventIngress {
   private consumer: ProviderEventIngressConsumer | undefined;
   private started = false;
   private stopped = false;
+  private admissionClosed = false;
+  private readonly pendingWorkerCountsByThread = new Map<string, number>();
+  private closing: Promise<void> | undefined;
   private drainScheduled = false;
   private pendingEventCount = 0;
   private pendingByteCount = 0;
@@ -197,8 +200,8 @@ export class ProviderEventIngress {
     this.started = true;
     this.consumer = consumer;
     for (const provider of providerRegistry.resolveAll()) {
-      provider.on("file_mutation_start", (event) => consumer.handleProviderFileMutation(event));
-      if (isTurnDiffSource(provider)) provider.onTurnDiff((event) => consumer.handleProviderTurnDiff(event));
+      provider.on("file_mutation_start", (event) => { if (!this.admissionClosed) consumer.handleProviderFileMutation(event); });
+      if (isTurnDiffSource(provider)) provider.onTurnDiff((event) => { if (!this.admissionClosed) consumer.handleProviderTurnDiff(event); });
       provider.on("event", (event) => this.acceptProviderRuntime(provider.id, event));
     }
     if (this.pendingEventCount > 0) this.scheduleDrain();
@@ -268,17 +271,27 @@ export class ProviderEventIngress {
 
   /** Deliver writer-projected events after their durable reply without reapplying old turn writes. */
   acceptProjectedCommitted(events: readonly ProjectedCommittedProviderEvent[]): void {
-    if (this.stopped || !this.consumer?.handleProjectedCommitted) {
+    if (this.admissionClosed || this.stopped || !this.consumer?.handleProjectedCommitted) {
       throw new Error("Worker-owned provider publication is unavailable");
     }
+    this.enqueueProjected(events, "worker-commit");
+  }
+
+  /** Native child interpretation is committed, while parent legacy turn effects still need application. */
+  acceptLegacyProjected(events: readonly ProjectedCommittedProviderEvent[]): void {
+    if (this.admissionClosed || this.stopped || !this.consumer) throw new Error("Legacy provider publication is unavailable");
+    this.enqueueProjected(events, "canonical-commit");
+  }
+
+  private enqueueProjected(events: readonly ProjectedCommittedProviderEvent[], sourceKind: "canonical-commit" | "worker-commit"): void {
     for (const event of events) {
       const eventId = event.canonicalReceipt.eventId;
       if (this.seenCanonicalEventIds.has(eventId) || this.pendingCanonicalEventIds.has(eventId)) {
-        this.report({ reason: "duplicate-event", sourceKind: "worker-commit", eventId });
+        this.report({ reason: "duplicate-event", sourceKind, eventId });
         continue;
       }
-      if (!this.enqueue({ ...event, sourceKind: "worker-commit" })) {
-        throw new Error("Worker-owned provider publication queue is full");
+      if (!this.enqueue({ ...event, sourceKind })) {
+        throw new Error("Committed provider publication queue is full");
       }
       this.rememberCanonicalEvent(eventId);
     }
@@ -309,8 +322,22 @@ export class ProviderEventIngress {
     await this.waitForQueuedThread(threadId);
   }
 
+  /** Fence provider admission and apply every retained preprocessing result and fair-queue event before closing workers. */
+  stopAdmissionAndDrain(): Promise<void> {
+    this.admissionClosed = true;
+    this.closing ??= this.drainAcceptedWork();
+    return this.closing;
+  }
+
+  private async drainAcceptedWork(): Promise<void> {
+    await Promise.all([...this.pendingWorkerCountsByThread.keys()].map((threadId) => this.workerPool.waitForThread(threadId)));
+    await Promise.all([...this.pendingByThread.keys()].map((threadId) => this.waitForQueuedThread(threadId)));
+    this.shutdown();
+  }
+
   /** Reject retained worker payloads during orderly server shutdown. */
   shutdown(): void {
+    this.admissionClosed = true;
     this.stopped = true;
     this.workerPool.shutdown();
     this.pendingByThread.clear();
@@ -328,25 +355,51 @@ export class ProviderEventIngress {
   }
 
   private submit(task: ProviderEventWorkerTask, onOutcome: (outcome: ProviderEventWorkerOutcome) => void): boolean {
-    if (this.stopped) {
+    if (this.stopped || this.admissionClosed) {
       this.report({ reason: "worker-shutdown", sourceKind: task.kind, eventId: canonicalEventIdentity(task) });
       return false;
     }
     const threadId = providerEventWorkerThreadId(task);
+    this.pendingWorkerCountsByThread.set(threadId, (this.pendingWorkerCountsByThread.get(threadId) ?? 0) + 1);
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      this.releasePendingWorker(threadId);
+    };
+    const complete = (outcome: ProviderEventWorkerOutcome): void => {
+      try { onOutcome(outcome); }
+      finally { release(); }
+    };
     let accepted: boolean;
     const trace = serverWorkTrace;
     if (trace) {
       const started = NodePerfHooks.performance.now();
-      accepted = this.workerPool.submit(threadId, task, { onOutcome: (outcome) => {
+      accepted = this.submitWorker(threadId, task, (outcome) => {
         trace.record("worker-wait", threadId,
           outcome.status === "accepted" ? outcome.event.event.turnExecutionId : undefined,
           NodePerfHooks.performance.now() - started);
-        onOutcome(outcome);
-      } });
+        complete(outcome);
+      }, release);
       trace.record("worker-admission", threadId, undefined, NodePerfHooks.performance.now() - started);
-    } else accepted = this.workerPool.submit(threadId, task, { onOutcome });
-    if (!accepted) this.rejectForWorkerCapacity(task);
+    } else accepted = this.submitWorker(threadId, task, complete, release);
+    if (!accepted) {
+      release();
+      this.rejectForWorkerCapacity(task);
+    }
     return accepted;
+  }
+
+  private submitWorker(threadId: string, task: ProviderEventWorkerTask,
+    onOutcome: (outcome: ProviderEventWorkerOutcome) => void, release: () => void): boolean {
+    try { return this.workerPool.submit(threadId, task, { onOutcome }); }
+    catch (error) { release(); throw error; }
+  }
+
+  private releasePendingWorker(threadId: string): void {
+    const pending = this.pendingWorkerCountsByThread.get(threadId) ?? 0;
+    if (pending <= 1) this.pendingWorkerCountsByThread.delete(threadId);
+    else this.pendingWorkerCountsByThread.set(threadId, pending - 1);
   }
 
   private rejectForWorkerCapacity(task: ProviderEventWorkerTask): void {

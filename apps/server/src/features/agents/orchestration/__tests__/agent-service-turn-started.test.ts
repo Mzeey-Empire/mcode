@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
 import { AgentEventType } from "@mcode/contracts";
@@ -9,7 +9,8 @@ import type {
   ProviderId,
   ProviderRuntimeEvent,
 } from "@mcode/contracts";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
+import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -53,12 +54,13 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
   let eventsLengthAtSendMessageEntry: number;
 
   beforeEach(() => {
-    db = openMemoryDatabase();
-    threadRepo = new ThreadRepo(db);
-    workspaceRepo = new WorkspaceRepo(db);
-    messageRepo = new MessageRepo(db);
-    toolCallRecordRepo = new ToolCallRecordRepo(db);
-    turnSnapshotRepo = new TurnSnapshotRepo(db);
+    db = openAgentStorageTestDatabase();
+    const writer = agentStorageTestWriter(db);
+    threadRepo = new ThreadRepo(db, writer);
+    workspaceRepo = new WorkspaceRepo(db, writer);
+    messageRepo = new MessageRepo(db, writer);
+    toolCallRecordRepo = new ToolCallRecordRepo(db, writer);
+    turnSnapshotRepo = new TurnSnapshotRepo(db, writer);
 
     // Capture runtime envelopes emitted on the provider bus.
     capturedEvents = [];
@@ -84,7 +86,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     const registryStub: IProviderRegistry = {
       resolve: () => providerStub as unknown as IAgentProvider,
       resolveAll: () => [providerStub as unknown as IAgentProvider],
-      shutdown: () => {},
+      shutdown: async () => {},
     };
 
     const gitServiceStub = {
@@ -123,7 +125,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       assertUsable: vi.fn(),
     } as unknown as ProviderAvailabilityService;
 
-    canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    canonicalSink = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), vi.fn());
     svc = createAgentServiceForTest(
       threadRepo,
       workspaceRepo,
@@ -132,14 +134,12 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       attachmentServiceStub,
       registryStub,
       threadServiceStub,
-      { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../events/persistence/hook-execution-repo.js").HookExecutionRepo,
       turnSnapshotRepo,
       snapshotServiceStub,
       db,
       memoryPressureServiceStub,
       settingsServiceStub,
       availabilityStub,
-      { markAnswered: vi.fn(), isAnswered: vi.fn(() => false), listAnsweredForThread: vi.fn(() => []) } as unknown as import("../../planning/persistence/plan-question-answers-repo.js").PlanQuestionAnswersRepo,
       { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       new NarrativeStore(
@@ -148,7 +148,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
         { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../conversation/narrative/persistence/thought-segment-repo.js").ThoughtSegmentRepo,
         { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../events/persistence/hook-execution-repo.js").HookExecutionRepo,
       ),
-      new ParentAssistantTextCheckpointService(db),
+      new ParentAssistantTextCheckpointService(db, writer),
       undefined,
       undefined,
       undefined,
@@ -156,9 +156,14 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     );
   });
 
+  afterEach(async () => {
+    try { await svc?.stopAll(); }
+    finally { await closeAgentStorageTestDatabases(); }
+  });
+
   it("emits turnStarted through the provider before provider.sendMessage resolves", async () => {
-    const workspace = workspaceRepo.create("test-ws", process.cwd());
-    const thread = threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
+    const workspace = await workspaceRepo.create("test-ws", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
 
     // Kick off sendMessage without awaiting (provider.sendMessage never resolves).
     void svc.sendMessage({
@@ -169,7 +174,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     });
 
     // Let the async prelude (attachment persist + ref capture + settings.get) settle.
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => expect(providerStub.sendTurn).toHaveBeenCalledTimes(1));
 
     // TurnStarted must be the FIRST event on the bus (nothing precedes it).
     expect(capturedEvents.length, "expected at least one event on the bus").toBeGreaterThan(0);
@@ -178,6 +183,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       threadId: thread.id,
     });
     const executionId = capturedEvents[0]!.event.turnExecutionId;
+    if (!executionId) throw new Error("TurnStarted has no execution identity");
     expect(canonicalSink.loadTurnByExecution(executionId)).toMatchObject({
       threadId: thread.id,
       status: "Running",
@@ -229,8 +235,8 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       }),
     });
     startAgentServiceIngressForTest(svc);
-    const workspace = workspaceRepo.create("test-ws", process.cwd());
-    const thread = threadRepo.create(workspace.id, "Cursor Thread", "direct", "main", true, "cursor");
+    const workspace = await workspaceRepo.create("test-ws", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Cursor Thread", "direct", "main", true, "cursor");
     void svc.sendMessage({
       threadId: thread.id,
       content: "hello",
@@ -238,7 +244,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       approvalReviewMode: "automatic",
       sourceTurnId: "canonical-cursor-turn",
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.waitFor(() => expect(providerStub.sendTurn).toHaveBeenCalledTimes(1));
 
     expect(svc.runtimeAccess().activeThreadIds()).toContain(thread.id);
     expect(providerStub.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
@@ -281,7 +287,14 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     };
     providerStub.emit("event", approved);
     providerStub.emit("event", approved);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.waitFor(() => {
+      const item = db.query<{ payload_json: string }, [string]>(
+        "SELECT payload_json FROM canonical_agent_items WHERE id = ?",
+      ).get("toolCall:approval-review:test-id");
+      expect(item && JSON.parse(item.payload_json)).toMatchObject({
+        narrative: { record: { output_summary: "approved", status: "completed" } },
+      });
+    });
     const reviewItems = db.prepare(
       "SELECT id, payload_json FROM canonical_agent_items WHERE id = ?",
     ).all("toolCall:approval-review:test-id") as Array<{ id: string; payload_json: string }>;
@@ -307,8 +320,8 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       }),
     });
     startAgentServiceIngressForTest(svc);
-    const workspace = workspaceRepo.create("test-ws", process.cwd());
-    const thread = threadRepo.create(workspace.id, "Full Access Cursor Thread", "direct", "main", true, "cursor");
+    const workspace = await workspaceRepo.create("test-ws", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Full Access Cursor Thread", "direct", "main", true, "cursor");
     void svc.sendMessage({
       threadId: thread.id,
       content: "hello",
@@ -316,7 +329,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       approvalReviewMode: "automatic",
       sourceTurnId: "full-access-cursor-turn",
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await vi.waitFor(() => expect(providerStub.sendTurn).toHaveBeenCalledTimes(1));
 
     expect(providerStub.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
       turnId: "full-access-cursor-turn",

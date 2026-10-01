@@ -4,7 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openAgentStorageTestDatabase as openMemoryDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../../agents/__tests__/agent-storage-fixture.js";
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import { FakeGitExecutor } from "../execution/fake-git-executor.js";
 import type { GitExecOptions, GitExecResult } from "../execution/types.js";
@@ -13,6 +13,7 @@ import {
   PullRequestReviewGitService,
 } from "../pull-request-review-git-service.js";
 import { GitRepositoryService } from "../git-repository-service.js";
+import { DatabaseWriteOutcomeUnknown } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 
 const TEST_HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "127" } as const;
 
@@ -47,6 +48,8 @@ class WorktreeCreatingGitExecutor extends FakeGitExecutor {
   }
 }
 
+afterEach(closeAgentStorageTestDatabases);
+
 describe("PullRequestReviewGitService", () => {
   let db: Database;
   let executor: WorktreeCreatingGitExecutor;
@@ -58,7 +61,7 @@ describe("PullRequestReviewGitService", () => {
     db = openMemoryDatabase();
     repoPath = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-review-repo-"));
     executor = new WorktreeCreatingGitExecutor();
-    const workspaceRepo = new WorkspaceRepo(db);
+    const workspaceRepo = new WorkspaceRepo(db, agentStorageTestWriter(db));
     gitRepository = new GitRepositoryService(workspaceRepo, executor);
     service = new PullRequestReviewGitService(executor, gitRepository, TEST_HOST_RUNTIME);
     executor.setResponse(
@@ -160,6 +163,27 @@ describe("PullRequestReviewGitService", () => {
       kind: "committed",
       value: { branch: "mcode/pr-42-contributor-feature-review-aaaaaaa" },
     });
+  });
+
+  it("rolls back a provisioned checkout after a known failed commit", async () => {
+    await expect(service.provisionPullRequestReviewWorktreeAndCommit(
+      repoPath, source, { action: "create_new", worktreeName: `rolled-back-${Date.now()}` },
+      () => { throw new Error("confirmed rollback"); },
+    )).rejects.toThrow("confirmed rollback");
+    expect(executor.calls.some(call => call.args.includes("worktree") && call.args.includes("remove"))).toBe(true);
+  });
+
+  it("keeps a provisioned checkout and surfaces an unknown commit without retrying", async () => {
+    let commits = 0;
+    await expect(service.provisionPullRequestReviewWorktreeAndCommit(
+      repoPath, source, { action: "create_new", worktreeName: `unknown-commit-${Date.now()}` },
+      () => { commits += 1; throw new DatabaseWriteOutcomeUnknown("commit reply lost"); },
+      undefined, error => !(error instanceof DatabaseWriteOutcomeUnknown),
+    )).rejects.toBeInstanceOf(DatabaseWriteOutcomeUnknown);
+    expect(commits).toBe(1);
+    expect(executor.calls.some(call => call.args.includes("worktree") && call.args.includes("remove"))).toBe(false);
+    expect(executor.createdPaths).toHaveLength(1);
+    expect(NodeFS.existsSync(executor.createdPaths[0]!)).toBe(true);
   });
 
   it("serializes cleanup work behind a repository provisioning transaction", async () => {
