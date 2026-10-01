@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
 import type { ProviderCatalogSnapshot } from "@mcode/contracts";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { ProviderCatalogSnapshotRepo } from "../provider-catalog-snapshot-repo.js";
+import { ProviderCatalogSnapshotStore } from "../provider-catalog-snapshot-store.js";
 
 const SNAPSHOT: ProviderCatalogSnapshot = {
   providerId: "codex",
@@ -20,7 +20,7 @@ const SNAPSHOT: ProviderCatalogSnapshot = {
   selectableAgents: [],
 };
 
-describe("ProviderCatalogSnapshotRepo", () => {
+describe("ProviderCatalogSnapshotStore", () => {
   let db: Database | undefined;
 
   afterEach(() => db?.close());
@@ -37,10 +37,10 @@ describe("ProviderCatalogSnapshotRepo", () => {
 
   it("persists snapshots by provider and realized catalog context", () => {
     db = openCatalogDatabase();
-    const firstProcess = new ProviderCatalogSnapshotRepo(db);
+    const firstProcess = new ProviderCatalogSnapshotStore(db);
     firstProcess.upsert("codex:workspace:workspace-1:C:/repo", "workspace-1", "C:/repo", SNAPSHOT);
 
-    const restartedProcess = new ProviderCatalogSnapshotRepo(db);
+    const restartedProcess = new ProviderCatalogSnapshotStore(db);
 
     expect(restartedProcess.get("codex:workspace:workspace-1:C:/repo")).toEqual(SNAPSHOT);
     expect(restartedProcess.get("codex:workspace:workspace-2:C:/other")).toBeNull();
@@ -48,7 +48,7 @@ describe("ProviderCatalogSnapshotRepo", () => {
 
   it("rejects malformed persisted payloads without affecting other contexts", () => {
     db = openCatalogDatabase();
-    const repo = new ProviderCatalogSnapshotRepo(db);
+    const repo = new ProviderCatalogSnapshotStore(db);
     repo.upsert("valid", "workspace-1", "C:/repo", SNAPSHOT);
     db.prepare(`
       INSERT INTO provider_catalog_snapshots
@@ -62,7 +62,7 @@ describe("ProviderCatalogSnapshotRepo", () => {
 
   it("does not expire an otherwise valid snapshot because of its age", () => {
     db = openCatalogDatabase();
-    const repo = new ProviderCatalogSnapshotRepo(db);
+    const repo = new ProviderCatalogSnapshotStore(db);
     repo.upsert("old", "workspace-1", "C:/repo", SNAPSHOT);
     db.prepare(
       "UPDATE provider_catalog_snapshots SET updated_at = ? WHERE context_key = ?",
@@ -73,7 +73,7 @@ describe("ProviderCatalogSnapshotRepo", () => {
 
   it("deletes workspace snapshots when their workspace is deleted", () => {
     db = openCatalogDatabase();
-    const repo = new ProviderCatalogSnapshotRepo(db);
+    const repo = new ProviderCatalogSnapshotStore(db);
     repo.upsert("workspace-snapshot", "workspace-1", "C:/repo", SNAPSHOT);
 
     db.prepare("DELETE FROM workspaces WHERE id = ?").run("workspace-1");
@@ -83,7 +83,7 @@ describe("ProviderCatalogSnapshotRepo", () => {
 
   it("does not recreate a snapshot after its workspace is deleted", () => {
     db = openCatalogDatabase();
-    const repo = new ProviderCatalogSnapshotRepo(db);
+    const repo = new ProviderCatalogSnapshotStore(db);
     db.prepare("DELETE FROM workspaces WHERE id = ?").run("workspace-1");
 
     const persisted = repo.upsert(

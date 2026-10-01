@@ -68,7 +68,8 @@ try {
 Record every returned condition. Successful Completed retry requires exact
 accepted/durable IDs and content, drained queue, unchanged outcome/execution,
 one measured native invocation, COMPLETE once, no failed-saving notice, and no
-Stop button after retry and reload. `fail-terminal` rejects only canonical
+Stop button after retry and reload. Save failures stay out of the chat; the UI
+retry opens thread Overview and selects Retry save. `fail-terminal` rejects only canonical
 `turn.completed` for this exact execution. It must be armed after the certified
 prefix and before the native terminal. A tool-level `fail` is a separate active
 execution interruption proof: start with `{pauseBeforeTerminal:true,honorCancel:true}`,

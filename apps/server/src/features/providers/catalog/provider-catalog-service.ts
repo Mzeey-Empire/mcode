@@ -223,6 +223,9 @@ export class ProviderCatalogService {
   private readonly inflight = new Map<string, CatalogRefreshJob>();
   private readonly trackedContexts = new Map<string, ProviderCatalogLoadInput>();
   private readonly changedHandlers = new Set<(change: ProviderCatalogChange) => void>();
+  private readonly activeRefreshes = new Set<Promise<void>>();
+  private closing = false;
+  private closeTask: Promise<void> | undefined;
 
   constructor(
     @inject(ProviderCatalogSnapshotRepo)
@@ -240,6 +243,7 @@ export class ProviderCatalogService {
     const persisted = this.snapshotRepo.get(persistenceKey)
       ?? (fallbackKey && fallbackKey !== persistenceKey ? this.snapshotRepo.get(fallbackKey) : null);
     const visible = staleSnapshot(persisted, input.request, input.context);
+    if (this.closing) return visible;
     if (!this.rememberContext(requestKey, input)) return capacitySnapshot(visible);
     if (!this.scheduleRefresh(requestKey, persistenceKey, visible, input, false)) {
       return capacitySnapshot(visible);
@@ -253,8 +257,22 @@ export class ProviderCatalogService {
     return () => this.changedHandlers.delete(handler);
   }
 
+  /** Stop refresh admission and drain scheduled fetches plus their committed saves. */
+  close(): Promise<void> {
+    this.closing = true;
+    this.closeTask ??= this.drainRefreshes();
+    return this.closeTask;
+  }
+
+  private async drainRefreshes(): Promise<void> {
+    const outcomes = await Promise.allSettled(this.activeRefreshes);
+    const failures = outcomes.filter((outcome) => outcome.status === "rejected").map((outcome) => outcome.reason);
+    if (failures.length > 0) throw new AggregateError(failures, "Catalog refreshes failed during shutdown");
+  }
+
   /** Reconciles requested contexts after a provider-native background change signal. */
   refreshKnownContexts(providerId: string, cwd?: string): void {
+    if (this.closing) return;
     const queueByPersistenceKey = new Map<string, boolean>();
     for (const [requestKey, input] of this.trackedContexts) {
       if (
@@ -311,6 +329,7 @@ export class ProviderCatalogService {
     input: ProviderCatalogLoadInput,
     queueIfInflight: boolean,
   ): boolean {
+    if (this.closing) return false;
     const subscriber = { visible, input } satisfies CatalogRefreshSubscriber;
     const currentJob = this.inflight.get(persistenceKey);
     if (currentJob) {
@@ -327,15 +346,15 @@ export class ProviderCatalogService {
       pendingSubscribers: new Map(),
     };
     this.inflight.set(persistenceKey, job);
-    setImmediate(() => {
-      void this.runRefresh(persistenceKey, job).catch((error: unknown) => {
+    const refresh = new Promise<void>((resolve) => setImmediate(resolve)).then(() => this.runRefresh(persistenceKey, job));
+    this.activeRefreshes.add(refresh);
+    void refresh.catch((error: unknown) => {
         logger.warn("Provider catalog background refresh could not persist", {
           providerId: input.request.providerId,
           workspaceId: input.request.workspaceId,
           error: error instanceof Error ? error.message : String(error),
         });
-      });
-    });
+      }).finally(() => this.activeRefreshes.delete(refresh));
     return true;
   }
 
@@ -344,7 +363,7 @@ export class ProviderCatalogService {
       await this.refresh(persistenceKey, job);
     } finally {
       this.inflight.delete(persistenceKey);
-      for (const [pendingRequestKey, pending] of job.pendingSubscribers) {
+      if (!this.closing) for (const [pendingRequestKey, pending] of job.pendingSubscribers) {
         const persisted = this.snapshotRepo.get(persistenceKey);
         const pendingVisible = staleSnapshot(
           persisted,
@@ -433,7 +452,7 @@ export class ProviderCatalogService {
               freshness: refreshed.freshness,
             }, input.request.providerId, input.context);
       if (!persisted) {
-        const workspaceExists = this.snapshotRepo.upsert(
+        const workspaceExists = await this.snapshotRepo.upsert(
           persistenceKey,
           input.request.workspaceId,
           input.cwd,

@@ -1,3 +1,4 @@
+import { logger } from "@mcode/shared";
 import {
   AgentEventType,
   type ProviderIdentity,
@@ -26,6 +27,9 @@ interface ProviderExecutionQueue {
 /** Serializes one provider's live events into canonical drafts for an execution. */
 export class CanonicalLiveEventPublisher {
   private readonly queues = new Map<string, ProviderExecutionQueue>();
+  private admissionStopped = false;
+  private shutdownTask: Promise<void> | undefined;
+  private lateEventReported = false;
 
   constructor(
     private readonly providerId: ProviderId,
@@ -38,6 +42,13 @@ export class CanonicalLiveEventPublisher {
     runtimeEvent: ProviderRuntimeEvent,
     sourceIdentities: readonly ProviderIdentity[],
   ): void {
+    if (this.admissionStopped) {
+      if (!this.lateEventReported) {
+        this.lateEventReported = true;
+        logger.warn("Provider canonical event rejected after shutdown", { executionId: routing.executionId });
+      }
+      return;
+    }
     const queue = this.queueFor(routing);
     if (queue.failure) return;
     if (queue.pendingEventCount >= MAX_PENDING_EVENTS_PER_EXECUTION) {
@@ -85,6 +96,20 @@ export class CanonicalLiveEventPublisher {
     } finally {
       this.queues.delete(this.queueKey(routing));
     }
+  }
+
+  /** Fences late callbacks and drains every event admitted before provider shutdown. */
+  stopAdmissionAndDrain(): Promise<void> {
+    this.admissionStopped = true;
+    this.shutdownTask ??= this.drainAcceptedQueues([...this.queues.values()]);
+    return this.shutdownTask;
+  }
+
+  private async drainAcceptedQueues(queues: readonly ProviderExecutionQueue[]): Promise<void> {
+    await Promise.all(queues.map((queue) => queue.tail));
+    this.queues.clear();
+    const failures = queues.flatMap((queue) => queue.failure ? [queue.failure] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Provider canonical event shutdown failed");
   }
 
   private queueFor(routing: CanonicalLiveEventRouting): ProviderExecutionQueue {

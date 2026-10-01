@@ -27,7 +27,7 @@ const EXECUTION_MAILBOX_LIMITS: ExecutionMailboxLimits = {
   reservedPerExecutionControlBytes: 512 * 1024,
 };
 
-/** Owns the fixed execution pool and sole semantic writer for this server process. */
+/** Owns the execution pool and borrows the shared application's canonical writer adapter. */
 export class WorkerOwnedTurnRuntime {
   readonly writer: CanonicalAgentWriterClient;
   readonly writerPort: CanonicalExecutionWriterPort;
@@ -40,8 +40,8 @@ export class WorkerOwnedTurnRuntime {
   private readonly rejectedRecoveries = new Map<string, Promise<void>>();
   private onRecovered: ((execution: ExecutionIdentity) => void) | undefined;
 
-  constructor(dbPath: string, publication: AgentEventPublicationRegistry, canonical?: CanonicalAgentBoundary) {
-    this.writer = new CanonicalAgentWriterClient(dbPath);
+  constructor(writer: CanonicalAgentWriterClient, publication: AgentEventPublicationRegistry, canonical?: CanonicalAgentBoundary) {
+    this.writer = writer;
     this.progress = canonical ? new CanonicalAcceptedProgress(canonical, this.writer) : undefined;
     this.writerPort = new CanonicalExecutionWriterPort(
       this.writer,
@@ -112,7 +112,7 @@ export class WorkerOwnedTurnRuntime {
     }
   }
 
-  /** Stop mailbox admission before closing its durable writer. */
+  /** Stop mailbox admission and flush canonical receipts; application composition closes the shared writer. */
   async close(): Promise<void> {
     this.scheduler.shutdown();
     try { await this.progress?.close(); }

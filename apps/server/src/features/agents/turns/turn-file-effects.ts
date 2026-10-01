@@ -100,28 +100,31 @@ export class TurnFileEffects {
     outcome: TurnOutcome,
     executionId: string | undefined,
     source: string,
+    persistence: Promise<unknown> = Promise.resolve(),
   ): Promise<boolean> {
     const existing = this.finalizationByThread.get(threadId);
     if (existing) return existing;
     const setup = this.setupByThread.get(threadId);
     const activity = this.activityByThread.get(threadId) ?? setup;
     const refCapture = this.refCaptureByThread.get(threadId);
-    const prerequisite = Promise.all([activity ?? Promise.resolve(), refCapture ?? Promise.resolve()]);
-    const finalization = this.finalizer.finalize(threadId, outcome, prerequisite, executionId).then(
-      () => true,
-      (error) => {
-        logger.error("finalize failed on terminal event", {
-          threadId,
-          outcome,
-          source,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return false;
-      },
-    );
+    const prerequisite = Promise.all([persistence, activity ?? Promise.resolve(), refCapture ?? Promise.resolve()]);
+    const finalization = Promise.allSettled([
+      prerequisite, this.finalizer.finalize(threadId, outcome, prerequisite, executionId),
+    ]).then((results) => this.settledFinalization(threadId, outcome, source, results));
     this.finalizationByThread.set(threadId, finalization);
     void finalization.finally(() => this.clearFinishedGeneration(threadId, setup, activity, refCapture, finalization));
     return finalization;
+  }
+
+  private settledFinalization(threadId: string, outcome: TurnOutcome, source: string,
+    results: readonly PromiseSettledResult<unknown>[]): boolean {
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed?.status !== "rejected") return true;
+    const error: unknown = failed.reason;
+    logger.error("finalize failed on terminal event", {
+      threadId, outcome, source, error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
   }
 
   /** Return the active file-effect turn identity for renderer attribution. */

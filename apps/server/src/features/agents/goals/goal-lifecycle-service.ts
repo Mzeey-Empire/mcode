@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import { inject, injectable } from "tsyringe";
 import {
   AgentEventType,
@@ -23,7 +22,7 @@ import type {
   GoalCommandEffectIntent,
 } from "../commands/command-router.js";
 import { AgentRuntimeCommandPort } from "../orchestration/agent-turn-command-port.js";
-import { MessageRepo } from "../conversation/persistence/message-repo.js";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 type AgentMessage = Extract<AgentEvent, { type: "message" }>;
 
@@ -69,12 +68,11 @@ export class GoalLifecycleService {
   constructor(
     @inject(ThreadRepo) private readonly threads: ThreadRepo,
     @inject("IProviderRegistry") private readonly providers: IProviderRegistry,
-    @inject(MessageRepo) messages: MessageRepo,
-    @inject("Database") database: Database,
+    @inject(ApplicationDatabaseWriter) writer: ApplicationDatabaseWriter,
     @inject(AgentRuntimeCommandPort) private readonly runtime: AgentRuntimeCommandPort,
     @inject(CanonicalAgentBoundary) private readonly canonical: Pick<CanonicalAgentBoundary, "recordSynthesizedPublications">,
   ) {
-    this.command = new GoalCommand({ messageRepo: messages, db: database },
+    this.command = new GoalCommand({ writer },
       (threadId, events) => publishSynthesizedAgentEvents(canonical, threadId, events));
   }
 

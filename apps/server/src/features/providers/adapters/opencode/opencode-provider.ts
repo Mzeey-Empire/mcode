@@ -384,14 +384,19 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   }
 
   async shutdown(): Promise<void> {
+    const pendingTurns = [...this.turns.values()].map((state) => state.chain);
     for (const [sessionId, state] of this.turns) {
       state.aborted = true;
       this.drainPendingForSession(sessionId);
       state.abortController.abort();
     }
     this.drainAllPending();
+    const results = await Promise.allSettled([this.pool.shutdown()]);
+    results.push(...await Promise.allSettled(pendingTurns));
+    results.push(...await Promise.allSettled([this.canonicalEventPublisher?.stopAdmissionAndDrain()]));
     this.turns.clear();
-    await this.pool.shutdown();
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "OpenCode provider shutdown failed");
   }
 
   /**

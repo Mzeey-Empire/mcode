@@ -7,7 +7,8 @@ import { AgentEventType, type PlanQuestion } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { PlanRepo } from "../../planning/persistence/plan-repo.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { PlanStore as PlanRepo } from "../../planning/persistence/plan-store.js";
 import { AgentEventPublicationRegistry } from "../../orchestration/agent-event-publication-registry.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
@@ -46,7 +47,8 @@ function startInput(): DataOnlyParentTurnStartInput {
   };
 }
 
-function operation(ordinal: number, mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation {
+function operation<Mutation extends ExecutionSemanticOperation["mutation"]>(ordinal: number, mutation: Mutation):
+  Omit<ExecutionSemanticOperation, "mutation"> & { mutation: Mutation } {
   return { operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation };
 }
 
@@ -112,7 +114,8 @@ describe("Codex live plan projections on the sole writer", () => {
     const published: string[] = [];
     const registry = new AgentEventPublicationRegistry();
     registry.bind((item) => published.push(`agent:${item.type}`));
-    const client = new CanonicalAgentWriterClient(path);
+    const owner = new ApplicationDatabaseWriter(path);
+    const client = new CanonicalAgentWriterClient(owner);
     const port = new CanonicalExecutionWriterPort(client, () => {},
       new ExecutionLivePublicationRelease(registry),
       new ExecutionPlanQuestionRelease(() => published.push("plan.questions")));
@@ -123,7 +126,7 @@ describe("Codex live plan projections on the sole writer", () => {
       expect((await port.transact(write)).kind).toBe("committed");
       expect(published).toEqual(["agent:textDelta", "plan.questions"]);
     } finally {
-      await client.close();
+      await owner.close();
     }
   });
 

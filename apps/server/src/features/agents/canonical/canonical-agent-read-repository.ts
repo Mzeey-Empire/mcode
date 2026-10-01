@@ -4,6 +4,7 @@ import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import {
   CANONICAL_AGENT_RECONNECT_DELTA_MAX_EVENTS,
   CanonicalAgentEventEnvelopeSchema,
+  MessageSchema,
   type AgentModelState,
   type AgentThread,
   type AgentTurn,
@@ -141,7 +142,16 @@ export class CanonicalAgentReadRepository {
       .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
       .limit(1)
       .get();
-    return row ? (JSON.parse(row.payloadJson) as { message: Message }).message : null;
+    if (!row) return null;
+    const payload: unknown = JSON.parse(row.payloadJson);
+    if (!payload || typeof payload !== "object" || !("message" in payload)) throw new Error("Invalid canonical user-message payload");
+    return MessageSchema().parse(payload.message);
+  }
+
+  /** Load the accepted user anchor owned by the exact parent execution. */
+  loadParentTurnUserMessage(executionId: string): Message | null {
+    const turn = this.loadTurnByExecution(executionId);
+    return turn ? this.loadUserMessage(turn.id) : null;
   }
 
 

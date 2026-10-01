@@ -509,6 +509,7 @@ export class ClaudeProvider
   /** Serializes canonical event submission when the adapter runs in the server composition. */
   private readonly canonicalEventPublisher:
     ClaudeCanonicalEventPublisher | undefined;
+  private readonly streamTasks = new Set<Promise<void>>();
   private canonicalTurnDeliveryFailureHandler:
     | ((routing: ClaudeCanonicalEventRouting, error: Error) => Promise<void>)
     | undefined;
@@ -2065,7 +2066,10 @@ export class ClaudeProvider
       if (executionId && executionId !== state.currentTurnExecutionId)
         state.pendingPromptExecutionIds.push(executionId);
     });
-    void this.consumeClaudeStream(sessionId, q, routing, state).catch((error: unknown) => {
+    const task = this.consumeClaudeStream(sessionId, q, routing, state)
+      .finally(() => { this.streamTasks.delete(task); });
+    this.streamTasks.add(task);
+    void task.catch((error: unknown) => {
       logger.error("Claude stream finalization failed", {
         executionId: state.currentTurnExecutionId,
         error: error instanceof Error ? error.message : String(error),
@@ -2916,7 +2920,7 @@ export class ClaudeProvider
   }
 
   /** Tear down all sessions and release resources. */
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     // Drain all pending permission requests so their promises settle. Do this
     // before the runtime stops sessions so any in-flight canUseTool awaits
     // unblock and the SDK iterators can wind down cleanly.
@@ -2928,16 +2932,15 @@ export class ClaudeProvider
         decision: "cancelled" as const,
       });
     }
-    // The runtime stops every session (interrupt → close → taskkill) and
-    // clears its eviction timer. Fire-and-forget: shutdown is synchronous and
-    // the provider-owned maps below are cleared immediately.
-    void this.runtime.shutdown().catch((err: unknown) => {
-      logger.warn("Claude runtime shutdown failed", { error: String(err) });
-    });
+    const results = await Promise.allSettled([this.runtime.shutdown()]);
+    results.push(...await Promise.allSettled(this.streamTasks));
+    results.push(...await Promise.allSettled([this.canonicalEventPublisher?.stopAdmissionAndDrain()]));
     this.pendingSpawnTurns.clear();
     this.pendingBrowserAccess.clear();
     this.sdkSessionIds.clear();
     this.goalsBySession.clear();
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Claude provider shutdown failed");
     this.nativeGoalsBySession.clear();
     this.nativeGoalSupportBySession.clear();
     logger.info("ClaudeProvider shutdown complete");

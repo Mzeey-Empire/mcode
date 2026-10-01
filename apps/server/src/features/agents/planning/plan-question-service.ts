@@ -125,11 +125,11 @@ export class PlanQuestionService {
    * the facade's dismissal broadcast. The progress owner and repository each
    * keep repeated dismissal idempotent; acceptance does not confirm saving.
    */
-  dismiss(threadId: string): string | null {
+  async dismiss(threadId: string): Promise<string | null> {
     const assistantMessageId = this.findLatestPlanQuestionsMessageId(threadId);
     if (!assistantMessageId) return null;
     if (this.acceptedProgress?.markPlanAnswered(threadId, assistantMessageId)) return assistantMessageId;
-    this.planQuestionAnswersRepo.markAnswered(assistantMessageId, threadId);
+    await this.planQuestionAnswersRepo.markAnswered(assistantMessageId, threadId);
     return assistantMessageId;
   }
 

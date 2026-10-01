@@ -242,7 +242,7 @@ export class GitWatcherService {
     if (!headFile) return false;
 
     // The folder is now a git repo — update the DB, start watching, notify clients.
-    this.workspaceRepo.setIsGitRepo(workspaceId, true);
+    await this.workspaceRepo.setIsGitRepo(workspaceId, true);
     await this.watchWorkspace(workspaceId, workspacePath);
 
     logger.info("GitWatcherService: non-git workspace became a git repo", {

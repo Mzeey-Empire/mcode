@@ -3,22 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 import { routeAgentRpc, type AgentRouterDeps } from "../agent-rpc.js";
 import type { SendMessageCommand } from "../../turns/turn-admission-dispatch-coordinator.js";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 
 function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMessage"]): {
   deps: AgentRouterDeps; close(): void;
 } {
-  const db = openMemoryDatabase();
   const unused = (): never => { throw new Error("Unexpected dependency in admission-only route"); };
   const deps: AgentRouterDeps = {
     agentService: { sendMessage, createAndSend: unused, stopSession: unused, runtimeAccess: unused },
     agentPermissionService: { respondToPermission: unused, listPendingPermissions: unused },
     hookExecutionRepo: { listByMessage: unused },
-    messageRepo: new MessageRepo(db),
+    messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused },
     narrativeStore: { load: unused },
-    planQuestionAnswersRepo: new PlanQuestionAnswersRepo(db),
+    planQuestionAnswersRepo: { listAnsweredForThread: unused },
     planRepo: { updateStatus: unused, listByThread: unused },
     planTurnService: { answerQuestions: unused, dismissQuestions: unused },
     recapService: { generate: unused },
@@ -29,10 +25,36 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
     toolCallRecordRepo: { listByMessage: unused, listByParent: unused },
     turnRecoveryService: { currentRecoveryIncident: unused, retry: unused },
   };
-  return { deps, close: () => db.close(true) };
+  return { deps, close: () => undefined };
 }
 
 describe("routeMessage Agent RPCs", () => {
+  it("acknowledges a legacy plan-status update only after its save completes", async () => {
+    const fixture = admissionFixture(async () => {});
+    let confirm: (() => void) | undefined;
+    fixture.deps.planRepo.updateStatus = vi.fn(async () => {
+      await new Promise<void>((resolve) => { confirm = resolve; });
+    });
+    try {
+      let settled = false;
+      const pending = routeAgentRpc("plan.updateStatus", { planId: "plan-one", status: "accepted" }, fixture.deps)
+        .then((result) => { settled = true; return result; });
+      expect(settled).toBe(false);
+      confirm?.();
+      await expect(pending).resolves.toBeUndefined();
+      expect(fixture.deps.planRepo.updateStatus).toHaveBeenCalledWith("plan-one", "accepted");
+    } finally { fixture.close(); }
+  });
+
+  it("reports a failed legacy plan-status save through the RPC", async () => {
+    const fixture = admissionFixture(async () => {});
+    const failure = new Error("Plan save failed");
+    fixture.deps.planRepo.updateStatus = vi.fn().mockRejectedValue(failure);
+    try {
+      await expect(routeAgentRpc("plan.updateStatus", { planId: "plan-one", status: "accepted" }, fixture.deps)).rejects.toBe(failure);
+    } finally { fixture.close(); }
+  });
+
   it("retries the recovered command with its raw display content", async () => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const retry = vi.fn(async (_executionId, dispatch) => {

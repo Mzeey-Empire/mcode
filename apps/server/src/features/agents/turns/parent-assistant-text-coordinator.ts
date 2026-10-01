@@ -1,11 +1,11 @@
 import type { AgentEvent } from "@mcode/contracts";
 import {
   PARENT_ASSISTANT_TEXT_QUEUE_POLICY,
-  ParentAssistantTextCheckpointQueue,
   ParentAssistantTextCheckpointService,
   type ParentAssistantTextDurabilityUpdate,
 } from "./parent-assistant-text-checkpoint-service.js";
 import type { ParentTurnDurability } from "./parent-turn-durability.js";
+import { ParentAssistantTextSaveQueue } from "./parent-assistant-text-save-queue.js";
 
 type ParentTextDelta = Extract<AgentEvent, { type: "textDelta" }>;
 
@@ -13,18 +13,18 @@ type ParentTextDelta = Extract<AgentEvent, { type: "textDelta" }>;
 export class ParentAssistantTextCoordinator {
   private readonly turnIdByExecution = new Map<string, string>();
   private readonly sequenceByExecution = new Map<string, number>();
-  private readonly queue: ParentAssistantTextCheckpointQueue;
+  private readonly queue: ParentAssistantTextSaveQueue;
 
   constructor(
     private readonly durability: ParentTurnDurability,
     readonly checkpoints: ParentAssistantTextCheckpointService,
     onDurabilityChange: (update: ParentAssistantTextDurabilityUpdate) => void,
   ) {
-    this.queue = new ParentAssistantTextCheckpointQueue(
+    this.queue = new ParentAssistantTextSaveQueue(
       checkpoints,
       PARENT_ASSISTANT_TEXT_QUEUE_POLICY,
       undefined,
-      { onDurabilityChange },
+      onDurabilityChange,
     );
   }
 
@@ -44,7 +44,17 @@ export class ParentAssistantTextCoordinator {
     this.sequenceByExecution.set(executionId, 0);
   }
 
-  /** Queue visible text only after a corresponding durable checkpoint commits. */
+  /** Fence text saves around a committed narrative classification while live publication continues. */
+  classify(executionId: string, write: () => Promise<void>): Promise<void> {
+    const turn = this.durability.loadTurnByExecution(executionId);
+    if (!turn) throw new Error(`Assistant text classification turn was not found: ${executionId}`);
+    this.queue.initializeExecution(executionId, turn.threadId);
+    const classification = this.queue.classify(executionId, write);
+    this.sequenceByExecution.set(executionId, 0);
+    return classification;
+  }
+
+  /** Publish accepted text immediately while its ordered checkpoint remains retained. */
   queueText(
     event: ParentTextDelta,
     publish: () => void,
@@ -60,7 +70,7 @@ export class ParentAssistantTextCoordinator {
   }
 
   /** Finish every accepted text checkpoint before terminal materialization. */
-  finish(executionId: string): boolean {
+  finish(executionId: string): Promise<boolean> {
     return this.queue.finish(executionId);
   }
 
@@ -79,7 +89,7 @@ export class ParentAssistantTextCoordinator {
     return this.queue.continueWithoutSaving(executionId);
   }
 
-  /** Fence a semantic event behind every preceding visible text checkpoint. */
+  /** Schedule preceding text saves without fencing accepted semantic progress. */
   prepareSemanticBoundary(threadId: string): boolean {
     return this.queue.prepareSemanticBoundary(threadId);
   }
@@ -90,7 +100,7 @@ export class ParentAssistantTextCoordinator {
   }
 
   /** Flush pending checkpoints for deterministic recovery verification. */
-  flush(executionId: string): boolean {
+  flush(executionId: string): Promise<boolean> {
     return this.queue.flush(executionId);
   }
 
@@ -101,9 +111,13 @@ export class ParentAssistantTextCoordinator {
     this.sequenceByExecution.delete(executionId);
   }
 
+  /** Drain committed checkpoints after producer shutdown and before the database writer closes. */
+  close(): Promise<void> { return this.queue.close(); }
+
   /** Reset provisional text before a fresh provider retry. */
-  resetForRetry(executionId: string): boolean {
-    if (!this.checkpoints.resetForRetry(executionId)) return false;
+  async resetForRetry(executionId: string): Promise<boolean> {
+    if (!await this.queue.flush(executionId)) return false;
+    if (!await this.checkpoints.resetForRetry(executionId)) return false;
     this.queue.discard(executionId);
     this.sequenceByExecution.set(executionId, 0);
     return true;
@@ -123,11 +137,8 @@ export class ParentAssistantTextCoordinator {
     fail: (reason: string) => void,
   ): number | "blocked" | false {
     const executionId = event.turnExecutionId!;
-    const current = this.sequenceByExecution.get(executionId);
-    if (current !== undefined) return current;
     try {
-      const durable = this.queue.initializeExecution(executionId, event.threadId, fail);
-      if (durable === null) return "blocked";
+      const durable = this.queue.initializeExecution(executionId, event.threadId);
       this.turnIdByExecution.set(executionId, turnId);
       this.sequenceByExecution.set(executionId, durable);
       return durable;

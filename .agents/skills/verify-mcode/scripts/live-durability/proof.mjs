@@ -161,7 +161,7 @@ export async function startComposer(run, options = {}) {
   await waitFile(run, 'prefix', 15_000);
   const deadline = Date.now() + 8000;
   while (true) {
-    const body = await run.page.locator('body').innerText({ timeout: 1500 });
+    const body = await run.page.locator('body').innerText({ timeout: Math.max(1, deadline - Date.now()) });
     if (body.includes(prompt) && body.includes(`LIVE_DURABILITY ${run.id} PREFIX`)) break;
     if (Date.now() >= deadline) throw new Error('Composer prompt/native prefix did not both render; do not arm a UI proof fault');
     await timeout(100);
@@ -247,7 +247,7 @@ export async function captureChild(run, { expectedOutcome, maxMs = 5000 } = {}) 
     const roster = await run.socket.rpc('canonicalAgent.roster', { owningParentThreadId: run.thread.id }, Date.now() + 3000);
     const row = exactNativeChild(roster, native.threadId);
     if (childOutcomeMatches(row, expectedOutcome)) {
-      const transcript = await run.socket.rpc('conversation.tail', { threadId: row.id, limit: 20 }, Date.now() + 3000);
+      const transcript = await run.socket.rpc('conversation.tail', { threadId: row.id, limit: 2 }, Date.now() + 3000);
       const parent = (await run.socket.rpc('agent.listRunning', {})).find(item => item.threadId === run.thread.id);
       const result = { at: new Date().toISOString(), native, row, roster, transcript, parent };
       run.receipt.childCaptures ??= []; run.receipt.childCaptures.push(result); writeReceipt(run);
@@ -347,7 +347,7 @@ export async function observe(run, { phase = 'held', waitForTerminal = false } =
   if (waitForTerminal) await waitFile(run, 'terminal', 5000);
   assertHeldLock(run);
   await timeout(700);
-  const body = await run.page.locator('body').innerText({ timeout: 1500 });
+  const body = await run.page.locator('body').innerText({ timeout: 5000 });
   const ownText = ['PREFIX', 'AFTER_TOOL', 'COMPLETE'].map((part) => {
     const count = body.split(`LIVE_DURABILITY ${run.id} ${part}`).length - 1;
     return { part, rendered: count > 0, occurrences: count };
@@ -507,13 +507,13 @@ function failedSaveStatus(run, snapshot, expectedFailureKind) {
 function requireRetryCut({ cut, accepted, audit, observation, expectedOutcome }) {
   if (cut.retained.length === 0 || cut.acceptedThrough <= cut.savedThrough) throw new Error('Failed saving has no accepted unsaved suffix');
   if (audit.length !== 1 || accepted.length === 0) throw new Error('Retry proof requires one measured invocation and its accepted identities');
-  if (!observation.failedSaveLabelRendered) throw new Error('Failed saving did not render before retry');
+  if (observation.failedSaveLabelRendered) throw new Error('Save failure diagnostics appeared in the chat');
   if (expectedOutcome === 'completed' && !observation.ownText.find(item => item.part === 'COMPLETE')?.rendered) {
     throw new Error('Completed save-retry proof requires the completed response to render before retry');
   }
 }
 
-/** Retries only the accepted save queue through RPC or its real notice button; never resubmits a provider prompt. */
+/** Retries only the accepted save queue through RPC or thread Overview; never resubmits a provider prompt. */
 export async function retrySave(run, { via = 'ui', maxMs = 8000 } = {}) {
   const before = run.receipt.saveRetryBefore;
   requireRetryOptions(run, via, maxMs);
@@ -528,6 +528,11 @@ export async function retrySave(run, { via = 'ui', maxMs = 8000 } = {}) {
   const runtime = await waitRuntime(run, { terminal: true });
   const acceptedComparison = compareEventIdentities(before.accepted, acceptedDescriptors(run));
   const audit = readAudit(run);
+  const overview = run.page.getByRole('button', { name: 'Thread overview', exact: true });
+  if (await overview.getAttribute('aria-expanded') !== 'true') await overview.click({ timeout: 5000 });
+  await run.page.getByTestId('thread-overview-body').waitFor({ state: 'visible', timeout: 5000 });
+  const saveRecoveryActionRemoved = await run.page.getByTestId('turn-save-recovery').count() === 0;
+  if (!saveRecoveryActionRemoved) throw new Error('Overview still offers save recovery after its accepted suffix was saved');
   const result = { at: new Date().toISOString(), requestedAt, via, ...request,
     exactDurableIdentities: durability.exact, queueDrained: durability.allSaved,
     acceptedIdentitiesUnchanged: acceptedComparison.exact,
@@ -538,6 +543,7 @@ export async function retrySave(run, { via = 'ui', maxMs = 8000 } = {}) {
     providerWasNotReinvoked: JSON.stringify(audit) === JSON.stringify(before.providerInvocationAudit),
     originalInvocationCount: before.providerInvocationAudit.length, currentInvocationCount: audit.length,
     failedSavingNoticeRemoved: !observation.failedSaveLabelRendered,
+    saveRecoveryActionRemoved,
     completeRenderedOnce: observation.ownText.find(item => item.part === 'COMPLETE')?.occurrences === 1,
     durableCount: durability.storedCount, acceptedCount: before.accepted.length, durability, acceptedComparison };
   run.receipt.saveRetry = result;
@@ -556,8 +562,11 @@ async function performSaveRetry(run, via) {
     if (rpcResult?.retried !== true) throw new Error('Public save retry did not accept the failed queue');
     return { rpcResult };
   } else {
-    const button = run.page.getByTestId('turn-saving-notice').getByRole('button', { name: /^Retry(?: save| saving)?$/i });
-    if (await button.count() !== 1) throw new Error('Expected exactly one actual saving notice Retry button');
+    const overview = run.page.getByRole('button', { name: 'Thread overview', exact: true });
+    if (await overview.getAttribute('aria-expanded') !== 'true') await overview.click({ timeout: 5000 });
+    const button = run.page.getByTestId('turn-save-recovery').getByRole('button', { name: 'Retry save', exact: true });
+    await button.waitFor({ state: 'visible', timeout: 5000 });
+    if (await button.count() !== 1) throw new Error('Expected exactly one Overview Retry save button');
     const buttonLabel = await button.innerText({ timeout: 1500 });
     await button.click({ timeout: 5000 });
     return { buttonLabel };

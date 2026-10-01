@@ -1,4 +1,5 @@
 import * as NodeEvents from "node:events";
+import * as NodeBuffer from "node:buffer";
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryPtyHostCleanupLedger } from "../../testing/in-memory-pty-host-cleanup-ledger.js";
 import type {
@@ -6,6 +7,8 @@ import type {
   PtyHostServerMessage,
 } from "../pty-host-protocol.js";
 import { PtyHostSupervisor, type PtyHostChild } from "../pty-host-supervisor.js";
+import { PtyHostCleanupLedger } from "../../cleanup/terminal-cleanup-ledger.js";
+import { createOwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 
 const UUID = "abcdef12-abcd-4abc-8abc-abcdefabcdef";
 const createRequest = {
@@ -100,6 +103,90 @@ class FakeHostChild extends NodeEvents.EventEmitter implements PtyHostChild {
 }
 
 describe("PtyHostSupervisor", () => {
+  it("streams an acknowledged session beyond one MiB while a peer's running ledger commit waits for SQLite", async () => {
+    const owned = createOwnedTestDatabase();
+    const child = new FakeHostChild();
+    const ledger = new PtyHostCleanupLedger(owned.db, owned.writer);
+    const supervisor = new PtyHostSupervisor({ platform: "windows", spawnHost: () => child, cleanupLedger: ledger });
+    const peerId = "abcdef12-abcd-4abc-8abc-abcdefabcdea";
+    const observed: PtyHostEvent[] = [];
+    supervisor.subscribe((event) => observed.push(event));
+    let locked = false;
+    try {
+      await owned.writer.whenReady();
+      await supervisor.start();
+      const peer = supervisor.create({ ...createRequest, sessionId: peerId });
+      child.emitMessage({ contractVersion: 1, kind: "running", sessionId: peerId, hostGeneration: "1", rootPid: 124, processGroupId: "job-124", containment: "job-object" });
+      await peer;
+      await owned.writer.barrier();
+      observed.length = 0;
+      owned.db.run("BEGIN IMMEDIATE");
+      locked = true;
+      let acknowledged = false;
+      const creating = supervisor.create(createRequest).then((result) => { acknowledged = true; return result; });
+      child.emitMessage({ contractVersion: 1, kind: "running", sessionId: UUID, hostGeneration: "1", rootPid: 123, processGroupId: "job-123", containment: "job-object" });
+      child.emitMessage({ contractVersion: 1, kind: "output", sessionId: UUID, hostGeneration: "1", outputSeq: "1", dataBase64: "YQ==" });
+      const dataBase64 = NodeBuffer.Buffer.alloc(65_536, "x").toString("base64");
+      for (let sequence = 1; sequence <= 13; sequence += 1) {
+        child.emitMessage({ contractVersion: 1, kind: "output", sessionId: peerId, hostGeneration: "1", outputSeq: String(sequence), dataBase64 });
+      }
+      expect(observed.filter((event) => event.kind === "output")).toHaveLength(13);
+      expect(child.kill).not.toHaveBeenCalled();
+      await expect(supervisor.inspectChildren(peerId, "1")).resolves.toEqual({ hasChildren: true });
+      expect(acknowledged).toBe(false);
+      expect(observed.some((event) => "sessionId" in event && event.sessionId === UUID)).toBe(false);
+      owned.db.run("ROLLBACK");
+      locked = false;
+      await creating;
+      await vi.waitFor(() => expect(observed.filter((event) => "sessionId" in event && event.sessionId === UUID).map((event) => event.kind)).toEqual(["running", "output"]));
+    } finally {
+      if (locked) owned.db.run("ROLLBACK");
+      await supervisor.shutdown();
+      await owned.close();
+    }
+  });
+
+  it("commits running identity before acknowledgment and preserves running-to-exit order while SQLite is locked", async () => {
+    const owned = createOwnedTestDatabase();
+    const child = new FakeHostChild();
+    const ledger = new PtyHostCleanupLedger(owned.db, owned.writer);
+    const supervisor = new PtyHostSupervisor({ platform: "windows", spawnHost: () => child, cleanupLedger: ledger });
+    const observed: string[] = [];
+    let locked = false;
+    supervisor.subscribe((event) => {
+      if (event.kind === "running") {
+        expect(ledger.get(UUID)).not.toBeNull();
+        observed.push(event.kind);
+      }
+      if (event.kind === "exit") {
+        expect(ledger.get(UUID)).toBeNull();
+        observed.push(event.kind);
+      }
+    });
+    try {
+      await owned.writer.whenReady();
+      await supervisor.start();
+      owned.db.run("BEGIN IMMEDIATE");
+      locked = true;
+      let acknowledged = false;
+      const creating = supervisor.create(createRequest).then((value) => { acknowledged = true; return value; });
+      child.emitMessage({ contractVersion: 1, kind: "running", sessionId: UUID, hostGeneration: "1", rootPid: 123, processGroupId: "job-123", containment: "job-object" });
+      child.emitMessage({ contractVersion: 1, kind: "exit", sessionId: UUID, hostGeneration: "1", finalOutputSeq: "0", code: 0, signal: null, reason: "user-close" });
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      expect(acknowledged).toBe(false);
+      expect(observed).toEqual([]);
+      owned.db.run("ROLLBACK");
+      locked = false;
+      await creating;
+      await vi.waitFor(() => expect(observed).toEqual(["running", "exit"]));
+      expect(ledger.list()).toEqual([]);
+    } finally {
+      if (locked) owned.db.run("ROLLBACK");
+      await supervisor.shutdown();
+      await owned.close();
+    }
+  });
+
   it("waits for graceful host exit beyond the normal operation deadline", async () => {
     vi.useFakeTimers();
     const child = new FakeHostChild();
@@ -343,6 +430,7 @@ describe("PtyHostSupervisor", () => {
       containment: "job-object",
     });
 
+    await vi.waitFor(() => expect(ledger.list()).toHaveLength(1));
     expect(ledger.list()).toEqual([
       expect.objectContaining({ sessionId: UUID, hostGeneration: "1" }),
     ]);
@@ -366,6 +454,7 @@ describe("PtyHostSupervisor", () => {
       signal: null,
       reason: "user-close",
     });
+    await vi.waitFor(() => expect(ledger.list()).toHaveLength(0));
     expect(ledger.list()).toEqual([]);
     await supervisor.shutdown();
     vi.useRealTimers();

@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { broadcast } from "../../../../application/transport/push.js";
 import { HandoffCoordinator } from "../handoff-coordinator.js";
 import type { HandoffArtifact, LadderStep, ProviderErrorClass } from "@mcode/contracts";
+import { DatabaseWriteOutcomeUnknown } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 
 // The coordinator broadcasts UI handoff-status events as part of path selection
 // ("generating" -> "ready"/"fallback"). Mock the push module so tests can assert
@@ -49,7 +50,7 @@ function mkDeps() {
     // Child thread is present and not deleted by default.
     threadRepo: { findById: vi.fn(() => ({ id: "t_child", deleted_at: null }) as any) },
     messageRepo: {
-      create: vi.fn(() => ({}) as any),
+      create: vi.fn(async () => ({}) as any),
       listByThread: vi.fn(() => ({ messages: [], hasMore: false }) as any),
     },
     turnSnapshotRepo: { listByThread: vi.fn(() => []) },
@@ -96,6 +97,31 @@ function lastHandoffStatus() {
 describe("HandoffCoordinator.deliverHandoff", () => {
   beforeEach(() => {
     broadcastMock.mockClear();
+  });
+
+  it("does not mark the handoff ready or return provider input until its anchor is saved", async () => {
+    const deps = mkDeps();
+    let release: (() => void) | undefined;
+    deps.messageRepo.create.mockImplementation(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return {};
+    });
+    const pending = HandoffCoordinator.forTesting(deps).deliverHandoff(mkInput({ childProvider: "codex" }));
+    await vi.waitFor(() => expect(deps.messageRepo.create).toHaveBeenCalledOnce());
+    expect(lastHandoffStatus()).toMatchObject({ status: "generating" });
+    release?.();
+    await expect(pending).resolves.toHaveProperty("providerWireOverride");
+    expect(lastHandoffStatus()).toMatchObject({ status: "ready" });
+  });
+
+  it("does not replay a handoff anchor whose commit outcome is unknown", async () => {
+    const deps = mkDeps();
+    const failure = new DatabaseWriteOutcomeUnknown("Anchor commit reply lost");
+    deps.messageRepo.create.mockRejectedValue(failure);
+    await expect(HandoffCoordinator.forTesting(deps).deliverHandoff(mkInput())).rejects.toBe(failure);
+    expect(deps.messageRepo.create).toHaveBeenCalledOnce();
+    expect(deps.handoffStorage.write).toHaveBeenCalledOnce();
+    expect(lastHandoffStatus()).toMatchObject({ status: "generating" });
   });
 
   it("path B: persists the artifact, broadcasts ready, anchors the full doc, delivers off-band", async () => {

@@ -305,6 +305,7 @@ export class PullRequestReviewGitService {
       provisioned: Extract<PullRequestReviewGitProvisionResult, { kind: "ready" }>,
     ) => Promise<T> | T,
     observer?: PullRequestReviewGitObserver,
+    rollbackOnCommitFailure: (error: unknown) => boolean = () => true,
   ): Promise<
     | Extract<PullRequestReviewGitProvisionResult, { kind: "requires_reuse" }>
     | { kind: "committed"; value: T }
@@ -320,7 +321,7 @@ export class PullRequestReviewGitService {
       try {
         return { kind: "committed" as const, value: await commit(provisioned) };
       } catch (error) {
-        await provisioned.rollback();
+        if (rollbackOnCommitFailure(error)) await provisioned.rollback();
         throw error;
       }
     });

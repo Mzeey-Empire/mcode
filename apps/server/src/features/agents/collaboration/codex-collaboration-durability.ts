@@ -7,9 +7,6 @@ import type {
   TurnOutcome,
 } from "@mcode/contracts";
 
-/** Injection token for the narrow Codex-native collaboration durability boundary. */
-export const CODEX_COLLABORATION_DURABILITY = Symbol("CodexCollaborationDurability");
-
 /** The durable state created for one Codex provider-native child delegation. */
 export interface CodexChildDelegation {
   childThread: AgentThread;
@@ -107,7 +104,7 @@ export interface CodexCollaborationActionInput {
   payload: Record<string, unknown>;
 }
 
-/** Durable Codex-native collaboration operations that a future adapter can receive by construction. */
+/** Synchronous collaboration state used inside writer transactions or by the retained accepted owner. */
 export interface CodexCollaborationDurability {
   loadThread(threadId: string): AgentThread | null;
   loadThreadByProviderIdentity(identity: ProviderIdentity): AgentThread | null;

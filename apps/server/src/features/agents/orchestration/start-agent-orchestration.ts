@@ -40,6 +40,6 @@ export function startAgentOrchestration({
     publishThreadStatus,
   });
   publication.start();
-  publicationRegistry.bind((event) => publication.publish(event));
+  publicationRegistry.bind((event) => publication.publish(event), () => publication.drain());
   publicationRegistry.start();
 }

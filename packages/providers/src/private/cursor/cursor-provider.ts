@@ -346,8 +346,17 @@ export class CursorProvider
     return [...CURSOR_STATIC_MODEL_FALLBACK];
   }
 
+  private readonly turnTasks = new Set<Promise<void>>();
+
   /** Queues an ACP `session/prompt` on the session subprocess (serialized per thread). */
-  async sendTurn(req: TurnRequest<"cursor">): Promise<void> {
+  sendTurn(req: TurnRequest<"cursor">): Promise<void> {
+    const task = this.dispatchTurnRequest(req);
+    this.turnTasks.add(task);
+    void task.then(() => { this.turnTasks.delete(task); }, () => { this.turnTasks.delete(task); });
+    return task;
+  }
+
+  private async dispatchTurnRequest(req: TurnRequest<"cursor">): Promise<void> {
     const context = this.prepareTurnContext(req);
     const { sessionId } = context;
     // `resumeFrom` defined ⇒ resume the stored ACP session; undefined ⇒ fresh.
@@ -825,18 +834,19 @@ export class CursorProvider
 
 
   /** Tear down all sessions, cancel pending permissions, and stop the eviction timer. */
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     this.getAcpClientBridge().cancelAllPending();
+    const closingRuntimes: Promise<void>[] = [];
     for (const [sessionId, runtime] of this.pendingAcpRuntimes ?? []) {
       this.pendingStops.add(sessionId);
-      void runtime.close();
+      closingRuntimes.push(runtime.close());
     }
     for (const sessionId of this.liveSessionIds) {
       this.browserAutomationLease.releaseSession(this.id, sessionId);
     }
-    void this.runtime.shutdown().catch((err: unknown) => {
-      logger.warn("Cursor runtime shutdown failed", { error: String(err) });
-    });
+    const results = await Promise.allSettled([...closingRuntimes, this.runtime.shutdown()]);
+    results.push(...await Promise.allSettled(this.turnTasks));
+    results.push(...await Promise.allSettled([this.canonicalEventPublisher.stopAdmissionAndDrain()]));
     this.sdkSessionIds.clear();
     this.liveSessionIds.clear();
     for (const stage of this.pendingBrowserLeases.values()) {
@@ -849,6 +859,8 @@ export class CursorProvider
     this.pendingBrowserContext.clear();
     this.pendingBrowserGrants.clear();
     this.pendingBrowserGrantContext.clear();
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Cursor provider shutdown failed");
     logger.info("CursorProvider shutdown complete");
   }
 

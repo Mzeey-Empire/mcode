@@ -76,9 +76,9 @@ const workspaceEnvironmentHandlers: WorkspaceEnvironmentHandlerMap = {
   },
   "workspace.environment.command.approve": (deps, params) =>
     deps.workspaceEnvironmentService.approveCommand(params),
-  "workspace.environment.command.clearApprovals": (deps, params) => {
+  "workspace.environment.command.clearApprovals": async (deps, params) => {
     requireWorkspace(deps, params.workspaceId);
-    deps.workspaceEnvironmentService.clearApprovals(params.workspaceId);
+    await deps.workspaceEnvironmentService.clearApprovals(params.workspaceId);
   },
   "workspace.environment.setup.start": (deps, params) =>
     deps.workspaceEnvironmentService.startSetup(params),

@@ -1,3 +1,4 @@
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import {
@@ -9,18 +10,19 @@ import {
 } from "@mcode/contracts";
 import { z } from "zod";
 
-import { MessageRepo } from "../conversation/persistence/message-repo.js";
-import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
-import { ThoughtSegmentRepo } from "../conversation/narrative/persistence/thought-segment-repo.js";
-import { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js";
-import { PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-repo.js";
-import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
+import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
+import { NarrativeReadStore } from "../conversation/narrative/narrative-read-store.js";
+import { recoveredNarrativeRows } from "../conversation/narrative/recovered-narrative-rows.js";
+import { ThoughtSegmentStore as ThoughtSegmentRepo } from "../conversation/narrative/persistence/thought-segment-store.js";
+import { HookExecutionStore as HookExecutionRepo } from "../events/persistence/hook-execution-store.js";
+import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-store.js";
+import { ToolCallRecordStore as ToolCallRecordRepo } from "../tools/persistence/tool-call-record-store.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
-import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
+import { ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-store.js";
 import { TURN_DIFF_MAX_BYTES, parseTurnDiff } from "../turns/turn-diff-patch.js";
-import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
-import { TurnSnapshotRepo } from "../turns/persistence/turn-snapshot-repo.js";
+import { TurnDiffStore as TurnDiffRepo } from "../turns/persistence/turn-diff-store.js";
+import { TurnSnapshotStore as TurnSnapshotRepo } from "../turns/persistence/turn-snapshot-store.js";
 import type { PreparedExecutionFileEvidence } from "../turns/turn-execution-file-evidence.js";
 import type { SelectedTurnDiff } from "../turns/turn-diff-service.js";
 import type {
@@ -28,9 +30,8 @@ import type {
   ParentTurnProjection,
   ParentTurnStartInput,
 } from "../turns/parent-turn-durability.js";
-import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
 import {
-  CanonicalAgentBoundary,
   type CanonicalAgentBatchedCommitResult,
   type CanonicalAgentCommitInput,
   type CanonicalAgentCommitResult,
@@ -139,6 +140,7 @@ export interface LostParentExecutionInput {
   executionId: string;
   reason: string;
   recoveryIncidentId: string;
+  endedAt?: string;
   assignedMessageId?: string;
 }
 
@@ -147,7 +149,10 @@ export class CanonicalParentTurnWrite {
   private readonly db: Database;
   private readonly canonical: CanonicalAgentBoundary;
   private readonly messages: MessageRepo;
-  private readonly narrative: NarrativeStore;
+  private readonly narrative: NarrativeReadStore;
+  private readonly toolRecords: ToolCallRecordRepo;
+  private readonly thoughtRecords: ThoughtSegmentRepo;
+  private readonly hookRecords: HookExecutionRepo;
   private readonly threads: ThreadRepo;
   private readonly planAnswers: PlanQuestionAnswersRepo;
   private readonly stagedAssistant: ReturnType<Database["prepare"]>;
@@ -160,13 +165,10 @@ export class CanonicalParentTurnWrite {
     this.db = db;
     this.canonical = new CanonicalAgentBoundary(db, publish);
     this.messages = new MessageRepo(db);
-    this.narrative = new NarrativeStore(
-      this.messages,
-      new ToolCallRecordRepo(db),
-      new ThoughtSegmentRepo(db),
-      new HookExecutionRepo(db),
-      db,
-    );
+    this.toolRecords = new ToolCallRecordRepo(db);
+    this.thoughtRecords = new ThoughtSegmentRepo(db);
+    this.hookRecords = new HookExecutionRepo(db);
+    this.narrative = new NarrativeReadStore(this.toolRecords, this.thoughtRecords, this.hookRecords);
     this.threads = new ThreadRepo(db);
     this.planAnswers = new PlanQuestionAnswersRepo(db);
     this.stagedAssistant = db.prepare("SELECT role, content FROM messages WHERE id = ? AND thread_id = ?");
@@ -199,10 +201,11 @@ export class CanonicalParentTurnWrite {
       input.reason,
       assistant ?? undefined,
       recoveredNarrative.length > 0
-        ? (message, narrative) => this.narrative.persistRecoveredNarrative(message.id, narrative)
+        ? (message, narrative) => this.persistRecoveredNarrative(message.id, narrative)
         : undefined,
       recoveredNarrative,
       input.recoveryIncidentId,
+      input.endedAt,
     );
     if (result.outcome !== "committed") throw new Error(`Parent interruption did not commit: ${input.executionId}`);
     this.threads.updateStatus(input.threadId, "interrupted");
@@ -311,6 +314,13 @@ export class CanonicalParentTurnWrite {
     return this.db.transaction(() => this.stageTerminalProjectionInTransaction(input, narrative))();
   }
 
+  private persistRecoveredNarrative(messageId: string, items: readonly ParentNarrativeRecoveryItem[], replaceExisting = false): void {
+    const rows = recoveredNarrativeRows(messageId, items);
+    this.toolRecords.bulkCreate(rows.tools, replaceExisting);
+    this.thoughtRecords.bulkCreate(rows.thoughts, replaceExisting);
+    this.hookRecords.bulkCreate(rows.hooks, replaceExisting);
+  }
+
   /** Replace an internal accepted prefix with the exact terminal body on the writer connection. */
   stageAcceptedTerminalProjection(input: DataOnlyParentTerminalProjectionInput): StagedParentTerminalProjection {
     this.terminalProjectionTurn(input);
@@ -334,8 +344,9 @@ export class CanonicalParentTurnWrite {
       return { projection: { message: null, narrative: [] }, messageId: null, toolCallCount: 0 };
     }
     const message = this.stageAssistant(input);
-    const settled = settleTerminalNarrative(snapshot, message.id, input.outcome, input.endedAt, input.assistant.content);
-    this.narrative.persistRecoveredNarrative(message.id, settled, true);
+    const parentSnapshot = this.canonical.parentOwnedNarrative(input.threadId, turn.turnId, snapshot);
+    const settled = settleTerminalNarrative(parentSnapshot, message.id, input.outcome, input.endedAt, input.assistant.content);
+    this.persistRecoveredNarrative(message.id, settled, true);
     return this.projectionForMessage(message);
   }
 
@@ -429,11 +440,34 @@ export class CanonicalParentTurnWrite {
     input: DataOnlyParentTurnFinishInput,
     onBatchWrite?: (batch: CanonicalTerminalBatchWrite) => void,
   ): Promise<CanonicalAgentBatchedCommitResult> {
+    const projection = this.terminalProjection(input);
+    return this.canonical.finishParentTurnBatched({
+      ...input,
+      projectTurn: () => projection,
+      finalizeCompatibility: () => this.finalizeProjectionCompatibility(input, projection),
+    }, onBatchWrite);
+  }
+
+  /** Commit one bounded terminal checkpoint without crossing the worker transaction with a callback. */
+  finishBatch(input: DataOnlyParentTurnFinishInput, endedAt: string, cursor: number) {
+    const checkpoint = this.canonical.loadCheckpoint(input.executionId);
+    if (!checkpoint || checkpoint.threadId !== input.threadId || checkpoint.turnId !== input.turnId) {
+      throw new Error(`Canonical parent execution not found: ${input.executionId}`);
+    }
+    if (checkpoint.terminalOutcome) {
+      return this.canonical.finishParentTurnBatch({ ...input, projectTurn: () => ({ message: null, narrative: [] }) }, endedAt, cursor);
+    }
+    const projection = this.terminalProjection(input);
+    return this.canonical.finishParentTurnBatch({ ...input, projectTurn: () => projection,
+      finalizeCompatibility: () => this.finalizeProjectionCompatibility(input, projection) }, endedAt, cursor);
+  }
+
+  private terminalProjection(input: DataOnlyParentTurnFinishInput): ParentTurnProjection {
     const staged = "kind" in input.projection
       ? this.loadStagedTerminalProjection(input.threadId, input.executionId, input.projection.messageId)
       : input.projection;
     this.assertStagedAssistant(input.threadId, staged);
-    const projection: ParentTurnProjection = {
+    return {
       message: staged.message
         ? {
             ...staged.message,
@@ -442,13 +476,8 @@ export class CanonicalParentTurnWrite {
             outcomeExecutionId: input.executionId,
           }
         : null,
-      narrative: staged.narrative,
+      narrative: this.canonical.parentOwnedNarrative(input.threadId, input.turnId, staged.narrative),
     };
-    return this.canonical.finishParentTurnBatched({
-      ...input,
-      projectTurn: () => projection,
-      finalizeCompatibility: () => this.finalizeProjectionCompatibility(input, projection),
-    }, onBatchWrite);
   }
 
   private finalizeProjectionCompatibility(input: DataOnlyParentTurnFinishInput, projection: ParentTurnProjection): void {

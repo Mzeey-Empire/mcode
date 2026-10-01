@@ -1,11 +1,10 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
-import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { TaskRepo, type StoredTask } from "../task-repo.js";
-import { WorkspaceRepo } from "../../../../projects/persistence/workspace-repo.js";
-import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
+import { TaskStore, type StoredTask } from "../task-store.js";
+import { WorkspaceStore } from "../../../../projects/persistence/workspace-store.js";
+import { ThreadStore } from "../../../../thread-control/persistence/thread-store.js";
 
 /**
  * The repo serializes tasks via JSON.stringify, so coverage focuses on the
@@ -15,19 +14,17 @@ import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.j
  * `thread_tasks.thread_id` is a FK to `threads(id)` (CASCADE on delete), so
  * each test creates a workspace + thread before exercising the repo.
  */
-describe("TaskRepo", () => {
+describe("TaskStore", () => {
   let db: Database;
-  let repo: TaskRepo;
-  let workspaceRepo: WorkspaceRepo;
-  let threadRepo: ThreadRepo;
+  let repo: TaskStore;
+  let workspaceRepo: WorkspaceStore;
+  let threadRepo: ThreadStore;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    container.reset();
-    container.registerInstance("Database", db);
-    repo = container.resolve(TaskRepo);
-    workspaceRepo = container.resolve(WorkspaceRepo);
-    threadRepo = container.resolve(ThreadRepo);
+    repo = new TaskStore(db);
+    workspaceRepo = new WorkspaceStore(db);
+    threadRepo = new ThreadStore(db);
   });
 
   /** Create a workspace + thread so FK constraints on thread_tasks are satisfied. */

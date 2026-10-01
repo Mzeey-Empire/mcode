@@ -1,4 +1,5 @@
-import * as NodeCrypto from "node:crypto";
+import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { reviewLinkProjection } from "./review-link-projection.js";
 import { inject, injectable } from "tsyringe";
 import {
   THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS,
@@ -13,7 +14,6 @@ import type {
   PullRequestReviewLink as PullRequestReviewLinkDto,
   PullRequestReviewLinkResult,
   PullRequestReviewSource,
-  PullRequestState,
   PullRequestWorkspaceCandidate,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
@@ -95,29 +95,11 @@ function safeStartupOutput(value: string): string {
     .replace(/\b((?:access[_-]?)?(?:token|password|secret|authorization|credential))\s*[:=]\s*\S+/gi, "$1=[redacted]");
 }
 
-function pullRequestIdentityFromLink(link: PullRequestReviewLink): PullRequestIdentity | null {
-  try {
-    const url = new URL(link.pullRequestUrl);
-    const [owner, repository, pullSegment, number] = url.pathname.split("/").filter(Boolean);
-    if (!owner || !repository || pullSegment !== "pull" || Number(number) !== link.pullRequestNumber) {
-      return null;
-    }
-    return {
-      provider: "github",
-      repositoryNodeId: link.repositoryNodeId,
-      owner,
-      repository,
-      number: link.pullRequestNumber,
-    };
-  } catch {
-    return null;
-  }
-}
-
 /** Creates idempotent pull request Review tasks and their isolated local worktrees. */
 @injectable()
 export class ReviewWorktreeService {
   private readonly identityLocks = new Map<string, Promise<void>>();
+  private readonly startupOutputWrites = new Map<string, Promise<void>>();
 
   constructor(
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
@@ -125,8 +107,9 @@ export class ReviewWorktreeService {
     @inject(PullRequestReviewLinkRepo)
     private readonly reviewLinkRepo: PullRequestReviewLinkRepo,
     @inject(PullRequestReviewGitService)
-    private readonly pullRequestReviews: PullRequestReviewGitService,
-    @inject(GitRepositoryService) private readonly gitRepository: GitRepositoryService,
+    private readonly pullRequestReviews: Pick<PullRequestReviewGitService,
+      "findCompatiblePullRequestReviewWorktrees" | "getReviewWorktreeDestination" | "provisionPullRequestReviewWorktreeAndCommit">,
+    @inject(GitRepositoryService) private readonly gitRepository: Pick<GitRepositoryService, "listNormalizedRemotes">,
     @inject(PullRequestService) private readonly pullRequestService: PullRequestService,
     @inject(AgentService) private readonly agentService: AgentService,
     @inject(SettingsService) private readonly settingsService: SettingsService,
@@ -142,19 +125,21 @@ export class ReviewWorktreeService {
   ): Promise<PullRequestCreateReviewTaskResult> {
     let startupId: string | undefined;
     try {
-      startupId = this.startReviewStartup(request);
+      startupId = await this.startReviewStartup(request);
       return await this.withIdentityLock(request.identity, async () => {
-        const canonical = this.findActiveCanonicalLink(request.identity);
+        const canonical = await this.findActiveCanonicalLink(request.identity);
         if (canonical) {
-          this.completeExistingReviewStartup(startupId, canonical.threadId);
+          await this.completeExistingReviewStartup(startupId, canonical.threadId);
           return { ok: true, status: "ready", reused: true, reviewLink: canonical };
         }
         return await this.createReviewTaskUnderLock(request, startupId);
       });
     } catch (error) {
-      if (error instanceof ReviewStartupCancelledError) this.markReviewStartupCancelled(startupId);
-      else this.failReviewStartup(startupId);
+      if (error instanceof ReviewStartupCancelledError) await this.markReviewStartupCancelled(startupId);
+      else await this.failReviewStartup(startupId);
       return { ok: false, error: this.toPullRequestError(error) };
+    } finally {
+      if (startupId) this.startupOutputWrites.delete(startupId);
     }
   }
 
@@ -165,7 +150,7 @@ export class ReviewWorktreeService {
     const source = await this.loadAndValidateSource(request.identity);
     const workspace = await this.resolveWorkspace(source.git.baseRepositoryUrl, request.workspaceId);
     if ("error" in workspace) {
-      this.failReviewStartup(startupId);
+      await this.failReviewStartup(startupId);
       return { ok: false, error: workspace.error };
     }
     if (request.action === "prepare") {
@@ -175,8 +160,8 @@ export class ReviewWorktreeService {
       );
       return this.prepareReviewTask(source, workspace, compatible);
     }
-    this.advanceReviewStartup(startupId, "worktree");
-    this.cancelReviewStartupIfRequested(startupId);
+    await this.advanceReviewStartup(startupId, "worktree");
+    await this.cancelReviewStartupIfRequested(startupId);
     return await this.completeReviewTask(request, source, workspace, startupId);
   }
 
@@ -210,7 +195,7 @@ export class ReviewWorktreeService {
     startupId: string | undefined,
   ): Promise<PullRequestCreateReviewTaskResult> {
     if (source.contract.expectedHeadOid.toLowerCase() !== request.expectedHeadOid.toLowerCase()) {
-      this.failReviewStartup(startupId);
+      await this.failReviewStartup(startupId);
       return { ok: false, error: { code: "conflict", message: "The pull request head changed. Refresh before creating the Review task." } };
     }
     const mutation = await this.provisionReviewTask(
@@ -221,18 +206,18 @@ export class ReviewWorktreeService {
       startupId,
     );
     if (mutation instanceof CanonicalReviewTaskWonError) {
-      this.completeExistingReviewStartup(startupId, mutation.winner.threadId);
+      await this.completeExistingReviewStartup(startupId, mutation.winner.threadId);
       return { ok: true, status: "ready", reused: true, reviewLink: mutation.winner };
     }
     if (mutation.kind === "requires_reuse") {
       return { ok: true, status: "existing_worktree", source: source.contract,
         workspace: workspace.candidate, worktree: mutation.candidate };
     }
-    this.bindReviewStartup(startupId, mutation.value.threadId);
-    this.cancelReviewStartupIfRequested(startupId);
-    this.advanceReviewStartup(startupId, "agent");
+    await this.bindReviewStartup(startupId, mutation.value.threadId);
+    await this.cancelReviewStartupIfRequested(startupId);
+    await this.advanceReviewStartup(startupId, "agent");
     const warnings = await this.seedInitialContext(mutation.value.threadId, request.intent, source.remote);
-    this.completeReviewStartup(startupId);
+    await this.completeReviewStartup(startupId);
     return { ok: true, status: "ready", reused: false, reviewLink: mutation.value.link,
       ...(warnings.length > 0 ? { warnings } : {}) };
   }
@@ -248,25 +233,30 @@ export class ReviewWorktreeService {
     | CanonicalReviewTaskWonError
   > {
     try {
-      return await this.pullRequestReviews.provisionPullRequestReviewWorktreeAndCommit(
+      const result = await this.pullRequestReviews.provisionPullRequestReviewWorktreeAndCommit(
         workspacePath,
         source.git,
         request.action === "create_new"
           ? { action: "create_new", worktreeName: request.worktreeName }
           : { action: "reuse_existing", candidateId: request.candidateId },
-        (provisioned) => {
+        async (provisioned) => {
+          await this.waitForReviewStartupOutput(startupId);
           this.throwIfReviewStartupCancelled(startupId);
           return this.persistCanonicalReviewTask(request.identity, source, workspaceId, provisioned);
         },
         this.reviewStartupReporter(startupId),
+        (error: unknown) => !(error instanceof DatabaseWriteOutcomeUnknown),
       );
+      await this.waitForReviewStartupOutput(startupId);
+      return result;
     } catch (error) {
+      await this.waitForReviewStartupOutput(startupId);
       if (error instanceof CanonicalReviewTaskWonError) return error;
       throw error;
     }
   }
 
-  private persistCanonicalReviewTask(
+  private async persistCanonicalReviewTask(
     identity: PullRequestIdentity,
     source: ResolvedReviewSource,
     workspaceId: string,
@@ -274,11 +264,12 @@ export class ReviewWorktreeService {
       Awaited<ReturnType<PullRequestReviewGitService["provisionPullRequestReviewWorktree"]>>,
       { kind: "ready" }
     >,
-  ): { threadId: string; link: PullRequestReviewLinkDto } {
+  ): Promise<{ threadId: string; link: PullRequestReviewLinkDto }> {
     try {
-      return this.persistReviewTask(identity, source, workspaceId, provisioned);
+      return await this.persistReviewTask(identity, source, workspaceId, provisioned);
     } catch (error) {
-      const winner = this.findActiveCanonicalLink(identity);
+      if (error instanceof DatabaseWriteOutcomeUnknown) throw error;
+      const winner = await this.findActiveCanonicalLink(identity);
       if (winner) throw new CanonicalReviewTaskWonError(winner);
       throw error;
     }
@@ -364,48 +355,48 @@ export class ReviewWorktreeService {
     }
   }
 
-  private startReviewStartup(request: PullRequestCreateReviewTaskRequest): string | undefined {
+  private async startReviewStartup(request: PullRequestCreateReviewTaskRequest): Promise<string | undefined> {
     if (request.action === "prepare" || !request.startupId || !this.threadStartups) return undefined;
-    const startup = this.threadStartups.start({
+    const startup = await this.threadStartups.start({
       startupId: request.startupId,
       workspaceId: request.workspaceId,
       kind: "pull-request-review",
     });
-    if (startup.state === "pending") this.threadStartups.advance(startup.startupId, "thread");
-    this.cancelReviewStartupIfRequested(startup.startupId);
+    if (startup.state === "pending") await this.threadStartups.advance(startup.startupId, "thread");
+    await this.cancelReviewStartupIfRequested(startup.startupId);
     return startup.startupId;
   }
 
-  private completeExistingReviewStartup(startupId: string | undefined, threadId: string): void {
-    this.bindReviewStartup(startupId, threadId);
-    this.advanceReviewStartup(startupId, "worktree");
-    this.cancelReviewStartupIfRequested(startupId);
-    this.advanceReviewStartup(startupId, "agent");
-    this.cancelReviewStartupIfRequested(startupId);
-    this.completeReviewStartup(startupId);
+  private async completeExistingReviewStartup(startupId: string | undefined, threadId: string): Promise<void> {
+    await this.bindReviewStartup(startupId, threadId);
+    await this.advanceReviewStartup(startupId, "worktree");
+    await this.cancelReviewStartupIfRequested(startupId);
+    await this.advanceReviewStartup(startupId, "agent");
+    await this.cancelReviewStartupIfRequested(startupId);
+    await this.completeReviewStartup(startupId);
   }
 
-  private advanceReviewStartup(startupId: string | undefined, phase: "worktree" | "agent"): void {
+  private async advanceReviewStartup(startupId: string | undefined, phase: "worktree" | "agent"): Promise<void> {
     if (!startupId) return;
     const startup = this.threadStartups?.get(startupId);
     if (!startup || startup.state !== "running" || startup.phase === phase) return;
-    this.threadStartups?.advance(startupId, phase);
+    await this.threadStartups?.advance(startupId, phase);
   }
 
-  private bindReviewStartup(startupId: string | undefined, threadId: string): void {
-    if (startupId) this.threadStartups?.bindThread(startupId, threadId);
+  private async bindReviewStartup(startupId: string | undefined, threadId: string): Promise<void> {
+    if (startupId) await this.threadStartups?.bindThread(startupId, threadId);
   }
 
-  private completeReviewStartup(startupId: string | undefined): void {
+  private async completeReviewStartup(startupId: string | undefined): Promise<void> {
     const startups = this.threadStartups;
     if (!startupId || startups?.get(startupId)?.state !== "running") return;
-    startups.complete(startupId);
+    await startups.complete(startupId);
   }
 
-  private cancelReviewStartupIfRequested(startupId: string | undefined): void {
+  private async cancelReviewStartupIfRequested(startupId: string | undefined): Promise<void> {
     const startups = this.threadStartups;
     if (!startupId || !startups?.isCancellationRequested(startupId)) return;
-    startups.markCancelled(startupId);
+    await startups.markCancelled(startupId);
     throw new ReviewStartupCancelledError();
   }
 
@@ -415,19 +406,19 @@ export class ReviewWorktreeService {
     }
   }
 
-  private markReviewStartupCancelled(startupId: string | undefined): void {
-    if (startupId) this.threadStartups?.markCancelled(startupId);
+  private async markReviewStartupCancelled(startupId: string | undefined): Promise<void> {
+    if (startupId) await this.threadStartups?.markCancelled(startupId);
   }
 
-  private failReviewStartup(startupId: string | undefined): void {
+  private async failReviewStartup(startupId: string | undefined): Promise<void> {
     if (!startupId) return;
     const startup = this.threadStartups?.get(startupId);
     if (!startup || TERMINAL_STARTUP_STATES.has(startup.state)) return;
     if (startup.cancellation === "requested") {
-      this.threadStartups?.markCancelled(startupId);
+      await this.threadStartups?.markCancelled(startupId);
       return;
     }
-    this.threadStartups?.fail(startupId, this.reviewStartupFailure(startup.phase));
+    await this.threadStartups?.fail(startupId, this.reviewStartupFailure(startup.phase));
   }
 
   private reviewStartupFailure(phase: string): { code: string; message: string; retryable: boolean } {
@@ -449,17 +440,26 @@ export class ReviewWorktreeService {
 
   private appendReviewStartupOutput(startupId: string, content: string): void {
     const safeOutput = safeStartupOutput(content.replace(/\0/g, ""));
-    for (let offset = 0; offset < safeOutput.length; offset += THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS) {
-      this.threadStartups?.appendOutput(
-        startupId,
-        safeOutput.slice(offset, offset + THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS),
-      );
-    }
+    const previous = this.startupOutputWrites.get(startupId) ?? Promise.resolve();
+    const pending = previous.then(async () => {
+      for (let offset = 0; offset < safeOutput.length; offset += THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS) {
+        await this.threadStartups.appendOutput(startupId, safeOutput.slice(offset, offset + THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS));
+      }
+    });
+    this.startupOutputWrites.set(startupId, pending);
+    // Git output callbacks cannot await; retain the rejection for the commit boundary.
+    void pending.catch((error: unknown) => {
+      logger.warn("Review startup transcript save failed", { startupId, error: error instanceof Error ? error.message : String(error) });
+    });
   }
 
-  private findActiveCanonicalLink(
+  private async waitForReviewStartupOutput(startupId: string | undefined): Promise<void> {
+    if (startupId) await this.startupOutputWrites.get(startupId);
+  }
+
+  private async findActiveCanonicalLink(
     identity: PullRequestIdentity,
-  ): PullRequestReviewLinkDto | null {
+  ): Promise<PullRequestReviewLinkDto | null> {
     const link = this.reviewLinkRepo.findByIdentity({
       provider: identity.provider,
       repositoryNodeId: identity.repositoryNodeId,
@@ -468,7 +468,7 @@ export class ReviewWorktreeService {
     if (!link?.primaryThreadId) return null;
     const thread = this.threadRepo.findById(link.primaryThreadId);
     if (thread && thread.deleted_at === null) return this.toContractLink(link);
-    this.reviewLinkRepo.clearPrimaryThreadByThreadId(link.primaryThreadId);
+    await this.reviewLinkRepo.clearPrimaryThreadByThreadId(link.primaryThreadId);
     return null;
   }
 
@@ -583,89 +583,22 @@ export class ReviewWorktreeService {
       .slice(0, 100)
       .replace(/[.-]+$/g, "");
   }
-
-  private persistReviewTask(
-    identity: PullRequestIdentity,
-    source: ResolvedReviewSource,
-    workspaceId: string,
-    provisioned: Extract<
-      Awaited<ReturnType<PullRequestReviewGitService["provisionPullRequestReviewWorktree"]>>,
-      { kind: "ready" }
-    >,
-  ): { threadId: string; link: PullRequestReviewLinkDto } {
+  private async persistReviewTask(identity: PullRequestIdentity, source: ResolvedReviewSource, workspaceId: string, provisioned: Extract<Awaited<ReturnType<PullRequestReviewGitService["provisionPullRequestReviewWorktree"]>>, { kind: "ready" }>): Promise<{ threadId: string; link: PullRequestReviewLinkDto }> {
     const settings = this.settingsService.get();
-    const provider = settings.model.defaults.provider;
-    const title = `Review #${identity.number}: ${source.remote.detail.title}`.slice(0, 200);
-    const linkIdentity = {
-      provider: identity.provider,
-      repositoryNodeId: identity.repositoryNodeId,
-      pullRequestNumber: identity.number,
-    };
-
-    return this.reviewLinkRepo.withWriteTransaction(() => {
-      const canonical = this.findActiveCanonicalLink(identity);
-      if (canonical) {
-        throw new Error("A canonical Review task was created concurrently.");
-      }
-      const thread = this.threadRepo.create(
-        workspaceId,
-        title,
-        "worktree",
-        provisioned.branch,
-        provisioned.managed,
-        provider,
-        undefined,
-        "named",
-        source.remote.detail.base.name,
-      );
-      if (!this.threadRepo.updateWorktreePath(thread.id, provisioned.path)) {
-        throw new Error("Failed to persist the Review worktree path.");
-      }
-      if (!this.threadRepo.updateModel(thread.id, settings.model.defaults.id)) {
-        throw new Error("Failed to persist the Review task model.");
-      }
-      if (!this.threadRepo.updateSettings(thread.id, {
-        reasoning_level: settings.model.defaults.reasoning,
-        interaction_mode: settings.agent.defaults.mode === "plan" ? "plan" : "build",
-        permission_mode: settings.agent.defaults.permission,
-        context_window_mode: settings.model.defaults.contextWindow,
-        thinking: settings.model.defaults.thinking,
-      })) {
-        throw new Error("Failed to persist the Review task settings.");
-      }
-      if (!this.threadRepo.updatePr(thread.id, identity.number, source.remote.detail.state.toUpperCase())) {
-        throw new Error("Failed to persist the pull request on the Review task.");
-      }
-
-      const checkout = {
-        pullRequestUrl: source.remote.detail.url,
-        pullRequestState: source.remote.detail.state,
-        workspaceId,
-        worktreePath: provisioned.path,
-        worktreeManaged: provisioned.managed,
-        headRepositoryNodeId: source.remote.headRepositoryNodeId,
-        headRepositoryOwner: source.remote.detail.head.owner!,
-        headRepositoryName: source.remote.detail.head.repository!,
-        headRef: source.remote.detail.head.name,
-        headOid: source.remote.detail.head.oid!,
-        localBranch: provisioned.branch,
-        pushRemote: provisioned.pushRemote,
-        pushRef: provisioned.pushRef,
-        managedRemoteName: provisioned.managedRemoteName,
-      };
-      const existing = this.reviewLinkRepo.findByIdentity(linkIdentity);
-      let link = existing
-        ? this.reviewLinkRepo.replaceLocalCheckout(linkIdentity, checkout)
-        : this.reviewLinkRepo.insert({
-            worktreeId: NodeCrypto.randomUUID(),
-            ...linkIdentity,
-            ...checkout,
-          });
-      if (!link) throw new Error("The pull request Review link is already owned.");
-      link = this.reviewLinkRepo.updatePrimaryThread(linkIdentity, thread.id);
-      if (!link) throw new Error("Failed to assign the canonical Review task.");
-      return { threadId: thread.id, link: this.toContractLink(link) };
+    const committed = await this.reviewLinkRepo.persistReviewTask({
+      identity, title: `Review #${identity.number}: ${source.remote.detail.title}`.slice(0, 200), baseBranch: source.remote.detail.base.name,
+      checkout: {
+        pullRequestUrl: source.remote.detail.url, pullRequestState: source.remote.detail.state, workspaceId,
+        worktreePath: provisioned.path, worktreeManaged: provisioned.managed,
+        headRepositoryNodeId: source.remote.headRepositoryNodeId, headRepositoryOwner: source.remote.detail.head.owner!,
+        headRepositoryName: source.remote.detail.head.repository!, headRef: source.remote.detail.head.name, headOid: source.remote.detail.head.oid!,
+        localBranch: provisioned.branch, pushRemote: provisioned.pushRemote, pushRef: provisioned.pushRef, managedRemoteName: provisioned.managedRemoteName,
+      },
+      defaults: { provider: settings.model.defaults.provider, model: settings.model.defaults.id, reasoning: settings.model.defaults.reasoning,
+        interactionMode: settings.agent.defaults.mode === "plan" ? "plan" : "build", permission: settings.agent.defaults.permission,
+        contextWindow: settings.model.defaults.contextWindow, thinking: settings.model.defaults.thinking },
     });
+    return { threadId: committed.thread.id, link: committed.link };
   }
 
   private async seedInitialContext(
@@ -798,29 +731,10 @@ export class ReviewWorktreeService {
     ].join("\n");
     return truncateUtf8(payload, REVIEW_CONTEXT_MAX_BYTES);
   }
-
-  private toContractLink(link: PullRequestReviewLink): PullRequestReviewLinkDto {
-    if (!link.primaryThreadId) throw new Error("Review link has no canonical task.");
-    const identity = pullRequestIdentityFromLink(link);
-    if (!identity) throw new Error("Review link has an invalid pull request URL.");
-    return {
-      identity,
-      pullRequestUrl: link.pullRequestUrl,
-      pullRequestState: link.pullRequestState as PullRequestState,
-      threadId: link.primaryThreadId,
-      worktreeId: link.worktreeId,
-      workspaceId: link.workspaceId,
-      worktreePath: link.worktreePath,
-      worktreeManaged: link.worktreeManaged,
-      checkoutState: "named",
-      localBranch: link.localBranch,
-      headOid: link.headOid,
-      pushRemote: link.pushRemote,
-      pushRef: link.pushRef,
-    };
-  }
+  private toContractLink(link: PullRequestReviewLink): PullRequestReviewLinkDto { return reviewLinkProjection(link); }
 
   private toPullRequestError(error: unknown): PullRequestError {
+    if (error instanceof DatabaseWriteOutcomeUnknown) return { code: "conflict", message: "The Review task save outcome is unknown. Its checkout was kept. Refresh before retrying." };
     if (error instanceof PullRequestReviewGitError) {
       return { code: error.code, message: error.message.slice(0, 512) };
     }

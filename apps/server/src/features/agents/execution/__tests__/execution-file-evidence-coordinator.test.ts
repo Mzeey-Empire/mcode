@@ -2,12 +2,11 @@ import "reflect-metadata";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import type { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderFileMutationStart } from "@mcode/contracts";
 
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
 import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import { TurnDiffRepo } from "../../turns/persistence/turn-diff-repo.js";
@@ -19,7 +18,6 @@ import {
 } from "../execution-file-evidence-coordinator.js";
 
 const directories: string[] = [];
-const databases: Database[] = [];
 const input = {
   threadId: "thread", turnId: "turn", executionId: "execution",
   deliveryAttempt: 1, baselineRef: null,
@@ -36,9 +34,8 @@ function tracker(): TurnFileTracker {
 }
 
 function diffs(): TurnDiffService {
-  const db = openMemoryDatabase();
-  databases.push(db);
-  return new TurnDiffService(new TurnDiffRepo(db));
+  const db = openAgentStorageTestDatabase();
+  return new TurnDiffService(new TurnDiffRepo(db, agentStorageTestWriter(db)));
 }
 
 function mutation(executionId = input.executionId, deliveryAttempt = input.deliveryAttempt): ProviderFileMutationStart {
@@ -53,7 +50,7 @@ function toolUse(event: ProviderFileMutationStart) {
 }
 
 afterEach(async () => {
-  for (const db of databases.splice(0)) db.close();
+  await closeAgentStorageTestDatabases();
   await Promise.all(directories.splice(0).map((path) => NodeFSPromises.rm(path, { recursive: true, force: true })));
 });
 

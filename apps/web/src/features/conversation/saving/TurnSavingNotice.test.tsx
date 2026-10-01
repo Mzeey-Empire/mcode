@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentModelState, type CanonicalAgentProgressRecovery, type TurnSavingStatus } from "@mcode/contracts";
 import { createCanonicalAgentReplica } from "@/stores/canonical-agent-replica";
-import { TurnSavingNotice } from "./TurnSavingNotice";
+import { TurnSaveRecovery, TurnSavingNotice } from "./TurnSavingNotice";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { resetThreadStoreForTests, seedThreadRecord } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
@@ -19,15 +19,14 @@ const failed: Extract<TurnSavingStatus, { mode: "saving-failed" }> = { ...pendin
 
 function ConnectedSavingNotice() {
   const statuses = useThreadStore((state) => state.records.get(pending.threadId)?.savingStatuses ?? []);
-  const ownerThreadId = useThreadStore((state) => state.records.get(pending.threadId)?.canonicalAgent.ownerThreadId);
-  return <TurnSavingNotice statuses={statuses} lostProgress={false} parentConversation={Boolean(ownerThreadId && ownerThreadId !== pending.threadId)} />;
+  return <TurnSaveRecovery statuses={statuses} />;
 }
 
 function ConnectedRuntimeNotice() {
   const record = useThreadStore((state) => state.records.get(pending.threadId));
   const running = useThreadStore((state) => state.runningThreadIds.has(pending.threadId));
   return <><NarrativeIndicator stepCount={1} subagentCount={0} activeToolCalls={record?.toolCalls ?? []} isAgentRunning={running} />
-    <TurnSavingNotice statuses={record?.savingStatuses ?? []} lostProgress={false} /></>;
+    <TurnSavingNotice lostProgress={false} /></>;
 }
 
 function epochRecoveryFixture() {
@@ -63,7 +62,7 @@ describe("turn saving notice", () => {
     }) });
   });
 
-  it("keeps a parent save failure visible on a child and retries its target without restarting the child", async () => {
+  it("keeps parent save recovery available on a child without restarting the child", async () => {
     resetThreadStoreForTests();
     resetThreadStoreForTests({ records: seedThreadRecord(pending.threadId, { runtimePhase: "completed", turnExecutionId: pending.executionId,
       canonicalAgent: { ...createCanonicalAgentReplica(), ownerThreadId: "parent-thread" } }) });
@@ -71,7 +70,7 @@ describe("turn saving notice", () => {
     useThreadStore.getState().setTurnSavingStatus(ownerFailure);
     vi.mocked(mockTransport.retrySave).mockResolvedValueOnce({ retried: true });
     render(<ConnectedSavingNotice />);
-    expect(screen.getByRole("alert").textContent).toContain("Parent conversation could not be saved. Disk is full");
+    expect(screen.queryByRole("alert")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry save" })).not.toBeDisabled());
     expect(mockTransport.retrySave).toHaveBeenCalledExactlyOnceWith(pending.threadId);
@@ -118,51 +117,55 @@ describe("turn saving notice", () => {
     expect(useThreadStore.getState().records.get(pending.threadId)?.toolCalls).toEqual(record?.toolCalls);
     expect(useThreadStore.getState().records.get(pending.threadId)?.runtimePhase).toBe("interrupted");
     await waitFor(() => expect(screen.queryByText(/Running a command/)).toBeNull());
-    expect(screen.getByRole("button", { name: "Retry save" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry save" })).toBeNull();
+    expect(useThreadStore.getState().records.get(pending.threadId)?.savingStatuses).not.toHaveLength(0);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("shows ordinary saving without requiring a modal decision", () => {
-    render(<TurnSavingNotice statuses={[{ ...pending, mode: "saving" }]} lostProgress={false} />);
-    expect(screen.getByRole("status").textContent).toContain("Saving response");
+  it("keeps ordinary saving quiet", () => {
+    render(<TurnSaveRecovery statuses={[{ ...pending, mode: "saving" }]} />);
+    expect(screen.queryByTestId("turn-save-recovery")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("shows the original retry and permanent failure messages", () => {
+  it("keeps automatic retries quiet and offers manual recovery without raw errors", () => {
     const status: TurnSavingStatus = { ...pending, mode: "save-retrying", failure: { name: "DatabaseError", kind: "transient", message: "Database is busy" } };
-    const { rerender } = render(<TurnSavingNotice statuses={[status]} lostProgress={false} />);
-    expect(screen.getByRole("status").textContent).toContain("Database is busy");
-    rerender(<TurnSavingNotice statuses={[{ ...status, mode: "saving-failed", failure: { ...status.failure, kind: "permanent", message: "Disk is full" } }]} lostProgress={false} />);
-    expect(screen.getByRole("alert").textContent).toContain("Disk is full");
+    const { rerender } = render(<TurnSaveRecovery statuses={[status]} />);
+    expect(screen.queryByTestId("turn-save-recovery")).toBeNull();
+    rerender(<TurnSaveRecovery statuses={[{ ...status, mode: "saving-failed", failure: { ...status.failure, kind: "permanent", message: "Disk is full" } }]} />);
+    expect(screen.getByRole("button", { name: "Retry save" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/Disk is full|Database is busy/)).toBeNull();
   });
 
   it("discloses restart loss after pending work disappears", () => {
-    render(<TurnSavingNotice statuses={[]} lostProgress />);
+    render(<TurnSavingNotice lostProgress />);
     expect(screen.getByRole("alert").textContent).toContain("Progress that had not been saved was lost");
   });
 
-  it("removes the notice once all retained executions are saved", () => {
-    const { rerender } = render(<TurnSavingNotice statuses={[{ ...pending, mode: "saving" }]} lostProgress={false} />);
-    rerender(<TurnSavingNotice statuses={[{ threadId: pending.threadId, executionId: pending.executionId, mode: "durable" }]} lostProgress={false} />);
-    expect(screen.queryByTestId("turn-saving-notice")).toBeNull();
+  it("removes the recovery action once all retained executions are saved", () => {
+    const { rerender } = render(<TurnSaveRecovery statuses={[failed]} />);
+    expect(screen.getByRole("button", { name: "Retry save" })).toBeVisible();
+    rerender(<TurnSaveRecovery statuses={[{ threadId: pending.threadId, executionId: pending.executionId, mode: "durable" }]} />);
+    expect(screen.queryByTestId("turn-save-recovery")).toBeNull();
   });
 
   it("fences retries for the same thread while pending and keeps failures when nothing was retried", async () => {
     let resolve: ((result: { retried: boolean }) => void) | undefined;
     vi.mocked(mockTransport.retrySave).mockImplementationOnce(() => new Promise((complete) => { resolve = complete; }));
-    render(<TurnSavingNotice statuses={[failed, { ...failed, executionId: "00000000-0000-4000-8000-000000000002" }]} lostProgress={false} />);
+    render(<TurnSaveRecovery statuses={[failed, { ...failed, executionId: "00000000-0000-4000-8000-000000000002" }]} />);
     const buttons = screen.getAllByRole("button", { name: "Retry save" });
     fireEvent.click(buttons[0]);
-    fireEvent.click(buttons[1]);
     fireEvent.click(buttons[0]);
     expect(mockTransport.retrySave).toHaveBeenCalledExactlyOnceWith(pending.threadId);
-    expect(screen.getAllByRole("button", { name: "Retrying save…" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Retrying save…" })).toHaveLength(1);
     for (const button of buttons) expect(button).toBeDisabled();
     const complete = resolve;
     if (!complete) throw new Error("missing retry request");
     await act(async () => { complete({ retried: false }); });
-    expect(screen.getAllByRole("alert")).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: "Retry save" })).toHaveLength(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Retry save" })).toHaveLength(1);
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
     expect(mockTransport.retryTurn).not.toHaveBeenCalled();
   });
@@ -172,23 +175,23 @@ describe("turn saving notice", () => {
     render(<ConnectedSavingNotice />);
     fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry save" })).not.toBeDisabled());
-    expect(screen.getByRole("alert").textContent).toContain("Disk is full");
+    expect(screen.getByRole("button", { name: "Retry save" })).toBeVisible();
     act(() => { useThreadStore.getState().setTurnSavingStatus({ ...failed, mode: "save-retrying" }); });
-    expect(screen.getByRole("status").textContent).toContain("Retrying save");
+    expect(screen.queryByTestId("turn-save-recovery")).toBeNull();
     act(() => { useThreadStore.getState().setTurnSavingStatus({ threadId: pending.threadId, executionId: pending.executionId, mode: "durable" }); });
-    expect(screen.queryByTestId("turn-saving-notice")).toBeNull();
+    expect(screen.queryByTestId("turn-save-recovery")).toBeNull();
     expect(useThreadStore.getState().records.get(pending.threadId)?.runtimePhase).toBe("completed");
     expect(useThreadStore.getState().runningThreadIds.has(pending.threadId)).toBe(false);
     expect(mockTransport.sendMessage).not.toHaveBeenCalled();
     expect(mockTransport.retryTurn).not.toHaveBeenCalled();
   });
 
-  it("shows an actionable RPC error alongside the original failure and allows another retry", async () => {
+  it("allows another retry after an RPC error without exposing storage diagnostics", async () => {
     vi.mocked(mockTransport.retrySave).mockRejectedValueOnce(new Error("Database is read-only"));
-    render(<TurnSavingNotice statuses={[failed]} lostProgress={false} />);
+    render(<TurnSaveRecovery statuses={[failed]} />);
     fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
-    expect(await screen.findByText("Retry failed. Database is read-only")).toBeVisible();
-    expect(screen.getByText("Response could not be saved. Disk is full")).toBeVisible();
+    expect(await screen.findByText("Save could not be retried. Try again.")).toBeVisible();
+    expect(screen.queryByText(/Database is read-only|Disk is full/)).toBeNull();
     expect(screen.getByRole("button", { name: "Retry save" })).not.toBeDisabled();
   });
 
@@ -201,7 +204,7 @@ describe("turn saving notice", () => {
     else store.hydrateThreadRuntimes([{ threadId: pending.threadId, turnExecutionId: pending.executionId, phase: "completed",
       savingStatus: "durable", savingStatuses: [fixture.failed] }]);
     render(<ConnectedSavingNotice />);
-    expect(screen.queryByTestId("turn-saving-notice")).toBeNull();
+    expect(screen.queryByTestId("turn-save-recovery")).toBeNull();
     act(() => { store.applyCanonicalReconnectRecoveries([fixture.recovery]); store.finishCanonicalRecovery(token); });
     const record = useThreadStore.getState().records.get(pending.threadId);
     expect(record?.runtimePhase).toBe("completed");
@@ -209,7 +212,7 @@ describe("turn saving notice", () => {
     expect(record?.savingStatuses).toEqual([fixture.failed]);
     expect(record?.pendingSavingStatuses).toEqual([]);
     expect(screen.getByRole("button", { name: "Retry save" })).toBeVisible();
-    expect(screen.getByRole("alert").textContent).toContain("Disk is full");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("restores a failure delivered after a new-epoch saved frame and before its recovery", () => {
@@ -222,7 +225,7 @@ describe("turn saving notice", () => {
     useThreadStore.getState().setTurnSavingStatus(status);
     expect(useThreadStore.getState().records.get(pending.threadId)?.canonicalAgent.recoveryRequired).toBe(true);
     render(<ConnectedSavingNotice />);
-    expect(screen.queryByTestId("turn-saving-notice")).toBeNull();
+    expect(screen.queryByTestId("turn-save-recovery")).toBeNull();
     act(() => { useThreadStore.getState().applyCanonicalReconnectRecoveries([{ ...fixture.recovery, acceptedThrough: 2, savedThrough: 1,
       durable: { mode: "snapshot", threadId: pending.threadId, snapshot: { revision: { conversationRevision: 2, rosterRevision: 0 }, state: fixture.state } },
       retained: [{ ...terminal, acceptedSequence: 2, progressPosition: { epoch: "new-epoch", sequence: 2 } }] }]); });

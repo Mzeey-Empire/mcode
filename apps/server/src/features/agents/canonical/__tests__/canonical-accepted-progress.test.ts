@@ -3,17 +3,28 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { AgentEventSchema, CanonicalAgentProgressFrameSchema, ProviderRuntimeExtensionSchema, encodeCanonicalSubagentDetailTarget, type ProviderRuntimeExtension, type AgentEvent, type CanonicalAgentProgressFrame,
+import { AgentEventSchema, CanonicalAgentProgressFrameSchema, ProviderRuntimeExtensionSchema, MessageSchema, encodeCanonicalSubagentDetailTarget, type ProviderRuntimeExtension, type AgentEvent, type CanonicalAgentProgressFrame,
+  type AcceptedCanonicalAgentEventEnvelope,
   type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ExecutionWorkerHandler, type ExecutionWorkCommand, type ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
-import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agent-store.js";
+import { CanonicalAgentBoundary as MainCanonicalAgentBoundary } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient, CanonicalWriterAcknowledgementCapacity } from "../canonical-agent-writer-client.js";
 import { CanonicalAcceptedProgress } from "../canonical-accepted-progress.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { createDevinAcpTurnState, mapDevinAcpSessionNotification } from "../../../../../../../packages/providers/src/private/devin/devin-acp-event-mapper.js";
+import { z } from "zod";
+
+function acceptedMessage(event: Pick<AcceptedCanonicalAgentEventEnvelope, "payload">) {
+  const payload = event.payload;
+  if (payload.type !== "item.recorded" || payload.item.payload.projection !== "message") return null;
+  return MessageSchema().parse(payload.item.payload.message);
+}
 
 const pushes = vi.hoisted(() => ({ frames: [] as unknown[] }));
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: (channel: string, frame: unknown) => {
@@ -61,7 +72,9 @@ function familyDraft(sequence: number, type: AgentEvent["type"], fields: Record<
 describe("accepted parent progress with the actual SQLite writer", () => {
   let directory: string;
   let db: Database;
+  let reader: Database;
   let writer: CanonicalAgentWriterClient;
+  let databaseWriter: ApplicationDatabaseWriter;
   let progress: CanonicalAcceptedProgress;
   let port: CanonicalExecutionWriterPort;
   let handler: ExecutionWorkerHandler;
@@ -75,8 +88,10 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
       .run("workspace", "Workspace", directory, NOW, NOW);
     insertThread(execution.threadId);
-    writer = new CanonicalAgentWriterClient(dbPath);
-    progress = new CanonicalAcceptedProgress(new CanonicalAgentBoundary(db, () => {}), writer);
+    databaseWriter = new ApplicationDatabaseWriter(dbPath);
+    writer = new CanonicalAgentWriterClient(databaseWriter);
+    reader = openReadOnlyDatabase(dbPath);
+    progress = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
     port = new CanonicalExecutionWriterPort(writer, () => {}, undefined, undefined, progress);
     handler = new ExecutionWorkerHandler(port);
   });
@@ -86,6 +101,8 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     release = undefined;
     await progress.close();
     await writer.close();
+    await databaseWriter.close();
+    reader.close(true);
     db.close(true);
     NodeFS.rmSync(directory, { recursive: true, force: true });
     vi.restoreAllMocks();
@@ -133,7 +150,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect(before.revision.rosterRevision).toBe(1);
     const childThread = Object.values(before.state.threads).find((thread) => thread.owningParentThreadId === execution.threadId);
     if (!childThread) throw new Error("Expected existing native child");
-    expect(progress.loadSubagentRoster({ owningParentThreadId: execution.threadId })?.done.map((thread) => thread.id)).toContain(childThread.id);
+    expect(progress.loadSubagentRoster({ owningParentThreadId: execution.threadId, limit: 100 })?.done.map((thread) => thread.id)).toContain(childThread.id);
     const frameOffset = pushes.frames.length;
     const next = { ...execution, turnId: "next-turn", executionId: "00000000-0000-4000-8000-000000000126" };
     const nextLease = { ...lease, ownerEpoch: 2, leaseId: "next-lease" };
@@ -152,7 +169,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     const recordedParent = starts.flatMap((frame) => frame.phase === "saved" ? frame.events : [])
       .find((event) => event.payload.type === "thread.recorded");
     expect(recordedParent?.payload).toMatchObject({ thread: { rosterRevision: before.revision.rosterRevision } });
-    const restarted = new CanonicalAcceptedProgress(new CanonicalAgentBoundary(db, () => {}), writer);
+    const restarted = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
     try {
       const restored = restarted.recover(execution.threadId, before.revision);
       if (restored.durable.mode !== "snapshot") throw new Error("Expected restarted snapshot");
@@ -173,7 +190,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     const evidence = { nativeThreadId: "native-child", nativeTurnId: "native-turn", parentCollaborationItemId: "spawn" };
     expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
       events: [familyDraft(2, "turnStarted", {}, { child: evidence })] })).result.kind).toBe("accepted");
-    const roster = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId });
+    const roster = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId, limit: 100 });
     const childId = roster?.active[0]?.id;
     if (!childId) throw new Error("Expected accepted child roster");
     expect(() => progress.assertThreadDeletionSupported(childId)).toThrow("Provider-owned child");
@@ -185,10 +202,12 @@ describe("accepted parent progress with the actual SQLite writer", () => {
       events: [familyDraft(3, "system", { subtype: "provider.notice.warning", message: "Child provider warning",
         systemNotice: { kind: "warning", presentation: "timeline", scope: "session", sessionId: "child-session" } },
       { child: evidence })] })).result.kind).toBe("accepted");
-    const childTurn = progress.loadSubagentStopTarget({ owningParentThreadId: execution.threadId, childThreadId: childId })?.latestTurn;
+    const childTurn = recovery().retained.flatMap((event) => event.payload.type === "collaboration.observed" ? event.payload.changes : [])
+      .find((change) => change.kind === "turn-started" && change.turn.threadId === childId);
+    if (!childTurn) throw new Error("Accepted child turn identity is missing");
     const childNotice = recovery().retained.find((envelope) => envelope.payload.type === "publication.recorded"
       && envelope.payload.event.type === "system" && envelope.payload.event.message === "Child provider warning");
-    expect(childNotice).toMatchObject({ payload: { event: { threadId: childId, turnExecutionId: childTurn?.executionId } } });
+    expect(childNotice).toMatchObject({ payload: { event: { threadId: childId, turnExecutionId: childTurn.sourceExecution.executionId } } });
     expect((await send(5, { kind: "event", phase: "running", nativeCursor: null,
       events: [familyDraft(4, "textDelta", { delta: "Child answer" }, { child: { ...evidence,
         nativeItemId: "child-message", itemEventKey: "delta" } })] })).result.kind).toBe("accepted");
@@ -232,7 +251,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     const evidence = { nativeThreadId: "native-child", nativeTurnId: "native-turn", parentCollaborationItemId: "spawn" };
     await send(3, { kind: "event", phase: "running", nativeCursor: null,
       events: [familyDraft(2, "turnStarted", {}, { child: evidence })] });
-    const childId = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId })?.active[0]?.id;
+    const childId = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId, limit: 100 })?.active[0]?.id;
     if (!childId) throw new Error("Expected accepted child roster");
     await send(4, { kind: "event", phase: "running", nativeCursor: null,
       events: [familyDraft(3, "textDelta", { delta: "Child answer" }, { child: { ...evidence,
@@ -409,17 +428,16 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect(progress.updatePlanStatus(plan.id, "accepted")).toBe(true);
     await send(5, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 4, "system", {
       subtype: "provider.notice.test", message: "Notice", systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "turn", sessionId: "session" } })] });
-    const notice = frames().flatMap((frame) => frame.phase === "accepted" ? frame.events : []).find((value) => value.payload.type === "item.recorded"
-      && value.payload.item.payload.projection === "message" && value.payload.item.payload.message.role === "system");
-    if (!notice || notice.payload.type !== "item.recorded") throw new Error("Expected accepted notice");
+    const notice = frames().flatMap((frame) => frame.phase === "accepted" ? frame.events : []).map(acceptedMessage)
+      .find((message) => message?.role === "system");
+    if (!notice) throw new Error("Expected accepted notice");
     expect(db.prepare("SELECT id FROM plans WHERE id = ?").get(plan.id)).toBeNull();
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(db.prepare("SELECT id, message_id, version, status, created_at FROM plans WHERE id = ?").get(plan.id))
       .toEqual({ id: plan.id, message_id: plan.messageId, version: plan.version, status: "accepted", created_at: plan.createdAt });
-    expect(db.prepare("SELECT id FROM messages WHERE id = ?").get(notice.payload.item.payload.message.id))
-      .toEqual({ id: notice.payload.item.payload.message.id });
-    expect(progress.getTasks(execution.threadId)).toEqual(new (await import("../../orchestration/persistence/task-repo.js")).TaskRepo(db).get(execution.threadId));
+    expect(db.prepare("SELECT id FROM messages WHERE id = ?").get(notice.id)).toEqual({ id: notice.id });
+    expect(progress.getTasks(execution.threadId)).toEqual(new (await import("../../orchestration/persistence/task-repo.js")).TaskRepo(db, databaseWriter).get(execution.threadId));
   });
 
   it("retains a rejected older late hook while the current execution continues on its bounded owner", async () => {
@@ -497,7 +515,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     await send(3, { kind: "event", phase: "running", nativeCursor: null,
       events: [familyDraft(2, "turnStarted", {}, { child: { nativeThreadId: "native-child", nativeTurnId: "native-turn",
         parentCollaborationItemId: "spawn" } })] });
-    const childId = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId })?.active[0]?.id;
+    const childId = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId, limit: 100 })?.active[0]?.id;
     if (!childId) throw new Error("Expected accepted child");
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "turnComplete")],
       terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
@@ -752,9 +770,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect((await send(3, { kind: "release", recovery: interrupted })).result.kind).toBe("released");
     const cut = recovery();
     expect(cut.retained.some((event) => event.payload.type === "turn.interrupted")).toBe(true);
-    expect(cut.retained.some((event) => event.payload.type === "item.recorded"
-      && event.payload.item.payload.projection === "message"
-      && event.payload.item.payload.message.content === "Retained answer")).toBe(true);
+    expect(cut.retained.some((event) => acceptedMessage(event)?.content === "Retained answer")).toBe(true);
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Running" });
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
@@ -858,8 +874,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
         providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } }, other, otherLease)).result.kind).toBe("accepted");
     await expect.poll(() => db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(other.turnId))
       .toEqual({ status: "Completed" });
-    const retained = recovery().retained.filter((event) => event.payload.type === "item.recorded"
-      && event.payload.item.payload.projection === "message" && event.payload.item.payload.message.id === notice.messageId);
+    const retained = recovery().retained.filter((event) => acceptedMessage(event)?.id === notice.messageId);
     expect(retained).toHaveLength(1);
     db.run("DROP TRIGGER fail_notice");
     expect(progress.retry(execution.threadId)).toBe(true);
@@ -895,7 +910,8 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect(next.messageId).not.toBe(first.messageId);
     expect(db.prepare("SELECT id FROM messages WHERE role = 'system'").all()).toEqual([]);
     expect(recovery().retained.some((event) => event.payload.type === "item.recorded"
-      && event.payload.item.payload.projection === "noticeStatus" && event.payload.item.payload.expiredNoticeMessageIds.includes(first.messageId!))).toBe(true);
+      && event.payload.item.payload.projection === "noticeStatus"
+      && z.array(z.string()).parse(event.payload.item.payload.expiredNoticeMessageIds).includes(first.messageId!))).toBe(true);
     expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 1, "textDelta", { delta: "Provider continues", isFinalResponse: true })] })).result.kind).toBe("accepted");
     release?.();
@@ -904,7 +920,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
       .toEqual([{ id: next.messageId, content: "Next session warning" }]);
     expect(db.prepare("SELECT current_notice_session_id FROM threads WHERE id = ?").get(execution.threadId))
       .toEqual({ current_notice_session_id: "new" });
-    const restarted = new CanonicalAcceptedProgress(new CanonicalAgentBoundary(db, () => {}), writer);
+    const restarted = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
     try {
       const restored = restarted.acceptThreadSystemObservation({ type: "system", threadId: execution.threadId,
         subtype: "provider.notice.warning", message: "After restart" });
@@ -971,7 +987,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
       events: [draft("codex", 1, "textDelta", { delta: "Saved prefix", isFinalResponse: true })] });
     await expect.poll(() => progress.depth().pending).toBe(0);
     const saved = recovery();
-    const restarted = new CanonicalAcceptedProgress(new CanonicalAgentBoundary(db, () => {}), writer);
+    const restarted = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
     expect(restarted.recover(execution.threadId, { conversationRevision: 0, rosterRevision: 0 },
       { epoch: saved.epoch, sequence: saved.acceptedThrough }).loss).toBe("none");
     holdWrites();

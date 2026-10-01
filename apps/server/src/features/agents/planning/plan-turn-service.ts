@@ -103,11 +103,11 @@ ${userMessage}`;
   }
 
   /** Persist the one plan record that an assistant message can materialize. */
-  persistAssistantMessage(event: PlanMessage): void {
+  async persistAssistantMessage(event: PlanMessage): Promise<void> {
     if (!event.messageId) return;
     const execution = this.executionByThread.get(event.threadId);
     const ready = execution?.consumeAssistantMessage(event.content);
-    if (execution && ready) this.persistPlan(event.threadId, event.messageId, ready, execution);
+    if (execution && ready) await this.persistPlan(event.threadId, event.messageId, ready, execution);
   }
 
   /** Submit answers and dispatch the complete answer turn through the command facade. */
@@ -138,8 +138,8 @@ ${userMessage}`;
   }
 
   /** Settle the latest plan-question batch without sending a provider turn. */
-  dismissQuestions(threadId: string): void {
-    const assistantMessageId = this.questions.dismiss(threadId);
+  async dismissQuestions(threadId: string): Promise<void> {
+    const assistantMessageId = await this.questions.dismiss(threadId);
     if (assistantMessageId) broadcast("plan.dismissed", { threadId, assistantMessageId });
   }
 
@@ -155,15 +155,15 @@ ${userMessage}`;
     provider.setPlanAnswerMode?.(threadId, true);
   }
 
-  private persistPlan(
+  private async persistPlan(
     threadId: string,
     messageId: string,
     ready: PlanPersistenceReady,
     execution: PlanExecutionState,
-  ): void {
+  ): Promise<void> {
     if (execution.hasPersistedPlan()) return;
     try {
-      const plan = this.planRepo.create(threadId, messageId, ready.title, ready.contentMd, ready.sectionsJson, ready.changeSummary);
+      const plan = await this.planRepo.create(threadId, messageId, ready.title, ready.contentMd, ready.sectionsJson, ready.changeSummary);
       execution.markPlanPersisted();
       broadcast("plan.generated", { threadId, plan });
     } catch (error) {

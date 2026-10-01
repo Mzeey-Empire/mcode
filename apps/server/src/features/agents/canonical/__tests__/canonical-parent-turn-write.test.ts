@@ -7,10 +7,11 @@ import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
-import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
+import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
+import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-store.js";
+import { ToolCallRecordStore as ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-store.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
+import { CanonicalAgentStore } from "../canonical-agent-store.js";
 import type { PreparedExecutionFileEvidence } from "../../turns/turn-execution-file-evidence.js";
 import {
   CanonicalParentTurnWrite,
@@ -129,6 +130,31 @@ describe("CanonicalParentTurnWrite", () => {
     })).toBe(true);
     expect(messages.findByIdInThreadIncludingInternal(THREAD_ID, messageId))
       .toMatchObject({ sequence: 3, is_internal: true, content: "Answer" });
+  });
+
+  it("stages only parent-owned tools while retaining its canonical delegation anchor", async () => {
+    writer.start(startInput());
+    const canonical = new CanonicalAgentStore(db, () => {});
+    canonical.startCodexChildDelegation({ parentThreadId: THREAD_ID, parentTurnId: TURN_ID,
+      parentExecutionId: EXECUTION_ID, parentItemId: "toolCall:spawn", providerIdentities: [] });
+    const input = terminalProjectionInput();
+    const base = input.narrative.find((item) => item.kind === "toolCall");
+    if (!base || base.kind !== "toolCall") throw new Error("Fixture tool is missing");
+    const parent = { ...base, record: { ...base.record, id: "spawn", tool_name: "Agent",
+      input_summary: JSON.stringify({ codexCollabKind: "spawnAgent" }) } };
+    const child = { ...base, record: { ...base.record, id: "child-tool", parent_tool_call_id: "spawn",
+      input_summary: "private child input", output_summary: "private child output" } };
+    const nested = { ...child, record: { ...child.record, id: "nested-tool", parent_tool_call_id: "child-tool" } };
+    const staged = writer.stageTerminalProjection({ ...input, narrative: [parent, child, nested, base] });
+    expect(new ToolCallRecordRepo(db).listByMessage(staged.messageId!).map((record) => record.id))
+      .toEqual(["spawn", "tool-1"]);
+    expect(staged.projection.narrative.flatMap((entry) => entry.kind === "toolCall" ? [entry.record.id] : []))
+      .toEqual(["spawn", "tool-1"]);
+    await writer.finish({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+      providerId: "codex", providerIdentities: [], outcome: "completed", projection: staged.projection });
+    expect(canonical.loadItem("toolCall:spawn")?.payload.projection).toBe("codexSubagent");
+    expect(canonical.loadItem("toolCall:child-tool")).toBeNull();
+    expect(canonical.loadItem("toolCall:nested-tool")).toBeNull();
   });
 
   it("does not stage the assistant after a later user prompt", () => {

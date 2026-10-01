@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import { inject, injectable } from "tsyringe";
 import {
   AgentEventType,
@@ -7,7 +6,6 @@ import {
   type ProviderId,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
-import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 
 import { broadcast } from "../../../application/transport/push.js";
 import { BrowserNarrativeEventSanitizer } from "../../browser-automation/index.js";
@@ -56,6 +54,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private readonly lastContextByThread = new Map<string, number>();
   private readonly lastContextWindowByThread = new Map<string, number>();
   private readonly terminalProjectionByThread = new Map<string, Promise<boolean>>();
+  private readonly persistenceByThread = new Map<string, Set<Promise<void>>>();
 
   constructor(
     @inject(TURN_FINALIZER) private readonly finalizer: TurnFinalizer,
@@ -73,7 +72,6 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     @inject(NarrativeStore) private readonly narrative: NarrativeStore,
     @inject(ParentAssistantTextCheckpointService) checkpoints: ParentAssistantTextCheckpointService,
     @inject(TURN_FEATURE_EFFECTS) private readonly featureEffects: TurnFeatureEffects,
-    @inject("Database") private readonly db: Database,
     @inject(TURN_RUNTIME_EVENT_CONTROL) private readonly runtime: TurnRuntimeEventControl,
     @inject(AgentEventPublicationRegistry)
     private readonly publication: AgentEventPublicationRegistry,
@@ -153,25 +151,26 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     if (this.terminalFinalizedThreads.has(command.threadId)) return null;
     this.terminalFinalizedThreads.add(command.threadId);
     const executionId = this.runtime.snapshot(command.threadId)?.turnExecutionId;
+    const pending = [...this.persistenceByThread.get(command.threadId) ?? []];
     const finalization = this.fileEffects.finalize(
-      command.threadId,
-      command.outcome,
-      executionId ?? undefined,
-      command.source,
+      command.threadId, command.outcome, executionId ?? undefined, command.source,
+      Promise.all(pending),
     );
-    void finalization.finally(() => this.clearFinalizedEventState(command.threadId, executionId));
+    void finalization.then((persisted) => {
+      if (persisted) this.clearFinalizedEventState(command.threadId, executionId);
+    }, () => undefined);
     return finalization;
   }
 
   /** Stream the private restart-reliability prefix through the same durable text owner. */
-  streamReliabilityAssistantText(threadId: string): { threadId: string; executionId: string; text: string } {
+  async streamReliabilityAssistantText(threadId: string): Promise<{ threadId: string; executionId: string; text: string }> {
     if (!this.publication.isBound()) {
       throw new Error("Agent event publication is unavailable for reliability streaming");
     }
     const executionId = this.runtime.beginReliabilityTurn(threadId);
     const text = "Durable assistant prefix for restart recovery.";
     try {
-      this.conversationProjection.startReliabilityTurn(threadId, executionId);
+      await this.conversationProjection.startReliabilityTurn(threadId, executionId);
       const event: Extract<AgentEvent, { type: "textDelta" }> = {
         type: AgentEventType.TextDelta,
         threadId,
@@ -185,7 +184,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       })) {
         throw new Error("Reliability assistant text could not be queued");
       }
-      if (!this.parentAssistantText.flush(executionId)) {
+      if (!await this.parentAssistantText.flush(executionId)) {
         throw new Error("Reliability assistant text could not be checkpointed");
       }
       return { threadId, executionId, text };
@@ -210,10 +209,10 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   /** Reset visible text before the runtime retries the same provider execution. */
-  resetAssistantTextForRetry(threadId: string, executionId: string): boolean {
+  async resetAssistantTextForRetry(threadId: string, executionId: string): Promise<boolean> {
     if (this.parentDurability.loadCheckpoint(executionId)) {
       try {
-        if (!this.parentAssistantText.resetForRetry(executionId)) return false;
+        if (!await this.parentAssistantText.resetForRetry(executionId)) return false;
       } catch (error) {
         logger.warn("Assistant text checkpoint could not reset before retry", {
           threadId,
@@ -229,13 +228,14 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   /** Clear a stale provider cursor before the runtime retries with a fresh session. */
-  clearSessionCursorForRetry(threadId: string): void {
-    this.sessionCursors.clearForRetry(threadId);
+  async clearSessionCursorForRetry(threadId: string): Promise<void> {
+    await this.sessionCursors.clearForRetry(threadId);
   }
 
   /** Finish the parent text checkpoint before an explicit user stop finalizes it. */
   finishAssistantText(executionId: string): void {
-    this.parentAssistantText.finish(executionId);
+    const threadId = this.parentDurability.loadTurnByExecution(executionId)?.threadId;
+    if (threadId) this.observePersistence(threadId, this.parentAssistantText.finish(executionId).then(() => undefined), "Assistant text final checkpoint");
   }
 
   /** Continue an active response after the user accepts unrecoverable text. */
@@ -355,7 +355,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private applyMessage(providerId: ProviderId, event: Extract<AgentEvent, { type: "message" }>): boolean {
     if (event.turnExecutionId) this.finalResponseExecutionByThread.set(event.threadId, event.turnExecutionId);
     try {
-      this.conversationProjection.bufferAssistantMessage(event, this.isPostTurnGoalReceipt(event));
+      this.observePersistence(event.threadId, this.conversationProjection.bufferAssistantMessage(event, this.isPostTurnGoalReceipt(event)), "Assistant message projection");
     } catch (error) {
       logger.error("Failed to persist assistant message", {
         threadId: event.threadId,
@@ -364,10 +364,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     }
     this.featureEffects.onAssistantMessage(providerId, event);
     this.narrative.clearAgentStackOnMessage(event.threadId);
-    if (this.featureEffects.needsAssistantMaterialization(event)) {
-      this.finalizer.materializeAssistantRow(event.threadId);
-    }
-    this.featureEffects.persistAssistantMessage(event);
+    this.observePersistence(event.threadId, this.persistAssistantFeatures(event), "Assistant feature persistence");
     return true;
   }
 
@@ -384,7 +381,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private applyToolUse(event: Extract<AgentEvent, { type: "toolUse" }>): boolean {
     this.narrative.closeOpenThought(event.threadId);
     const parentToolCallId = this.narrative.bufferToolCall(event.threadId, event);
-    this.featureEffects.onToolUse(event.threadId, { ...event, parentToolCallId });
+    this.observePersistence(event.threadId, this.featureEffects.onToolUse(event.threadId, { ...event, parentToolCallId }), "Task request persistence");
     if (!this.runtime.consumeEarlyFileEffect(event)) this.fileEffects.observeToolUse(event);
     return true;
   }
@@ -438,7 +435,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       toolResultMetadata(event),
       event.subagentPresentation,
     );
-    this.featureEffects.onToolResult(event.threadId, event.toolCallId, event.output, event.isError);
+    this.observePersistence(event.threadId, this.featureEffects.onToolResult(event.threadId, event.toolCallId, event.output, event.isError), "Task result persistence");
     return true;
   }
 
@@ -518,7 +515,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     this.compactionInProgressByThread.delete(event.threadId);
     this.releaseHeldTurnComplete(event.threadId);
     try {
-      this.conversationProjection.persistCompactionDivider(event.threadId);
+      this.observePersistence(event.threadId, this.conversationProjection.persistCompactionDivider(event.threadId), "Compaction divider persistence");
     } catch (error) {
       logger.error("Failed to persist compaction system message", {
         threadId: event.threadId,
@@ -532,7 +529,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     this.compactionInProgressByThread.delete(event.threadId);
     this.releaseHeldTurnComplete(event.threadId);
     try {
-      this.runtimePersistence.recordCompactionSummary(event.threadId, event.summary);
+      this.observePersistence(event.threadId, this.runtimePersistence.recordCompactionSummary(event.threadId, event.summary), "Compaction summary persistence");
     } catch (error) {
       logger.error("Failed to persist compaction summary", {
         threadId: event.threadId,
@@ -543,13 +540,15 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private applySystem(providerId: ProviderId, event: Extract<AgentEvent, { type: "system" }>): EventApplicationResult {
-    if (event.subtype === "provider.session.started" && this.conversationProjection.beginNoticeSession(event)) {
+    if (event.subtype === "provider.session.started") {
+      this.observeNoticePublication(event, this.conversationProjection.beginNoticeSession(event));
       return OWNED_SYSTEM_PUBLICATION;
     }
     if (event.subtype.startsWith("provider.notice.") && event.message) {
-      if (this.conversationProjection.persistSystemNotice(event)) return OWNED_SYSTEM_PUBLICATION;
+      this.observeNoticePublication(event, this.conversationProjection.persistSystemNotice(event));
+      return OWNED_SYSTEM_PUBLICATION;
     }
-    this.sessionCursors.apply(providerId, event, this.runtime.snapshot(event.threadId)?.turnExecutionId ?? undefined);
+    this.observePersistence(event.threadId, this.sessionCursors.apply(providerId, event, this.runtime.snapshot(event.threadId)?.turnExecutionId ?? undefined), "Provider session cursor persistence");
     return true;
   }
 
@@ -590,28 +589,14 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
 
   private prepareTerminalText(event: AgentEvent, publish: boolean, terminal: boolean): boolean {
     if (!publish || !terminal || !event.turnExecutionId) return true;
-    if (this.parentAssistantText.finish(event.turnExecutionId)) return true;
-    if (this.parentAssistantText.durabilityMode(event.turnExecutionId) !== "unsaved") {
-      this.runtime.stopForEventApplicationFailure(
-        event,
-        "Assistant text recovery remained unavailable at turn finalization",
-      );
-    }
-    return false;
+    this.observePersistence(event.threadId, this.parentAssistantText.finish(event.turnExecutionId).then(() => undefined), "Assistant text final checkpoint");
+    return true;
   }
 
   private checkpointNarrative(event: AgentEvent, publish: boolean): boolean {
     if (!publish || this.isUnsavedNarrationBoundary(event)) return true;
-    try {
-      if (serverWorkTrace) {
-        serverWorkTrace.measure("narrative-checkpoint", event.threadId, event.turnExecutionId,
-          () => this.parentNarrativeRecovery.checkpoint(event));
-      } else this.parentNarrativeRecovery.checkpoint(event);
-      return true;
-    } catch {
-      this.runtime.stopForEventApplicationFailure(event, "Parent narrative recovery checkpoint failed");
-      return false;
-    }
+    this.observePersistence(event.threadId, this.parentNarrativeRecovery.checkpoint(event), "Parent narrative recovery checkpoint");
+    return true;
   }
 
   private publishAfterDurability(event: AgentEvent, terminal: boolean): void {
@@ -729,31 +714,20 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       this.finalizer.resetStreamingText(event.threadId);
       return true;
     }
-    const text = this.parentAssistantText.checkpoints.restoreChunks(executionId)
+    const restored = this.parentAssistantText.checkpoints.restoreChunks(executionId)
       .filter((chunk) => chunk.lastSequence >= firstSequence)
       .map((chunk) => chunk.text)
       .join("");
+    const text = this.finalizer.getStreamingText(event.threadId) || restored;
     const staged = this.narrative.stageNarrationSegment(event.threadId, text);
-    let confirm: (() => void) | undefined;
-    try {
-      this.db.transaction(() => {
-        const checkpoint = this.parentNarrativeRecovery.prepareCheckpoint(
-          event,
-          staged ? this.narrative.recoverySnapshotWithStagedNarration(event.threadId, staged) : undefined,
-        );
-        checkpoint?.persist();
-        if (!this.parentAssistantText.checkpoints.resetInTransaction(executionId)) {
-          throw new Error(`Unclassified assistant text checkpoint was not reset: ${executionId}`);
-        }
-        confirm = checkpoint?.confirm;
-      })();
-    } catch {
-      this.runtime.stopForEventApplicationFailure(event, "Parent narrative recovery checkpoint failed");
-      return false;
-    }
-    this.parentAssistantText.checkpoints.discardRecoveryJournal(executionId);
-    this.parentAssistantText.discard(executionId);
-    confirm?.();
+    const snapshot = staged ? this.narrative.recoverySnapshotWithStagedNarration(event.threadId, staged, false) : undefined;
+    this.observePersistence(event.threadId, this.parentNarrativeRecovery.runOrdered(event, snapshot, (ready) =>
+      this.parentAssistantText.classify(executionId, async () => {
+        const checkpoint = await ready;
+        await this.parentDurability.classifyParentNarrativeRecovery(checkpoint.input, checkpoint.operationId);
+        checkpoint.confirm();
+        this.parentAssistantText.checkpoints.discardRecoveryJournal(executionId);
+      })), "Assistant text classification");
     if (staged) this.narrative.applyStagedNarrationSegment(event.threadId, staged);
     this.unclassifiedAssistantTextStartByExecution.delete(executionId);
     this.finalizer.resetStreamingText(event.threadId);
@@ -766,10 +740,40 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return true;
   }
 
+  private observeNoticePublication(event: Extract<AgentEvent, { type: "system" }>, operation: Promise<boolean>): void {
+    this.observePersistence(event.threadId, operation.then((published) => {
+      if (!published) this.publish(event);
+    }), "Provider notice persistence");
+  }
+
+  private async persistAssistantFeatures(event: Extract<AgentEvent, { type: "message" }>): Promise<void> {
+    if (this.featureEffects.needsAssistantMaterialization(event)) await this.finalizer.materializeAssistantRow(event.threadId);
+    await this.featureEffects.persistAssistantMessage(event);
+  }
+
+  private observePersistence(threadId: string, operation: Promise<unknown>, label: string): void {
+    const pending = this.persistenceByThread.get(threadId) ?? new Set<Promise<void>>();
+    this.persistenceByThread.set(threadId, pending);
+    const observed = operation.then(() => undefined, (error: unknown) => {
+      logger.error(`${label} failed`, { threadId, error: error instanceof Error ? error.message : String(error) });
+    });
+    pending.add(observed);
+    void observed.then(() => {
+      pending.delete(observed);
+      if (pending.size === 0 && this.persistenceByThread.get(threadId) === pending) this.persistenceByThread.delete(threadId);
+    });
+  }
+
+  /** Drain accepted feature persistence after provider ingress has stopped. */
+  async drainPersistence(): Promise<void> {
+    await this.parentNarrativeRecovery.close(() => this.parentAssistantText.close());
+    await Promise.all([...this.persistenceByThread.values()].flatMap((pending) => [...pending]));
+  }
+
   private recordContextUsage(event: Extract<AgentEvent, { type: "turnComplete" | "contextEstimate" }>, compacting: boolean): void {
     if (event.tokensIn > 0 && !compacting) {
       try {
-        this.runtimePersistence.recordContextUsage(event.threadId, event.tokensIn, event.contextWindow);
+        this.observePersistence(event.threadId, this.runtimePersistence.recordContextUsage(event.threadId, event.tokensIn, event.contextWindow), "Context usage persistence");
       } catch (error) {
         logger.warn("Context usage not persisted", {
           threadId: event.threadId,

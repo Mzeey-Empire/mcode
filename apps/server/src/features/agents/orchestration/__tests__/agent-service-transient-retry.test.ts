@@ -1,7 +1,8 @@
 import "reflect-metadata";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Thread, IProviderRegistry, TurnRequest } from "@mcode/contracts";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { AgentService } from "../agent-service.js";
 import {
   createAgentServiceForTest,
@@ -16,7 +17,7 @@ import { NarrativeStore } from "../../conversation/narrative/narrative-store.js"
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
-import type { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import type { GitService } from "../../../projects/index.js";
 import type { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import type { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
@@ -26,14 +27,13 @@ import type { MemoryPressureService } from "../../../../runtime/memory/memory-pr
 import type { SettingsService } from "../../../settings/settings-service.js";
 import type { ThreadService } from "../../../thread-control/index.js";
 import type { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
-import type { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
   return {
     ...actual,
-    existsSync: vi.fn(() => true),
-    statSync: vi.fn(() => ({ isDirectory: () => true })),
+    existsSync: vi.fn((path) => path === "/workspace" || actual.existsSync(path)),
+    statSync: vi.fn((path, options) => path === "/workspace" ? { isDirectory: (): boolean => true } : actual.statSync(path, options)),
   };
 });
 
@@ -118,26 +118,7 @@ function buildService(): {
     findById: vi.fn(() => ({ id: "ws-1", path: "/workspace" })),
   } as unknown as WorkspaceRepo;
 
-  // A prior message means nextSeq > 1, so the first attempt is a resume.
-  let latestSequence = 1;
-  const createMessage = vi.fn((_threadId: string, _role: string, _content: string, sequence: number) => {
-    latestSequence = Math.max(latestSequence, sequence);
-    return { id: `msg-${sequence}`, sequence };
-  });
-  const messageRepo = {
-    listByThread: vi.fn(() => ({ messages: [{ id: "m0", sequence: 1, role: "user", content: "prev" }] })),
-    getLatestSequenceIncludingInternal: vi.fn(() => latestSequence),
-    create: createMessage,
-    createAssistantIdempotent: vi.fn((input: Parameters<MessageRepo["createAssistantIdempotent"]>[0]) => ({
-      id: input.id,
-      thread_id: input.threadId,
-      role: "assistant",
-      content: input.content,
-    }) as ReturnType<MessageRepo["createAssistantIdempotent"]>),
-    findByIdInThread: vi.fn(),
-    listByThreadUpToSequence: vi.fn(() => []),
-    setAssistantOutcome: vi.fn(),
-  } as unknown as MessageRepo;
+
 
   const gitService = {
     resolveWorkingDir: vi.fn(() => "/workspace"),
@@ -178,18 +159,17 @@ function buildService(): {
     on: vi.fn(),
   } as unknown as SettingsService;
   const availability = { assertUsable: vi.fn() } as unknown as ProviderAvailabilityService;
-  const planQuestionAnswersRepo = {
-    markAnswered: vi.fn(),
-    isAnswered: vi.fn(() => false),
-    listAnsweredForThread: vi.fn(() => []),
-  } as unknown as PlanQuestionAnswersRepo;
   const threadControlMcp = { activate: vi.fn(), revoke: vi.fn(), close: vi.fn() };
   const mutationReservations = new ThreadControlMutationReservationService();
-  const db = {
-    filename: ":memory:",
-    transaction: vi.fn((fn: (...args: unknown[]) => unknown) => fn),
-    prepare: vi.fn(() => ({ run: vi.fn() })),
-  } as unknown as import("bun:sqlite").Database;
+  const db = openAgentStorageTestDatabase();
+  db.prepare("INSERT INTO workspaces (id,name,path,created_at,updated_at) VALUES (?,?,?,?,?)").run("ws-1", "Retry fixture", "/workspace", thread.created_at, thread.updated_at);
+  db.prepare("INSERT INTO threads (id,workspace_id,title,status,mode,branch,provider,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)").run(thread.id, thread.workspace_id, thread.title, thread.status, thread.mode, thread.branch, thread.provider, thread.created_at, thread.updated_at);
+  db.prepare("UPDATE threads SET sdk_session_id = ? WHERE id = ?").run(thread.sdk_session_id, thread.id);
+  db.prepare("INSERT INTO messages (id,thread_id,role,content,sequence,timestamp) VALUES (?,?,?,?,?,?)").run("m0", thread.id, "user", "prev", 1, thread.created_at);
+  const messageRepo = new MessageRepo(db, agentStorageTestWriter(db));
+  vi.spyOn(messageRepo, "createAssistantIdempotent");
+  vi.spyOn(messageRepo, "setAssistantOutcome");
+
 
   const service = createAgentServiceForTest(
     threadRepo,
@@ -199,14 +179,12 @@ function buildService(): {
     attachmentService,
     providerRegistry,
     threadService,
-    { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../events/persistence/hook-execution-repo.js").HookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,
     db,
     memoryPressureService,
     settingsService,
     availability,
-    planQuestionAnswersRepo,
     { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as never,
     { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as never,
     new NarrativeStore(
@@ -215,7 +193,7 @@ function buildService(): {
       { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../conversation/narrative/persistence/thought-segment-repo.js").ThoughtSegmentRepo,
       { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../events/persistence/hook-execution-repo.js").HookExecutionRepo,
     ),
-    new ParentAssistantTextCheckpointService(db),
+    new ParentAssistantTextCheckpointService(db, agentStorageTestWriter(db)),
     undefined,
     threadControlMcp as never,
     mutationReservations,
@@ -239,6 +217,8 @@ function synthesizedTurnCompleteEvents(events: Array<Record<string, unknown>>): 
   return events.filter((event) => event.type === "turnComplete"
     && (event.reason === "message_received" || event.reason === "provider_stream_exhausted"));
 }
+
+afterEach(closeAgentStorageTestDatabases);
 
 describe("AgentService transient-failure auto-retry", () => {
   beforeEach(() => {

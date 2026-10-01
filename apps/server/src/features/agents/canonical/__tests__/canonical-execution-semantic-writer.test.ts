@@ -8,16 +8,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
-import type { ParentAssistantTextCheckpointInput } from "../../turns/parent-assistant-text-checkpoint-service.js";
-import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { TaskRepo } from "../../orchestration/persistence/task-repo.js";
+import type { ParentAssistantTextCheckpointInput } from "../../turns/parent-assistant-text-checkpoint-store.js";
+import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
+import { TaskStore as TaskRepo } from "../../orchestration/persistence/task-store.js";
 import { CodexLiveEventReducer } from "../../execution/codex-live-event-reducer.js";
 import type { ExecutionSemanticOperation, ExecutionWorkCommand } from "../../execution/execution-worker-handler.js";
 import { ExecutionWorkerHandler } from "../../execution/execution-worker-handler.js";
-import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
+import { ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-store.js";
 import { CodexParentMessageProjection } from "../../turns/codex-parent-message-projection.js";
 import { NarrativeRecoveryDelta } from "../../turns/narrative-recovery-delta.js";
-import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agent-store.js";
 import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-projection.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
@@ -660,7 +660,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const text = new ParentAssistantTextCheckpointService(db);
     expect(text.appendChunk([{ ...execution, sequence: 1, text: "Partial answer" }]).outcome).toBe("committed");
     text.recoveryJournal.append([{ ...execution, sequence: 2, text: " from journal" }]);
-    const { CanonicalAgentBoundary } = await import("../canonical-agent-boundary.js");
+    const { CanonicalAgentStore: CanonicalAgentBoundary } = await import("../canonical-agent-store.js");
     const canonical = new CanonicalAgentBoundary(db, () => {});
     expect(canonical.recordParentNarrativeRecovery({
       executionId: EXECUTION_ID, items: toolNarrative("", 1),

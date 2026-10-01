@@ -4,10 +4,14 @@
  */
 
 import "reflect-metadata";
+import type { Database } from "bun:sqlite";
 import { container, Lifecycle } from "tsyringe";
 import { hostRuntime, type HostRuntime } from "@mcode/shared/node/host-runtime";
 
-import { openDatabase } from "../../runtime/persistence/sqlite/database.js";
+import { resolveDatabasePath } from "../../runtime/persistence/sqlite/database.js";
+import { openReadOnlyDatabase } from "../../runtime/persistence/sqlite/read-only-database.js";
+import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
+import { CanonicalAgentWriterClient } from "../../features/agents/canonical/canonical-agent-writer-client.js";
 import { registerCodexProvider } from "../../features/providers/composition/codex-provider-registration.js";
 import { registerCursorProvider } from "../../features/providers/composition/cursor-provider-registration.js";
 import { registerDevinProvider } from "../../features/providers/composition/devin-provider-registration.js";
@@ -79,7 +83,7 @@ import {
 } from "../../features/thread-control/composition/register-thread-repositories.js";
 
 /** Initialize the DI container with all server dependencies. */
-export function setupContainer(mcodeDir: string): typeof container {
+export async function setupContainer(mcodeDir: string): Promise<typeof container> {
   container.register<HostRuntime>("HostRuntime", { useValue: hostRuntime });
   registerBrowserAutomation(container);
 
@@ -113,10 +117,22 @@ export function setupContainer(mcodeDir: string): typeof container {
   );
 
   // Database
-  const db = openDatabase();
+  const dbPath = resolveDatabasePath();
+  const databaseWriter = new ApplicationDatabaseWriter(dbPath, undefined, { bootstrap: true });
+  let db: Database;
+  try {
+    await databaseWriter.whenReady();
+    db = openReadOnlyDatabase(dbPath);
+  } catch (error) {
+    try { await databaseWriter.close(); }
+    catch (closeError) { throw new AggregateError([error, closeError], "Database owner initialization and cleanup failed"); }
+    throw error;
+  }
   container.register("Database", { useValue: db });
+  container.registerInstance(ApplicationDatabaseWriter, databaseWriter);
+  container.registerInstance(CanonicalAgentWriterClient, new CanonicalAgentWriterClient(databaseWriter));
   container.register(PtyHostCleanupLedger, {
-    useValue: new PtyHostCleanupLedger(db),
+    useValue: new PtyHostCleanupLedger(db, databaseWriter),
   });
 
   registerWorkspaceRepository(container);

@@ -6,12 +6,12 @@ import {
   AcceptedCanonicalAgentEventEnvelopeSchema, CanonicalAgentEventEnvelopeSchema, AgentProgressPositionSchema, TurnOutcomeSchema, MessageSchema,
 } from "@mcode/contracts";
 import { canonicalAgentEvents } from "../../../runtime/persistence/sqlite/schema.js";
-import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";
 import type { ExecutionSemanticOperation } from "../execution/execution-worker-handler.js";
 import type { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
-import { PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-repo.js";
-import { MessageRepo } from "../conversation/persistence/message-repo.js";
+import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-store.js";
+import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import { AcceptedFeatureWriteMetadataSchema, persistAcceptedFeatureWrite } from "./accepted-feature-write.js";
 
 /** Immutable storage intent, validated again on the dedicated SQLite worker. */

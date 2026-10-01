@@ -34,21 +34,21 @@ export class TurnFeatureEffects {
   }
 
   /** Persist the plan record tied to an already-materialized assistant message. */
-  persistAssistantMessage(event: AgentMessage): void {
-    this.plans.persistAssistantMessage(event);
+  async persistAssistantMessage(event: AgentMessage): Promise<void> {
+    await this.plans.persistAssistantMessage(event);
   }
 
   /** Persist one provider task result for reconnect hydration. */
-  onToolResult(threadId: string, toolCallId: string, output: string, isError: boolean): void {
-    this.tasks.onToolResult(threadId, toolCallId, output, isError);
+  async onToolResult(threadId: string, toolCallId: string, output: string, isError: boolean): Promise<void> {
+    await this.tasks.onToolResult(threadId, toolCallId, output, isError);
   }
 
   /** Persist one provider task request with its resolved narrative parent. */
-  onToolUse(
+  async onToolUse(
     threadId: string,
     event: Parameters<TaskPersistenceService["onToolUse"]>[1],
-  ): void {
-    this.tasks.onToolUse(threadId, event);
+  ): Promise<void> {
+    await this.tasks.onToolUse(threadId, event);
   }
 
   /** Refresh goal state after the terminal turn reaches durable completion. */

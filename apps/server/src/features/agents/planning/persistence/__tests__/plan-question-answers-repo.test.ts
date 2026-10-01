@@ -1,34 +1,31 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
-import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
-import { WorkspaceRepo } from "../../../../projects/persistence/workspace-repo.js";
-import { MessageRepo } from "../../../conversation/persistence/message-repo.js";
-import { PlanQuestionAnswersRepo } from "../plan-question-answers-repo.js";
+import { ThreadStore } from "../../../../thread-control/persistence/thread-store.js";
+import { WorkspaceStore } from "../../../../projects/persistence/workspace-store.js";
+import { MessageStore } from "../../../conversation/persistence/message-store.js";
+import { PlanQuestionAnswersStore } from "../plan-question-answers-store.js";
 
 /**
  * Sidecar repo for the plan-question wizard's answered marker. The marker
  * lives keyed on the assistant message that contained the plan-questions
  * fence; cascading FKs to messages and threads keep the table self-pruning.
  */
-describe("PlanQuestionAnswersRepo", () => {
+describe("PlanQuestionAnswersStore", () => {
   let db: Database;
-  let repo: PlanQuestionAnswersRepo;
-  let messageRepo: MessageRepo;
+  let repo: PlanQuestionAnswersStore;
+  let messageRepo: MessageStore;
   let threadId: string;
   let assistantMsgId: string;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    container.reset();
-    container.registerInstance("Database", db);
-    repo = container.resolve(PlanQuestionAnswersRepo);
-    messageRepo = container.resolve(MessageRepo);
+    repo = new PlanQuestionAnswersStore(db);
+    messageRepo = new MessageStore(db);
 
-    const workspaceRepo = container.resolve(WorkspaceRepo);
-    const threadRepo = container.resolve(ThreadRepo);
+    const workspaceRepo = new WorkspaceStore(db);
+    const threadRepo = new ThreadStore(db);
     const ws = workspaceRepo.create("test-ws", "/tmp/ws", false);
     const t = threadRepo.create(ws.id, "thread", "direct", "main");
     threadId = t.id;
@@ -47,8 +44,8 @@ describe("PlanQuestionAnswersRepo", () => {
   });
 
   it("listAnsweredForThread returns marker IDs scoped to the thread", () => {
-    const workspaceRepo = container.resolve(WorkspaceRepo);
-    const threadRepo = container.resolve(ThreadRepo);
+    const workspaceRepo = new WorkspaceStore(db);
+    const threadRepo = new ThreadStore(db);
     const ws2 = workspaceRepo.create("other-ws", "/tmp/other-ws", false);
     const otherThread = threadRepo.create(ws2.id, "other", "direct", "main");
     const otherMsg = messageRepo.create(

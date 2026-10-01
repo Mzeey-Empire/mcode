@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
+let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import { HandoffStorage } from "../../../handoff/index.js";
 import {
@@ -16,6 +17,8 @@ import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { ThreadControlMutationReservationService } from "../../index.js";
 import { CleanupWorker } from "../cleanup-worker.js";
 import { CleanupJobRepo } from "../persistence/cleanup-job-repo.js";
+import { DatabaseWriteOutcomeUnknown } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import type { ApplicationDatabaseWriterResponse } from "../../../../runtime/persistence/sqlite/application-database-writer-protocol.js";
 
 const HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "127" } as const;
 
@@ -33,10 +36,10 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   let worker: CleanupWorker;
 
   beforeEach(() => {
-    database = openMemoryDatabase();
-    cleanupJobs = new CleanupJobRepo(database);
-    threads = new ThreadRepo(database);
-    workspaces = new WorkspaceRepo(database);
+    database = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
+    cleanupJobs = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    threads = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    workspaces = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     gitWorktrees = {
       removeWorktree: vi.fn().mockResolvedValue(true),
     } as unknown as GitWorktreeService;
@@ -57,7 +60,6 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
     } as unknown as ThreadDeletionTeardownService;
     mutationLock = new RepositoryGitMutationLock(HOST_RUNTIME);
     worker = new CleanupWorker(
-      database,
       cleanupJobs,
       threads,
       { waitForSessionExit: vi.fn().mockResolvedValue(undefined) } as unknown as ClaudeProvider,
@@ -108,7 +110,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   }
 
   it("keeps a sandbox worktree and active handoff thread", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     const path = "C:\\Users\\user\\.mcode\\worktrees\\repo\\feature";
     addThread(workspace.id, "expired", path, "feature/dirty", new Date(0).toISOString());
     addThread(workspace.id, "active-handoff", path, "feature/dirty", null);
@@ -139,17 +141,17 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("does not remove a new worktree path from a stale cleanup job", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     const stalePath = "C:\\Users\\user\\.mcode\\worktrees\\repo\\stale";
     const currentPath = "C:\\Users\\user\\.mcode\\worktrees\\repo\\current";
     addThread(workspace.id, "expired", stalePath, "feature/stale", null);
-    threads.softDelete("expired");
-    cleanupJobs.insert({
+    (await threads.softDelete("expired"));
+    (await cleanupJobs.insert({
       thread_id: "expired",
       workspace_path: "/repo",
       worktree_path: stalePath,
       branch: "feature/stale",
-    });
+    }));
     database.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?").run(currentPath, "expired");
 
     await worker.poll();
@@ -160,17 +162,17 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("does not remove a path changed after cleanup validates the job", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     const stalePath = "C:\\Users\\user\\.mcode\\worktrees\\repo\\stale";
     const currentPath = "C:\\Users\\user\\.mcode\\worktrees\\repo\\current";
     addThread(workspace.id, "expired", stalePath, "feature/stale", null);
-    threads.softDelete("expired");
-    cleanupJobs.insert({
+    (await threads.softDelete("expired"));
+    (await cleanupJobs.insert({
       thread_id: "expired",
       workspace_path: "/repo",
       worktree_path: stalePath,
       branch: "feature/stale",
-    });
+    }));
     vi.spyOn(mutationLock, "run").mockImplementationOnce(async (_workspacePath, work) => {
       database.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?").run(currentPath, "expired");
       return await work();
@@ -184,7 +186,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("keeps a default-branch checkout and removes only the expired thread", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     const path = "C:\\Users\\user\\.mcode\\worktrees\\repo\\main";
     addThread(workspace.id, "expired", path, "main", new Date(0).toISOString());
     addThread(workspace.id, "active-sibling", path, "main", null);
@@ -203,7 +205,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("keeps an external checkout and removes only the expired thread", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     const path = "C:\\source\\shared-worktree";
     addThread(workspace.id, "expired", path, "feature/external", new Date(0).toISOString());
     addThread(workspace.id, "active-sibling", path, "feature/external", null);
@@ -220,7 +222,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("retries failed worktree removal without deleting the thread", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     addThread(
       workspace.id,
       "failed-removal",
@@ -240,7 +242,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("does not overlap cleanup polls while a worktree removal is running", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     const removal = deferred<boolean>();
     const removalStarted = deferred<void>();
     addThread(
@@ -270,7 +272,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("requeues exhausted jobs on startup so stale worktrees get retried", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     addThread(
       workspace.id,
       "exhausted-explicit",
@@ -278,13 +280,13 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       "feature/exhausted",
       null,
     );
-    threads.softDelete("exhausted-explicit");
-    const job = cleanupJobs.insert({
+    (await threads.softDelete("exhausted-explicit"));
+    const job = (await cleanupJobs.insert({
       thread_id: "exhausted-explicit",
       workspace_path: "/repo",
       worktree_path: "C:\\Users\\user\\.mcode\\worktrees\\repo\\exhausted",
       branch: "feature/exhausted",
-    });
+    }));
     database.prepare("UPDATE cleanup_jobs SET attempts = 5 WHERE id = ?").run(job.id);
 
     expect(cleanupJobs.findDue(Date.now())).toHaveLength(0);
@@ -298,12 +300,12 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("restricts startup recovery and cleanup admission to the fixture workspace", async () => {
-    const fixture = workspaces.create("Fixture", "/fixture");
-    const user = workspaces.create("Copied user project", "/fixture-other");
-    const deleting = workspaces.create("Deleting user project", "/user-deleting");
-    const empty = workspaces.create("Empty deleting user project", "/user-empty");
-    workspaces.softDelete(deleting.id);
-    workspaces.softDelete(empty.id);
+    const fixture = (await workspaces.create("Fixture", "/fixture"));
+    const user = (await workspaces.create("Copied user project", "/fixture-other"));
+    const deleting = (await workspaces.create("Deleting user project", "/user-deleting"));
+    const empty = (await workspaces.create("Empty deleting user project", "/user-empty"));
+    (await workspaces.softDelete(deleting.id));
+    (await workspaces.softDelete(empty.id));
     addThread(deleting.id, "user-missing-job", "/user-worktree", "user", null);
 
     for (const workspace of [fixture, user]) {
@@ -311,24 +313,24 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       const explicitId = `${workspace.id}-explicit`;
       addThread(workspace.id, expiredId, `${workspace.path}/expired`, "expired", new Date(0).toISOString());
       addThread(workspace.id, explicitId, `${workspace.path}/explicit`, "explicit", null);
-      threads.softDelete(explicitId);
-      const job = cleanupJobs.insert({
+      (await threads.softDelete(explicitId));
+      const job = (await cleanupJobs.insert({
         thread_id: explicitId,
         workspace_path: workspace.path,
         worktree_path: `${workspace.path}/explicit`,
         branch: "explicit",
-      });
+      }));
       database.prepare("UPDATE cleanup_jobs SET attempts = 5, last_error = 'original error' WHERE id = ?")
         .run(job.id);
     }
     for (const kind of ["explicit", "retention"] as const) {
-      cleanupJobs.insert({
+      (await cleanupJobs.insert({
         thread_id: `user-orphan-${kind}`,
         workspace_path: user.path,
         worktree_path: null,
         branch: null,
         kind,
-      });
+      }));
     }
     const userRows = () => ({
       workspaces: database.prepare("SELECT * FROM workspaces WHERE id != ? ORDER BY id").all(fixture.id),
@@ -356,11 +358,11 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("leaves all copied rows untouched when the fixture path has no matching workspace", async () => {
-    const user = workspaces.create("Copied user project", "/user");
+    const user = (await workspaces.create("Copied user project", "/user"));
     addThread(user.id, "user-expired", "/user/expired", "expired", new Date(0).toISOString());
-    const job = cleanupJobs.insert({
+    const job = (await cleanupJobs.insert({
       thread_id: "user-orphan", workspace_path: user.path, worktree_path: null, branch: null,
-    });
+    }));
     database.prepare("UPDATE cleanup_jobs SET attempts = 5 WHERE id = ?").run(job.id);
     const threadBefore = threads.findById("user-expired");
     const jobBefore = cleanupJobs.findById(job.id);
@@ -380,12 +382,12 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("deletes exhausted orphan job rows on the next poll after startup requeue", async () => {
-    const job = cleanupJobs.insert({
+    const job = (await cleanupJobs.insert({
       thread_id: "thread-already-gone",
       workspace_path: "/repo",
       worktree_path: "C:\\Users\\user\\.mcode\\worktrees\\repo\\orphan",
       branch: "feature/orphan",
-    });
+    }));
     database.prepare("UPDATE cleanup_jobs SET attempts = 5 WHERE id = ?").run(job.id);
 
     await worker.reconcileOnStartup();
@@ -396,7 +398,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("blocks a retention cleanup with the underlying removal error attached", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     addThread(
       workspace.id,
       "blocked-retention",
@@ -405,13 +407,13 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       new Date(0).toISOString(),
     );
     database.prepare("UPDATE threads SET cleanup_state = 'queued' WHERE id = ?").run("blocked-retention");
-    const job = cleanupJobs.insert({
+    const job = (await cleanupJobs.insert({
       thread_id: "blocked-retention",
       workspace_path: "/repo",
       worktree_path: "C:\\Users\\user\\.mcode\\worktrees\\repo\\blocked",
       branch: "feature/blocked",
       kind: "retention",
-    });
+    }));
     database.prepare("UPDATE cleanup_jobs SET attempts = 4 WHERE id = ?").run(job.id);
     vi.mocked(gitWorktrees.removeWorktree).mockRejectedValue(new Error("removal timed out"));
 
@@ -425,7 +427,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   });
 
   it("does not admit cleanup after disposal", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     addThread(
       workspace.id,
       "disposed-removal",
@@ -441,8 +443,88 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
     expect(gitWorktrees.removeWorktree).not.toHaveBeenCalled();
   });
 
+  it("retains an uncertain committed claim and prevents automatic destructive retry after real owner loss", async () => {
+    let workers = 0;
+    const runtime = createThreadPersistenceTestRuntime(() => {
+      const providerWorker = new Worker(new URL("../../../agents/canonical/canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
+      if (++workers > 1) return providerWorker;
+      return new Proxy(providerWorker, {
+        set(target, property, value) {
+          if (property !== "onmessage" || typeof value !== "function") return Reflect.set(target, property, value);
+          target.onmessage = (message: MessageEvent<ApplicationDatabaseWriterResponse>) => {
+            if (message.data.kind === "ordinary-written" && message.data.name === "cleanupJob.claimRetentionJob") {
+              target.terminate();
+              return;
+            }
+            value(message);
+          };
+          return true;
+        },
+        get(target, property) {
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    });
+    const ownedWorkspaces = new WorkspaceRepo(runtime.reader, runtime.writer);
+    const ownedThreads = new ThreadRepo(runtime.reader, runtime.writer);
+    const ownedJobs = new CleanupJobRepo(runtime.reader, runtime.writer);
+    const workspace = await ownedWorkspaces.create("Uncertain cleanup", "/uncertain-cleanup");
+    const thread = await ownedThreads.create(workspace.id, "Uncertain claim", "direct", "main");
+    await ownedThreads.complete(thread.id, new Date().toISOString(), new Date(0).toISOString());
+    runtime.database.prepare("UPDATE threads SET cleanup_state = 'queued' WHERE id = ?").run(thread.id);
+    const job = await ownedJobs.insert({ thread_id: thread.id, workspace_path: workspace.path, worktree_path: null, branch: "main", kind: "retention" });
+    const uncertainCleanup = new CleanupWorker(
+      ownedJobs, ownedThreads,
+      { waitForSessionExit: vi.fn().mockResolvedValue(undefined) } as unknown as ClaudeProvider,
+      gitWorktrees, cleanupPolicy, mutationLock, ownedWorkspaces,
+      { removeForThread: vi.fn() } as unknown as AttachmentService,
+      { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
+      threadDeletion, HOST_RUNTIME, new ThreadControlMutationReservationService(),
+    );
+
+    await expect(uncertainCleanup.processOneJob()).rejects.toBeInstanceOf(DatabaseWriteOutcomeUnknown);
+    await uncertainCleanup.poll();
+    expect(ownedJobs.findById(job.id)).toMatchObject({ attempts: 0 });
+    expect(ownedThreads.findById(thread.id)?.cleanup_state).toBe("running");
+    expect(threadDeletion.teardownThread).not.toHaveBeenCalled();
+    expect(gitWorktrees.removeWorktree).not.toHaveBeenCalled();
+    expect(await ownedThreads.create(workspace.id, "Unrelated tail", "direct", "main")).toMatchObject({ title: "Unrelated tail" });
+    expect(workers).toBe(2);
+  });
+
+  it("keeps twenty uncertain jobs reachable while processing a later healthy cleanup", async () => {
+    const workspace = await workspaces.create("Quarantined cleanup", "/quarantined-cleanup");
+    const uncertainIds: string[] = [];
+    const claim = vi.spyOn(cleanupJobs, "claimRetentionJob");
+    for (let index = 0; index < 20; index++) {
+      const thread = await threads.create(workspace.id, `Uncertain ${index}`, "direct", "main");
+      await threads.complete(thread.id, new Date().toISOString(), new Date(0).toISOString());
+      database.prepare("UPDATE threads SET cleanup_state = 'queued' WHERE id = ?").run(thread.id);
+      const job = await cleanupJobs.insert({ thread_id: thread.id, workspace_path: workspace.path, worktree_path: null, branch: "main", kind: "retention" });
+      uncertainIds.push(job.id);
+      claim.mockRejectedValueOnce(new DatabaseWriteOutcomeUnknown("Claim response was lost"));
+    }
+    const healthy = await threads.create(workspace.id, "Healthy tail", "direct", "main");
+    await threads.complete(healthy.id, new Date().toISOString(), new Date(0).toISOString());
+    database.prepare("UPDATE threads SET cleanup_state = 'queued' WHERE id = ?").run(healthy.id);
+    const healthyJob = await cleanupJobs.insert({ thread_id: healthy.id, workspace_path: workspace.path, worktree_path: null, branch: "main", kind: "retention" });
+
+    await worker.poll();
+    expect(cleanupJobs.count()).toBe(21);
+    await worker.poll();
+
+    expect(threads.findById(healthy.id)).toBeNull();
+    expect(cleanupJobs.findById(healthyJob.id)).toBeNull();
+    expect(cleanupJobs.count()).toBe(20);
+    expect(claim.mock.calls.map(([jobId]) => jobId)).toEqual([...uncertainIds, healthyJob.id]);
+    expect(cleanupJobs.getDueCounts(Date.now(), workspace.path, uncertainIds)).toEqual({ explicit: 0, retention: 0 });
+    for (const jobId of uncertainIds) expect(cleanupJobs.findById(jobId)).toMatchObject({ attempts: 0 });
+    expect(threadDeletion.teardownThread).toHaveBeenCalledExactlyOnceWith(healthy.id);
+  });
+
   it("waits for an active cleanup before shutdown completes", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     const removal = deferred<boolean>();
     const removalStarted = deferred<void>();
     addThread(

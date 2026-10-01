@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { ThreadRepo } from "../thread-repo.js";
+import { ThreadStore as ThreadRepo } from "../thread-store.js";
 import type { Database } from "bun:sqlite";
 
 describe("ThreadRepo.updateSettings", () => {

@@ -102,7 +102,27 @@ interface WsMessageContext {
   readonly ws: WebSocket;
   readonly deps: WsServerDeps;
   readonly resolveCurrentBrowserAutomationAuthorization: () => BrowserAutomationHostConnectionAuthorization | null;
+  readonly admission: RequestAdmission;
   pendingBinaryHeader: BinaryUploadHeader | null;
+}
+
+class RequestAdmission {
+  private accepting = true;
+  private readonly pending = new Set<Promise<void>>();
+
+  run(handler: () => Promise<void>): boolean {
+    if (!this.accepting) return false;
+    const task = Promise.resolve().then(handler).catch((error: unknown) => {
+      logger.error("Admitted transport request failed", { error: describeError(error) });
+    }).finally(() => this.pending.delete(task));
+    this.pending.add(task);
+    return true;
+  }
+
+  async stopAdmissionAndDrain(): Promise<void> {
+    this.accepting = false;
+    await Promise.all(this.pending);
+  }
 }
 
 /** Query parameters used by browser clients to prove they target this dev instance. */
@@ -162,11 +182,14 @@ function matchesWorktreeIdentity(presented: string | null, expected: string | nu
 export function createWsServer(deps: WsServerDeps): {
   httpServer: NodeHTTP.Server;
   wss: WebSocketServer;
+  /** Refuses new routed requests and waits for admitted handlers and Terminal cleanup. */
+  stopAdmissionAndDrain(): Promise<void>;
 } {
+  const admission = new RequestAdmission();
   let wss: WebSocketServer;
   const httpServer = NodeHTTP.createServer((req: NodeHTTP.IncomingMessage, res: NodeHTTP.ServerResponse) => {
     const requestPath = new URL(req.url ?? "/", "http://localhost").pathname;
-    if (handleSpecialHttpRequest(req, res, requestPath, deps, wss)) return;
+    if (handleSpecialHttpRequest(req, res, requestPath, deps, wss, admission)) return;
     if (handleHealthRequest(req, res, deps)) return;
     if (handleShutdownRequest(req, res, deps)) return;
     if (handleAttachmentRequest(req, res, deps)) return;
@@ -252,6 +275,7 @@ export function createWsServer(deps: WsServerDeps): {
       ws,
       deps,
       resolveCurrentBrowserAutomationAuthorization,
+      admission,
       pendingBinaryHeader: null,
     };
 
@@ -272,7 +296,7 @@ export function createWsServer(deps: WsServerDeps): {
     });
   });
 
-  return { httpServer, wss };
+  return { httpServer, wss, stopAdmissionAndDrain: () => admission.stopAdmissionAndDrain() };
 }
 
 /** Routes authenticated HTTP endpoints that require an asynchronous handler. */
@@ -282,60 +306,84 @@ function handleSpecialHttpRequest(
   requestPath: string,
   deps: WsServerDeps,
   wss: WebSocketServer,
+  admission: RequestAdmission,
 ): boolean {
   if (requestPath === "/__mcode/reliability" && deps.reliabilityHarness?.enabled) {
-    handleReliabilityRequest(req, res, deps.reliabilityHarness, wss);
+    const harness = deps.reliabilityHarness;
+    admitHttpRequest(res, admission, () => handleReliabilityRequest(req, res, harness, wss));
     return true;
   }
   if (requestPath === "/mcp" && deps.browserAutomationMcpHandler) {
-    handleBrowserAutomationMcpRequest(req, res, deps.browserAutomationMcpHandler);
+    const handler = deps.browserAutomationMcpHandler;
+    admitHttpRequest(res, admission, () => handleBrowserAutomationMcpRequest(req, res, handler));
     return true;
   }
   if (requestPath === EXTERNAL_THREAD_CONTROL_MCP_PATH && deps.externalThreadControlMcpRuntime) {
-    handleThreadControlMcpRequest(req, res, deps.externalThreadControlMcpRuntime);
+    const runtime = deps.externalThreadControlMcpRuntime;
+    admitHttpRequest(res, admission, () => handleThreadControlMcpRequest(req, res, runtime));
     return true;
   }
   return false;
 }
 
+function admitHttpRequest(res: NodeHTTP.ServerResponse, admission: RequestAdmission, handler: () => Promise<void>): void {
+  if (admission.run(handler)) return;
+  sendHttpFailure(res, 503, "Server is shutting down");
+}
+
+function sendHttpFailure(res: NodeHTTP.ServerResponse, status: number, body: string, headers?: NodeHTTP.OutgoingHttpHeaders): void {
+  if (res.destroyed || res.writableEnded) return;
+  try {
+    if (!res.headersSent) res.writeHead(status, headers);
+    res.end(body);
+  } catch (error) {
+    logger.warn("HTTP failure response send failed", { error: describeError(error) });
+    res.destroy();
+  }
+}
+
 /** Starts a reliability control request and returns its existing failure response. */
-function handleReliabilityRequest(
+async function handleReliabilityRequest(
   req: NodeHTTP.IncomingMessage,
   res: NodeHTTP.ServerResponse,
   reliabilityHarness: NonNullable<WsServerDeps["reliabilityHarness"]>,
   wss: WebSocketServer,
-): void {
-  void reliabilityHarness.handleRequest(req, res, wss.clients).catch((error: unknown) => {
+): Promise<void> {
+  try {
+    await reliabilityHarness.handleRequest(req, res, wss.clients);
+  } catch (error) {
     logger.error("Reliability harness request failed", { error: describeError(error) });
-    if (!res.headersSent) res.writeHead(500);
-    res.end("Reliability harness failure");
-  });
+    sendHttpFailure(res, 500, "Reliability harness failure");
+  }
 }
 
 /** Starts a browser MCP request and returns its JSON-RPC failure response when required. */
-function handleBrowserAutomationMcpRequest(
+async function handleBrowserAutomationMcpRequest(
   req: NodeHTTP.IncomingMessage,
   res: NodeHTTP.ServerResponse,
   handler: BrowserAutomationMcpHandler,
-): void {
-  void handler.handle(req, res).catch((error: unknown) => {
+): Promise<void> {
+  try {
+    await handler.handle(req, res);
+  } catch (error) {
     logger.error("Browser automation MCP request failed", { error: describeError(error) });
-    if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal error" } }));
-  });
+    sendHttpFailure(res, 500, JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal error" } }),
+      { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  }
 }
 
 /** Starts an external thread-control MCP request and returns its failure response when required. */
-function handleThreadControlMcpRequest(
+async function handleThreadControlMcpRequest(
   req: NodeHTTP.IncomingMessage,
   res: NodeHTTP.ServerResponse,
   runtime: NonNullable<WsServerDeps["externalThreadControlMcpRuntime"]>,
-): void {
-  void runtime.handleRequest(req, res).catch((error: unknown) => {
+): Promise<void> {
+  try {
+    await runtime.handleRequest(req, res);
+  } catch (error) {
     logger.error("External thread-control MCP request failed", { error: describeError(error) });
-    if (!res.headersSent) res.writeHead(500);
-    res.end();
-  });
+    sendHttpFailure(res, 500, "");
+  }
 }
 
 /** Serves the server health endpoint. */
@@ -449,17 +497,47 @@ function describeError(error: unknown): string {
 
 /** Routes one WebSocket frame to terminal upload handling or JSON-RPC. */
 function handleWsMessage(data: Buffer | string, isBinary: boolean, context: WsMessageContext): void {
+  const admitted = context.admission.run(async () => {
+    if (isBinary) {
+      await handleBinaryWsMessage(Buffer.isBuffer(data) ? data : Buffer.from(data), context);
+      return;
+    }
+    await handleTextWsMessage(typeof data === "string" ? data : data.toString("utf-8"), context);
+  });
+  if (admitted) return;
+  rejectWsMessage(data, isBinary, context);
+}
+
+function rejectWsMessage(data: Buffer | string, isBinary: boolean, context: WsMessageContext): void {
   if (isBinary) {
-    handleBinaryWsMessage(Buffer.isBuffer(data) ? data : Buffer.from(data), context);
+    const header = context.pendingBinaryHeader;
+    context.pendingBinaryHeader = null;
+    if (header) sendShutdownResponse(context.ws, header.id);
+    else context.ws.close(1012, "Server is shutting down");
     return;
   }
-  handleTextWsMessage(typeof data === "string" ? data : data.toString("utf-8"), context);
+  const raw = typeof data === "string" ? data : data.toString("utf-8");
+  const header = parseBinaryUploadHeader(raw);
+  sendShutdownResponse(context.ws, header?.id ?? parseWsRequestId(raw));
+}
+
+function parseWsRequestId(raw: string): string {
+  try {
+    const request = WebSocketRequestSchema().safeParse(JSON.parse(raw));
+    return request.success ? request.data.id : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function sendShutdownResponse(ws: WebSocket, id: string | number | null): void {
+  sendWsJson(ws, { id, error: { code: "SERVER_SHUTTING_DOWN", message: "Server is shutting down" } });
 }
 
 /** Routes a binary terminal frame or a binary file-upload frame. */
-function handleBinaryWsMessage(bytes: Buffer, context: WsMessageContext): void {
+async function handleBinaryWsMessage(bytes: Buffer, context: WsMessageContext): Promise<void> {
   if (isTerminalBinaryFrame(bytes)) {
-    handleTerminalBinaryFrame(bytes, context);
+    await handleTerminalBinaryFrame(bytes, context);
     return;
   }
   const header = context.pendingBinaryHeader;
@@ -468,7 +546,7 @@ function handleBinaryWsMessage(bytes: Buffer, context: WsMessageContext): void {
     logger.warn("Received binary frame with no pending upload header");
     return;
   }
-  handleFileUploadFrame(header, bytes, context.ws);
+  await handleFileUploadFrame(header, bytes, context.ws);
 }
 
 /** Checks whether a binary frame uses the terminal v1 magic prefix. */
@@ -477,11 +555,13 @@ function isTerminalBinaryFrame(bytes: Buffer): boolean {
 }
 
 /** Sends a terminal v1 frame to the terminal service. */
-function handleTerminalBinaryFrame(bytes: Buffer, context: WsMessageContext): void {
-  void context.deps.terminalService.handleV1Frame(context.ws, bytes).catch((error: unknown) => {
+async function handleTerminalBinaryFrame(bytes: Buffer, context: WsMessageContext): Promise<void> {
+  try {
+    await context.deps.terminalService.handleV1Frame(context.ws, bytes);
+  } catch (error) {
     logger.warn("Terminal v1 frame rejected", { error: describeError(error) });
     closeForTerminalRetry(error, context.ws);
-  });
+  }
 }
 
 /** Closes a connection when a terminal error requires a non-safe retry. */
@@ -491,7 +571,7 @@ function closeForTerminalRetry(error: unknown, ws: WebSocket): void {
 }
 
 /** Handles a clipboard file-upload frame after its text header. */
-function handleFileUploadFrame(header: BinaryUploadHeader, bytes: Buffer, ws: WebSocket): void {
+async function handleFileUploadFrame(header: BinaryUploadHeader, bytes: Buffer, ws: WebSocket): Promise<void> {
   if (header.method !== "clipboard.saveFile") {
     logger.warn("Unsupported binary upload method", { method: header.method });
     sendWsJson(ws, {
@@ -509,9 +589,12 @@ function handleFileUploadFrame(header: BinaryUploadHeader, bytes: Buffer, ws: We
     });
     return;
   }
-  void handleBinaryUpload(metadata, bytes)
-    .then((result) => sendWsJson(ws, { id: header.id, result }))
-    .catch((error: unknown) => handleFileUploadFailure(header.id, error, ws));
+  try {
+    const result = await handleBinaryUpload(metadata, bytes);
+    sendWsJson(ws, { id: header.id, result });
+  } catch (error) {
+    handleFileUploadFailure(header.id, error, ws);
+  }
 }
 
 /** Reads the required file-upload metadata from an upload header. */
@@ -547,13 +630,13 @@ function sendWsJson(
 }
 
 /** Routes a text upload header or a regular JSON-RPC message. */
-function handleTextWsMessage(raw: string, context: WsMessageContext): void {
+async function handleTextWsMessage(raw: string, context: WsMessageContext): Promise<void> {
   const header = parseBinaryUploadHeader(raw);
   if (header) {
     replacePendingUploadHeader(header, context);
     return;
   }
-  routeWsMessage(raw, context);
+  await routeWsMessage(raw, context);
 }
 
 /** Parses a text frame as a binary-upload header. */
@@ -580,14 +663,13 @@ function replacePendingUploadHeader(header: BinaryUploadHeader, context: WsMessa
 }
 
 /** Routes a regular JSON-RPC frame and returns its response to the same client. */
-function routeWsMessage(raw: string, context: WsMessageContext): void {
+async function routeWsMessage(raw: string, context: WsMessageContext): Promise<void> {
   const terminalCreateMethod = parseTerminalCreateMethod(raw);
-  void routeMessage(raw, context.deps, {
+  const response = await routeMessage(raw, context.deps, {
     client: context.ws,
     browserAutomationAuthorization: context.resolveCurrentBrowserAutomationAuthorization(),
-  })
-    .then((response) => sendWsResponse(terminalCreateMethod, response, context))
-    .catch((error: unknown) => logger.error("Unexpected router error", { error: describeError(error) }));
+  });
+  await sendWsResponse(terminalCreateMethod, response, context);
 }
 
 type TerminalCreateMethod = DisconnectedTerminalCreate["method"];
@@ -608,11 +690,11 @@ function isTerminalCreateMethod(method: string): method is TerminalCreateMethod 
 }
 
 /** Delivers an RPC response and reclaims a Terminal create only when response delivery fails. */
-function sendWsResponse(
+async function sendWsResponse(
   method: TerminalCreateMethod | null,
   response: WebSocketResponse,
   context: WsMessageContext,
-): void {
+): Promise<void> {
   if (!method) {
     sendWsJson(context.ws, response);
     return;
@@ -622,16 +704,11 @@ function sendWsResponse(
     sendWsJson(context.ws, response);
     return;
   }
-  let cleanupStarted = false;
-  const cleanup = () => {
-    if (cleanupStarted) return;
-    cleanupStarted = true;
-    void cleanupDisconnectedTerminalCreate(create, context);
-  };
-  const accepted = sendWsJson(context.ws, response, (error) => {
-    if (error) cleanup();
+  const delivered = await new Promise<boolean>((resolve) => {
+    const accepted = sendWsJson(context.ws, response, (error) => resolve(!error));
+    if (!accepted) resolve(false);
   });
-  if (!accepted) cleanup();
+  if (!delivered) await cleanupDisconnectedTerminalCreate(create, context);
 }
 
 /** Closes a Terminal resource that was created for a response the client did not receive. */

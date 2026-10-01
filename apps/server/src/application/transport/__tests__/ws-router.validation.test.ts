@@ -10,7 +10,8 @@ import { routeMessage, type RouterDeps } from "../ws-router.js";
 import { CodexCatalogService } from "../../../features/providers/catalog/codex-catalog-service.js";
 import { ProviderCatalogService } from "../../../features/providers/catalog/provider-catalog-service.js";
 import { ProviderCatalogSnapshotRepo } from "../../../features/providers/catalog/persistence/provider-catalog-snapshot-repo.js";
-import { openMemoryDatabase } from "../../../runtime/persistence/sqlite/database.js";
+import { openReadOnlyDatabase } from "../../../runtime/persistence/sqlite/read-only-database.js";
+import { createOwnedTestDatabase } from "../../../features/projects/testing/owned-test-database.js";
 import { ThreadRepo } from "../../../features/thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../features/projects/persistence/workspace-repo.js";
 import type { ProjectActionService } from "../../../features/projects/environment/project-action-service.js";
@@ -77,7 +78,7 @@ function createProjectActionServiceMock() {
     beginWorkspaceTeardown,
     reopenThread: vi.fn(),
     dispose: vi.fn(async () => undefined),
-    recoverStaleRuns: vi.fn(() => []),
+    recoverStaleRuns: vi.fn(async () => []),
   } satisfies Pick<
     ProjectActionService,
     | "onUpdate"
@@ -95,6 +96,29 @@ function createProjectActionServiceMock() {
   >;
   return { service, beginWorkspaceTeardown, beginThreadTeardown, stopForThread };
 }
+
+const databaseCleanups: Array<() => Promise<void>> = [];
+const catalogServices: ProviderCatalogService[] = [];
+
+function routerStorageFixture() {
+  const fixture = createOwnedTestDatabase();
+  const reader = openReadOnlyDatabase(fixture.db.filename);
+  databaseCleanups.push(async () => { reader.close(true); await fixture.close(); });
+  return { reader, seed: fixture.db, writer: fixture.writer };
+}
+
+function catalogService(snapshots: ProviderCatalogSnapshotRepo): ProviderCatalogService {
+  const service = new ProviderCatalogService(snapshots);
+  catalogServices.push(service);
+  return service;
+}
+
+afterEach(async () => {
+  const catalogResults = await Promise.allSettled(catalogServices.splice(0).map((service) => service.close()));
+  const databaseResults = await Promise.allSettled(databaseCleanups.splice(0).map((close) => close()));
+  const failures = [...catalogResults, ...databaseResults].filter((result) => result.status === "rejected");
+  if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Router fixture cleanup failed");
+});
 
 describe("routeMessage result validation seam", () => {
   afterEach(() => {
@@ -252,9 +276,10 @@ describe("routeMessage provider.catalog", () => {
       } as never,
       hostRuntime,
     );
-    const db = openMemoryDatabase();
-    const providerCatalogService = new ProviderCatalogService(
-      new ProviderCatalogSnapshotRepo(db),
+    const fixture = routerStorageFixture();
+    const db = fixture.reader;
+    const providerCatalogService = catalogService(
+      new ProviderCatalogSnapshotRepo(db, fixture.writer),
     );
     const deps = {
       codexCatalogService,
@@ -292,7 +317,6 @@ describe("routeMessage provider.catalog", () => {
       expect(client.readConfig).toHaveBeenCalledWith(cwd);
     } finally {
       await codexCatalogService.shutdown();
-      db.close();
       await NodeFSPromises.rm(root, { recursive: true, force: true });
     }
   });
@@ -333,9 +357,10 @@ describe("routeMessage provider.catalog", () => {
       } as never,
       hostRuntime,
     );
-    const db = openMemoryDatabase();
-    const providerCatalogService = new ProviderCatalogService(
-      new ProviderCatalogSnapshotRepo(db),
+    const fixture = routerStorageFixture();
+    const db = fixture.reader;
+    const providerCatalogService = catalogService(
+      new ProviderCatalogSnapshotRepo(db, fixture.writer),
     );
     const deps = {
       codexCatalogService,
@@ -372,7 +397,6 @@ describe("routeMessage provider.catalog", () => {
       });
     } finally {
       await codexCatalogService.shutdown();
-      db.close();
       await NodeFSPromises.rm(root, { recursive: true, force: true });
     }
   });
@@ -497,14 +521,15 @@ describe("routeMessage provider.catalog", () => {
       hostRuntime,
     );
     const refresh = vi.spyOn(codexCatalogService, "refresh");
-    const db = openMemoryDatabase();
-    const insertWorkspace = db.prepare(
+    const fixture = routerStorageFixture();
+    const db = fixture.reader;
+    const insertWorkspace = fixture.seed.prepare(
       "INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)",
     );
     insertWorkspace.run("workspace-1", "Workspace 1", "C:/repo");
     insertWorkspace.run("workspace-2", "Workspace 2", "C:/other");
-    const snapshotRepo = new ProviderCatalogSnapshotRepo(db);
-    const providerCatalogService = new ProviderCatalogService(snapshotRepo);
+    const snapshotRepo = new ProviderCatalogSnapshotRepo(db, fixture.writer);
+    const providerCatalogService = catalogService(snapshotRepo);
     const list = vi.fn().mockImplementation((_cwd, _providerId, discoveredSkills = []) => (
       discoveredSkills
     ));
@@ -576,7 +601,7 @@ describe("routeMessage provider.catalog", () => {
     }).selectableAgents.every((agent) => agent.providerId === "codex" && agent.nativeId.length > 0))
       .toBe(true);
 
-    const restartedCatalogService = new ProviderCatalogService(snapshotRepo);
+    const restartedCatalogService = catalogService(snapshotRepo);
     (deps as { providerCatalogService: ProviderCatalogService }).providerCatalogService = restartedCatalogService;
     const restartedChange = new Promise<import("@mcode/contracts").ProviderCatalogChange>((resolve) => {
       restartedCatalogService.onChanged((change) => {
@@ -662,7 +687,6 @@ describe("routeMessage provider.catalog", () => {
       freshness: { status: "stale" },
     });
     await codexCatalogService.shutdown();
-    db.close();
   });
 
   it("rejects unknown providers and oversized contexts before dispatch", async () => {
@@ -1409,16 +1433,18 @@ describe("routeMessage thread completion lifecycle", () => {
     const secondClient: Array<{ buf: Buffer; binary: boolean }> = [];
     addClient(fakeOpenSocket(firstClient));
     addClient(fakeOpenSocket(secondClient));
-    const db = openMemoryDatabase();
-    const workspaceRepo = new WorkspaceRepo(db);
-    const threadRepo = new ThreadRepo(db);
-    const thread = threadRepo.create(
-      workspaceRepo.create("Project", "C:/repo", true).id,
+    const fixture = routerStorageFixture();
+    const db = fixture.reader;
+    const workspaceRepo = new WorkspaceRepo(db, fixture.writer);
+    const threadRepo = new ThreadRepo(db, fixture.writer);
+    const workspace = await workspaceRepo.create("Project", "C:/repo", true);
+    const thread = await threadRepo.create(
+      workspace.id,
       "Complete me",
       "direct",
       "main",
     );
-    const completed = threadRepo.complete(
+    const completed = await threadRepo.complete(
       thread.id,
       "2026-08-12T08:00:00.000Z",
       "2026-08-15T08:00:00.000Z",
@@ -1528,7 +1554,7 @@ describe("routeMessage Setup deletion barriers", () => {
     const environment = new WorkspaceEnvironmentService({
       mcodeDir: root,
       threads: { findById: (threadId) => !deleted && threadId === thread.id ? thread : null },
-      platform: hostRuntime.platform,
+      platform: hostRuntime.platform === "win32" ? "windows" : hostRuntime.platform === "darwin" ? "macos" : "linux",
     });
     const teardownEntered = deferred<void>();
     const teardown = deferred<void>();

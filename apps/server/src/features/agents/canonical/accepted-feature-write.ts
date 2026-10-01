@@ -3,9 +3,9 @@ import * as NodeUtil from "node:util";
 import { AgentThreadIdSchema, CanonicalTimestampSchema, MessageSchema, PlanRecordSchema, lazySchema,
   type PlanRecord } from "@mcode/contracts";
 import { z } from "zod";
-import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import { MessageRepo } from "../conversation/persistence/message-repo.js";
-import { PlanRepo } from "../planning/persistence/plan-repo.js";
+import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
+import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
+import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
 
 const MAX_METADATA_BYTES = 2 * 1024 * 1024;
 const boundedIdentitySchema = z.string().min(1).max(256).refine((id) => id.trim() === id,

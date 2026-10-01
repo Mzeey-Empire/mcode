@@ -42,8 +42,8 @@ type SnapshotHandlerMap = {
 const snapshotHandlers: SnapshotHandlerMap = {
   "snapshot.getDiff": routeSnapshotDiff,
   "snapshot.getDiffStats": routeSnapshotDiffStats,
-  "snapshot.cleanup": (deps) => ({
-    removed: deps.turnSnapshotRepo.deleteExpired(
+  "snapshot.cleanup": async (deps) => ({
+    removed: await deps.turnSnapshotRepo.deleteExpired(
       parseInt(process.env.SNAPSHOT_MAX_AGE_DAYS ?? "30", 10),
     ),
   }),

@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { describe, expect, it } from "vitest";
-import { ThreadControlAuditRepo } from "../thread-control-audit-repo.js";
+import { ThreadControlAuditStore as ThreadControlAuditRepo } from "../thread-control-audit-store.js";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
 
 describe("ThreadControlAuditRepo", () => {

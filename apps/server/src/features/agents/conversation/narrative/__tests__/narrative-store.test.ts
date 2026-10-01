@@ -1,7 +1,7 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
+import { openAgentStorageTestDatabase as openMemoryDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../../__tests__/agent-storage-fixture.js";
 import { MessageRepo } from "../../persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../../tools/persistence/tool-call-record-repo.js";
 import { ThoughtSegmentRepo } from "../persistence/thought-segment-repo.js";
@@ -56,7 +56,7 @@ function narrativeEntryIdentity(entry: ReturnType<NarrativeStore["load"]>[number
 
 interface CapturedStatement {
   sql: string;
-  parameters: unknown[];
+  parameters: SQLQueryBindings[];
 }
 
 function traceStatements(db: Database, captured: CapturedStatement[]): Database {
@@ -74,7 +74,7 @@ function traceStatements(db: Database, captured: CapturedStatement[]): Database 
             if (statementProperty !== "all" && statementProperty !== "get" && statementProperty !== "values") {
               return typeof value === "function" ? value.bind(statementTarget) : value;
             }
-            return (...parameters: unknown[]) => {
+            return (...parameters: SQLQueryBindings[]) => {
               captured.push({ sql, parameters });
               return value.call(statementTarget, ...parameters);
             };
@@ -85,10 +85,12 @@ function traceStatements(db: Database, captured: CapturedStatement[]): Database 
   }) as Database;
 }
 
+afterEach(closeAgentStorageTestDatabases);
+
 describe("NarrativeStore Move/Rename persistence sanitization", () => {
   it.each(["Move", "rEnAmE"])(
     "passes only bounded source and destination paths to persistence for %s",
-    (toolName) => {
+    async (toolName) => {
       let persistedInputSummary: string | undefined;
       const store = new NarrativeStore(
         {} as MessageRepo,
@@ -113,7 +115,7 @@ describe("NarrativeStore Move/Rename persistence sanitization", () => {
         },
       });
 
-      store.persistNarrative("thread-1", "m1", "done", "completed");
+      await store.persistNarrative("thread-1", "m1", "done", "completed");
 
       expect(persistedInputSummary).toBe("src/old.ts -> src/new.ts");
       expect(persistedInputSummary?.length).toBeLessThanOrEqual(200);
@@ -199,7 +201,7 @@ describe("NarrativeStore sub-agent identity persistence", () => {
     ]);
   });
 
-  it("persists bounded explicit identity separately from delegated task text", () => {
+  it("persists bounded explicit identity separately from delegated task text", async () => {
     let persisted: Array<{ displayName?: string; inputSummary?: string; subagentIdentityKey?: string }> = [];
     const store = new NarrativeStore(
       {} as MessageRepo,
@@ -223,7 +225,7 @@ describe("NarrativeStore sub-agent identity persistence", () => {
       },
     });
 
-    store.persistNarrative("thread-1", "m1", "done", "completed");
+    await store.persistNarrative("thread-1", "m1", "done", "completed");
 
     expect(persisted[0]?.displayName).toHaveLength(96);
     expect(persisted[0]?.displayName?.endsWith("…")).toBe(true);
@@ -233,7 +235,7 @@ describe("NarrativeStore sub-agent identity persistence", () => {
       .toBe(encodeSubagentAliasDetailTarget("native-agent-1"));
   });
 
-  it("persists a canonical target supplied with a late Agent result", () => {
+  it("persists a canonical target supplied with a late Agent result", async () => {
     let persisted: Array<{ subagentIdentityKey?: string }> = [];
     const store = new NarrativeStore(
       {} as MessageRepo,
@@ -266,7 +268,7 @@ describe("NarrativeStore sub-agent identity persistence", () => {
         "thread:codex-child:worker",
       ),
     );
-    store.persistNarrative("thread-1", "m1", "done", "completed");
+    await store.persistNarrative("thread-1", "m1", "done", "completed");
 
     expect(persisted[0]?.subagentIdentityKey)
       .toBe(encodeCanonicalSubagentDetailTarget("thread:codex-child:worker"));
@@ -374,26 +376,26 @@ describe("NarrativeStore.load (read seam)", () => {
     db = openMemoryDatabase();
     seedThread(db);
     store = new NarrativeStore(
-      new MessageRepo(db),
-      new ToolCallRecordRepo(db),
-      new ThoughtSegmentRepo(db),
-      new HookExecutionRepo(db),
+      new MessageRepo(db, agentStorageTestWriter(db)),
+      new ToolCallRecordRepo(db, agentStorageTestWriter(db)),
+      new ThoughtSegmentRepo(db, agentStorageTestWriter(db)),
+      new HookExecutionRepo(db, agentStorageTestWriter(db)),
       db,
     );
   });
 
-  it("returns one list interleaved by (sequence, sortOrder), final response as the message body", () => {
+  it("returns one list interleaved by (sequence, sortOrder), final response as the message body", async () => {
     // One assistant message: preamble narration (0), tool call (1), hook (2),
     // final-response segment (3). The body must surface at sortOrder 3.
     insertMessage(db, "m1", "assistant", "Final answer text.", 1);
-    new ThoughtSegmentRepo(db).bulkCreate([
+    await new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).bulkCreate([
       { messageId: "m1", text: "Let me look.", startedAt: "t", endedAt: "t", sortOrder: 0 },
       { messageId: "m1", text: "Final answer text.", startedAt: "t", endedAt: "t", sortOrder: 3, isFinalResponse: 1 },
     ]);
-    new ToolCallRecordRepo(db).bulkCreate([
+    await new ToolCallRecordRepo(db, agentStorageTestWriter(db)).bulkCreate([
       { messageId: "m1", toolName: "Read", inputSummary: "f.ts", outputSummary: "ok", status: "completed", sortOrder: 1 },
     ]);
-    new HookExecutionRepo(db).bulkCreate([
+    await new HookExecutionRepo(db, agentStorageTestWriter(db)).bulkCreate([
       { messageId: "m1", hookName: "PreToolUse", toolName: "Read", phase: "pre", payload: "{}", durationMs: 1, didBlock: false, startedAt: "t", endedAt: "t", sortOrder: 2 },
     ]);
 
@@ -413,16 +415,16 @@ describe("NarrativeStore.load (read seam)", () => {
     expect(narrations[0].kind === "narrationSegment" && narrations[0].record.text).toBe("Let me look.");
   });
 
-  it("orders entries across messages by sequence, and skips user/system messages", () => {
+  it("orders entries across messages by sequence, and skips user/system messages", async () => {
     insertMessage(db, "u1", "user", "do the thing", 1);
     insertMessage(db, "m1", "assistant", "first answer", 2);
     insertMessage(db, "sys1", "system", "Context compacted", 3);
     insertMessage(db, "m2", "assistant", "second answer", 4);
-    const tools = new ToolCallRecordRepo(db);
-    tools.bulkCreate([
+    const tools = new ToolCallRecordRepo(db, agentStorageTestWriter(db));
+    await tools.bulkCreate([
       { messageId: "m1", toolName: "Read", inputSummary: "a", outputSummary: "ok", status: "completed", sortOrder: 0 },
     ]);
-    tools.bulkCreate([
+    await tools.bulkCreate([
       { messageId: "m2", toolName: "Bash", inputSummary: "ls", outputSummary: "ok", status: "completed", sortOrder: 0 },
     ]);
 
@@ -438,9 +440,9 @@ describe("NarrativeStore.load (read seam)", () => {
     expect(seq2.map((e) => e.kind)).toEqual(["toolCall", "assistantMessage"]);
   });
 
-  it("places the assistant body last when there is no final-response segment", () => {
+  it("places the assistant body last when there is no final-response segment", async () => {
     insertMessage(db, "m1", "assistant", "answer with no tagged final segment", 1);
-    new ToolCallRecordRepo(db).bulkCreate([
+    await new ToolCallRecordRepo(db, agentStorageTestWriter(db)).bulkCreate([
       { messageId: "m1", toolName: "Read", inputSummary: "a", outputSummary: "ok", status: "completed", sortOrder: 0 },
       { messageId: "m1", toolName: "Edit", inputSummary: "b", outputSummary: "ok", status: "completed", sortOrder: 1 },
     ]);
@@ -449,9 +451,9 @@ describe("NarrativeStore.load (read seam)", () => {
     expect(entries.map((e) => e.kind)).toEqual(["toolCall", "toolCall", "assistantMessage"]);
   });
 
-  it("continues a 1,000-detail assistant turn without skips or duplicate rows", () => {
+  it("continues a 1,000-detail assistant turn without skips or duplicate rows", async () => {
     insertMessage(db, "m1", "assistant", "Completed answer", 1);
-    new ToolCallRecordRepo(db).bulkCreate(Array.from({ length: 1_000 }, (_, sortOrder) => ({
+    await new ToolCallRecordRepo(db, agentStorageTestWriter(db)).bulkCreate(Array.from({ length: 1_000 }, (_, sortOrder) => ({
       toolCallId: `tool-${sortOrder.toString().padStart(4, "0")}`,
       messageId: "m1",
       toolName: "Read",
@@ -555,10 +557,10 @@ describe("NarrativeStore.load (read seam)", () => {
 
     const captured: CapturedStatement[] = [];
     const tracedStore = new NarrativeStore(
-      new MessageRepo(db),
-      new ToolCallRecordRepo(db),
-      new ThoughtSegmentRepo(db),
-      new HookExecutionRepo(db),
+      new MessageRepo(db, agentStorageTestWriter(db)),
+      new ToolCallRecordRepo(db, agentStorageTestWriter(db)),
+      new ThoughtSegmentRepo(db, agentStorageTestWriter(db)),
+      new HookExecutionRepo(db, agentStorageTestWriter(db)),
       traceStatements(db, captured),
     );
     const first = tracedStore.load("thread-1", { limit: 1, detail: { limit: 2 } });
@@ -622,10 +624,10 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     db = openMemoryDatabase();
     seedThread(db);
     store = new NarrativeStore(
-      new MessageRepo(db),
-      new ToolCallRecordRepo(db),
-      new ThoughtSegmentRepo(db),
-      new HookExecutionRepo(db),
+      new MessageRepo(db, agentStorageTestWriter(db)),
+      new ToolCallRecordRepo(db, agentStorageTestWriter(db)),
+      new ThoughtSegmentRepo(db, agentStorageTestWriter(db)),
+      new HookExecutionRepo(db, agentStorageTestWriter(db)),
       db,
     );
   });
@@ -762,7 +764,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     }
 
     const result = await store.persistNarrativeBatched(THREAD, "m1", "done", "completed");
-    const persisted = new ToolCallRecordRepo(db).listByMessage("m1");
+    const persisted = new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
 
     expect(result).toEqual({ toolCallCount: 130 });
     expect(persisted).toHaveLength(130);
@@ -791,7 +793,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     expect(() => store.recoverySnapshot(THREAD)).toThrow("active-turn byte limit");
   });
 
-  it("keeps mixed live recovery and persisted narrative in the same order", () => {
+  it("keeps mixed live recovery and persisted narrative in the same order", async () => {
     seedAssistantMessage("m1", "Done", 1);
     store.beginTurn(THREAD);
     store.resetTurnCounters(THREAD);
@@ -818,7 +820,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     expect(live.find((item) => item.kind === "toolCall" && item.record.id === "child"))
       .toMatchObject({ record: { parent_tool_call_id: "agent", output_summary: "Found it" } });
 
-    store.persistNarrative(THREAD, "m1", "Done", "completed");
+    await store.persistNarrative(THREAD, "m1", "Done", "completed");
 
     expect(store.load(THREAD)
       .filter((entry) => entry.kind !== "assistantMessage")
@@ -856,12 +858,12 @@ describe("NarrativeStore write seam (server-side traps)", () => {
 
   it("drains a hook that arrives while a bounded narrative write yields", async () => {
     seedAssistantMessage("m1", "done", 1);
-    const toolRepo = new ToolCallRecordRepo(db);
-    const hookRepo = new HookExecutionRepo(db);
+    const toolRepo = new ToolCallRecordRepo(db, agentStorageTestWriter(db));
+    const hookRepo = new HookExecutionRepo(db, agentStorageTestWriter(db));
     store = new NarrativeStore(
-      new MessageRepo(db),
+      new MessageRepo(db, agentStorageTestWriter(db)),
       toolRepo,
-      new ThoughtSegmentRepo(db),
+      new ThoughtSegmentRepo(db, agentStorageTestWriter(db)),
       hookRepo,
     );
     store.beginTurn(THREAD);
@@ -895,13 +897,13 @@ describe("NarrativeStore write seam (server-side traps)", () => {
 
   it("keeps non-strict bounded persistence best-effort after a repository failure", async () => {
     seedAssistantMessage("m1", "done", 1);
-    const toolRepo = new ToolCallRecordRepo(db);
+    const toolRepo = new ToolCallRecordRepo(db, agentStorageTestWriter(db));
     vi.spyOn(toolRepo, "bulkCreateBatched").mockRejectedValue(new Error("disk unavailable"));
     store = new NarrativeStore(
-      new MessageRepo(db),
+      new MessageRepo(db, agentStorageTestWriter(db)),
       toolRepo,
-      new ThoughtSegmentRepo(db),
-      new HookExecutionRepo(db),
+      new ThoughtSegmentRepo(db, agentStorageTestWriter(db)),
+      new HookExecutionRepo(db, agentStorageTestWriter(db)),
     );
     store.beginTurn(THREAD);
     store.resetTurnCounters(THREAD);
@@ -939,7 +941,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(byId.get("a1")).toBeUndefined();
     });
 
-    it("persists explicit nested Agent parents without stack-parenting other Agents", () => {
+    it("persists explicit nested Agent parents without stack-parenting other Agents", async () => {
       seedAssistantMessage("m1", "", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -964,7 +966,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         },
       });
 
-      store.persistNarrative(THREAD, "m1", "", "completed");
+      await store.persistNarrative(THREAD, "m1", "", "completed");
 
       const persistedTools = store.load(THREAD)
         .filter((entry) => entry.kind === "toolCall")
@@ -976,7 +978,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(byId.get("marker-target")?.parent_tool_call_id).toBe("agent-target");
     });
 
-    it("reloads parallel provider children with durable exact identities and nesting", () => {
+    it("reloads parallel provider children with durable exact identities and nesting", async () => {
       seedAssistantMessage("m1", "", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -1010,9 +1012,9 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         toolInput: { ...sharedProviderInput, nativeThreadId: "native-direct" },
       });
 
-      store.persistNarrative(THREAD, "m1", "", "completed");
+      await store.persistNarrative(THREAD, "m1", "", "completed");
 
-      const reloaded = new ToolCallRecordRepo(db).listByMessage("m1")
+      const reloaded = new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1")
         .filter((record) => record.tool_name === "Agent");
       expect(reloaded).toHaveLength(2);
       expect(reloaded.map((record) => ({
@@ -1045,7 +1047,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       ]);
     });
 
-    it("persists a Cursor delegation as transcript-unavailable without fabricating a child identity", () => {
+    it("persists a Cursor delegation as transcript-unavailable without fabricating a child identity", async () => {
       seedAssistantMessage("m1", "", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -1063,9 +1065,9 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         },
       });
 
-      store.persistNarrative(THREAD, "m1", "", "completed");
+      await store.persistNarrative(THREAD, "m1", "", "completed");
 
-      expect(new ToolCallRecordRepo(db).listByMessage("m1")[0]).toMatchObject({
+      expect(new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1")[0]).toMatchObject({
         id: "cursor-task",
         subagent_identity_key: null,
         subagent_provider_name: "Cursor",
@@ -1077,7 +1079,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       });
     });
 
-    it("backfills an exact identity when Agent enrichment arrives after the row is persisted", () => {
+    it("backfills an exact identity when Agent enrichment arrives after the row is persisted", async () => {
       seedAssistantMessage("m1", "", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -1090,8 +1092,8 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         },
       });
 
-      store.persistNarrative(THREAD, "m1", "", "completed");
-      expect(new ToolCallRecordRepo(db).listByMessage("m1")[0]?.subagent_identity_key).toBeNull();
+      await store.persistNarrative(THREAD, "m1", "", "completed");
+      expect(new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1")[0]?.subagent_identity_key).toBeNull();
 
       store.bufferToolCall(THREAD, {
         toolCallId: "late-agent",
@@ -1103,7 +1105,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         },
       });
 
-      expect(new ToolCallRecordRepo(db).listByMessage("m1")[0]?.subagent_identity_key)
+      await expect.poll(() => new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1")[0]?.subagent_identity_key)
         .toBe(encodeSubagentAliasDetailTarget("native-late-agent"));
     });
 
@@ -1118,7 +1120,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(childParent).toBe("solo");
     });
 
-    it("replaces an inferred duplicate parent with explicit provider attribution and retains it", () => {
+    it("replaces an inferred duplicate parent with explicit provider attribution and retains it", async () => {
       seedAssistantMessage("m1", "", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -1131,7 +1133,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       store.updateBufferedToolCallOutput(THREAD, "agent-b", "done", false);
       expect(store.bufferToolCall(THREAD, toolUse("child-x", "Read"))).toBe("agent-b");
       store.updateBufferedToolCallOutput(THREAD, "child-x", "read", false);
-      store.persistNarrative(THREAD, "m1", "", "completed");
+      await store.persistNarrative(THREAD, "m1", "", "completed");
 
       const persistedChild = store.load(THREAD)
         .find((entry) => entry.kind === "toolCall" && entry.record.id === "child-x");
@@ -1176,7 +1178,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(store.getCurrentParentToolCallId(THREAD)).toBeUndefined();
     });
 
-    it("persists tool output truncation metadata", () => {
+    it("persists tool output truncation metadata", async () => {
       seedAssistantMessage("m1", "", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -1188,9 +1190,9 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         outputArtifactPath: "C:\\mcode\\artifacts\\tool-output\\thread\\tool.txt",
         exitCode: 1,
       });
-      store.persistNarrative(THREAD, "m1", "", "completed");
+      await store.persistNarrative(THREAD, "m1", "", "completed");
 
-      const tools = new ToolCallRecordRepo(db).listByMessage("m1");
+      const tools = new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
       expect(tools[0].output_truncated).toBe(1);
       expect(tools[0].output_total_bytes).toBe(300_000);
       expect(tools[0].output_artifact_path).toBe("C:\\mcode\\artifacts\\tool-output\\thread\\tool.txt");
@@ -1220,13 +1222,13 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(store.getBufferedToolCalls(THREAD)).toHaveLength(0);
     });
 
-    it("keeps buffers populated through persistNarrative until clearTurn", () => {
+    it("keeps buffers populated through persistNarrative until clearTurn", async () => {
       seedAssistantMessage("m1", "final body", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
       store.bufferToolCall(THREAD, toolUse("tc-1", "Read"));
 
-      const result = store.persistNarrative(THREAD, "m1", "final body", "completed");
+      const result = await store.persistNarrative(THREAD, "m1", "final body", "completed");
       expect(result.toolCallCount).toBe(1);
       // Buffers are NOT cleared by persistNarrative.
       expect(store.getBufferedToolCalls(THREAD)).toHaveLength(1);
@@ -1254,7 +1256,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(calls[0]._rawToolInput).toEqual({ command: "echo hi" });
     });
 
-    it("persists Codex commands beyond the old 200-character JSON summary", () => {
+    it("persists Codex commands beyond the old 200-character JSON summary", async () => {
       const command = `pwsh -Command "${"Write-Output long-command;".repeat(20)}"`;
       seedAssistantMessage("m1", "done", 1);
       store.beginTurn(THREAD);
@@ -1265,9 +1267,9 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         toolInput: { command },
       });
 
-      store.persistNarrative(THREAD, "m1", "done", "completed");
+      await store.persistNarrative(THREAD, "m1", "done", "completed");
 
-      const [record] = new ToolCallRecordRepo(db).listByMessage("m1");
+      const [record] = new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
       expect(command.length).toBeGreaterThan(200);
       expect(record.input_summary).toBe(command);
     });
@@ -1275,7 +1277,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
   });
 
   describe("Classification precedence + is_final_response safety net", () => {
-    it("drops the open thought when the boundary reports a final response (tool-free turn)", () => {
+    it("drops the open thought when the boundary reports a final response (tool-free turn)", async () => {
       seedAssistantMessage("m1", "Tool-free final answer", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -1283,8 +1285,8 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       // end_turn-style boundary means final response, so drop it.
       store.dropOpenThought(THREAD);
 
-      store.persistNarrative(THREAD, "m1", "Tool-free final answer", "completed");
-      expect(new ThoughtSegmentRepo(db).listByMessage("m1")).toHaveLength(0);
+      await store.persistNarrative(THREAD, "m1", "Tool-free final answer", "completed");
+      expect(new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).listByMessage("m1")).toHaveLength(0);
     });
 
     it("moves an open thought out of the narrative buffer for final-response ownership transfer", () => {
@@ -1298,7 +1300,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(store.hasBufferedNarrative(THREAD)).toBe(false);
     });
 
-    it("persists preamble as a thought when the boundary reports tool_use (non-final)", () => {
+    it("persists preamble as a thought when the boundary reports tool_use (non-final)", async () => {
       seedAssistantMessage("m1", "", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -1307,23 +1309,23 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       store.closeOpenThought(THREAD);
       store.bufferToolCall(THREAD, toolUse("tc-read", "Read"));
 
-      store.persistNarrative(THREAD, "m1", "", "completed");
-      const thoughts = new ThoughtSegmentRepo(db).listByMessage("m1");
+      await store.persistNarrative(THREAD, "m1", "", "completed");
+      const thoughts = new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
       expect(thoughts).toHaveLength(1);
       expect(thoughts[0].text).toBe("Let me check that file.");
       expect(thoughts[0].is_final_response ?? 0).toBe(0);
     });
 
-    it("tags the tail thought is_final_response via suffix-match when text equals the body", () => {
+    it("tags the tail thought is_final_response via suffix-match when text equals the body", async () => {
       const body = "FULL USER-FACING REPLY";
       seedAssistantMessage("m1", body, 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
       store.openOrExtendThought(THREAD, body);
       // No boundary fired (older/reconnect path) → suffix-match must catch it.
-      store.persistNarrative(THREAD, "m1", body, "completed");
+      await store.persistNarrative(THREAD, "m1", body, "completed");
 
-      const thoughts = new ThoughtSegmentRepo(db).listByMessage("m1");
+      const thoughts = new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
       expect(thoughts).toHaveLength(1);
       expect(thoughts[0].is_final_response).toBe(1);
       // load() surfaces the body as assistantMessage, not a duplicate narration.
@@ -1333,7 +1335,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(msg && msg.kind === "assistantMessage" && msg.body).toBe(body);
     });
 
-    it("orders a preamble thought before its following tool call via the shared sort counter", () => {
+    it("orders a preamble thought before its following tool call via the shared sort counter", async () => {
       seedAssistantMessage("m1", "", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -1344,9 +1346,9 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       store.bufferToolCall(THREAD, toolUse("tc-1", "Read"));
       store.openOrExtendThought(THREAD, "Now respond.");
 
-      store.persistNarrative(THREAD, "m1", "", "completed");
-      const thoughts = new ThoughtSegmentRepo(db).listByMessage("m1");
-      const tools = new ToolCallRecordRepo(db).listByMessage("m1");
+      await store.persistNarrative(THREAD, "m1", "", "completed");
+      const thoughts = new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
+      const tools = new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
       expect(thoughts.map((t) => [t.text, t.sort_order])).toEqual([
         ["I will read.", 0],
         ["Now respond.", 2],
@@ -1356,7 +1358,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
   });
 
   describe("Trap 6: counting data preserved (semantics unchanged)", () => {
-    it("persists each Agent's captured lifecycle timestamps through the real repository", () => {
+    it("persists each Agent's captured lifecycle timestamps through the real repository", async () => {
       seedAssistantMessage("m1", "", 1);
       vi.useFakeTimers();
       try {
@@ -1373,12 +1375,12 @@ describe("NarrativeStore write seam (server-side traps)", () => {
         vi.setSystemTime(new Date("2026-07-22T10:00:50.000Z"));
         store.updateBufferedToolCallOutput(THREAD, "agent-second", "Second result", false);
         vi.setSystemTime(new Date("2026-07-22T10:01:00.000Z"));
-        store.persistNarrative(THREAD, "m1", "", "completed");
+        await store.persistNarrative(THREAD, "m1", "", "completed");
       } finally {
         vi.useRealTimers();
       }
 
-      const records = new ToolCallRecordRepo(db).listByMessage("m1");
+      const records = new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
       expect(records.map((record) => ({
         id: record.id,
         startedAt: record.started_at,
@@ -1406,7 +1408,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       ]);
     });
 
-    it("persists every top-level tool call including Agent rows, so step counts are derivable", () => {
+    it("persists every top-level tool call including Agent rows, so step counts are derivable", async () => {
       seedAssistantMessage("m1", "", 1);
       store.beginTurn(THREAD);
       store.resetTurnCounters(THREAD);
@@ -1415,10 +1417,10 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       store.bufferToolCall(THREAD, toolUse("r3", "Read"));
       store.bufferToolCall(THREAD, toolUse("ag", "Agent"));
 
-      const { toolCallCount } = store.persistNarrative(THREAD, "m1", "", "completed");
+      const { toolCallCount } = await store.persistNarrative(THREAD, "m1", "", "completed");
       expect(toolCallCount).toBe(4);
 
-      const tools = new ToolCallRecordRepo(db).listByMessage("m1");
+      const tools = new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
       // All four top-level calls persisted; the Agent is one of the four, not a fifth.
       const topLevel = tools.filter((t) => t.parent_tool_call_id == null);
       expect(topLevel).toHaveLength(4);

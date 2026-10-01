@@ -2,15 +2,15 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { ModelCacheRepo } from "../model-cache-repo.js";
+import { ModelCacheStore } from "../model-cache-store.js";
 
-describe("ModelCacheRepo", () => {
+describe("ModelCacheStore", () => {
   let db: Database;
-  let repo: ModelCacheRepo;
+  let repo: ModelCacheStore;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    repo = new ModelCacheRepo(db);
+    repo = new ModelCacheStore(db);
   });
 
   afterEach(() => {

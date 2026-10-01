@@ -380,6 +380,7 @@ interface PendingPermissionEntry {
 
 interface PreparedCodexTurn {
   request: TurnRequest<"codex">;
+  signal: AbortSignal;
   cliPath: string;
   threadId: string;
   sandbox: SandboxMode;
@@ -699,11 +700,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** Owns the session pool, idle eviction (with busy guard), and JobObject/kill. */
   private readonly runtime: SessionRuntime<CodexSessionState>;
   private sdkSessionIds = new Map<string, string>();
-  /**
-   * Session IDs for which a stop was requested before the session was created.
-   * Checked after session creation; if found the session is torn down immediately.
-   */
-  private pendingStops = new Set<string>();
+  private readonly pendingTurnRequests = new Map<string, { executionId: string; controller: AbortController }>();
   private liveSessionIds = new Set<string>();
   /** Pending host-side permission approvals keyed by requestId. */
   private pendingPermissions = new Map<string, PendingPermissionEntry>();
@@ -731,6 +728,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       turnId: string;
       deliveryAttempt: number;
       threadControlEligible: boolean;
+      signal: AbortSignal;
     }
   >();
   /** Guards callbacks before pool registration and after a retry replaces the app-server. */
@@ -996,9 +994,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     } satisfies AgentEvent));
   }
 
-  /** Evict idle Codex sessions while preserving active turns. */
-  async shedMemoryPressure(level: MemoryPressureLevel): Promise<void> {
-    const result = await this.runtime.evictNonBusy(`memory-pressure:${level}`);
+  /** Evict idle Codex sessions while preserving admitted and active turns. */
+  async shedMemoryPressure(level: MemoryPressureLevel, isThreadProtected: (threadId: string) => boolean = () => false): Promise<void> {
+    const result = await this.runtime.evictNonBusy(`memory-pressure:${level}`, (sessionId) => isThreadProtected(this.threadIdForSession(sessionId)));
     logger.info("Codex session pool shed memory pressure", {
       level,
       before: result.before,
@@ -1109,38 +1107,57 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * The method returns immediately; events stream via the `event` EventEmitter channel.
    */
   async sendTurn(req: TurnRequest<"codex">): Promise<void> {
-    const preparingSession = this.runtime.get(req.sessionId);
-    if (preparingSession) preparingSession.nextTurnExecutionId = req.turnExecutionId;
-    if (this.canonicalTurnEventDeliveryEnabled) {
-      const threadId = this.threadIdForSession(req.sessionId);
-      await this.retirePreviousCanonicalTurn(threadId);
-      this.canonicalTurnRoutingsByThread.set(threadId, { kind: "active", routing: {
-        threadId,
-        turnId: req.turnId,
-        executionId: req.turnExecutionId,
-        deliveryAttempt: req.deliveryAttempt ?? 1,
-      } });
+    const pending = { executionId: req.turnExecutionId, controller: new AbortController() };
+    this.pendingTurnRequests.set(req.sessionId, pending);
+    const signal = pending.controller.signal;
+    let dispatched = false;
+    try {
+      const preparingSession = this.runtime.get(req.sessionId);
+      if (preparingSession) preparingSession.nextTurnExecutionId = req.turnExecutionId;
+      if (this.canonicalTurnEventDeliveryEnabled) {
+        const threadId = this.threadIdForSession(req.sessionId);
+        await this.retirePreviousCanonicalTurn(threadId);
+        signal.throwIfAborted();
+        this.bindCanonicalCodexRequest(req);
+      }
+      const turn = await this.prepareCodexTurn(req, signal);
+      if (!turn) return;
+      if (this.consumePendingCodexStop(turn)) return;
+      const existing = await this.reconcileCodexSession(turn);
+      signal.throwIfAborted();
+      const reusable = this.isReusableCodexSession(existing, turn.sandbox);
+      if (!this.canStartCodexTurn(turn, reusable)) return;
+      this.stageCodexTurn(turn);
+      const state = await this.acquireCodexTurn(turn);
+      if (!state) return;
+      dispatched = this.finishAcquiredCodexTurn(turn, state, existing, reusable);
+    } catch (error) {
+      if (!signal.aborted) throw error;
+      this.releaseStagedCodexTurn(req.sessionId, signal);
+      this.emitCancelledCodexRequest(req);
+    } finally {
+      if (!dispatched) this.releasePendingCodexRequest(req.sessionId, signal);
     }
-    const turn = await this.prepareCodexTurn(req);
-    if (!turn) return;
-    if (this.consumePendingCodexStop(turn)) return;
-    const existing = await this.reconcileCodexSession(turn);
-    const reusable = this.isReusableCodexSession(existing, turn.sandbox);
-    if (!this.canStartCodexTurn(turn, reusable)) return;
-    this.stageCodexTurn(turn);
-    const state = await this.acquireCodexTurn(turn);
-    if (!state) return;
-    this.finishAcquiredCodexTurn(turn, state, existing, reusable);
   }
 
-  private async prepareCodexTurn(request: TurnRequest<"codex">): Promise<PreparedCodexTurn | undefined> {
+  private bindCanonicalCodexRequest(request: TurnRequest<"codex">): void {
+    const threadId = this.threadIdForSession(request.sessionId);
+    this.canonicalTurnRoutingsByThread.set(threadId, { kind: "active", routing: {
+      threadId, turnId: request.turnId, executionId: request.turnExecutionId, deliveryAttempt: request.deliveryAttempt ?? 1,
+    } });
+  }
+
+  private async prepareCodexTurn(request: TurnRequest<"codex">, signal: AbortSignal): Promise<PreparedCodexTurn | undefined> {
     const settings = await this.codexPorts.settings.get();
+    signal.throwIfAborted();
     if (request.resumeFrom !== undefined) this.sdkSessionIds.set(request.sessionId, request.resumeFrom);
     const threadId = this.threadIdForSession(request.sessionId);
     const input = await this.resolveCodexTurnInput(request, threadId);
+    signal.throwIfAborted();
     if (!input) return undefined;
     return {
       request,
+      signal,
       threadId,
       input,
       cliPath: settings.cliPath,
@@ -1240,7 +1257,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private stageCodexTurn(turn: PreparedCodexTurn): void {
     const { request } = turn;
     const sessionId = request.sessionId;
-    this.pendingSpawnTurns.set(sessionId, { input: turn.input, turnOptions: turn.turnOptions, turnExecutionId: request.turnExecutionId, turnId: request.turnId, deliveryAttempt: request.deliveryAttempt ?? 1, threadControlEligible: turn.threadControlEligible });
+    this.pendingSpawnTurns.set(sessionId, { input: turn.input, turnOptions: turn.turnOptions, turnExecutionId: request.turnExecutionId, turnId: request.turnId, deliveryAttempt: request.deliveryAttempt ?? 1, threadControlEligible: turn.threadControlEligible, signal: turn.signal });
     if (!this.host.browser.isConfigured()) return;
     const stage = this.host.browser.stage({ providerId: this.id, providerSessionId: request.resumeFrom ?? sessionId, mcodeSessionId: sessionId, threadId: request.threadId, workspaceId: request.workspaceId, permissionCapability: turn.browserPermissionCapability });
     const previous = this.pendingBrowserAccess.get(sessionId);
@@ -1261,9 +1278,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async acquireCodexTurn(turn: PreparedCodexTurn): Promise<CodexSessionState | undefined> {
     const { request, threadId } = turn;
     try {
-      return await this.runtime.acquire({ sessionId: request.sessionId, threadId, cwd: request.cwd, permissionMode: request.permissionMode, resumeFrom: request.resumeFrom !== undefined ? this.sdkSessionIds.get(request.sessionId) : undefined });
+      return await this.runtime.acquire({ sessionId: request.sessionId, threadId, cwd: request.cwd, permissionMode: request.permissionMode, resumeFrom: request.resumeFrom !== undefined ? this.sdkSessionIds.get(request.sessionId) : undefined, signal: turn.signal });
     } catch (error) {
-      this.releaseStagedCodexTurn(request.sessionId);
+      if (turn.signal.aborted) throw error;
+      this.releaseStagedCodexTurn(request.sessionId, turn.signal);
       const message = error instanceof Error ? error.message : String(error);
       logger.error("CodexAppServer start failed", { sessionId: request.sessionId, error: message });
       this.emitTurnFailure(threadId, message, undefined, true, request.turnExecutionId);
@@ -1271,14 +1289,15 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
-  private releaseStagedCodexTurn(sessionId: string): void {
+  private releaseStagedCodexTurn(sessionId: string, signal?: AbortSignal): void {
+    if (signal && this.pendingSpawnTurns.get(sessionId)?.signal !== signal) return;
     this.pendingSpawnTurns.delete(sessionId);
     const stagedBrowser = this.pendingBrowserAccess.get(sessionId);
     this.pendingBrowserAccess.delete(sessionId);
     if (stagedBrowser) this.host.browser.release(stagedBrowser.stage.leaseId);
   }
 
-  private finishAcquiredCodexTurn(turn: PreparedCodexTurn, state: CodexSessionState, existing: CodexSessionState | undefined, reusable: boolean): void {
+  private finishAcquiredCodexTurn(turn: PreparedCodexTurn, state: CodexSessionState, existing: CodexSessionState | undefined, reusable: boolean): boolean {
     const sessionId = turn.request.sessionId;
     state.mapper.setApprovalReviewVisible(
       turn.request.permissionMode !== "full" && turn.request.approvalReviewMode === "automatic",
@@ -1287,20 +1306,29 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const stagedBrowser = this.pendingBrowserAccess.get(sessionId);
     this.pendingBrowserAccess.delete(sessionId);
     if (state === existing && stagedBrowser) this.host.browser.release(stagedBrowser.stage.leaseId);
-    if (this.consumePendingCodexStop(turn)) return;
+    if (this.consumePendingCodexStop(turn)) return false;
     if (reusable && this.pendingSpawnTurns.delete(sessionId)) this.runReusedCodexTurn(turn, state);
+    return true;
   }
 
   private consumePendingCodexStop(turn: PreparedCodexTurn): boolean {
     const sessionId = turn.request.sessionId;
     const state = this.runtime.get(sessionId);
-    const pendingStop = this.pendingStops.delete(sessionId);
-    if (!pendingStop && state?.cancelledTurnExecutionId !== turn.request.turnExecutionId) return false;
+    if (!turn.signal.aborted && state?.cancelledTurnExecutionId !== turn.request.turnExecutionId) return false;
     logger.info("Pending stop consumed, cancelling staged Codex turn", { sessionId });
-    this.pendingSpawnTurns.delete(sessionId);
+    this.releaseStagedCodexTurn(sessionId, turn.signal);
     if (state) state.cancelledTurnExecutionId = turn.request.turnExecutionId;
-    this.emitRuntimeEvent(providerRuntimeEvent({ type: AgentEventType.Ended, threadId: turn.threadId, turnExecutionId: turn.request.turnExecutionId } satisfies AgentEvent));
+    this.emitCancelledCodexRequest(turn.request);
     return true;
+  }
+
+  private emitCancelledCodexRequest(request: TurnRequest<"codex">): void {
+    this.emitRuntimeEvent(providerRuntimeEvent({ type: AgentEventType.Ended, threadId: request.threadId,
+      turnExecutionId: request.turnExecutionId, outcome: "cancelled" } satisfies AgentEvent));
+  }
+
+  private releasePendingCodexRequest(sessionId: string, signal: AbortSignal): void {
+    if (this.pendingTurnRequests.get(sessionId)?.controller.signal === signal) this.pendingTurnRequests.delete(sessionId);
   }
 
   private runReusedCodexTurn(turn: PreparedCodexTurn, state: CodexSessionState): void {
@@ -1308,7 +1336,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     state.nextTurnExecutionId = turn.request.turnExecutionId;
     state.turnDiffRouting = { turnId: turn.request.turnId, turnExecutionId: turn.request.turnExecutionId, deliveryAttempt: turn.request.deliveryAttempt ?? 1 };
     state.turnDiffRevision = 0;
-    void this.dispatchReusedCodexTurn(turn, state);
+    void this.dispatchReusedCodexTurn(turn, state).catch((error: unknown) => {
+      if (turn.signal.aborted) this.emitCancelledCodexRequest(turn.request);
+      else this.emitTurnFailure(turn.threadId, error instanceof Error ? error.message : String(error), "errored", true, turn.request.turnExecutionId);
+      this.releaseStagedCodexTurn(turn.request.sessionId, turn.signal);
+      this.releasePendingCodexRequest(turn.request.sessionId, turn.signal);
+    });
   }
 
   /**
@@ -1319,6 +1352,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    */
   private async dispatchReusedCodexTurn(turn: PreparedCodexTurn, state: CodexSessionState): Promise<void> {
     const sessionId = turn.request.sessionId;
+    if (this.consumePendingCodexStop(turn)) { this.releasePendingCodexRequest(sessionId, turn.signal); return; }
     const drain = state.interruptDrain;
     if (drain) {
       const settled = await Promise.race([
@@ -1328,8 +1362,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
           timer.unref?.();
         }),
       ]);
+      if (this.consumePendingCodexStop(turn)) { this.releasePendingCodexRequest(sessionId, turn.signal); return; }
       const pooled = this.runtime.get(sessionId);
-      if (!settled || pooled !== state || !state.server.isAlive || this.isBusy(state)) {
+      if (!settled || !this.isCurrentCodexSession(sessionId, state) || this.isBusy(state)) {
         // The drain wedged or the session was replaced mid-wait; teardown
         // failure must not lose the staged turn, so respawn regardless. Only
         // discard when the pool still holds this entry — a concurrent send may
@@ -1342,27 +1377,26 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
             });
           });
         }
+        turn.signal.throwIfAborted();
         this.stageCodexTurn(turn);
         await this.acquireCodexTurn(turn);
         return;
       }
-    } else if (this.runtime.get(sessionId) !== state || !state.server.isAlive) {
+    } else if (!this.isCurrentCodexSession(sessionId, state)) {
       // The entry was evicted between acquire and dispatch; a turn started on
       // the dead state would be silently dropped, so re-stage and respawn.
       this.stageCodexTurn(turn);
       await this.acquireCodexTurn(turn);
       return;
     }
-    await this.runTurnAfterGoal(sessionId, turn.threadId, state.server, turn.input, turn.turnOptions, turn.request.turnExecutionId);
+    await this.runTurnAfterGoal(sessionId, turn.threadId, state.server, turn.input, turn.turnOptions, turn.request.turnExecutionId, turn.signal);
   }
 
   /**
    * Spawns a fresh Codex app-server session: version-checked CLI launch, the
    * JSON-RPC handshake, mapper + event wiring, and the first turn for the
-   * staged payload. Returns an empty `pids` array because {@link CodexAppServer}
-   * keeps its child PID private and attaches it to the Windows JobObject
-   * itself; the runtime's JobObject/taskkill are therefore best-effort no-ops
-   * for Codex and teardown is delegated to `server.kill()` in {@link close}.
+   * staged payload. Captures the owned native PID so SessionRuntime can force
+   * termination when graceful close stalls.
    */
   async spawn(args: SpawnArgs): Promise<SpawnResult<CodexSessionState>> {
     const context = await this.prepareCodexSpawn(args);
@@ -1385,7 +1419,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       const state = this.createCodexSessionState(context, server, mapper);
       this.scheduleStagedCodexTurn(context, server);
 
-      return { state, pids: [] };
+      return { state, pids: server.pid === undefined ? [] : [server.pid] };
     } catch (error) {
       if (this.activeCodexServers.get(context.sessionId) === server) this.activeCodexServers.delete(context.sessionId);
       throw error;
@@ -1725,7 +1759,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private scheduleStagedCodexTurn(context: CodexSpawnContext, server: CodexAppServer): void {
     const staged = this.pendingSpawnTurns.get(context.sessionId);
-    if (!staged || this.pendingStops.has(context.sessionId)) return;
+    if (!staged || staged.signal.aborted) return;
     this.pendingSpawnTurns.delete(context.sessionId);
     setImmediate(() => this.startStagedCodexTurn(context, server, staged));
   }
@@ -1733,13 +1767,19 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private startStagedCodexTurn(
     context: CodexSpawnContext,
     server: CodexAppServer,
-    staged: { input: string | TurnInputPart[]; turnOptions: CodexTurnOptions; turnExecutionId: string; turnId: string; deliveryAttempt: number },
+    staged: { input: string | TurnInputPart[]; turnOptions: CodexTurnOptions; turnExecutionId: string; turnId: string; deliveryAttempt: number; signal: AbortSignal },
   ): void {
     const state = this.runtime.get(context.sessionId);
-    if (!state) return;
+    if (!state || state.server !== server) { this.releasePendingCodexRequest(context.sessionId, staged.signal); return; }
+    if (staged.signal.aborted || state.cancelledTurnExecutionId === staged.turnExecutionId) {
+      this.emitRuntimeEvent(providerRuntimeEvent({ type: AgentEventType.Ended, threadId: context.threadId,
+        turnExecutionId: staged.turnExecutionId, outcome: "cancelled" } satisfies AgentEvent));
+      this.releasePendingCodexRequest(context.sessionId, staged.signal);
+      return;
+    }
     state.turnDiffRouting = { turnId: staged.turnId, turnExecutionId: staged.turnExecutionId, deliveryAttempt: staged.deliveryAttempt };
     state.turnDiffRevision = 0;
-    void this.runTurnAfterGoal(context.sessionId, context.threadId, server, staged.input, staged.turnOptions, staged.turnExecutionId);
+    void this.runTurnAfterGoal(context.sessionId, context.threadId, server, staged.input, staged.turnOptions, staged.turnExecutionId, staged.signal);
   }
 
   private handleCodexUsageNotification(
@@ -1970,6 +2010,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (args.nativeTurnId && !notice) return false;
     return args.mapper.hasReceiverThread(args.nativeThreadId) && Boolean(event.extension?.child)
       && !this.matchesCodexChildTurnBinding(args.entry, args.eventExecutionId, event);
+  }
+
+  private isCurrentCodexSession(sessionId: string, state: CodexSessionState): boolean {
+    return this.runtime.get(sessionId) === state && state.server.isAlive;
   }
 
   private matchesCodexChildTurnBinding(state: CodexSessionState, executionId: string | undefined, event: ProviderRuntimeEvent): boolean {
@@ -2426,19 +2470,24 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     input: string | TurnInputPart[],
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
+    signal: AbortSignal,
   ): Promise<void> {
-    if (this.runtime.get(sessionId)?.cancelledTurnExecutionId === turnExecutionId) return;
     try {
-      await this.applyPendingGoal(sessionId, server);
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      logger.error("Codex goal install failed", { sessionId, error });
-      this.emitGoalCleared(sessionId, "rollback");
-      this.emitTurnFailure(threadId, error, "errored", true, turnExecutionId);
-      return;
-    }
-    if (this.runtime.get(sessionId)?.cancelledTurnExecutionId === turnExecutionId) return;
-    await this.runTurn(sessionId, threadId, server, input, turnOptions, turnExecutionId);
+      if (signal.aborted || this.runtime.get(sessionId)?.cancelledTurnExecutionId === turnExecutionId) return;
+      try {
+        await this.applyPendingGoal(sessionId, server);
+      } catch (err) {
+        if (signal.aborted) return;
+        const error = err instanceof Error ? err.message : String(err);
+        logger.error("Codex goal install failed", { sessionId, error });
+        this.emitGoalCleared(sessionId, "rollback");
+        this.emitTurnFailure(threadId, error, "errored", true, turnExecutionId);
+        return;
+      }
+      if (signal.aborted) return;
+      if (this.runtime.get(sessionId)?.cancelledTurnExecutionId === turnExecutionId) return;
+      await this.runTurn(sessionId, threadId, server, input, turnOptions, turnExecutionId);
+    } finally { this.releasePendingCodexRequest(sessionId, signal); }
   }
 
   /**
@@ -2890,11 +2939,14 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * A stop before spawn prevents the staged turn from starting.
    */
   async stopSession(sessionId: string): Promise<void> {
+    const pending = this.pendingTurnRequests.get(sessionId);
+    pending?.controller.abort();
+    if (pending) this.releaseStagedCodexTurn(sessionId, pending.controller.signal);
     const state = this.runtime.get(sessionId);
     // Approval cards must clear even if the native interrupt is slow or fails.
     this.drainPending((e) => e.sessionId === sessionId);
     if (state) {
-      state.cancelledTurnExecutionId = state.nextTurnExecutionId;
+      state.cancelledTurnExecutionId = pending?.executionId ?? state.nextTurnExecutionId;
       const drain = this.awaitStopSettled(state);
       state.interruptDrain = drain;
       const settled = await drain.catch(() => false);
@@ -2907,12 +2959,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       }
       this.runtime.recordUsage(sessionId);
     } else {
-      this.pendingStops.add(sessionId);
       this.pendingSpawnTurns.delete(sessionId);
       const stagedBrowser = this.pendingBrowserAccess.get(sessionId);
       this.pendingBrowserAccess.delete(sessionId);
       if (stagedBrowser) this.host.browser.release(stagedBrowser.stage.leaseId);
-      setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
     }
   }
 
@@ -2969,14 +3019,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     // (close drains per-session), but draining all here also clears any
     // permissions whose session never landed in the pool.
     this.drainPending(() => true);
-    await this.runtime.shutdown();
-    await this.codexPorts.catalog.shutdown();
+    const results = await Promise.allSettled([this.runtime.shutdown(), this.codexPorts.catalog.shutdown()]);
+    results.push(...await Promise.allSettled([this.canonicalEventPublisher.stopAdmissionAndDrain()]));
     this.sdkSessionIds.clear();
     this.pendingSpawnTurns.clear();
     this.pendingBrowserAccess.clear();
     this.liveSessionIds.clear();
     this.activeCodexServers.clear();
     this.canonicalTurnRoutingsByThread.clear();
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Codex provider shutdown failed");
     logger.info("CodexProvider shutdown complete");
   }
 }

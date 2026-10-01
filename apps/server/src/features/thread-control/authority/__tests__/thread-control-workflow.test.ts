@@ -1,12 +1,13 @@
 import "reflect-metadata";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ThreadCreateBatchResultSchema } from "@mcode/contracts";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
 import { ThreadControlApprovalRepo } from "../persistence/thread-control-approval-repo.js";
 import { ThreadControlAuditRepo } from "../persistence/thread-control-audit-repo.js";
 import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
+let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { InternalThreadControlMcpAuthority } from "../thread-control-mcp-authority.js";
 import { createInternalThreadControlMcpSession } from "../thread-control-mcp-transport.js";
 import { ThreadControlMutationReservationService } from "../thread-control-mutation-reservation-service.js";
@@ -16,25 +17,18 @@ import type { GitRepositoryService, GitWorktreeService } from "../../../projects
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 
 describe("internal thread-control MCP workflow", () => {
-  let db: ReturnType<typeof openMemoryDatabase> | undefined;
-
-  afterEach(() => {
-    db?.close();
-    db = undefined;
-  });
-
   it("persists a cross-Project worktree workflow and keeps the child usable after partial failure", async () => {
-    db = openMemoryDatabase();
-    const workspaces = new WorkspaceRepo(db);
-    const threads = new ThreadRepo(db);
-    const messages = new MessageRepo(db);
-    const approvals = new ThreadControlApprovalRepo(db);
-    const audit = new ThreadControlAuditRepo(db);
-    const sourceWorkspace = workspaces.create("Coordinator Project", "C:/private/coordinator");
-    const destinationWorkspace = workspaces.create("Child Project", "C:/private/child");
-    const sourceThread = threads.create(sourceWorkspace.id, "Coordinator", "direct", "main", true, "codex");
-    threads.updateModel(sourceThread.id, "gpt-default");
-    threads.updateSettings(sourceThread.id, { permission_mode: "full", interaction_mode: "build" });
+    persistenceRuntime = createThreadPersistenceTestRuntime();
+    const workspaces = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    const threads = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    const messages = new MessageRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    const approvals = new ThreadControlApprovalRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    const audit = new ThreadControlAuditRepo(persistenceRuntime.writer);
+    const sourceWorkspace = (await workspaces.create("Coordinator Project", "C:/private/coordinator"));
+    const destinationWorkspace = (await workspaces.create("Child Project", "C:/private/child"));
+    const sourceThread = (await threads.create(sourceWorkspace.id, "Coordinator", "direct", "main", true, "codex"));
+    (await threads.updateModel(sourceThread.id, "gpt-default"));
+    (await threads.updateSettings(sourceThread.id, { permission_mode: "full", interaction_mode: "build" }));
     const sequenceByThread = new Map<string, number>();
 
     const worktrees = {
@@ -68,7 +62,7 @@ describe("internal thread-control MCP workflow", () => {
       }) => {
         const sequence = (sequenceByThread.get(input.threadId) ?? 0) + 1;
         sequenceByThread.set(input.threadId, sequence);
-        messages.create(
+        (await messages.create(
           input.threadId,
           "user",
           input.content,
@@ -88,8 +82,8 @@ describe("internal thread-control MCP workflow", () => {
                 sourceProviderId: input.sourceProviderId,
               }
             : { type: "composer" },
-        );
-        threads.updateStatus(input.threadId, "paused");
+        ));
+        (await threads.updateStatus(input.threadId, "paused"));
       }),
       stopSession: vi.fn().mockResolvedValue(undefined),
     };
@@ -215,8 +209,8 @@ describe("internal thread-control MCP workflow", () => {
       ],
     });
 
-    const restartedThreads = new ThreadRepo(db);
-    const restartedMessages = new MessageRepo(db);
+    const restartedThreads = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    const restartedMessages = new MessageRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     expect(restartedThreads.findDelegationLineage(destinationThreadId)).toEqual({
       coordinatorThreadId: sourceThread.id,
       creatorTurnId: "source-turn",

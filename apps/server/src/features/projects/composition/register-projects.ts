@@ -29,6 +29,7 @@ import { TerminalCommandService } from "../../terminal/commands/terminal-command
 import { TERMINAL_BACKEND_TOKEN, type TerminalBackend } from "../../terminal/backends/terminal-backend.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 /** Register the workspace repository and its string-keyed dependency alias. */
 export function registerWorkspaceRepository(container: DependencyContainer): void {
@@ -117,6 +118,7 @@ export function registerProjectServices(container: DependencyContainer): void {
             ? c.resolve(ThreadStartupService)
             : undefined,
           database: c.isRegistered("Database") ? c.resolve("Database") : undefined,
+          databaseWriter: c.resolve(ApplicationDatabaseWriter),
         });
         return workspaceEnvironmentService;
       },

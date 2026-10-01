@@ -3,7 +3,7 @@ import type { Database } from "bun:sqlite";
 import type { Message } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { ConversationDisplayMaterializer } from "../conversation-display-materializer.js";
+import { ConversationDisplayMaterializationStore } from "../conversation-display-materialization-store.js";
 import { CanonicalConversationProjectionReader } from "../../../canonical/canonical-conversation-projection-reader.js";
 
 const NOW = "2026-09-22T10:00:00.000Z";
@@ -99,7 +99,7 @@ function directThought(id: string, messageId: string): Record<string, unknown> {
   };
 }
 
-describe("ConversationDisplayMaterializer", () => {
+describe("ConversationDisplayMaterializationStore", () => {
   let db: Database;
 
   beforeEach(() => {
@@ -120,7 +120,7 @@ describe("ConversationDisplayMaterializer", () => {
     insertItem(db, "reasoning", { projection: "codexChildReasoning", nativeItemId: "reasoning", content: "Thinking" });
     db.prepare("UPDATE canonical_agent_items SET kind = 'reasoning' WHERE id = 'reasoning'").run();
     seedCanonicalTurn(db, THREAD_ID, "other-turn", "other-execution");
-    const materializer = new ConversationDisplayMaterializer(db);
+    const materializer = new ConversationDisplayMaterializationStore(db);
     const reader = new CanonicalConversationProjectionReader(db);
     materializer.materializeItems(["prompt", "answer", "reasoning"]);
     expect(reader.load(THREAD_ID, 20).messages.map((entry) => entry.id)).toEqual(["prompt-1"]);
@@ -143,16 +143,16 @@ describe("ConversationDisplayMaterializer", () => {
     insertItem(db, "answer", { projection: "message", message: message("assistant-1", "assistant", 2) });
     insertItem(db, "reasoning", { projection: "codexChildReasoning", nativeItemId: "reasoning", content: "Thinking" });
     db.prepare("UPDATE canonical_agent_items SET kind = 'reasoning' WHERE id = 'reasoning'").run();
-    await new ConversationDisplayMaterializer(db).runToCompletion();
+    await new ConversationDisplayMaterializationStore(db).runToCompletion();
     const cursor = db.prepare("SELECT last_source_created_at, last_source_id FROM conversation_display_materialization_state WHERE id = 1").get();
     expect(db.prepare("SELECT id FROM messages").all()).toEqual([{ id: "prompt-1" }]);
     db.prepare("UPDATE canonical_agent_turns SET status = 'Completed'").run();
 
-    await new ConversationDisplayMaterializer(db).runToCompletion();
+    await new ConversationDisplayMaterializationStore(db).runToCompletion();
     expect(db.prepare("SELECT id FROM messages ORDER BY sequence").all()).toEqual([{ id: "prompt-1" }, { id: "assistant-1" }]);
     expect(db.prepare("SELECT message_id FROM thought_segments").all()).toEqual([{ message_id: "assistant-1" }]);
     expect(db.prepare("SELECT last_source_created_at, last_source_id FROM conversation_display_materialization_state WHERE id = 1").get()).toEqual(cursor);
-    await new ConversationDisplayMaterializer(db).runToCompletion();
+    await new ConversationDisplayMaterializationStore(db).runToCompletion();
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_conversation_display_mappings").get()).toEqual({ count: 3 });
   });
 
@@ -167,7 +167,7 @@ describe("ConversationDisplayMaterializer", () => {
     db.prepare("UPDATE canonical_agent_turns SET trigger_json = ?").run(JSON.stringify({ kind: trigger }));
     insertItem(db, "answer", { projection: "message", message: message("assistant-1", "assistant", 2) });
 
-    new ConversationDisplayMaterializer(db).materializeItems(["answer"]);
+    new ConversationDisplayMaterializationStore(db).materializeItems(["answer"]);
     expect(db.prepare("SELECT id FROM messages").all()).toEqual([]);
     expect(new CanonicalConversationProjectionReader(db).load(THREAD_ID, 20).messages).toEqual([]);
   });
@@ -203,7 +203,7 @@ describe("ConversationDisplayMaterializer", () => {
       END;
     `);
 
-    const materializer = new ConversationDisplayMaterializer(db);
+    const materializer = new ConversationDisplayMaterializationStore(db);
     db.transaction(() => materializer.materializeItems(records.map((record) => record.id)))();
 
     expect(db.prepare("SELECT COUNT(*) AS count FROM message_writes").get()).toEqual({ count: 1 });
@@ -233,7 +233,7 @@ describe("ConversationDisplayMaterializer", () => {
     }
     insertItem(db, itemIds[3]!, recoveryThought(undefined, "thought-3"), NOW, scopes[0]);
 
-    new ConversationDisplayMaterializer(db).materializeItems(itemIds);
+    new ConversationDisplayMaterializationStore(db).materializeItems(itemIds);
 
     expect(db.prepare("SELECT id, message_id FROM thought_segments ORDER BY id").all()).toEqual([
       { id: "thought-0", message_id: "assistant-0" },
@@ -258,7 +258,7 @@ describe("ConversationDisplayMaterializer", () => {
     });
     insertItem(db, "c-thought", directThought("thought-c", "shared"));
 
-    new ConversationDisplayMaterializer(db).materializeItems(["a-thought", "b-message", "c-thought"]);
+    new ConversationDisplayMaterializationStore(db).materializeItems(["a-thought", "b-message", "c-thought"]);
 
     expect(db.prepare("SELECT content FROM messages WHERE id = 'shared'").get())
       .toEqual({ content: "Canonical source" });
@@ -287,7 +287,7 @@ describe("ConversationDisplayMaterializer", () => {
       record: { id: "hook-1", message_id: "assistant-last", hook_name: "Stop", phase: "stop", started_at: NOW },
     });
 
-    new ConversationDisplayMaterializer(db).materializeItems(["last"]);
+    new ConversationDisplayMaterializationStore(db).materializeItems(["last"]);
 
     expect(db.prepare("SELECT id, message_id FROM thought_segments WHERE id NOT LIKE 'codex-child-%' ORDER BY id").all()).toEqual([
       { id: "explicit-1", message_id: "assistant-last" },
@@ -314,7 +314,7 @@ describe("ConversationDisplayMaterializer", () => {
     insertItem(db, "child-a", directThought("explicit-a", "shared"));
     insertItem(db, "child-b", { projection: "codexChildReasoning", nativeItemId: "reasoning", content: "Thinking" });
     insertItem(db, "child-c", directThought("explicit-c", "shared"));
-    const materializer = new ConversationDisplayMaterializer(db);
+    const materializer = new ConversationDisplayMaterializationStore(db);
     materializer.materializeItems(["a-explicit-source"]);
     expect(db.prepare("SELECT content FROM messages WHERE id = 'shared'").get()).toEqual({ content: "Explicit source" });
 
@@ -331,7 +331,7 @@ describe("ConversationDisplayMaterializer", () => {
       projection: "narrationSegment",
       record: { id: "invalid-1", message_id: "assistant-1", text: "Retried", started_at: "" },
     });
-    const materializer = new ConversationDisplayMaterializer(db);
+    const materializer = new ConversationDisplayMaterializationStore(db);
     const materialize = db.transaction(() => materializer.materializeItems(["assistant"]));
 
     expect(materialize).toThrow("Canonical thought started_at is required");
@@ -357,7 +357,7 @@ describe("ConversationDisplayMaterializer", () => {
     insertItem(db, "last", { projection: "message", message: message("assistant-last", "assistant", 3) });
     insertItem(db, "recovery", recoveryThought());
     insertItem(db, "direct", directThought("direct-1", "assistant-last"));
-    const materializer = new ConversationDisplayMaterializer(db);
+    const materializer = new ConversationDisplayMaterializationStore(db);
     materializer.materializeItems(["last"]);
     expect(db.prepare("SELECT message_id FROM thought_segments WHERE id = 'thought-1'").get())
       .toEqual({ message_id: "assistant-first" });
@@ -384,14 +384,14 @@ describe("ConversationDisplayMaterializer", () => {
     insertItem(db, "assistant-item", { projection: "message", message: message("assistant-1", "assistant", 2) });
     insertItem(db, "recovery-item", recoveryThought());
 
-    new ConversationDisplayMaterializer(db).materializeItems(["recovery-item"]);
+    new ConversationDisplayMaterializationStore(db).materializeItems(["recovery-item"]);
 
     expect(db.prepare("SELECT id, content FROM messages").all()).toEqual([{ id: "prompt-1", content: "Question" }]);
     expect(db.prepare("SELECT id, message_id, text FROM thought_segments").all()).toEqual([
       { id: "thought-1", message_id: "prompt-1", text: "Working" },
     ]);
 
-    const recoveredMaterializer = new ConversationDisplayMaterializer(db);
+    const recoveredMaterializer = new ConversationDisplayMaterializationStore(db);
     recoveredMaterializer.materializeItems(["recovery-item"]);
     expect(db.prepare("SELECT message_id FROM thought_segments").all()).toEqual([{ message_id: "prompt-1" }]);
 
@@ -407,7 +407,7 @@ describe("ConversationDisplayMaterializer", () => {
 
   it("defers recovery narrative with no visible anchor until a terminal message arrives", () => {
     insertItem(db, "recovery-item", recoveryThought());
-    const materializer = new ConversationDisplayMaterializer(db);
+    const materializer = new ConversationDisplayMaterializationStore(db);
 
     materializer.materializeItems(["recovery-item"]);
 
@@ -432,7 +432,7 @@ describe("ConversationDisplayMaterializer", () => {
     }
     insertItem(db, "recovery-item", recoveryThought("invalid-1"));
 
-    expect(() => new ConversationDisplayMaterializer(db).materializeItems(["recovery-item"]))
+    expect(() => new ConversationDisplayMaterializationStore(db).materializeItems(["recovery-item"]))
       .toThrow(`Canonical narrative item recovery-item references ${visibility === "hidden" ? "a hidden" : "missing"} message invalid-1`);
     expect(db.prepare("SELECT COUNT(*) AS count FROM thought_segments").get()).toEqual({ count: 0 });
   });
@@ -444,7 +444,7 @@ describe("ConversationDisplayMaterializer", () => {
       toolName: "Read",
       toolInput: { path: "src/app.ts" },
     });
-    const materializer = new ConversationDisplayMaterializer(db);
+    const materializer = new ConversationDisplayMaterializationStore(db);
 
     await materializer.runToCompletion();
 
@@ -492,7 +492,7 @@ describe("ConversationDisplayMaterializer", () => {
     };
     insertItem(db, "legacy-message-item", { projection: "message", message: legacyMessage });
 
-    new ConversationDisplayMaterializer(db).materializeItems(["legacy-message-item"]);
+    new ConversationDisplayMaterializationStore(db).materializeItems(["legacy-message-item"]);
 
     expect(db.prepare(`
       SELECT origin_type, source_thread_id, source_turn_id, source_provider_id,
@@ -536,7 +536,7 @@ describe("ConversationDisplayMaterializer", () => {
         sort_order: 0,
       },
     });
-    const materializer = new ConversationDisplayMaterializer(db);
+    const materializer = new ConversationDisplayMaterializationStore(db);
 
     await materializer.runToCompletion();
 
@@ -575,7 +575,7 @@ describe("ConversationDisplayMaterializer", () => {
       },
     });
 
-    new ConversationDisplayMaterializer(db).materializeItems(["tool-item"]);
+    new ConversationDisplayMaterializationStore(db).materializeItems(["tool-item"]);
 
     expect(db.prepare(`SELECT content FROM messages WHERE id = 'assistant-1'`).get())
       .toEqual({ content: "Completed answer" });
@@ -601,7 +601,7 @@ describe("ConversationDisplayMaterializer", () => {
       },
     });
 
-    new ConversationDisplayMaterializer(db).materializeItems(["tool-item"]);
+    new ConversationDisplayMaterializationStore(db).materializeItems(["tool-item"]);
 
     expect(db.prepare(`SELECT output_summary FROM tool_call_records WHERE id = 'tool-bom'`).get())
       .toEqual({ output_summary: "\uFEFFoutput" });
@@ -625,7 +625,7 @@ describe("ConversationDisplayMaterializer", () => {
       isError: false,
     });
 
-    await new ConversationDisplayMaterializer(db).runToCompletion();
+    await new ConversationDisplayMaterializationStore(db).runToCompletion();
 
     expect(db.prepare(`
       SELECT output_summary, status, completed_at
@@ -651,7 +651,7 @@ describe("ConversationDisplayMaterializer", () => {
       },
     });
 
-    await new ConversationDisplayMaterializer(db).runToCompletion();
+    await new ConversationDisplayMaterializationStore(db).runToCompletion();
 
     expect(db.prepare(`
       SELECT origin_type, legacy_provenance FROM messages WHERE id = 'legacy-message'
@@ -680,7 +680,7 @@ describe("ConversationDisplayMaterializer", () => {
       },
     });
 
-    await expect(new ConversationDisplayMaterializer(db).runToCompletion())
+    await expect(new ConversationDisplayMaterializationStore(db).runToCompletion())
       .rejects.toThrow("Canonical toolCall status is required");
 
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = 'assistant-rollback'").get())

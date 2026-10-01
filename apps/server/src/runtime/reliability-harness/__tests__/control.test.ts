@@ -3,7 +3,7 @@ import * as NodeHTTP from "node:http";
 import { createReliabilityHarnessAdapter, readReliabilityHarnessCapability } from "../control.js";
 
 function databaseStub() {
-  return { run: vi.fn() } as never;
+  return { setQueryOnlyForReliability: vi.fn(async (_enabled: boolean) => undefined) };
 }
 
 describe("reliability harness server adapter", () => {
@@ -32,11 +32,11 @@ describe("reliability harness server adapter", () => {
     await adapter.handleRequest(request, response, new Set() as never);
 
     expect(response.writeHead).toHaveBeenCalledWith(401);
-    expect(database.run).not.toHaveBeenCalled();
+    expect(database.setQueryOnlyForReliability).not.toHaveBeenCalled();
   });
 
   it("publishes a deterministic assistant prefix only after capability authentication", async () => {
-    const streamAssistant = vi.fn(() => ({
+    const streamAssistant = vi.fn(async () => ({
       threadId: "thread-reliability",
       executionId: "00000000-0000-4000-8000-000000000001",
       text: "Durable assistant prefix for restart recovery.",
@@ -126,7 +126,21 @@ describe("reliability harness server adapter", () => {
     );
 
     expect(response.writeHead).toHaveBeenCalledWith(202, expect.any(Object));
-    expect(database.run).toHaveBeenCalledWith("PRAGMA query_only = ON");
+    expect(database.setQueryOnlyForReliability).toHaveBeenCalledWith(true);
+  });
+
+  it("acknowledges persistence fault only after the writer policy is applied", async () => {
+    let release!: () => void;
+    const applied = new Promise<void>((resolve) => { release = resolve; });
+    const writer = { setQueryOnlyForReliability: vi.fn(() => applied) };
+    const adapter = createReliabilityHarnessAdapter(writer, { version: 1, token: "b".repeat(64), runId: "writer-fault" });
+    const response = responseStub();
+    const request = adapter.handleRequest(requestStub(JSON.stringify({ control: "persistence-failure" }), "b".repeat(64)), response, new Set() as never);
+    await vi.waitFor(() => expect(writer.setQueryOnlyForReliability).toHaveBeenCalledWith(true));
+    expect(response.writeHead).not.toHaveBeenCalled();
+    release();
+    await request;
+    expect(response.writeHead).toHaveBeenCalledWith(202, expect.any(Object));
   });
 
   it("executes transport loss and bounded server lifecycle controls", async () => {

@@ -1,12 +1,12 @@
 import type { Database } from "bun:sqlite";
 import { ProviderIdSchema, type AgentEvent, type ProviderId } from "@mcode/contracts";
 
-import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import { MessageRepo } from "../conversation/persistence/message-repo.js";
+import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
+import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import type { CodexLiveReduction, CodexLiveWriterIntent } from "../execution/codex-live-event-reducer.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import type { DataOnlyParentTerminalProjectionInput } from "./canonical-parent-turn-write.js";
-import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
 import { matchesCodexSystemIntents, type CodexSystemWriterIntent } from "./codex-system-intents.js";
 export type { CodexSystemWriterIntent } from "./codex-system-intents.js";
 

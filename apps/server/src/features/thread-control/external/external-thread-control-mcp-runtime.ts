@@ -101,7 +101,7 @@ export class ExternalThreadControlMcpRuntime {
   }
 
   /** Reconcile uncertain external work before accepting new deliveries after restart. */
-  reconcileOnStartup(): number {
+  reconcileOnStartup(): Promise<number> {
     return this.pairings.reconcileInFlight();
   }
 

@@ -1,11 +1,11 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
-import { container } from "tsyringe";
+
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { ThreadRepo, MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "../thread-repo.js";
-import { TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-repo.js";
-import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { ThreadStore as ThreadRepo, MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "../thread-store.js";
+import { TurnSnapshotStore as TurnSnapshotRepo } from "../../../agents/turns/persistence/turn-snapshot-store.js";
+import { WorkspaceStore as WorkspaceRepo } from "../../../projects/persistence/workspace-store.js";
 
 describe("ThreadRepo has_file_changes", () => {
   let db: Database;
@@ -14,10 +14,10 @@ describe("ThreadRepo has_file_changes", () => {
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    container.reset();
-    container.registerInstance("Database", db);
-    threadRepo = container.resolve(ThreadRepo);
-    const workspaceRepo = container.resolve(WorkspaceRepo);
+
+
+    threadRepo = new ThreadRepo(db);
+    const workspaceRepo = new WorkspaceRepo(db);
     const ws = workspaceRepo.create("test-ws", "/tmp/ws", false);
     workspaceId = ws.id;
   });
@@ -113,10 +113,10 @@ describe("ThreadRepo.updateCheckoutToNamedBranch", () => {
 
   beforeEach(() => {
     const db = openMemoryDatabase();
-    container.reset();
-    container.registerInstance("Database", db);
-    threadRepo = container.resolve(ThreadRepo);
-    const workspaceRepo = container.resolve(WorkspaceRepo);
+
+
+    threadRepo = new ThreadRepo(db);
+    const workspaceRepo = new WorkspaceRepo(db);
     const ws = workspaceRepo.create("test-ws", "/tmp/ws", false);
     workspaceId = ws.id;
   });
@@ -149,10 +149,10 @@ describe("ThreadRepo.updateCheckoutFromHead", () => {
 
   beforeEach(() => {
     const db = openMemoryDatabase();
-    container.reset();
-    container.registerInstance("Database", db);
-    threadRepo = container.resolve(ThreadRepo);
-    const workspaceRepo = container.resolve(WorkspaceRepo);
+
+
+    threadRepo = new ThreadRepo(db);
+    const workspaceRepo = new WorkspaceRepo(db);
     const ws = workspaceRepo.create("test-ws", "/tmp/ws", false);
     workspaceId = ws.id;
   });
@@ -427,10 +427,10 @@ describe("ThreadRepo.search", () => {
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    container.reset();
-    container.registerInstance("Database", db);
-    threadRepo = container.resolve(ThreadRepo);
-    workspaceRepo = container.resolve(WorkspaceRepo);
+
+
+    threadRepo = new ThreadRepo(db);
+    workspaceRepo = new WorkspaceRepo(db);
   });
 
   it.each([
@@ -485,11 +485,11 @@ describe("ThreadRepo.search", () => {
 describe("Migration 019 backfill", () => {
   it("backfills has_file_changes = 1 for threads with non-empty file changes in any snapshot", () => {
     const db = openMemoryDatabase();
-    container.reset();
-    container.registerInstance("Database", db);
-    const threadRepo = container.resolve(ThreadRepo);
-    const snapshotRepo = container.resolve(TurnSnapshotRepo);
-    const workspaceRepo = container.resolve(WorkspaceRepo);
+
+
+    const threadRepo = new ThreadRepo(db);
+    const snapshotRepo = new TurnSnapshotRepo(db);
+    const workspaceRepo = new WorkspaceRepo(db);
     const ws = workspaceRepo.create("test-ws", "/tmp/ws", false);
 
     const tWithChanges = threadRepo.create(ws.id, "with", "direct", "main");

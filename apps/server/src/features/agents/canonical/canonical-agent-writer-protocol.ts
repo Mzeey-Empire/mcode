@@ -1,5 +1,6 @@
 import type { CanonicalAgentEventEnvelope, CanonicalAgentRevision } from "@mcode/contracts";
 import type { SavedProgressReceipt } from "../execution/thread-progress-types.js";
+import type { CanonicalProviderProjection } from "./canonical-provider-projection.js";
 import type { CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";
 import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execution/execution-worker-handler.js";
 import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
@@ -27,7 +28,13 @@ export interface CanonicalProviderWriteReceipt {
   acceptedThrough: number;
   durableThrough: number;
   events: readonly CanonicalAgentEventEnvelope[];
+  providerProjection?: CanonicalProviderProjection;
 }
+
+/** A provider-facing commit also certifies worker-local interpretation of its native events. */
+export type CanonicalProjectedProviderWriteReceipt = CanonicalProviderWriteReceipt & {
+  providerProjection: CanonicalProviderProjection;
+};
 
 /** Only a committed append may certify the saved position of an accepted batch. */
 export interface CanonicalAcceptedWriteReceipt {
@@ -54,8 +61,8 @@ interface Correlation {
 }
 
 export type CanonicalWriterRequest =
-  | (Correlation & { kind: "open"; dbPath: string })
-  | (Correlation & { kind: "commit"; input: CanonicalProviderWriteInput })
+  | (Correlation & { kind: "open"; dbPath: string; bootstrap?: boolean })
+  | (Correlation & { kind: "commit"; input: CanonicalProviderWriteInput; projectProviderEvents?: true })
   | (Correlation & { kind: "append-accepted"; input: CanonicalAcceptedWriteInput })
   | (Correlation & { kind: "semantic-transact"; operation: ExecutionSemanticOperation })
   | (Correlation & { kind: "semantic-worker-loss"; input: LostExecutionInterruption })

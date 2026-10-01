@@ -20,25 +20,25 @@ export class ProviderSessionCursorPersistence {
   ) {}
 
   /** Apply a normalized provider system event when it carries session state. */
-  apply(providerId: ProviderId, event: Extract<AgentEvent, { type: "system" }>, executionId?: string): void {
+  async apply(providerId: ProviderId, event: Extract<AgentEvent, { type: "system" }>, executionId?: string): Promise<void> {
     if (event.subtype.startsWith("sdk_session_id:")) {
-      this.save(providerId, event.threadId, event.subtype.slice("sdk_session_id:".length), executionId);
+      await this.save(providerId, event.threadId, event.subtype.slice("sdk_session_id:".length), executionId);
       return;
     }
-    if (event.subtype === "sdk_session_invalidated") this.clear(event.threadId);
+    if (event.subtype === "sdk_session_invalidated") await this.clear(event.threadId);
   }
 
   /** Remove a stale cursor before a retry starts a fresh provider session. */
-  clearForRetry(threadId: string): void {
-    this.clear(threadId);
+  clearForRetry(threadId: string): Promise<void> {
+    return this.clear(threadId);
   }
 
-  private save(providerId: ProviderId, threadId: string, cursor: string, executionId?: string): void {
+  private async save(providerId: ProviderId, threadId: string, cursor: string, executionId?: string): Promise<void> {
     if (!cursor) return;
     try {
-      this.runtime.saveProviderCursor(threadId, cursor);
+      await this.runtime.saveProviderCursor(threadId, cursor);
       if (!executionId) return;
-      this.parentTurns.recordNativeCursor(executionId, {
+      await this.parentTurns.recordNativeCursor(executionId, {
         providerId,
         scope: nativeCursorScope(providerId),
         value: cursor,
@@ -52,9 +52,9 @@ export class ProviderSessionCursorPersistence {
     }
   }
 
-  private clear(threadId: string): void {
+  private async clear(threadId: string): Promise<void> {
     try {
-      this.runtime.clearProviderCursor(threadId);
+      await this.runtime.clearProviderCursor(threadId);
     } catch (error) {
       logger.warn("Failed to clear provider session cursor", {
         threadId,

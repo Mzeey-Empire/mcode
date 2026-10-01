@@ -107,4 +107,14 @@ export class InternalThreadControlMcpAuthority {
     this.leases.get(sessionId)?.active?.controller.abort();
     this.leases.delete(sessionId);
   }
+
+  /** Invalidates a retired provider's credential while preserving an admitted turn's authority. */
+  retireTransport(sessionId: string): void {
+    const entry = this.leases.get(sessionId);
+    if (!entry?.active?.active) {
+      this.close(sessionId);
+      return;
+    }
+    entry.credential = NodeCrypto.randomBytes(32).toString("base64url");
+  }
 }

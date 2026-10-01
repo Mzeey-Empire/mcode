@@ -8,6 +8,7 @@ vi.mock("../../../../application/transport/push.js", () => ({ broadcast: mockBro
 
 import { ThreadControlService, type InternalThreadControlAuthority } from "../thread-control-service.js";
 import { ThreadControlMutationReservationService } from "../thread-control-mutation-reservation-service.js";
+import { DatabaseWriteOutcomeUnknown } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 
 const authority: InternalThreadControlAuthority = {
   type: "internal",
@@ -1029,23 +1030,23 @@ describe("ThreadControlService", () => {
         : null;
     });
 
-    expect(service.threadSearch(externalAuthority, { limit: 20 })).toMatchObject({
+    expect((await service.threadSearch(externalAuthority, { limit: 20 }))).toMatchObject({
       threads: [{ threadId: ownedThread.id }],
     });
     expect(threads.search).toHaveBeenCalledWith(expect.objectContaining({ createdByIntegrationId: "integration-a" }));
 
-    const found = service.threadGet(externalAuthority, { threadId: ownedThread.id, messageLimit: 10 });
+    const found = (await service.threadGet(externalAuthority, { threadId: ownedThread.id, messageLimit: 10 }));
     expect(found).toMatchObject({ status: "found", thread: { threadId: ownedThread.id } });
     expect(messages.listByThreadForThreadControl).toHaveBeenCalledWith(
       ownedThread.id,
       10,
       THREAD_GET_TRANSCRIPT_MAX_BYTES,
     );
-    expect(service.threadGet(externalAuthority, { threadId: otherOwnedThread.id, messageLimit: 10 })).toMatchObject({
+    expect((await service.threadGet(externalAuthority, { threadId: otherOwnedThread.id, messageLimit: 10 }))).toMatchObject({
       status: "rejected",
       error: { code: "not_found" },
     });
-    expect(service.threadGet(externalAuthority, { threadId: unownedThread.id, messageLimit: 10 })).toMatchObject({
+    expect((await service.threadGet(externalAuthority, { threadId: unownedThread.id, messageLimit: 10 }))).toMatchObject({
       status: "rejected",
       error: { code: "not_found" },
     });
@@ -1087,7 +1088,7 @@ describe("ThreadControlService", () => {
   it("audits denied reads without recording the unreadable target", async () => {
     const service = createService();
 
-    expect(service.threadGet(authority, { threadId: "missing-thread", messageLimit: 10 })).toMatchObject({
+    expect((await service.threadGet(authority, { threadId: "missing-thread", messageLimit: 10 }))).toMatchObject({
       status: "rejected",
       error: { code: "not_found" },
     });
@@ -1118,7 +1119,7 @@ describe("ThreadControlService", () => {
     }
   });
 
-  it("normalizes empty thread titles at the projection boundary", () => {
+  it("normalizes empty thread titles at the projection boundary", async () => {
     const service = createService();
     const emptyTitleThread = {
       ...createdThread,
@@ -1131,7 +1132,7 @@ describe("ThreadControlService", () => {
     const namedThread = { ...emptyTitleThread, id: "named-thread", title: "Keep this title" };
     threads.search.mockReturnValue({ threads: [emptyTitleThread, namedThread], workspaces: [] });
 
-    const result = service.threadSearch(authority, { limit: 20 });
+    const result = (await service.threadSearch(authority, { limit: 20 }));
 
     expect(result.threads).toEqual(expect.arrayContaining([
       expect.objectContaining({ threadId: emptyTitleThread.id, title: "Untitled thread" }),
@@ -1264,6 +1265,19 @@ describe("ThreadControlService", () => {
     await expect(service.threadSend(authority, { threadId: target.id, message: "Needs approval." })).resolves.toMatchObject({ status: "pending_approval", approvalId: "approval-send" });
     expect(approvals.createSend).toHaveBeenCalledWith(expect.objectContaining({ message: "Needs approval.", sourceThreadId: authority.sourceThreadId }));
     await expect(service.threadSend(authority, { threadId: authority.sourceThreadId, message: "Self-target" })).resolves.toMatchObject({ status: "rejected", error: { code: "not_found" } });
+  });
+
+  it("retains a supervised send reservation when its commit outcome is unknown", async () => {
+    const service = createService();
+    const target = { ...createdThread, id: "target-thread", model: "claude-exact", deleted_at: null };
+    threads.findById.mockReturnValue(target);
+    approvals.createSend.mockRejectedValueOnce(new DatabaseWriteOutcomeUnknown("Approval commit reply lost"));
+
+    await expect(service.threadSend(authority, { threadId: target.id, message: "Uncertain approval" })).rejects.toBeInstanceOf(DatabaseWriteOutcomeUnknown);
+    await expect(service.threadSend(authority, { threadId: target.id, message: "Do not create another" })).resolves.toMatchObject({ status: "rejected", error: { code: "thread_busy" } });
+    expect(approvals.createSend).toHaveBeenCalledTimes(1);
+    expect(agentService.sendMessage).not.toHaveBeenCalled();
+    expect(mutationReservations.get(target.id)?.state).toBe("pendingApproval");
   });
 
   it("derives internal send permission from authenticated authority", async () => {

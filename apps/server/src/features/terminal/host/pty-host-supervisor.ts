@@ -122,6 +122,9 @@ export class PtyHostSupervisor implements PtyHostAdapter {
   private readonly pendingCloses = new Map<string, PendingClose>();
   private readonly pendingInspections = new Map<string, PendingInspection>();
   private readonly cleanupLedger: PtyHostCleanupLedgerStore;
+  private readonly hostEventTails = new Map<string, Promise<void>>();
+  private hostEventBytes = 0;
+  private hostEventCount = 0;
 
   constructor(private readonly options: PtyHostSupervisorOptions) {
     const degradedMs = options.heartbeatDegradedMs ?? HEARTBEAT_DEGRADED_MS;
@@ -354,6 +357,7 @@ export class PtyHostSupervisor implements PtyHostAdapter {
     this.resolveStart = null;
     this.rejectStart = null;
     this.rejectPending(new Error("PTY host stopped"));
+    await Promise.all(this.hostEventTails.values());
     const failures = await this.reapCleanupRecords(this.cleanupLedger.list());
     if (failures.length > 0) {
       throw new AggregateError(failures, "PTY host shutdown cleanup failed");
@@ -458,8 +462,52 @@ export class PtyHostSupervisor implements PtyHostAdapter {
     const event = this.parseHostEvent(child, generation, value);
     if (!event) return;
     this.observeHostEvent(child, generation, event);
-    if (event.kind === "running" && !this.handleRunningEvent(child, event)) return;
-    if (event.kind === "exit") this.handleExitEvent(event);
+    const lane = "sessionId" in event && event.sessionId ? event.sessionId : "host";
+    const key = `${generation}:${lane}`;
+    const previous = this.hostEventTails.get(key);
+    if (!previous && event.kind !== "running" && event.kind !== "exit") {
+      this.deliverUnfencedHostEvent(child, event);
+      return;
+    }
+    this.queueHostEvent(child, event, key, previous ?? Promise.resolve());
+  }
+
+  private deliverUnfencedHostEvent(child: PtyHostChild, event: PtyHostEvent): void {
+    try {
+      this.publishCommittedHostEvent(event);
+    } catch (error) {
+      this.handleHostFailure(child, error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private queueHostEvent(child: PtyHostChild, event: PtyHostEvent, key: string, previous: Promise<void>): void {
+    const bytes = NodeBuffer.Buffer.byteLength(JSON.stringify(event), "utf8");
+    if (this.hostEventBytes + bytes > MAX_IPC_QUEUE_BYTES || this.hostEventCount >= 4096) {
+      this.handleHostFailure(child, new Error("PTY host event queue exceeded its retention limit"));
+      return;
+    }
+    this.hostEventBytes += bytes;
+    this.hostEventCount += 1;
+    // A session's running commit orders its own output, while peer sessions keep streaming.
+    const pending = previous.then(async () => {
+      if (child !== this.child) return;
+      if (event.kind === "running" && !await this.handleRunningEvent(child, event)) return;
+      if (event.kind === "exit") await this.handleExitEvent(event);
+      if (child !== this.child) return;
+      this.publishCommittedHostEvent(event);
+      if (this.hostEventTails.get(key) === pending) this.hostEventTails.delete(key);
+      this.acknowledgeHostEvent(event);
+    }).catch((error: unknown) => {
+      this.handleHostFailure(child, error instanceof Error ? error : new Error(String(error)));
+    }).finally(() => {
+      this.hostEventBytes -= bytes;
+      this.hostEventCount -= 1;
+      if (this.hostEventTails.get(key) === pending) this.hostEventTails.delete(key);
+    });
+    this.hostEventTails.set(key, pending);
+  }
+
+  private publishCommittedHostEvent(event: PtyHostEvent): void {
     if (event.kind === "children") this.handleChildrenEvent(event);
     if (event.kind === "failure") this.rejectPending(new Error(event.code));
     this.publish(event);
@@ -495,12 +543,12 @@ export class PtyHostSupervisor implements PtyHostAdapter {
     this.armHeartbeatWatchdog(child, generation);
   }
 
-  private handleRunningEvent(
+  private async handleRunningEvent(
     child: PtyHostChild,
     event: Extract<PtyHostEvent, { kind: "running" }>,
-  ): boolean {
+  ): Promise<boolean> {
     try {
-      this.cleanupLedger.record({
+      await this.cleanupLedger.record({
         sessionId: event.sessionId,
         hostGeneration: event.hostGeneration,
         rootPid: event.rootPid,
@@ -511,6 +559,7 @@ export class PtyHostSupervisor implements PtyHostAdapter {
       this.handleHostFailure(child, error instanceof Error ? error : new Error(String(error)));
       return false;
     }
+    if (child !== this.child) return false;
     const pending = this.pendingCreates.get(event.sessionId);
     if (!pending) {
       try {
@@ -527,20 +576,24 @@ export class PtyHostSupervisor implements PtyHostAdapter {
       }
       return false;
     }
-    pending.resolve({
-      sessionId: event.sessionId,
-      hostGeneration: event.hostGeneration,
-      state: "running",
-      containment: event.containment,
-    });
-    clearTimeout(pending.timer);
-    this.pendingCreates.delete(event.sessionId);
     return true;
   }
 
-  private handleExitEvent(event: Extract<PtyHostEvent, { kind: "exit" }>): void {
-    this.cleanupLedger.remove(event.sessionId, event.hostGeneration);
+  private async handleExitEvent(event: Extract<PtyHostEvent, { kind: "exit" }>): Promise<void> {
+    await this.cleanupLedger.remove(event.sessionId, event.hostGeneration);
     this.rejectPendingInspectionForExit(event.sessionId);
+  }
+
+  private acknowledgeHostEvent(event: PtyHostEvent): void {
+    if (event.kind === "running") {
+      const pending = this.pendingCreates.get(event.sessionId);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      this.pendingCreates.delete(event.sessionId);
+      pending.resolve({ sessionId: event.sessionId, hostGeneration: event.hostGeneration, state: "running", containment: event.containment });
+      return;
+    }
+    if (event.kind !== "exit") return;
     const pending = this.pendingCloses.get(event.sessionId);
     if (!pending) return;
     clearTimeout(pending.timer);
@@ -605,10 +658,11 @@ export class PtyHostSupervisor implements PtyHostAdapter {
     if (!canReplace || this.replacementUsed) return;
     this.replacementUsed = true;
     const failedGeneration = this.generation.toString();
-    const records = this.cleanupLedger.forGeneration(failedGeneration);
     setTimeout(async () => {
       // A manual start() takes over recovery; only proceed while still unhealthy.
       if (this.stopping || this.child || this.state !== "unhealthy") return;
+      await Promise.all(this.hostEventTails.values());
+      const records = this.cleanupLedger.forGeneration(failedGeneration);
       const failures = await this.reapCleanupRecords(records);
       if (failures.length > 0) {
         this.publish({

@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { CleanupJobRepo, MAX_CLEANUP_ATTEMPTS } from "../cleanup-job-repo.js";
+import { CleanupJobStore as CleanupJobRepo, MAX_CLEANUP_ATTEMPTS } from "../cleanup-job-store.js";
 
 describe("CleanupJobRepo", () => {
   let db: Database;
@@ -161,6 +161,27 @@ describe("CleanupJobRepo", () => {
         .toEqual(explicitJobs.slice(0, 10).map((job) => job.thread_id));
       expect(due.filter((job) => job.kind === "retention").map((job) => job.thread_id))
         .toEqual(retentionJobs.slice(0, 10).map((job) => job.thread_id));
+    });
+
+    it("excludes uncertain jobs before counting kinds and limiting the due batch across bounded SQL chunks", () => {
+      const excluded = Array.from({ length: 140 }, (_, index) => repo.insert({
+        thread_id: `uncertain-${index}`, workspace_path: "/r", worktree_path: null, branch: null,
+        kind: index % 2 === 0 ? "explicit" : "retention",
+      }).id);
+      const explicit = repo.insert({ thread_id: "healthy-explicit", workspace_path: "/r", worktree_path: null, branch: null });
+      const retention = repo.insert({ thread_id: "healthy-retention", workspace_path: "/r", worktree_path: null, branch: null, kind: "retention" });
+
+      expect(repo.getDueCounts(Date.now(), "/r", excluded)).toEqual({ explicit: 1, retention: 1 });
+      expect(repo.findDue(Date.now(), 2, "/r", excluded).map((job) => job.id)).toEqual([retention.id, explicit.id]);
+      expect(repo.count()).toBe(142);
+      expect(repo.findDue(Date.now(), 2, "/another-workspace", excluded)).toEqual([]);
+    });
+
+    it("rejects an exclusion list above the owner budget without hiding a healthy job", () => {
+      const healthy = repo.insert({ thread_id: "healthy", workspace_path: "/r", worktree_path: null, branch: null });
+      const excessive = Array.from({ length: 257 }, (_, index) => `uncertain-${index}`);
+      expect(() => repo.findDue(Date.now(), 20, "/r", excessive)).toThrow("exceed the database owner budget");
+      expect(repo.findDue(Date.now()).map((job) => job.id)).toEqual([healthy.id]);
     });
   });
 

@@ -346,6 +346,18 @@ describe("ProviderEventIngress", () => {
     expect(projected).toHaveLength(2);
   });
 
+  it("applies parent legacy effects for worker-interpreted events and deduplicates their receipt", async () => {
+    const { ingress, received } = createIngress();
+    const event = projectedEvent("legacy-projected", "legacy parent");
+    ingress.acceptLegacyProjected([event]);
+    expect(received).toHaveLength(0);
+    await ingress.waitForThread("thread-1");
+    expect(received).toEqual([{ ...event, sourceKind: "canonical-commit" }]);
+    ingress.acceptLegacyProjected([event]);
+    await ingress.waitForThread("thread-1");
+    expect(received).toHaveLength(1);
+  });
+
   it("does not invoke the consumer on the provider callback stack", async () => {
     const { provider, received } = createIngress();
 
@@ -379,6 +391,29 @@ describe("ProviderEventIngress", () => {
     await flushIngress();
     await fence;
     expect(received).toHaveLength(65);
+  });
+
+  it("drains admitted preprocessing and yielded terminal queues before closing admission", async () => {
+    const workerPool = new DeferredWorkerPool();
+    const { ingress, received, diagnostics } = createIngress(undefined, undefined, workerPool);
+    for (let index = 0; index < 130; index += 1) {
+      ingress.acceptProviderRuntime("claude", runtimeEvent("accepted-" + index, "thread-" + index % 2));
+    }
+    ingress.acceptProviderRuntime("claude", terminalEvent("thread-0"));
+    let closed = false;
+    const closing = ingress.stopAdmissionAndDrain().then(() => { closed = true; });
+    ingress.acceptProviderRuntime("claude", runtimeEvent("late", "thread-0"));
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    expect(received).toHaveLength(0);
+    workerPool.settleAll();
+    await closing;
+    expect(received).toHaveLength(131);
+    expect(received.filter((entry) => entry.event.type === AgentEventType.TurnComplete)).toHaveLength(1);
+    expect(received.some((entry) => entry.event.type === AgentEventType.TextDelta && entry.event.delta === "late")).toBe(false);
+    expect(ingress.queueMetrics().pendingEvents).toBe(0);
+    expect(diagnostics).toContainEqual(expect.objectContaining({ reason: "worker-shutdown" }));
+    await ingress.stopAdmissionAndDrain();
   });
 
   it("stops one affected execution once when worker capacity rejects its events", () => {

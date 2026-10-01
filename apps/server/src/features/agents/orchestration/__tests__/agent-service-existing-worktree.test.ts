@@ -4,14 +4,20 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createThreadPersistenceTestRuntime } from "../../../thread-control/testing/thread-persistence-test-runtime.js";
+let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { createAgentServiceForTest, goalLifecycleForAgentServiceTest } from "./agent-service-test-harness.js";
 import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
-import type { GitService } from "../../../projects/index.js";
+import type { IAgentProvider } from "@mcode/contracts";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
+import { FakeGitExecutor } from "../../../projects/git/execution/fake-git-executor.js";
+import type { AttachmentService } from "../../../attachments/storage/attachment-service.js";
+import type { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import type { ThreadService } from "../../../thread-control/index.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
@@ -25,24 +31,15 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
 });
 
-async function eventually(assertion: () => void): Promise<void> {
-  let failure: unknown;
-  for (let index = 0; index < 32; index += 1) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      failure = error;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-  }
-  throw failure;
-}
-
 function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((next) => { resolve = next; });
   return { promise, resolve };
+}
+
+function requireThreadCreationOptions(options: Parameters<ThreadService["create"]>[4]) {
+  if (!options) throw new Error("Expected thread creation options");
+  return options;
 }
 
 function createAgentServiceHarness(automaticSetup?:
@@ -55,23 +52,22 @@ function createAgentServiceHarness(automaticSetup?:
   useGoalLifecycle = false,
   threadBranching?: { create: ReturnType<typeof vi.fn> },
 ) {
-  const db: Database = openMemoryDatabase();
-  const threadRepo = new ThreadRepo(db);
-  const workspaceRepo = new WorkspaceRepo(db);
-  const messageRepo = new MessageRepo(db);
-  const threadStartups = new ThreadStartupService(new ThreadStartupRepo(db));
-  const gitService = {
-    listWorktrees: vi.fn(),
-    resolveWorkingDir: vi.fn(() => process.cwd()),
-  } as unknown as GitService;
+  const db: Database = (persistenceRuntime = createThreadPersistenceTestRuntime()).reader;
+  const threadRepo = new ThreadRepo(db, persistenceRuntime.writer);
+  const workspaceRepo = new WorkspaceRepo(db, persistenceRuntime.writer);
+  const messageRepo = new MessageRepo(db, persistenceRuntime.writer);
+  const threadStartups = new ThreadStartupService(new ThreadStartupRepo(db, persistenceRuntime.writer), persistenceRuntime.writer);
+  const gitService = new GitWorktreeService(workspaceRepo, new FakeGitExecutor(), hostRuntime);
+  vi.spyOn(gitService, "listWorktrees").mockResolvedValue([]);
+  vi.spyOn(gitService, "resolveWorkingDir").mockReturnValue(process.cwd());
   const threadService = {
     create: vi.fn(),
   } as unknown as ThreadService;
   const availability = { assertUsable: vi.fn() };
   const provider = {
     id: "claude" as const,
-    sendTurn: vi.fn(async () => undefined),
-    stopSession: vi.fn(async () => undefined),
+    sendTurn: vi.fn<IAgentProvider["sendTurn"]>(async () => undefined),
+    stopSession: vi.fn<IAgentProvider["stopSession"]>(async () => undefined),
     setGoal: vi.fn(),
     clearGoal: vi.fn(),
     getGoal: vi.fn(),
@@ -81,10 +77,10 @@ function createAgentServiceHarness(automaticSetup?:
     resolveAll: vi.fn(() => [provider]),
   };
   const attachmentService = {
-    persist: vi.fn(async () => ({ stored: [], persisted: [] })),
+    persist: vi.fn<AttachmentService["persist"]>(async () => ({ stored: [], persisted: [] })),
     removeStoredAttachments: vi.fn(async () => undefined),
   };
-  const goals = { routeCommand: vi.fn(async () => ({ kind: "passthrough" as const })) };
+  const goals = { routeCommand: vi.fn<GoalLifecycleService["routeCommand"]>(async () => ({ kind: "passthrough" })) };
   const resolvedAutomaticSetup = typeof automaticSetup === "function"
     ? automaticSetup({ db, threadRepo, threadStartups })
     : automaticSetup;
@@ -96,7 +92,6 @@ function createAgentServiceHarness(automaticSetup?:
     attachmentService as never,
     providerRegistry as never,
     threadService,
-    {} as never,
     {} as never,
     {
       captureRef: vi.fn(async () => "ref-before"),
@@ -116,7 +111,6 @@ function createAgentServiceHarness(automaticSetup?:
     } as never,
     availability as never,
     {} as never,
-    {} as never,
     { clear: vi.fn() } as never,
     new NarrativeStore(
       messageRepo,
@@ -124,11 +118,11 @@ function createAgentServiceHarness(automaticSetup?:
       { bulkCreate: vi.fn(), bulkCreateBatched: vi.fn() } as never,
       { bulkCreate: vi.fn(), bulkCreateBatched: vi.fn() } as never,
     ),
-    new ParentAssistantTextCheckpointService(db),
+    new ParentAssistantTextCheckpointService(db, persistenceRuntime.writer),
     {} as never,
     undefined,
     undefined,
-    createCanonicalAgentBoundaryStub(db),
+    createCanonicalAgentBoundaryStub(db, persistenceRuntime.writer),
     resolvedAutomaticSetup as never,
     undefined,
     undefined,
@@ -138,6 +132,7 @@ function createAgentServiceHarness(automaticSetup?:
     threadBranching as never,
     undefined,
     threadStartups,
+    persistenceRuntime.writer,
   );
   return {
     db,
@@ -161,8 +156,8 @@ describe("AgentService.createAndSend defaults", () => {
   it("queues only the first Turn for a managed New worktree before AgentService reserves runtime state", async () => {
     const automaticSetup = { queueAutomaticFirstTurn: vi.fn(), admitAutomaticTurn: vi.fn(() => ({ queued: true })) };
     const { threadRepo, workspaceRepo, threadService, service, provider } = createAgentServiceHarness(automaticSetup);
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
     vi.mocked(threadService.create).mockResolvedValue(managed);
 
     const result = await service.createAndSend({
@@ -189,16 +184,17 @@ describe("AgentService.createAndSend defaults", () => {
       new WorkspaceEnvironmentService({
         mcodeDir: root,
         database: db,
+        databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: { prepare },
         threadStartups: startups,
         platform: "linux",
       }),
     );
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
-      options.lifecycle?.onThreadPersisted(managed);
+      (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
     });
     const providerCompletion = deferred<void>();
@@ -214,7 +210,7 @@ describe("AgentService.createAndSend defaults", () => {
       startupId: "00000000-0000-4000-8000-000000000001",
     });
 
-    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
     expect(prepare).not.toHaveBeenCalled();
     expect(environment.getAutomaticSetup({ threadId: managed.id })).toMatchObject({
       gate: "not-required",
@@ -242,6 +238,7 @@ describe("AgentService.createAndSend defaults", () => {
       new WorkspaceEnvironmentService({
         mcodeDir: root,
         database: db,
+        databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: {
           prepare: async () => ({
@@ -258,10 +255,10 @@ describe("AgentService.createAndSend defaults", () => {
         platform: "linux",
       }),
     );
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
-      options.lifecycle?.onThreadPersisted(managed);
+      (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
     });
     const environment = automaticSetup as WorkspaceEnvironmentService;
@@ -280,19 +277,19 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await eventually(() => expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running"));
+    await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running"));
     await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
     expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(2);
 
     setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
     await creating;
-    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
     expect(threadStartups.get(startupId)).toMatchObject({ state: "completed", phase: "agent" });
 
     // Ending the first session releases the drain loop so it claims the second queued Turn.
     await service.stopSession(managed.id);
 
-    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledTimes(2));
     expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toEqual([
       expect.objectContaining({ state: "dispatched" }),
       expect.objectContaining({ state: "dispatched" }),
@@ -307,16 +304,17 @@ describe("AgentService.createAndSend defaults", () => {
       new WorkspaceEnvironmentService({
         mcodeDir: root,
         database: db,
+        databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: { prepare },
         threadStartups: startups,
         platform: "linux",
       }),
     );
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
-      options.lifecycle?.onThreadPersisted(managed);
+      (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
     });
     const heldAdmission = deferred<{ kind: "passthrough" }>();
@@ -332,13 +330,13 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await eventually(() => expect(goals.routeCommand).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(goals.routeCommand).toHaveBeenCalledOnce());
 
-    threadStartups.cancel(startupId);
+    (await threadStartups.cancel(startupId));
     heldAdmission.resolve({ kind: "passthrough" });
 
     await creating;
-    await eventually(() => expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent" }));
+    await vi.waitFor(() => expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent" }));
     expect(provider.sendTurn).not.toHaveBeenCalled();
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(managed.id);
   });
@@ -350,10 +348,10 @@ describe("AgentService.createAndSend defaults", () => {
       getAutomaticSetup: vi.fn(() => ({ gate: "released" })),
     };
     const { threadRepo, workspaceRepo, threadService, service, provider, attachmentService, threadStartups } = createAgentServiceHarness(automaticSetup);
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
-      options.lifecycle?.onThreadPersisted(managed);
+      (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
     });
     const heldAttachmentPersistence = deferred<{ stored: []; persisted: [] }>();
@@ -367,10 +365,10 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await eventually(() => expect(attachmentService.persist).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(attachmentService.persist).toHaveBeenCalledOnce());
 
-    threadStartups.cancel(startupId);
-    threadStartups.markCancelled(startupId);
+    (await threadStartups.cancel(startupId));
+    (await threadStartups.markCancelled(startupId));
     heldAttachmentPersistence.resolve({ stored: [], persisted: [] });
 
     const result = await creating;
@@ -389,16 +387,17 @@ describe("AgentService.createAndSend defaults", () => {
       new WorkspaceEnvironmentService({
         mcodeDir: root,
         database: db,
+        databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: { prepare },
         threadStartups: startups,
         platform: "linux",
       }),
     true);
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude"));
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
-      options.lifecycle?.onThreadPersisted(managed);
+      (await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed));
       return managed;
     });
     const environment = automaticSetup as WorkspaceEnvironmentService;
@@ -407,7 +406,7 @@ describe("AgentService.createAndSend defaults", () => {
     const routeCommand = goalLifecycle.routeCommand.bind(goalLifecycle);
     vi.spyOn(goalLifecycle, "routeCommand").mockImplementation(async (...args) => {
       const outcome = await routeCommand(...args);
-      threadStartups.cancel(startupId);
+      (await threadStartups.cancel(startupId));
       return outcome;
     });
 
@@ -420,8 +419,8 @@ describe("AgentService.createAndSend defaults", () => {
       startupId,
     });
 
-    await eventually(() => expect(goalLifecycle.routeCommand).toHaveBeenCalledOnce());
-    await eventually(() => expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent" }));
+    await vi.waitFor(() => expect(goalLifecycle.routeCommand).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent" }));
     expect(goalLifecycle.pendingCommandEffectCount()).toBe(0);
     expect(provider.sendTurn).not.toHaveBeenCalled();
   });
@@ -433,6 +432,7 @@ describe("AgentService.createAndSend defaults", () => {
       new WorkspaceEnvironmentService({
         mcodeDir: root,
         database: db,
+        databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: {
           prepare: async () => ({
@@ -448,15 +448,15 @@ describe("AgentService.createAndSend defaults", () => {
         platform: "linux",
       }),
     );
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
       document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
     });
-    environment.queueAutomaticFirstTurn({
+    (await environment.queueAutomaticFirstTurn({
       threadId: managed.id,
       messageId: "message-first",
       content: "First blocked Turn",
@@ -474,7 +474,7 @@ describe("AgentService.createAndSend defaults", () => {
         mentions: [],
         provider: "claude",
       },
-    });
+    }));
 
     await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
 
@@ -496,13 +496,14 @@ describe("AgentService.createAndSend defaults", () => {
       new WorkspaceEnvironmentService({
         mcodeDir: root,
         database: db,
+        databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: { prepare: vi.fn() },
         platform: "linux",
       }),
     );
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
@@ -510,7 +511,7 @@ describe("AgentService.createAndSend defaults", () => {
       document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
     });
     for (let index = 1; index <= 64; index += 1) {
-      environment.queueAutomaticFirstTurn({
+      (await environment.queueAutomaticFirstTurn({
         threadId: managed.id,
         messageId: `queued-capacity-${index}`,
         content: `Queued Turn ${index}`,
@@ -528,7 +529,7 @@ describe("AgentService.createAndSend defaults", () => {
           mentions: [],
           provider: "claude",
         },
-      });
+      }));
     }
     const stored = { id: "attachment-capacity", name: "capacity.png", mimeType: "image/png", sizeBytes: 4 };
     attachmentService.persist.mockResolvedValue({
@@ -552,20 +553,21 @@ describe("AgentService.createAndSend defaults", () => {
       new WorkspaceEnvironmentService({
         mcodeDir: root,
         database: db,
+        databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: { prepare: vi.fn() },
         platform: "linux",
       }),
     );
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
       document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
     });
-    environment.queueAutomaticFirstTurn({
+    (await environment.queueAutomaticFirstTurn({
       threadId: managed.id,
       messageId: "queued-deletion-1",
       content: "First blocked Turn",
@@ -583,7 +585,7 @@ describe("AgentService.createAndSend defaults", () => {
         mentions: [],
         provider: "claude",
       },
-    });
+    }));
     const stored = { id: "attachment-deletion", name: "deletion.png", mimeType: "image/png", sizeBytes: 4 };
     attachmentService.persist.mockResolvedValue({
       stored: [stored],
@@ -608,20 +610,21 @@ describe("AgentService.createAndSend defaults", () => {
       new WorkspaceEnvironmentService({
         mcodeDir: root,
         database: db,
+        databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: { prepare: async () => { throw new Error("setup unavailable"); } },
         platform: "linux",
       }),
     );
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
       document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
     });
-    environment.queueAutomaticFirstTurn({
+    (await environment.queueAutomaticFirstTurn({
       threadId: managed.id,
       messageId: "message-first",
       content: "First blocked Turn",
@@ -639,8 +642,8 @@ describe("AgentService.createAndSend defaults", () => {
         mentions: [],
         provider: "claude",
       },
-    });
-    await eventually(() => expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("failed"));
+    }));
+    await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("failed"));
     const stored = { id: "attachment-handled", name: "handled.png", mimeType: "image/png", sizeBytes: 4 };
     attachmentService.persist.mockImplementationOnce(async () => {
       await environment.continueAutomaticSetup({ threadId: managed.id });
@@ -668,21 +671,22 @@ describe("AgentService.createAndSend defaults", () => {
       new WorkspaceEnvironmentService({
         mcodeDir: root,
         database: db,
+        databaseWriter: persistenceRuntime.writer,
         threads: { findById: (id) => threads.findById(id) },
         terminalCommands: { prepare: vi.fn() },
         platform: "linux",
       }),
     );
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const managed = threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude");
-    const replyTarget = messageRepo.create(managed.id, "assistant", "Prior answer", 1);
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const managed = (await threadRepo.create(workspace.id, "Managed", "worktree", "feature/managed", true, "claude"));
+    const replyTarget = (await messageRepo.create(managed.id, "assistant", "Prior answer", 1));
     const environment = automaticSetup as WorkspaceEnvironmentService;
     await environment.save({
       workspaceId: workspace.id,
       sourceRevision: null,
       document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
     });
-    environment.queueAutomaticFirstTurn({
+    (await environment.queueAutomaticFirstTurn({
       threadId: managed.id,
       messageId: "message-first",
       content: "First blocked Turn",
@@ -700,7 +704,7 @@ describe("AgentService.createAndSend defaults", () => {
         mentions: [],
         provider: "claude",
       },
-    });
+    }));
 
     await service.sendMessage({
       threadId: managed.id,
@@ -756,10 +760,10 @@ describe("AgentService.createAndSend defaults", () => {
   it("keeps Direct and Existing worktree first Turns on immediate dispatch", async () => {
     const automaticSetup = { queueAutomaticFirstTurn: vi.fn(), admitAutomaticTurn: vi.fn(() => ({ queued: true })) };
     const { workspaceRepo, gitService, service, provider } = createAgentServiceHarness(automaticSetup);
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     vi.mocked(gitService.listWorktrees).mockResolvedValue([
-      { path: "/repo/.worktrees/existing", branch: "feature/existing" },
-    ] as never);
+      { name: "existing", path: "/repo/.worktrees/existing", branch: "feature/existing", managed: true },
+    ]);
 
     await service.createAndSend({ workspaceId: workspace.id, content: "Direct dispatch" });
     await service.createAndSend({
@@ -770,12 +774,12 @@ describe("AgentService.createAndSend defaults", () => {
     });
 
     expect(automaticSetup.queueAutomaticFirstTurn).not.toHaveBeenCalled();
-    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledTimes(2));
   });
 
   it("returns the authoritative running runtime snapshot after startup", async () => {
     const { workspaceRepo, service } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
 
     const result = await service.createAndSend({
       workspaceId: workspace.id,
@@ -791,7 +795,7 @@ describe("AgentService.createAndSend defaults", () => {
 
   it("replays a lost createAndSend response without creating or dispatching twice", async () => {
     const { workspaceRepo, threadRepo, service, provider, messageRepo } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const command = {
       workspaceId: workspace.id,
       content: "Start exactly once",
@@ -804,13 +808,13 @@ describe("AgentService.createAndSend defaults", () => {
     expect(replay.id).toBe(first.id);
     expect(replay.runtimeSnapshot).toEqual(first.runtimeSnapshot);
     expect(threadRepo.listByWorkspace(workspace.id)).toHaveLength(1);
-    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
     expect(messageRepo.listByThread(first.id, 10).messages).toHaveLength(1);
   });
 
   it("completes startup when the initial native command is handled without a provider turn", async () => {
     const { workspaceRepo, service, provider, threadStartups } = createAgentServiceHarness(undefined, true);
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const startupId = "00000000-0000-4000-8000-000000000025";
 
     const result = await service.createAndSend({
@@ -833,7 +837,7 @@ describe("AgentService.createAndSend defaults", () => {
 
   it("returns an idle snapshot when startup fails before runtime ownership", async () => {
     const { workspaceRepo, service, availability } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     availability.assertUsable.mockImplementation(() => {
       throw new Error("startup failed");
     });
@@ -852,7 +856,7 @@ describe("AgentService.createAndSend defaults", () => {
 
   it("returns after runtime startup without waiting for provider completion", async () => {
     const { workspaceRepo, service, provider } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     let finishProvider!: () => void;
     const providerDone = new Promise<void>((resolve) => {
       finishProvider = resolve;
@@ -870,7 +874,7 @@ describe("AgentService.createAndSend defaults", () => {
 
   it("uses the default model when the command omits it", async () => {
     const { threadRepo, workspaceRepo, service, provider } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
 
     const thread = await service.createAndSend({
       workspaceId: workspace.id,
@@ -879,7 +883,7 @@ describe("AgentService.createAndSend defaults", () => {
 
     expect(thread.model).toBe("claude-sonnet-4-6");
     expect(threadRepo.findById(thread.id)?.model).toBe("claude-sonnet-4-6");
-    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: `mcode-${thread.id}`,
       model: "claude-sonnet-4-6",
     })));
@@ -892,9 +896,9 @@ describe("AgentService.createAndSend defaults", () => {
       false,
       threadBranching,
     );
-    const workspace = workspaceRepo.create("Repo", "/repo");
-    const parent = threadRepo.create(workspace.id, "Parent", "direct", "main", true, "claude");
-    const child = threadRepo.create(workspace.id, "Child", "direct", "branch/comment", true, "claude");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
+    const parent = (await threadRepo.create(workspace.id, "Parent", "direct", "main", true, "claude"));
+    const child = (await threadRepo.create(workspace.id, "Child", "direct", "branch/comment", true, "claude"));
     const comment = {
       id: "550e8400-e29b-41d4-a716-446655440010",
       displayNumber: 1,
@@ -923,8 +927,9 @@ describe("AgentService.createAndSend defaults", () => {
       selectedTextComments: [comment],
     });
 
-    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
     const request = vi.mocked(provider.sendTurn).mock.calls[0]![0];
+    if (!request) throw new Error("Expected the dispatched provider request");
     expect(request.message).toContain("<branch-handoff>Historical context</branch-handoff>");
     expect(request.message.match(/<!-- mcode-selected-text-comments-v1 -->/g)).toHaveLength(1);
     expect(request.message).toContain('"sourceRole":"user"');
@@ -940,9 +945,9 @@ describe("AgentService.createAndSend defaults", () => {
 describe("AgentService.createAndSend existing worktree attach", () => {
   it("creates a new worktree as branchless from the selected base branch", async () => {
     const { threadRepo, workspaceRepo, threadService, service } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const createdThread = {
-      ...threadRepo.create(
+      ...(await threadRepo.create(
         workspace.id,
         "Work from feature base",
         "worktree",
@@ -952,7 +957,7 @@ describe("AgentService.createAndSend existing worktree attach", () => {
         undefined,
         "branchless",
         "feature/base",
-      ),
+      )),
       worktree_path: "/repo/.worktrees/feature-base",
     };
     vi.mocked(threadService.create).mockResolvedValue(createdThread);
@@ -983,9 +988,9 @@ describe("AgentService.createAndSend existing worktree attach", () => {
 
   it("creates a new worktree on a PR branch as a named checkout", async () => {
     const { threadRepo, workspaceRepo, threadService, service } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     const createdThread = {
-      ...threadRepo.create(
+      ...(await threadRepo.create(
         workspace.id,
         "Review PR",
         "worktree",
@@ -995,7 +1000,7 @@ describe("AgentService.createAndSend existing worktree attach", () => {
         undefined,
         "named",
         null,
-      ),
+      )),
       worktree_path: "/repo/.worktrees/contributor-pr-branch",
     };
     vi.mocked(threadService.create).mockResolvedValue(createdThread);
@@ -1027,7 +1032,7 @@ describe("AgentService.createAndSend existing worktree attach", () => {
 
   it("attaches a detached existing worktree as branchless with the selected base branch", async () => {
     const { workspaceRepo, gitService, service } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     vi.mocked(gitService.listWorktrees).mockResolvedValue([
       {
         name: "branchless-existing",
@@ -1062,7 +1067,7 @@ describe("AgentService.createAndSend existing worktree attach", () => {
 
   it("keeps named existing worktree attach behavior unchanged", async () => {
     const { workspaceRepo, gitService, service } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     vi.mocked(gitService.listWorktrees).mockResolvedValue([
       {
         name: "feature-existing",
@@ -1096,7 +1101,7 @@ describe("AgentService.createAndSend existing worktree attach", () => {
 
   it("rejects HEAD as the base branch for detached existing worktrees", async () => {
     const { workspaceRepo, gitService, service } = createAgentServiceHarness();
-    const workspace = workspaceRepo.create("Repo", "/repo");
+    const workspace = (await workspaceRepo.create("Repo", "/repo"));
     vi.mocked(gitService.listWorktrees).mockResolvedValue([
       {
         name: "branchless-existing",

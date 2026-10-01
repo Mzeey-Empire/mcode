@@ -20,11 +20,11 @@ export interface SubagentLifecycleDurability {
   loadSubagentRoster(request: CanonicalSubagentRosterRequest): CanonicalSubagentRoster;
   loadSubagentStopTarget(request: CanonicalSubagentStopRequest): SubagentStopTarget | null;
   loadActiveSubagentStopTargets(owningParentThreadId: string): SubagentStopTarget[];
-  interruptSubagentTurns(childThreadIds: readonly string[], reason: string): void;
+  interruptSubagentTurns(childThreadIds: readonly string[], reason: string): Promise<void>;
   finishSubagentTurn(input: {
     childThreadId: string;
     nativeTurnId: string;
     outcome: "interrupted";
     error: string;
-  }): { status: string };
+  }): Promise<{ status: string }>;
 }

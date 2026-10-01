@@ -24,6 +24,10 @@ interface ExecutionQueue {
 /** Serializes Codex parent events through the server-owned canonical sink. */
 export class CodexCanonicalEventPublisher {
   private readonly queues = new Map<string, ExecutionQueue>();
+  private admissionStopped = false;
+  private shutdownTask: Promise<void> | undefined;
+  private lateEventReported = false;
+  private readonly failureTasks = new Set<Promise<void>>();
   private failureHandler:
     | ((routing: CodexCanonicalEventRouting, error: Error) => void | Promise<void>)
     | undefined;
@@ -39,6 +43,13 @@ export class CodexCanonicalEventPublisher {
 
   /** Queues one event; the caller must have verified its exact execution and attempt. */
   publish(routing: CodexCanonicalEventRouting, runtimeEvent: ProviderRuntimeEvent): void {
+    if (this.admissionStopped) {
+      if (!this.lateEventReported) {
+        this.lateEventReported = true;
+        logger.warn("Codex canonical event rejected after shutdown", { executionId: routing.executionId });
+      }
+      return;
+    }
     const queue = this.queueFor(routing);
     if (queue.failure || queue.discardQueued) return;
     if (queue.pendingEventCount >= MAX_PENDING_EVENTS_PER_EXECUTION) {
@@ -91,6 +102,21 @@ export class CodexCanonicalEventPublisher {
     this.queues.delete(this.queueKey(routing));
   }
 
+  /** Fences late callbacks and drains every event admitted before provider shutdown. */
+  stopAdmissionAndDrain(): Promise<void> {
+    this.admissionStopped = true;
+    this.shutdownTask ??= this.drainAcceptedQueues([...this.queues.values()]);
+    return this.shutdownTask;
+  }
+
+  private async drainAcceptedQueues(queues: readonly ExecutionQueue[]): Promise<void> {
+    await Promise.all(queues.map((queue) => queue.tail));
+    await Promise.all(this.failureTasks);
+    this.queues.clear();
+    const failures = queues.flatMap((queue) => queue.failure ? [queue.failure] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Codex canonical event shutdown failed");
+  }
+
   private queueFor(routing: CodexCanonicalEventRouting): ExecutionQueue {
     const key = this.queueKey(routing);
     const existing = this.queues.get(key);
@@ -114,12 +140,13 @@ export class CodexCanonicalEventPublisher {
     if (queue.failure) return;
     queue.failure = error;
     try {
-      void Promise.resolve(this.failureHandler?.(routing, error)).catch((handlerError: unknown) => {
+      const failureTask = Promise.resolve(this.failureHandler?.(routing, error)).catch((handlerError: unknown) => {
         logger.error("Codex canonical failure handler failed", {
           executionId: routing.executionId,
           error: toError(handlerError).message,
         });
-      });
+      }).finally(() => { this.failureTasks.delete(failureTask); });
+      this.failureTasks.add(failureTask);
     } catch (handlerError: unknown) {
       logger.error("Codex canonical failure handler failed", {
         executionId: routing.executionId,

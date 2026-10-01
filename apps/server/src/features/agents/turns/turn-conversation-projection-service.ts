@@ -7,6 +7,8 @@ import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { PARENT_TURN_DURABILITY, type ParentTurnDurability } from "./parent-turn-durability.js";
 import { TURN_FINALIZER, TurnFinalizer } from "./turn-finalizer.js";
 import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { turnConversationWriteOperations } from "./turn-conversation-write-operations.js";
 
 /** Owns conversation-message projection for normalized provider events. */
 @injectable()
@@ -16,17 +18,18 @@ export class TurnConversationProjectionService {
     @inject(MessageRepo) private readonly messages: MessageRepo,
     @inject(TURN_FINALIZER) private readonly finalizer: TurnFinalizer,
     @inject(PARENT_TURN_DURABILITY) private readonly parentTurns: ParentTurnDurability,
+    @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter,
     @inject(CanonicalAcceptedProgress, { isOptional: true }) private readonly progress?: CanonicalAcceptedProgress,
   ) {}
 
   /** Assign renderer identity and buffer a provider assistant message until terminal materialization. */
-  bufferAssistantMessage(
+  async bufferAssistantMessage(
     event: Extract<AgentEvent, { type: "message" }>,
     postTurnGoalReceipt: boolean,
-  ): void {
+  ): Promise<void> {
     const model = this.threads.findById(event.threadId)?.model ?? null;
     if (postTurnGoalReceipt) {
-      this.materializeGoalReceipt(event, model);
+      await this.materializeGoalReceipt(event, model);
       return;
     }
     const attachments = this.finalizer.getBufferedAssistantAttachments(event.threadId);
@@ -38,43 +41,42 @@ export class TurnConversationProjectionService {
   }
 
   /** Persist the divider that marks a completed provider compaction. */
-  persistCompactionDivider(threadId: string): void {
-    const sequence = this.messages.getLatestSequenceIncludingInternal(threadId) + 1;
-    this.messages.create(threadId, "system", "Context compacted", sequence);
+  persistCompactionDivider(threadId: string): Promise<void> {
+    return this.writer.execute(turnConversationWriteOperations.compactionDivider, threadId);
   }
 
   /** Return true when the retained writer owner has already published this notice. */
-  persistSystemNotice(event: Extract<AgentEvent, { type: "system" }>): boolean {
+  async persistSystemNotice(event: Extract<AgentEvent, { type: "system" }>): Promise<boolean> {
     if (this.progress) {
       const accepted = this.progress.acceptThreadSystemObservation(event);
       event.messageId = accepted.messageId;
       event.publicationId = accepted.publicationId;
       return true;
     }
-    const sequence = this.messages.getLatestSequenceIncludingInternal(event.threadId) + 1;
-    event.messageId = this.messages.createSystemNotice(
-      event.threadId, event.message ?? "", sequence, event.systemNotice,
-    ).id;
+    const notice = await this.writer.execute(turnConversationWriteOperations.systemNotice, {
+      threadId: event.threadId, content: event.message ?? "", notice: event.systemNotice,
+    });
+    event.messageId = notice.id;
     return false;
   }
 
   /** Remove diagnostics from a previous provider session before publishing startup. */
-  beginNoticeSession(event: Extract<AgentEvent, { type: "system" }>): boolean {
+  async beginNoticeSession(event: Extract<AgentEvent, { type: "system" }>): Promise<boolean> {
     if (this.progress) {
       const accepted = this.progress.acceptThreadSystemObservation(event);
       event.publicationId = accepted.publicationId;
       return true;
     }
-    this.messages.beginNoticeSession(event.threadId, event.systemNotice?.sessionId);
+    await this.messages.beginNoticeSession(event.threadId, event.systemNotice?.sessionId);
     return false;
   }
 
   /** Start the deterministic reliability harness parent turn with its durable user message. */
-  startReliabilityTurn(threadId: string, executionId: string): void {
+  async startReliabilityTurn(threadId: string, executionId: string): Promise<void> {
     const thread = this.threads.findById(threadId);
     if (!thread) throw new Error(`Reliability stream thread not found: ${threadId}`);
     const sequence = this.messages.getLatestSequenceIncludingInternal(threadId) + 1;
-    this.parentTurns.startParentTurn({
+    await this.parentTurns.startParentTurn({
       thread: {
         id: thread.id,
         workspaceId: thread.workspace_id,
@@ -87,26 +89,26 @@ export class TurnConversationProjectionService {
       approvalReviewMode: "manual",
       approvalReviewReason: "manual-requested",
       providerIdentities: [],
-      projectUserMessage: () => this.messages.create(
-        threadId,
-        "user",
-        "Reliability harness assistant stream",
-        sequence,
-      ),
+      userMessage: { kind: "create", content: "Reliability harness assistant stream", sequence },
     });
   }
 
-  private materializeGoalReceipt(
+  private async materializeGoalReceipt(
     event: Extract<AgentEvent, { type: "message" }>,
     model: string | null,
-  ): void {
+  ): Promise<void> {
     const { messages } = this.messages.listByThread(event.threadId, 1);
-    const last = messages[messages.length - 1] ?? null;
-    const sequence = this.messages.getLatestSequenceIncludingInternal(event.threadId) + 1;
-    const receipt = last?.role === "assistant" && last.content === event.content
-      ? last
-      : this.messages.create(event.threadId, "assistant", event.content, sequence, undefined, undefined, undefined, model);
-    event.messageId = receipt.id;
+    const last = messages[messages.length - 1];
+    const messageId = last?.role === "assistant" && last.content === event.content
+      ? last.id
+      : NodeCrypto.createHash("sha256").update(JSON.stringify([
+        "goal-receipt", event.threadId, event.turnExecutionId, event.content,
+      ])).digest("hex");
+    event.messageId = messageId;
     event.model = model;
+    const receipt = await this.writer.execute(turnConversationWriteOperations.goalReceipt, {
+      threadId: event.threadId, messageId, content: event.content, model,
+    });
+    if (receipt.id !== messageId) throw new Error("Goal receipt changed its assigned renderer identity");
   }
 }

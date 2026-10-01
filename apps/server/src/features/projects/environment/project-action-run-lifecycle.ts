@@ -9,6 +9,8 @@ import type { ActiveProjectAction, ProjectActionSlotState } from "./project-acti
 
 /** Persists Project Action transcript and finalization transitions for active slots. */
 export class ProjectActionRunLifecycle {
+  private readonly outputWrites = new WeakMap<ActiveProjectAction, Promise<void>>();
+  private readonly dirtyOutput = new WeakSet<ActiveProjectAction>();
   constructor(
     private readonly runs: Pick<ProjectActionRunRepo, "updateIfCurrent">,
     private readonly active: Map<string, ProjectActionSlotState>,
@@ -23,11 +25,11 @@ export class ProjectActionRunLifecycle {
     const output = consumeCompleteOutput(active, data);
     if (output === null) return;
     appendOutput(active, output);
-    this.persistOutput(active, runId);
+    this.scheduleOutput(active, runId);
   }
 
   /** Maps a terminal exit into one retained final Action run. */
-  finish(slot: string, runId: string, exitCode: number | null): void {
+  async finish(slot: string, runId: string, exitCode: number | null): Promise<void> {
     const active = this.runningSlot(slot, runId);
     if (!active) return;
     flushOutputRemainder(active);
@@ -35,14 +37,15 @@ export class ProjectActionRunLifecycle {
     active.run = finalRun;
     active.pendingFinalization = finalRun;
     active.state = "pending-finalization";
-    this.retryPendingFinalization(slot, active);
+    await this.retryPendingFinalization(slot, active);
   }
 
   /** Retries the one retained final run until the durable slot update succeeds. */
-  retryPendingFinalization(slot: string, active: ActiveProjectAction): void {
+  async retryPendingFinalization(slot: string, active: ActiveProjectAction): Promise<void> {
     const finalRun = active.pendingFinalization;
     if (active.state !== "pending-finalization" || !finalRun) return;
-    const persisted = this.persistFinalization(active, finalRun);
+    await this.outputWrites.get(active);
+    const persisted = await this.persistFinalization(active, finalRun);
     if (persisted === null || this.active.get(slot) !== active) return;
     this.active.delete(slot);
     if (persisted) this.publisher.publish(finalRun);
@@ -54,9 +57,22 @@ export class ProjectActionRunLifecycle {
     return active;
   }
 
-  private persistOutput(active: ActiveProjectAction, runId: string): void {
+  private scheduleOutput(active: ActiveProjectAction, runId: string): void {
+    if (this.outputWrites.has(active)) {
+      this.dirtyOutput.add(active);
+      return;
+    }
+    const write = this.persistOutput(active, runId).finally(() => {
+      this.outputWrites.delete(active);
+      if (this.dirtyOutput.delete(active) && active.state === "running") this.scheduleOutput(active, runId);
+    });
+    this.outputWrites.set(active, write);
+  }
+
+  private async persistOutput(active: ActiveProjectAction, runId: string): Promise<void> {
+    const run = active.run;
     try {
-      if (this.runs.updateIfCurrent(active.run)) this.publisher.publish(active.run);
+      if (await this.runs.updateIfCurrent(run)) this.publisher.publish(run);
     } catch (error) {
       logger.warn("Project Action output persistence failed; retaining output for the next durable update", {
         threadId: active.threadId,
@@ -67,12 +83,12 @@ export class ProjectActionRunLifecycle {
     }
   }
 
-  private persistFinalization(
+  private async persistFinalization(
     active: ActiveProjectAction,
     finalRun: WorkspaceEnvironmentActionRun,
-  ): boolean | null {
+  ): Promise<boolean | null> {
     try {
-      return this.runs.updateIfCurrent(finalRun);
+      return await this.runs.updateIfCurrent(finalRun);
     } catch (error) {
       logger.warn("Project Action finalization persistence failed; retaining the slot for retry", {
         threadId: active.threadId,

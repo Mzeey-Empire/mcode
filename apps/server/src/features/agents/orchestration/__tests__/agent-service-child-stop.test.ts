@@ -60,7 +60,7 @@ function makeHarness(options: {
     interruptChildTurn: ReturnType<typeof vi.fn>;
     stopSession: ReturnType<typeof vi.fn>;
   };
-  const finishSubagentTurn = vi.fn().mockReturnValue({ status: "Interrupted" });
+  const finishSubagentTurn = vi.fn().mockResolvedValue({ status: "Interrupted" });
   const service = Object.create(SubagentLifecycleService.prototype) as ServiceHarness;
   service.durability = {
     loadSubagentStopTarget: vi.fn(() => target),
@@ -77,6 +77,24 @@ const request = {
 };
 
 describe("SubagentLifecycleService.stop", () => {
+  it("keeps stop pending until the child interruption is durable", async () => {
+    const { service, finishSubagentTurn } = makeHarness();
+    let confirm: ((result: { status: string }) => void) | undefined;
+    finishSubagentTurn.mockReturnValue(new Promise<{ status: string }>((resolve) => { confirm = resolve; }));
+    let settled = false;
+    const pending = service.stop(request).then((result) => { settled = true; return result; });
+    await vi.waitFor(() => expect(finishSubagentTurn).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+    confirm?.({ status: "Interrupted" });
+    await expect(pending).resolves.toMatchObject({ status: "interrupted" });
+  });
+
+  it("does not report a successful stop when saving the interruption fails", async () => {
+    const { service, finishSubagentTurn } = makeHarness();
+    finishSubagentTurn.mockRejectedValue(new Error("Child save failed"));
+    await expect(service.stop(request)).rejects.toThrow("Child save failed");
+  });
+
   it("interrupts the exact native child turn without stopping the provider session", async () => {
     const { service, provider, finishSubagentTurn } = makeHarness();
 

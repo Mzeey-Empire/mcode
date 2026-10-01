@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openAgentStorageTestDatabase as openMemoryDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../persistence/plan-question-answers-repo.js";
 import { PlanQuestionService } from "../plan-question-service.js";
@@ -55,6 +55,8 @@ function acceptedAssistant(content: string): Message {
   };
 }
 
+afterEach(closeAgentStorageTestDatabases);
+
 describe("PlanQuestionService accepted progress read-through", () => {
   let db: Database;
   let answersRepo: PlanQuestionAnswersRepo;
@@ -63,8 +65,8 @@ describe("PlanQuestionService accepted progress read-through", () => {
   beforeEach(() => {
     db = openMemoryDatabase();
     seedThread(db);
-    answersRepo = new PlanQuestionAnswersRepo(db);
-    svc = new PlanQuestionService(new MessageRepo(db), answersRepo);
+    answersRepo = new PlanQuestionAnswersRepo(db, agentStorageTestWriter(db));
+    svc = new PlanQuestionService(new MessageRepo(db, agentStorageTestWriter(db)), answersRepo);
   });
 
   afterEach(() => db.close(true));
@@ -80,7 +82,7 @@ describe("PlanQuestionService accepted progress read-through", () => {
     expect(payload.content).not.toContain("**Which auth strategy?**");
     expect(payload.markPlanAnswerForMessageId).toBe(accepted.id);
     expect(svc.findLatestPlanQuestionsMessageId("thread-1")).toBe(accepted.id);
-    expect(new MessageRepo(db).findById(accepted.id)).toBeUndefined();
+    expect(new MessageRepo(db, agentStorageTestWriter(db)).findById(accepted.id)).toBeUndefined();
   });
 
   it("keeps malformed current accepted context attached to its own fence instead of using an older batch", () => {
@@ -94,7 +96,7 @@ describe("PlanQuestionService accepted progress read-through", () => {
     expect(payload.markPlanAnswerForMessageId).toBe(accepted.id);
   });
 
-  it("admits one ordered dismissal marker for the unsaved ID without inserting a foreign-key-dependent saved marker", () => {
+  it("admits one ordered dismissal marker for the unsaved ID without inserting a foreign-key-dependent saved marker", async () => {
     insertMessage(db, "saved-assistant", "assistant", fence(), 1);
     const accepted = acceptedAssistant(fence("Which storage?", "SQLite"));
     const queued: Array<{ threadId: string; messageId: string }> = [];
@@ -107,14 +109,14 @@ describe("PlanQuestionService accepted progress read-through", () => {
         return true;
       },
     });
-    expect(svc.dismiss("thread-1")).toBe(accepted.id);
-    expect(svc.dismiss("thread-1")).toBe(accepted.id);
+    expect(await svc.dismiss("thread-1")).toBe(accepted.id);
+    expect(await svc.dismiss("thread-1")).toBe(accepted.id);
     expect(queued).toEqual([{ threadId: "thread-1", messageId: accepted.id }]);
     expect(answersRepo.listAnsweredForThread("thread-1")).toEqual([]);
-    expect(new MessageRepo(db).findById(accepted.id)).toBeUndefined();
+    expect(new MessageRepo(db, agentStorageTestWriter(db)).findById(accepted.id)).toBeUndefined();
   });
 
-  it("falls back to the saved fence and idempotent repository marker when no accepted match exists", () => {
+  it("falls back to the saved fence and idempotent repository marker when no accepted match exists", async () => {
     insertMessage(db, "saved-assistant", "assistant", fence(), 1);
     const attempted: Array<{ threadId: string; messageId: string }> = [];
     svc.bindAcceptedProgress({ latestAssistantMessage: () => undefined,
@@ -125,8 +127,8 @@ describe("PlanQuestionService accepted progress read-through", () => {
     ]);
     expect(payload.content).toContain("**Which auth strategy?**: OAuth");
     expect(payload.markPlanAnswerForMessageId).toBe("saved-assistant");
-    expect(svc.dismiss("thread-1")).toBe("saved-assistant");
-    expect(svc.dismiss("thread-1")).toBe("saved-assistant");
+    expect(await svc.dismiss("thread-1")).toBe("saved-assistant");
+    expect(await svc.dismiss("thread-1")).toBe("saved-assistant");
     expect(attempted).toEqual([
       { threadId: "thread-1", messageId: "saved-assistant" },
       { threadId: "thread-1", messageId: "saved-assistant" },
@@ -144,11 +146,11 @@ describe("PlanQuestionService accepted progress read-through", () => {
     ]).content).toContain("**Which auth strategy?**: OAuth");
   });
 
-  it("propagates rejected marker admission without writing a saved acknowledgement", () => {
+  it("propagates rejected marker admission without writing a saved acknowledgement", async () => {
     insertMessage(db, "saved-assistant", "assistant", fence(), 1);
     svc.bindAcceptedProgress({ latestAssistantMessage: () => acceptedAssistant(fence()),
       markPlanAnswered: () => { throw new Error("Control admission rejected"); } });
-    expect(() => svc.dismiss("thread-1")).toThrow("Control admission rejected");
+    await expect(svc.dismiss("thread-1")).rejects.toThrow("Control admission rejected");
     expect(answersRepo.listAnsweredForThread("thread-1")).toEqual([]);
   });
 
@@ -173,7 +175,7 @@ describe("PlanQuestionService.buildAnswerPayload", () => {
   beforeEach(() => {
     db = openMemoryDatabase();
     seedThread(db);
-    svc = new PlanQuestionService(new MessageRepo(db), new PlanQuestionAnswersRepo(db));
+    svc = new PlanQuestionService(new MessageRepo(db, agentStorageTestWriter(db)), new PlanQuestionAnswersRepo(db, agentStorageTestWriter(db)));
   });
 
   it("renders a selected option as human-readable question and option title", () => {
@@ -238,7 +240,7 @@ describe("PlanQuestionService.findLatestPlanQuestionsMessageId", () => {
   beforeEach(() => {
     db = openMemoryDatabase();
     seedThread(db);
-    svc = new PlanQuestionService(new MessageRepo(db), new PlanQuestionAnswersRepo(db));
+    svc = new PlanQuestionService(new MessageRepo(db, agentStorageTestWriter(db)), new PlanQuestionAnswersRepo(db, agentStorageTestWriter(db)));
   });
 
   it("returns the id of the most recent fenced assistant message", () => {
@@ -270,23 +272,23 @@ describe("PlanQuestionService.dismiss", () => {
   beforeEach(() => {
     db = openMemoryDatabase();
     seedThread(db);
-    answersRepo = new PlanQuestionAnswersRepo(db);
-    svc = new PlanQuestionService(new MessageRepo(db), answersRepo);
+    answersRepo = new PlanQuestionAnswersRepo(db, agentStorageTestWriter(db));
+    svc = new PlanQuestionService(new MessageRepo(db, agentStorageTestWriter(db)), answersRepo);
   });
 
-  it("marks the latest fenced message answered and returns its id", () => {
+  it("marks the latest fenced message answered and returns its id", async () => {
     insertMessage(db, "m1", "assistant", fence(), 1);
 
-    const result = svc.dismiss("thread-1");
+    const result = await svc.dismiss("thread-1");
 
     expect(result).toBe("m1");
     expect(answersRepo.isAnswered("m1")).toBe(true);
   });
 
-  it("returns null and writes nothing when there is no fenced message", () => {
+  it("returns null and writes nothing when there is no fenced message", async () => {
     insertMessage(db, "m1", "assistant", "plain reply", 1);
 
-    const result = svc.dismiss("thread-1");
+    const result = await svc.dismiss("thread-1");
 
     expect(result).toBeNull();
     expect(answersRepo.listAnsweredForThread("thread-1")).toEqual([]);

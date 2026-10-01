@@ -3,8 +3,8 @@ import type { Database } from "bun:sqlite";
 import { type PlanRecord } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
-import { PlanRepo } from "../../planning/persistence/plan-repo.js";
+import { ThreadStore as ThreadRepo } from "../../../thread-control/persistence/thread-store.js";
+import { PlanStore as PlanRepo } from "../../planning/persistence/plan-store.js";
 import { AcceptedFeatureWriteMetadataSchema, persistAcceptedFeatureWrite } from "../accepted-feature-write.js";
 
 const THREAD = "feature-thread";

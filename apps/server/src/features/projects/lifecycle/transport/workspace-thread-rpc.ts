@@ -74,20 +74,20 @@ const workspaceThreadHandlers = {
   "workspace.rename": (deps, params) => deps.workspaceService.rename(params.id, params.name),
   "workspace.delete": (deps, params) => deleteWorkspace(deps, params.id),
   "workspace.forceDelete": (deps, params) => forceDeleteWorkspace(deps, params.id),
-  "workspace.pin": (deps, params) => {
-    deps.workspaceRepo.setPinned(params.id, params.pinned);
+  "workspace.pin": async (deps, params) => {
+    await deps.workspaceRepo.setPinned(params.id, params.pinned);
     return { ok: true as const };
   },
-  "workspace.removeRecent": (deps, params) => {
-    deps.workspaceRepo.removeRecent(params.id);
+  "workspace.removeRecent": async (deps, params) => {
+    await deps.workspaceRepo.removeRecent(params.id);
     return { ok: true as const };
   },
-  "workspace.touchLastOpened": (deps, params) => {
-    deps.workspaceRepo.touchLastOpened(params.id);
+  "workspace.touchLastOpened": async (deps, params) => {
+    await deps.workspaceRepo.touchLastOpened(params.id);
     return { ok: true as const };
   },
-  "workspace.reorder": (deps, params) => {
-    deps.workspaceService.reorder(params.id, params.newIndex);
+  "workspace.reorder": async (deps, params) => {
+    await deps.workspaceService.reorder(params.id, params.newIndex);
     broadcast("workspace.orderChanged", {});
     return { ok: true as const };
   },
@@ -187,7 +187,7 @@ async function deleteWorkspaceWithTeardown(
     await teardownWorkspaceThreads(deps, workspaceId);
     const deleted = await removeWorkspace(workspaceId);
     if (deleted) {
-      deps.workspaceEnvironmentService.clearApprovals(workspaceId);
+      await deps.workspaceEnvironmentService.clearApprovals(workspaceId);
       deps.gitWatcherService.unwatchWorkspace(workspaceId);
       publishDeleted();
     }
@@ -291,15 +291,15 @@ async function completeThread(
   }
 }
 
-function reopenThread(deps: WorkspaceThreadRouterDeps, threadId: string): Thread {
-  const reopened = deps.threadCompletionService.reopen(threadId);
+async function reopenThread(deps: WorkspaceThreadRouterDeps, threadId: string): Promise<Thread> {
+  const reopened = await deps.threadCompletionService.reopen(threadId);
   deps.projectActionService.reopenThread(threadId);
   broadcast("thread.lifecycleChanged", { thread: reopened });
   return reopened;
 }
 
-function retryThreadCleanup(deps: WorkspaceThreadRouterDeps, threadId: string): Thread {
-  const queued = deps.threadCompletionService.retryCleanup(threadId);
+async function retryThreadCleanup(deps: WorkspaceThreadRouterDeps, threadId: string): Promise<Thread> {
+  const queued = await deps.threadCompletionService.retryCleanup(threadId);
   broadcast("thread.lifecycleChanged", { thread: queued });
   return queued;
 }
@@ -318,7 +318,7 @@ function updateThreadSettings(
     codexFastMode?: boolean | null;
     defaultOpenInApp?: string | null;
   },
-): boolean {
+): Promise<boolean> {
   return deps.threadService.updateSettings(params.threadId, {
     reasoning_level: params.reasoningLevel,
     interaction_mode: params.interactionMode,

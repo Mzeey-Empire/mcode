@@ -2,7 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeHTTP from "node:http";
-import type { Database } from "bun:sqlite";
+import type { ApplicationDatabaseWriter } from "../persistence/sqlite/application-database-writer.js";
 import type { WebSocketServer } from "ws";
 import { THREAD_CONTROL_OPAQUE_ID_MAX_LENGTH } from "@mcode/contracts";
 
@@ -89,11 +89,11 @@ function isCapabilityRunId(value: unknown): value is string {
 
 /** Build a server adapter only when the explicit capability is present. */
 export function createReliabilityHarnessAdapter(
-  database: Database,
+  writer: Pick<ApplicationDatabaseWriter, "setQueryOnlyForReliability">,
   capability = readReliabilityHarnessCapability(),
   hooks: {
     readonly blockEventLoop?: (durationMs: number) => void;
-    readonly streamAssistant?: (threadId: string) => ReliabilityHarnessAssistantStream;
+    readonly streamAssistant?: (threadId: string) => Promise<ReliabilityHarnessAssistantStream>;
   } = {},
 ): ReliabilityHarnessAdapter {
   if (!capability) return { enabled: false, handleRequest: async () => false };
@@ -114,18 +114,17 @@ export function createReliabilityHarnessAdapter(
       if (!authorizeReliabilityRequest(request, response, capability)) return true;
       const body = await readReliabilityCommand(request, response);
       if (!body) return true;
-      const stream = executeAssistantStream(body, hooks, response);
+      const stream = await executeAssistantStream(body, hooks, response);
       if (stream === undefined) return true;
+      try {
+        persistenceFailure = await executeReliabilityControl(body, sockets, block, writer, persistenceFailure, closeSockets);
+      } catch {
+        response.writeHead(500);
+        response.end("Reliability control failed");
+        return true;
+      }
       response.writeHead(202, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       response.end(JSON.stringify({ accepted: true, control: body.control, ...(stream ? { stream } : {}) }));
-      persistenceFailure = executeReliabilityControl(
-        body,
-        sockets,
-        block,
-        database,
-        persistenceFailure,
-        closeSockets,
-      );
       return true;
     },
   };
@@ -161,11 +160,11 @@ async function readReliabilityCommand(
   }
 }
 
-function executeAssistantStream(
+async function executeAssistantStream(
   command: ReliabilityHarnessCommand,
-  hooks: { readonly streamAssistant?: (threadId: string) => ReliabilityHarnessAssistantStream },
+  hooks: { readonly streamAssistant?: (threadId: string) => Promise<ReliabilityHarnessAssistantStream> },
   response: NodeHTTP.ServerResponse,
-): ReliabilityHarnessAssistantStream | null | undefined {
+): Promise<ReliabilityHarnessAssistantStream | null | undefined> {
   if (command.control !== "assistant-stream") return null;
   if (!hooks.streamAssistant) {
     response.writeHead(409);
@@ -173,7 +172,7 @@ function executeAssistantStream(
     return undefined;
   }
   try {
-    return hooks.streamAssistant(command.threadId!);
+    return await hooks.streamAssistant(command.threadId!);
   } catch {
     response.writeHead(500);
     response.end("Reliability control failed");
@@ -181,14 +180,14 @@ function executeAssistantStream(
   }
 }
 
-function executeReliabilityControl(
+async function executeReliabilityControl(
   command: ReliabilityHarnessCommand,
   sockets: WebSocketServer["clients"],
   block: (durationMs: number) => void,
-  database: Database,
+  writer: Pick<ApplicationDatabaseWriter, "setQueryOnlyForReliability">,
   persistenceFailure: boolean,
   closeSockets: (sockets: WebSocketServer["clients"]) => void,
-): boolean {
+): Promise<boolean> {
   switch (command.control) {
     case "server-exit":
       setImmediate(() => process.exit(137));
@@ -200,7 +199,7 @@ function executeReliabilityControl(
       closeSockets(sockets);
       return persistenceFailure;
     case "persistence-failure":
-      if (!persistenceFailure) database.run("PRAGMA query_only = ON");
+      if (!persistenceFailure) await writer.setQueryOnlyForReliability(true);
       return true;
     case "assistant-stream":
       return persistenceFailure;

@@ -1,4 +1,5 @@
 import { inject, injectable } from "tsyringe";
+import { logger } from "@mcode/shared";
 import type { CompletedThreadRetentionDays, Settings, Thread } from "@mcode/contracts";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { AgentService } from "../../agents/index.js";
@@ -21,6 +22,7 @@ function completionFailureMessage(result: PromiseRejectedResult): string {
 /** Owns durable user completion and reopen transitions for one thread. */
 @injectable()
 export class ThreadCompletionService {
+  private retentionRecalculation: Promise<void> = Promise.resolve();
   private readonly resourceOwners = new Map<string, (threadId: string) => Promise<ThreadResourceOwnerRelease>>();
   private deadlineChangesListener: ((threads: readonly Thread[]) => void) | null = null;
   private lastRetentionDays: CompletedThreadRetentionDays | undefined;
@@ -56,7 +58,11 @@ export class ThreadCompletionService {
       this.lastRetentionDays = nextRetentionDays;
       if (previousRetentionDays !== nextRetentionDays) {
         const generation = ++this.retentionRecalculationGeneration;
-        this.recalculateDeadlineBatch(previousRetentionDays, nextRetentionDays, null, generation);
+        this.retentionRecalculation = this.retentionRecalculation
+          .then(() => this.recalculateDeadlineBatch(previousRetentionDays, nextRetentionDays, null, generation))
+          .catch((error: unknown) => {
+            logger.error("Thread retention deadline recalculation failed", { error: error instanceof Error ? error.message : String(error) });
+          });
       }
     });
   }
@@ -66,6 +72,12 @@ export class ThreadCompletionService {
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = null;
     this.retentionRecalculationGeneration += 1;
+  }
+
+  /** Stop new recalculations and await already admitted retention effects before writer shutdown. */
+  async shutdown(): Promise<void> {
+    this.stop();
+    await this.retentionRecalculation;
   }
 
   /** Register the push publisher for recalculated thread deadlines. */
@@ -93,7 +105,7 @@ export class ThreadCompletionService {
       const { failures, barriers } = await this.releaseThreadResources(threadId);
       try {
         this.throwOnCompletionFailures(threadId, failures);
-        return this.persistCompletion(thread);
+        return await this.persistCompletion(thread);
       } finally {
         for (const release of barriers) release();
       }
@@ -136,25 +148,25 @@ export class ThreadCompletionService {
     );
   }
 
-  private persistCompletion(thread: Thread): Thread {
+  private async persistCompletion(thread: Thread): Promise<Thread> {
     const completedAt = this.clock?.() ?? new Date();
     const retentionDays = this.retentionDays(this.settingsService.get());
     const scheduledDeletionAt = retentionDays === null
       ? null
       : new Date(completedAt.getTime() + retentionDays * DAY_MS).toISOString();
-    const completed = this.threadRepo.complete(thread.id, completedAt.toISOString(), scheduledDeletionAt);
+    const completed = await this.threadRepo.complete(thread.id, completedAt.toISOString(), scheduledDeletionAt);
     if (!completed) throw new Error(`Thread not found: ${thread.id}`);
     return completed;
   }
 
   /** Reopen a completed thread and cancel its pending automatic deletion. */
-  reopen(threadId: string): Thread {
+  async reopen(threadId: string): Promise<Thread> {
     const token = this.mutationReservations.reserve(threadId, "reopening");
     if (!token) throw new Error(`Thread has a pending mutation: ${threadId}`);
 
     try {
       this.requireThread(threadId);
-      const reopened = this.threadRepo.reopen(threadId, (this.clock?.() ?? new Date()).toISOString());
+      const reopened = await this.threadRepo.reopen(threadId, (this.clock?.() ?? new Date()).toISOString());
       if (!reopened) {
         const current = this.threadRepo.findById(threadId);
         if (
@@ -177,7 +189,7 @@ export class ThreadCompletionService {
   }
 
   /** Atomically requeue one blocked completed thread for retention cleanup. */
-  retryCleanup(threadId: string): Thread {
+  async retryCleanup(threadId: string): Promise<Thread> {
     const token = this.mutationReservations.reserve(threadId, "cleaning");
     if (!token) throw new Error(`Thread cleanup is already running: ${threadId}`);
 
@@ -192,7 +204,7 @@ export class ThreadCompletionService {
       if (thread.cleanup_state !== "blocked") {
         throw new Error("Thread cleanup is not blocked");
       }
-      if (!this.cleanupJobRepo.requeueBlockedRetention(threadId)) {
+      if (!await this.cleanupJobRepo.requeueBlockedRetention(threadId)) {
         throw new Error("Thread cleanup is no longer blocked");
       }
       const queued = this.threadRepo.findById(threadId);
@@ -215,12 +227,12 @@ export class ThreadCompletionService {
     return settings.thread.completion.retentionDays;
   }
 
-  private recalculateDeadlineBatch(
+  private async recalculateDeadlineBatch(
     previousRetentionDays: CompletedThreadRetentionDays,
     nextRetentionDays: CompletedThreadRetentionDays,
     afterId: string | null,
     generation: number,
-  ): void {
+  ): Promise<void> {
     if (generation !== this.retentionRecalculationGeneration) return;
     const now = this.clock?.() ?? new Date();
     const nowMs = now.getTime();
@@ -249,17 +261,12 @@ export class ThreadCompletionService {
         ? []
         : [{ ...record, nextScheduledDeletionAt }];
     });
-    const changed = this.threadRepo.updateCompletedThreadDeadlines(updates);
+    const changed = await this.threadRepo.updateCompletedThreadDeadlines(updates);
     if (changed.length > 0) this.deadlineChangesListener?.(changed);
+    if (generation !== this.retentionRecalculationGeneration) return;
     if (records.length < RETENTION_RECALCULATION_BATCH_SIZE) return;
     const nextAfterId = records.at(-1)!.id;
-    setTimeout(() => {
-      this.recalculateDeadlineBatch(
-        previousRetentionDays,
-        nextRetentionDays,
-        nextAfterId,
-        generation,
-      );
-    }, 0);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await this.recalculateDeadlineBatch(previousRetentionDays, nextRetentionDays, nextAfterId, generation);
   }
 }

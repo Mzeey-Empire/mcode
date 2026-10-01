@@ -168,9 +168,9 @@ const agentHandlers: AgentRpcHandlerMap = {
   },
   "agent.child.stop": (deps, params) => deps.subagentLifecycleService.stop(params),
   "canonicalAgent.roster": (deps, params) => deps.subagentLifecycleService.loadRoster(params),
-  "plan.updateStatus": (deps, params) => {
+  "plan.updateStatus": async (deps, params) => {
     if (deps.canonicalProgress?.updatePlanStatus(params.planId, params.status)) return;
-    deps.planRepo.updateStatus(params.planId, params.status);
+    await deps.planRepo.updateStatus(params.planId, params.status);
   },
   "plan.list": (deps, params) => deps.canonicalProgress?.listPlans(params.threadId) ?? deps.planRepo.listByThread(params.threadId),
   "message.list": (deps, params) => ({

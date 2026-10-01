@@ -1,5 +1,4 @@
 import * as NodeCrypto from "node:crypto";
-import { inject, injectable } from "tsyringe";
 import {
   AgentEventType,
   createCanonicalSubagentPresentation,
@@ -14,7 +13,6 @@ import {
 import { logger } from "@mcode/shared";
 
 import {
-  CODEX_COLLABORATION_DURABILITY,
   type CodexChildDelegation,
   type CodexChildRoutingDiagnosticInput,
   type CodexCollaborationDurability,
@@ -82,12 +80,10 @@ const CODEX_COLLABORATION_KIND_BY_NATIVE = new Map<string, CollaborationActionKi
 ]);
 
 /** Projects Codex-native collaboration evidence before generic turn handling. */
-@injectable()
 export class CodexCollaborationEventAdapter implements ProviderEventAdapter {
   readonly providerId = "codex" as const;
 
   constructor(
-    @inject(CODEX_COLLABORATION_DURABILITY)
     private readonly durability: CodexCollaborationDurability,
   ) {}
 

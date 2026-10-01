@@ -11,9 +11,10 @@ import { gc } from "bun";
 import type { Database } from "bun:sqlite";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../features/settings/settings-service.js";
+import { ApplicationDatabaseWriter } from "../persistence/sqlite/application-database-writer.js";
+import { sqliteOptimizeWriteOperation } from "../persistence/sqlite/sqlite-maintenance-write-operation.js";
 import {
   applySQLiteCacheBudget,
-  optimizeSQLiteConnection,
 } from "../persistence/sqlite/sqlite-connection-policy.js";
 import {
   sampleRuntimeMemory,
@@ -75,6 +76,8 @@ export class MemoryPressureService {
   private readonly activeTurns = new Set<string>();
   private readonly turnHighWater = new Map<string, MemoryPressureSnapshot>();
   private readonly pressureListeners = new Set<(snapshot: MemoryPressureSnapshot) => void>();
+  private pendingOptimization: Promise<void> | undefined;
+  private disposed = false;
   private pressure: MemoryPressureSnapshot = {
     level: "normal",
     source: "v8-heap",
@@ -87,6 +90,7 @@ export class MemoryPressureService {
   constructor(
     @inject("Database") private readonly db: Database,
     @inject(SettingsService) private readonly settings: Pick<SettingsService, "get">,
+    @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter,
   ) {}
 
   /** Current idle state. Exposed for diagnostics. */
@@ -114,6 +118,7 @@ export class MemoryPressureService {
    * restore is needed when transitioning from warm-idle to active.
    */
   markActive(threadId?: string): void {
+    if (this.disposed) return;
     this.clearIdleTimers();
     if (this.state === "background-idle") {
       this.restoreFromBackground();
@@ -131,6 +136,7 @@ export class MemoryPressureService {
    * Starts the appropriate idle timer only when no active turns remain.
    */
   markIdle(threadId?: string): void {
+    if (this.disposed) return;
     if (threadId) {
       this.finishActiveTurn(threadId);
       if (this.activeTurns.size > 0) {
@@ -166,6 +172,7 @@ export class MemoryPressureService {
    * If no agents are running, starts the background idle timer.
    */
   markBackground(): void {
+    if (this.disposed) return;
     this.isWindowBackground = true;
     if (this.activeTurns.size > 0 || this.state === "active") return;
     this.clearIdleTimers();
@@ -180,6 +187,7 @@ export class MemoryPressureService {
    * Restores cache levels if in background idle.
    */
   markForeground(): void {
+    if (this.disposed) return;
     this.isWindowBackground = false;
     if (this.state === "background-idle") {
       this.restoreFromBackground();
@@ -191,10 +199,12 @@ export class MemoryPressureService {
     }
   }
 
-  /** Clean up timers on shutdown. */
-  dispose(): void {
+  /** Stop timers and await admitted statistics maintenance before the writer closes. */
+  dispose(): Promise<void> {
+    this.disposed = true;
     this.clearIdleTimers();
     this.stopActiveMemoryPolling();
+    return this.pendingOptimization ?? Promise.resolve();
   }
 
   /** Test hook for deterministic runtime-memory sampling. */
@@ -292,13 +302,7 @@ export class MemoryPressureService {
     this.state = "warm-idle";
     logger.info("Entering warm idle: shrinking SQLite + minor GC");
     const startedAt = performance.now();
-    try {
-      optimizeSQLiteConnection(this.db);
-    } catch (err) {
-      logger.warn("SQLite optimization failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    this.pendingOptimization ??= this.optimizeDatabase();
     try {
       this.db.run("PRAGMA shrink_memory");
     } catch (err) {
@@ -309,9 +313,21 @@ export class MemoryPressureService {
     gc(false);
     // These synchronous ops block the event loop; the duration ties stalls to
     // the health-probe failures they can cause.
-    logger.info("Warm idle maintenance completed", {
+    logger.info("Warm idle cache reclamation completed", {
       durationMs: Math.round(performance.now() - startedAt),
     });
+  }
+
+  private async optimizeDatabase(): Promise<void> {
+    try {
+      await this.writer.execute(sqliteOptimizeWriteOperation, undefined);
+    } catch (err) {
+      logger.warn("SQLite optimization failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      this.pendingOptimization = undefined;
+    }
   }
 
   /**

@@ -586,6 +586,77 @@ describe("CodexProvider first turn on new session", () => {
     await sendPromise;
   });
 
+  it("cancels a turn waiting on teardown beyond ten seconds without poisoning its next turn", async () => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const request: TurnRequest<"codex"> = { turnId: "seed-turn", turnExecutionId: "seed-execution",
+      sessionId: "mcode-teardown-cancel", workspaceId: "workspace-test", threadId: "teardown-cancel",
+      message: "seed", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "full", approvalReviewMode: "manual" };
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
+    const closeOriginal = provider.close.bind(provider);
+    const close = vi.spyOn(provider, "close").mockImplementationOnce(async (state) => { await closeGate; await closeOriginal(state); });
+    try {
+      await provider.sendTurn(request);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const teardown = provider.discardSession(request.sessionId);
+      await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const cancelled = provider.sendTurn({ ...request, turnId: "cancelled-turn", turnExecutionId: "cancelled-execution", message: "cancel me" });
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(appServers).toHaveLength(1);
+      await provider.stopSession(request.sessionId);
+      await cancelled;
+      expect(events.filter(({ event }) => event.turnExecutionId === "cancelled-execution").map(({ event }) => event.type)).toEqual([AgentEventType.Ended]);
+      const next = provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: "next-execution", message: "next" });
+      releaseClose();
+      await Promise.all([teardown, next]);
+      vi.useRealTimers();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(sendTurnMock).toHaveBeenCalledTimes(2);
+      expect(appServers).toHaveLength(2);
+      expect(events.some(({ event }) => event.type === AgentEventType.Error)).toBe(false);
+    } finally {
+      releaseClose();
+      vi.useRealTimers();
+      close.mockRestore();
+      await provider.shutdown();
+    }
+  });
+
+  it("does not auto-start a cancelled staged turn when its shared spawn finishes later", async () => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    let releaseStart!: () => void;
+    startGate.current = new Promise<void>((resolve) => { releaseStart = resolve; });
+    const request: TurnRequest<"codex"> = { turnId: "cancelled-turn", turnExecutionId: "cancelled-execution",
+      sessionId: "mcode-spawn-cancel", workspaceId: "workspace-test", threadId: "spawn-cancel",
+      message: "cancel me", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "full", approvalReviewMode: "manual" };
+    try {
+      const cancelled = provider.sendTurn(request);
+      await vi.waitFor(() => expect(appServers).toHaveLength(1));
+      await provider.stopSession(request.sessionId);
+      await cancelled;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await vi.advanceTimersByTimeAsync(11_000);
+      releaseStart();
+      vi.useRealTimers();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(sendTurnMock).not.toHaveBeenCalled();
+      expect(events.filter(({ event }) => event.turnExecutionId === request.turnExecutionId).map(({ event }) => event.type)).toEqual([AgentEventType.Ended]);
+      await provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: "next-execution", message: "next" });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(sendTurnMock).toHaveBeenCalledOnce();
+      expect(events.some(({ event }) => event.type === AgentEventType.Error)).toBe(false);
+    } finally {
+      releaseStart();
+      vi.useRealTimers();
+      await provider.shutdown();
+    }
+  });
+
   it("does not shut down the shared lease when Codex stops", () => {
     const lease = new BrowserAutomationSessionLease();
     lease.configure({

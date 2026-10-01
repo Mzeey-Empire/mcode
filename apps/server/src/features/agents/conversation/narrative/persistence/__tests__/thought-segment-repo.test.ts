@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../../runtime/persistence/sqlite/database.js";
-import { ThoughtSegmentRepo } from "../thought-segment-repo.js";
+import { ThoughtSegmentStore } from "../thought-segment-store.js";
 
 /** Seed a workspace, thread, and assistant message so FKs resolve. */
 function seedFixtures(db: Database): { messageId: string } {
@@ -19,14 +19,14 @@ function seedFixtures(db: Database): { messageId: string } {
   return { messageId: "msg-1" };
 }
 
-describe("ThoughtSegmentRepo", () => {
+describe("ThoughtSegmentStore", () => {
   let db: Database;
-  let repo: ThoughtSegmentRepo;
+  let repo: ThoughtSegmentStore;
   let messageId: string;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    repo = new ThoughtSegmentRepo(db);
+    repo = new ThoughtSegmentStore(db);
     ({ messageId } = seedFixtures(db));
   });
 

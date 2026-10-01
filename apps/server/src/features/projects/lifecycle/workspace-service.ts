@@ -9,11 +9,12 @@ import { injectable, inject, delay } from "tsyringe";
 import type { Workspace } from "@mcode/contracts";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import { CleanupJobRepo } from "../../thread-control/cleanup/persistence/cleanup-job-repo.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { ThreadDeletionTeardownService } from "../../thread-control/lifecycle/thread-deletion-teardown-service.js";
 import { logger } from "@mcode/shared";
 import type { GitExecutor } from "../git/execution/index.js";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { projectLifecycleWriteOperations } from "./project-lifecycle-write-operations.js";
 
 /** Handles workspace creation, rename, listing, and two-phase deletion. */
 @injectable()
@@ -21,9 +22,9 @@ export class WorkspaceService {
   constructor(
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
-    @inject(CleanupJobRepo) private readonly cleanupJobRepo: CleanupJobRepo,
-    @inject(AttachmentService) private readonly attachmentService: AttachmentService,
-    @inject(delay(() => ThreadDeletionTeardownService)) private readonly threadDeletion: ThreadDeletionTeardownService,
+    @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter,
+    @inject(AttachmentService) private readonly attachmentService: Pick<AttachmentService, "removeForThread">,
+    @inject(delay(() => ThreadDeletionTeardownService)) private readonly threadDeletion: Pick<ThreadDeletionTeardownService, "teardownThread" | "deletePersistentData">,
     @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
   ) {}
 
@@ -37,9 +38,9 @@ export class WorkspaceService {
   async create(name: string, path: string): Promise<Workspace> {
     const existing = this.workspaceRepo.findByPath(path);
     if (existing) {
-      this.workspaceRepo.touch(existing.id);
-      this.workspaceRepo.prependToSortOrder(existing.id);
-      return this.workspaceRepo.findById(existing.id)!;
+      const current = await this.writer.execute(projectLifecycleWriteOperations.reuseWorkspace, [existing.id]);
+      if (!current) throw new Error("Workspace was deleted while it was being reopened");
+      return current;
     }
 
     // A soft-deleted workspace may still occupy this path. findByPath filters those
@@ -58,8 +59,8 @@ export class WorkspaceService {
    * Persist a new sidebar index for a workspace (zero-based). Other connected
    * clients receive `workspace.orderChanged` and should refresh the list.
    */
-  reorder(id: string, newIndex: number): void {
-    this.workspaceRepo.reorderToIndex(id, newIndex);
+  async reorder(id: string, newIndex: number): Promise<void> {
+    await this.workspaceRepo.reorderToIndex(id, newIndex);
   }
 
   /** List all workspaces ordered by ascending sidebar `sort_order`. */
@@ -68,8 +69,8 @@ export class WorkspaceService {
   }
 
   /** Rename an existing workspace without changing its filesystem path. */
-  rename(id: string, name: string): Workspace {
-    const workspace = this.workspaceRepo.rename(id, name);
+  async rename(id: string, name: string): Promise<Workspace> {
+    const workspace = await this.workspaceRepo.rename(id, name);
     if (!workspace) {
       throw new Error(`Workspace not found: ${id}`);
     }
@@ -84,54 +85,12 @@ export class WorkspaceService {
    * Returns false if the workspace does not exist.
    */
   async delete(id: string): Promise<boolean> {
-    // Attempt soft-delete. If workspace doesn't exist or is already deleted, bail.
-    if (!this.workspaceRepo.softDelete(id)) {
-      return false;
-    }
-
-    const workspacePath = this.getWorkspacePathForCleanup(id);
-
-    // Nullify cross-workspace fork lineage before threads are deleted
-    this.threadRepo.nullifyExternalLineage(id);
-
-    // Gather all threads (active + already-soft-deleted) that have a worktree
-    const worktreeThreads = this.threadRepo.findWorktreeThreadsByWorkspace(id);
-
-    // Get all threads regardless of status
-    const allThreads = this.threadRepo.listAllByWorkspace(id);
-
-    // Separate threads by whether they need async worktree cleanup
-    const worktreeThreadIds = new Set(worktreeThreads.map((t) => t.id));
-    const directThreads = allThreads.filter((t) => !worktreeThreadIds.has(t.id));
-
-    // Soft-delete all threads that aren't already deleted
-    for (const thread of allThreads) {
-      if (!thread.deleted_at) {
-        this.threadRepo.softDelete(thread.id);
-      }
-    }
-
-    // Enqueue cleanup jobs for worktree threads (batch, skips duplicates)
-    if (worktreeThreads.length > 0 && workspacePath) {
-      this.cleanupJobRepo.insertBatch(
-        worktreeThreads.map((t) => ({
-          thread_id: t.id,
-          workspace_path: workspacePath,
-          worktree_path: t.worktree_path!,
-          branch: t.branch,
-        })),
-      );
-    }
-
-    for (const thread of allThreads) await this.threadDeletion.teardownThread(thread.id);
-    await this.threadDeletion.deletePersistentData(allThreads.map((thread) => thread.id), async () => {
-      for (const thread of directThreads) {
-        this.attachmentService.removeForThread(thread.id);
-        this.threadRepo.hardDelete(thread.id);
-      }
-      const pendingJobs = workspacePath ? this.cleanupJobRepo.countByWorkspacePath(workspacePath) : 0;
-      if (pendingJobs === 0) this.workspaceRepo.hardDelete(id);
-    });
+    const admitted = await this.writer.execute(projectLifecycleWriteOperations.beginWorkspaceDeletion, [id]);
+    if (!admitted) return false;
+    for (const threadId of admitted.threadIds) await this.threadDeletion.teardownThread(threadId);
+    const deleted = await this.threadDeletion.deletePersistentData(admitted.threadIds,
+      () => this.writer.execute(projectLifecycleWriteOperations.finishWorkspaceDeletion, [id]));
+    for (const threadId of deleted) this.attachmentService.removeForThread(threadId);
     return true;
   }
 
@@ -141,17 +100,13 @@ export class WorkspaceService {
    * Orphaned worktree directories may remain on disk.
    */
   async forceDelete(id: string): Promise<boolean> {
-    this.threadRepo.nullifyExternalLineage(id);
     const threads = this.threadRepo.listAllByWorkspace(id);
 
     for (const thread of threads) await this.threadDeletion.teardownThread(thread.id);
-    return this.threadDeletion.deletePersistentData(threads.map((thread) => thread.id), async () => {
-      for (const thread of threads) {
-        this.cleanupJobRepo.deleteByThreadId(thread.id);
-        this.attachmentService.removeForThread(thread.id);
-      }
-      return this.workspaceRepo.hardDelete(id);
-    });
+    const committed = await this.threadDeletion.deletePersistentData(threads.map((thread) => thread.id),
+      () => this.writer.execute(projectLifecycleWriteOperations.forceDeleteWorkspace, [id]));
+    for (const threadId of committed.threadIds) this.attachmentService.removeForThread(threadId);
+    return committed.deleted;
   }
 
   /** Find a workspace by its primary key. Returns null if not found. */
@@ -160,19 +115,13 @@ export class WorkspaceService {
   }
 
   /** Bump updated_at for a workspace so it sorts to the top of the recent list. */
-  touch(id: string): void {
-    this.workspaceRepo.touch(id);
+  async touch(id: string): Promise<void> {
+    await this.workspaceRepo.touch(id);
   }
 
   /** Update the is_git_repo flag on a workspace record. */
-  setIsGitRepo(id: string, isGitRepo: boolean): void {
-    this.workspaceRepo.setIsGitRepo(id, isGitRepo);
-  }
-
-  /** Retrieve workspace path even if soft-deleted (uses unfiltered repo lookup). */
-  private getWorkspacePathForCleanup(id: string): string | null {
-    const ws = this.workspaceRepo.findByIdIncludeDeleted(id);
-    return ws?.path ?? null;
+  async setIsGitRepo(id: string, isGitRepo: boolean): Promise<void> {
+    await this.workspaceRepo.setIsGitRepo(id, isGitRepo);
   }
 
   /** Check whether a filesystem path is inside a git repository. */

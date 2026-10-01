@@ -11,15 +11,15 @@ export interface TurnRuntimePersistence {
   /** Load the provider, status, and cursor state for one runtime decision. */
   load(threadId: string): TurnRuntimePersistenceState | null;
   /** Store context usage reported by a provider turn. */
-  recordContextUsage(threadId: string, tokens: number, contextWindow?: number): void;
+  recordContextUsage(threadId: string, tokens: number, contextWindow?: number): Promise<void>;
   /** Store a provider-produced compaction summary. */
-  recordCompactionSummary(threadId: string, summary: string): void;
+  recordCompactionSummary(threadId: string, summary: string): Promise<void>;
   /** Store a provider cursor that can resume a later turn. */
-  saveProviderCursor(threadId: string, cursor: string): void;
+  saveProviderCursor(threadId: string, cursor: string): Promise<void>;
   /** Remove a cursor that the provider has invalidated. */
-  clearProviderCursor(threadId: string): void;
+  clearProviderCursor(threadId: string): Promise<void>;
   /** Store a terminal lifecycle state selected by the runtime owner. */
-  setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): void;
+  setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): Promise<void>;
 }
 
 /** Injection token for the runtime persistence port. */
@@ -34,23 +34,23 @@ export class ThreadRuntimePersistence implements TurnRuntimePersistence {
     return this.threads.findById(threadId);
   }
 
-  recordContextUsage(threadId: string, tokens: number, contextWindow?: number): void {
-    this.threads.updateContextUsage(threadId, tokens, contextWindow);
+  async recordContextUsage(threadId: string, tokens: number, contextWindow?: number): Promise<void> {
+    await this.threads.updateContextUsage(threadId, tokens, contextWindow);
   }
 
-  recordCompactionSummary(threadId: string, summary: string): void {
-    this.threads.updateCompactSummary(threadId, summary);
+  recordCompactionSummary(threadId: string, summary: string): Promise<void> {
+    return this.threads.updateCompactSummary(threadId, summary);
   }
 
-  saveProviderCursor(threadId: string, cursor: string): void {
-    this.threads.updateSdkSessionId(threadId, cursor);
+  async saveProviderCursor(threadId: string, cursor: string): Promise<void> {
+    await this.threads.updateSdkSessionId(threadId, cursor);
   }
 
-  clearProviderCursor(threadId: string): void {
-    this.threads.clearSdkSessionId(threadId);
+  async clearProviderCursor(threadId: string): Promise<void> {
+    await this.threads.clearSdkSessionId(threadId);
   }
 
-  setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): void {
-    this.threads.updateStatus(threadId, status);
+  async setRuntimeStatus(threadId: string, status: "paused" | "interrupted"): Promise<void> {
+    await this.threads.updateStatus(threadId, status);
   }
 }

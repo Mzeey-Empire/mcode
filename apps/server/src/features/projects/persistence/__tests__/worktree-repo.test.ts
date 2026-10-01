@@ -1,18 +1,18 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { WorkspaceRepo } from "../workspace-repo.js";
-import { STALE_WORKTREE_RETENTION_DAYS, WorktreeRepo } from "../worktree-repo.js";
+import { WorkspaceStore } from "../workspace-store.js";
+import { STALE_WORKTREE_RETENTION_DAYS, WorktreeStore } from "../worktree-store.js";
 
-describe("WorktreeRepo", () => {
+describe("WorktreeStore", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
   it("keeps an opaque identity stable and marks absent registrations stale", () => {
     const db = openMemoryDatabase();
-    const workspaces = new WorkspaceRepo(db);
-    const worktrees = new WorktreeRepo(db);
+    const workspaces = new WorkspaceStore(db);
+    const worktrees = new WorktreeStore(db);
     const workspace = workspaces.create("Workspace", "/repo");
     const first = worktrees.reconcile(workspace.id, [{
       canonicalPath: "/repo/.worktrees/feature",
@@ -36,8 +36,8 @@ describe("WorktreeRepo", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     const db = openMemoryDatabase();
-    const workspaces = new WorkspaceRepo(db);
-    const worktrees = new WorktreeRepo(db);
+    const workspaces = new WorkspaceStore(db);
+    const worktrees = new WorktreeStore(db);
     const workspace = workspaces.create("Workspace", "/repo");
     const input = {
       canonicalPath: "/repo/.worktrees/feature",
@@ -62,8 +62,8 @@ describe("WorktreeRepo", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     const db = openMemoryDatabase();
-    const workspaces = new WorkspaceRepo(db);
-    const worktrees = new WorktreeRepo(db);
+    const workspaces = new WorkspaceStore(db);
+    const worktrees = new WorktreeStore(db);
     const firstWorkspace = workspaces.create("First", "/first");
     const secondWorkspace = workspaces.create("Second", "/second");
     const secondInput = {

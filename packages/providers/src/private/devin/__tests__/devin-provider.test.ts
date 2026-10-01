@@ -192,6 +192,39 @@ describe("DevinProvider", () => {
     return provider;
   }
 
+  it("cancels teardown-waiting requests beyond ten seconds and starts the next distinct turn once", async () => {
+    const host = createHost();
+    const first = createFakeRuntime("devin-acp-first", 101);
+    const next = createFakeRuntime("devin-acp-next", 102);
+    starts.push(mockAcpStart([first, next]));
+    const p = createProvider(host);
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
+    vi.mocked(first.runtime.close).mockImplementationOnce(async () => { await closeGate; });
+    try {
+      await p.sendTurn(turn({ turnExecutionId: "seed-execution" }));
+      const teardown = p.discardSession("mcode-thread-1");
+      await vi.waitFor(() => expect(first.runtime.close).toHaveBeenCalledOnce());
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const cancelled = p.sendTurn(turn({ turnExecutionId: "cancelled-execution", message: "cancel me" }));
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(next.runtime.initialize).not.toHaveBeenCalled();
+      await p.stopSession("mcode-thread-1");
+      await cancelled;
+      const cancelledEvents = submittedRuntimeEvents(host).filter((event) => event.turnExecutionId === "cancelled-execution");
+      expect(cancelledEvents).toEqual([expect.objectContaining({ type: "ended", outcome: "cancelled" })]);
+      const following = p.sendTurn(turn({ turnId: "next-turn", turnExecutionId: "next-execution", message: "next" }));
+      releaseClose();
+      await Promise.all([teardown, following]);
+      expect(first.runtime.prompt).toHaveBeenCalledOnce();
+      expect(next.runtime.prompt).toHaveBeenCalledOnce();
+      expect(submittedRuntimeEvents(host).some((event) => event.type === "error")).toBe(false);
+    } finally {
+      releaseClose();
+      vi.useRealTimers();
+    }
+  });
+
   it("authenticates the ACP host with windsurf-api-key and _meta.api_key", async () => {
     const host = createHost();
     const fake = createFakeRuntime("devin-acp-1", 101);

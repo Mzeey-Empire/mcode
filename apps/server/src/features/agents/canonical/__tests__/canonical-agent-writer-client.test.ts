@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import * as NodeFS from "node:fs";
 import type { Database } from "bun:sqlite";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -7,19 +8,40 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AcceptedCanonicalAgentEventEnvelopeSchema, AgentEventType, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
-import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import { CanonicalAgentWriterClient as SharedCanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { workspaceWriteOperations } from "../../../projects/persistence/workspace-write-operations.js";
 import { CanonicalAgentWriterReceipts } from "../canonical-agent-writer-receipts.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 import { AgentEventPublicationRegistry } from "../../orchestration/agent-event-publication-registry.js";
 import type { CanonicalWriterResponse } from "../canonical-agent-writer-protocol.js";
-import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
+import { ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-store.js";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 
 const THREAD_ID = "writer-thread";
 const TURN_ID = "writer-turn";
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000176";
 const NOW = "2026-09-24T12:00:00.000Z";
+
+// This fixture owns its transport. Production canonical adapters share the composition-owned writer.
+class CanonicalAgentWriterClient extends SharedCanonicalAgentWriterClient {
+  readonly owner: ApplicationDatabaseWriter;
+  private readonly pathExists: boolean;
+
+  constructor(dbPath: string, createWorker?: () => Worker) {
+    const owner = new ApplicationDatabaseWriter(dbPath, createWorker);
+    super(owner);
+    this.owner = owner;
+    this.pathExists = NodeFS.existsSync(dbPath);
+  }
+
+  override async close(): Promise<void> {
+    await super.close();
+    if (this.pathExists) await this.owner.close();
+    else await expect(this.owner.close()).rejects.toThrow("open-failed");
+  }
+}
 
 function workerDroppingReply(kind: CanonicalWriterResponse["kind"]): Worker {
   const worker = new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
@@ -224,6 +246,49 @@ describe("canonical SQLite writer", () => {
       peer.prepare("UPDATE threads SET title = ? WHERE id = ?").run("Peer update", THREAD_ID);
       expect(db.prepare("SELECT title FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ title: "Peer update" });
     } finally { peer.close(true); }
+  });
+
+  it("retains a failed publication head until the worker's final response before releasing an ordinary tail", async () => {
+    const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID };
+    const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "failed-publication-lease" };
+    const operation: ExecutionSemanticOperation = {
+      operationId: "failed-publication-lease:1", execution, lease, ordinal: 1,
+      mutation: { kind: "begin", providerId: "codex", input: {
+        thread: { id: THREAD_ID, workspaceId: "writer-workspace", providerId: "codex", createdAt: NOW },
+        turnId: TURN_ID, executionId: EXECUTION_ID, permissionMode: "supervised", providerIdentities: [],
+        userMessage: { kind: "create", messageId: "failed-publication-user", content: "Question", sequence: 1 },
+      } },
+    };
+    let notifyFinal: () => void = () => {};
+    const workerFinished = new Promise<void>((resolve) => { notifyFinal = resolve; });
+    writer = new CanonicalAgentWriterClient(dbPath, () => {
+      const worker = new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
+      return new Proxy(worker, {
+        set(target, property, value) {
+          if (property !== "onmessage" || typeof value !== "function") return Reflect.set(target, property, value);
+          target.onmessage = (message: MessageEvent<CanonicalWriterResponse>) => {
+            if (message.data.kind === "semantic-transacted") {
+              notifyFinal();
+              setTimeout(() => value(message), 100);
+            } else value(message);
+          };
+          return true;
+        },
+        get(target, property) {
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    });
+    const failedPublication = writer.transactSemantic(operation, () => { throw new Error("Publication callback failed"); });
+    const observed = expect(failedPublication).rejects.toThrow("Publication callback failed");
+    const tail = writer.owner.execute(workspaceWriteOperations.create, ["After publication", "after-publication", true]);
+    await workerFinished;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(db.query("SELECT COUNT(*) AS count FROM workspaces WHERE path = 'after-publication'").get()).toEqual({ count: 0 });
+    await observed;
+    expect(await tail).toMatchObject({ name: "After publication" });
+    expect(db.query("SELECT COUNT(*) AS count FROM messages WHERE id = 'failed-publication-user'").get()).toEqual({ count: 1 });
   });
 
   it("recovers one durable live publication identity after a file-backed writer loses its reply", async () => {

@@ -1,3 +1,4 @@
+import { NarrativeReadStore } from "./narrative-read-store.js";
 /**
  * NarrativeStore — single home for the narrative pipeline's read side (and,
  * after the candidate-A write-seam extraction, its enrichment + classification
@@ -53,18 +54,9 @@ import {
   type TurnRange,
 } from "@mcode/contracts";
 import { MessageRepo } from "../persistence/message-repo.js";
-import {
-  ToolCallRecordRepo,
-  type CreateToolCallRecordInput,
-} from "../../tools/persistence/tool-call-record-repo.js";
-import {
-  ThoughtSegmentRepo,
-  type CreateThoughtSegmentInput,
-} from "./persistence/thought-segment-repo.js";
-import {
-  HookExecutionRepo,
-  type CreateHookExecutionInput,
-} from "../../events/persistence/hook-execution-repo.js";
+import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
+import { ThoughtSegmentRepo } from "./persistence/thought-segment-repo.js";
+import { HookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
 import type { TurnOutcome } from "../../turns/turn-outcome.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import {
@@ -135,12 +127,12 @@ interface PersistedNarrativeRows {
   hooks: Set<string>;
 }
 
-type RecoveredToolCallItem = Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }>;
+
 
 @injectable()
 export class NarrativeStore {
   constructor(
-    @inject(MessageRepo) _messageRepo: MessageRepo,
+    @inject(MessageRepo) private readonly messageRepo: MessageRepo,
     @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,
     @inject(ThoughtSegmentRepo) private readonly thoughtSegmentRepo: ThoughtSegmentRepo,
     @inject(HookExecutionRepo) private readonly hookExecutionRepo: HookExecutionRepo,
@@ -148,9 +140,15 @@ export class NarrativeStore {
   ) {}
 
   private applyStateEffect(effect: NarrativeTurnStateEffect): void {
-    this.toolCallRecordRepo.updateSubagentIdentity(
+    void this.toolCallRecordRepo.updateSubagentIdentity(
       effect.toolCallId, effect.messageId, effect.identityKey,
-    );
+    ).catch((error: unknown) => {
+      logger.error("Failed to persist narrative subagent identity", {
+        toolCallId: effect.toolCallId,
+        messageId: effect.messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   private readonly narrativeStates = new Map<string, NarrativeTurnState>();
@@ -503,204 +501,17 @@ export class NarrativeStore {
       || compareSqliteBinaryIds(leftId, rightId);
   }
 
-  /**
-   * Build persisted narrative entries for an already-loaded message page.
-   * Used by the conversation-page RPC so messages and narrative share one page
-   * query and the child tables are fetched once each across all assistants.
-   */
+  /** Read accepted history before its owner reserves only the unsaved changed records. */
+  terminalSnapshot(...args: Parameters<NarrativeTurnState["terminalSnapshot"]>): ReturnType<NarrativeTurnState["terminalSnapshot"]> {
+    return this.narrativeStates.get(args[0])?.terminalSnapshot(...args) ?? [];
+  }
+  /** Build persisted narrative entries for an already-loaded message page. */
   loadForMessages(messages: readonly Message[]): NarrativeEntry[] {
-    const entries: NarrativeEntry[] = [];
-    const assistantMessages = messages.filter((m) => m.role === "assistant");
-    const assistantMessageIds = assistantMessages.map((m) => m.id);
-    const toolsByMessage = this.toolCallRecordRepo.listByMessages(assistantMessageIds);
-    const thoughtsByMessage = this.thoughtSegmentRepo.listByMessages(assistantMessageIds);
-    const hooksByMessage = this.hookExecutionRepo.listByMessages(assistantMessageIds);
-
-    for (const message of assistantMessages) {
-      this.appendAssistantNarrativeEntries(entries, message, {
-        tools: toolsByMessage.get(message.id) ?? [],
-        thoughts: thoughtsByMessage.get(message.id) ?? [],
-        hooks: hooksByMessage.get(message.id) ?? [],
-      });
-    }
-
-    return entries.sort(
-      (a, b) => a.sequence - b.sequence || a.sortOrder - b.sortOrder,
-    );
+    return new NarrativeReadStore(this.toolCallRecordRepo, this.thoughtSegmentRepo, this.hookExecutionRepo).loadForMessages(messages);
   }
-
-  private appendAssistantNarrativeEntries(
-    entries: NarrativeEntry[],
-    message: Message,
-    records: {
-      tools: ReturnType<ToolCallRecordRepo["listByMessages"]> extends Map<string, infer T> ? T : never;
-      thoughts: ReturnType<ThoughtSegmentRepo["listByMessages"]> extends Map<string, infer T> ? T : never;
-      hooks: ReturnType<HookExecutionRepo["listByMessages"]> extends Map<string, infer T> ? T : never;
-    },
-  ): void {
-    const finalSegment = records.thoughts.find((thought) => (thought.is_final_response ?? 0) !== 0);
-    entries.push({
-      kind: "assistantMessage",
-      messageId: message.id,
-      sequence: message.sequence,
-      body: message.content,
-      sortOrder: finalSegment?.sort_order ?? Number.MAX_SAFE_INTEGER,
-    });
-    this.appendToolCallEntries(entries, message.sequence, records.tools);
-    this.appendThoughtEntries(entries, message.sequence, records.thoughts);
-    this.appendHookEntries(entries, message.sequence, records.hooks);
-  }
-
-  private appendToolCallEntries(
-    entries: NarrativeEntry[],
-    sequence: number,
-    tools: ReturnType<ToolCallRecordRepo["listByMessages"]> extends Map<string, infer T> ? T : never,
-  ): void {
-    for (const tool of tools) entries.push({ kind: "toolCall", sequence, sortOrder: tool.sort_order, record: tool });
-  }
-
-  private appendThoughtEntries(
-    entries: NarrativeEntry[],
-    sequence: number,
-    thoughts: ReturnType<ThoughtSegmentRepo["listByMessages"]> extends Map<string, infer T> ? T : never,
-  ): void {
-    for (const thought of thoughts) {
-      if ((thought.is_final_response ?? 0) === 0) {
-        entries.push({ kind: "narrationSegment", sequence, sortOrder: thought.sort_order, record: thought });
-      }
-    }
-  }
-
-  private appendHookEntries(
-    entries: NarrativeEntry[],
-    sequence: number,
-    hooks: ReturnType<HookExecutionRepo["listByMessages"]> extends Map<string, infer T> ? T : never,
-  ): void {
-    for (const hook of hooks) entries.push({ kind: "hook", sequence, sortOrder: hook.sort_order, record: hook });
-  }
-
-  /** Persist a durable semantic snapshot against its recovered assistant row. */
-  persistRecoveredNarrative(
-    messageId: string,
-    items: readonly ParentNarrativeRecoveryItem[],
-    replaceExisting = false,
-  ): void {
-    const tools: CreateToolCallRecordInput[] = [];
-    const thoughts: CreateThoughtSegmentInput[] = [];
-    const hooks: CreateHookExecutionInput[] = [];
-    for (const item of items) {
-      if (item.kind === "toolCall") tools.push(this.recoveredToolCall(messageId, item));
-      if (item.kind === "narrationSegment") thoughts.push(this.recoveredThought(messageId, item));
-      if (item.kind === "hook") hooks.push(this.recoveredHook(messageId, item));
-    }
-    if (tools.length > 0) this.toolCallRecordRepo.bulkCreate(tools, replaceExisting);
-    if (thoughts.length > 0) this.thoughtSegmentRepo.bulkCreate(thoughts, replaceExisting);
-    if (hooks.length > 0) this.hookExecutionRepo.bulkCreate(hooks, replaceExisting);
-  }
-
-  private recoveredToolCall(
-    messageId: string,
-    item: RecoveredToolCallItem,
-  ): CreateToolCallRecordInput {
-    return {
-      ...this.recoveredToolCallIdentity(messageId, item),
-      ...this.recoveredToolCallPresentation(item),
-      ...this.recoveredToolCallOutput(item),
-      ...this.recoveredToolCallState(item),
-    };
-  }
-
-  private recoveredToolCallIdentity(messageId: string, item: RecoveredToolCallItem) {
-    const record = item.record;
-    return {
-      toolCallId: record.id,
-      messageId,
-      toolName: record.tool_name,
-      displayName: this.optionalRecoveryValue(record.display_name),
-      providerAgentKey: this.optionalRecoveryValue(record.provider_agent_key),
-      subagentIdentityKey: this.optionalRecoveryValue(record.subagent_identity_key),
-      subagentProviderName: this.optionalRecoveryValue(record.subagent_provider_name),
-      parentToolCallId: this.optionalRecoveryValue(record.parent_tool_call_id),
-    };
-  }
-
-  private recoveredToolCallPresentation(item: RecoveredToolCallItem) {
-    const record = item.record;
-    return {
-      subagentPrompt: this.optionalRecoveryValue(record.subagent_prompt),
-      subagentType: this.optionalRecoveryValue(record.subagent_type),
-      subagentAgentId: this.optionalRecoveryValue(record.subagent_agent_id),
-      subagentDurationMs: this.optionalRecoveryValue(record.subagent_duration_ms),
-      model: this.optionalRecoveryValue(record.model),
-      reasoningEffort: this.optionalRecoveryValue(record.reasoning_effort),
-    };
-  }
-
-  private recoveredToolCallOutput(item: RecoveredToolCallItem) {
-    const record = item.record;
-    const optionalOutput = this.recoveredOptionalToolCallOutput(record);
-    return {
-      inputSummary: record.input_summary,
-      outputSummary: record.output_summary,
-      ...optionalOutput,
-    };
-  }
-
-  private recoveredOptionalToolCallOutput(item: RecoveredToolCallItem["record"]) {
-    const output: Partial<CreateToolCallRecordInput> = {};
-    if (item.output_truncated) output.outputTruncated = true;
-    if (item.output_total_bytes != null) output.outputTotalBytes = item.output_total_bytes;
-    if (item.output_artifact_path) output.outputArtifactPath = item.output_artifact_path;
-    if (item.exit_code != null) output.exitCode = item.exit_code;
-    return output;
-  }
-
-  private recoveredToolCallState(item: RecoveredToolCallItem) {
-    const record = item.record;
-    return {
-      status: record.status,
-      startedAt: record.started_at,
-      completedAt: this.optionalRecoveryValue(record.completed_at),
-      sortOrder: record.sort_order,
-    };
-  }
-
-  private optionalRecoveryValue<T>(value: T | null | undefined): T | undefined {
-    return value ?? undefined;
-  }
-
-  private recoveredThought(
-    messageId: string,
-    item: Extract<ParentNarrativeRecoveryItem, { kind: "narrationSegment" }>,
-  ): CreateThoughtSegmentInput {
-    return {
-      id: item.record.id,
-      messageId,
-      text: item.record.text,
-      startedAt: item.record.started_at,
-      endedAt: item.record.ended_at,
-      sortOrder: item.record.sort_order,
-      ...(item.record.is_final_response ? { isFinalResponse: item.record.is_final_response } : {}),
-    };
-  }
-
-  private recoveredHook(
-    messageId: string,
-    item: Extract<ParentNarrativeRecoveryItem, { kind: "hook" }>,
-  ): CreateHookExecutionInput {
-    return {
-      id: item.record.id,
-      messageId,
-      hookName: item.record.hook_name,
-      toolName: item.record.tool_name,
-      phase: item.record.phase,
-      payload: item.record.payload,
-      durationMs: item.record.duration_ms,
-      didBlock: item.record.did_block,
-      startedAt: item.record.started_at,
-      endedAt: item.record.ended_at,
-      sortOrder: item.record.sort_order,
-    };
+  /** Persist recovered rows through acknowledged owner commands. */
+  async persistRecoveredNarrative(messageId: string, items: readonly ParentNarrativeRecoveryItem[], replaceExisting = false): Promise<void> {
+    await this.messageRepo.persistRecoveredNarrative(messageId, items, replaceExisting);
   }
 
   /**
@@ -714,41 +525,35 @@ export class NarrativeStore {
    * The volatile buffers are NOT cleared here (Trap 3) — call {@link clearTurn}
    * after the turn-level persistence (snapshots, broadcast) completes.
    */
-  persistNarrative(
+  async persistNarrative(
     threadId: string,
     messageId: string,
     messageContent: string,
     outcome: TurnOutcome,
     options: { strict?: boolean } = {},
-  ): PersistNarrativeResult {
+  ): Promise<PersistNarrativeResult> {
     const prepared = this.prepareNarrativePersistence(
       threadId,
       messageId,
       messageContent,
       outcome,
     );
-    this.persistNarrativeRows(prepared.toolCalls, options.strict, threadId, "tool call records", (items) => {
-      this.toolCallRecordRepo.bulkCreate(items);
-    });
-    this.persistNarrativeRows(prepared.thoughts, options.strict, threadId, "thought segments", (items) => {
-      this.thoughtSegmentRepo.bulkCreate(items);
-    });
-    this.persistNarrativeRows(prepared.hooks, options.strict, threadId, "hook executions", (items) => {
-      this.hookExecutionRepo.bulkCreate(items);
-    });
+    await this.persistNarrativeRows(prepared.toolCalls, options.strict, threadId, "tool call records", (items) => this.toolCallRecordRepo.bulkCreate(items));
+    await this.persistNarrativeRows(prepared.thoughts, options.strict, threadId, "thought segments", (items) => this.thoughtSegmentRepo.bulkCreate(items));
+    await this.persistNarrativeRows(prepared.hooks, options.strict, threadId, "hook executions", (items) => this.hookExecutionRepo.bulkCreate(items));
     return { toolCallCount: prepared.toolCalls.length };
   }
 
-  private persistNarrativeRows<T>(
+  private async persistNarrativeRows<T>(
     items: T[],
     strict: boolean | undefined,
     threadId: string,
     rowDescription: string,
-    persist: (items: T[]) => void,
-  ): void {
+    persist: (items: T[]) => Promise<void>,
+  ): Promise<void> {
     if (items.length === 0) return;
     try {
-      persist(items);
+      await persist(items);
     } catch (err) {
       if (strict) throw err;
       logger.error(`Failed to persist ${rowDescription}`, {
