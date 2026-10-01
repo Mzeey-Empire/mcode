@@ -576,6 +576,7 @@ export class CodexEventMapper {
     if (notice) return this.withChildNotificationEvidence(notice, context, undefined, "notice");
     const handlers: Record<string, () => CodexMappedEvent[]> = {
       "turn/started": () => this.mapChildTurnStarted(context),
+      "mcpServer/startupStatus/updated": () => this.mapChildMcpStartupStatus(notification, context),
       "thread/tokenUsage/updated": () => [],
       "item/commandExecution/outputDelta": () => this.mapChildCommandOutputDelta(notification),
       "item/agentMessage/delta": () => this.mapChildAssistantDelta(notification, context),
@@ -603,6 +604,18 @@ export class CodexEventMapper {
       parentCollaborationItemId: childThreadId ? this.collabReceiverThreadToCollabId.get(childThreadId) : undefined,
       nativeTurnId: this.bufferedChildTurnId(childThreadId) ?? this.nativeTurnId(notification),
     };
+  }
+
+  private mapChildMcpStartupStatus(notification: CodexNotification, context: ChildNotificationContext): CodexMappedEvent[] {
+    const events = this.mapMcpStartupStatus(notification);
+    const { childThreadId, parentCollaborationItemId, nativeTurnId } = context;
+    if (!childThreadId || !parentCollaborationItemId) return events;
+    const evidence = { nativeThreadId: childThreadId, parentCollaborationItemId,
+      ...(nativeTurnId ? { nativeTurnId } : {}) };
+    // Distinct servers and startup states must survive child-event deduplication.
+    const nativeEventId = this.childNativeEventId(AgentEventType.McpServerStartupStatus,
+      { ...evidence, itemEventKey: JSON.stringify(events) });
+    return this.withChildEvidence(events, { ...evidence, nativeEventId });
   }
 
   private rememberChildTurnId(notification: CodexNotification, childThreadId: string | undefined): void {
