@@ -1967,7 +1967,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): boolean {
     if (event.event.type === AgentEventType.System && event.event.systemNotice) return false;
     if (!args.entry || args.mainNotification || !args.nativeThreadId || args.nativeTurnId) return false;
-    return args.mapper.hasReceiverThread(args.nativeThreadId) && Boolean(event.extension?.child);
+    return args.mapper.hasReceiverThread(args.nativeThreadId) && Boolean(event.extension?.child)
+      && !this.matchesCodexChildTurnBinding(args.entry, args.eventExecutionId, event);
+  }
+
+  private matchesCodexChildTurnBinding(state: CodexSessionState, executionId: string | undefined, event: ProviderRuntimeEvent): boolean {
+    const bound = this.nativeTurnAttempt(state, event.extension?.child?.nativeTurnId);
+    return bound !== undefined && bound.executionId === executionId && bound.deliveryAttempt === event.deliveryAttempt;
   }
 
   private canEmitCodexNotificationEvent(
