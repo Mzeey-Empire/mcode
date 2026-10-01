@@ -3,6 +3,7 @@ import {
   CanonicalAgentSemanticEnvelopeSchema,
   MessageSchema,
   createAgentModelState,
+  encodeCanonicalSubagentDetailTarget,
   reduceAgentEventBatch,
   type AgentItem,
   type AgentThread,
@@ -117,6 +118,30 @@ function applyPrepared(events: readonly CanonicalAgentEventDraft[], items: Reado
 }
 
 describe("prepareAcceptedParentEvents", () => {
+  it("assigns a new recovery identity for a late child target and retains it through repeat preparation and terminal binding", () => {
+    const base = tool("completed");
+    const entry = { ...base, record: { ...base.record, tool_name: "Agent" } };
+    const op = operation({ kind: "narrative-delta", input: { executionId: execution.executionId, items: [entry] } });
+    const initial = prepare(op);
+    const source = projectedItems(initial.events)[0];
+    if (!source) throw new Error("Expected assigned tool recovery");
+    const bound = { ...source, payload: { ...source.payload, childThreadId: "child-thread" } };
+    const enriched = prepare(op, { [bound.id]: bound });
+    const assigned = projectedItems(enriched.events)[0];
+    if (!assigned) throw new Error("Expected assigned child recovery");
+    expect(enriched.events[0]?.eventId).not.toBe(initial.events[0]?.eventId);
+    expect(assigned.payload).toMatchObject({ childThreadId: "child-thread", narrative: { record: {
+      subagent_identity_key: encodeCanonicalSubagentDetailTarget("child-thread"),
+    } } });
+    expect(prepare(op, { [assigned.id]: assigned })).toEqual(enriched);
+    const terminal = prepare(finish("completed", [entry]), { [assigned.id]: assigned });
+    expect(projectedItems(terminal.events).filter((item) => item.kind === "tool-call")).toEqual([]);
+    const state = applyPrepared(terminal.events, { [assigned.id]: assigned });
+    expect(state.items[assigned.id]?.payload).toMatchObject({ projection: "toolCall", childThreadId: "child-thread", record: {
+      subagent_identity_key: encodeCanonicalSubagentDetailTarget("child-thread"),
+    } });
+  });
+
   it("retains raw event identities and routing, prepares recovery changes, and sanitizes renderer tools", () => {
     const raw = rawDraft();
     const discarded = recoveryItem(thought("discarded"));

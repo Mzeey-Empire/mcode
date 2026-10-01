@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { AgentEventSchema, CanonicalAgentProgressFrameSchema, ProviderRuntimeExtensionSchema, type ProviderRuntimeExtension, type AgentEvent, type CanonicalAgentProgressFrame,
+import { AgentEventSchema, CanonicalAgentProgressFrameSchema, ProviderRuntimeExtensionSchema, encodeCanonicalSubagentDetailTarget, type ProviderRuntimeExtension, type AgentEvent, type CanonicalAgentProgressFrame,
   type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
@@ -109,6 +109,59 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     return pushes.frames.map((frame) => CanonicalAgentProgressFrameSchema().parse(frame));
   }
 
+  it("preserves the durable child roster revision across a parent follow-up and fresh recovery owner", async () => {
+    await send(1, start("codex"));
+    expect(recovery().durable).toMatchObject({ mode: "snapshot", snapshot: { revision: { rosterRevision: 0 } } });
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(1, "toolUse", { toolCallId: "spawn", toolName: "Agent", toolInput: {} },
+        { collaboration: { kind: "spawnAgent", receiverThreadIds: ["native-child"], prompt: "Child task" } })] });
+    const child = { nativeThreadId: "native-child", nativeTurnId: "native-turn", parentCollaborationItemId: "spawn" };
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(2, "turnStarted", {}, { child })] });
+    await send(4, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(3, "turnComplete", {}, { child })] });
+    await send(5, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 4, "turnComplete")], terminalInput: { ...execution, providerId: "codex", providerIdentities: [],
+        outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect((await send(6, { kind: "release" })).result.kind).toBe("released");
+    const previous = recovery();
+    if (previous.durable.mode !== "snapshot") throw new Error("Expected saved parent snapshot");
+    const before = previous.durable.snapshot;
+    expect(before.revision.rosterRevision).toBe(1);
+    const childThread = Object.values(before.state.threads).find((thread) => thread.owningParentThreadId === execution.threadId);
+    if (!childThread) throw new Error("Expected existing native child");
+    expect(progress.loadSubagentRoster({ owningParentThreadId: execution.threadId })?.done.map((thread) => thread.id)).toContain(childThread.id);
+    const frameOffset = pushes.frames.length;
+    const next = { ...execution, turnId: "next-turn", executionId: "00000000-0000-4000-8000-000000000126" };
+    const nextLease = { ...lease, ownerEpoch: 2, leaseId: "next-lease" };
+    expect((await send(1, start("codex", next), next, nextLease)).result.kind).toBe("committed");
+    const after = recovery(next);
+    if (after.durable.mode !== "snapshot") throw new Error("Expected follow-up snapshot");
+    expect(after.durable.snapshot.revision.rosterRevision).toBe(before.revision.rosterRevision);
+    expect(after.durable.snapshot.revision.conversationRevision).toBeGreaterThan(before.revision.conversationRevision);
+    expect(after.durable.snapshot.state.threads[childThread.id]).toEqual(childThread);
+    const starts = frames().slice(frameOffset).filter((frame) => frame.phase === "saved" && frame.through === 0);
+    expect(starts).toHaveLength(2);
+    for (const frame of starts) {
+      if (frame.phase !== "saved") throw new Error("Expected saved startup frame");
+      expect(frame.revision.rosterRevision).toBe(before.revision.rosterRevision);
+    }
+    const recordedParent = starts.flatMap((frame) => frame.phase === "saved" ? frame.events : [])
+      .find((event) => event.payload.type === "thread.recorded");
+    expect(recordedParent?.payload).toMatchObject({ thread: { rosterRevision: before.revision.rosterRevision } });
+    const restarted = new CanonicalAcceptedProgress(new CanonicalAgentBoundary(db, () => {}), writer);
+    try {
+      const restored = restarted.recover(execution.threadId, before.revision);
+      if (restored.durable.mode !== "snapshot") throw new Error("Expected restarted snapshot");
+      expect(restored.durable.snapshot.revision).toEqual(after.durable.snapshot.revision);
+      expect(restored.durable.snapshot.state.threads[childThread.id]).toEqual(childThread);
+      expect(restored.durable.snapshot.state.threads[execution.threadId]?.rosterRevision).toBe(before.revision.rosterRevision);
+    } finally {
+      await restarted.close();
+    }
+  });
+
   it("retains a child roster, transcript and exact Stop without consuming the parent's next ordinal", async () => {
     await send(1, start("codex"));
     holdWrites();
@@ -197,6 +250,24 @@ describe("accepted parent progress with the actual SQLite writer", () => {
       .toEqual(["Child task", "Child answer"]);
     expect(db.prepare("SELECT role, content FROM messages WHERE thread_id = ? ORDER BY sequence").all(childId))
       .toEqual([{ role: "user", content: "Child task" }, { role: "assistant", content: "Child answer" }]);
+
+    await send(6, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 5, "toolResult", { toolCallId: "spawn", output: "Child answer", isError: false })] });
+    await send(7, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 6, "textDelta", { delta: "Parent answer", isFinalResponse: true })] });
+    await send(8, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 7, "turnComplete")], terminalInput: { ...execution, providerId: "codex", providerIdentities: [],
+        outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const detailTarget = encodeCanonicalSubagentDetailTarget(childId);
+    expect(saved.loadItem("toolCall:spawn")?.payload).toMatchObject({
+      childThreadId: childId, record: { subagent_identity_key: detailTarget },
+    });
+    expect(db.prepare("SELECT subagent_identity_key FROM tool_call_records WHERE id = 'spawn'").get())
+      .toEqual({ subagent_identity_key: detailTarget });
+    const parentPage = saved.loadConversationProjection(execution.threadId, 20);
+    expect(Object.values(parentPage.narrativeByMessage).flatMap((batch) => batch.tools).find((tool) => tool.id === "spawn"))
+      .toMatchObject({ subagent_identity_key: detailTarget });
   });
 
   it("accepts the native Devin final-prefix, later unknown narration and final completion sequence while saving is held", async () => {
