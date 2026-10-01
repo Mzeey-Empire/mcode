@@ -63,6 +63,7 @@ export class CanonicalAgentWriterReceipts {
 
   execute(request: AtomicWriteRequest, apply: () => WriteResponse): WriteResponse {
     const inputHash = fingerprint(request);
+    // Reserve the writer before reading. A peer commit otherwise makes this WAL snapshot impossible to upgrade.
     return this.db.transaction(() => {
       const existing = this.loadReceipt(request);
       if (existing) return this.replayMatching(request, inputHash, existing);
@@ -76,7 +77,7 @@ export class CanonicalAgentWriterReceipts {
         receiptJson: compactReceipt(response),
       }).run();
       return response;
-    })();
+    }).immediate();
   }
 
   /** Recovery upserts are repeatable, so its bounded batches commit before a short final receipt transaction. */
@@ -105,7 +106,7 @@ export class CanonicalAgentWriterReceipts {
         receiptJson: compactReceipt(response),
       }).run();
       return response;
-    })();
+    }).immediate();
   }
 
   /** Removes a receipt only after the caller has completed its dependent publication or journal discard. */

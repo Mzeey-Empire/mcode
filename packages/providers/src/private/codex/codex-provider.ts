@@ -637,16 +637,15 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private emitRuntimeEvent(runtimeEvent: ProviderRuntimeEvent): void {
     const state = this.canonicalTurnRoutingsByThread.get(runtimeEvent.event.threadId);
     const routing = state?.routing;
-    if (routing && runtimeEvent.extension?.child === undefined
-      && runtimeEvent.event.turnExecutionId === routing.executionId) {
+    if (routing && runtimeEvent.event.turnExecutionId === routing.executionId) {
       if (state.kind === "fenced") return;
       if (runtimeEvent.deliveryAttempt !== undefined && runtimeEvent.deliveryAttempt !== routing.deliveryAttempt) return;
       this.canonicalEventPublisher.publish(routing, {
         ...runtimeEvent,
         deliveryAttempt: routing.deliveryAttempt,
       });
-      // Ended closes this exact parent attempt; late SDK callbacks must stay fenced.
-      if (runtimeEvent.event.type === AgentEventType.Ended) state.kind = "fenced";
+      // Native child evidence shares its parent's ordered stream and must not close the parent attempt.
+      if (runtimeEvent.event.type === AgentEventType.Ended && runtimeEvent.extension?.child === undefined) state.kind = "fenced";
       return;
     }
     super.emit("event", runtimeEvent);
@@ -1553,7 +1552,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.bindReceiverThreadExecution(entry, mapper, rawNotification.method, mainNotification, nativeThreadId, nativeTurnId);
     const executionId = this.codexNotificationExecutionId(entry, mainNotification, nativeThreadId, nativeTurnId);
     this.emitCodexTurnDiff(entry, rawNotification, mainNotification, nativeTurnId, executionId);
-    const startupExecutionId = rawNotification.method === "mcpServer/startupStatus/updated" ? context.stagedExecutionId : undefined;
+    // Spawn context belongs to the first turn; reused sessions must own later startup diagnostics themselves.
+    const startupExecutionId = rawNotification.method === "mcpServer/startupStatus/updated"
+      ? entry ? this.executionForCodexMainThread(entry, true, undefined) : context.stagedExecutionId
+      : undefined;
     this.deliverCodexNotificationEvents({ entry, sessionId: context.sessionId, mapper, mappedEvents: events, mainNotification, nativeThreadId, nativeTurnId, eventExecutionId: executionId, startupEventExecutionId: startupExecutionId });
     if (entry && replayThreadId) this.replayPendingChildEvents(entry, context.sessionId, replayThreadId);
     this.fetchCompletedChildMetadata(context.sessionId, context.threadId, server, mapper, rawNotification.method, nativeThreadId, executionId);
@@ -1981,6 +1983,8 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     event: ProviderRuntimeEvent,
     eventKey: string | undefined,
   ): void {
+    if (event.event.type === AgentEventType.System && event.event.systemNotice && args.entry
+      && args.eventExecutionId && args.eventExecutionId !== args.entry.currentTurnExecutionId) return;
     if (eventKey && args.entry) rememberChildEventKey(args.entry, eventKey);
     this.recordGoalEvent(args.sessionId, event.event);
     this.emitRuntimeEvent(withTurnExecutionId(event, args.eventExecutionId ?? args.startupEventExecutionId));

@@ -10,9 +10,9 @@ import {
   type Message,
 } from "@mcode/contracts";
 import {
-  canonicalAgentIngestCheckpoints,
   canonicalAgentItems,
 } from "../../../runtime/persistence/sqlite/schema.js";
+import { terminalAssistantProjectionCondition } from "./canonical-conversation-visibility.js";
 
 /** Canonical conversation rows used by the staged compatibility read. */
 export interface CanonicalConversationProjection {
@@ -502,12 +502,7 @@ function messageProjectionConditions(threadId: string) {
     eq(sql`COALESCE(json_extract(${canonicalAgentItems.payloadJson}, '$.message.is_internal'), 0)`, 0),
     or(
       ne(sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.role')`, "assistant"),
-      sql`EXISTS (
-        SELECT 1
-        FROM ${canonicalAgentIngestCheckpoints} checkpoint
-        WHERE checkpoint.turn_id = ${canonicalAgentItems.turnId}
-          AND checkpoint.terminal_outcome IS NOT NULL
-      )`,
+      terminalAssistantProjectionCondition(sql`${canonicalAgentItems.turnId}`),
     ),
   ];
 }

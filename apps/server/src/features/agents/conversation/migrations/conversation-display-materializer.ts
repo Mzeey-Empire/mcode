@@ -1,10 +1,10 @@
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { and, asc, count, eq, inArray, isNotNull, like, or, placeholder, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, like, or, placeholder, sql } from "drizzle-orm";
 import {
-  canonicalAgentIngestCheckpoints,
   canonicalAgentItems,
+  canonicalAgentTurns,
   canonicalConversationDisplayMappings,
   conversationDisplayMaterializationState,
   hookExecutions,
@@ -13,6 +13,7 @@ import {
   toolCallRecords,
 } from "../../../../runtime/persistence/sqlite/schema.js";
 import type { Message } from "@mcode/contracts";
+import { terminalAssistantProjectionCondition, terminalProviderChildTurnCondition } from "../../canonical/canonical-conversation-visibility.js";
 
 const MATERIALIZATION_STATE_ID = 1;
 const MATERIALIZATION_BATCH_ITEMS = 100;
@@ -73,7 +74,7 @@ export class ConversationDisplayMaterializer {
   private readonly findChildMessage: ReturnType<ConversationDisplayMaterializer["buildFindChildMessage"]>;
   private readonly findCanonicalMessage: ReturnType<ConversationDisplayMaterializer["buildFindCanonicalMessage"]>;
   private readonly findDisplayMessage: ReturnType<ConversationDisplayMaterializer["buildFindDisplayMessage"]>;
-  private readonly findTerminalCheckpoint: ReturnType<ConversationDisplayMaterializer["buildFindTerminalCheckpoint"]>;
+  private readonly findTerminalTurn: ReturnType<ConversationDisplayMaterializer["buildFindTerminalTurn"]>;
 
   constructor(private readonly db: Database) {
     this.orm = drizzle(db);
@@ -85,7 +86,7 @@ export class ConversationDisplayMaterializer {
     this.findChildMessage = this.buildFindChildMessage();
     this.findCanonicalMessage = this.buildFindCanonicalMessage();
     this.findDisplayMessage = this.buildFindDisplayMessage();
-    this.findTerminalCheckpoint = this.buildFindTerminalCheckpoint();
+    this.findTerminalTurn = this.buildFindTerminalTurn();
   }
 
   private buildInsertMessage() {
@@ -291,6 +292,7 @@ export class ConversationDisplayMaterializer {
     while (true) {
       const batch = this.nextBatch();
       if (batch.length === 0) {
+        await this.backfillTerminalChildMessages();
         this.orm.update(conversationDisplayMaterializationState)
           .set({ completed: 1, updatedAt: new Date().toISOString() })
           .where(eq(conversationDisplayMaterializationState.id, MATERIALIZATION_STATE_ID))
@@ -391,15 +393,39 @@ export class ConversationDisplayMaterializer {
         .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
         .limit(MATERIALIZATION_BATCH_ITEMS)
         .all();
-    let byteLength = 0;
-    const bounded: CanonicalItemRow[] = [];
-    for (const row of rows) {
-      const itemBytes = Buffer.byteLength(row.payloadJson, "utf8");
-      if (bounded.length > 0 && byteLength + itemBytes > MATERIALIZATION_BATCH_BYTES) break;
-      bounded.push(row);
-      byteLength += itemBytes;
+    return boundedMaterializationBatch(rows);
+  }
+
+  private async backfillTerminalChildMessages(): Promise<void> {
+    // Older startup cursors passed child answers while the checkpoint-only gate hid them.
+    while (true) {
+      const rows = this.orm.select({
+        id: canonicalAgentItems.id,
+        threadId: canonicalAgentItems.threadId,
+        turnId: canonicalAgentItems.turnId,
+        payloadJson: canonicalAgentItems.payloadJson,
+        createdAt: canonicalAgentItems.createdAt,
+        updatedAt: canonicalAgentItems.updatedAt,
+      }).from(canonicalAgentItems)
+        .where(and(
+          eq(canonicalAgentItems.kind, "message"),
+          sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
+          sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.role') = 'assistant'`,
+          sql`COALESCE(json_extract(${canonicalAgentItems.payloadJson}, '$.message.is_internal'), 0) = 0`,
+          terminalProviderChildTurnCondition(sql`${canonicalAgentItems.turnId}`),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${canonicalConversationDisplayMappings} mapping
+            WHERE mapping.source_item_id = ${canonicalAgentItems.id}
+          )`,
+        ))
+        .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
+        .limit(MATERIALIZATION_BATCH_ITEMS)
+        .all();
+      const batch = boundedMaterializationBatch(rows);
+      if (batch.length === 0) return;
+      this.db.transaction(() => this.materializeItems(batch.map((row) => row.id)))();
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    return bounded;
   }
 
   private materializeRow(row: CanonicalItemRow, resolver?: NarrativeDisplayResolver): void {
@@ -723,11 +749,7 @@ export class ConversationDisplayMaterializer {
         sql`COALESCE(json_extract(${canonicalAgentItems.payloadJson}, '$.message.is_internal'), 0) = 0`,
         or(
           sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.role') <> 'assistant'`,
-          sql`EXISTS (
-            SELECT 1 FROM canonical_agent_ingest_checkpoints checkpoint
-            WHERE checkpoint.turn_id = ${canonicalAgentItems.turnId}
-              AND checkpoint.terminal_outcome IS NOT NULL
-          )`,
+          terminalAssistantProjectionCondition(sql`${canonicalAgentItems.turnId}`),
         ),
       ))
       .orderBy(
@@ -813,26 +835,26 @@ export class ConversationDisplayMaterializer {
   private isDisplayableMessage(row: CanonicalItemRow, message: Message): boolean {
     if (message.is_internal) return false;
     if (message.role !== "assistant") return true;
-    return this.turnHasTerminalCheckpoint(row.turnId);
+    return this.turnIsDisplayable(row.turnId);
   }
 
-  private turnHasTerminalCheckpoint(turnId: string): boolean {
-    return this.findTerminalCheckpoint.get({ turnId }) != null;
+  private turnIsDisplayable(turnId: string): boolean {
+    return this.findTerminalTurn.get({ turnId }) != null;
   }
 
-  private buildFindTerminalCheckpoint() {
-    return this.orm.select({ executionId: canonicalAgentIngestCheckpoints.executionId })
-      .from(canonicalAgentIngestCheckpoints)
+  private buildFindTerminalTurn() {
+    return this.orm.select({ id: canonicalAgentTurns.id })
+      .from(canonicalAgentTurns)
       .where(and(
-        eq(canonicalAgentIngestCheckpoints.turnId, placeholder("turnId")),
-        isNotNull(canonicalAgentIngestCheckpoints.terminalOutcome),
+        eq(canonicalAgentTurns.id, placeholder("turnId")),
+        terminalAssistantProjectionCondition(sql`${canonicalAgentTurns.id}`),
       ))
       .limit(1)
       .prepare();
   }
 
   private reanchorTurnChildren(row: CanonicalItemRow): void {
-    if (!this.turnHasTerminalCheckpoint(row.turnId)) return;
+    if (!this.turnIsDisplayable(row.turnId)) return;
     const children = this.orm.select({
       id: canonicalAgentItems.id,
       threadId: canonicalAgentItems.threadId,
@@ -880,6 +902,18 @@ export class ConversationDisplayMaterializer {
       },
     };
   }
+}
+
+function boundedMaterializationBatch(rows: readonly CanonicalItemRow[]): CanonicalItemRow[] {
+  let byteLength = 0;
+  const bounded: CanonicalItemRow[] = [];
+  for (const row of rows) {
+    const itemBytes = Buffer.byteLength(row.payloadJson, "utf8");
+    if (bounded.length > 0 && byteLength + itemBytes > MATERIALIZATION_BATCH_BYTES) break;
+    bounded.push(row);
+    byteLength += itemBytes;
+  }
+  return bounded;
 }
 
 function displayTableFor(

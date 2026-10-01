@@ -33,7 +33,7 @@ import type { SubagentStopTarget } from "../collaboration/subagent-lifecycle-dur
 import type { CreateHookExecutionInput } from "../events/persistence/hook-execution-repo.js";
 import * as NodeUtil from "node:util";
 import { z } from "zod";
-import { prepareAcceptedFeatureObservations, type AcceptedFeatureObservations } from "./accepted-feature-observations.js";
+import { prepareAcceptedFeatureObservations, type AcceptedFeatureObservations, type AcceptedChildPublicationOwner } from "./accepted-feature-observations.js";
 import type { AcceptedFeatureWriteMetadata } from "./accepted-feature-write.js";
 import type { StoredTask } from "../orchestration/persistence/task-repo.js";
 
@@ -161,7 +161,8 @@ export class CanonicalAcceptedProgress {
     const features = prepareAcceptedFeatureObservations({ operation: collaboration.operation, thread: modelThread, turn,
       items: thread.state.items, acceptedAt, messageSequence: thread.messageSequence,
       compaction: { active: thread.features.compacting }, currentNoticeSessionId: thread.features.noticeSessionId,
-      persistedPlans: thread.features.plans, persistedTasks: thread.features.tasks });
+      persistedPlans: thread.features.plans, persistedTasks: thread.features.tasks,
+      childPublicationOwners: acceptedChildPublicationOwners(collaboration) });
     const preparedOperation = { ...collaboration.operation, livePublication: features.publications };
     const publications = features.publications;
     const publicationIds = publications.map((_, index) => String(thread.publicationSequence + index + 1));
@@ -931,6 +932,16 @@ function nativeIdentityValue(identities: readonly import("@mcode/contracts").Pro
   scope: "thread" | "turn"): string | null {
   return identities.find((identity) => identity.providerId === providerId && identity.scope === scope
     && identity.provenance === "native")?.value ?? null;
+}
+
+function acceptedChildPublicationOwners(collaboration: ReturnType<typeof prepareAcceptedCollaboration>): readonly AcceptedChildPublicationOwner[] {
+  const candidate = collaboration.candidate;
+  if (!candidate) return [];
+  return (collaboration.operation.livePublication ?? []).flatMap(({ event }) => {
+    const thread = candidate.loadThread(event.threadId);
+    const turn = event.turnExecutionId ? candidate.loadTurnByExecution(event.turnExecutionId) : null;
+    return thread?.parentThreadId && turn ? [{ thread, turn }] : [];
+  });
 }
 
 function prependObservationEvents(events: import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[],

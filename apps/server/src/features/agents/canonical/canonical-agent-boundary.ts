@@ -2395,7 +2395,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     this.persistParentTerminalBatchState(state, input);
     this.persistParentTerminalBatchCheckpoint(state, input);
     if (state.terminal) {
-      this.displayMaterializer.materializeItems(this.parentAssistantItemIds(input.turnId));
+      this.displayMaterializer.materializeItems(this.assistantItemIds(input));
       this.retireParentNarrativeRecovery(input.turnId);
     }
     onBatchWrite?.({
@@ -3304,8 +3304,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   }
 
   private recordedItemIds(event: CanonicalAgentEventEnvelope): string[] {
-    if (event.payload.type === "collaboration.observed") return event.payload.changes.flatMap((change) =>
-      change.kind === "item-recorded" || change.kind === "diagnostic" ? [change.item.id] : []);
+    if (event.payload.type === "collaboration.observed") return event.payload.changes.flatMap((change) => this.observedItemIds(change));
     if (event.payload.type === "item.recorded") return [event.payload.item.id];
     if (event.payload.type !== "turn.response-bound") return [];
     return this.orm.select({ id: canonicalAgentItems.id }).from(canonicalAgentItems)
@@ -3314,10 +3313,17 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       .all().map((row) => row.id);
   }
 
-  private parentAssistantItemIds(turnId: string): string[] {
+  private observedItemIds(change: import("@mcode/contracts").CollaborationObservationChange): string[] {
+    if (change.kind === "item-recorded" || change.kind === "diagnostic") return [change.item.id];
+    if (change.kind !== "turn-terminal") return [];
+    return this.assistantItemIds({ threadId: change.turn.threadId, turnId: change.turn.id });
+  }
+
+  private assistantItemIds(input: Pick<CanonicalParentTurnFinishInput, "threadId" | "turnId">): string[] {
     return this.orm.select({ id: canonicalAgentItems.id }).from(canonicalAgentItems)
       .where(and(
-        eq(canonicalAgentItems.turnId, turnId),
+        eq(canonicalAgentItems.threadId, input.threadId),
+        eq(canonicalAgentItems.turnId, input.turnId),
         eq(canonicalAgentItems.kind, "message"),
         sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') = 'message'`,
         sql`json_extract(${canonicalAgentItems.payloadJson}, '$.message.role') = 'assistant'`,

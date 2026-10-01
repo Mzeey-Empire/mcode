@@ -3,7 +3,7 @@ import * as NodeUtil from "node:util";
 import {
   AgentEventIdSchema, AgentEventSchema, AgentItemSchema, CanonicalTimestampSchema,
   MessageSchema, PlanRecordSchema, PlanSectionNavSchema,
-  type AgentItem, type AgentThread, type AgentTurn, type Message, type PlanRecord,
+  type AgentEvent, type AgentItem, type AgentThread, type AgentTurn, type Message, type PlanRecord,
 } from "@mcode/contracts";
 import { v5 as uuidv5 } from "uuid";
 import { z } from "zod";
@@ -52,6 +52,12 @@ export interface AcceptedFeatureObservations {
   readonly planGenerated?: { readonly threadId: string; readonly plan: PlanRecord };
 }
 
+/** Exact child records resolved by the collaboration adapter before live acceptance. */
+export interface AcceptedChildPublicationOwner {
+  readonly thread: AgentThread;
+  readonly turn: AgentTurn;
+}
+
 /**
  * Prepares changed task, plan, and system observations from accepted state.
  * IDs, versions, timestamps, and message order are retained for storage to use unchanged.
@@ -68,6 +74,7 @@ export function prepareAcceptedFeatureObservations(input: {
   readonly currentNoticeSessionId?: string;
   readonly persistedPlans?: readonly PlanRecord[];
   readonly persistedTasks?: readonly StoredTask[];
+  readonly childPublicationOwners?: readonly AcceptedChildPublicationOwner[];
 }): AcceptedFeatureObservations {
   validateContext(input);
   const effects = liveEffects(input.operation);
@@ -136,14 +143,13 @@ function prepareSystems(input: PreparationInput, effects: ParentLiveEffects | un
     const event = publicEvent(source.event);
     const operationId = sources.length === 1 ? input.operation.operationId
       : uuidv5(`${input.operation.operationId}:system:${index}`, uuidv5.URL);
-    const observation = prepareAcceptedSystemObservation({ operationId,
+    const notices = prepareSystemPublication(input, { operationId,
       execution: input.operation.execution, providerId: input.thread.providerId, event,
       acceptedAt: input.acceptedAt, messageSequence,
       compacting: result.compacting ?? input.compaction.active });
-    const notices = prepareNoticeObservation(input, observation);
     if (notices.observation.message) {
       events.push(noticeMessageEvent(input, notices.observation.message));
-      if (notices.observation.message.id === observation.message?.id) messageSequence += 1;
+      if (notices.observation.message.id === notices.assignedMessageId) messageSequence += 1;
     }
     if (notices.expiredIds.length) {
       events.push(itemEvent(input, featureItem(input, `notice-status:${uuidv5(operationId, uuidv5.URL)}`, "system",
@@ -153,6 +159,29 @@ function prepareSystems(input: PreparationInput, effects: ParentLiveEffects | un
     publications.push({ ...source, event: notices.observation.event });
   }
   return result;
+}
+
+function prepareSystemPublication(input: PreparationInput,
+  observationInput: Parameters<typeof prepareAcceptedSystemObservation>[0]):
+  ReturnType<typeof prepareNoticeObservation> & { assignedMessageId?: string } {
+  if (isChildPublication(input, observationInput.event)) {
+    if (liveEffects(input.operation)) throw new Error("Accepted child publication cannot carry parent feature effects");
+    return { observation: { event: observationInput.event }, expiredIds: [] };
+  }
+  const observation = prepareAcceptedSystemObservation(observationInput);
+  return { ...prepareNoticeObservation(input, observation), assignedMessageId: observation.message?.id };
+}
+
+function isChildPublication(input: PreparationInput, event: AgentEvent): boolean {
+  if (event.threadId === input.operation.execution.threadId
+    && event.turnExecutionId === input.operation.execution.executionId) return false;
+  const owner = input.childPublicationOwners?.find(({ thread, turn }) => thread.id === event.threadId
+    && turn.threadId === thread.id && turn.executionId === event.turnExecutionId);
+  if (!owner?.thread.parentThreadId || owner.thread.owningParentThreadId !== input.thread.id
+    || owner.thread.providerId !== input.thread.providerId) {
+    throw new Error("Accepted feature publication lacks exact execution ownership");
+  }
+  return true;
 }
 
 function validateSystemIntents(sources: readonly ExecutionLivePublicationIntent[], effects: ParentLiveEffects | undefined): void {
