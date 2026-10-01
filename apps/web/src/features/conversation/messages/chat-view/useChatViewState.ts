@@ -96,9 +96,6 @@ export function useChatViewState() {
   );
   const hydratedThreadId = useThreadStore((state) => state.currentThreadId);
   const savingStatus = useActiveThreadRecord((record) => record.savingStatus);
-  const savingStatuses = useActiveThreadRecord((record) => record.savingStatuses);
-  const savingParentConversation = useActiveThreadRecord((record) => record.canonicalAgent.ownerThreadId !== null
-    && record.canonicalAgent.ownerThreadId !== hydratedThreadId);
   const lostProgress = useActiveThreadRecord((record) => record.canonicalAgent.lostProgress);
   const messageCount = useActiveThreadRecord((record) => record.messages.length);
   const residentContent = useActiveThreadRecord(hasResidentContent);
@@ -159,8 +156,6 @@ export function useChatViewState() {
     residentContent,
     runningThreadIds,
     savingStatus,
-    savingStatuses,
-    savingParentConversation,
     lostProgress,
     sessionError,
     setPendingPrefill,

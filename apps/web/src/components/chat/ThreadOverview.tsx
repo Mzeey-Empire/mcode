@@ -80,6 +80,7 @@ import type {
 } from "@/features/preview";
 import { useThreadStore } from "@/stores/threadStore";
 import { useThreadRecord } from "@/stores/thread-selectors";
+import { TurnSaveRecovery } from "@/features/conversation/saving/TurnSavingNotice";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   ProjectSetupAttemptCard,
@@ -119,6 +120,7 @@ import type {
   ProviderUsageInfo,
   QuotaCategory,
   TurnSnapshot,
+  TurnSavingStatus,
 } from "@mcode/contracts";
 import type { BrowserSessionLifecycleTab } from "@/features/preview";
 
@@ -126,6 +128,7 @@ import type { BrowserSessionLifecycleTab } from "@/features/preview";
 const EMPTY_MESSAGES: Message[] = [];
 /** Stable empty plans reference so closed Overview selectors never allocate. */
 const EMPTY_PLANS: readonly PlanRecord[] = [];
+const EMPTY_SAVING_STATUSES: readonly TurnSavingStatus[] = [];
 const SIDE_OVERVIEW_COLLISION_AVOIDANCE = {
   side: "none",
   align: "none",
@@ -2497,6 +2500,9 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
   const overviewToolCalls = useThreadStore((state) => (
     open ? state.records.get(thread.id)?.toolCalls : undefined
   ));
+  const overviewSavingStatuses = useThreadStore((state) => (
+    open ? state.records.get(thread.id)?.savingStatuses ?? EMPTY_SAVING_STATUSES : EMPTY_SAVING_STATUSES
+  ));
   const overviewNarrative = useThreadStore((state) => (
     open ? state.records.get(thread.id)?.narrativeByMessage : undefined
   ));
@@ -2601,6 +2607,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
         <ProjectSetupAttemptCard attempt={projectSetup.attempt!} onApprove={projectSetup.approve} />
       </ThreadOverviewWhen>
       <div className="p-1.5">
+            <TurnSaveRecovery statuses={overviewSavingStatuses} />
             <Button
               variant="ghost"
               size="sm"
