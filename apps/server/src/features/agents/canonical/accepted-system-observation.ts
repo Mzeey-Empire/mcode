@@ -5,6 +5,7 @@ import {
   CanonicalTimestampSchema,
   MessageSchema,
   ProviderIdSchema,
+  AgentThreadIdSchema,
   type AgentEvent,
   type Message,
 } from "@mcode/contracts";
@@ -44,10 +45,10 @@ export function prepareAcceptedSystemObservation(input: {
     throw new Error("Accepted system observation lacks exact execution ownership");
   }
   switch (event.type) {
-    case "system": return systemObservation(input, event);
+    case "system": return systemObservation({ ...input, threadId: input.execution.threadId }, event);
     case "compacting": return event.active
       ? { event, compacting: true }
-      : { event, compacting: false, message: systemMessage(input, "Context compacted") };
+      : { event, compacting: false, message: systemMessage({ ...input, threadId: input.execution.threadId }, "Context compacted") };
     case "compactSummary": return { event, compacting: false, threadPatch: { compactSummary: event.summary } };
     case "contextEstimate":
     case "turnComplete": return contextObservation(input, event);
@@ -57,6 +58,27 @@ export function prepareAcceptedSystemObservation(input: {
 
 type PreparationInput = Parameters<typeof prepareAcceptedSystemObservation>[0];
 type SystemEvent = Extract<AgentEvent, { type: "system" }>;
+type SystemMessageInput = Pick<PreparationInput, "operationId" | "messageSequence" | "acceptedAt"> & { readonly threadId: string };
+
+/** Prepare a session diagnostic without inventing provider turn ownership. */
+export function prepareAcceptedThreadSystemObservation(input: SystemMessageInput & {
+  readonly providerId: string;
+  readonly event: SystemEvent;
+}): AcceptedSystemObservation {
+  AgentThreadIdSchema.parse(input.threadId);
+  AgentEventIdSchema.parse(input.operationId);
+  ProviderIdSchema.parse(input.providerId);
+  CanonicalTimestampSchema.parse(input.acceptedAt);
+  if (input.operationId.length > 240 || input.operationId.trim() !== input.operationId
+    || !Number.isSafeInteger(input.messageSequence) || input.messageSequence < 0) {
+    throw new Error("Invalid accepted thread system observation identity or sequence");
+  }
+  const event = AgentEventSchema().parse(input.event);
+  if (event.type !== "system" || event.threadId !== input.threadId) {
+    throw new Error("Thread system observation must retain its source thread ownership");
+  }
+  return systemObservation(input, event);
+}
 
 function validateInput(input: PreparationInput): void {
   AgentEventIdSchema.parse(input.operationId);
@@ -71,7 +93,7 @@ function validateInput(input: PreparationInput): void {
   }
 }
 
-function systemObservation(input: PreparationInput, event: SystemEvent): AcceptedSystemObservation {
+function systemObservation(input: SystemMessageInput, event: SystemEvent): AcceptedSystemObservation {
   if (event.subtype === "provider.session.started") return { event, noticeSessionId: event.systemNotice?.sessionId };
   if (!event.subtype.startsWith("provider.notice.") || !event.message) return { event };
   const message = systemMessage(input, event.message, event.systemNotice);
@@ -81,10 +103,10 @@ function systemObservation(input: PreparationInput, event: SystemEvent): Accepte
   return { event: { ...event, messageId: message.id }, message };
 }
 
-function systemMessage(input: PreparationInput, content: string, systemNotice?: SystemEvent["systemNotice"]): Message {
+function systemMessage(input: SystemMessageInput, content: string, systemNotice?: SystemEvent["systemNotice"]): Message {
   return MessageSchema().parse({
     id: uuidv5(`mcode:accepted-system-observation:${input.operationId}`, uuidv5.URL),
-    thread_id: input.execution.threadId,
+    thread_id: input.threadId,
     role: "system",
     content,
     timestamp: input.acceptedAt,

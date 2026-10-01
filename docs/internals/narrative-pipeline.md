@@ -175,9 +175,11 @@ reintroduces synchronous copying and consumes the capacity reserved for controls
 
 A completion or cancellation ends Running as soon as it is accepted. Saving,
 retrying, or save failure remains visible for that execution without changing
-its outcome. A permanently failed save or exhausted retention must explicitly
-stop an affected active execution. Never leave it behind a blocked save queue
-with a Running label. `turn.persisted` still means the terminal data was saved.
+its outcome. A failed disk write pauses that thread's save queue while accepted
+events continue within bounded retention. Other thread queues remain eligible
+to save. Exhausted retention or invalid receipt application must explicitly
+stop the affected execution; storage failure alone must not cancel its provider.
+`turn.persisted` still means the terminal data was saved.
 
 Reconnect installs one saved-prefix and accepted-suffix cut. Frames received
 beyond that cut remain in order. Saved acknowledgements and recovery may update

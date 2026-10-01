@@ -80,6 +80,7 @@ import {
   type TurnRuntimePersistence,
 } from "../turns/turn-runtime-persistence.js";
 import { TurnConversationProjectionService } from "../turns/turn-conversation-projection-service.js";
+import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import { PostTerminalHookCompletionEffect } from "../turns/post-terminal-hook-completion-effect.js";
 import { ThreadCreationCoordinator } from "../turns/thread-creation-coordinator.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
@@ -107,6 +108,13 @@ export function registerAgentServices(container: DependencyContainer): void {
   });
   container.register(CanonicalAgentWriterClient, {
     useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).writer,
+  });
+  container.register(CanonicalAcceptedProgress, {
+    useFactory: (c) => {
+      const progress = c.resolve(WorkerOwnedTurnRuntime).progress;
+      if (!progress) throw new Error("Thread notice projection requires the production progress owner");
+      return progress;
+    },
   });
   container.register(CanonicalExecutionWriterPort, {
     useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).writerPort,

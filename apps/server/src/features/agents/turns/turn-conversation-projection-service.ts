@@ -6,6 +6,7 @@ import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { PARENT_TURN_DURABILITY, type ParentTurnDurability } from "./parent-turn-durability.js";
 import { TURN_FINALIZER, TurnFinalizer } from "./turn-finalizer.js";
+import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 
 /** Owns conversation-message projection for normalized provider events. */
 @injectable()
@@ -15,6 +16,7 @@ export class TurnConversationProjectionService {
     @inject(MessageRepo) private readonly messages: MessageRepo,
     @inject(TURN_FINALIZER) private readonly finalizer: TurnFinalizer,
     @inject(PARENT_TURN_DURABILITY) private readonly parentTurns: ParentTurnDurability,
+    @inject(CanonicalAcceptedProgress, { isOptional: true }) private readonly progress?: CanonicalAcceptedProgress,
   ) {}
 
   /** Assign renderer identity and buffer a provider assistant message until terminal materialization. */
@@ -41,17 +43,30 @@ export class TurnConversationProjectionService {
     this.messages.create(threadId, "system", "Context compacted", sequence);
   }
 
-  /** Persist a bounded provider notice before it is published to the client. */
-  persistSystemNotice(event: Extract<AgentEvent, { type: "system" }>): void {
+  /** Return true when the retained writer owner has already published this notice. */
+  persistSystemNotice(event: Extract<AgentEvent, { type: "system" }>): boolean {
+    if (this.progress) {
+      const accepted = this.progress.acceptThreadSystemObservation(event);
+      event.messageId = accepted.messageId;
+      event.publicationId = accepted.publicationId;
+      return true;
+    }
     const sequence = this.messages.getLatestSequenceIncludingInternal(event.threadId) + 1;
     event.messageId = this.messages.createSystemNotice(
       event.threadId, event.message ?? "", sequence, event.systemNotice,
     ).id;
+    return false;
   }
 
   /** Remove diagnostics from a previous provider session before publishing startup. */
-  beginNoticeSession(event: Extract<AgentEvent, { type: "system" }>): void {
+  beginNoticeSession(event: Extract<AgentEvent, { type: "system" }>): boolean {
+    if (this.progress) {
+      const accepted = this.progress.acceptThreadSystemObservation(event);
+      event.publicationId = accepted.publicationId;
+      return true;
+    }
     this.messages.beginNoticeSession(event.threadId, event.systemNotice?.sessionId);
+    return false;
   }
 
   /** Start the deterministic reliability harness parent turn with its durable user message. */

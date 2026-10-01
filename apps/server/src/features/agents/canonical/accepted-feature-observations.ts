@@ -14,7 +14,7 @@ import type { StoredTask } from "../orchestration/persistence/task-repo.js";
 import type { TaskToolWriteIntent } from "../tasks/task-tool-intent-reducer.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import type { CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
-import { prepareAcceptedSystemObservation, type AcceptedSystemObservation } from "./accepted-system-observation.js";
+import { prepareAcceptedSystemObservation, prepareAcceptedThreadSystemObservation, type AcceptedSystemObservation } from "./accepted-system-observation.js";
 import { matchesCodexSystemIntents } from "./codex-system-intents.js";
 
 const MAX_FEATURE_BYTES = 2 * 1024 * 1024;
@@ -112,9 +112,38 @@ function assertContextMetric(value: number | undefined, minimum: number, name: s
 }
 
 type PreparationInput = Parameters<typeof prepareAcceptedFeatureObservations>[0];
+type SystemFeatureInput = Omit<PreparationInput, "operation"> & {
+  readonly operation: Pick<ExecutionSemanticOperation, "operationId" | "execution">;
+};
 type PlanPreparation = Pick<AcceptedFeatureObservations, "events" | "planOutput" | "planRecords" | "planGenerated">;
 
-function validateContext(input: PreparationInput): void {
+/** Assign session notice identity, deduplication and expiry on the retained conversation stream. */
+export function prepareAcceptedThreadSystemFeatures(input: SystemFeatureInput & {
+  readonly event: Extract<AgentEvent, { type: "system" }>;
+}): AcceptedFeatureObservations {
+  validateContext(input);
+  if (input.event.turnExecutionId !== undefined && input.event.turnExecutionId !== input.turn.executionId) {
+    throw new Error("Thread system observation has conflicting source execution ownership");
+  }
+  const observation = prepareAcceptedThreadSystemObservation({ operationId: input.operation.operationId,
+    threadId: input.thread.id, providerId: input.thread.providerId, event: input.event,
+    acceptedAt: input.acceptedAt, messageSequence: input.messageSequence });
+  const notices = prepareNoticeObservation(input, observation);
+  const events: CanonicalAgentEventDraft[] = [];
+  if (notices.observation.message) events.push(noticeMessageEvent(input, notices.observation.message));
+  if (notices.expiredIds.length) events.push(itemEvent(input,
+    featureItem(input, `notice-status:${uuidv5(input.operation.operationId, uuidv5.URL)}`, "system",
+      { projection: "noticeStatus", expiredNoticeMessageIds: notices.expiredIds })));
+  const features = advanceSystemEffects({ events, publications: [{ event: notices.observation.event, after: "writer" }] },
+    notices.observation, notices.expiredIds);
+  assertStorageMetadata(features, { events: [] });
+  if (events.length > MAX_FEATURE_EVENTS || Buffer.byteLength(JSON.stringify(events)) > MAX_FEATURE_BYTES) {
+    throw new Error("Accepted thread system observations exceed their retention limit");
+  }
+  return features;
+}
+
+function validateContext(input: SystemFeatureInput): void {
   const { execution, operationId } = input.operation;
   AgentEventIdSchema.parse(operationId);
   CanonicalTimestampSchema.parse(input.acceptedAt);
@@ -202,7 +231,7 @@ function advanceSystemEffects(result: AcceptedFeatureObservations, observation: 
   };
 }
 
-function prepareNoticeObservation(input: PreparationInput, observation: AcceptedSystemObservation): {
+function prepareNoticeObservation(input: SystemFeatureInput, observation: AcceptedSystemObservation): {
   observation: AcceptedSystemObservation; expiredIds: string[];
 } {
   const event = observation.event;
@@ -223,7 +252,7 @@ function prepareNoticeObservation(input: PreparationInput, observation: Accepted
   return { observation, expiredIds: prunableNoticeIds(notices, observation.message) };
 }
 
-function acceptedNotices(input: PreparationInput, selectedSessionOnly = true): Message[] {
+function acceptedNotices(input: SystemFeatureInput, selectedSessionOnly = true): Message[] {
   const items = Object.values(input.items).filter((item) => item.threadId === input.thread.id);
   const expired = new Set(items.flatMap((item) => item.payload.projection === "noticeStatus"
     ? expiredNoticeIdsSchema.parse(item.payload.expiredNoticeMessageIds) : []));
@@ -239,11 +268,11 @@ function acceptedNotices(input: PreparationInput, selectedSessionOnly = true): M
   return [...messages.values()].map(({ message }) => message).sort((a, b) => b.sequence - a.sequence);
 }
 
-function inSelectedNoticeSession(input: PreparationInput, message: Message): boolean {
+function inSelectedNoticeSession(input: SystemFeatureInput, message: Message): boolean {
   return message.systemNotice?.scope !== "session" || message.systemNotice.sessionId === input.currentNoticeSessionId;
 }
 
-function noticeFromItem(input: PreparationInput, item: AgentItem): Message | null {
+function noticeFromItem(input: SystemFeatureInput, item: AgentItem): Message | null {
   if (item.payload.projection !== "message") return null;
   const message = MessageSchema().parse(item.payload.message);
   if (message.role !== "system" || !message.systemNotice) return null;
@@ -265,7 +294,7 @@ function prunableNoticeIds(notices: readonly Message[], message: Message): strin
     && notice.systemNotice.sessionId === metadata.sessionId).slice(19).map((notice) => notice.id) : [];
 }
 
-function noticeMessageEvent(input: PreparationInput, message: Message): CanonicalAgentEventDraft {
+function noticeMessageEvent(input: SystemFeatureInput, message: Message): CanonicalAgentEventDraft {
   const original = input.items[`message:${message.id}`];
   const id = original && original.turnId !== input.turn.id
     ? `message-update:${uuidv5(`${input.operation.operationId}:${message.id}`, uuidv5.URL)}` : `message:${message.id}`;
@@ -384,13 +413,13 @@ function validatedPriorPlan(input: PreparationInput, value: unknown): PlanRecord
   return plan;
 }
 
-function featureItem(input: PreparationInput, id: string, kind: AgentItem["kind"],
+function featureItem(input: SystemFeatureInput, id: string, kind: AgentItem["kind"],
   payload: AgentItem["payload"], createdAt = input.acceptedAt): AgentItem {
   return AgentItemSchema.parse({ id, threadId: input.thread.id, turnId: input.turn.id, kind,
     providerIdentities: input.turn.providerIdentities, payload, createdAt, updatedAt: input.acceptedAt });
 }
 
-function itemEvent(input: PreparationInput, item: AgentItem): CanonicalAgentEventDraft {
+function itemEvent(input: SystemFeatureInput, item: AgentItem): CanonicalAgentEventDraft {
   const fingerprint = NodeCrypto.createHash("sha256").update(JSON.stringify(item.payload)).digest("hex");
   return { eventId: uuidv5(`${input.operation.operationId}:feature:${item.id}:${fingerprint}`, uuidv5.URL),
     routing: { ...input.operation.execution, itemId: item.id },

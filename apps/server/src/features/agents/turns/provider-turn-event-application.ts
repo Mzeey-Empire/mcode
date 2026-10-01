@@ -32,9 +32,10 @@ import {
 } from "../orchestration/turn-runtime-event-control.js";
 import { AgentEventPublicationRegistry } from "../orchestration/agent-event-publication-registry.js";
 
+const OWNED_SYSTEM_PUBLICATION = Symbol("ownedSystemPublication");
 const OWNED_LATE_HOOK_COMPLETION = Symbol("ownedLateHookCompletion");
 
-type EventApplicationResult = boolean | typeof OWNED_LATE_HOOK_COMPLETION | undefined;
+type EventApplicationResult = boolean | typeof OWNED_SYSTEM_PUBLICATION | typeof OWNED_LATE_HOOK_COMPLETION | undefined;
 
 /** Applies normalized provider events after the runtime controller admits them in pipeline order. */
 @injectable()
@@ -260,7 +261,12 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     if (preparation !== undefined) return preparation;
     this.recordDiagnostic(input, event);
     const accepted = this.applyEvent(input.providerId, event, publish);
+    return this.completeEventApplication(event, publish, terminal, accepted);
+  }
+
+  private completeEventApplication(event: AgentEvent, publish: boolean, terminal: boolean, accepted: EventApplicationResult): boolean {
     if (accepted === false) return true;
+    if (accepted === OWNED_SYSTEM_PUBLICATION) return true;
     if (terminal && accepted !== true) return false;
     if (!this.checkpointNarrative(event, publish)) return false;
     if (publish && accepted === OWNED_LATE_HOOK_COMPLETION) return true;
@@ -536,10 +542,12 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return true;
   }
 
-  private applySystem(providerId: ProviderId, event: Extract<AgentEvent, { type: "system" }>): boolean {
-    if (event.subtype === "provider.session.started") this.conversationProjection.beginNoticeSession(event);
+  private applySystem(providerId: ProviderId, event: Extract<AgentEvent, { type: "system" }>): EventApplicationResult {
+    if (event.subtype === "provider.session.started" && this.conversationProjection.beginNoticeSession(event)) {
+      return OWNED_SYSTEM_PUBLICATION;
+    }
     if (event.subtype.startsWith("provider.notice.") && event.message) {
-      this.conversationProjection.persistSystemNotice(event);
+      if (this.conversationProjection.persistSystemNotice(event)) return OWNED_SYSTEM_PUBLICATION;
     }
     this.sessionCursors.apply(providerId, event, this.runtime.snapshot(event.threadId)?.turnExecutionId ?? undefined);
     return true;

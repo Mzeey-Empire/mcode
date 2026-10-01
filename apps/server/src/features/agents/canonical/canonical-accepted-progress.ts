@@ -6,6 +6,7 @@ import {
   type CanonicalAgentProgressRecovery, type CanonicalAgentRevision, type TurnSavingStatus,
   type CanonicalAgentEventEnvelope,
   type Message, type CanonicalAgentProgressFrame,
+  type AgentEvent,
   type CanonicalSubagentRosterRequest, type CanonicalSubagentStopRequest, type CollaborationObservationChange,
   AgentEventSchema,
   MessageSchema, HookExecutionRecordSchema,
@@ -33,7 +34,7 @@ import type { SubagentStopTarget } from "../collaboration/subagent-lifecycle-dur
 import type { CreateHookExecutionInput } from "../events/persistence/hook-execution-repo.js";
 import * as NodeUtil from "node:util";
 import { z } from "zod";
-import { prepareAcceptedFeatureObservations, type AcceptedFeatureObservations, type AcceptedChildPublicationOwner } from "./accepted-feature-observations.js";
+import { prepareAcceptedFeatureObservations, prepareAcceptedThreadSystemFeatures, type AcceptedFeatureObservations, type AcceptedChildPublicationOwner } from "./accepted-feature-observations.js";
 import type { AcceptedFeatureWriteMetadata } from "./accepted-feature-write.js";
 import type { StoredTask } from "../orchestration/persistence/task-repo.js";
 
@@ -386,6 +387,53 @@ export class CanonicalAcceptedProgress {
     return acceptedEnvelopes(admission.batch);
   }
 
+  /** Publish session diagnostics before saving while retaining their genuine source ownership. */
+  acceptThreadSystemObservation(input: Extract<AgentEvent, { type: "system" }>): Extract<AgentEvent, { type: "system" }> {
+    this.assertOpen();
+    const event = AgentEventSchema().parse(input);
+    if (event.type !== "system") throw new Error("Thread system admission requires a system event");
+    const thread = this.thread(event.threadId);
+    const { turn, execution, phase, nativeCursor } = this.threadSystemExecution(thread, event);
+    const modelThread = thread.state.threads[event.threadId] ?? this.canonical.loadThreadForAcceptance(event.threadId);
+    if (!modelThread) throw new Error("Thread system admission requires an existing canonical conversation");
+    const operationId = `thread-system:${NodeCrypto.randomUUID()}`;
+    const features = prepareAcceptedThreadSystemFeatures({ operation: { operationId, execution },
+      thread: modelThread, turn, items: thread.state.items, acceptedAt: new Date().toISOString(),
+      messageSequence: thread.messageSequence, compaction: { active: thread.features.compacting },
+      currentNoticeSessionId: thread.features.noticeSessionId, event });
+    const published = features.publications[0]?.event;
+    if (published?.type !== "system") throw new Error("Thread system preparation lost its publication");
+    const publicationId = String(thread.publicationSequence + 1);
+    const drafts = [...features.events, { eventId: `${operationId}:publication`, routing: execution,
+      sourceProviderId: modelThread.providerId, sourceIdentities: [],
+      payload: { type: "publication.recorded" as const, publicationId, event: { ...published, publicationId } } }];
+    this.acceptAuxiliary(thread, operationId, execution, drafts, phase, nativeCursor, featureWriteMetadata(features));
+    this.installFeatureState(thread, features);
+    thread.publicationSequence += 1;
+    return { ...published, publicationId };
+  }
+
+  private threadSystemExecution(thread: ProgressThread, event: Extract<AgentEvent, { type: "system" }>) {
+    const head = thread.head;
+    if (head && (event.turnExecutionId === undefined || event.turnExecutionId === head.execution.executionId)) {
+      const turn = thread.state.turns[head.execution.turnId];
+      if (!turn) throw new Error("Thread system admission lost its retained canonical turn");
+      return { turn, execution: head.execution, phase: head.phase, nativeCursor: head.nativeCursor };
+    }
+    const { turn, execution } = this.savedThreadSystemExecution(event);
+    const checkpoint = this.canonical.loadCheckpoint(execution.executionId);
+    return { turn, execution, phase: checkpoint?.phase ?? "finalized", nativeCursor: checkpoint?.nativeCursor ?? null };
+  }
+
+  private savedThreadSystemExecution(event: Extract<AgentEvent, { type: "system" }>) {
+    const turn = event.turnExecutionId ? this.canonical.loadTurnByExecution(event.turnExecutionId)
+      : this.canonical.loadLatestTurn(event.threadId);
+    if (!turn?.executionId || turn.threadId !== event.threadId) {
+      throw new Error("Thread system admission requires an existing canonical turn belonging to its thread");
+    }
+    return { turn, execution: { threadId: turn.threadId, turnId: turn.id, executionId: turn.executionId } };
+  }
+
   /** Server lifecycle publications enter the same stream behind any unsaved provider suffix. */
   acceptSynthesizedPublications(threadId: string, input: readonly Record<string, unknown>[]): readonly AcceptedCanonicalAgentEventEnvelope[] {
     this.assertOpen();
@@ -447,7 +495,7 @@ export class CanonicalAcceptedProgress {
     return true;
   }
 
-  /** Bind exact active-execution shutdown after a permanent save or receipt-processing failure. */
+  /** Bind exact active-execution shutdown when saved receipts or their capacity cannot be trusted. */
   bindPermanentFailure(callback: (execution: ExecutionIdentity, error: Error) => Promise<void>): void {
     this.onPermanentFailure = callback;
   }
@@ -775,7 +823,8 @@ export class CanonicalAcceptedProgress {
       executionId: batch.execution.executionId, operationId: batch.operationId, error: describeSaveFailure(failure.error),
       exhausted: failure.exhausted, queue: this.depth() });
     this.publishSaving(batch.execution.threadId);
-    if (failure.exhausted) await this.stopFailedOwner(thread, failure.error);
+    // Disk failure retains the accepted stream; invalid receipt application still invalidates execution ownership.
+    if (failure.exhausted && source === "receipt") await this.stopFailedOwner(thread, failure.error);
   }
 
   private async stopFailedOwner(thread: ProgressThread, error: Error): Promise<void> {
