@@ -30,11 +30,11 @@ import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import {
   CANONICAL_AGENT_CONTROL_EVENT_RESERVE,
-  CANONICAL_SYNTHESIZED_EXECUTION_ID,
   CanonicalAgentStore as CanonicalAgentBoundary,
   type CanonicalAgentEventDraft,
 } from "../canonical-agent-store.js";
 import { CodexCollaborationEventAdapter } from "../../collaboration/adapters/codex-collaboration-event-adapter.js";
+import { syntheticThreadExecutionId } from "../canonical-thread-execution.js";
 
 const THREAD_ID = "thread-1";
 const TURN_ID = "turn-1";
@@ -3264,11 +3264,48 @@ describe("CanonicalAgentBoundary", () => {
 
     // Synthesized commits hold no execution checkpoint; their events still replay through
     // the thread-scoped delta channel a reconnecting client consumes.
-    expect(sink.loadCheckpoint(CANONICAL_SYNTHESIZED_EXECUTION_ID)).toBeNull();
+    expect(sink.loadCheckpoint(syntheticThreadExecutionId(THREAD_ID))).toBeNull();
     const recovery = sink.recoverThread(THREAD_ID, { conversationRevision: 0, rosterRevision: 0 });
     const recovered = recovery.mode === "delta" ? recovery.events : [];
     expect(recovered.filter((envelope) => envelope.payload.type === "publication.recorded"))
       .toHaveLength(2);
     expect(published).toHaveBeenCalled();
+  });
+
+  it("keeps synthesized sequence and execution identities separate across threads after reopening", () => {
+    startCanonicalParent(sink, db);
+    const otherThreadId = "other-synthesized-thread";
+    db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(otherThreadId, "workspace-1", "Other thread", "main", "codex", NOW, NOW);
+    db.prepare(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, root_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(otherThreadId, "workspace-1", otherThreadId, "codex", "Idle", NOW, NOW);
+
+    const first = sink.recordSynthesizedPublications(THREAD_ID, [{ type: "goalUpdated", threadId: THREAD_ID }]);
+    const other = sink.recordSynthesizedPublications(otherThreadId, [{ type: "goalUpdated", threadId: otherThreadId }]);
+    expect(first).toHaveLength(1);
+    expect(other).toHaveLength(1);
+    expect(first[0]).toMatchObject({ acceptedSequence: 1,
+      routing: { threadId: THREAD_ID, executionId: syntheticThreadExecutionId(THREAD_ID) } });
+    expect(other[0]).toMatchObject({ acceptedSequence: 1,
+      routing: { threadId: otherThreadId, executionId: syntheticThreadExecutionId(otherThreadId) } });
+    expect(syntheticThreadExecutionId(THREAD_ID)).not.toBe(syntheticThreadExecutionId(otherThreadId));
+    expect(first[0]?.routing).not.toHaveProperty("turnId");
+    expect(other[0]?.routing).not.toHaveProperty("turnId");
+
+    const reopened = new CanonicalAgentBoundary(db, published);
+    const next = reopened.recordSynthesizedPublications(otherThreadId, [{ type: "goalCleared", threadId: otherThreadId }]);
+    expect(next[0]).toMatchObject({ acceptedSequence: 2,
+      routing: { threadId: otherThreadId, executionId: syntheticThreadExecutionId(otherThreadId) },
+      payload: { type: "publication.recorded", publicationId: "2" } });
+    expect(reopened.loadCheckpoint(syntheticThreadExecutionId(THREAD_ID))).toBeNull();
+    expect(reopened.loadCheckpoint(syntheticThreadExecutionId(otherThreadId))).toBeNull();
+    expect(reopened.loadTurnByExecution(syntheticThreadExecutionId(THREAD_ID))).toBeNull();
+    expect(reopened.loadTurnByExecution(syntheticThreadExecutionId(otherThreadId))).toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?")
+      .get(syntheticThreadExecutionId(THREAD_ID))).toEqual({ count: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?")
+      .get(syntheticThreadExecutionId(otherThreadId))).toEqual({ count: 2 });
   });
 });

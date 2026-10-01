@@ -6,10 +6,14 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import {
   canonicalAgentEvents,
+  canonicalAgentTurns,
   canonicalWriterOperationReceipts,
+  canonicalWriterThreadOperationReceipts,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "./canonical-agent-writer-protocol.js";
 import { StoredCanonicalProviderProjectionSchema } from "./canonical-provider-projection.js";
+import { CanonicalAcceptedWriteInputSchema } from "./canonical-accepted-write.js";
+import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 
 type WriteRequest = Extract<CanonicalWriterRequest, {
   kind: "commit" | "append-accepted" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery";
@@ -18,6 +22,9 @@ type AtomicWriteRequest = Extract<WriteRequest, { kind: "commit" | "append-accep
 type WriteResponse = Extract<CanonicalWriterResponse, {
   kind: "committed" | "accepted-appended" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified";
 }>;
+
+type ReceiptOwner = { kind: "execution"; executionId: string }
+  | { kind: "thread"; executionId: string; threadId: string };
 
 const storedReceiptSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("accepted-appended"), result: z.object({
@@ -65,19 +72,15 @@ export class CanonicalAgentWriterReceipts {
 
   execute(request: AtomicWriteRequest, apply: () => WriteResponse): WriteResponse {
     const inputHash = fingerprint(request);
+    const owner = receiptOwner(request);
     // Reserve the writer before reading. A peer commit otherwise makes this WAL snapshot impossible to upgrade.
     return this.db.transaction(() => {
-      const existing = this.loadReceipt(request);
+      this.assertOwnership(owner);
+      const existing = this.loadReceipt(owner, request.operationId);
       if (existing) return this.replayMatching(request, inputHash, existing);
-      this.assertCapacity(request.executionId);
+      this.assertCapacity(owner);
       const response = structuredClone(apply());
-      this.orm.insert(canonicalWriterOperationReceipts).values({
-        executionId: request.executionId,
-        operationId: request.operationId,
-        kind: request.kind,
-        inputHash,
-        receiptJson: compactReceipt(response),
-      }).run();
+      this.insertReceipt(owner, request, inputHash, response);
       return response;
     }).immediate();
   }
@@ -88,43 +91,79 @@ export class CanonicalAgentWriterReceipts {
     apply: () => Promise<WriteResponse>,
   ): Promise<WriteResponse> {
     const inputHash = fingerprint(request);
-    const existing = this.loadReceipt(request);
+    const owner = receiptOwner(request);
+    this.assertOwnership(owner);
+    const existing = this.loadReceipt(owner, request.operationId);
     if (existing) return this.replayMatching(request, inputHash, existing);
-    this.assertCapacity(request.executionId);
+    this.assertCapacity(owner);
     const response = await apply();
     if (response.kind !== "parent-narrative-recovery-recorded") {
       throw new Error("Canonical writer returned the wrong recovery response");
     }
     if (!response.receipt.recorded) return response;
     return this.db.transaction(() => {
-      const committed = this.loadReceipt(request);
+      this.assertOwnership(owner);
+      const committed = this.loadReceipt(owner, request.operationId);
       if (committed) return this.replayMatching(request, inputHash, committed);
-      this.assertCapacity(request.executionId);
-      this.orm.insert(canonicalWriterOperationReceipts).values({
-        executionId: request.executionId,
-        operationId: request.operationId,
-        kind: request.kind,
-        inputHash,
-        receiptJson: compactReceipt(response),
-      }).run();
+      this.assertCapacity(owner);
+      this.insertReceipt(owner, request, inputHash, response);
       return response;
     }).immediate();
   }
 
   /** Removes a receipt only after the caller has completed its dependent publication or journal discard. */
   acknowledge(executionId: string, operationId: string): void {
-    this.orm.delete(canonicalWriterOperationReceipts).where(and(
-      eq(canonicalWriterOperationReceipts.executionId, executionId),
-      eq(canonicalWriterOperationReceipts.operationId, operationId),
-    )).run();
+    this.db.transaction(() => {
+      const turnReceipt = this.loadReceipt({ kind: "execution", executionId }, operationId);
+      const threadReceipt = this.orm.select().from(canonicalWriterThreadOperationReceipts).where(and(
+        eq(canonicalWriterThreadOperationReceipts.executionId, executionId),
+        eq(canonicalWriterThreadOperationReceipts.operationId, operationId),
+      )).get();
+      if (turnReceipt && threadReceipt) throw new CanonicalWriterOperationConflict("Canonical writer receipt has ambiguous ownership");
+      if (threadReceipt) {
+        const owner: ReceiptOwner = { kind: "thread", executionId, threadId: threadReceipt.threadId };
+        if (syntheticThreadExecutionId(owner.threadId) !== executionId) throw new Error("Canonical thread receipt execution does not match its thread");
+        this.assertOwnership(owner);
+        this.deleteReceipt(canonicalWriterThreadOperationReceipts, executionId, operationId);
+      } else if (turnReceipt) {
+        this.assertOwnership({ kind: "execution", executionId });
+        this.deleteReceipt(canonicalWriterOperationReceipts, executionId, operationId);
+      }
+    }).immediate();
   }
 
-  private loadReceipt(request: WriteRequest) {
-    return this.orm.select().from(canonicalWriterOperationReceipts)
+  private deleteReceipt(table: typeof canonicalWriterOperationReceipts | typeof canonicalWriterThreadOperationReceipts,
+    executionId: string, operationId: string): void {
+    this.orm.delete(table).where(and(eq(table.executionId, executionId), eq(table.operationId, operationId))).run();
+  }
+
+  private loadReceipt(owner: ReceiptOwner, operationId: string) {
+    const table = owner.kind === "thread" ? canonicalWriterThreadOperationReceipts : canonicalWriterOperationReceipts;
+    return this.orm.select({ kind: table.kind, inputHash: table.inputHash, receiptJson: table.receiptJson }).from(table)
       .where(and(
-        eq(canonicalWriterOperationReceipts.executionId, request.executionId),
-        eq(canonicalWriterOperationReceipts.operationId, request.operationId),
+        eq(table.executionId, owner.executionId),
+        eq(table.operationId, operationId),
+        owner.kind === "thread" ? eq(canonicalWriterThreadOperationReceipts.threadId, owner.threadId) : undefined,
       )).get();
+  }
+
+  private assertOwnership(owner: ReceiptOwner): void {
+    const table = owner.kind === "thread" ? canonicalAgentTurns : canonicalWriterThreadOperationReceipts;
+    if (this.orm.select({ executionId: table.executionId }).from(table)
+      .where(eq(table.executionId, owner.executionId)).limit(1).get()) {
+      throw new CanonicalWriterOperationConflict("Canonical writer receipt execution has conflicting ownership");
+    }
+  }
+
+  private insertReceipt(owner: ReceiptOwner, request: WriteRequest, inputHash: string, response: WriteResponse): void {
+    this.assertOwnership(owner);
+    const values = { executionId: owner.executionId, operationId: request.operationId,
+      kind: request.kind, inputHash, receiptJson: compactReceipt(response) };
+    if (owner.kind === "thread") {
+      this.orm.insert(canonicalWriterThreadOperationReceipts).values({ ...values, threadId: owner.threadId }).run();
+    } else {
+      this.orm.insert(canonicalWriterOperationReceipts).values(values).run();
+    }
   }
 
   private replayMatching(request: WriteRequest, inputHash: string, existing: NonNullable<ReturnType<CanonicalAgentWriterReceipts["loadReceipt"]>>): WriteResponse {
@@ -134,9 +173,10 @@ export class CanonicalAgentWriterReceipts {
     return this.replay(request, existing.receiptJson);
   }
 
-  private assertCapacity(executionId: string): void {
-    const outstanding = this.orm.select({ count: count() }).from(canonicalWriterOperationReceipts)
-      .where(eq(canonicalWriterOperationReceipts.executionId, executionId)).get()?.count ?? 0;
+  private assertCapacity(owner: ReceiptOwner): void {
+    const table = owner.kind === "thread" ? canonicalWriterThreadOperationReceipts : canonicalWriterOperationReceipts;
+    const outstanding = this.orm.select({ count: count() }).from(table)
+      .where(eq(table.executionId, owner.executionId)).get()?.count ?? 0;
     if (outstanding >= MAX_UNACKNOWLEDGED_RECEIPTS_PER_EXECUTION) {
       throw new CanonicalWriterReceiptCapacity("Canonical writer receipt capacity reached");
     }
@@ -168,9 +208,10 @@ export class CanonicalAgentWriterReceipts {
       };
     }
     if (stored.kind === "accepted-appended") {
+      if (request.kind !== "append-accepted") throw new Error("Canonical writer accepted receipt has the wrong operation kind");
       const { eventIds, ...result } = stored.result;
       return { ...correlation, kind: "accepted-appended", result: { ...result,
-        events: eventIds.map((id) => this.loadEvent(request.executionId, id)) } };
+        events: eventIds.map((id) => this.loadEvent(request.executionId, id, request.input.execution.threadId)) } };
     }
     if (stored.kind === "parent-narrative-recovery-recorded") {
       return { ...correlation, kind: stored.kind, receipt: stored.receipt };
@@ -178,16 +219,41 @@ export class CanonicalAgentWriterReceipts {
     return { ...correlation, kind: stored.kind, receipt: stored.receipt };
   }
 
-  private loadEvent(executionId: string, eventId: string) {
+  private loadEvent(executionId: string, eventId: string, threadId?: string) {
     const row = this.orm.select({ envelopeJson: canonicalAgentEvents.envelopeJson })
       .from(canonicalAgentEvents)
       .where(and(
         eq(canonicalAgentEvents.executionId, executionId),
         eq(canonicalAgentEvents.eventId, eventId),
+        threadId === undefined ? undefined : eq(canonicalAgentEvents.threadId, threadId),
       ))
       .get();
     if (!row) throw new Error(`Canonical writer receipt event was not found: ${eventId}`);
     return CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelopeJson));
+  }
+}
+
+function receiptOwner(request: WriteRequest): ReceiptOwner {
+  if (request.kind !== "append-accepted") {
+    if (request.input.executionId !== request.executionId) throw new Error("Canonical writer execution mismatch");
+    if (request.kind === "commit") assertProviderExecution(request.input.threadId, request.executionId);
+    return { kind: "execution", executionId: request.executionId };
+  }
+  const { execution } = CanonicalAcceptedWriteInputSchema.parse(request.input);
+  if (execution.executionId !== request.executionId) throw new Error("Canonical writer execution mismatch");
+  if (execution.turnId !== "") {
+    assertProviderExecution(execution.threadId, execution.executionId);
+    return { kind: "execution", executionId: request.executionId };
+  }
+  if (syntheticThreadExecutionId(execution.threadId) !== execution.executionId) {
+    throw new Error("Canonical thread receipt execution does not match its thread");
+  }
+  return { kind: "thread", executionId: request.executionId, threadId: execution.threadId };
+}
+
+function assertProviderExecution(threadId: string, executionId: string): void {
+  if (executionId === syntheticThreadExecutionId(threadId)) {
+    throw new CanonicalWriterOperationConflict("Canonical writer receipt execution has conflicting ownership");
   }
 }
 

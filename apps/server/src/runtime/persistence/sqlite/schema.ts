@@ -5,7 +5,7 @@
 
 import { sql } from "drizzle-orm";
 import { asc, desc } from "drizzle-orm";
-import { type AnySQLiteColumn, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { type AnySQLiteColumn, check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestampDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -754,6 +754,25 @@ export const canonicalWriterOperationReceipts = sqliteTable(
     createdAt: text("created_at").notNull().default(timestampDefault),
   },
   (table) => [primaryKey({ columns: [table.executionId, table.operationId] })],
+);
+
+/** Thread-owned receipts replay publications without inventing a canonical turn. */
+export const canonicalWriterThreadOperationReceipts = sqliteTable(
+  "canonical_writer_thread_operation_receipts",
+  {
+    executionId: text("execution_id").notNull(),
+    threadId: text("thread_id").notNull().references(() => canonicalAgentThreads.id, { onDelete: "cascade" }),
+    operationId: text("operation_id").notNull(),
+    kind: text("kind").notNull(),
+    inputHash: text("input_hash").notNull(),
+    receiptJson: text("receipt_json").notNull(),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+  },
+  (table) => [
+    primaryKey({ columns: [table.executionId, table.operationId] }),
+    index("idx_canonical_writer_thread_receipts_thread").on(table.threadId),
+    check("canonical_writer_thread_receipts_append_only", sql`${table.kind} = 'append-accepted'`),
+  ],
 );
 
 /** Monotonic live publication identity survives execution changes and receipt pruning. */

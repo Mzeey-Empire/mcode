@@ -12,6 +12,7 @@ import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/rea
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ExecutionWorkerHandler, type ExecutionWorkCommand, type ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agent-store.js";
+import { syntheticThreadExecutionId } from "../canonical-thread-execution.js";
 import { CanonicalAgentBoundary as MainCanonicalAgentBoundary } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient, CanonicalWriterAcknowledgementCapacity } from "../canonical-agent-writer-client.js";
 import { CanonicalAcceptedProgress } from "../canonical-accepted-progress.js";
@@ -364,6 +365,116 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect(saved.map((value) => ({ id: value.eventId, position: value.progressPosition }))).toEqual(before);
   });
 
+  it("publishes and saves thread-scoped synthesized observations without a turn", async () => {
+    await writer.whenReady();
+    const boundary = new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {});
+    boundary.bindAcceptedSynthesizedPublications((threadId, events) => progress.acceptSynthesizedPublications(threadId, events));
+    const observed = boundary.recordSynthesizedPublications(execution.threadId, [{
+      type: "system", threadId: execution.threadId, subtype: "goal.paused", message: "Paused",
+    }]);
+
+    expect(observed).toHaveLength(2);
+    expect(observed.map((event) => event.payload)).toContainEqual({
+      type: "publication.recorded", publicationId: "1", event: {
+        type: "system", threadId: execution.threadId, subtype: "goal.paused", message: "Paused", publicationId: "1",
+      },
+    });
+    for (const event of observed) {
+      expect(event.routing).toEqual({ threadId: execution.threadId, executionId: syntheticThreadExecutionId(execution.threadId) });
+    }
+    expect(frames().flatMap((frame) => frame.phase === "accepted" ? frame.events : [])).toEqual(observed);
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const saved = frames().flatMap((frame) => frame.phase === "saved" ? frame.events : []);
+    expect(saved.map((event) => ({ eventId: event.eventId, routing: event.routing, payload: event.payload })))
+      .toEqual(observed.map((event) => ({ eventId: event.eventId, routing: event.routing, payload: event.payload })));
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_turns").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_ingest_checkpoints").get()).toEqual({ count: 0 });
+  });
+
+  it("keeps headless conversation sequences separate across an accepted-owner restart", async () => {
+    await writer.whenReady();
+    const otherThreadId = "second-headless-thread";
+    const threadIds = [execution.threadId, otherThreadId];
+    insertThread(otherThreadId);
+    holdWrites();
+    for (const threadId of threadIds) {
+      const accepted = progress.acceptSynthesizedPublications(threadId, [{ type: "system", threadId,
+        subtype: "goal.paused", message: "Paused" }]);
+      expect(accepted.map((event) => event.acceptedSequence)).toEqual([1, 2]);
+      expect(accepted.map((event) => event.routing)).toEqual([
+        { threadId, executionId: syntheticThreadExecutionId(threadId) },
+        { threadId, executionId: syntheticThreadExecutionId(threadId) },
+      ]);
+    }
+    expect(syntheticThreadExecutionId(execution.threadId)).not.toBe(syntheticThreadExecutionId(otherThreadId));
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    await progress.close();
+    progress = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
+
+    for (const threadId of threadIds) {
+      const accepted = progress.acceptSynthesizedPublications(threadId, [{ type: "system", threadId,
+        subtype: "goal.resumed", message: "Resumed" }]);
+      expect(accepted).toHaveLength(1);
+      expect(accepted[0]).toMatchObject({ acceptedSequence: 3,
+        routing: { threadId, executionId: syntheticThreadExecutionId(threadId) },
+        payload: { type: "publication.recorded", publicationId: "2", event: { subtype: "goal.resumed", message: "Resumed" } } });
+    }
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    for (const threadId of threadIds) {
+      const saved = frames().flatMap((frame) => frame.phase === "saved" && frame.threadId === threadId ? frame.events : []);
+      expect(saved.map((event) => event.acceptedSequence)).toEqual([1, 2, 3]);
+    }
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_turns").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_ingest_checkpoints").get()).toEqual({ count: 0 });
+  });
+
+  it("keeps a higher saved publication head when an older assigned batch commits", async () => {
+    await writer.whenReady();
+    holdWrites();
+    const accepted = progress.acceptSynthesizedPublications(execution.threadId, [{ type: "system", threadId: execution.threadId,
+      subtype: "goal.paused", message: "Paused" }]);
+    expect(accepted.at(-1)?.payload).toMatchObject({ type: "publication.recorded", publicationId: "1" });
+    db.prepare("INSERT INTO canonical_writer_live_publication_heads (thread_id, last_sequence) VALUES (?, ?)")
+      .run(execution.threadId, 50);
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?").get(execution.threadId))
+      .toEqual({ last_sequence: 50 });
+    await progress.close();
+    progress = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
+    const resumed = progress.acceptSynthesizedPublications(execution.threadId, [{ type: "system", threadId: execution.threadId,
+      subtype: "goal.resumed", message: "Resumed" }]);
+    expect(resumed.at(-1)?.payload).toMatchObject({ type: "publication.recorded", publicationId: "51" });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?").get(execution.threadId))
+      .toEqual({ last_sequence: 51 });
+  });
+
+  it.each([
+    { publicationId: "01", failureName: "ZodError", failureMessage: expect.stringContaining('"publicationId"') },
+    { publicationId: "9007199254740992", failureName: "Error",
+      failureMessage: "Canonical writer write-failed: Accepted publication requires a positive safe sequence" },
+  ])("rolls back events and the publication head for invalid assigned ID $publicationId", async ({ publicationId, failureName, failureMessage }) => {
+    await writer.whenReady();
+    const append = writer.appendAccepted.bind(writer);
+    vi.spyOn(writer, "appendAccepted").mockImplementationOnce((operationId, input) => append(operationId, { ...input,
+      events: input.events.map((event) => event.payload.type === "publication.recorded"
+        ? { ...event, payload: { ...event.payload, publicationId } } : event),
+    }));
+    progress.acceptSynthesizedPublications(execution.threadId, [{ type: "system", threadId: execution.threadId,
+      subtype: "goal.paused", message: "Paused" }]);
+    await expect.poll(() => progress.savingStatuses(execution.threadId)[0]).toMatchObject({ mode: "saving-failed",
+      failure: { name: failureName, message: failureMessage } });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_live_publication_heads").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_thread_operation_receipts").get()).toEqual({ count: 0 });
+    expect(progress.retry(execution.threadId)).toBe(true);
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?").get(execution.threadId))
+      .toEqual({ last_sequence: 1 });
+  });
+
   it("orders synthesized observations behind a held provider suffix without consuming its next ordinal", async () => {
     await send(1, start("codex"));
     holdWrites();
@@ -383,6 +494,12 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(recovery().savedThrough).toBe(before.acceptedThrough);
+    const publications = frames().flatMap((frame) => frame.phase === "accepted" ? frame.events : [])
+      .filter((event) => event.payload.type === "publication.recorded");
+    const latest = publications.at(-1);
+    if (latest?.payload.type !== "publication.recorded") throw new Error("Expected accepted publication head");
+    expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?").get(execution.threadId))
+      .toEqual({ last_sequence: Number(latest.payload.publicationId) });
   });
 
   it("admits an external late hook behind its unsaved terminal and preserves that original correlation on a later turn", async () => {
@@ -438,6 +555,59 @@ describe("accepted parent progress with the actual SQLite writer", () => {
       .toEqual({ id: plan.id, message_id: plan.messageId, version: plan.version, status: "accepted", created_at: plan.createdAt });
     expect(db.prepare("SELECT id FROM messages WHERE id = ?").get(notice.id)).toEqual({ id: notice.id });
     expect(progress.getTasks(execution.threadId)).toEqual(new (await import("../../orchestration/persistence/task-repo.js")).TaskRepo(db, databaseWriter).get(execution.threadId));
+  });
+
+  it("orders a saved plan status change under its original turn after the live owner restarts", async () => {
+    const admission = start("codex");
+    await send(1, { ...admission, parentLive: { ...admission.parentLive, precedingMessageId: `${execution.turnId}:user`, planFeature: "output" } });
+    const content = '```plan-output\n{"title":"Plan","sections":[{"id":"build","title":"Build","level":1,"content":"Build it"}]}\n```';
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: content, isFinalResponse: true })] });
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 2, "message", { content, tokens: null })] });
+    await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "turnComplete")],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const original = progress.listPlans(execution.threadId)?.[0];
+    if (!original) throw new Error("Expected saved canonical plan");
+    await progress.close();
+    progress = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
+    await progress.beforeDurableCommand(execution.threadId);
+    progress.cancelDurableCommand(execution.threadId);
+    holdWrites();
+
+    expect(progress.updatePlanStatus(original.id, "accepted")).toBe(true);
+    expect(progress.listPlans(execution.threadId)).toEqual([{ ...original, status: "accepted" }]);
+    expect(db.prepare("SELECT status FROM plans WHERE id = ?").get(original.id)).toEqual({ status: "draft" });
+    const accepted = recovery().retained;
+    expect(accepted).toHaveLength(1);
+    const event = accepted[0];
+    if (event?.payload.type !== "item.recorded") throw new Error("Expected accepted plan item");
+    expect(event.routing).toEqual({ ...execution, itemId: event.payload.item.id });
+    expect(event.payload.item.turnId).toBe(execution.turnId);
+    expect(event.payload.item.payload).toEqual({ projection: "plan", plan: { ...original, status: "accepted" } });
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT status FROM plans WHERE id = ?").get(original.id)).toEqual({ status: "accepted" });
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
+  });
+
+  it("leaves a legacy plan without canonical ownership to its existing durable repository", async () => {
+    const { PlanRepo } = await import("../../planning/persistence/plan-repo.js");
+    db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("legacy-plan-message", execution.threadId, "assistant", "Legacy plan", 1, NOW);
+    const plans = new PlanRepo(reader, databaseWriter);
+    const plan = await plans.create(execution.threadId, "legacy-plan-message", "Legacy plan", "Build", "[]", null);
+    await progress.beforeDurableCommand(execution.threadId);
+    progress.cancelDurableCommand(execution.threadId);
+
+    expect(progress.updatePlanStatus(plan.id, "accepted")).toBe(false);
+    expect(progress.depth().pending).toBe(0);
+    expect(plans.getById(plan.id)?.status).toBe("draft");
+    await plans.updateStatus(plan.id, "accepted");
+    expect(plans.getById(plan.id)?.status).toBe("accepted");
+    expect(progress.listPlans(execution.threadId)).toEqual([{ ...plan, status: "accepted" }]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_turns").get()).toEqual({ count: 0 });
   });
 
   it("retains a rejected older late hook while the current execution continues on its bounded owner", async () => {
@@ -815,6 +985,8 @@ describe("accepted parent progress with the actual SQLite writer", () => {
 
   it("reports a permanent save failure while the provider continues and retries its retained completion", async () => {
     await send(1, start("codex"));
+    const previousPublicationHead = db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?")
+      .get(execution.threadId);
     db.run("CREATE TRIGGER fail_progress BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.operation_id = 'live-lease:2' BEGIN SELECT RAISE(ABORT, 'disk checkpoint unavailable'); END");
     const failures: string[] = [];
     progress.bindPermanentFailure(async (failed, error) => {
@@ -824,6 +996,8 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 1, "textDelta", { delta: "Before failed save", isFinalResponse: true })] });
     await expect.poll(() => progress.savingStatuses(execution.threadId)[0]?.mode).toBe("saving-failed");
+    expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?").get(execution.threadId))
+      .toEqual(previousPublicationHead);
     expect(failures).toEqual([]);
     await expect(progress.beforeDurableCommand(execution.threadId)).rejects.toThrow("disk checkpoint unavailable");
     expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,

@@ -39,12 +39,15 @@ export class CanonicalAcceptedEventWrite {
   private readonly orm;
   private readonly planAnswers;
   private readonly messages;
+  private readonly advancePublicationHead;
 
   constructor(private readonly db: Database, private readonly canonical: CanonicalAgentBoundary,
     private readonly compatibility?: Pick<CanonicalExecutionSemanticWriter, "applyAcceptedCompatibility" | "confirmAcceptedCompatibility">) {
     this.orm = drizzle(db);
     this.planAnswers = new PlanQuestionAnswersRepo(db);
     this.messages = new MessageRepo(db);
+    this.advancePublicationHead = db.prepare(`INSERT INTO canonical_writer_live_publication_heads (thread_id, last_sequence)
+      VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET last_sequence = MAX(last_sequence, excluded.last_sequence)`);
   }
 
   /** Called inside the receipt transaction so the stream head and events commit together. */
@@ -60,6 +63,7 @@ export class CanonicalAcceptedEventWrite {
       ...(parsed.execution.turnId === "" ? { persistCheckpoint: false } : {}),
     });
     if (result.outcome !== "committed") throw new Error("Accepted progress did not append a new durable prefix");
+    this.persistPublicationHead(parsed);
     this.persistFeatures(input.execution.threadId, parsed.features);
     if (parsed.planAnswer) {
       if (parsed.planAnswer.thread_id !== input.execution.threadId || parsed.planAnswer.role !== "assistant") {
@@ -90,6 +94,19 @@ export class CanonicalAcceptedEventWrite {
 
   private persistFeatures(threadId: string, metadata: unknown): void {
     if (metadata !== undefined) persistAcceptedFeatureWrite(this.db, threadId, metadata);
+  }
+
+  private persistPublicationHead(input: z.infer<typeof CanonicalAcceptedWriteInputSchema>): void {
+    let lastSequence = 0;
+    for (const { payload } of input.events) {
+      if (payload.type !== "publication.recorded") continue;
+      const sequence = Number(payload.publicationId);
+      if (!/^[1-9]\d*$/.test(payload.publicationId) || !Number.isSafeInteger(sequence)) {
+        throw new Error("Accepted publication requires a positive safe sequence");
+      }
+      lastSequence = Math.max(lastSequence, sequence);
+    }
+    if (lastSequence > 0) this.advancePublicationHead.run(input.execution.threadId, lastSequence);
   }
 
   private applyCompatibility(input: CanonicalAcceptedWriteInput, operationId: string): void {

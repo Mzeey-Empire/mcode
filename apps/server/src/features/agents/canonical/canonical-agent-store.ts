@@ -109,16 +109,11 @@ import { CanonicalCodexCollaborationCoordinator } from "./canonical-codex-collab
 import { prepareParentNarrativeRecoveryEvents } from "./parent-narrative-recovery-events.js";
 import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";
 import { ConversationDisplayMaterializationStore as ConversationDisplayMaterializer } from "../conversation/migrations/conversation-display-materialization-store.js";
+import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 
 /** Capacity held back so volatile input cannot consume every semantic batch slot. */
 export const CANONICAL_AGENT_CONTROL_EVENT_RESERVE = 16;
 
-/**
- * Reserved execution identity for `publication.recorded` envelopes synthesized outside a provider
- * execution, such as goal broadcasts and admission failures. The sequence space is shared across
- * all threads because each envelope is keyed by its thread-scoped publicationId.
- */
-export const CANONICAL_SYNTHESIZED_EXECUTION_ID = "00000000-0000-4000-8000-000000000000";
 const CANONICAL_EXECUTION_DIAGNOSTIC_INDEX_CAPACITY = 128;
 const CANONICAL_DIAGNOSTIC_EXPORT_EVENT_CAPACITY = 1_024;
 
@@ -532,10 +527,11 @@ export class CanonicalAgentStore {
     if (events.length === 0) return [];
     if (this.acceptedSynthesizedPublication) return this.acceptedSynthesizedPublication(threadId, events);
     const thread = this.loadThread(threadId);
+    const executionId = syntheticThreadExecutionId(threadId);
     const result = this.commit({
       threadId,
       turnId: "",
-      executionId: CANONICAL_SYNTHESIZED_EXECUTION_ID,
+      executionId,
       phase: "synthesized",
       persistCheckpoint: false,
       events: () => {
@@ -548,7 +544,7 @@ export class CanonicalAgentStore {
           const publicationId = String(first + index);
           return {
             eventId: `publication:${threadId}:${publicationId}`,
-            routing: { threadId, executionId: CANONICAL_SYNTHESIZED_EXECUTION_ID },
+            routing: { threadId, executionId },
             sourceProviderId: thread?.providerId ?? "server",
             sourceIdentities: [],
             payload: {

@@ -17,7 +17,8 @@ import { BoundedProgressRetention } from "../execution/progress-retention-budget
 import { ThreadProgressOwner } from "../execution/thread-progress-owner.js";
 import type { AcceptedProgressBatch, SavedProgressReceipt, ProgressSaveFailure } from "../execution/thread-progress-types.js";
 import type { ExecutionAcceptedReceipt, ExecutionSemanticOperation } from "../execution/execution-worker-handler.js";
-import { CanonicalAgentBoundary, CANONICAL_SYNTHESIZED_EXECUTION_ID } from "./canonical-agent-boundary.js";
+import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { CanonicalWriterAcknowledgementCapacity, type CanonicalAgentWriterClient } from "./canonical-agent-writer-client.js";
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";
 import type { CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";
@@ -217,7 +218,14 @@ export class CanonicalAcceptedProgress {
   /** Plan cards and controls read their assigned identities before saving finishes. */
   listPlans(threadId: string): PlanRecord[] | undefined {
     const thread = this.threads.get(threadId);
-    return thread ? structuredClone(thread.features.plans) : undefined;
+    if (!thread) return undefined;
+    if (!thread.head) {
+      // Legacy status writes have no canonical event to update this owner after the repository commits.
+      const saved = new Map(this.canonical.loadAcceptedFeatureSeed(threadId).plans.map((plan) => [plan.id, plan]));
+      thread.features.plans = thread.features.plans.map((plan) =>
+        this.planExecution(thread, threadId, plan.id) ? plan : saved.get(plan.id) ?? plan);
+    }
+    return structuredClone(thread.features.plans);
   }
 
   /** Task hydration reads the accepted board while its compatibility row is still queued. */
@@ -237,8 +245,10 @@ export class CanonicalAcceptedProgress {
       const existing = thread.features.plans[index];
       if (!existing) continue;
       this.assertAdmission(thread);
+      const ownership = this.planExecution(thread, threadId, planId);
+      if (!ownership) return false;
       const plan = PlanRecordSchema().parse({ ...existing, status });
-      const { execution, phase, nativeCursor } = auxiliaryExecution(thread, threadId);
+      const { execution, phase, nativeCursor } = ownership;
       const operationId = `plan-status:${NodeCrypto.randomUUID()}`;
       const itemId = operationId;
       const now = new Date().toISOString();
@@ -251,6 +261,23 @@ export class CanonicalAcceptedProgress {
       return true;
     }
     return false;
+  }
+
+  private planExecution(thread: ProgressThread, threadId: string, planId: string) {
+    if (thread.head) return auxiliaryExecution(thread, threadId);
+    const turn = this.savedPlanTurn(threadId, planId);
+    if (!turn?.executionId || turn.threadId !== threadId) return undefined;
+    const checkpoint = this.canonical.loadCheckpoint(turn.executionId);
+    return { execution: { threadId, turnId: turn.id, executionId: turn.executionId },
+      phase: checkpoint?.phase ?? "finalized", nativeCursor: checkpoint?.nativeCursor ?? null };
+  }
+
+  private savedPlanTurn(threadId: string, planId: string) {
+    const item = this.canonical.loadItem(`plan:${planId}`);
+    if (item?.threadId !== threadId || item.payload.projection !== "plan") return undefined;
+    const plan = PlanRecordSchema().safeParse(item.payload.plan);
+    if (!plan.success || plan.data.id !== planId) return undefined;
+    return this.canonical.loadTurn(item.turnId);
   }
 
   private advanceMessageSequence(thread: ProgressThread, events: readonly import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[]): void {
@@ -445,13 +472,15 @@ export class CanonicalAcceptedProgress {
     const modelThread = thread.state.threads[threadId] ?? this.canonical.loadThreadForAcceptance(threadId);
     if (!modelThread) throw new Error("Synthesized publication has no existing conversation");
     const { execution, phase, nativeCursor } = auxiliaryExecution(thread, threadId);
+    const routing = execution.turnId ? execution
+      : { threadId: execution.threadId, executionId: execution.executionId };
     const operationId = `synthesized:${NodeCrypto.randomUUID()}`;
     const drafts: import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[] = [];
-    if (!thread.state.threads[threadId]) drafts.push({ eventId: `${operationId}:thread`, routing: execution,
+    if (!thread.state.threads[threadId]) drafts.push({ eventId: `${operationId}:thread`, routing,
       sourceProviderId: modelThread.providerId, sourceIdentities: [], payload: { type: "thread.recorded", thread: modelThread } });
     for (const [index, event] of events.entries()) {
       const publicationId = String(thread.publicationSequence + index + 1);
-      drafts.push({ eventId: `${operationId}:publication:${index}`, routing: execution, sourceProviderId: modelThread.providerId,
+      drafts.push({ eventId: `${operationId}:publication:${index}`, routing, sourceProviderId: modelThread.providerId,
         sourceIdentities: [], payload: { type: "publication.recorded", publicationId, event: { ...event, publicationId } } });
     }
     const accepted = this.acceptAuxiliary(thread, operationId, execution, drafts, phase, nativeCursor);
@@ -958,7 +987,7 @@ function storedTaskFromAccepted(value: unknown): StoredTask { return acceptedTas
 function auxiliaryExecution(thread: ProgressThread, threadId: string):
   { execution: ExecutionIdentity; phase: string; nativeCursor: unknown | null } {
   if (thread.head) return { execution: thread.head.execution, phase: thread.head.phase, nativeCursor: thread.head.nativeCursor };
-  return { execution: { threadId, turnId: "", executionId: CANONICAL_SYNTHESIZED_EXECUTION_ID }, phase: "synthesized", nativeCursor: null };
+  return { execution: { threadId, turnId: "", executionId: syntheticThreadExecutionId(threadId) }, phase: "synthesized", nativeCursor: null };
 }
 
 function exactTerminalAssistant(state: AgentModelState, execution: ExecutionIdentity): Message {
