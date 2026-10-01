@@ -173,7 +173,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private readonly sessions: SessionRuntime<DevinAcpSessionEntry>;
   private readonly canonicalEvents: DevinCanonicalEventPublisher;
-  private readonly pendingTurnRoutings = new Map<string, DevinCanonicalEventRouting>();
+  private readonly pendingTurns = new Map<string, { routing: DevinCanonicalEventRouting; controller: AbortController }>();
   private readonly pendingPermissions = new Map<string, DevinPendingPermission>();
   private modelsCache: Promise<{ models: ProviderModelInfo[]; families: DevinModelFamily[] }> | null = null;
   /** Seeded from the static fallback so `applyModel` never blocks on a probe. */
@@ -359,7 +359,9 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       executionId: req.turnExecutionId,
       deliveryAttempt: req.deliveryAttempt ?? 1,
     };
-    this.pendingTurnRoutings.set(req.sessionId, routing);
+    const pending = { routing, controller: new AbortController() };
+    const signal = pending.controller.signal;
+    this.pendingTurns.set(req.sessionId, pending);
     try {
       let entry = await this.sessions.acquire({
         sessionId: req.sessionId,
@@ -367,14 +369,21 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
         cwd: req.cwd,
         permissionMode: req.permissionMode,
         resumeFrom: req.resumeFrom,
+        signal,
       });
-      entry = await this.resolveStopDrain(req, entry);
+      entry = await this.resolveStopDrain(req, entry, signal);
+      signal.throwIfAborted();
       entry.devinMode = resolveDevinMode(req);
-      const run = entry.turnChain.then(() => this.executeTurn(entry, req, routing));
+      const run = entry.turnChain.then(() => this.executeTurn(entry, req, routing, signal));
       entry.turnChain = run.then(() => undefined, () => undefined);
       await run;
+    } catch (error) {
+      if (!signal.aborted || error !== signal.reason) throw error;
+      this.canonicalEvents.publish(routing, providerRuntimeEvent({ type: AgentEventType.Ended,
+        threadId: req.threadId, turnExecutionId: req.turnExecutionId, outcome: "cancelled" }), []);
+      await this.canonicalEvents.waitForExecution(routing);
     } finally {
-      this.pendingTurnRoutings.delete(req.sessionId);
+      if (this.pendingTurns.get(req.sessionId) === pending) this.pendingTurns.delete(req.sessionId);
     }
   }
 
@@ -387,6 +396,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async resolveStopDrain(
     req: TurnRequest<"devin">,
     entry: DevinAcpSessionEntry,
+    signal: AbortSignal,
   ): Promise<DevinAcpSessionEntry> {
     if (entry.pendingUserStopAbort) {
       const settled = await Promise.race([
@@ -396,6 +406,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
           timer.unref?.();
         }),
       ]);
+      signal.throwIfAborted();
       if (settled && this.sessions.get(req.sessionId) === entry) return entry;
       // Stop only when the pool still holds this entry — a concurrent send may
       // have already spawned a replacement under the same sessionId.
@@ -412,6 +423,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       cwd: req.cwd,
       permissionMode: req.permissionMode,
       resumeFrom: req.resumeFrom,
+      signal,
     });
   }
 
@@ -419,17 +431,22 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     entry: DevinAcpSessionEntry,
     req: TurnRequest<"devin">,
     routing: DevinCanonicalEventRouting,
+    signal: AbortSignal,
   ): Promise<void> {
+    signal.throwIfAborted();
     const resume = req.resumeFrom !== undefined;
     const storedAcpId = resume ? req.resumeFrom : undefined;
     if (resume && storedAcpId && !entry.acpSessionId) {
       entry.acpSessionId = storedAcpId;
       entry.replayTurnState = createDevinAcpTurnState();
     }
-    await this.ensureSession(entry, req);
+    await this.ensureSession(entry, req, routing);
+    signal.throwIfAborted();
     entry.replayTurnState = null;
     await this.applyModel(entry, req);
+    signal.throwIfAborted();
     await this.applyMode(entry, entry.devinMode);
+    signal.throwIfAborted();
 
     const turnState = createDevinAcpTurnState();
     entry.activeTurnState = turnState;
@@ -447,7 +464,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
-  private async ensureSession(entry: DevinAcpSessionEntry, req: TurnRequest<"devin">): Promise<void> {
+  private async ensureSession(entry: DevinAcpSessionEntry, req: TurnRequest<"devin">, routing: DevinCanonicalEventRouting): Promise<void> {
     if (entry.acpSessionId && entry.acpRuntime.state.sessionId === entry.acpSessionId) return;
     const opened = await entry.acpRuntime.openSession({
       resumeFrom: entry.acpSessionId || req.resumeFrom,
@@ -457,7 +474,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     entry.acpSessionId = opened.sessionId;
     // Persists the resume cursor (`threads.sdk_session_id`) so session/load
     // works across app restarts.
-    this.publishEntryEvent(entry, this.pendingTurnRoutings.get(entry.mcodeSessionId), {
+    this.publishEntryEvent(entry, routing, {
       type: AgentEventType.System,
       threadId: entry.threadId,
       subtype: `sdk_session_id:${opened.sessionId}`,
@@ -789,6 +806,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
    * is a guaranteed escape even for a wedged child.
    */
   async stopSession(sessionId: string): Promise<void> {
+    this.pendingTurns.get(sessionId)?.controller.abort();
     const entry = this.sessions.get(sessionId);
     if (!entry) return;
     entry.pendingUserStopAbort = true;
@@ -1037,7 +1055,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       return;
     }
     if (raw.sessionUpdate === "usage_update") this.observeUsageCost(entry, raw);
-    const routing = this.pendingTurnRoutings.get(entry.mcodeSessionId);
+    const routing = this.pendingTurns.get(entry.mcodeSessionId)?.routing;
     for (const event of mapDevinAcpSessionNotification(update, entry.threadId, state)) {
       this.publishEntryEvent(entry, routing, event);
     }

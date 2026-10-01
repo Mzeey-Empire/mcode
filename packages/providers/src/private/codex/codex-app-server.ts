@@ -954,6 +954,11 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   public get lastTransportBreadcrumb(): CodexTransportBreadcrumb | null {
     return this._lastTransportBreadcrumb;
   }
+
+  /** Captured child ownership used by the session runtime's verified teardown. */
+  public get pid(): number | undefined {
+    return this.child?.pid;
+  }
   private activeRequestId: number | null = null;
   private activeTurnId: string | null = null;
   private lastActivity: { method: string; timestamp: number } | null = null;
@@ -1151,7 +1156,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
     try {
-      await promisify(execFile)("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true });
+      await promisify(execFile)("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true, timeout: 5_000 });
     } catch {
       // taskkill fails when the child already exited.
     }

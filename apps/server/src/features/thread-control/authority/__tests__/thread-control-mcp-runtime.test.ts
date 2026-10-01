@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import * as NodeHTTP from "node:http";
+import * as NodeNet from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -173,6 +174,54 @@ describe("InternalThreadControlMcpRuntime", () => {
     expect(server.close).toHaveBeenCalledOnce();
     expect(state.httpServer).toBeUndefined();
     expect(state.httpSessions).toHaveLength(0);
+  });
+
+  it("closes an unfinished HTTP request before bootstrapping the next provider session", async () => {
+    const { runtime: instance, authority } = runtime();
+    const lease = { sessionId: "session", sourceThreadId: "thread", sourceTurnId: "turn", sourceProviderId: "codex", permissionMode: "full" as const };
+    authority.activate(lease);
+    const connection = await instance.createHttpConnection("session");
+    if (!connection) throw new Error("Missing test connection");
+    const url = new URL(connection.url);
+    const socket = NodeNet.createConnection({ host: url.hostname, port: Number(url.port) });
+    const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+    socket.on("error", () => undefined);
+    socket.resume();
+    try {
+      await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+      await new Promise<void>((resolve, reject) => socket.write(
+        `POST ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\nAuthorization: ${connection.headers.Authorization}\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{`,
+        (error) => error ? reject(error) : resolve(),
+      ));
+      await instance.close("session");
+      await closed;
+      authority.activate({ ...lease, sourceTurnId: "next-turn" });
+      await expect(instance.createHttpConnection("session")).resolves.toBeDefined();
+    } finally {
+      socket.destroy();
+      await instance.close("session");
+    }
+  });
+
+  it("preserves a newly admitted turn while retiring the old provider credential and transport", async () => {
+    const { runtime: instance, authority } = runtime();
+    const lease = { sessionId: "session", sourceThreadId: "thread", sourceTurnId: "old-turn", sourceProviderId: "codex", permissionMode: "full" as const };
+    instance.activate(lease);
+    const oldCredential = authority.credential("session");
+    await instance.createHttpConnection("session");
+    instance.activate({ ...lease, sourceTurnId: "next-turn" });
+    await instance.retireTransport("session");
+    try {
+      const nextCredential = authority.credential("session");
+      expect(nextCredential).toBeDefined();
+      expect(nextCredential).not.toBe(oldCredential);
+      expect(authority.authorize(oldCredential!, "call")).toBeUndefined();
+      expect(authority.authorize(nextCredential!, "call")).toMatchObject({ sourceTurnId: "next-turn" });
+      await expect(instance.createCodexConfiguration("session")).resolves.toBeDefined();
+      instance.revoke("session");
+      await instance.retireTransport("session");
+      expect(authority.credential("session")).toBeUndefined();
+    } finally { await instance.close("session"); }
   });
 
   it("rejects oversized declared and streamed request bodies before MCP dispatch", async () => {

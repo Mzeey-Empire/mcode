@@ -3,8 +3,7 @@ import type { ProviderProcessPort } from "../host-ports.js";
 
 const DEFAULT_IDLE_TTL_MS = 10 * 60 * 1_000;
 const EVICTION_INTERVAL_MS = 60 * 1_000;
-/** Bound on an acquire's wait for a previous incarnation's teardown. */
-const TEARDOWN_REUSE_TIMEOUT_MS = 5_000;
+const GRACEFUL_STOP_TIMEOUT_MS = 5_000;
 
 /** Arguments supplied to one private protocol adapter spawn. */
 export interface SpawnArgs {
@@ -53,6 +52,12 @@ interface PoolEntry<TState> {
   lastUsedAt: number;
 }
 
+class SpawnRetirementFailure extends Error {
+  constructor(cause: unknown) {
+    super("Provider session retirement failed during spawn", { cause });
+  }
+}
+
 /** Owns the lifecycle for one Provider's persistent sessions. */
 export class SessionRuntime<TState> {
   private readonly sessions = new Map<string, PoolEntry<TState>>();
@@ -83,22 +88,22 @@ export class SessionRuntime<TState> {
     cwd: string;
     permissionMode: string;
     resumeFrom?: string;
+    signal?: AbortSignal;
   }): Promise<TState> {
+    args.signal?.throwIfAborted();
     if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
     this.ensureEvictionTimer();
     const teardown = this.teardowns.get(args.sessionId);
     if (teardown) {
       // Providers can hold exclusive resources (state DBs, sockets) that a
       // spawn would race while the previous incarnation is still closing.
-      await Promise.race([teardown, delay(TEARDOWN_REUSE_TIMEOUT_MS).then(() => {
-        throw new Error("The previous agent session is still closing. This turn could not start.");
-      })]);
+      await waitForAcquisition(teardown, args.signal);
       if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
     }
     const existing = this.sessions.get(args.sessionId);
     if (existing) {
       if (this.adapter.isStale(existing.state, args)) {
-        await this.stop(args.sessionId);
+        await waitForAcquisition(this.stop(args.sessionId), args.signal);
         if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
       }
       else {
@@ -106,15 +111,17 @@ export class SessionRuntime<TState> {
         return existing.state;
       }
     }
+    args.signal?.throwIfAborted();
     const pending = this.pendingSpawns.get(args.sessionId);
-    if (pending) return pending;
-    const spawn = this.spawn(args);
-    this.pendingSpawns.set(args.sessionId, spawn);
-    try {
-      return await spawn;
-    } finally {
-      this.pendingSpawns.delete(args.sessionId);
+    if (pending) {
+      await waitForAcquisition(pending, args.signal);
+      return this.acquire(args);
     }
+    const spawn = this.spawn(args).finally(() => {
+      if (this.pendingSpawns.get(args.sessionId) === spawn) this.pendingSpawns.delete(args.sessionId);
+    });
+    this.pendingSpawns.set(args.sessionId, spawn);
+    return waitForAcquisition(spawn, args.signal);
   }
 
   /** Returns the live state for one session. */
@@ -158,21 +165,19 @@ export class SessionRuntime<TState> {
     if (existing) return existing;
     // Recorded before the work begins so a racing acquire waits instead of
     // spawning alongside teardown or joining a spawn that is being stopped.
-    const work = this.performStop(sessionId);
+    const work = Promise.resolve().then(() => this.performStop(sessionId));
     this.teardowns.set(sessionId, work);
-    try {
-      await work;
-    } finally {
-      if (this.teardowns.get(sessionId) === work) this.teardowns.delete(sessionId);
-    }
+    await work;
+    if (this.teardowns.get(sessionId) === work) this.teardowns.delete(sessionId);
   }
 
   private async performStop(sessionId: string): Promise<void> {
     const pending = this.pendingSpawns.get(sessionId);
     if (pending) {
       this.stopsDuringSpawn.add(sessionId);
-      await pending.catch(() => undefined);
-      this.stopsDuringSpawn.delete(sessionId);
+      try { await pending; }
+      catch (error) { if (error instanceof SpawnRetirementFailure) throw error.cause; }
+      finally { this.stopsDuringSpawn.delete(sessionId); }
     }
     const entry = this.sessions.get(sessionId);
     if (!entry) return;
@@ -205,7 +210,8 @@ export class SessionRuntime<TState> {
     const env = this.deps.envService.getEnv();
     const result = await this.adapter.spawn({ ...args, env });
     if (this.shuttingDown || this.stopsDuringSpawn.has(args.sessionId)) {
-      await this.closeEntry(args.sessionId, { ...result, lastUsedAt: Date.now() });
+      try { await this.closeEntry(args.sessionId, { ...result, lastUsedAt: Date.now() }); }
+      catch (error) { throw new SpawnRetirementFailure(error); }
       throw new Error(`Provider session stopped during spawn: ${args.sessionId}`);
     }
     if (this.deps.processes) {
@@ -224,7 +230,11 @@ export class SessionRuntime<TState> {
 
   private ensureEvictionTimer(): void {
     if (this.evictionTimer) return;
-    this.evictionTimer = setInterval(() => void this.evictIdle(), EVICTION_INTERVAL_MS);
+    this.evictionTimer = setInterval(() => {
+      void this.evictIdle().catch((error: unknown) => {
+        this.deps.logger?.warn("SessionRuntime idle eviction failed", { error: errorMessage(error) });
+      });
+    }, EVICTION_INTERVAL_MS);
     this.evictionTimer.unref?.();
   }
 
@@ -232,7 +242,7 @@ export class SessionRuntime<TState> {
     const now = Date.now();
     const sessions = Array.from(this.sessions);
     for (const [sessionId, entry] of sessions) {
-      if (now - entry.lastUsedAt > this.idleTtlMs && !this.adapter.isBusy(entry.state)) {
+      if (this.sessions.get(sessionId) === entry && now - entry.lastUsedAt > this.idleTtlMs && !this.adapter.isBusy(entry.state)) {
         this.deps.logger?.info("SessionRuntime evicting idle session", { sessionId });
         await this.stop(sessionId);
       }
@@ -240,22 +250,29 @@ export class SessionRuntime<TState> {
   }
 
   private async closeEntry(sessionId: string, entry: PoolEntry<TState>): Promise<void> {
-    try {
-      await this.adapter.interrupt(entry.state);
-    } catch (error) {
+    const interrupt = Promise.resolve().then(() => this.adapter.interrupt(entry.state)).catch((error: unknown) => {
       this.deps.logger?.warn("SessionRuntime interrupt failed", { sessionId, error: errorMessage(error) });
+    });
+    if (!await settlesWithin(interrupt, GRACEFUL_STOP_TIMEOUT_MS)) {
+      this.deps.logger?.info("SessionRuntime interrupt grace expired; closing session", { sessionId });
     }
-    try {
-      await this.adapter.close(entry.state);
-    } catch (error) {
+    const close = Promise.resolve().then(() => this.adapter.close(entry.state)).catch((error: unknown) => {
       this.deps.logger?.warn("SessionRuntime close failed", { sessionId, error: errorMessage(error) });
+      throw error;
+    });
+    if (!await settlesWithin(close.then(() => undefined, () => undefined), GRACEFUL_STOP_TIMEOUT_MS)) {
+      this.deps.logger?.info("SessionRuntime close grace expired; terminating owned processes", { sessionId });
     }
-    await this.hardKill(entry.pids);
+    const results = await Promise.allSettled([close, this.hardKill(entry.pids)]);
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
   }
 
   private async hardKill(pids: number[]): Promise<void> {
     if (this.deps.processes) {
-      await Promise.all(pids.map((pid) => this.deps.processes!.terminateTree(pid)));
+      const results = await Promise.allSettled(pids.map((pid) => this.deps.processes!.terminateTree(pid)));
+      const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+      if (failures.length > 0) throw new AggregateError(failures, "Provider process retirement failed");
       return;
     }
     await Promise.all(pids.map((pid) => new Promise<void>((resolve) => {
@@ -276,11 +293,29 @@ export class SessionRuntime<TState> {
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
+async function settlesWithin(operation: Promise<void>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
     timer.unref?.();
   });
+  try { return await Promise.race([operation.then(() => true), deadline]); }
+  finally { clearTimeout(timer); }
+}
+
+async function waitForAcquisition<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation;
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  try {
+    const result = await Promise.race([operation, cancelled]);
+    signal.throwIfAborted();
+    return result;
+  } finally { signal.removeEventListener("abort", abort); }
 }
 
 function errorMessage(error: unknown): string {

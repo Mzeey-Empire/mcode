@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeHTTP from "node:http";
+import type * as NodeNet from "node:net";
 import * as NodeStream from "node:stream";
 import { inject, injectable } from "tsyringe";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -50,6 +51,7 @@ export class InternalThreadControlMcpRuntime {
   private readonly transport;
   private readonly httpSessions = new Map<string, HttpProviderSession>();
   private httpServer: NodeHTTP.Server | undefined;
+  private readonly httpServerSockets = new WeakMap<NodeHTTP.Server, Set<NodeNet.Socket>>();
   private httpPort: number | undefined;
   private httpServerStartup: Promise<void> | undefined;
   private lifecycleTail: Promise<void> = Promise.resolve();
@@ -74,6 +76,16 @@ export class InternalThreadControlMcpRuntime {
   /** Closes all MCP state owned by a provider session. */
   async close(sessionId: string): Promise<void> {
     this.authority.close(sessionId);
+    await this.closeSessionTransports(sessionId);
+  }
+
+  /** Retires native transport resources without revoking a turn admitted during cleanup. */
+  async retireTransport(sessionId: string): Promise<void> {
+    this.authority.retireTransport(sessionId);
+    await this.closeSessionTransports(sessionId);
+  }
+
+  private async closeSessionTransports(sessionId: string): Promise<void> {
     await this.inLifecycle(async () => {
       const entry = this.httpSessions.get(sessionId);
       this.httpSessions.delete(sessionId);
@@ -164,6 +176,7 @@ export class InternalThreadControlMcpRuntime {
     this.httpPort = undefined;
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
+      for (const socket of this.httpServerSockets.get(server) ?? []) socket.destroy();
     });
   }
 
@@ -181,6 +194,12 @@ export class InternalThreadControlMcpRuntime {
 
   private async startHttpServer(): Promise<void> {
     const server = NodeHTTP.createServer((request, response) => this.handleHttpRequest(request, response));
+    const sockets = new Set<NodeNet.Socket>();
+    this.httpServerSockets.set(server, sockets);
+    server.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+    });
     server.requestTimeout = INTERNAL_MCP_REQUEST_TIMEOUT_MS;
     server.headersTimeout = INTERNAL_MCP_REQUEST_TIMEOUT_MS;
     server.timeout = INTERNAL_MCP_REQUEST_TIMEOUT_MS;

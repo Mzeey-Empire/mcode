@@ -115,7 +115,7 @@ export function createProviderHostPorts(
           }
         }
       },
-      close: (sessionId) => dependencies.threadControl.close(sessionId),
+      close: (sessionId) => dependencies.threadControl.retireTransport(sessionId),
     },
     grants: {
       consume: (request) => dependencies.grants.tryConsume(request),

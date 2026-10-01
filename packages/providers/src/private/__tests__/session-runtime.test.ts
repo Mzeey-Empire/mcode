@@ -97,7 +97,7 @@ describe("SessionRuntime", () => {
     }
   });
 
-  it("rejects a timed-out teardown wait without spawning an overlapping session", async () => {
+  it("keeps acquisitions pending through slow teardown and starts one replacement after close", async () => {
     vi.useFakeTimers();
     let releaseClose!: () => void;
     const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
@@ -118,9 +118,10 @@ describe("SessionRuntime", () => {
       expect(await runtime.acquire(request)).toEqual({ generation: 1 });
       const stopping = runtime.stop(request.sessionId);
       await vi.advanceTimersByTimeAsync(0);
-      const acquiring = Promise.allSettled([runtime.acquire(request)]);
-      await vi.advanceTimersByTimeAsync(5_000);
-      expect(await acquiring).toEqual([{ status: "rejected", reason: expect.objectContaining({ message: "The previous agent session is still closing. This turn could not start." }) }]);
+      let acquired = false;
+      const acquiring = Promise.all([runtime.acquire(request), runtime.acquire(request)]).then((states) => { acquired = true; return states; });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(acquired).toBe(false);
       expect(adapter.spawn).toHaveBeenCalledOnce();
       expect(runtime.get(request.sessionId)).toBeUndefined();
 
@@ -132,7 +133,9 @@ describe("SessionRuntime", () => {
 
       releaseClose();
       await Promise.all([stopping, repeatedStop]);
-      expect(await runtime.acquire(request)).toEqual({ generation: 2 });
+      const states = await acquiring;
+      expect(states).toEqual([{ generation: 2 }, { generation: 2 }]);
+      expect(states[0]).toBe(states[1]);
       expect(adapter.spawn).toHaveBeenCalledTimes(2);
       await runtime.shutdown();
       await expect(runtime.acquire(request)).rejects.toThrow("shutting down");
@@ -189,7 +192,7 @@ describe("SessionRuntime", () => {
     for (const sessionId of ["failed", "peer"]) await runtime.acquire({ sessionId, threadId: sessionId, cwd: ".", permissionMode: "default" });
     let settled = false;
     const closing = runtime.shutdown().finally(() => { settled = true; });
-    const failure = expect(closing).rejects.toMatchObject({ errors: [expect.objectContaining({ message: "failed process cleanup" })] });
+    const failure = expect(closing).rejects.toMatchObject({ errors: [expect.objectContaining({ errors: [expect.objectContaining({ message: "failed process cleanup" })] })] });
     await vi.waitFor(() => expect(adapter.close).toHaveBeenCalledTimes(2));
     expect(settled).toBe(false);
     releasePeer();
