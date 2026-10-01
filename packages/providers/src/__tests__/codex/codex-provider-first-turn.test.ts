@@ -811,10 +811,10 @@ describe("CodexProvider first turn on new session", () => {
     startup("starting");
     server.emit("notification", { method: "turn/started",
       params: { threadId: "native-child", turn: { id: "child-turn" } } });
-    startup("ready", { turnId: "child-turn" });
+    startup("ready");
     server.emit("notification", { method: "turn/completed",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } } });
-    startup("failed", { turnId: "child-turn", error: "connection refused", failureReason: "optional server unavailable" });
+    startup("failed", { error: "connection refused", failureReason: "optional server unavailable" });
     server.emit("notification", { method: "turn/completed",
       params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } } });
     await provider.waitForCanonicalTurnEvents({ threadId, turnId: "test-turn",
