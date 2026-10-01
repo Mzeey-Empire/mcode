@@ -961,13 +961,14 @@ describe("AgentService narrative persistence", () => {
         expect.objectContaining({ kind: "narrationSegment", record: expect.objectContaining({ text: "provisional text" }) }),
       ]);
       expect(thoughtBulk).not.toHaveBeenCalled();
+      db.exec("DROP TRIGGER reject_narration_recovery");
+      await vi.waitFor(() => expect(JSON.stringify(
+        canonicalSink.loadParentNarrativeRecovery("turn-rejected-narration"),
+      )).toContain("provisional text"), { timeout: 3_000 });
     } finally {
       db.exec("DROP TRIGGER IF EXISTS reject_narration_recovery");
       vi.useRealTimers();
     }
-    await vi.waitFor(() => expect(JSON.stringify(
-      canonicalSink.loadParentNarrativeRecovery("turn-rejected-narration"),
-    )).toContain("provisional text"));
   });
 
   it("publishes narration classification before saving its covered text delta", async () => {

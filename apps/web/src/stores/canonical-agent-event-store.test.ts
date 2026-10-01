@@ -252,8 +252,10 @@ describe("canonical agent event residency guards", () => {
     });
     expect(useThreadStore.getState().records.get(threadId)!.canonicalAgent.recoveryRequired).toBe(false);
     expect(Object.keys(useThreadStore.getState().records.get(threadId)!.canonicalAgent.state.items)).toEqual(["child-answer-first"]);
-    expect(projection?.messages).toEqual([]);
-    expect(projection?.streamingText).toBe("First chunk");
+    expect(projection?.messages.map((message) => [message.id, message.content])).toEqual([
+      ["child-answer", "First chunk"],
+    ]);
+    expect(projection?.streamingText).toBeUndefined();
 
     useThreadStore.getState().handleCanonicalAgentEvents(threadId, [
       envelope(threadId, "child-answer-second", 5, 3, {
@@ -268,8 +270,10 @@ describe("canonical agent event residency guards", () => {
       toolCalls: [],
       thoughtSegments: [],
     });
-    expect(projection?.messages).toEqual([]);
-    expect(projection?.streamingText).toBe("First chunk, second chunk");
+    expect(projection?.messages.map((message) => [message.id, message.content])).toEqual([
+      ["child-answer", "First chunk, second chunk"],
+    ]);
+    expect(projection?.streamingText).toBeUndefined();
 
     useThreadStore.getState().handleCanonicalAgentEvents(threadId, [
       envelope(threadId, "turn-completed", 6, 4, { type: "turn.completed", endedAt: NOW }),

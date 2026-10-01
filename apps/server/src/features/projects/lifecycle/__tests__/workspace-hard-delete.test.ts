@@ -24,12 +24,22 @@ let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
 const mockGitExecutor = { exec: vi.fn() } as unknown as GitExecutor;
 const TEST_HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "127" } as const;
+const cleanupFixtureRoots = vi.hoisted(() => [
+  "/tmp/active", "/tmp/deleted", "/tmp/deleting", "/tmp/direct", "/tmp/empty",
+  "/tmp/empty-del", "/tmp/fast", "/tmp/gone-ws", "/tmp/nonexistent", "/tmp/orphan",
+  "/tmp/same", "/tmp/source", "/tmp/stuck", "/tmp/target", "/tmp/test-ws", "/tmp/ws", "/tmp/wt",
+]);
+
+function isCleanupFixturePath(path: NodeFS.PathLike): boolean {
+  const value = String(path);
+  return cleanupFixtureRoots.some((root) => value === root || value.startsWith(`${root}/`));
+}
 
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
   return {
     ...actual,
-    existsSync: vi.fn((path: NodeFS.PathLike) => String(path).startsWith("/tmp/") || actual.existsSync(path)),
+    existsSync: vi.fn((path: NodeFS.PathLike) => isCleanupFixturePath(path) || actual.existsSync(path)),
   };
 });
 vi.mock("../../../../runtime/process/containment/process-kill.js", () => ({
@@ -38,7 +48,7 @@ vi.mock("../../../../runtime/process/containment/process-kill.js", () => ({
 
 function setCleanupPathExists(exists: boolean): void {
   vi.mocked(NodeFS.existsSync).mockImplementation((path) => (
-    String(path).startsWith("/tmp/") ? exists : actualFs.existsSync(path)
+    isCleanupFixturePath(path) ? exists : actualFs.existsSync(path)
   ));
 }
 

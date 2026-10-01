@@ -300,8 +300,8 @@ describe("MessageList thread switch", () => {
 
     const { rerender } = render(<MessageList displayThreadId="child-thread" />);
     expect(screen.getByText("First chunk")).toBeInTheDocument();
-    expect(document.querySelectorAll(`[data-message-id="${sharedResponseId}"]`)).toHaveLength(1);
-    expect(document.querySelectorAll(`[data-message-id="${completedResponseId}"]`)).toHaveLength(0);
+    expect(document.querySelectorAll(`[data-message-id="${sharedResponseId}"]`)).toHaveLength(0);
+    expect(document.querySelectorAll(`[data-message-id="${completedResponseId}"]`)).toHaveLength(1);
     expect(document.querySelectorAll('[data-message-role="assistant"]')).toHaveLength(1);
 
     recordOverridesByThread["child-thread"] = {
@@ -315,8 +315,8 @@ describe("MessageList thread switch", () => {
     };
     rerender(<MessageList displayThreadId="child-thread" />);
     expect(screen.getByText("First chunk, second chunk")).toBeInTheDocument();
-    expect(document.querySelectorAll(`[data-message-id="${sharedResponseId}"]`)).toHaveLength(1);
-    expect(document.querySelectorAll(`[data-message-id="${completedResponseId}"]`)).toHaveLength(0);
+    expect(document.querySelectorAll(`[data-message-id="${sharedResponseId}"]`)).toHaveLength(0);
+    expect(document.querySelectorAll(`[data-message-id="${completedResponseId}"]`)).toHaveLength(1);
     expect(document.querySelectorAll('[data-message-role="assistant"]')).toHaveLength(1);
 
     recordOverridesByThread["child-thread"] = {

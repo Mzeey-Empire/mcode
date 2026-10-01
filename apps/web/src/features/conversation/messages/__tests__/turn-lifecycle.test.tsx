@@ -165,8 +165,8 @@ describe("one lifecycle for the current turn", () => {
     }]);
     const { result } = renderHook(useLifecycle);
     expect(result.current.data.agentDisplayState).toEqual({ phase: "streaming" });
-    expect(result.current.data.messages).toEqual([]);
-    expect(result.current.data.streamingText).toBe("Saved answer");
+    expect(result.current.data.messages).toEqual([childAnswer]);
+    expect(result.current.data.streamingText).toBeUndefined();
     expect(result.current.running).toBe(true);
     expect(shouldQueueActiveThreadSubmit(THREAD, false, null, false, "follow-up")).toBe(true);
     const finished = structuredClone(record.canonicalAgent.state);
