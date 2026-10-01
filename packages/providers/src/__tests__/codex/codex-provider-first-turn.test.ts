@@ -791,6 +791,55 @@ describe("CodexProvider first turn on new session", () => {
       && batch.threadId === threadId && batch.turnId === "test-turn" && batch.deliveryAttempt === 2)).toBe(true);
   });
 
+  it("delivers linked-child MCP startup states through canonical execution before and after child turn binding", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({ turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const server = appServers[0];
+    if (!server) throw new Error("Expected native app-server session");
+    server.emit("notification", { method: "item/started", params: { threadId: "sdk-thread-1",
+      turnId: "turn-test-id", item: { type: "subAgentActivity", id: "spawn-child", kind: "started",
+        agentThreadId: "native-child", agentPath: "/root/worker" } } });
+    const startup = (status: string, details: Record<string, unknown> = {}) => server.emit("notification", {
+      method: "mcpServer/startupStatus/updated", params: { threadId: "native-child", name: "native-mcp", status, ...details },
+    });
+    startup("starting");
+    server.emit("notification", { method: "turn/started",
+      params: { threadId: "native-child", turn: { id: "child-turn" } } });
+    startup("ready", { turnId: "child-turn" });
+    server.emit("notification", { method: "turn/completed",
+      params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } } });
+    startup("failed", { turnId: "child-turn", error: "connection refused", failureReason: "optional server unavailable" });
+    server.emit("notification", { method: "turn/completed",
+      params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } } });
+    await provider.waitForCanonicalTurnEvents({ threadId, turnId: "test-turn",
+      executionId: schemaValidExecutionId, deliveryAttempt: 2 });
+    const runtimeEvents = submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch));
+    const startupEvents = runtimeEvents.filter((event) => event.event.type === AgentEventType.McpServerStartupStatus);
+    const base = { type: AgentEventType.McpServerStartupStatus, threadId, turnExecutionId: schemaValidExecutionId,
+      providerId: "codex", serverThreadId: "native-child", name: "native-mcp" };
+    expect(startupEvents.map((event) => event.event)).toEqual([
+      { ...base, status: "starting" }, { ...base, status: "ready" },
+      { ...base, status: "failed", error: "connection refused", failureReason: "optional server unavailable" },
+    ]);
+    for (const event of startupEvents) {
+      expect(event).toMatchObject({ deliveryAttempt: 2, extension: { child: {
+        nativeThreadId: "native-child", parentCollaborationItemId: "spawn-child",
+      } } });
+    }
+    expect(startupEvents[0]?.extension?.child?.nativeTurnId).toBeUndefined();
+    expect(startupEvents.slice(1).map((event) => event.extension?.child?.nativeTurnId)).toEqual(["child-turn", "child-turn"]);
+    expect(new Set(startupEvents.map((event) => event.extension?.child?.nativeEventId)).size).toBe(3);
+    expect(runtimeEvents.filter((event) => event.event.type === AgentEventType.System
+      && event.event.subtype === "provider.notice.unknown-event")).toEqual([]);
+    await provider.shutdown();
+  });
+
   it("rejects stale child callbacks after replacing a canonical delivery attempt", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue(acceptedEventReceipt);

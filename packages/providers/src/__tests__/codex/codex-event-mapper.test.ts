@@ -231,6 +231,51 @@ describe("CodexEventMapper", () => {
     expect(AgentEventSchema().parse(events[0]!.event)).toEqual(events[0]!.event);
   });
 
+  it("maps linked-child MCP startup sequences through parent and child completion while retaining unknown diagnostics", () => {
+    mapper = new CodexEventMapper("test-thread", "main-thread");
+    mapper.mapNotification({ jsonrpc: "2.0", method: "item/completed", params: {
+      threadId: "main-thread", item: { type: "collabAgentToolCall", id: "spawn-child",
+        tool: "spawnAgent", receiverThreadIds: ["native-child"] },
+    } });
+    mapper.mapNotification({ jsonrpc: "2.0", method: "turn/started",
+      params: { threadId: "native-child", turn: { id: "child-turn" } } });
+    const startup = (params: Record<string, unknown>) => mapper.mapNotification({ jsonrpc: "2.0",
+      method: "mcpServer/startupStatus/updated", params: { threadId: "native-child", ...params } });
+    const starting = startup({ name: "native-mcp", status: "starting" });
+    const ready = startup({ name: "native-mcp", status: "ready" });
+    mapper.mapNotification({ jsonrpc: "2.0", method: "turn/completed",
+      params: { threadId: "main-thread", turn: { status: "completed" } } });
+    const failed = startup({ name: "native-mcp", status: "failed", error: "connection refused",
+      failureReason: "optional server unavailable" });
+    const otherServer = startup({ name: "other-mcp", status: "ready" });
+    mapper.mapNotification({ jsonrpc: "2.0", method: "turn/completed",
+      params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } } });
+    const cancelled = startup({ name: "native-mcp", status: "cancelled" });
+    const legacyError = startup({ name: "native-mcp", status: "error", error: "legacy failure" });
+    const events = [...starting, ...ready, ...failed, ...otherServer, ...cancelled, ...legacyError];
+    const base = { type: "mcpServerStartupStatus", threadId: "test-thread", providerId: "codex",
+      serverThreadId: "native-child", name: "native-mcp" };
+    expect(events.map(({ event }) => event)).toEqual([
+      { ...base, status: "starting" }, { ...base, status: "ready" },
+      { ...base, status: "failed", error: "connection refused", failureReason: "optional server unavailable" },
+      { ...base, name: "other-mcp", status: "ready" }, { ...base, status: "cancelled" },
+      { ...base, status: "failed", error: "legacy failure" },
+    ]);
+    for (const event of events) {
+      expect(AgentEventSchema().parse(event.event)).toEqual(event.event);
+      expect(event.extension?.child).toMatchObject({ nativeThreadId: "native-child", nativeTurnId: "child-turn",
+        parentCollaborationItemId: "spawn-child", nativeEventId: expect.any(String) });
+      expect(event.extension?.child?.nativeItemId).toBeUndefined();
+    }
+    expect(new Set(events.map((event) => event.extension?.child?.nativeEventId)).size).toBe(6);
+    expect(startup({ name: "native-mcp", status: "ready" })).toEqual([]);
+    const unknown = mapper.mapNotification({ jsonrpc: "2.0", method: "future/child-update",
+      params: { threadId: "native-child" } });
+    expect(unknown).toMatchObject([{ event: { type: "system", subtype: "provider.notice.unknown-event",
+      message: "Codex sent an update this client does not recognize (future/child-update). The thread continues normally." },
+    extension: { child: { nativeThreadId: "native-child", nativeTurnId: "child-turn", parentCollaborationItemId: "spawn-child" } } }]);
+  });
+
   it("emits Agent toolUse for item/started collabAgentToolCall", () => {
     const events = mapper.mapNotification({
       jsonrpc: "2.0",
