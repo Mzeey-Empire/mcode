@@ -813,6 +813,91 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect(failures).toHaveLength(1);
   });
 
+  it("contains a notice save failure while another provider completes and retries the original notice ID", async () => {
+    await send(1, start("codex"));
+    const other = { threadId: "devin-thread", turnId: "devin-turn", executionId: "00000000-0000-4000-8000-000000000155" };
+    const otherLease = { ...lease, workerIndex: 1, leaseId: "devin-lease" };
+    insertThread(other.threadId);
+    await send(1, start("devin", other), other, otherLease);
+    db.run("CREATE TRIGGER fail_notice BEFORE INSERT ON messages WHEN NEW.role = 'system' AND NEW.content = 'Session save fails' BEGIN SELECT RAISE(ABORT, 'notice storage unavailable'); END");
+    const affected: string[] = [];
+    progress.bindPermanentFailure(async (failed, error) => {
+      affected.push(failed.executionId);
+      progress.interruptWorkerLoss({ execution: failed, lease, reason: error.message, recoveryIncidentId: "notice-save-failure" });
+    });
+    const notice = progress.acceptThreadSystemObservation({ type: "system", threadId: execution.threadId,
+      subtype: "provider.notice.warning", message: "Session save fails",
+      systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "session", sessionId: "session" } });
+    expect(notice.turnExecutionId).toBeUndefined();
+    expect(notice.messageId).toBeDefined();
+    await expect.poll(() => affected).toEqual([execution.executionId]);
+    expect(progress.savingStatuses(execution.threadId).find((status) => status.executionId === execution.executionId)?.mode).toBe("saving-failed");
+    expect(db.prepare("SELECT id FROM messages WHERE id = ?").get(notice.messageId!)).toBeNull();
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("devin", 1, "textDelta", { delta: "Other provider continues", isFinalResponse: true }, other)] }, other, otherLease)).result.kind).toBe("accepted");
+    expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("devin", 2, "turnComplete", {}, other)], terminalInput: { ...other, providerId: "devin",
+        providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } }, other, otherLease)).result.kind).toBe("accepted");
+    await expect.poll(() => db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(other.turnId))
+      .toEqual({ status: "Completed" });
+    const retained = recovery().retained.filter((event) => event.payload.type === "item.recorded"
+      && event.payload.item.payload.projection === "message" && event.payload.item.payload.message.id === notice.messageId);
+    expect(retained).toHaveLength(1);
+    db.run("DROP TRIGGER fail_notice");
+    expect(progress.retry(execution.threadId)).toBe(true);
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT id, content FROM messages WHERE id = ?").all(notice.messageId!))
+      .toEqual([{ id: notice.messageId, content: "Session save fails" }]);
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(other.turnId)).toEqual({ status: "Completed" });
+    expect(affected).toEqual([execution.executionId]);
+  });
+
+  it("rejects headless thread notices without writing a main-connection message", () => {
+    expect(() => progress.acceptThreadSystemObservation({ type: "system", threadId: execution.threadId,
+      subtype: "provider.notice.warning", message: "No canonical turn" })).toThrow("existing canonical turn");
+    expect(db.prepare("SELECT id FROM messages WHERE thread_id = ?").all(execution.threadId)).toEqual([]);
+    expect(progress.depth().pending).toBe(0);
+  });
+
+  it("accepts notice deduplication and session expiry before saving without consuming a provider ordinal", async () => {
+    await send(1, start("codex"));
+    holdWrites();
+    progress.acceptThreadSystemObservation({ type: "system", threadId: execution.threadId,
+      subtype: "provider.session.started", systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "session", sessionId: "old" } });
+    const warning = { type: "system" as const, threadId: execution.threadId, subtype: "provider.notice.warning", message: "First warning",
+      systemNotice: { kind: "diagnostic" as const, presentation: "timeline" as const, scope: "session" as const, sessionId: "old", noticeKey: "warning" } };
+    const first = progress.acceptThreadSystemObservation(warning);
+    const update = progress.acceptThreadSystemObservation({ ...warning, turnExecutionId: execution.executionId, message: "Updated warning" });
+    expect(update.messageId).toBe(first.messageId);
+    progress.acceptThreadSystemObservation({ type: "system", threadId: execution.threadId,
+      subtype: "provider.session.started", systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "session", sessionId: "new" } });
+    const next = progress.acceptThreadSystemObservation({ ...warning, message: "Next session warning", systemNotice: { ...warning.systemNotice, sessionId: "new" } });
+    expect(next.messageId).not.toBe(first.messageId);
+    expect(db.prepare("SELECT id FROM messages WHERE role = 'system'").all()).toEqual([]);
+    expect(recovery().retained.some((event) => event.payload.type === "item.recorded"
+      && event.payload.item.payload.projection === "noticeStatus" && event.payload.item.payload.expiredNoticeMessageIds.includes(first.messageId!))).toBe(true);
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "Provider continues", isFinalResponse: true })] })).result.kind).toBe("accepted");
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT id, content FROM messages WHERE role = 'system'").all())
+      .toEqual([{ id: next.messageId, content: "Next session warning" }]);
+    expect(db.prepare("SELECT current_notice_session_id FROM threads WHERE id = ?").get(execution.threadId))
+      .toEqual({ current_notice_session_id: "new" });
+    const restarted = new CanonicalAcceptedProgress(new CanonicalAgentBoundary(db, () => {}), writer);
+    try {
+      const restored = restarted.acceptThreadSystemObservation({ type: "system", threadId: execution.threadId,
+        subtype: "provider.notice.warning", message: "After restart" });
+      expect(restored.turnExecutionId).toBeUndefined();
+      expect(restarted.recover(execution.threadId, { conversationRevision: 0, rosterRevision: 0 }).retained
+        .every((event) => event.routing.executionId === execution.executionId)).toBe(true);
+      await expect.poll(() => restarted.depth().pending).toBe(0);
+      expect(db.prepare("SELECT id FROM messages WHERE id = ?").get(restored.messageId!)).toEqual({ id: restored.messageId });
+    } finally {
+      await restarted.close();
+    }
+  });
+
   it("rejects durable command waiters after receipt processing fails without replaying the committed disk write", async () => {
     await send(1, start("codex"));
     const heldAppend = holdWrites();

@@ -27,8 +27,10 @@ import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../../turns/turn-featu
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { TurnConversationProjectionService } from "../../turns/turn-conversation-projection-service.js";
+import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
-import { addClient, removeClient } from "../../../../application/transport/push.js";
+import { addClient, removeClient, subscribeClientToThread } from "../../../../application/transport/push.js";
 
 describe("AgentService container composition", () => {
   let database: Database | undefined;
@@ -146,6 +148,46 @@ describe("AgentService container composition", () => {
       && canonicalPayloadTypes(thread.id).includes("turn.completed"));
     expect(container.resolve(TurnRuntimeController).snapshot(thread.id)?.phase).toBe("completed");
     expect(workerRuntime?.scheduler.depth().activeExecutions).toBe(0);
+  });
+
+  it.each([false, true])("publishes a session notice through the production progress owner while its SQLite save is held (scoped=%s)", async (scoped) => {
+    registerFakeCodex(fakeCodexProvider(async () => undefined));
+    const publication = container.resolve(AgentEventPublicationRegistry);
+    const legacyPublications: AgentEvent[] = [];
+    publication.bind((event) => legacyPublications.push(event));
+    publication.start();
+    const pushes: Array<{ channel: string; data: unknown }> = [];
+    pushClient = capturePushes(pushes);
+    const workspace = container.resolve(WorkspaceRepo).create("notice-owner", temporaryDirectory!);
+    const thread = container.resolve(ThreadRepo).create(workspace.id, "Notice turn", "direct", "main", true, "codex");
+    subscribeClientToThread(pushClient, thread.id);
+    await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "hello", provider: "codex", permissionMode: "full" });
+    await waitFor(() => workerRuntime?.owner.current(thread.id) !== undefined);
+    const writer = container.resolve(CanonicalAgentWriterClient);
+    const append = writer.appendAccepted.bind(writer);
+    let releaseSave: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const heldAppend: typeof writer.appendAccepted = async (...args) => { await held; return append(...args); };
+    const heldWrite = vi.spyOn(writer, "appendAccepted").mockImplementation(heldAppend);
+    const event: Extract<AgentEvent, { type: "system" }> = { type: "system", threadId: thread.id,
+      ...(scoped ? { turnExecutionId: workerRuntime?.owner.current(thread.id)?.execution.executionId } : {}),
+      subtype: "provider.notice.warning", message: "Session warning",
+      systemNotice: { kind: "diagnostic", presentation: "timeline", scope: "session", sessionId: "notice-session" } };
+    try {
+      const sourceExecutionId = event.turnExecutionId;
+      expect(container.resolve(ProviderTurnEventApplication).apply({ providerId: "codex", sourceKind: "provider-runtime", event }, event, true)).toBe(true);
+      expect(event.turnExecutionId).toBe(sourceExecutionId);
+      expect(event.messageId).toBeDefined();
+      expect(container.resolve(MessageRepo).findById(event.messageId!)).toBeUndefined();
+      expect(pushes.filter((push) => push.channel === "agent.canonical").map((push) => JSON.stringify(push.data)))
+        .toContainEqual(expect.stringContaining(event.messageId!));
+      expect(legacyPublications.filter((published) => published.type === "system" && published.message === event.message)).toHaveLength(0);
+    } finally {
+      releaseSave?.();
+      await waitFor(() => workerRuntime?.progress?.depth().pending === 0);
+      heldWrite.mockRestore();
+    }
+    expect(container.resolve(MessageRepo).findById(event.messageId!)).toMatchObject({ content: "Session warning" });
   });
 
   it("returns from Stop after a durable worker terminal that preserves partial text", async () => {
