@@ -20,6 +20,40 @@ function storage(): Pick<Storage, "getItem" | "setItem"> {
 }
 
 describe("stable AgentEvent publications", () => {
+  it("deduplicates one owner event across target thread identities", () => {
+    const cursor = new StableAgentEventPublications(storage);
+    const identity = { ownerThreadId: "parent", epoch: "runtime-1", eventId: "event-1" };
+    expect(cursor.acceptCanonical(event(1), identity)).toBe(true);
+    expect(cursor.acceptCanonical({ ...event(1), threadId: "other-alias" }, identity)).toBe(false);
+    cursor.forgetThread("other-alias");
+    expect(cursor.acceptCanonical(event(1), identity)).toBe(false);
+    cursor.forgetThread("parent", new Set(["parent"]));
+    expect(cursor.acceptCanonical(event(1), identity)).toBe(false);
+  });
+
+  it("keeps identical event IDs from independent owners separate", () => {
+    const cursor = new StableAgentEventPublications(storage);
+    expect(cursor.acceptCanonical(event(1), { ownerThreadId: "parent-a", epoch: "runtime-1", eventId: "event-1" })).toBe(true);
+    expect(cursor.acceptCanonical(event(1), { ownerThreadId: "parent-b", epoch: "runtime-1", eventId: "event-1" })).toBe(true);
+  });
+
+  it("does not merge epoch and event IDs containing separators", () => {
+    const cursor = new StableAgentEventPublications(storage);
+    expect(cursor.acceptCanonical(event(1), { epoch: "runtime:1", eventId: "event" })).toBe(true);
+    expect(cursor.acceptCanonical(event(1), { epoch: "runtime", eventId: "1:event" })).toBe(true);
+  });
+  it("accepts reused numeric publications in a new runtime epoch", () => {
+    const cursor = new StableAgentEventPublications(storage);
+    expect(cursor.acceptCanonical(event(1), { epoch: "runtime-1", eventId: "event-1" })).toBe(true);
+    expect(cursor.acceptCanonical(event(1), { epoch: "runtime-1", eventId: "event-1" })).toBe(false);
+    expect(cursor.acceptCanonical(event(1), { epoch: "runtime-2", eventId: "event-2" })).toBe(true);
+  });
+
+  it("does not confuse an older legacy publication with a new epoch's first effect", () => {
+    const cursor = new StableAgentEventPublications(storage);
+    expect(cursor.accept(event(1), "runtime-1")).toBe(true);
+    expect(cursor.acceptCanonical(event(1), { epoch: "runtime-2", eventId: "new-event-1" })).toBe(true);
+  });
   it("rejects a publish-then-crash replay after recreating the client", () => {
     const shared = storage();
     const firstClient = new StableAgentEventPublications(() => shared);

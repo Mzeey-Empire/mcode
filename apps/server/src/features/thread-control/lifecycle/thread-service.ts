@@ -21,6 +21,13 @@ export interface ThreadCreateLifecycle {
 /** Handles thread creation, deletion, worktree provisioning, and lifecycle. */
 @injectable()
 export class ThreadService {
+  private acceptedProgress: Pick<import("../../agents/canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
+    "discardThreads" | "finishThreadDeletion" | "assertThreadDeletionSupported"> | undefined;
+
+  /** Compose the ownership check used before any thread deletion effects. */
+  bindAcceptedProgress(progress: NonNullable<ThreadService["acceptedProgress"]>): void {
+    this.acceptedProgress = progress;
+  }
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(ProjectWorktreeService) private readonly projectWorktreeService: ProjectWorktreeService,
@@ -110,6 +117,7 @@ export class ThreadService {
   async delete(threadId: string, cleanupWorktree: boolean): Promise<boolean> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread || thread.deleted_at !== null) return false;
+    this.acceptedProgress?.assertThreadDeletionSupported(threadId);
 
     if (cleanupWorktree && thread.worktree_path) {
       if (await this.projectWorktreeService.scheduleCleanup(threadId)) return true;
@@ -120,9 +128,11 @@ export class ThreadService {
     }
 
     await this.threadDeletionTeardownService.teardownThread(threadId);
-    this.attachmentService.removeForThread(threadId);
-    await this.handoffStorage.deleteThreadFiles(threadId);
-    return this.threadRepo.hardDelete(threadId, { preserveActiveDescendants: true });
+    return this.threadDeletionTeardownService.deletePersistentData([threadId], async () => {
+      this.attachmentService.removeForThread(threadId);
+      await this.handoffStorage.deleteThreadFiles(threadId);
+      return this.threadRepo.hardDelete(threadId, { preserveActiveDescendants: true });
+    });
   }
 
   /** Update a thread's display title. */

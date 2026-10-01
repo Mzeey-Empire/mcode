@@ -31,6 +31,8 @@ interface CanonicalProjectionInput {
   thoughtSegments: readonly ThoughtSegment[];
 }
 
+const CANONICAL_VISIBLE_TOOL_CALL_LIMIT = 32;
+
 function timestamp(value: string | null | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Date.parse(value);
@@ -226,6 +228,28 @@ function projectedToolCallResult(item: AgentItem, nativeItemId: string, existing
   };
 }
 
+function projectedToolIdentity(item: AgentItem): string | undefined {
+  return item.payload.projection === "codexChildToolCall" || item.payload.projection === "codexChildToolResult"
+    ? payloadString(item.payload, "nativeItemId") ?? item.id
+    : undefined;
+}
+
+function visibleProjectedToolIds(items: readonly AgentItem[]): Set<string> | undefined {
+  const allIds = new Set<string>();
+  for (const item of items) {
+    const id = projectedToolIdentity(item);
+    if (id) allIds.add(id);
+  }
+  if (allIds.size <= CANONICAL_VISIBLE_TOOL_CALL_LIMIT) return undefined;
+
+  const visibleIds = new Set<string>();
+  for (let index = items.length - 1; index >= 0 && visibleIds.size < CANONICAL_VISIBLE_TOOL_CALL_LIMIT; index -= 1) {
+    const id = projectedToolIdentity(items[index]!);
+    if (id) visibleIds.add(id);
+  }
+  return visibleIds;
+}
+
 function projectedToolCall(item: AgentItem, calls: Map<string, ToolCall>): void {
   const nativeItemId = payloadString(item.payload, "nativeItemId") ?? item.id;
   if (item.payload.projection === "codexChildToolCall") {
@@ -239,8 +263,22 @@ function projectedToolCall(item: AgentItem, calls: Map<string, ToolCall>): void 
 
 function projectedToolCalls(items: readonly AgentItem[]): Map<string, ToolCall> {
   const calls = new Map<string, ToolCall>();
-  for (const item of items) projectedToolCall(item, calls);
+  const visibleIds = visibleProjectedToolIds(items);
+  for (const item of items) {
+    const id = projectedToolIdentity(item);
+    if (visibleIds && (!id || !visibleIds.has(id))) continue;
+    projectedToolCall(item, calls);
+  }
   return calls;
+}
+
+function visibleToolCalls(toolCalls: readonly ToolCall[], projectedCalls: Iterable<ToolCall>): ToolCall[] {
+  const calls = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
+  for (const toolCall of projectedCalls) calls.set(toolCall.id, toolCall);
+  const visible = [...calls.values()];
+  return visible.length <= CANONICAL_VISIBLE_TOOL_CALL_LIMIT
+    ? visible
+    : visible.slice(-CANONICAL_VISIBLE_TOOL_CALL_LIMIT);
 }
 
 function projectedThoughtSegments(items: readonly AgentItem[], terminal: boolean): ThoughtSegment[] {
@@ -290,8 +328,6 @@ export function projectCanonicalMessageList({
   const projected = projectedMessages(items);
   const projectedCalls = projectedToolCalls(items);
   const projectedThoughts = projectedThoughtSegments(items, terminal);
-  const toolCallById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
-  for (const toolCall of projectedCalls.values()) toolCallById.set(toolCall.id, toolCall);
   const response = projectedResponse(messages, projected, terminal);
   const responseKey = `canonical-turn-response:${latestTurn.id}`;
 
@@ -300,7 +336,9 @@ export function projectCanonicalMessageList({
     streamingText: response.streamingText,
     agentDisplayState,
     agentStartTime: timestamp(latestTurn.startedAt ?? latestTurn.createdAt),
-    toolCalls: [...toolCallById.values()],
+    // The canonical model keeps every activity item. The mounted timeline gets a
+    // bounded recent window so extreme long-running turns do not monopolize the renderer.
+    toolCalls: visibleToolCalls(toolCalls, projectedCalls.values()),
     thoughtSegments: projectedThoughts.length > 0 ? projectedThoughts : [...thoughtSegments],
     currentTurnMessageId: response.assistantMessage?.id ?? "",
     currentTurnResponseKey: responseKey,

@@ -369,17 +369,19 @@ export class CleanupWorker {
 
   private async completeThreads(job: CleanupJob, threadIds: readonly string[]): Promise<void> {
     const ids = [...new Set(threadIds)];
-    for (const threadId of ids) {
-      this.attachmentService.removeForThread(threadId);
-      await this.handoffStorage.deleteThreadFiles(threadId);
-    }
-    this.db.transaction(() => {
+    await this.threadDeletionTeardownService.deletePersistentData(ids, async () => {
       for (const threadId of ids) {
-        this.cleanupJobRepo.deleteByThreadId(threadId);
-        this.threadRepo.hardDelete(threadId, { preserveActiveDescendants: true });
+        this.attachmentService.removeForThread(threadId);
+        await this.handoffStorage.deleteThreadFiles(threadId);
       }
-      this.cleanupJobRepo.delete(job.id);
-    })();
+      this.db.transaction(() => {
+        for (const threadId of ids) {
+          this.cleanupJobRepo.deleteByThreadId(threadId);
+          this.threadRepo.hardDelete(threadId, { preserveActiveDescendants: true });
+        }
+        this.cleanupJobRepo.delete(job.id);
+      })();
+    });
     for (const threadId of ids) broadcast("thread.deleted", { threadId });
     logger.info("CleanupWorker job completed", {
       jobId: job.id,
@@ -477,12 +479,14 @@ export class CleanupWorker {
       // clean up attachments, hard-delete them, and hard-delete the workspace now
       const pendingJobs = this.cleanupJobRepo.countByWorkspacePath(ws.path);
       if (pendingJobs === 0) {
-        for (const t of threads) {
-          this.attachmentService.removeForThread(t.id);
-          await this.handoffStorage.deleteThreadFiles(t.id);
-          this.threadRepo.hardDelete(t.id);
-        }
-        this.workspaceRepo.hardDelete(ws.id);
+        await this.threadDeletionTeardownService.deletePersistentData(threads.map((thread) => thread.id), async () => {
+          for (const thread of threads) {
+            this.attachmentService.removeForThread(thread.id);
+            await this.handoffStorage.deleteThreadFiles(thread.id);
+            this.threadRepo.hardDelete(thread.id);
+          }
+          this.workspaceRepo.hardDelete(ws.id);
+        });
         logger.info("Reconciled workspace with no pending cleanup", { workspaceId: ws.id });
       }
     }
@@ -498,12 +502,13 @@ export class CleanupWorker {
       // Clean up any remaining threads (e.g. crash-orphaned soft-deleted direct threads)
       // before FK cascade removes them without attachment file cleanup.
       const remainingThreads = this.threadRepo.listAllByWorkspace(workspace.id);
-      for (const thread of remainingThreads) {
-        this.attachmentService.removeForThread(thread.id);
-        await this.handoffStorage.deleteThreadFiles(thread.id);
-      }
-
-      this.workspaceRepo.hardDelete(workspace.id);
+      await this.threadDeletionTeardownService.deletePersistentData(remainingThreads.map((thread) => thread.id), async () => {
+        for (const thread of remainingThreads) {
+          this.attachmentService.removeForThread(thread.id);
+          await this.handoffStorage.deleteThreadFiles(thread.id);
+        }
+        this.workspaceRepo.hardDelete(workspace.id);
+      });
       broadcast("workspace.deleted", { workspaceId: workspace.id });
       logger.info("Workspace hard-deleted after final cleanup job", {
         workspaceId: workspace.id,

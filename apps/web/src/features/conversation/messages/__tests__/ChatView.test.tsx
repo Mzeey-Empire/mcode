@@ -361,11 +361,13 @@ function disableAtomicSubscriptionTransport() {
 /** One canonical delta recovery that always counts as newer than a fresh replica. */
 function deltaRecovery(threadId: string) {
   return {
-    mode: "delta" as const,
-    threadId,
+    phase: "recovery" as const, threadId,
+    epoch: "runtime-1", acceptedThrough: 0, savedThrough: 0, retained: [], loss: "none" as const,
+    durable: { mode: "delta" as const, threadId,
     from: { conversationRevision: 0, rosterRevision: 0 },
     through: { conversationRevision: 1, rosterRevision: 0 },
     events: [],
+    },
   };
 }
 
@@ -401,6 +403,8 @@ function defaultThreadState(overrides: Partial<{
     runningThreadIds: overrides.runningThreadIds ?? new Set<string>(),
     activeRecord: overrides.activeRecord ?? createEmptyThreadRecord(),
     applyCanonicalReconnectRecoveries: chatViewApplyCanonicalRecoveriesMock,
+    beginCanonicalRecovery: vi.fn(() => Symbol("recovery")),
+    finishCanonicalRecovery: vi.fn(),
     clearMessages: vi.fn(),
     deactivateConversation: vi.fn(),
     setForkMode: vi.fn(),
@@ -1735,15 +1739,32 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
   });
 
+  it("sends owner revisions and progress positions under the child subscription target", async () => {
+    const setThreadSubscriptions = enableAtomicSubscriptionTransport();
+    const emptyRecord = createEmptyThreadRecord();
+    const record = { ...emptyRecord, canonicalAgent: { ...emptyRecord.canonicalAgent, ownerThreadId: "parent-thread",
+      revision: { conversationRevision: 14, rosterRevision: 3 },
+      progress: { epoch: "parent-epoch", acceptedThrough: 40, savedThrough: 30, retained: [] },
+    } };
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1", activeRecord: record,
+      records: new Map([["thread-1", record]]) });
+    render(<ChatView />);
+    await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledExactlyOnceWith({
+      threadIds: ["thread-1"], revisions: { "thread-1": { conversationRevision: 14, rosterRevision: 3 } },
+      progressCursors: { "thread-1": { epoch: "parent-epoch", sequence: 40, ownerThreadId: "parent-thread" } },
+    }));
+  });
+
   it("installs a canonical reconnect snapshot before it refreshes the visible conversation", async () => {
     const record = createEmptyThreadRecord();
     const recovery = {
-      mode: "snapshot" as const,
+      phase: "recovery" as const,
       threadId: "thread-1",
-      snapshot: {
+      epoch: "runtime-1", acceptedThrough: 0, savedThrough: 0, retained: [], loss: "none" as const,
+      durable: { mode: "snapshot" as const, threadId: "thread-1", snapshot: {
         revision: { conversationRevision: 2, rosterRevision: 0 },
         state: record.canonicalAgent.state,
-      },
+      } },
     };
     const setThreadSubscriptions = vi.fn().mockResolvedValue({
       canonicalRecoveries: [recovery],

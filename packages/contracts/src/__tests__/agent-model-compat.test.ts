@@ -30,9 +30,13 @@ describe("agent-model compatibility boundary", () => {
     expect(TurnExecutionIdSchema.safeParse("00000000-0000-4000-8000-000000000001").success).toBe(true);
   });
 
-  it("validates durable canonical event batches on their migration channel", () => {
-    const result = WS_CHANNELS["agent.canonical"].safeParse({
+  it("validates accepted progress frames on the canonical channel", () => {
+    const frame = {
+      phase: "accepted",
       threadId: "thread-1",
+      epoch: "epoch-1",
+      from: 0,
+      through: 1,
       events: [{
         eventId: "event-1",
         routing: {
@@ -43,22 +47,16 @@ describe("agent-model compatibility boundary", () => {
         sourceProviderId: "codex",
         sourceIdentities: [],
         acceptedSequence: 1,
-        durableRevision: 1,
-        serverTimestamps: {
-          acceptedAt: "2026-08-09T20:00:00.000Z",
-          persistedAt: "2026-08-09T20:00:00.000Z",
-        },
+        progressPosition: { epoch: "epoch-1", sequence: 1 },
+        serverTimestamps: { acceptedAt: "2026-08-09T20:00:00.000Z" },
         payload: {
           type: "turn.started",
           startedAt: "2026-08-09T20:00:00.000Z",
         },
       }],
-    });
+    };
 
-    expect(result.success).toBe(true);
-    expect(WS_CHANNELS["agent.canonical"].safeParse({
-      threadId: "thread-1",
-      events: [],
-    }).success).toBe(false);
+    expect(WS_CHANNELS["agent.canonical"].safeParse(frame).success).toBe(true);
+    expect(WS_CHANNELS["agent.canonical"].safeParse({ ...frame, events: [] }).success).toBe(false);
   });
 });

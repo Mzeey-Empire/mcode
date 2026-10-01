@@ -185,7 +185,7 @@ describe("buildStableItems", () => {
     expect(items.filter((i) => i.type === "persisted-turn-footer")).toHaveLength(1);
   });
 
-  it("renders stop-only persisted hooks after the assistant message", () => {
+  it("renders stop-only persisted hooks as persisted narrative chrome", () => {
     const messages: Message[] = [
       makeMessage({ id: "u1", role: "user", content: "hi" }),
       makeMessage({ id: "a1", role: "assistant", content: "hello" }),
@@ -200,6 +200,7 @@ describe("buildStableItems", () => {
 
     expect(items.map((i) => i.type)).toEqual([
       "message",
+      "persisted-narrative",
       "message",
       "persisted-turn-footer",
     ]);

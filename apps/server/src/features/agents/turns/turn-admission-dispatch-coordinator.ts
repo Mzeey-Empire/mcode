@@ -455,7 +455,7 @@ export class TurnAdmissionDispatchCoordinator {
       threadControl: this.threadControlDirective(prepared, sourceTurnId),
       contextSeed: prepared.thread.last_context_tokens ?? 0,
       contextWindow: prepared.thread.context_window,
-      ...(this.parentStartOwner && prepared.providerId === "codex" ? { workerOwned: true as const } : {}),
+      ...(this.parentStartOwner ? { workerOwned: true as const } : {}),
     };
   }
 
@@ -728,7 +728,7 @@ export class TurnAdmissionDispatchCoordinator {
     sourceTurnId: string,
     input: DataOnlyParentTurnStartInput,
   ): Promise<void> {
-    if (!this.parentStartOwner || prepared.providerId !== "codex") return this.startParentTurn(input);
+    if (!this.parentStartOwner) return this.startParentTurn(input);
     const precedingMessageId = input.userMessage.messageId;
     if (!precedingMessageId) throw new Error("Worker-owned turn needs its committed user message identity");
     const planFeature = prepared.command.planAction === "revise" ? "output"
@@ -739,7 +739,7 @@ export class TurnAdmissionDispatchCoordinator {
       providerId: prepared.providerId,
       parentTurn: input,
       parentLive: { planFeature, precedingMessageId },
-      publishParentStart: prepared.providerId === "codex",
+      publishParentStart: true,
     });
     if (input.reopenThread) {
       const reopened = this.threads.findById(lease.threadId);

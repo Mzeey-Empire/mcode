@@ -112,7 +112,7 @@ export interface ParentTurnDurability {
   recordSynthesizedPublications(
     threadId: string,
     events: readonly Record<string, unknown>[],
-  ): readonly CanonicalAgentEventEnvelope[];
+  ): readonly (CanonicalAgentEventEnvelope | import("@mcode/contracts").AcceptedCanonicalAgentEventEnvelope)[];
 }
 
 /** Injection token for parent-turn durability. */

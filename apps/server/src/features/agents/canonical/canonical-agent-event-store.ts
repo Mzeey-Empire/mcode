@@ -4,10 +4,12 @@ import { eq } from "drizzle-orm";
 import { canonicalAgentEvents } from "../../../runtime/persistence/sqlite/schema.js";
 import {
   CanonicalAgentEventEnvelopeSchema,
+  AcceptedCanonicalAgentEventEnvelopeSchema,
   reduceAgentEventBatch,
   type AgentModelState,
   type AgentThread,
   type CanonicalAgentEventEnvelope,
+  type AcceptedCanonicalAgentEventEnvelope,
   type TurnOutcome,
 } from "@mcode/contracts";
 import type {
@@ -45,6 +47,11 @@ export interface CanonicalAgentEventStoreInput {
   onOverflow?: () => void;
   persistCheckpoint?: boolean;
 }
+
+/** Already-accepted semantics whose event identity, sequence, and timestamp are immutable. */
+export type CanonicalAcceptedEventStoreInput = Omit<CanonicalAgentEventStoreInput, "events" | "projectCompatibility" | "onOverflow" | "replayGuard"> & {
+  readonly events: readonly AcceptedCanonicalAgentEventEnvelope[];
+};
 
 /** Operations supplied by the owner of canonical state and compatibility projection. */
 export interface CanonicalAgentEventStoreOperations {
@@ -131,6 +138,20 @@ export class CanonicalAgentEventStore {
     return this.persistNewEvents(input, context, newDrafts);
   }
 
+  /** Validate and store supplied acceptance; this path never allocates an event identity. */
+  applyAcceptedWithinTransaction(input: CanonicalAcceptedEventStoreInput): CanonicalAgentCommitResult {
+    const accepted = input.events.map((event) => AcceptedCanonicalAgentEventEnvelopeSchema.parse(event));
+    if (accepted.length === 0 || accepted.length > 256) throw new Error("Accepted canonical batch has an invalid size");
+    const drafts = accepted.map(acceptedDraft);
+    const storeInput = { ...input, events: drafts };
+    this.assertBatchRouting(drafts, storeInput);
+    const context = this.commitContext(storeInput);
+    const existing = this.existingAcceptedEvents(accepted);
+    if (existing.size === drafts.length) return this.duplicateResult(context.thread, context.checkpoint);
+    if (existing.size !== 0) throw new Error("Accepted canonical batch cannot be partially replayed");
+    return this.persistNewEvents(storeInput, context, drafts, accepted);
+  }
+
   private commitContext(input: CanonicalAgentEventStoreInput): CommitContext {
     const thread = this.operations.loadThread(input.threadId);
     const checkpoint = this.operations.loadCheckpoint(input.executionId);
@@ -169,14 +190,23 @@ export class CanonicalAgentEventStore {
     input: CanonicalAgentEventStoreInput,
     context: CommitContext,
     newDrafts: readonly CanonicalAgentEventDraft[],
+    supplied?: readonly AcceptedCanonicalAgentEventEnvelope[],
   ): CanonicalAgentCommitResult {
     const acceptedAt = new Date().toISOString();
     const candidateRevision = (context.thread?.conversationRevision ?? 0) + 1;
     // Checkpoint-less executions (synthesized publications) sequence from their own event rows.
     let acceptedSequence = context.checkpoint?.lastAcceptedSequence
       ?? this.operations.lastAcceptedSequence(input.threadId, input.executionId);
-    let envelopes = newDrafts.map((draft) => {
+    let envelopes = newDrafts.map((draft, index) => {
       acceptedSequence += 1;
+      if (supplied) {
+        const accepted = supplied[index];
+        if (!accepted || accepted.acceptedSequence !== acceptedSequence) {
+          throw new Error("Accepted canonical sequence does not follow the durable predecessor");
+        }
+        return CanonicalAgentEventEnvelopeSchema.parse({ ...accepted, durableRevision: candidateRevision,
+          serverTimestamps: { acceptedAt: accepted.serverTimestamps.acceptedAt, persistedAt: acceptedAt } });
+      }
       return this.operations.createEnvelope(draft, acceptedSequence, candidateRevision, acceptedAt);
     });
     const state = this.operations.loadCommitState(input.threadId, context.checkpoint, envelopes);
@@ -284,6 +314,25 @@ export class CanonicalAgentEventStore {
     return existing;
   }
 
+  private existingAcceptedEvents(events: readonly AcceptedCanonicalAgentEventEnvelope[]): ReadonlySet<string> {
+    const existing = new Set<string>();
+    for (const accepted of events) {
+      const row = this.orm.select({ envelopeJson: canonicalAgentEvents.envelopeJson }).from(canonicalAgentEvents)
+        .where(eq(canonicalAgentEvents.eventId, accepted.eventId)).get();
+      if (!row) continue;
+      const stored = CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelopeJson));
+      this.operations.assertDuplicate(acceptedDraft(accepted), stored);
+      if (stored.acceptedSequence !== accepted.acceptedSequence
+        || stored.serverTimestamps.acceptedAt !== accepted.serverTimestamps.acceptedAt
+        || stored.progressPosition?.epoch !== accepted.progressPosition.epoch
+        || stored.progressPosition.sequence !== accepted.progressPosition.sequence) {
+        throw new Error("Accepted canonical event identity was reused with another assigned position");
+      }
+      existing.add(accepted.eventId);
+    }
+    return existing;
+  }
+
   private withConversationRevision(
     state: AgentModelState,
     threadId: string,
@@ -370,4 +419,9 @@ export class CanonicalAgentEventStore {
   ): unknown | null {
     return input.recoveryCursor ?? current?.recoveryCursor ?? null;
   }
+}
+
+function acceptedDraft(event: AcceptedCanonicalAgentEventEnvelope): CanonicalAgentEventDraft {
+  const { acceptedSequence: _sequence, progressPosition: _position, serverTimestamps: _timestamps, ...draft } = event;
+  return draft;
 }

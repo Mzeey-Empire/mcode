@@ -10,6 +10,26 @@ import { ThreadTeardownService } from "./thread-teardown-service.js";
 /** Stops every runtime resource that belongs to one thread before deletion. */
 @injectable()
 export class ThreadDeletionTeardownService {
+  private acceptedProgress: Pick<import("../../agents/canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
+    "discardThreads" | "finishThreadDeletion"> | undefined;
+
+  /** Compose retained-save disposal for direct deletion, delayed cleanup, and workspace cascades. */
+  bindAcceptedProgress(progress: NonNullable<ThreadDeletionTeardownService["acceptedProgress"]>): void {
+    this.acceptedProgress = progress;
+  }
+
+  /** Fence late admission while the exact in-flight save settles and persistent deletion runs. */
+  async deletePersistentData<Result>(threadIds: readonly string[], remove: () => Promise<Result>): Promise<Result> {
+    const progress = this.acceptedProgress;
+    if (!progress) throw new Error("Conversation deletion requires its accepted progress boundary");
+    try {
+      await progress.discardThreads(threadIds);
+      return await remove();
+    } finally {
+      for (const id of threadIds) progress.finishThreadDeletion(id);
+    }
+  }
+
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(WorkspaceEnvironmentService)

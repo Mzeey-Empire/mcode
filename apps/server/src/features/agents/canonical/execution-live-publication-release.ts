@@ -124,5 +124,5 @@ function systemIntentsFor(mutation: ExecutionSemanticOperation["mutation"]) {
 
 function barrierFor(kind: ExecutionSemanticOperation["mutation"]["kind"]): "writer" | "terminal" | null {
   if (kind === "begin" || kind === "append-events" || kind === "live-event") return "writer";
-  return kind === "finish" || kind === "finish-live-event" || kind === "post-terminal-event" ? "terminal" : null;
+  return kind === "finish-live-event" || kind === "post-terminal-event" ? "terminal" : null;
 }

@@ -104,10 +104,16 @@ export interface ThreadRecord {
   canonicalAgent: CanonicalAgentReplica;
   /** Mcode-owned identity for the current logical turn. */
   turnExecutionId: string | null;
+  /** Exact local prompt awaiting its canonical execution admission. */
+  optimisticUserMessageId: string | null;
   /** Authoritative lifecycle phase restored from server runtime snapshots. */
   runtimePhase: TurnRuntimePhase;
   /** Active assistant-text durability status. This is transient and server-authoritative. */
   savingStatus: TurnSavingStatus | null;
+  /** Saving work is retained after completion and while a newer execution is active. */
+  savingStatuses: TurnSavingStatus[];
+  /** Statuses awaiting installation of their exact progress epoch. */
+  pendingSavingStatuses: TurnSavingStatus[];
   messages: Message[];
   sessionNotices: Message[];
   /** Provider notice collection owner. Null means an explicit unscoped provider session. */
@@ -205,8 +211,11 @@ export function createEmptyThreadRecord(): ThreadRecord {
   return {
     canonicalAgent: createCanonicalAgentReplica(),
     turnExecutionId: null,
+    optimisticUserMessageId: null,
     runtimePhase: "idle",
     savingStatus: null,
+    savingStatuses: [],
+    pendingSavingStatuses: [],
     messages: [],
     sessionNotices: [],
     loading: false,

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import type { CanonicalAgentReconnectRecovery, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult } from "@mcode/contracts";
+import type { CanonicalAgentProgressRecovery, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult } from "@mcode/contracts";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { recordSubscriptionSkipped } from "@/lib/thread-switch-telemetry";
 import { useThreadStore } from "@/stores/threadStore";
@@ -46,6 +46,7 @@ type AtomicRequestContext = {
   readonly requestId: number;
   readonly sentThreadIds: Set<string>;
   readonly revisions: NonNullable<SetThreadSubscriptionsInput["revisions"]>;
+  readonly bufferToken: symbol;
 };
 
 type SubscriptionReconcileContext = {
@@ -103,10 +104,15 @@ function hasCanonicalRecovery(threadIds: readonly string[]): boolean {
 
 function atomicSubscriptionInput(threadIds: string[]): AtomicSubscriptionInput {
   const revisions: NonNullable<SetThreadSubscriptionsInput["revisions"]> = {};
+  const progressCursors: NonNullable<SetThreadSubscriptionsInput["progressCursors"]> = {};
   for (const threadId of threadIds) {
-    revisions[threadId] = readThreadRecord(threadId).canonicalAgent.revision;
+    const replica = readThreadRecord(threadId).canonicalAgent;
+    revisions[threadId] = replica.revision;
+    if (replica.progress) progressCursors[threadId] = { epoch: replica.progress.epoch, sequence: replica.progress.acceptedThrough,
+      ...(replica.ownerThreadId ? { ownerThreadId: replica.ownerThreadId } : {}),
+    };
   }
-  return { input: { threadIds, revisions }, revisions };
+  return { input: { threadIds, revisions, ...(Object.keys(progressCursors).length > 0 ? { progressCursors } : {}) }, revisions };
 }
 
 function createAtomicRequest(
@@ -126,6 +132,7 @@ function createAtomicRequest(
     requestId,
     sentThreadIds: new Set(threadIds),
     revisions: subscription.revisions,
+    bufferToken: useThreadStore.getState().beginCanonicalRecovery(threadIds),
   };
 }
 
@@ -143,15 +150,15 @@ function atomicResponseIsCurrent(refs: SubscriptionRefs, request: AtomicRequestC
 }
 
 function canonicalRecoveryChanged(
-  recovery: CanonicalAgentReconnectRecovery,
+  recovery: CanonicalAgentProgressRecovery,
   revisions: NonNullable<SetThreadSubscriptionsInput["revisions"]>,
 ): boolean {
-  if (recovery.mode === "snapshot") return true;
+  if (recovery.durable.mode === "snapshot") return true;
   const requested = revisions[recovery.threadId];
   if (!requested) return true;
   return [
-    recovery.through.conversationRevision > requested.conversationRevision,
-    recovery.through.rosterRevision > requested.rosterRevision,
+    recovery.durable.through.conversationRevision > requested.conversationRevision,
+    recovery.durable.through.rosterRevision > requested.rosterRevision,
   ].some(Boolean);
 }
 
@@ -160,7 +167,7 @@ function refreshConversation(threadId: string): void {
 }
 
 function applyCanonicalRecovery(
-  recovery: CanonicalAgentReconnectRecovery,
+  recovery: CanonicalAgentProgressRecovery,
   revisions: NonNullable<SetThreadSubscriptionsInput["revisions"]>,
   activeThreadId: string | null,
 ): void {
@@ -203,6 +210,7 @@ function handleAtomicFailure(request: AtomicRequestContext, context: Subscriptio
 
 function settleAtomicRequest(request: AtomicRequestContext, context: SubscriptionReconcileContext): void {
   const refs = context.refs;
+  useThreadStore.getState().finishCanonicalRecovery(request.bufferToken);
   refs.pendingAtomicThreadIds.current.delete(request.requestId);
   const currentRequest = refs.atomicRequest.current;
   const completedCurrentRequest = currentRequest?.epoch === request.epoch

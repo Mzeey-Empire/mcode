@@ -272,6 +272,7 @@ export interface RouterDeps {
   narrativeStore: NarrativeStore;
   /** Canonical agent-model reader used during staged compatibility projection. */
   canonicalSink: CanonicalAgentBoundary;
+  canonicalProgress?: import("../../features/agents/canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress;
   turnSnapshotRepo: TurnSnapshotRepo;
   turnDiffs: TurnDiffService;
   snapshotService: SnapshotService;

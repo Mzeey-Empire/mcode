@@ -311,6 +311,19 @@ export class CanonicalParentTurnWrite {
     return this.db.transaction(() => this.stageTerminalProjectionInTransaction(input, narrative))();
   }
 
+  /** Replace an internal accepted prefix with the exact terminal body on the writer connection. */
+  stageAcceptedTerminalProjection(input: DataOnlyParentTerminalProjectionInput): StagedParentTerminalProjection {
+    this.terminalProjectionTurn(input);
+    if (input.assistant.messageId) {
+      this.db.prepare(`UPDATE messages SET content = ?, model = ?, attachments = ?
+        WHERE id = ? AND thread_id = ? AND role = 'assistant' AND is_internal = 1`)
+        .run(input.assistant.content, input.assistant.model,
+          input.assistant.attachments.length ? JSON.stringify(input.assistant.attachments) : null,
+          input.assistant.messageId, input.threadId);
+    }
+    return this.stageTerminalProjection(input);
+  }
+
   private stageTerminalProjectionInTransaction(
     input: DataOnlyParentTerminalProjectionInput,
     snapshot: readonly ParentNarrativeRecoveryItem[],
@@ -403,6 +416,15 @@ export class CanonicalParentTurnWrite {
   }
 
   /** Confirm the terminal checkpoint and publish the staged assistant in one transaction. */
+  publishAcceptedTerminal(input: DataOnlyParentTurnFinishInput): void {
+    const staged = "kind" in input.projection
+      ? this.loadStagedTerminalProjection(input.threadId, input.executionId, input.projection.messageId)
+      : input.projection;
+    this.assertStagedAssistant(input.threadId, staged);
+    this.finalizeProjectionCompatibility(input, staged);
+  }
+
+  /** Confirm the terminal checkpoint and publish the staged assistant in one transaction. */
   finish(
     input: DataOnlyParentTurnFinishInput,
     onBatchWrite?: (batch: CanonicalTerminalBatchWrite) => void,
@@ -411,8 +433,6 @@ export class CanonicalParentTurnWrite {
       ? this.loadStagedTerminalProjection(input.threadId, input.executionId, input.projection.messageId)
       : input.projection;
     this.assertStagedAssistant(input.threadId, staged);
-    const fileEvidence = input.fileEvidence;
-    const selectedTurnDiff = selectTerminalDiff(input, staged.message !== null);
     const projection: ParentTurnProjection = {
       message: staged.message
         ? {
@@ -427,33 +447,29 @@ export class CanonicalParentTurnWrite {
     return this.canonical.finishParentTurnBatched({
       ...input,
       projectTurn: () => projection,
-      finalizeCompatibility: () => {
-        if (!projection.message) {
-          this.markEmptyTerminalFileChanges(input.threadId, fileEvidence);
-          return;
-        }
-        this.messages.setAssistantOutcome(projection.message.id, input.outcome, input.executionId);
-        this.messages.publishAssistant(projection.message.id);
-        if (fileEvidence?.snapshot) {
-          const snapshot = fileEvidence.snapshot;
-          this.turnSnapshots.create({
-            messageId: projection.message.id,
-            threadId: snapshot.threadId,
-            refBefore: snapshot.refBefore,
-            refAfter: snapshot.refAfter,
-            filesChanged: [...snapshot.filesChanged],
-            fileEffects: snapshot.fileEffects,
-            worktreePath: null,
-          });
-          if (fileEvidence.fileEffects.fileCount > 0 || fileEvidence.filesChanged.length > 0) {
-            this.markThreadFilesChanged.run(input.threadId);
-          }
-        }
-        if (selectedTurnDiff) this.turnDiffs.create({
-          id: NodeCrypto.randomUUID(), message_id: projection.message.id, ...selectedTurnDiff,
-        });
-      },
+      finalizeCompatibility: () => this.finalizeProjectionCompatibility(input, projection),
     }, onBatchWrite);
+  }
+
+  private finalizeProjectionCompatibility(input: DataOnlyParentTurnFinishInput, projection: ParentTurnProjection): void {
+    const fileEvidence = input.fileEvidence;
+    const selectedTurnDiff = selectTerminalDiff(input, projection.message !== null);
+    if (!projection.message) {
+      this.markEmptyTerminalFileChanges(input.threadId, fileEvidence);
+      return;
+    }
+    this.messages.setAssistantOutcome(projection.message.id, input.outcome, input.executionId);
+    this.messages.publishAssistant(projection.message.id);
+    if (fileEvidence?.snapshot) {
+      const snapshot = fileEvidence.snapshot;
+      this.turnSnapshots.create({ messageId: projection.message.id, threadId: snapshot.threadId,
+        refBefore: snapshot.refBefore, refAfter: snapshot.refAfter, filesChanged: [...snapshot.filesChanged],
+        fileEffects: snapshot.fileEffects, worktreePath: null });
+      this.markEmptyTerminalFileChanges(input.threadId, fileEvidence);
+    }
+    if (selectedTurnDiff) this.turnDiffs.create({
+      id: NodeCrypto.randomUUID(), message_id: projection.message.id, ...selectedTurnDiff,
+    });
   }
 
   private markEmptyTerminalFileChanges(threadId: string, evidence?: PreparedExecutionFileEvidence): void {

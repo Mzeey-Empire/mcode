@@ -12,6 +12,7 @@ import type {
   ExecutionWorkerResult,
   ExecutionWriteReceipt,
 } from "./execution-worker-handler.js";
+import { executionWriterFailure, type ExecutionWriterFailure } from "./execution-writer-failure.js";
 
 type Command = ExecutionMailboxCommand<ExecutionWorkCommand>;
 type Request = ExecutionWorkerRequest<Command>;
@@ -21,7 +22,7 @@ type Reply = ExecutionWorkerReply<ExecutionWorkerResult>;
 export type ExecutionWorkerInbound =
   | { readonly kind: "command"; readonly request: Request }
   | { readonly kind: "writer-receipt"; readonly rpcId: number; readonly receipt: ExecutionWriteReceipt }
-  | { readonly kind: "writer-failure"; readonly rpcId: number }
+  | { readonly kind: "writer-failure"; readonly rpcId: number; readonly failure: ExecutionWriterFailure }
   | { readonly kind: "close" };
 
 /** The Worker requests one durable transaction and returns its acknowledged result. */
@@ -139,8 +140,8 @@ export class ExecutionThreadWorkerPort implements ExecutionWorkerPort<Command, E
     try {
       const receipt = await this.writer.transact(operation);
       if (this.state === "ready") this.send({ kind: "writer-receipt", rpcId, receipt });
-    } catch {
-      if (this.state === "ready") this.send({ kind: "writer-failure", rpcId });
+    } catch (error) {
+      if (this.state === "ready") this.send({ kind: "writer-failure", rpcId, failure: executionWriterFailure(error) });
     } finally {
       this.writerRpcPending = false;
     }

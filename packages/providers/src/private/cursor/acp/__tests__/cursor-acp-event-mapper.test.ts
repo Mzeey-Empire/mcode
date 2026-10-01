@@ -139,6 +139,61 @@ describe("mapCursorAcpSessionNotification", () => {
     expect(state.accumulator.assistantFinalText).toBe("");
   });
 
+  it("settles the unknown preamble before a tool and keeps its later final reply separate", () => {
+    const state = createCursorAcpTurnState();
+    const notifications: SessionNotification[] = [
+      { sessionId: "s", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "I will read the file. " } } },
+      { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId: "read-1", title: "Read File", kind: "read", rawInput: { file_path: "src/file.ts" }, status: "in_progress" } },
+      { sessionId: "s", update: { sessionUpdate: "tool_call_update", toolCallId: "read-1", status: "completed", rawOutput: { content: "File contents" } } },
+      { sessionId: "s", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "The file defines the entry point." } } },
+    ];
+    const mapped = notifications.flatMap((notification) => mapCursorAcpSessionNotification(notification, threadId, state));
+    expect(mapped).toEqual([
+      { type: "textDelta", threadId, delta: "I will read the file. " },
+      { type: "assistantMessageBoundary", threadId, isFinalResponse: false },
+      { type: "toolUse", threadId, toolCallId: "read-1", toolName: "Read", toolInput: { file_path: "src/file.ts" } },
+      { type: "toolResult", threadId, toolCallId: "read-1", output: "File contents", isError: false },
+      { type: "textDelta", threadId, delta: "The file defines the entry point.", isFinalResponse: true },
+    ]);
+    expect(resolveCursorAssistantMessageContent(state.accumulator)).toBe("The file defines the entry point.");
+  });
+
+  it("settles an unknown preamble before an explicitly nonfinal thought and preserves repeated thought chunks", () => {
+    const state = createCursorAcpTurnState();
+    const notifications: SessionNotification[] = [
+      { sessionId: "s", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Let me check. " } } },
+      { sessionId: "s", update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Inspect the caller. " } } },
+      { sessionId: "s", update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Then inspect its return value." } } },
+    ];
+    expect(notifications.flatMap((notification) => mapCursorAcpSessionNotification(notification, threadId, state))).toEqual([
+      { type: "textDelta", threadId, delta: "Let me check. " },
+      { type: "assistantMessageBoundary", threadId, isFinalResponse: false },
+      { type: "textDelta", threadId, delta: "Inspect the caller. ", isFinalResponse: false },
+      { type: "textDelta", threadId, delta: "Then inspect its return value.", isFinalResponse: false },
+    ]);
+    expect(state.accumulator.assistantText).toBe("Let me check. ");
+    expect(state.accumulator.assistantFinalText).toBe("");
+  });
+
+  it("closes prior final text as final before a later thought, tool, or unknown classification", () => {
+    const final = { sessionId: "s", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Intermediate answer. " } } } satisfies SessionNotification;
+    const transitions: SessionNotification[] = [
+      { sessionId: "s", update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Check one more thing." } } },
+      { sessionId: "s", update: { sessionUpdate: "tool_call", toolCallId: "next-read", title: "Read File", kind: "read", status: "in_progress" } },
+      { sessionId: "s", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "While the tool runs." } } },
+    ];
+    for (const transition of transitions) {
+      const state = createCursorAcpTurnState();
+      state.accumulator.hasFiredToolThisTurn = true;
+      mapCursorAcpSessionNotification(final, threadId, state);
+      if (transition.update.sessionUpdate === "agent_message_chunk") state.accumulator.pendingToolCalls.add("pending-tool");
+      const mapped = mapCursorAcpSessionNotification(transition, threadId, state);
+      expect(mapped[0]).toEqual({ type: "assistantMessageBoundary", threadId, isFinalResponse: true });
+      expect(mapped[1]?.type).toBe(transition.update.sessionUpdate === "tool_call" ? "toolUse" : "textDelta");
+      expect(state.accumulator.assistantFinalText).toBe("Intermediate answer. ");
+    }
+  });
+
   it("emits ToolUse at a lifecycle tool_call marker and merges enriched input at completion", () => {
     const state = createCursorAcpTurnState();
     const start = mapCursorAcpSessionNotification(
@@ -290,9 +345,10 @@ describe("mapCursorAcpSessionNotification", () => {
       status: "completed",
       rawOutput: { path: "a.ts", content: "x" },
     });
-    expect(published.map((e) => [e.type, (e as { toolCallId?: string }).toolCallId ?? ""])).toEqual([
+    expect(published.map((e) => [e.type, "toolCallId" in e ? e.toolCallId : ""])).toEqual([
       [AgentEventType.ToolUse, "c-read"],
       [AgentEventType.TextDelta, ""],
+      [AgentEventType.AssistantMessageBoundary, ""],
       [AgentEventType.ToolUse, "c-grep"],
       [AgentEventType.ToolUse, "c-read"],
       [AgentEventType.ToolResult, "c-read"],

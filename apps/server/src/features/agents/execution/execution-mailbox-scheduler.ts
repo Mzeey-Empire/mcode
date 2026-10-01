@@ -17,7 +17,7 @@ export type ExecutionMailboxCommand<Work extends { readonly kind: string }> =
 
 /** Lifecycle results that must be allowed to settle after Stop is admitted. */
 export const EXECUTION_CONTROL_KINDS = [
-  "checkpoint", "effect-result", "provider-outcome", "stage-terminal", "finalize", "release",
+  "checkpoint", "effect-result", "provider-outcome", "release",
   "finish-from-state", "finish-live-event", "post-terminal-event",
 ] as const;
 /** A command kind that must still settle after Stop begins draining the mailbox. */
@@ -74,6 +74,7 @@ export interface ExecutionLostAssignment {
 
 /** Writer evidence that a lost worker's execution can release its thread and slot. */
 export type ExecutionRecoveryReceipt =
+  | { readonly kind: "accepted"; readonly operationId: string; readonly progressPosition: { readonly epoch: string; readonly sequence: number } }
   | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number }
   | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState?: "not-started" | "already-terminal" };
 
@@ -419,7 +420,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
 
 function validRecoveryReceipt(lease: ExecutionLease, receipt: ExecutionRecoveryReceipt): boolean {
   return receipt.operationId === `${lease.leaseId}:worker-lost`
-    && (receipt.kind === "conflict" || Number.isSafeInteger(receipt.durableRevision));
+    && (receipt.kind === "conflict" || receipt.kind === "accepted" || Number.isSafeInteger(receipt.durableRevision));
 }
 
 function matchesReply<Command, Result>(request: ExecutionWorkerRequest<Command>, reply: ExecutionWorkerReply<Result>): boolean {

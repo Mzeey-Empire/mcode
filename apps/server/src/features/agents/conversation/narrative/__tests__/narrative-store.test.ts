@@ -667,6 +667,26 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     }]);
   });
 
+  it("detaches changed and terminally materialized records from a fork's accepted narrative", () => {
+    const accepted = new NarrativeTurnState({ threadId: THREAD, turnId: "turn", executionId: "execution" });
+    accepted.beginTurn(THREAD);
+    accepted.bufferToolCall(THREAD, {
+      toolCallId: "read", toolName: "Read", toolInput: { file_path: "original.txt", options: { keep: true } },
+    });
+    const before = accepted.terminalSnapshot(THREAD);
+    const candidate = accepted.fork();
+    candidate.updateBufferedToolCallOutput(THREAD, "read", "candidate output", false, { file_path: "candidate.txt" });
+    const persisted = candidate.prepareNarrativePersistence(THREAD, "assistant", "Answer", "completed");
+    expect(persisted.toolCalls[0]).toMatchObject({ messageId: "assistant", status: "completed", outputSummary: "candidate output" });
+    expect(accepted.terminalSnapshot(THREAD)).toEqual(before);
+    expect(accepted.getBufferedToolCalls(THREAD)[0]).toMatchObject({
+      messageId: "", status: "running", _rawToolInput: { file_path: "original.txt", options: { keep: true } },
+    });
+    const recovery = accepted.takeRecoveryChanges(THREAD);
+    expect(recovery.items[0]?.record).toMatchObject({ status: "running", input_summary: "original.txt" });
+    expect(recovery.discardedItemIds).toEqual([]);
+  });
+
   it("keeps two execution states for the same thread independent", () => {
     const firstExecution = { threadId: THREAD, turnId: "turn-1", executionId: "execution-1" };
     const secondExecution = { threadId: THREAD, turnId: "turn-2", executionId: "execution-2" };

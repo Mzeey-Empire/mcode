@@ -11,7 +11,7 @@ import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { CleanupJobRepo } from "../../thread-control/cleanup/persistence/cleanup-job-repo.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
-import { AgentService } from "../../agents/index.js";
+import { ThreadDeletionTeardownService } from "../../thread-control/lifecycle/thread-deletion-teardown-service.js";
 import { logger } from "@mcode/shared";
 import type { GitExecutor } from "../git/execution/index.js";
 
@@ -23,7 +23,7 @@ export class WorkspaceService {
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(CleanupJobRepo) private readonly cleanupJobRepo: CleanupJobRepo,
     @inject(AttachmentService) private readonly attachmentService: AttachmentService,
-    @inject(delay(() => AgentService)) private readonly agentService: AgentService,
+    @inject(delay(() => ThreadDeletionTeardownService)) private readonly threadDeletion: ThreadDeletionTeardownService,
     @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
   ) {}
 
@@ -47,7 +47,7 @@ export class WorkspaceService {
     // evicts only if no threads remain; if it can't, force-delete here.
     const stale = this.workspaceRepo.findDeletingByPath(path);
     if (stale) {
-      this.forceDelete(stale.id);
+      await this.forceDelete(stale.id);
     }
 
     const isGitRepo = await this.detectGitRepo(path);
@@ -78,12 +78,12 @@ export class WorkspaceService {
 
   /**
    * Two-phase workspace deletion.
-   * Phase 1 (synchronous): soft-delete workspace + threads, enqueue cleanup jobs.
+   * Phase 1: soft-delete workspace + threads, enqueue cleanup jobs, and stop their runtimes.
    * Phase 2 (async via CleanupWorker): drain jobs, then hard-delete workspace.
    *
    * Returns false if the workspace does not exist.
    */
-  delete(id: string): boolean {
+  async delete(id: string): Promise<boolean> {
     // Attempt soft-delete. If workspace doesn't exist or is already deleted, bail.
     if (!this.workspaceRepo.softDelete(id)) {
       return false;
@@ -99,14 +99,6 @@ export class WorkspaceService {
 
     // Get all threads regardless of status
     const allThreads = this.threadRepo.listAllByWorkspace(id);
-
-    // Signal all active agent sessions to stop (fire-and-forget)
-    const activeThreads = allThreads.filter((t) => t.sdk_session_id);
-    for (const thread of activeThreads) {
-      this.agentService.stopSession(thread.id).catch(() => {
-        logger.debug("Failed to stop session during workspace delete", { threadId: thread.id });
-      });
-    }
 
     // Separate threads by whether they need async worktree cleanup
     const worktreeThreadIds = new Set(worktreeThreads.map((t) => t.id));
@@ -131,45 +123,35 @@ export class WorkspaceService {
       );
     }
 
-    // For direct threads (no worktree), clean up attachments and hard-delete now
-    for (const thread of directThreads) {
-      this.attachmentService.removeForThread(thread.id);
-      this.threadRepo.hardDelete(thread.id);
-    }
-
-    // If no worktree cleanup is pending, hard-delete the workspace immediately
-    const pendingJobs = workspacePath
-      ? this.cleanupJobRepo.countByWorkspacePath(workspacePath)
-      : 0;
-
-    if (pendingJobs === 0) {
-      this.workspaceRepo.hardDelete(id);
-    }
-
+    for (const thread of allThreads) await this.threadDeletion.teardownThread(thread.id);
+    await this.threadDeletion.deletePersistentData(allThreads.map((thread) => thread.id), async () => {
+      for (const thread of directThreads) {
+        this.attachmentService.removeForThread(thread.id);
+        this.threadRepo.hardDelete(thread.id);
+      }
+      const pendingJobs = workspacePath ? this.cleanupJobRepo.countByWorkspacePath(workspacePath) : 0;
+      if (pendingJobs === 0) this.workspaceRepo.hardDelete(id);
+    });
     return true;
   }
 
   /**
    * Force-delete a workspace, abandoning any pending filesystem cleanup.
-   * Signals active sessions to stop (best-effort), then removes all DB records
-   * immediately. Orphaned worktree directories may remain on disk.
+   * Stops owned runtimes and settles their active saves before removing DB records.
+   * Orphaned worktree directories may remain on disk.
    */
-  forceDelete(id: string): boolean {
+  async forceDelete(id: string): Promise<boolean> {
     this.threadRepo.nullifyExternalLineage(id);
     const threads = this.threadRepo.listAllByWorkspace(id);
 
-    // Best-effort signal to active sessions before removing their backing rows
-    for (const t of threads) {
-      if (t.sdk_session_id) {
-        this.agentService.stopSession(t.id).catch(() => {});
+    for (const thread of threads) await this.threadDeletion.teardownThread(thread.id);
+    return this.threadDeletion.deletePersistentData(threads.map((thread) => thread.id), async () => {
+      for (const thread of threads) {
+        this.cleanupJobRepo.deleteByThreadId(thread.id);
+        this.attachmentService.removeForThread(thread.id);
       }
-    }
-
-    for (const t of threads) {
-      this.cleanupJobRepo.deleteByThreadId(t.id);
-      this.attachmentService.removeForThread(t.id);
-    }
-    return this.workspaceRepo.hardDelete(id);
+      return this.workspaceRepo.hardDelete(id);
+    });
   }
 
   /** Find a workspace by its primary key. Returns null if not found. */

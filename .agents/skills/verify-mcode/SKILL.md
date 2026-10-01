@@ -79,6 +79,8 @@ Run `runtime console-audit` after changes to child-process spawn, startup, or cl
 
 Run `runtime check --phase acp` for the deterministic ACP narrative regression gate. For the production-boundary Electron proof, run `desktop acp-narrative setup`, set the returned path as the Cursor (or Devin) CLI path in the owned Electron runtime, and follow `references/features/acp-narrative.md`. The fixture emits reasoning chunks, three invocation-ordered tool markers, and out-of-order completions without needing a provider account. A prompt containing the word `subagent` appends a Devin `run_subagent` sequence with `subagent_context` child markers to prove nested subagent resolution.
 
+For live progress independent of saving, run `bun .agents/skills/verify-mcode/scripts/live-durability.mjs check`, then import that module in the existing owned Playwright session. Follow the held-save, Stop, permanent-rejection/Retry, and reload recipes in [provider events and durability](references/features/provider-events-and-durability.md#live-progress-and-saving). The module validates the explicit runtime/database identity and emits native ACP Devin or Codex fixture traffic. Its offline check does not prove the UI. The coordinator owns app lifecycle; each proof cleans its exact fixture threads/faults and restores captured settings.
+
 ## Evidence and cleanup
 
 Runtime evidence is under `.dev/verification/agent-runtime`. Thread-lifecycle evidence is under `.dev/verification/thread-lifecycle`. Selected-text-comments evidence is under `.dev/verification`.

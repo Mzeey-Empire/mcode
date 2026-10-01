@@ -60,7 +60,7 @@ it("contains a rejected writer operation to its execution while a slot peer keep
     payload: { type: "item.recorded", item: { id: "failed-tool", threadId: failed.threadId, turnId: failed.turnId,
       kind: "tool-call", providerIdentities: [], payload: { projection: "toolCall", toolName: "Read", path: "CONTEXT.md" },
       createdAt: NOW, updatedAt: NOW } },
-  }] })).rejects.toThrow("writer-failure");
+  }] })).rejects.toThrow("injected append failure");
   await runtime.recoverRejected(failed);
   expect(runtime.owner.current(failed.threadId)).toBeUndefined();
   expect(database.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")

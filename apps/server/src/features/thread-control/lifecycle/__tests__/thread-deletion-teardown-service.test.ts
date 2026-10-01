@@ -10,6 +10,42 @@ import { ThreadDeletionTeardownService } from "../thread-deletion-teardown-servi
 import type { ThreadTeardownService } from "../thread-teardown-service.js";
 
 describe("ThreadDeletionTeardownService", () => {
+  it("rejects missing save ownership before removing persistent data", async () => {
+    const remove = vi.fn(async () => true);
+    await expect(createService([]).deletePersistentData(["thread"], remove)).rejects.toThrow("accepted progress boundary");
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("waits for the exact save disposal before removing persistent data and holds the fence until removal finishes", async () => {
+    const service = createService([]);
+    let releaseSave: (() => void) | undefined;
+    let releaseRemoval: (() => void) | undefined;
+    const save = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const removal = new Promise<boolean>((resolve) => { releaseRemoval = () => resolve(true); });
+    const discardThreads = vi.fn(() => save);
+    const finishThreadDeletion = vi.fn();
+    service.bindAcceptedProgress({ discardThreads, finishThreadDeletion });
+    const remove = vi.fn(() => removal);
+    const deleting = service.deletePersistentData(["parent", "native-child"], remove);
+    expect(discardThreads).toHaveBeenCalledExactlyOnceWith(["parent", "native-child"]);
+    expect(remove).not.toHaveBeenCalled();
+    releaseSave?.();
+    await vi.waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+    expect(finishThreadDeletion).not.toHaveBeenCalled();
+    releaseRemoval?.();
+    expect(await deleting).toBe(true);
+    expect(finishThreadDeletion.mock.calls).toEqual([["parent"], ["native-child"]]);
+  });
+
+  it("releases the admission fence while preserving the original persistent deletion failure", async () => {
+    const service = createService([]);
+    const finishThreadDeletion = vi.fn();
+    service.bindAcceptedProgress({ discardThreads: async () => {}, finishThreadDeletion });
+    const error = new Error("hard deletion failed");
+    await expect(service.deletePersistentData(["thread"], async () => { throw error; })).rejects.toBe(error);
+    expect(finishThreadDeletion).toHaveBeenCalledExactlyOnceWith("thread");
+  });
+
   it("stops every owned resource before releasing deletion barriers", async () => {
     const calls: string[] = [];
     const service = createService(calls);

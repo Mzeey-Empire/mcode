@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TurnRuntimeSnapshot, TurnSavingStatus } from "@mcode/contracts";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
@@ -46,6 +47,24 @@ describe("follow-up runtime ownership", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it.each<TurnRuntimeSnapshot["phase"]>(["running", "completed"])("preserves %s save failures through snapshots and reconnect", (phase) => {
+    const failed: TurnSavingStatus = { threadId: THREAD_ID, executionId: "00000000-0000-4000-8000-000000000002", mode: "saving-failed",
+      accepted: { epoch: "runtime-1", sequence: 2 }, saved: { epoch: "runtime-1", sequence: 0 },
+      pendingEvents: 2, pendingBytes: 128, oldestPendingAt: "2026-09-30T12:00:00.000Z",
+      failure: { kind: "permanent", name: "WriteError", message: "Unable to save accepted progress" } };
+    const previous = { ...failed, executionId: "00000000-0000-4000-8000-000000000001" };
+    const snapshot: TurnRuntimeSnapshot = { threadId: THREAD_ID, phase, turnExecutionId: failed.executionId,
+      savingStatus: "durable", savingStatuses: [failed, previous] };
+    useThreadStore.getState().applyThreadRuntimeSnapshot(snapshot);
+    expect(record()?.savingStatus).toEqual(failed);
+    expect(record()?.savingStatuses).toEqual([failed, previous]);
+
+    useThreadStore.getState().hydrateThreadRuntimes([snapshot]);
+    expect(record()?.runtimePhase).toBe(phase);
+    expect(record()?.savingStatus).toEqual(failed);
+    expect(record()?.savingStatuses).toEqual([failed, previous]);
   });
 
   it("completes a follow-up when the publication cursor write fails", async () => {

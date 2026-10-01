@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@mcode/contracts";
 import { expandTranscriptNarrative, expandTranscriptToolGroups } from "../transcript-narrative-items";
-import { createTranscriptItemProjector, type ChatVirtualItem, type TranscriptProjectionInput } from "../virtual-items";
+import { createTranscriptItemProjector, type ChatVirtualItem, type PersistedNarrativeRecords, type TranscriptProjectionInput } from "../virtual-items";
 
 describe("transcript narrative rows", () => {
   it.each([undefined, "pending-answer", "answer"])("renders hydrated live narrative once with response id %s", (messageId) => {
@@ -80,5 +80,49 @@ describe("transcript narrative rows", () => {
     expect(live.map((row) => row.type === "narrative-row" && row.item.type === "thought" ? row.item.segment.text : row.type))
       .toEqual(["Reasoning 1000", "Reasoning 2000"]);
     expect(saved.at(-1)).toMatchObject({ type: "message", message: { content: "Final response" } });
+  });
+
+  it("bounds persisted narrative expansion for very large saved tool histories", () => {
+    const records: NonNullable<PersistedNarrativeRecords> = {
+      hooks: [],
+      thoughts: [],
+      tools: Array.from({ length: 170 }, (_, index) => ({
+        id: `tool-${String(index).padStart(3, "0")}`,
+        message_id: "answer",
+        parent_tool_call_id: null,
+        tool_name: "Bash",
+        input_summary: "pwd",
+        output_summary: "done",
+        status: "completed",
+        started_at: new Date(1_000 + index).toISOString(),
+        completed_at: new Date(2_000 + index).toISOString(),
+        sort_order: index,
+      })),
+    };
+    const rows = expandTranscriptNarrative([
+      { type: "persisted-narrative", key: "saved", messageId: "answer", messageContent: "Done" },
+      {
+        type: "message",
+        key: "answer",
+        message: {
+          id: "answer",
+          thread_id: "thread",
+          role: "assistant",
+          content: "Done",
+          sequence: 1,
+          timestamp: new Date(3_000).toISOString(),
+          tool_calls: null,
+          files_changed: null,
+          cost_usd: null,
+          tokens_used: null,
+          attachments: null,
+        },
+      },
+    ], { answer: records });
+    const expanded = expandTranscriptToolGroups(rows, new Set(rows.map((row) => row.key)));
+    const toolRows = expanded.filter((row) => row.type === "tool-row");
+    expect(toolRows).toHaveLength(32);
+    expect(toolRows[0]).toMatchObject({ toolCall: { id: "tool-138" } });
+    expect(toolRows.at(-1)).toMatchObject({ toolCall: { id: "tool-169" } });
   });
 });

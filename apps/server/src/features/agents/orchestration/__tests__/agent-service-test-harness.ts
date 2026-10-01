@@ -292,7 +292,7 @@ export function createAgentServiceForTest(
   testContainer.registerInstance(TURN_FILE_EFFECTS, fileEffects);
   testContainer.registerInstance(TURN_ADMISSION_DISPATCH_COORDINATOR, admissions);
   testContainer.registerInstance(TurnConversationProjectionService, conversationProjection);
-  testContainer.registerInstance(PostTerminalHookCompletionEffect, new PostTerminalHookCompletionEffect(hookExecutionRepo, finalizer, parentDurability));
+  testContainer.registerInstance(PostTerminalHookCompletionEffect, new PostTerminalHookCompletionEffect());
   testContainer.registerInstance(ProviderSessionCursorPersistence, new ProviderSessionCursorPersistence(runtimePersistence, parentDurability));
   testContainer.registerInstance(ThreadCreationCoordinator, new ThreadCreationCoordinator(
     threadRepo,

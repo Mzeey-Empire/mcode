@@ -783,6 +783,7 @@ mcode-preview-annotations:end -->`,
       permissionMode: "full",
       thinking: false,
       previewAnnotations,
+      onTurnStarted: expect.any(Function),
     });
   });
 

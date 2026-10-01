@@ -5,6 +5,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { CanonicalAcceptedEventWrite } from "./canonical-accepted-write.js";
 import { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
 import { isGroupableAppend, selectAppendGroup, type QueuedCanonicalWrite } from "./canonical-append-group.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
@@ -21,6 +22,7 @@ import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-bound
 
 let db: Database | undefined;
 let boundary: CanonicalAgentBoundary | undefined;
+let acceptedWriter: CanonicalAcceptedEventWrite | undefined;
 let assistantTextCheckpoints: ParentAssistantTextCheckpointService | undefined;
 let receipts: CanonicalAgentWriterReceipts | undefined;
 let semanticWriter: CanonicalExecutionSemanticWriter | undefined;
@@ -41,9 +43,11 @@ function openDatabase(dbPath: string): void {
       if (!correlation) throw new Error("Semantic publication has no active request");
       publishSemantic(correlation, events);
     });
+    acceptedWriter = new CanonicalAcceptedEventWrite(connection, boundary, semanticWriter);
     db = connection;
   } catch (error) {
     boundary = undefined;
+    acceptedWriter = undefined;
     assistantTextCheckpoints = undefined;
     receipts = undefined;
     semanticWriter = undefined;
@@ -98,12 +102,13 @@ async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterR
     try {
       openDatabase(request.dbPath);
       return { ...correlation, kind: "opened" };
-    } catch {
-      return { ...correlation, kind: "failed", reason: "open-failed" };
+    } catch (error) {
+      return { ...correlation, kind: "failed", reason: "open-failed", failure: describeFailure(error) };
     }
   }
   if (request.kind === "close") {
     boundary = undefined;
+    acceptedWriter = undefined;
     assistantTextCheckpoints = undefined;
     receipts = undefined;
     semanticWriter = undefined;
@@ -116,8 +121,8 @@ async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterR
       if (!receipts) throw new Error("Canonical writer has not opened its database");
       receipts.acknowledge(request.executionId, request.operationId);
       return { ...correlation, kind: "operation-acknowledged" };
-    } catch {
-      return { ...correlation, kind: "failed", reason: "write-failed" };
+    } catch (error) {
+      return { ...correlation, kind: "failed", reason: "write-failed", failure: describeFailure(error) };
     }
   }
   if (request.kind === "semantic-transact" || request.kind === "semantic-worker-loss") {
@@ -145,8 +150,8 @@ async function handleSemanticWrite(
       ? await withSQLiteBusyRetry(() => writer.transact(request.operation))
       : await withSQLiteBusyRetry(() => writer.interruptWorkerLoss(request.input));
     return { ...correlation, kind: "semantic-transacted", receipt };
-  } catch {
-    return { ...correlation, kind: "failed", reason: "write-failed" };
+  } catch (error) {
+    return { ...correlation, kind: "failed", reason: "write-failed", failure: describeFailure(error) };
   } finally {
     semanticPublication = undefined;
   }
@@ -181,7 +186,7 @@ function isSQLiteBusy(error: unknown): boolean {
 }
 
 async function handleWrite(
-  request: Extract<CanonicalWriterRequest, { kind: "commit" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery" }>,
+  request: Extract<CanonicalWriterRequest, { kind: "commit" | "append-accepted" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery" }>,
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
 ): Promise<CanonicalWriterResponse> {
   try {
@@ -204,15 +209,22 @@ async function handleWrite(
       kind: "failed",
       reason: error instanceof CanonicalWriterOperationConflict ? "operation-conflict"
         : error instanceof CanonicalWriterReceiptCapacity ? "receipt-capacity" : "write-failed",
+      failure: describeFailure(error),
     };
   }
 }
 
 function applyWrite(
-  request: Extract<CanonicalWriterRequest, { kind: "commit" | "classify-parent-narrative-recovery" }>,
+  request: Extract<CanonicalWriterRequest, { kind: "commit" | "append-accepted" | "classify-parent-narrative-recovery" }>,
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
   canonical: CanonicalAgentBoundary,
-): Extract<CanonicalWriterResponse, { kind: "committed" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified" }> {
+): Extract<CanonicalWriterResponse, { kind: "committed" | "accepted-appended" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified" }> {
+  if (request.kind === "append-accepted") {
+    if (!acceptedWriter || request.input.execution.executionId !== request.executionId) {
+      throw new Error("Accepted writer execution mismatch");
+    }
+    return { ...correlation, kind: "accepted-appended", result: acceptedWriter.apply(request.input, request.operationId) };
+  }
   if (request.kind === "classify-parent-narrative-recovery") {
     if (request.input.executionId !== request.executionId) {
       throw new Error("Canonical writer classification execution mismatch");
@@ -233,9 +245,16 @@ function applyWrite(
 const requestQueue: QueuedCanonicalWrite[] = [];
 let draining = false;
 
-function failRequest(request: CanonicalWriterRequest): void {
+function describeFailure(error: unknown): { name: string; message: string; code?: string } {
+  if (!(error instanceof Error)) return { name: "Error", message: String(error).slice(0, 8_000) };
+  return { name: error.name.slice(0, 128), message: error.message.slice(0, 8_000),
+    ...("code" in error && typeof error.code === "string" ? { code: error.code.slice(0, 128) } : {}) };
+}
+
+function failRequest(request: CanonicalWriterRequest, error: unknown): void {
   globalThis.postMessage({ requestId: request.requestId, operationId: request.operationId,
-    executionId: request.executionId, kind: "failed", reason: "write-failed" } satisfies CanonicalWriterResponse);
+    executionId: request.executionId, kind: "failed", reason: "write-failed",
+    failure: describeFailure(error) } satisfies CanonicalWriterResponse);
 }
 
 async function handleAppendGroup(requests: Extract<CanonicalWriterRequest, { kind: "semantic-transact" }>[]): Promise<number> {
@@ -267,8 +286,7 @@ async function handleSingleRequest(request: CanonicalWriterRequest): Promise<voi
   const response = await handle(request);
   globalThis.postMessage(response);
   if (requestQueue.length === 1 && response.kind === "semantic-transacted" && response.receipt.kind === "committed"
-    && request.kind === "semantic-transact" && (request.operation.mutation.kind === "finish"
-      || request.operation.mutation.kind === "finish-live-event")) gc(true);
+    && request.kind === "semantic-transact" && request.operation.mutation.kind === "finish-live-event") gc(true);
 }
 
 async function drainRequests(): Promise<void> {
@@ -282,7 +300,7 @@ async function drainRequests(): Promise<void> {
     else await handleSingleRequest(request);
   } catch (error) {
     console.error("Canonical writer request failed unexpectedly", error);
-    failRequest(request);
+    failRequest(request, error);
   } finally {
     requestQueue.splice(0, consumed);
     if (requestQueue.length > 0) setImmediate(() => { void drainRequests(); });
@@ -296,8 +314,8 @@ globalThis.onmessage = (message: MessageEvent<CanonicalWriterRequest>): void => 
     requestQueue.push({ request,
       bytes: request.kind === "semantic-transact" && isGroupableAppend(request.operation)
         ? Buffer.byteLength(JSON.stringify(request.operation), "utf8") : 0 });
-  } catch {
-    failRequest(request);
+  } catch (error) {
+    failRequest(request, error);
     return;
   }
   if (!draining) {

@@ -97,6 +97,8 @@ import { TurnSnapshotRepo } from "../../features/agents/turns/persistence/turn-s
 import { TurnDiffService } from "../../features/agents/turns/turn-diff-service.js";
 import { TaskRepo } from "../../features/agents/orchestration/persistence/task-repo.js";
 import { PlanQuestionAnswersRepo } from "../../features/agents/planning/persistence/plan-question-answers-repo.js";
+import { PlanQuestionService } from "../../features/agents/planning/plan-question-service.js";
+import { PostTerminalHookCompletionEffect } from "../../features/agents/turns/post-terminal-hook-completion-effect.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
 import { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
 import { SettingsService } from "../../features/settings/settings-service.js";
@@ -351,6 +353,15 @@ const thoughtSegmentRepo = container.resolve(ThoughtSegmentRepo);
 const hookExecutionRepo = container.resolve(HookExecutionRepo);
 const narrativeStore = container.resolve(NarrativeStore);
 const canonicalSink = container.resolve(CanonicalAgentBoundary);
+if (workerOwnedTurnRuntime.progress) {
+  const progress = workerOwnedTurnRuntime.progress;
+  container.resolve(PlanQuestionService).bindAcceptedProgress(progress);
+  container.resolve(SubagentLifecycleService).bindAcceptedProgress(progress);
+  container.resolve(ThreadService).bindAcceptedProgress(progress);
+  container.resolve(PostTerminalHookCompletionEffect).bindAcceptedProgress(progress);
+  canonicalSink.bindAcceptedSynthesizedPublications((threadId, events) =>
+    progress.acceptSynthesizedPublications(threadId, events));
+}
 const legacyConversationMigration = container.resolve(LegacyConversationMigration);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
@@ -454,6 +465,9 @@ const ciWatcherService = new CiWatcherService(githubService, (channel, data) => 
 });
 container.registerInstance(CiWatcherService, ciWatcherService);
 const threadDeletionTeardownService = container.resolve(ThreadDeletionTeardownService);
+if (workerOwnedTurnRuntime.progress) {
+  threadDeletionTeardownService.bindAcceptedProgress(workerOwnedTurnRuntime.progress);
+}
 const cleanupWorker = container.resolve(CleanupWorker);
 const threadCompletionService = container.resolve(ThreadCompletionService);
 const pullRequestCompletionEffect = new TurnPullRequestCompletionEffect(
@@ -707,6 +721,7 @@ const { httpServer, wss } = createWsServer({
   hookExecutionRepo,
   narrativeStore,
   canonicalSink,
+  canonicalProgress: workerOwnedTurnRuntime.progress,
   turnSnapshotRepo,
   turnDiffs: container.resolve(TurnDiffService),
   snapshotService,

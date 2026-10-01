@@ -434,7 +434,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     } finally {
       entry.activeTurnState = null;
       entry.pendingUserStopAbort = false;
-      await this.canonicalEvents.waitForExecution(routing).catch(() => undefined);
+      await this.canonicalEvents.waitForExecution(routing);
     }
   }
 

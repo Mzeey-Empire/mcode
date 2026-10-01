@@ -1218,6 +1218,7 @@ export function createWsTransport(
         : rpc<CreateAndSendResult>("agent.createAndSend", params);
     },
     stopAgent: (threadId) => rpc<import("@mcode/contracts").AgentStopResult>("agent.stop", { threadId }),
+    retrySave: async (threadId) => WS_METHODS()["agent.retrySave"].result.parse(await rpc<unknown>("agent.retrySave", { threadId })),
     continueWithoutSaving: (executionId) =>
       rpc<void>("agent.continueWithoutSaving", { executionId }),
     respondToPermission: (requestId, decision, answers, optionId) =>

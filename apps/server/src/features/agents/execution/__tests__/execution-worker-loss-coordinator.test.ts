@@ -10,7 +10,7 @@ import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writ
 import { CanonicalExecutionWriterPort } from "../../canonical/canonical-execution-writer-port.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
-import type { ExecutionWorkerPort, ExecutionWorkerReply, ExecutionWorkerRequest } from "../execution-mailbox-protocol.js";
+import type { ExecutionIdentity, ExecutionWorkerPort, ExecutionWorkerReply, ExecutionWorkerRequest } from "../execution-mailbox-protocol.js";
 import type { ExecutionLostAssignment, ExecutionMailboxCommand } from "../execution-mailbox-scheduler.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution-worker-handler.js";
 import { ExecutionThreadWorkerPort } from "../execution-worker-port.js";
@@ -104,7 +104,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
 
-  async function start(coordinator: ExecutionWorkerLossCoordinator, identity = execution) {
+  async function start(coordinator: ExecutionWorkerLossCoordinator, identity: ExecutionIdentity = execution) {
     const claim = coordinator.scheduler.claim(identity, 1);
     if (claim.kind !== "claimed") throw new Error(`Claim failed: ${claim.kind}`);
     const command: ExecutionWorkCommand = {
@@ -185,15 +185,13 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
       .get(execution.executionId, event.operationId))
       .toMatchObject({ receipt_json: expect.stringContaining('"publicationId":"2"') });
 
-    await send({ kind: "provider-outcome", outcome: "completed" });
-    await send({ kind: "stage-terminal", input: {
+    const ended = { type: "ended" as const, threadId: execution.threadId,
+      turnExecutionId: execution.executionId, outcome: "completed" as const };
+    const finish = await send({ kind: "finish-live-event", outcome: "completed", projection: {
       threadId: execution.threadId, executionId: execution.executionId,
       outcome: "completed", endedAt: NOW,
       assistant: { content: "Done", model: null, attachments: [] }, narrative: [tool],
-    } });
-    const ended = { type: "ended" as const, threadId: execution.threadId,
-      turnExecutionId: execution.executionId, outcome: "completed" as const };
-    const finish = await send({ kind: "finalize", outcome: "completed", input: {
+    }, input: {
       ...execution, providerId: "codex", providerIdentities: [], outcome: "completed",
       projection: { kind: "writer-staged" },
     }, livePublication: [{ after: "terminal", event: ended }] });

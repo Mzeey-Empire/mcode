@@ -19,6 +19,7 @@ import type {
   ExecutionWorkerResult,
   ExecutionWriteReceipt,
 } from "../execution-worker-handler.js";
+import { ProgressAdmissionError } from "../execution-writer-failure.js";
 
 const EXECUTION: ExecutionIdentity = {
   threadId: "real-worker-thread",
@@ -42,7 +43,14 @@ const FINISH_INPUT: DataOnlyParentTurnFinishInput = {
   providerId: "codex",
   providerIdentities: [],
   outcome: "cancelled",
-  projection: { message: null, narrative: [] },
+  projection: { kind: "writer-staged" },
+};
+
+const FINISH_COMMAND: Extract<ExecutionWorkCommand, { kind: "finish-live-event" }> = {
+  kind: "finish-live-event", outcome: "cancelled", input: FINISH_INPUT,
+  projection: { threadId: EXECUTION.threadId, executionId: EXECUTION.executionId,
+    outcome: "cancelled", endedAt: "2026-09-24T12:00:00.000Z",
+    assistant: { content: "", model: null, attachments: [] }, narrative: [] },
 };
 
 const LIMITS: ExecutionMailboxLimits = {
@@ -128,13 +136,13 @@ describe("ExecutionThreadWorkerPort", () => {
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 3 } });
       await expect(submit(scheduler, lease, { kind: "checkpoint", phase: "stopping", nativeCursor: null }))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 4 } });
-      await expect(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled", input: FINISH_INPUT }))
+      await expect(submit(scheduler, lease, FINISH_COMMAND))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 5 } });
       await expect(submit(scheduler, lease, { kind: "release" }))
         .resolves.toEqual({ kind: "reply", result: { kind: "released" } });
       expect(scheduler.release(EXECUTION, lease)).toBe(true);
       expect(writer.operations.map((operation) => operation.mutation.kind))
-        .toEqual(["begin", "append-events", "stop-requested", "checkpoint", "finish"]);
+        .toEqual(["begin", "append-events", "stop-requested", "checkpoint", "finish-live-event"]);
       expect(writer.operations[2]?.mutation).toEqual({
         kind: "stop-requested", requestId: "stop-real-worker", lastAdmittedOrdinal: 2,
       });
@@ -154,6 +162,21 @@ describe("ExecutionThreadWorkerPort", () => {
       expect(scheduler.depth()).toMatchObject({ pending: 0, activeExecutions: 1 });
       expect(scheduler.claim(EXECUTION, 2)).toEqual({ kind: "thread-busy" });
       expect(scheduler.replaceWorker(0)).toBe(false);
+    } finally {
+      scheduler.shutdown();
+    }
+  }, 10_000);
+
+  it.each([
+    { error: new ProgressAdmissionError("retention-exhausted"), reason: "retention-exhausted" },
+    { error: new Error("Original checkpoint rejected", { cause: Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" }) }), reason: "writer-failure" },
+  ])("preserves $reason and the original safe failure across the real worker IPC", async ({ error, reason }) => {
+    const { scheduler, lease } = fixture({ transact: async () => { throw error; } });
+    try {
+      await expect(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }))
+        .resolves.toMatchObject({ kind: "reply", result: { kind: "rejected", reason,
+          failure: { name: error.name, message: error.message,
+            ...(error.cause ? { cause: { message: "database is locked", code: "SQLITE_BUSY" } } : {}) } } });
     } finally {
       scheduler.shutdown();
     }

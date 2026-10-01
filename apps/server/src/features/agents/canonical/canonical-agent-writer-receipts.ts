@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
-import { CanonicalAgentEventEnvelopeSchema } from "@mcode/contracts";
+import { AgentProgressPositionSchema, CanonicalAgentEventEnvelopeSchema, CanonicalAgentRevisionSchema } from "@mcode/contracts";
 import { and, count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
@@ -11,14 +11,19 @@ import {
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "./canonical-agent-writer-protocol.js";
 
 type WriteRequest = Extract<CanonicalWriterRequest, {
-  kind: "commit" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery";
+  kind: "commit" | "append-accepted" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery";
 }>;
-type AtomicWriteRequest = Extract<WriteRequest, { kind: "commit" | "classify-parent-narrative-recovery" }>;
+type AtomicWriteRequest = Extract<WriteRequest, { kind: "commit" | "append-accepted" | "classify-parent-narrative-recovery" }>;
 type WriteResponse = Extract<CanonicalWriterResponse, {
-  kind: "committed" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified";
+  kind: "committed" | "accepted-appended" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified";
 }>;
 
 const storedReceiptSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("accepted-appended"), result: z.object({
+    receipt: z.object({ operationId: z.string(), contentHash: z.string(), predecessor: AgentProgressPositionSchema,
+      through: AgentProgressPositionSchema, durableRevision: z.number().int().nonnegative() }).strict(),
+    revision: CanonicalAgentRevisionSchema(), eventIds: z.array(z.string()).max(256),
+  }).strict() }).strict(),
   z.object({
     kind: z.literal("committed"),
     receipt: z.object({
@@ -155,6 +160,11 @@ export class CanonicalAgentWriterReceipts {
         },
       };
     }
+    if (stored.kind === "accepted-appended") {
+      const { eventIds, ...result } = stored.result;
+      return { ...correlation, kind: "accepted-appended", result: { ...result,
+        events: eventIds.map((id) => this.loadEvent(request.executionId, id)) } };
+    }
     if (stored.kind === "parent-narrative-recovery-recorded") {
       return { ...correlation, kind: stored.kind, receipt: stored.receipt };
     }
@@ -175,6 +185,10 @@ export class CanonicalAgentWriterReceipts {
 }
 
 function compactReceipt(response: WriteResponse): string {
+  if (response.kind === "accepted-appended") {
+    const { events, ...result } = response.result;
+    return JSON.stringify({ kind: response.kind, result: { ...result, eventIds: events.map((event) => event.eventId) } });
+  }
   if (response.kind !== "committed") {
     return JSON.stringify({ kind: response.kind, receipt: response.receipt });
   }

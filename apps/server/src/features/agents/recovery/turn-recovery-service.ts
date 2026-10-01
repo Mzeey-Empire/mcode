@@ -33,6 +33,7 @@ export class TurnRecoveryService {
     this.parentAssistantTextCheckpoints.importRecoveryJournals();
     this.reopenMaterializableTerminalCheckpoints();
     this.parentAssistantTextCheckpoints.retireTerminalCheckpoints();
+    this.canonicalSink.interruptSavedFamilyChildren(UNPROVED_EXECUTION_REASON);
     const checkpoints = this.canonicalSink.listUnfinishedCheckpoints();
     if (checkpoints.length === 0) {
       this.currentIncident = null;

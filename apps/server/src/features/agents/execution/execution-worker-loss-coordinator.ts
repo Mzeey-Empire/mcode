@@ -109,8 +109,9 @@ export class ExecutionWorkerLossCoordinator {
 }
 
 function recoveryEvidence(receipt: ExecutionWriteReceipt): ExecutionRecoveryReceipt | null {
+  if (receipt.kind === "accepted") return receipt;
   if (receipt.kind === "committed") return receipt;
-  if (!receipt.recoveryState) return null;
+  if (receipt.kind !== "conflict" || !receipt.recoveryState) return null;
   return { ...receipt, recoveryState: receipt.recoveryState };
 }
 

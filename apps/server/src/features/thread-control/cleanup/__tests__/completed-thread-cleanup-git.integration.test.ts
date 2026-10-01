@@ -90,7 +90,11 @@ describe("completed thread cleanup Git safety", () => {
       workspaceRepo,
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
-      { teardownThread: vi.fn().mockResolvedValue(undefined) } as unknown as ThreadDeletionTeardownService,
+      {
+        teardownThread: vi.fn().mockResolvedValue(undefined),
+        bindAcceptedProgress: vi.fn(),
+        deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove(),
+      } as unknown as ThreadDeletionTeardownService,
       hostRuntime,
     );
   }

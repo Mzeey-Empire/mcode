@@ -25,34 +25,39 @@ function message(id: string, role: "user" | "assistant", sequence: number): Mess
   };
 }
 
-function seedCanonicalTurn(db: Database): void {
+function seedCanonicalTurn(
+  db: Database,
+  threadId = THREAD_ID,
+  turnId = TURN_ID,
+  executionId = "execution-1",
+): void {
   db.prepare(`
-    INSERT INTO workspaces (id, name, path, created_at, updated_at)
+    INSERT OR IGNORE INTO workspaces (id, name, path, created_at, updated_at)
     VALUES ('workspace-1', 'Workspace', 'C:/workspace', ?, ?)
   `).run(NOW, NOW);
   db.prepare(`
-    INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at)
+    INSERT OR IGNORE INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at)
     VALUES (?, 'workspace-1', 'Thread', 'main', 'codex', ?, ?)
-  `).run(THREAD_ID, NOW, NOW);
+  `).run(threadId, NOW, NOW);
   db.prepare(`
-    INSERT INTO canonical_agent_threads (
+    INSERT OR IGNORE INTO canonical_agent_threads (
       id, workspace_id, parent_thread_id, root_thread_id, owning_parent_thread_id,
       provider_id, provider_identities_json, activity_state, conversation_revision,
       roster_revision, created_at, updated_at
     ) VALUES (?, 'workspace-1', NULL, ?, NULL, 'codex', '[]', 'Idle', 0, 0, ?, ?)
-  `).run(THREAD_ID, THREAD_ID, NOW, NOW);
+  `).run(threadId, threadId, NOW, NOW);
   db.prepare(`
     INSERT INTO canonical_agent_turns (
       id, thread_id, execution_id, status, trigger_json, permission_mode,
       provider_identities_json, started_at, ended_at, created_at, updated_at
-    ) VALUES (?, ?, 'execution-1', 'Completed', '{"kind":"user"}', 'default', '[]', ?, ?, ?, ?)
-  `).run(TURN_ID, THREAD_ID, NOW, NOW, NOW, NOW);
+    ) VALUES (?, ?, ?, 'Completed', '{"kind":"user"}', 'default', '[]', ?, ?, ?, ?)
+  `).run(turnId, threadId, executionId, NOW, NOW, NOW, NOW);
   db.prepare(`
     INSERT INTO canonical_agent_ingest_checkpoints (
       execution_id, thread_id, turn_id, last_accepted_sequence, last_durable_sequence,
       native_cursor_json, phase, terminal_outcome, error, updated_at
-    ) VALUES ('execution-1', ?, ?, 1, 1, NULL, 'completed', 'completed', NULL, ?)
-  `).run(THREAD_ID, TURN_ID, NOW);
+    ) VALUES (?, ?, ?, 1, 1, NULL, 'completed', 'completed', NULL, ?)
+  `).run(executionId, threadId, turnId, NOW);
 }
 
 function insertItem(
@@ -60,13 +65,14 @@ function insertItem(
   id: string,
   payload: Record<string, unknown>,
   createdAt = NOW,
+  scope = { threadId: THREAD_ID, turnId: TURN_ID },
 ): void {
   db.prepare(`
     INSERT INTO canonical_agent_items (
       id, thread_id, turn_id, parent_item_id, kind, provider_identities_json,
       payload_json, created_at, updated_at
     ) VALUES (?, ?, ?, NULL, 'message', '[]', ?, ?, ?)
-  `).run(id, THREAD_ID, TURN_ID, JSON.stringify(payload), createdAt, createdAt);
+  `).run(id, scope.threadId, scope.turnId, JSON.stringify(payload), createdAt, createdAt);
 }
 
 function recoveryThought(messageId?: string, id = "thought-1"): Record<string, unknown> {
@@ -102,6 +108,102 @@ describe("ConversationDisplayMaterializer", () => {
 
   afterEach(() => {
     db.close();
+  });
+
+  it("resolves a repeated terminal message once while preserving every bound tool record", () => {
+    const output = `\uFEFF${"full tool output\n".repeat(256)}`;
+    const records = Array.from({ length: 500 }, (_, index) => ({
+      id: `tool-${String(index).padStart(4, "0")}`,
+      message_id: "assistant-1",
+      tool_name: "Read",
+      input_summary: JSON.stringify({ path: `file-${index}.ts` }),
+      output_summary: `${output}${index}`,
+      status: index % 2 === 0 ? "completed" : "failed",
+      started_at: NOW,
+      completed_at: NOW,
+      sort_order: index,
+    }));
+    db.transaction(() => {
+      for (const record of records) {
+        insertItem(db, record.id, { projection: "toolCall", record });
+      }
+      insertItem(db, "z-assistant-source", {
+        projection: "message", message: message("assistant-1", "assistant", 2),
+      });
+    })();
+    db.exec(`
+      CREATE TEMP TABLE message_writes (id TEXT NOT NULL);
+      CREATE TEMP TRIGGER count_message_insert AFTER INSERT ON messages BEGIN
+        INSERT INTO message_writes VALUES (NEW.id);
+      END;
+      CREATE TEMP TRIGGER count_message_update AFTER UPDATE ON messages BEGIN
+        INSERT INTO message_writes VALUES (NEW.id);
+      END;
+    `);
+
+    const materializer = new ConversationDisplayMaterializer(db);
+    db.transaction(() => materializer.materializeItems(records.map((record) => record.id)))();
+
+    expect(db.prepare("SELECT COUNT(*) AS count FROM message_writes").get()).toEqual({ count: 1 });
+    expect(db.prepare(`
+      SELECT id, message_id, tool_name, input_summary, output_summary, status,
+        started_at, completed_at, sort_order FROM tool_call_records ORDER BY id
+    `).all()).toEqual(records);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_conversation_display_mappings").get())
+      .toEqual({ count: records.length });
+  });
+
+  it("resolves anchors for each turn and thread in an interleaved live batch", () => {
+    seedCanonicalTurn(db, THREAD_ID, "turn-2", "execution-2");
+    seedCanonicalTurn(db, "thread-2", "turn-3", "execution-3");
+    const scopes = [
+      { threadId: THREAD_ID, turnId: TURN_ID },
+      { threadId: THREAD_ID, turnId: "turn-2" },
+      { threadId: "thread-2", turnId: "turn-3" },
+    ];
+    const itemIds = ["a-first", "b-second", "c-third", "d-first-again"];
+    for (const [index, scope] of scopes.entries()) {
+      insertItem(db, `message-${index}`, {
+        projection: "message",
+        message: { ...message(`assistant-${index}`, "assistant", 2), thread_id: scope.threadId },
+      }, NOW, scope);
+      insertItem(db, itemIds[index]!, recoveryThought(undefined, `thought-${index}`), NOW, scope);
+    }
+    insertItem(db, itemIds[3]!, recoveryThought(undefined, "thought-3"), NOW, scopes[0]);
+
+    new ConversationDisplayMaterializer(db).materializeItems(itemIds);
+
+    expect(db.prepare("SELECT id, message_id FROM thought_segments ORDER BY id").all()).toEqual([
+      { id: "thought-0", message_id: "assistant-0" },
+      { id: "thought-1", message_id: "assistant-1" },
+      { id: "thought-2", message_id: "assistant-2" },
+      { id: "thought-3", message_id: "assistant-0" },
+    ]);
+    expect(db.prepare("SELECT id, thread_id FROM messages ORDER BY id").all()).toEqual([
+      { id: "assistant-0", thread_id: THREAD_ID },
+      { id: "assistant-1", thread_id: THREAD_ID },
+      { id: "assistant-2", thread_id: "thread-2" },
+    ]);
+  });
+
+  it("resolves a canonical message again after an intervening message projection", () => {
+    insertItem(db, "0-canonical-source", {
+      projection: "message", message: { ...message("shared", "user", 1), content: "Canonical source" },
+    });
+    insertItem(db, "a-thought", directThought("thought-a", "shared"));
+    insertItem(db, "b-message", {
+      projection: "message", message: { ...message("shared", "user", 2), content: "Intervening message" },
+    });
+    insertItem(db, "c-thought", directThought("thought-c", "shared"));
+
+    new ConversationDisplayMaterializer(db).materializeItems(["a-thought", "b-message", "c-thought"]);
+
+    expect(db.prepare("SELECT content FROM messages WHERE id = 'shared'").get())
+      .toEqual({ content: "Canonical source" });
+    expect(db.prepare("SELECT id, message_id FROM thought_segments ORDER BY id").all()).toEqual([
+      { id: "thought-a", message_id: "shared" },
+      { id: "thought-c", message_id: "shared" },
+    ]);
   });
 
   it("keeps explicit anchors while choosing the earliest visible assistant for mixed child rows", () => {

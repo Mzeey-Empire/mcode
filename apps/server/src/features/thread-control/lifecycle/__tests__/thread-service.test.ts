@@ -23,6 +23,7 @@ describe("ThreadService.delete", () => {
   let cleanupPolicy: SandboxWorktreeCleanupPolicy;
   let threadService: ThreadService;
   let teardownThread: ReturnType<typeof vi.fn>;
+  let deletePersistentData: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     database = openMemoryDatabase();
@@ -41,12 +42,13 @@ describe("ThreadService.delete", () => {
       removeWorktree: vi.fn().mockResolvedValue(true),
     } as unknown as GitWorktreeService;
     teardownThread = vi.fn().mockResolvedValue(undefined);
+    deletePersistentData = vi.fn(async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove());
     threadService = new ThreadService(
       threads,
       new ProjectWorktreeService(threads, workspaces, cleanupJobs, worktrees, cleanupPolicy),
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
-      { teardownThread } as unknown as ThreadDeletionTeardownService,
+      { teardownThread, deletePersistentData, bindAcceptedProgress: vi.fn() } as unknown as ThreadDeletionTeardownService,
     );
   });
 
@@ -109,6 +111,24 @@ describe("ThreadService.delete", () => {
     expect(cleanupJobs.count()).toBe(0);
     expect(threads.findById("thread-3")).toBeNull();
     expect(teardownThread).toHaveBeenCalledExactlyOnceWith("thread-3");
+  });
+
+  it("rejects provider-owned alias deletion before teardown and leaves managed child deletion available", async () => {
+    const workspace = workspaces.create("Project", "/repo");
+    const parent = threads.create(workspace.id, "Parent", "direct", "main");
+    const alias = threads.create(workspace.id, "Alias", "direct", "main");
+    const managed = threads.create(workspace.id, "Managed", "direct", "main", true, "claude", { parentThreadId: parent.id });
+    threadService.bindAcceptedProgress({
+      assertThreadDeletionSupported: (threadId) => { if (threadId === alias.id) throw new Error("Provider-owned child conversations support Stop"); },
+      discardThreads: async () => {}, finishThreadDeletion: () => {},
+    });
+    await expect(threadService.delete(alias.id, false)).rejects.toThrow("Provider-owned child");
+    expect(teardownThread).not.toHaveBeenCalled();
+    expect(threads.findById(alias.id)).not.toBeNull();
+    expect(await threadService.delete(managed.id, false)).toBe(true);
+    expect(teardownThread).toHaveBeenCalledExactlyOnceWith(managed.id);
+    expect(deletePersistentData).toHaveBeenCalledExactlyOnceWith([managed.id], expect.any(Function));
+    expect(threads.findById(parent.id)).not.toBeNull();
   });
 
   it("detaches an active handoff descendant when deleting its parent directly", async () => {

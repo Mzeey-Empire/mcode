@@ -6,15 +6,20 @@ import {
   type ExecutionWriteReceipt,
 } from "./execution-worker-handler.js";
 import type { ExecutionWorkerInbound, ExecutionWorkerOutbound } from "./execution-worker-port.js";
+import type { ExecutionWriterFailure } from "./execution-writer-failure.js";
 
 interface PendingWrite {
   readonly rpcId: number;
   readonly operationId: string;
   readonly resolve: (receipt: ExecutionWriteReceipt) => void;
-  readonly reject: () => void;
+  readonly reject: (failure?: ExecutionWriterFailure) => void;
 }
 
-class ExecutionWriterRpcFailure extends Error {}
+class ExecutionWriterRpcFailure extends Error {
+  constructor(readonly failure: ExecutionWriterFailure = { name: "Error", message: "Execution writer RPC unavailable" }) {
+    super(failure.message);
+  }
+}
 
 let nextRpcId = 1;
 let pendingWrite: PendingWrite | undefined;
@@ -30,7 +35,7 @@ const writer: ExecutionSemanticWriter = {
         rpcId,
         operationId: operation.operationId,
         resolve,
-        reject: () => reject(new ExecutionWriterRpcFailure("Execution writer RPC failed")),
+        reject: (failure) => reject(new ExecutionWriterRpcFailure(failure)),
       };
       post({ kind: "writer-request", rpcId, operation });
     });
@@ -49,7 +54,7 @@ globalThis.onmessage = (event: MessageEvent<ExecutionWorkerInbound>): void => {
       finishWrite(message.rpcId, message.receipt);
       break;
     case "writer-failure":
-      failWrite(message.rpcId);
+      failWrite(message.rpcId, message.failure);
       break;
     case "close":
       closeWorker();
@@ -80,7 +85,7 @@ function handleCommand(request: Extract<ExecutionWorkerInbound, { kind: "command
       if (error instanceof ExecutionWriterRpcFailure) {
         post({ kind: "command-reply", reply: { requestId: request.requestId,
           execution: request.execution, lease: request.lease, ordinal: request.ordinal,
-          result: { kind: "rejected", reason: "writer-failure" } } });
+          result: { kind: "rejected", reason: error.failure.admissionReason ?? "writer-failure", failure: error.failure } } });
       } else {
         failWorker();
       }
@@ -98,14 +103,14 @@ function finishWrite(rpcId: number, receipt: ExecutionWriteReceipt): void {
   pending.resolve(receipt);
 }
 
-function failWrite(rpcId: number): void {
+function failWrite(rpcId: number, failure: ExecutionWriterFailure): void {
   const pending = pendingWrite;
   if (!pending || pending.rpcId !== rpcId) {
     failWorker();
     return;
   }
   pendingWrite = undefined;
-  pending.reject();
+  pending.reject(failure);
 }
 
 function failWorker(): void {

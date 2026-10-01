@@ -134,7 +134,15 @@ export interface ProviderEventBatch {
 }
 
 /** Durable result for one provider event submission. */
-export interface ProviderEventCommitReceipt {
+export type ProviderEventCommitReceipt = ProviderEventDurableReceipt | {
+  outcome: "accepted";
+  acceptedThrough: number;
+  eventCount: number;
+  progressPosition: { epoch: string; sequence: number };
+};
+
+/** A storage receipt is issued only after the real transaction commits. */
+export interface ProviderEventDurableReceipt {
   outcome: "committed" | "duplicate" | "conflict" | "ingest-overflow";
   conversationRevision: number;
   rosterRevision: number;

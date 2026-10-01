@@ -8,7 +8,9 @@ import type {
   CanonicalProviderWriteReceipt,
   CanonicalWriterRequest,
   CanonicalWriterResponse,
+  CanonicalAcceptedWriteReceipt,
 } from "./canonical-agent-writer-protocol.js";
+import type { CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "./canonical-agent-writer-protocol.js";
 import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execution/execution-worker-handler.js";
@@ -34,6 +36,9 @@ interface PendingAcknowledgement {
 }
 
 class CanonicalWriterWorkerLost extends Error {}
+
+/** Receipt cleanup cannot be forgotten when its bounded retry queue is full. */
+export class CanonicalWriterAcknowledgementCapacity extends Error {}
 
 /** Sends cloneable canonical commands to a dedicated SQLite worker with bounded admission and crash retries. */
 export class CanonicalAgentWriterClient {
@@ -69,6 +74,16 @@ export class CanonicalAgentWriterClient {
     });
     if (response.kind !== "committed") throw new Error("Canonical writer returned an unexpected response");
     return response.receipt;
+  }
+
+  /** Store the same immutable accepted batch; its receipt contains no publication side effect. */
+  async appendAccepted(operationId: string, input: CanonicalAcceptedWriteInput): Promise<CanonicalAcceptedWriteReceipt> {
+    if (!operationId || !input.execution.executionId) throw new Error("Accepted writer operation and execution IDs are required");
+    await this.retryPendingAcknowledgements(MAX_ACK_RETRIES_BEFORE_WRITE);
+    const response = await this.sendWithRetry({ kind: "append-accepted", requestId: NodeCrypto.randomUUID(), operationId,
+      executionId: input.execution.executionId, input });
+    if (response.kind !== "accepted-appended") throw new Error("Canonical writer returned an unexpected accepted append response");
+    return response.result;
   }
 
   /** Commits one execution operation and delivers bounded pages after each durable write. */
@@ -147,7 +162,7 @@ export class CanonicalAgentWriterClient {
     } catch (error) {
       if (!this.pendingAcknowledgements.has(key)) {
         if (this.pendingAcknowledgements.size >= MAX_PENDING_ACKNOWLEDGEMENTS) {
-          throw new Error("Canonical writer acknowledgement retry queue is full", { cause: error });
+          throw new CanonicalWriterAcknowledgementCapacity("Canonical writer acknowledgement retry queue is full", { cause: error });
         }
         this.pendingAcknowledgements.set(key, { executionId, operationId });
       }
@@ -321,7 +336,11 @@ export class CanonicalAgentWriterClient {
     }
     this.pending.delete(response.requestId);
     if (response.kind === "failed") {
-      pending.reject(new Error(`Canonical writer ${response.reason}`));
+      const original = response.failure ? Object.assign(new Error(response.failure.message), {
+        name: response.failure.name, ...(response.failure.code ? { code: response.failure.code } : {}),
+      }) : undefined;
+      pending.reject(new Error(`Canonical writer ${response.reason}${original ? `: ${original.message}` : ""}`,
+        original ? { cause: original } : undefined));
       return;
     }
     pending.resolve(response);

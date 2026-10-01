@@ -49,7 +49,7 @@ type PrSyncResult = { threadId: string; prNumber: number; prStatus: string };
 
 /** Defines the feature services required to route validated Workspace and Thread RPC calls. */
 export interface WorkspaceThreadRouterDeps {
-  workspaceService: Pick<WorkspaceService, "create" | "delete" | "findById" | "forceDelete" | "list" | "rename" | "reorder" | "touch">;
+  workspaceService: Pick<WorkspaceService, "create" | "delete" | "findById" | "forceDelete" | "list" | "rename" | "reorder">;
   workspaceEnvironmentService: Pick<
     WorkspaceEnvironmentService,
     "beginThreadDeletion" | "beginWorkspaceDeletion" | "cancelSetupForThread" | "cancelSetupForWorkspace" | "clearApprovals" | "read"
@@ -93,7 +93,7 @@ const workspaceThreadHandlers = {
   },
   "workspace.enrich": enrichWorkspaces,
   "filesystem.browse": (deps, params) => deps.filesystemBrowser.browse(params.path),
-  "thread.list": listThreads,
+  "thread.list": listWorkspaceThreads,
   "thread.recent": (deps, params) => deps.threadService.listRecent(params.limit),
   "thread.create": createThread,
   "thread.delete": (deps, params) => deleteThread(deps, params),
@@ -178,14 +178,14 @@ async function forceDeleteWorkspace(
 async function deleteWorkspaceWithTeardown(
   deps: WorkspaceThreadRouterDeps,
   workspaceId: string,
-  removeWorkspace: (workspaceId: string) => boolean,
+  removeWorkspace: (workspaceId: string) => Promise<boolean>,
   publishDeleted: () => void,
 ): Promise<boolean> {
   const releaseDeletionBarrier = deps.workspaceEnvironmentService.beginWorkspaceDeletion(workspaceId);
   const releaseActionAdmission = await deps.projectActionService.beginWorkspaceTeardown(workspaceId);
   try {
     await teardownWorkspaceThreads(deps, workspaceId);
-    const deleted = removeWorkspace(workspaceId);
+    const deleted = await removeWorkspace(workspaceId);
     if (deleted) {
       deps.workspaceEnvironmentService.clearApprovals(workspaceId);
       deps.gitWatcherService.unwatchWorkspace(workspaceId);
@@ -209,11 +209,16 @@ async function enrichWorkspaces(
   return { items: await deps.enricher.enrich(workspaces) };
 }
 
-function listThreads(
-  deps: WorkspaceThreadRouterDeps,
+/** Read sidebar threads without requiring SQLite's writer lock during reconnect. */
+export function listWorkspaceThreads(
+  deps: {
+    workspaceService: Pick<WorkspaceService, "findById">;
+    threadService: Pick<ThreadService, "list">;
+    gitWatcherService: Pick<GitWatcherService, "retryWatch">;
+  },
   params: { workspaceId: string },
 ): Thread[] {
-  deps.workspaceService.touch(params.workspaceId);
+  // Opening is recorded by workspace.touchLastOpened; reconnect reads must not need the writer lock.
   // Re-detect git status for non-git workspaces (catches `git init` within a session)
   const workspace = deps.workspaceService.findById(params.workspaceId);
   if (workspace && !workspace.is_git_repo) {

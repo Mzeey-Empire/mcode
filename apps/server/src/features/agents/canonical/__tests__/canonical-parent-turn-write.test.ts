@@ -314,8 +314,8 @@ describe("CanonicalParentTurnWrite", () => {
       projection: { kind: "writer-staged", messageId },
       selectedTurnDiff: { thread_id: THREAD_ID, source: "native", patch, revision: 2 },
     };
-    expect(() => writer.finish({ ...finish, selectedTurnDiff: { ...finish.selectedTurnDiff!, thread_id: "other" } }))
-      .toThrow("Invalid selected turn diff");
+    await expect(writer.finish({ ...finish, selectedTurnDiff: { ...finish.selectedTurnDiff!, thread_id: "other" } }))
+      .rejects.toThrow("Invalid selected turn diff");
     db.run("CREATE TRIGGER fail_turn_diff BEFORE INSERT ON turn_diff_snapshots BEGIN SELECT RAISE(ABORT, 'diff unavailable'); END");
     await expect(writer.finish(finish)).rejects.toThrow("diff unavailable");
     expect(db.prepare("SELECT is_internal FROM messages WHERE id = ?").get(messageId)).toEqual({ is_internal: 1 });
@@ -353,9 +353,9 @@ describe("CanonicalParentTurnWrite", () => {
       ...finishInput(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, messageId)!),
       projection: { kind: "writer-staged", messageId }, deliveryAttempt: 2, fileEvidence,
     };
-    expect(() => writer.finish({ ...finish, fileEvidence: { ...fileEvidence, executionId: "old-execution" } }))
-      .toThrow("Invalid execution file evidence");
-    expect(() => writer.finish({ ...finish, deliveryAttempt: 1 })).toThrow("Invalid execution file evidence");
+    await expect(writer.finish({ ...finish, fileEvidence: { ...fileEvidence, executionId: "old-execution" } }))
+      .rejects.toThrow("Invalid execution file evidence");
+    await expect(writer.finish({ ...finish, deliveryAttempt: 1 })).rejects.toThrow("Invalid execution file evidence");
     db.run("CREATE TRIGGER fail_snapshot BEFORE INSERT ON turn_snapshots BEGIN SELECT RAISE(ABORT, 'snapshot unavailable'); END");
     await expect(writer.finish(structuredClone(finish))).rejects.toThrow("snapshot unavailable");
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))

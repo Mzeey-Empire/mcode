@@ -84,9 +84,10 @@ viewport, and the existing thread cache stores its reading anchor.
 When an initial page is shorter than the viewport, prepending history retains
 enough trailing space to preserve that anchor without browser scroll clamping.
 
-Subscription recovery restores unfinished parent commands, progress messages,
-and hooks from the canonical snapshot. Recovery includes these records even
-when the client already has the current canonical event revision.
+Subscription recovery restores parent commands, progress messages, hooks, and
+the terminal response from the saved model plus retained accepted progress.
+Recovery includes these records even when the client already has the current
+saved event revision.
 
 The clipped prompt follows the turn at the top of the viewport, including older
 turns. It hides while that prompt remains visible. Its jump control returns to
@@ -128,21 +129,19 @@ Provider-native event
 Provider runtime event keeps native evidence separate from AgentEvent data
     │
     ▼
-Provider event ownership selects the admitted execution's route
-    ├─ Worker-owned: ordered task mailbox → parent event and file reduction
-    │    → single execution writer commits event, turn effects, and publication receipt
-    │    → server releases the acknowledged AgentEvent
-    └─ Legacy: canonical commit → provider ingress and adapter
-         → turn event pipeline and parent turn application
+Provider event ownership fences the admitted execution
+    → ordered event preparation → immutable per-thread acceptance
     │
     ▼
-broadcast("agent.event", enrichedEvent)
+broadcast("agent.canonical", acceptedFrame)
+    └─ bounded save queue → dedicated SQLite writer → saved acknowledgement
     │
     ▼
-ws-events.ts validates and forwards AgentEvent directly to threadStore.handleAgentEvent
+ws-events.ts validates canonical progress and recovery frames
     │
     ▼
-threadStore.ts projects the validated event into the resident Thread record
+threadStore.ts projects saved state plus accepted progress into the resident Thread
+    → first-delivery publications apply provider-neutral AgentEvent effects once
     │
     ▼
 buildNarrativeItems groups by parentToolCallId → SubagentRow children
@@ -156,20 +155,62 @@ virtual-items.ts splits live turn into three slots:
 NarrativeFlow + MessageBubble + NarrativeIndicator render live turn
     │
     ▼
-PersistedTurnFooter appears after narrative.list RPC resolves
+Turn footer appears when execution terminates; saving has its own notice
 ```
 
-Every step has at least one trap. Read on.
+### Accepted progress and saving
+
+Acceptance and saving have different meanings. The thread owner validates and
+retains a complete operation before releasing any of its live events. Its
+identity, order, and write intent stay unchanged on retry. The SQLite writer
+acknowledges actual commits; only a contiguous acknowledged prefix can be
+discarded from retained progress. See
+[`CanonicalAcceptedProgress`](../../apps/server/src/features/agents/canonical/canonical-accepted-progress.ts)
+and the [progress frame contract](../../packages/contracts/src/models/canonical-agent-progress.ts).
+
+Retention limits apply to unsaved work, not the whole tool history. Completion
+binds previously accepted narrative to the response and carries only changed
+records into the write intent. Re-emitting the entire history at completion
+reintroduces synchronous copying and consumes the capacity reserved for controls.
+
+A completion or cancellation ends Running as soon as it is accepted. Saving,
+retrying, or save failure remains visible for that execution without changing
+its outcome. A permanently failed save or exhausted retention must explicitly
+stop an affected active execution. Never leave it behind a blocked save queue
+with a Running label. `turn.persisted` still means the terminal data was saved.
+
+Reconnect installs one saved-prefix and accepted-suffix cut. Frames received
+beyond that cut remain in order. Saved acknowledgements and recovery may update
+the model but cannot repeat publication effects, permissions, Stop, or provider
+commands. Late effects from an older turn must not reopen it or replace a newer
+turn's runtime state.
+
+Durable admission can establish runtime identity without replaying publication
+effects. Match its saved user message to the client's exact optimistic prompt
+before linking the execution. An older snapshot cannot claim a newer prompt.
+
+Child views share their parent's progress owner and save queue. Recovery must
+carry the known owner as well as the visible child ID, because an unsaved child
+has no durable parent mapping after restart. Child Stop cannot consume a parent
+execution command's ordinal. Startup recovery must settle saved unfinished
+children even when the parent is already terminal, while preserving completed
+child outcomes.
+
+The unsaved suffix survives worker release, but lives only in server memory.
+After a server restart, recovery compares the previous cursor with the stored
+prefix and reports detected loss. The renderer drops the lost overlay and shows
+a loss notice. Unfinished saved turns become interrupted; already saved outcomes
+remain intact. Neither recovery nor a save retry reruns provider tools.
 
 The live status line always uses the layers icon. Its step count, optional
 subagent count, and activity label share a text shimmer while the turn runs.
 The elapsed time stays static between ticks. The shimmer and icon motion stop
 when the turn ends and are disabled when reduced motion is preferred.
 
-Provider-native identity and child evidence stay before the adapter boundary.
-The narrative pipeline, WebSocket payload, and renderer receive only
-provider-neutral `AgentEvent` data. This keeps child lifecycle persistence
-private while preserving normal sub-agent rows in the parent timeline.
+Provider-specific mapping happens before the narrative renderer. Canonical
+history can retain opaque provider-runtime records, but live effects use
+validated provider-neutral `AgentEvent` publications. Renderers must not
+interpret native evidence or provider child protocols.
 
 ### Renderer ownership
 
@@ -179,10 +220,10 @@ conversation, retains inactive records within the bounded cache, and routes
 refresh, pagination, and prefetch work to `ThreadHydrator`. `workspaceStore`
 owns rows and selection, not a second conversation cache or restore path.
 
-The server owns durable messages and persisted narrative metadata. The renderer
-projects validated `AgentEvent` values into each resident Thread record. This
-split preserves the volatile Turn layer through `turn.persisted`; persistence
-confirms durable narrative data but does not end the live timeline.
+The server owns durable messages, persisted narrative metadata, and the retained
+accepted suffix. The renderer projects the saved model and accepted progress
+into each resident Thread record. This split preserves the Turn layer through
+`turn.persisted`; persistence confirms durable data but does not end the timeline.
 
 ### Residency certification
 
@@ -334,12 +375,6 @@ making the footer show "—" for duration.
 `toolCallsByThread`, `thoughtSegmentsByThread`, `hooksByThread`, or
 `agentStartTimes` must clear at `turnStarted` / `sendMessage` time, not at
 `turnComplete` / `turn.persisted` time.
-
-**Known follow-up:** on a full page reload, the volatile state is lost, so
-completed-turn audit trails for previously-rendered turns don't reappear.
-The fix is to hydrate from `tool_call_records` (and a future
-`thought_segments` / `hook_executions` table) when loading messages. Not
-done yet.
 
 ---
 

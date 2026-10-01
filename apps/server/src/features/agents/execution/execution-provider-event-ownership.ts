@@ -3,6 +3,7 @@ import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 import type { ExecutionMailboxOwner } from "./execution-mailbox-owner.js";
 import type { ProviderEventCommitReceipt } from "@mcode/providers";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
+import { restoreExecutionWriterFailure } from "./execution-writer-failure.js";
 import type { ProviderEventOwnership, ProviderEventOwnershipRoute, WorkerOwnedProviderEventBatch, WorkerOwnedProviderEventResult } from "../../providers/composition/provider-host-ports.js";
 
 interface ActiveRoute {
@@ -27,14 +28,13 @@ type Route = ActiveRoute | SwitchingRoute;
  */
 export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
   private readonly routes = new Map<string, Route>();
-  private readonly workerProviders = new Set(["codex"]);
-  private onCommitted: ((execution: ExecutionIdentity, result: Extract<ExecutionWorkerResult, { kind: "committed" }>) => Promise<void>) | undefined;
+  private onCommitted: ((execution: ExecutionIdentity, result: Extract<ExecutionWorkerResult, { kind: "committed" | "accepted" }>) => Promise<void>) | undefined;
   private prepareCommand: ((execution: ExecutionIdentity, batch: WorkerOwnedProviderEventBatch) => Promise<Extract<ExecutionWorkCommand, { kind: "event" }>>) | undefined;
 
   constructor(private readonly owner: Pick<ExecutionMailboxOwner, "isStarted" | "submit">) {}
 
   /** Run execution lifecycle effects after the writer acknowledgement and before the provider receives its batch receipt. */
-  bindCommitted(onCommitted: (execution: ExecutionIdentity, result: Extract<ExecutionWorkerResult, { kind: "committed" }>) => Promise<void>): void {
+  bindCommitted(onCommitted: (execution: ExecutionIdentity, result: Extract<ExecutionWorkerResult, { kind: "committed" | "accepted" }>) => Promise<void>): void {
     this.onCommitted = onCommitted;
   }
 
@@ -85,6 +85,17 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
   }
 
   /** Keep the execution rejected after its terminal fence releases ownership. */
+  fence(execution: ExecutionIdentity): Promise<void> {
+    const route = this.routes.get(execution.executionId);
+    if (!route || !sameExecution(route.execution, execution)) return Promise.resolve();
+    if (route.kind === "switching") return route.drained;
+    const drained = Promise.allSettled(route.pending).then(() => undefined);
+    this.routes.set(execution.executionId, { kind: "switching", execution,
+      deliveryAttempt: route.deliveryAttempt, drained });
+    return drained;
+  }
+
+  /** Keep the execution rejected after its terminal fence releases ownership. */
   async retire(execution: ExecutionIdentity): Promise<void> {
     const current = this.routes.get(execution.executionId);
     if (current && sameExecution(current.execution, execution)) {
@@ -95,10 +106,10 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
   }
 
   /** Select the exact mailbox, then check again before asynchronous admission. */
-  resolve(executionId: string, sourceProviderId?: string): ProviderEventOwnershipRoute {
+  resolve(executionId: string, _sourceProviderId?: string): ProviderEventOwnershipRoute {
     const route = this.routes.get(executionId);
     if (route?.kind !== "active" || !this.owner.isStarted(route.execution)) {
-      return { kind: sourceProviderId && !this.workerProviders.has(sourceProviderId) ? "legacy" : "rejected" };
+      return { kind: "rejected" };
     }
     return {
       kind: "worker",
@@ -123,8 +134,14 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
 
   private async commitAndNotify(route: ActiveRoute, batch: WorkerOwnedProviderEventBatch): Promise<WorkerOwnedProviderEventResult> {
     const result = await this.submitPrepared(route, batch);
+    if (result.kind === "accepted") {
+      await this.notifyCommitted(route.execution, result);
+      return { batchId: batch.batchId, deliveryAttempt: batch.deliveryAttempt,
+        commit: { outcome: "accepted", acceptedThrough: result.acceptedThrough,
+          eventCount: batch.events.length, progressPosition: result.progressPosition }, providerEvents: [] };
+    }
     if (result.kind !== "committed" || !result.providerCommit) {
-      throw new Error("Execution worker did not commit provider batch");
+      rejectWorkerResult(result);
     }
     await this.notifyCommitted(route.execution, result);
     const commit: ProviderEventCommitReceipt = {
@@ -163,8 +180,13 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
 
   private async notifyCommitted(
     execution: ExecutionIdentity,
-    result: Extract<ExecutionWorkerResult, { kind: "committed" }>,
+    result: Extract<ExecutionWorkerResult, { kind: "committed" | "accepted" }>,
   ): Promise<void> {
     await this.onCommitted?.(execution, result);
   }
+}
+
+function rejectWorkerResult(result: ExecutionWorkerResult): never {
+  if (result.kind === "rejected" && result.failure) throw restoreExecutionWriterFailure(result.failure);
+  throw new Error("Execution worker did not commit provider batch");
 }

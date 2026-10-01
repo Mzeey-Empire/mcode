@@ -1,4 +1,4 @@
-import type { AgentTurn, AgentTurnStatus, TurnRuntimePhase } from "@mcode/contracts";
+import { MessageSchema, type AgentTurn, type AgentTurnStatus, type TurnRuntimePhase } from "@mcode/contracts";
 import type { ThreadRecord } from "./thread-record";
 
 function latestCanonicalTurn(threadId: string, record: ThreadRecord): AgentTurn | undefined {
@@ -7,6 +7,16 @@ function latestCanonicalTurn(threadId: string, record: ThreadRecord): AgentTurn 
     .sort((left, right) => Date.parse(left.startedAt ?? left.createdAt)
       - Date.parse(right.startedAt ?? right.createdAt) || left.id.localeCompare(right.id))
     .at(-1);
+}
+
+function admitsOptimisticPrompt(threadId: string, turn: AgentTurn, record: ThreadRecord): boolean {
+  if (!record.optimisticUserMessageId || !turn.executionId || turn.trigger.kind !== "user") return false;
+  return Object.values(record.canonicalAgent.state.items).some((item) => {
+    if (item.threadId !== threadId || item.turnId !== turn.id || item.payload.projection !== "message") return false;
+    const message = MessageSchema().safeParse(item.payload.message);
+    return message.success && message.data.role === "user" && message.data.thread_id === threadId
+      && message.data.id === record.optimisticUserMessageId;
+  });
 }
 
 /** Selects the provider-owned child lifecycle when no local execution is active. */
@@ -36,9 +46,9 @@ export function getCanonicalRuntimeTurn(threadId: string, record: ThreadRecord):
   if (record.turnExecutionId !== null) {
     return latest.executionId === record.turnExecutionId ? latest : undefined;
   }
-  // Optimistic sends run without an identity until turnStarted lands; a prior
-  // terminal turn must not cancel that window.
-  if (record.runtimePhase === "running") return undefined;
+  // Saved admission does not replay turnStarted. Only this exact prompt can
+  // claim an optimistic run; an older recovery must not cancel a newer send.
+  if (record.runtimePhase === "running") return admitsOptimisticPrompt(threadId, latest, record) ? latest : undefined;
   // Without an identity, canonical Pending or Running claims only idle
   // records; terminal truth may claim any non-busy record.
   if ((latest.status === "Pending" || latest.status === "Running") && record.runtimePhase !== "idle") return undefined;

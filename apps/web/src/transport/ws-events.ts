@@ -174,10 +174,7 @@ export function startPushListeners(): void {
     pushEmitter.on("agent.canonical", (data) => {
       const parsed = WS_CHANNELS["agent.canonical"].safeParse(data);
       if (!parsed.success) return;
-      useThreadStore.getState().handleCanonicalAgentEvents(
-        parsed.data.threadId,
-        parsed.data.events,
-      );
+      useThreadStore.getState().handleCanonicalProgress(parsed.data);
     }),
   );
 

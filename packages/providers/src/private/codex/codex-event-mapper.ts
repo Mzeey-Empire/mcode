@@ -8,7 +8,6 @@ import type {
   AgentEvent,
   CodexChildEvidence,
   CodexCollaborationEvidence,
-  CodexContinuationEvidence,
   GoalState,
   ProviderFileMutationStart,
   ProviderRuntimeEvent,
@@ -28,7 +27,6 @@ import type {
 
 type CodexMappedEvent = AgentEvent & {
   codexChild?: CodexChildEvidence;
-  codexContinuation?: CodexContinuationEvidence;
 };
 type ToolResultAgentEvent = Extract<CodexMappedEvent, { type: typeof AgentEventType.ToolResult }>;
 type ChildNotificationContext = {
@@ -1604,12 +1602,11 @@ export class CodexEventMapper {
 
   private runtimeExtension(event: CodexMappedEvent): ProviderRuntimeEvent["extension"] {
     const collaboration = this.collaborationEvidence(event);
-    if (!event.codexChild && !event.codexContinuation && !collaboration) return undefined;
+    if (!event.codexChild && !collaboration) return undefined;
     return {
       providerId: "codex",
       kind: "codex-collaboration",
       ...(event.codexChild ? { child: event.codexChild } : {}),
-      ...(event.codexContinuation ? { continuation: event.codexContinuation } : {}),
       ...(collaboration ? { collaboration } : {}),
     };
   }
@@ -1636,7 +1633,7 @@ export class CodexEventMapper {
   }
 
   private rendererEvent(event: CodexMappedEvent): AgentEvent {
-    const { codexChild: _child, codexContinuation: _continuation, ...genericEvent } = event;
+    const { codexChild: _child, ...genericEvent } = event;
     if (genericEvent.type !== AgentEventType.ToolUse && genericEvent.type !== AgentEventType.ToolResult) {
       return genericEvent;
     }

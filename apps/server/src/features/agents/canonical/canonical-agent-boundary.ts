@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
+import { PlanRepo } from "../planning/persistence/plan-repo.js";
+import { TaskRepo } from "../orchestration/persistence/task-repo.js";
 import { inject, injectable } from "tsyringe";
 import { and, asc, between, desc, eq, getTableColumns, inArray, isNotNull, isNull, or, placeholder, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
@@ -30,6 +32,7 @@ import {
   type AgentTurn,
   type CanonicalAgentEvent,
   type CanonicalAgentEventEnvelope,
+  type AcceptedCanonicalAgentEventEnvelope,
   type CanonicalAgentReconnectRecovery,
   type CanonicalAgentRevision,
   type CollaborationAction,
@@ -78,7 +81,6 @@ import type {
   CodexChildTurnStartInput,
   CodexCollaborationActionInput,
   CodexCollaborationDurability,
-  CodexProviderContinuationInput,
 } from "../collaboration/codex-collaboration-durability.js";
 import type {
   ParentNarrativeRecoveryCommit,
@@ -96,6 +98,7 @@ import {
   CanonicalAgentEventStore,
   type CanonicalAgentEventStoreCheckpoint,
   type CanonicalAgentEventStoreInput,
+  type CanonicalAcceptedEventStoreInput,
 } from "./canonical-agent-event-store.js";
 import {
   CanonicalParentTurnLifecycle,
@@ -106,6 +109,8 @@ import {
   type CanonicalConversationProjection,
 } from "./canonical-agent-read-repository.js";
 import { CanonicalCodexCollaborationCoordinator } from "./canonical-codex-collaboration-coordinator.js";
+import { prepareParentNarrativeRecoveryEvents } from "./parent-narrative-recovery-events.js";
+import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";
 import { ConversationDisplayMaterializer } from "../conversation/migrations/conversation-display-materializer.js";
 
 /** Capacity held back so volatile input cannot consume every semantic batch slot. */
@@ -167,6 +172,11 @@ export interface CanonicalAgentCommitInput {
   /** Skips a checkpoint when a state-only event uses an existing source turn. */
   persistCheckpoint?: boolean;
 }
+
+/** A storage-only append receives identities chosen by the in-memory event owner. */
+export type CanonicalAcceptedCommitInput = Omit<CanonicalAgentCommitInput, "events" | "projectCompatibility" | "onOverflow" | "replayGuard"> & {
+  readonly events: readonly AcceptedCanonicalAgentEventEnvelope[];
+};
 
 /** One visible entry in a restart-scoped recovery incident. */
 export interface CanonicalRecoveryIncidentEntry {
@@ -237,10 +247,6 @@ export interface CanonicalChildStopTarget {
 /** Input used to persist one directional action without creating a Provider turn. */
 /** Canonical alias for the Codex collaboration action durability input. */
 export type CollaborationActionInput = CodexCollaborationActionInput;
-
-/** Input used to start a parent turn only after explicit provider continuation evidence. */
-/** Canonical alias for the Codex provider continuation durability input. */
-export type CanonicalProviderContinuationInput = CodexProviderContinuationInput;
 
 /** Durable canonical context included with one bounded diagnostic export. */
 export interface CanonicalTurnDiagnosticContext {
@@ -378,12 +384,22 @@ export type CanonicalAgentEventPublisher = (
 export const publishCanonicalAgentEvents: CanonicalAgentEventPublisher = (events) => {
   const threadId = events[0]?.routing.threadId;
   if (!threadId) throw new Error("Canonical publication requires at least one event");
-  broadcast("agent.canonical", { threadId, events: [...events] });
+  const last = events.at(-1);
+  if (!last) throw new Error("Canonical publication lost its durable head");
+  broadcast("agent.canonical", { phase: "saved", threadId, epoch: last.progressPosition?.epoch ?? `durable:${threadId}`,
+    through: last.progressPosition?.sequence ?? 0,
+    revision: { conversationRevision: last.durableRevision, rosterRevision: 0 }, events: [...events] });
 };
 
 /** Owns validation, semantic reduction, atomic canonical persistence, and post-commit publication. */
 @injectable()
 export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollaborationDurability, SubagentLifecycleDurability {
+  private acceptedSynthesizedPublication: ((threadId: string, events: readonly Record<string, unknown>[]) => readonly AcceptedCanonicalAgentEventEnvelope[]) | undefined;
+
+  /** Main-process synthetic observations share the accepted owner's allocation while writer-local compatibility remains storage-only. */
+  bindAcceptedSynthesizedPublications(accept: NonNullable<CanonicalAgentBoundary["acceptedSynthesizedPublication"]>): void {
+    this.acceptedSynthesizedPublication = accept;
+  }
   private readonly orm: BunSQLiteDatabase;
   private readonly persistThreadStatement: ReturnType<CanonicalAgentBoundary["buildPersistThreadStatement"]>;
   private readonly persistTurnStatement: ReturnType<CanonicalAgentBoundary["buildPersistTurnStatement"]>;
@@ -454,16 +470,6 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
         this.parentTurnTerminalEvents(input, projection, endedAt),
       cacheExecution: (executionId, turnId) => this.cacheTurnExecution(executionId, turnId),
       loadTurn: (turnId) => this.loadTurn(turnId),
-      loadCollaborationAction: (actionId) => this.loadCollaborationAction(actionId),
-      uniqueProviderIdentities: (identities) => this.uniqueProviderIdentities(identities),
-      executionIdForTurn: (turnId) => this.executionIdForTurn(turnId),
-      actionAcknowledgementDraft: (executionId, thread, action) => this.actionDraft(
-        executionId,
-        thread,
-        action,
-        `${executionId}:collaboration:${hashCodexKey(action.id)}:acknowledge`,
-      ),
-      commitContinuation: (input) => this.commitProviderContinuation(input),
       loadCheckpoint: (executionId) => this.loadCheckpoint(executionId),
       loadTurnByExecution: (executionId) => this.loadTurnByExecution(executionId),
       loadThread: (threadId) => this.loadThread(threadId),
@@ -527,8 +533,9 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   recordSynthesizedPublications(
     threadId: string,
     events: readonly Record<string, unknown>[],
-  ): readonly CanonicalAgentEventEnvelope[] {
+  ): readonly (CanonicalAgentEventEnvelope | AcceptedCanonicalAgentEventEnvelope)[] {
     if (events.length === 0) return [];
+    if (this.acceptedSynthesizedPublication) return this.acceptedSynthesizedPublication(threadId, events);
     const thread = this.loadThread(threadId);
     const result = this.commit({
       threadId,
@@ -561,6 +568,34 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       },
     });
     return result.events;
+  }
+
+  /** Apply accepted data inside the writer transaction, with no publication or identity allocation. */
+  appendAcceptedInsideTransaction(input: CanonicalAcceptedCommitInput): CanonicalAgentCommitResult {
+    const { nativeCursor, ...data } = input;
+    const storage: CanonicalAcceptedEventStoreInput = { ...data, recoveryCursor: nativeCursor };
+    return this.eventStore.applyAcceptedWithinTransaction(storage);
+  }
+
+  /** Read an existing legacy thread for first accepted admission diagnostics without writing a canonical row. */
+  loadThreadForAcceptance(threadId: string): AgentThread | null {
+    const canonical = this.loadThread(threadId);
+    if (canonical) return canonical;
+    const row = this.orm.select().from(threads).where(eq(threads.id, threadId)).get();
+    if (!row || row.deletedAt) return null;
+    return AgentThreadSchema.parse({ id: row.id, workspaceId: row.workspaceId, rootThreadId: row.id,
+      providerId: row.provider, providerIdentities: [], activityState: "Idle", conversationRevision: 0, rosterRevision: 0,
+      createdAt: row.createdAt, updatedAt: row.updatedAt });
+  }
+
+  /** Seed feature read-through once from saved legacy projections; new identities remain acceptance-owned. */
+  loadAcceptedFeatureSeed(threadId: string) {
+    const row = this.orm.select({ noticeSessionId: threads.currentNoticeSessionId }).from(threads).where(eq(threads.id, threadId)).get();
+    const publication = this.db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?").get(threadId);
+    const publicationSequence = publication && typeof publication === "object" && "last_sequence" in publication
+      && typeof publication.last_sequence === "number" ? publication.last_sequence : 0;
+    return { plans: new PlanRepo(this.db).listByThread(threadId), tasks: new TaskRepo(this.db).get(threadId) ?? [],
+      noticeSessionId: row?.noticeSessionId ?? undefined, publicationSequence };
   }
 
   /** Commit inside the caller's transaction. The caller publishes result.events after that commit. */
@@ -717,6 +752,33 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     return this.reads.recoverThread(threadId, known);
   }
 
+  /** Read the actual saved stream head when a live owner must be rehydrated. */
+  savedProgressPosition(threadId: string) {
+    const row = this.orm.select({ envelopeJson: canonicalAgentEvents.envelopeJson }).from(canonicalAgentEvents)
+      .where(eq(canonicalAgentEvents.threadId, threadId))
+      .orderBy(desc(canonicalAgentEvents.durableRevision), desc(canonicalAgentEvents.acceptedSequence)).get();
+    return row ? CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelopeJson)).progressPosition : undefined;
+  }
+
+  /** Certify the saved watermark of an older generation even after later starts or startup recovery. */
+  savedProgressThrough(threadId: string, epoch: string): number {
+    const row = this.orm.select({ through: sql<number | null>`max(json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.sequence'))` })
+      .from(canonicalAgentEvents).where(and(eq(canonicalAgentEvents.threadId, threadId),
+        sql`json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.epoch') = ${epoch}`)).get();
+    return row?.through ?? 0;
+  }
+
+  /** Hydrate complete already-saved parent history on the writer, without volatile-retention caps. */
+  loadParentNarrativeForBinding(threadId: string, turnId: string): ParentNarrativeRecoveryItem[] {
+    const rows = this.orm.select({ payloadJson: canonicalAgentItems.payloadJson }).from(canonicalAgentItems)
+      .where(and(eq(canonicalAgentItems.threadId, threadId), eq(canonicalAgentItems.turnId, turnId))).all();
+    return rows.flatMap((row) => {
+      const payload = JSON.parse(row.payloadJson);
+      if (payload.projection !== "narrativeRecovery") return [];
+      return [ParentNarrativeRecoveryItemSchema().parse(payload.narrative)];
+    });
+  }
+
   /** Load one canonical turn record. */
   loadTurn(turnId: string): AgentTurn | null {
     return this.reads.loadTurn(turnId);
@@ -766,17 +828,6 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       .limit(1)
       .get();
     return row ? this.turnFromRow(row) : null;
-  }
-
-  /** Load the latest canonical permission mode retained for a thread. */
-  loadLatestPermissionMode(threadId: string): AgentTurn["permissionMode"] | null {
-    const row = this.orm.select({ permissionMode: canonicalAgentTurns.permissionMode })
-      .from(canonicalAgentTurns)
-      .where(eq(canonicalAgentTurns.threadId, threadId))
-      .orderBy(desc(canonicalAgentTurns.updatedAt), desc(canonicalAgentTurns.id))
-      .limit(1)
-      .get();
-    return (row?.permissionMode as AgentTurn["permissionMode"] | undefined) ?? null;
   }
 
   /** Load one durable ingest checkpoint. */
@@ -939,36 +990,6 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   /** Commit the canonical start of one ordinary user-triggered parent turn. */
   startParentTurn(input: CanonicalParentTurnStartInput): CanonicalAgentCommitResult {
     return this.parentLifecycle.start(input);
-  }
-
-  /** Start an ordinary parent turn from a provider-proven child action. */
-  startProviderContinuation(input: CanonicalProviderContinuationInput): AgentTurn {
-    return this.parentLifecycle.continue(input);
-  }
-
-  /** Mark the legacy thread projection active when a provider resumes its parent turn. */
-  activateProviderContinuation(threadId: string): void {
-    this.orm.update(threads)
-      .set({ status: "active", updatedAt: new Date().toISOString() })
-      .where(eq(threads.id, threadId))
-      .run();
-  }
-
-  /** Commit continuation acknowledgement and parent turn creation before publishing either side. */
-  private commitProviderContinuation(input: {
-    source: CanonicalAgentCommitInput;
-    parent: CanonicalAgentCommitInput;
-  }): { source: CanonicalAgentCommitResult; parent: CanonicalAgentCommitResult } {
-    const transaction = this.db.transaction(() => ({
-      source: this.commitInsideTransaction(input.source),
-      parent: this.commitInsideTransaction(input.parent),
-    }));
-    const committed = transaction();
-    const sourceEvents = committed.source.events;
-    const parentEvents = committed.parent.events;
-    this.recordCanonicalDiagnostics([...sourceEvents, ...parentEvents]);
-    this.publishEventGroups([sourceEvents, parentEvents]);
-    return committed;
   }
 
   /** Load one canonical semantic item. */
@@ -1293,12 +1314,87 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     });
   }
 
+  /** Project the saved roster's metadata rules from accepted family records without storage. */
+  projectAcceptedSubagentRoster(request: CanonicalSubagentRosterRequest, state: AgentModelState): CanonicalSubagentRoster {
+    const parsed = CanonicalSubagentRosterRequestSchema().parse(request);
+    const parent = state.threads[parsed.owningParentThreadId];
+    if (!parent) return this.emptySubagentRoster(parsed.owningParentThreadId, 0);
+    const family = Object.values(state.threads).filter((thread) => thread.id !== parent.id
+      && thread.owningParentThreadId === parent.id);
+    const turnsByThread = new Map<string, AgentTurn[]>();
+    for (const turn of Object.values(state.turns)) {
+      const turns = turnsByThread.get(turn.threadId) ?? [];
+      turns.push(turn);
+      turnsByThread.set(turn.threadId, turns);
+    }
+    const actionsByThread = new Map<string, CollaborationAction>();
+    for (const action of Object.values(state.collaborationActions).sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))) actionsByThread.set(action.target.threadId, action);
+    const lookup: SubagentRosterLookup = { threads: family, turnsByThread, actionsByThread,
+      itemRows: Object.values(state.items).map((item) => ({ thread_id: item.threadId, created_at: item.createdAt, updated_at: item.updatedAt })),
+      sourceItemsById: new Map(Object.entries(state.items)), ...this.classifySubagentRosterThreads(family, turnsByThread) };
+    return this.projectRosterLookup(parsed, parent, lookup);
+  }
+
+  /** Saved family children have no independent ingest checkpoint; restart interrupts them through their parent stream. */
+  interruptSavedFamilyChildren(reason: string): string[] {
+    const rows = this.orm.select().from(canonicalAgentTurns)
+      .innerJoin(canonicalAgentThreads, eq(canonicalAgentThreads.id, canonicalAgentTurns.threadId))
+      .where(and(eq(canonicalAgentTurns.status, "Running"), isNotNull(canonicalAgentThreads.parentThreadId)))
+      .limit(MAX_TURN_RECOVERIES + 1).all();
+    if (rows.length > MAX_TURN_RECOVERIES) throw new Error("Saved family recovery capacity reached");
+    const interrupted: string[] = [];
+    for (const row of rows) {
+      const child = this.threadFromRow(row.canonical_agent_threads);
+      const ownerId = child.owningParentThreadId ?? child.parentThreadId;
+      if (!ownerId) throw new Error("Saved child has no family owner");
+      this.interruptSavedChild(ownerId, child.id, reason);
+      interrupted.push(child.id);
+    }
+    return interrupted;
+  }
+
+  private interruptSavedChild(ownerId: string, childId: string, reason: string): void {
+    const state = this.loadState(ownerId);
+    const prepared = new AcceptedCodexCollaboration(state).prepareChildInterruption({ childThreadId: childId, error: reason });
+    if (!prepared.turn || prepared.changes.length === 0) return;
+    const ownerTurn = this.familyOwnerTurn(state, prepared.turn, ownerId);
+    if (!ownerTurn.executionId) throw new Error("Saved child owner has no execution identity");
+    const execution = { threadId: ownerId, turnId: ownerTurn.id, executionId: ownerTurn.executionId };
+    const changes = prepared.changes.map((change) => {
+      if (change.kind === "diagnostic") throw new Error("Child recovery prepared an unrelated diagnostic");
+      return change;
+    });
+    this.commit({ ...execution, phase: "recovery", persistCheckpoint: false, events: [{
+      eventId: `family-recovery:${prepared.turn.executionId}`, routing: execution,
+      sourceProviderId: state.threads[ownerId]?.providerId ?? "server", sourceIdentities: [],
+      payload: { type: "collaboration.observed", changes },
+    }] });
+  }
+
+  private familyOwnerTurn(state: AgentModelState, turn: AgentTurn, ownerId: string): AgentTurn {
+    const seen = new Set<string>();
+    let current = turn;
+    while (current.threadId !== ownerId) {
+      if (seen.has(current.id) || current.trigger.kind !== "child") throw new Error("Saved child has invalid turn lineage");
+      seen.add(current.id);
+      const parent = state.turns[current.trigger.sourceTurnId];
+      if (!parent || parent.threadId !== current.trigger.sourceThreadId) throw new Error("Saved child parent turn is missing");
+      current = parent;
+    }
+    return current;
+  }
+
   private projectSubagentRoster(
     request: CanonicalSubagentRosterRequest,
     parent: AgentThread,
     rows: Array<Record<string, unknown>>,
   ): CanonicalSubagentRoster {
-    const lookup = this.loadSubagentRosterLookup(rows);
+    return this.projectRosterLookup(request, parent, this.loadSubagentRosterLookup(rows));
+  }
+
+  private projectRosterLookup(request: CanonicalSubagentRosterRequest, parent: AgentThread,
+    lookup: SubagentRosterLookup): CanonicalSubagentRoster {
     const rosterRows = lookup.threads.map((thread) => this.projectSubagentRosterRow(
       request,
       thread,
@@ -1909,120 +2005,15 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     };
   }
 
-  /** Build one item.recorded draft per recovery mutation; discards become tombstones so replicas drop them. */
+  /** Build recovery semantics using the same preparation as the accepted owner. */
   private parentNarrativeRecoveryDrafts(
     input: ParentNarrativeRecoveryCommitInput,
     thread: AgentThread,
     turn: AgentTurn,
   ): CanonicalAgentEventDraft[] {
-    const persisted = input.items.map((item): CanonicalAgentEventDraft => {
-      const itemId = this.parentNarrativeRecoveryItemId(item);
-      return {
-        eventId: `narrative:${input.executionId}:${itemId}:${hashCodexKey(JSON.stringify(item))}`,
-        routing: { threadId: thread.id, turnId: turn.id, executionId: input.executionId, itemId },
-        sourceProviderId: thread.providerId,
-        sourceIdentities: [],
-        payload: {
-          type: "item.recorded",
-          item: {
-            id: itemId,
-            threadId: thread.id,
-            turnId: turn.id,
-            ...this.parentNarrativeRecoveryParent(item),
-            kind: this.parentNarrativeRecoveryItemKind(item),
-            providerIdentities: turn.providerIdentities,
-            payload: this.parentNarrativeRecoveryPayload(item, itemId),
-            createdAt: item.record.started_at,
-            // Deterministic so a retried commit dedupes on eventId instead of conflicting.
-            updatedAt: item.kind === "toolCall"
-              ? item.record.completed_at ?? item.record.started_at
-              : item.record.ended_at ?? item.record.started_at,
-          },
-        },
-      };
+    return prepareParentNarrativeRecoveryEvents({
+      recovery: input, thread, turn, findItem: (id) => this.loadItem(id),
     });
-    const discarded = (input.discardedItemIds ?? []).map((itemId) =>
-      this.parentNarrativeRecoveryDiscardDraft(input, thread, turn, itemId));
-    return [...persisted, ...discarded];
-  }
-
-  /** A discard re-records the item under a marker projection so replicas drop it without a delete event. */
-  private parentNarrativeRecoveryDiscardDraft(
-    input: ParentNarrativeRecoveryCommitInput,
-    thread: AgentThread,
-    turn: AgentTurn,
-    itemId: string,
-  ): CanonicalAgentEventDraft {
-    const existing = this.loadItem(itemId);
-    const projection = typeof existing?.payload.projection === "string" ? existing.payload.projection : null;
-    if (!existing || existing.threadId !== thread.id || existing.turnId !== turn.id
-      || (projection !== "narrativeRecovery" && projection !== "narrativeRecoveryDiscarded")) {
-      throw new Error(`Canonical narrative recovery item was not found: ${itemId}`);
-    }
-    return {
-      eventId: `narrative-discard:${input.executionId}:${itemId}:${hashCodexKey(JSON.stringify(existing.payload))}`,
-      routing: { threadId: thread.id, turnId: turn.id, executionId: input.executionId, itemId },
-      sourceProviderId: thread.providerId,
-      sourceIdentities: [],
-      payload: {
-        type: "item.recorded",
-        item: {
-          ...existing,
-          payload: { ...existing.payload, projection: "narrativeRecoveryDiscarded" },
-        },
-      },
-    };
-  }
-
-  private parentNarrativeRecoveryItemId(item: ParentNarrativeRecoveryItem): string {
-    return item.kind === "toolCall"
-      ? `toolCall:${item.record.id}`
-      : `${item.kind}:${item.record.id}`;
-  }
-
-  private parentNarrativeRecoveryParent(
-    item: ParentNarrativeRecoveryItem,
-  ): { parentItemId?: string } {
-    if (item.kind !== "toolCall") return {};
-    const parentToolCallId = item.record.parent_tool_call_id;
-    return parentToolCallId ? { parentItemId: `toolCall:${parentToolCallId}` } : {};
-  }
-
-  private parentNarrativeRecoveryItemKind(item: ParentNarrativeRecoveryItem): AgentItem["kind"] {
-    if (item.kind === "toolCall") return "tool-call";
-    return item.kind === "narrationSegment" ? "reasoning" : "system";
-  }
-
-  private parentNarrativeRecoveryPayload(
-    item: ParentNarrativeRecoveryItem,
-    itemId: string,
-  ): Record<string, unknown> {
-    const existingPayload = this.loadItem(itemId)?.payload ?? {};
-    return {
-      projection: "narrativeRecovery",
-      narrative: item,
-      ...this.parentNarrativeRecoveryMetadata(item, existingPayload),
-    };
-  }
-
-  private parentNarrativeRecoveryMetadata(
-    item: ParentNarrativeRecoveryItem,
-    existingPayload: Record<string, unknown>,
-  ): Record<string, string> {
-    if (item.kind !== "toolCall") return {};
-    const metadata: Record<string, string> = {};
-    this.copyRecoveryMetadata(metadata, "identity", existingPayload.identity);
-    this.copyRecoveryMetadata(metadata, "model", existingPayload.model);
-    this.copyRecoveryMetadata(metadata, "reasoningEffort", existingPayload.reasoningEffort);
-    return metadata;
-  }
-
-  private copyRecoveryMetadata(
-    metadata: Record<string, string>,
-    key: string,
-    value: unknown,
-  ): void {
-    if (typeof value === "string") metadata[key] = value;
   }
 
   /** Load the newest durable structured narrative snapshot for an unfinished parent turn. */
@@ -3045,11 +3036,13 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     checkpoint: CanonicalAgentEventStoreCheckpoint | null,
     events: readonly CanonicalAgentEventEnvelope[],
   ): AgentModelState {
+    if (events.some((event) => event.payload.type === "collaboration.observed")) return this.loadState(threadId, checkpoint?.executionId);
     const state = createAgentModelState();
     const thread = this.loadThread(threadId);
     if (thread) state.threads[thread.id] = thread;
     this.addCommitChildThreadState(state, events);
     this.addCommitTurnState(state, events);
+    if (events.some((event) => event.payload.type === "turn.response-bound")) this.addItemState(state, threadId);
     // Item and action reducers replace their records, so prior rows cannot affect this batch.
     this.addCommitSequenceState(state, checkpoint, events);
     return state;
@@ -3126,6 +3119,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       || event.payload.type === "turn.interrupted"
       || event.payload.type === "turn.errored"
       || event.payload.type === "ingest.overflow"
+      || event.payload.type === "turn.response-bound"
     ) {
       return event.routing.turnId ?? null;
     }
@@ -3173,13 +3167,24 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
 
   private loadState(threadId: string, executionId?: string): AgentModelState {
     const state = createAgentModelState();
-    this.addThreadState(state, threadId);
-    this.addTurnState(state, threadId);
-    this.addItemState(state, threadId);
-    this.addCollaborationActionState(state, threadId);
-    this.addEventState(state, threadId);
+    this.addFamilyState(state, threadId);
     this.addCheckpointState(state, executionId);
     return state;
+  }
+
+  private addFamilyState(state: AgentModelState, threadId: string): void {
+    const seen = new Set<string>();
+    const pending = [threadId];
+    for (const id of pending) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      this.addThreadState(state, id);
+      this.addTurnState(state, id);
+      this.addItemState(state, id);
+      this.addCollaborationActionState(state, id);
+      this.addEventState(state, id);
+      for (const thread of Object.values(state.threads)) if (thread.parentThreadId === id) pending.push(thread.id);
+    }
   }
 
   private addThreadState(state: AgentModelState, threadId: string): void {
@@ -3263,12 +3268,50 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     this.persistRecordedItems(state, threadId, events);
     this.persistRecordedActions(state, threadId, events);
     this.persistChangedChildThreads(state, threadId, events);
+    this.persistObservedCollaboration(state, events);
+  }
+
+  private persistObservedCollaboration(state: AgentModelState, events: readonly CanonicalAgentEventEnvelope[]): void {
+    for (const event of events) {
+      if (event.payload.type !== "collaboration.observed") continue;
+      for (const change of event.payload.changes) this.persistObservedRecord(state, change);
+    }
+  }
+
+  private persistObservedRecord(state: AgentModelState, change: import("@mcode/contracts").CollaborationObservationChange): void {
+    switch (change.kind) {
+      case "thread-recorded": this.persistObservedThread(requiredObservedRecord(state.threads[change.thread.id])); break;
+      case "thread-bound": this.persistObservedThread(requiredObservedRecord(state.threads[change.childThread.id])); break;
+      case "turn-started":
+      case "turn-terminal": this.persistTurn(requiredObservedRecord(state.turns[change.turn.id]), change.sourceExecution.executionId); break;
+      case "item-recorded":
+      case "diagnostic": this.persistItem(requiredObservedRecord(state.items[change.item.id])); break;
+      case "action-recorded": this.persistAction(requiredObservedRecord(state.collaborationActions[change.action.id])); break;
+    }
+  }
+
+  private persistObservedThread(thread: AgentThread): void {
+    if (thread.parentThreadId) {
+      this.orm.insert(threads).values({ id: thread.id, workspaceId: thread.workspaceId, title: "Sub-agent",
+        status: "active", mode: "direct", branch: "", createdAt: thread.createdAt, updatedAt: thread.updatedAt,
+        deletedAt: null, provider: thread.providerId, parentThreadId: thread.parentThreadId }).onConflictDoNothing().run();
+    }
+    this.persistThread(thread);
   }
 
   private materializeRecordedItems(events: readonly CanonicalAgentEventEnvelope[]): void {
-    this.displayMaterializer.materializeItems(events.flatMap((event) =>
-      event.payload.type === "item.recorded" ? [event.payload.item.id] : [],
-    ));
+    this.displayMaterializer.materializeItems([...new Set(events.flatMap((event) => this.recordedItemIds(event)))]);
+  }
+
+  private recordedItemIds(event: CanonicalAgentEventEnvelope): string[] {
+    if (event.payload.type === "collaboration.observed") return event.payload.changes.flatMap((change) =>
+      change.kind === "item-recorded" || change.kind === "diagnostic" ? [change.item.id] : []);
+    if (event.payload.type === "item.recorded") return [event.payload.item.id];
+    if (event.payload.type !== "turn.response-bound") return [];
+    return this.orm.select({ id: canonicalAgentItems.id }).from(canonicalAgentItems)
+      .where(and(eq(canonicalAgentItems.threadId, event.routing.threadId), eq(canonicalAgentItems.turnId, event.routing.turnId ?? ""),
+        sql`json_extract(${canonicalAgentItems.payloadJson}, '$.projection') IN ('toolCall', 'hook', 'narrationSegment')`))
+      .all().map((row) => row.id);
   }
 
   private parentAssistantItemIds(turnId: string): string[] {
@@ -3304,6 +3347,12 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     events: readonly CanonicalAgentEventEnvelope[],
   ): void {
     for (const event of events) {
+      if (event.payload.type === "turn.response-bound") {
+        for (const item of Object.values(state.items)) {
+          if (item.threadId === threadId && item.turnId === event.routing.turnId) this.persistItem(item);
+        }
+        continue;
+      }
       if (event.payload.type !== "item.recorded") continue;
       const item = state.items[event.payload.item.id];
       if (item?.threadId === threadId) this.persistItem(item);
@@ -3756,6 +3805,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     return AgentTurnSchema.parse({
       id: row.id,
       threadId: row.threadId,
+      executionId: row.executionId,
       status: row.status,
       trigger: JSON.parse(String(row.triggerJson)),
       permissionMode: row.permissionMode,
@@ -3831,4 +3881,9 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     }
     return rows.map((row) => this.checkpointFromRow(row));
   }
+}
+
+function requiredObservedRecord<RecordValue>(record: RecordValue | undefined): RecordValue {
+  if (record === undefined) throw new Error("Accepted collaboration record is missing from its reduced family");
+  return record;
 }

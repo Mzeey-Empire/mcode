@@ -1,3 +1,4 @@
+import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { inject, injectable } from "tsyringe";
 import {
@@ -17,6 +18,12 @@ export const LEGACY_CONVERSATION_MIGRATION_MAX_NARRATIVE_ITEMS = 64;
 export const LEGACY_CONVERSATION_MIGRATION_MAX_BYTES = 262_144;
 /** Legacy lineage deeper than this bound remains readable but cannot become canonical. */
 export const LEGACY_CONVERSATION_MIGRATION_MAX_LINEAGE_DEPTH = 32;
+
+function legacyExecutionId(userMessageId: string): string {
+  const hash = NodeCrypto.createHash("sha256").update(`legacy-execution:${userMessageId}`).digest("hex");
+  const variant = ((Number.parseInt(hash.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, "0");
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${variant}${hash.slice(18, 20)}-${hash.slice(20, 32)}`;
+}
 
 type LegacyMessageRow = {
   id: string;
@@ -372,7 +379,7 @@ export class LegacyConversationMigration {
     }
     const narratives = this.loadNarratives(pair.assistant.id);
     const turnId = `legacy-turn:${pair.user.id}`;
-    const executionId = `legacy-execution:${pair.user.id}`;
+    const executionId = legacyExecutionId(pair.user.id);
     const bytes = Buffer.byteLength(JSON.stringify({
       userMessage,
       assistantMessage,

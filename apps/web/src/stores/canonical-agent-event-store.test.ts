@@ -131,6 +131,38 @@ describe("canonical agent event residency guards", () => {
     expect(record.thoughtSegments).toEqual([{ text: "Before the read", startedAt: Date.parse(NOW), endedAt: Date.parse(NOW), isExplicitNonFinal: true }]);
   });
 
+  it.each(["narrativeRecovery", "narrationSegment"])("restores a completed retained %s response exactly once without replaying live effects", (projection) => {
+    const threadId = "completed-parent";
+    const executionId = "00000000-0000-4000-8000-000000000001";
+    resetThreadStoreForTests({ currentThreadId: threadId });
+    const state = createAgentModelState();
+    state.turns.parent = { id: "parent", threadId, executionId, status: "Running", trigger: { kind: "user" },
+      permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", providerIdentities: [],
+      startedAt: NOW, endedAt: null, createdAt: NOW, updatedAt: NOW };
+    const tail = [
+      { eventId: "retained-answer", routing: { threadId, turnId: "parent", executionId, itemId: "answer" }, sourceProviderId: "codex", sourceIdentities: [],
+        acceptedSequence: 1, progressPosition: { epoch: "runtime-1", sequence: 1 }, serverTimestamps: { acceptedAt: NOW },
+        payload: { type: "item.recorded" as const, item: { id: "answer", threadId, turnId: "parent", kind: "reasoning" as const,
+          providerIdentities: [], createdAt: NOW, updatedAt: NOW, payload: projection === "narrativeRecovery" ? { projection, narrative: { kind: "narrationSegment", record: {
+            id: "answer-text", message_id: "", text: "Recovered before saving", started_at: NOW, ended_at: NOW, sort_order: 0, is_final_response: 1,
+          } } } : { projection, record: { id: "answer-text", message_id: "", text: "Recovered before saving", started_at: NOW, ended_at: NOW, sort_order: 0, is_final_response: 1 } } } } },
+      { eventId: "retained-message", routing: { threadId, turnId: "parent", executionId, itemId: "answer-message" }, sourceProviderId: "codex", sourceIdentities: [],
+        acceptedSequence: 2, progressPosition: { epoch: "runtime-1", sequence: 2 }, serverTimestamps: { acceptedAt: NOW },
+        payload: { type: "item.recorded" as const, item: { ...childAnswerItem(threadId, "answer-message", "Recovered before saving"), turnId: "parent" } } },
+      { eventId: "retained-terminal", routing: { threadId, turnId: "parent", executionId }, sourceProviderId: "codex", sourceIdentities: [],
+        acceptedSequence: 3, progressPosition: { epoch: "runtime-1", sequence: 3 }, serverTimestamps: { acceptedAt: NOW },
+        payload: { type: "turn.completed" as const, endedAt: NOW } },
+    ];
+    const recovery = { phase: "recovery" as const, threadId, epoch: "runtime-1", acceptedThrough: 3, savedThrough: 0, retained: tail, loss: "none" as const,
+      durable: { mode: "snapshot" as const, threadId, snapshot: { revision: { conversationRevision: 1, rosterRevision: 0 }, state } } };
+    useThreadStore.getState().applyCanonicalReconnectRecoveries([recovery]);
+    useThreadStore.getState().applyCanonicalReconnectRecoveries([recovery]);
+    const record = useThreadStore.getState().records.get(threadId);
+    expect(record?.runtimePhase).toBe("completed");
+    expect(record?.messages.filter((message) => message.content === "Recovered before saving")).toHaveLength(1);
+    expect(loadConversationPage).not.toHaveBeenCalled();
+  });
+
   it("rejects a late child push after its display lease is released", () => {
     const threadId = "child-released";
     const residency = getConversationResidency();

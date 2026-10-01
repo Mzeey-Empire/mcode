@@ -450,4 +450,54 @@ describe("projectCanonicalMessageList", () => {
       },
     });
   });
+
+  it("keeps full canonical activity in summaries while bounding visible tool projection", () => {
+    const state = createAgentModelState();
+    state.turns[TURN_ID] = turn("Completed", "2026-08-18T12:03:00.000Z");
+    const answer = message({
+      id: "child-answer",
+      role: "assistant",
+      content: "Done",
+      sequence: 1,
+      timestamp: "2026-08-18T12:02:59.000Z",
+    });
+    state.items.answer = item(
+      "answer",
+      "message",
+      { projection: "message", message: answer },
+      answer.timestamp,
+    );
+
+    for (let index = 0; index < 170; index += 1) {
+      const nativeItemId = `tool-${String(index).padStart(3, "0")}`;
+      const callTime = new Date(Date.parse(STARTED_AT) + index * 1_000).toISOString();
+      const resultTime = new Date(Date.parse(STARTED_AT) + index * 1_000 + 500).toISOString();
+      state.items[`call-${index}`] = item(
+        `call-${index}`,
+        "tool-call",
+        { projection: "codexChildToolCall", nativeItemId, toolName: "Read" },
+        callTime,
+      );
+      state.items[`result-${index}`] = item(
+        `result-${index}`,
+        "tool-result",
+        { projection: "codexChildToolResult", nativeItemId, output: "ok" },
+        resultTime,
+      );
+    }
+
+    const projection = projectCanonicalMessageList({
+      threadId: THREAD_ID,
+      state,
+      messages: [message(), answer],
+      toolCalls: [],
+      thoughtSegments: [],
+    });
+
+    const visibleIds = projection?.toolCalls.map((call) => call.id);
+    expect(visibleIds).toHaveLength(32);
+    expect(visibleIds?.[0]).toBe("tool-138");
+    expect(visibleIds?.at(-1)).toBe("tool-169");
+    expect(projection?.turnSummariesByMessageId["child-answer"]?.counts.steps).toBe(170);
+  });
 });

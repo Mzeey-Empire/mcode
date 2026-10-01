@@ -23,7 +23,11 @@ import {
 
 function canonicalBatch(threadId: string) {
   return {
+    phase: "saved" as const,
     threadId,
+    epoch: `epoch-${threadId}`,
+    through: 1,
+    revision: { conversationRevision: 1, rosterRevision: 0 },
     events: [{
       eventId: `event-${threadId}`,
       routing: {

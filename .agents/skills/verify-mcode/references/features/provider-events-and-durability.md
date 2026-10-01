@@ -33,6 +33,130 @@ This fixture checks the production Codex event boundary, not a real model run or
 
 ## Runtime checks
 
+### Live progress and saving
+
+Use `scripts/live-durability.mjs` when live output, terminal state, or Stop must
+remain responsive while saving is delayed or rejected. Run its `check` command
+first. Import it into the already owned Electron Playwright session; the helper
+does not launch, rebuild, restart, or stop Mcode. Use a fresh handle per measured
+invocation and only this worktree's `.dev/fixture-repo`.
+
+```js
+var root = electronSession.repoRoot;
+var proof = await import('file:///' + root.replaceAll('\\', '/') + '/.agents/skills/verify-mcode/scripts/live-durability.mjs');
+var identity = proof.readElectronRuntimeIdentity(root);
+// Match identity.electronPid/serverPid/serverStartedAt to the coordinator's owned process handoff.
+var run = await proof.connect({ page: electronPage, repoRoot: root,
+  dbPath: identity.dbPath, runtimeIdentity: identity, provider: 'codex', label: 'saving-proof' });
+try {
+  await proof.configure(run);
+  await proof.createThread(run); // Unmeasured native no-op seed must finish.
+  await proof.openThread(run);
+  await proof.startComposer(run); // Actual prompt and native PREFIX must render.
+  await proof.waitDurablePrefix(run);
+  await proof.healthyPrefixGate(run); // Keep DOM/public activity healthy beyond the 20-second send RPC timeout.
+  await proof.armFault(run, 'fail-terminal');
+  proof.releaseProvider(run);
+  await proof.prepareSaveRetry(run, { expectedOutcome: 'completed' });
+  await proof.releaseFault(run);
+  var result = await proof.retrySave(run, { via: 'ui' });
+  var reloaded = await proof.reload(run);
+  var durable = await proof.compareDurability(run);
+} finally { await proof.cleanup(run); }
+```
+
+Record every returned condition. Successful Completed retry requires exact
+accepted/durable IDs and content, drained queue, unchanged outcome/execution,
+one measured native invocation, COMPLETE once, no failed-saving notice, and no
+Stop button after retry and reload. `fail-terminal` rejects only canonical
+`turn.completed` for this exact execution. It must be armed after the certified
+prefix and before the native terminal. A tool-level `fail` is a separate active
+execution interruption proof: start with `{pauseBeforeTerminal:true,honorCancel:true}`,
+require fresh native cancellation, then use `expectedOutcome:'interrupted'`.
+Interrupted never substitutes for successful completion. Repeat Retry via RPC
+on a fresh failed run; the helper calls `agent.retrySave` without resending a prompt.
+
+For a delayed writer, use `armFault(run,'hold')`, release the provider, capture
+`observe` and `captureRecovery`, then `reloadWhileHeld`. Require public Completed,
+visible COMPLETE/Saving, cleared Stop, unchanged saved prefix, and retained
+suffix. Release once and compare exact IDs/count/content before and after reload.
+The SQLite lock has a 120-second safety lease; BUSY retry exhaustion or a locked
+navigation query is a failed or incomplete journey, not a permanent-rejection pass.
+If reconnect outlasts the retry budget, capture Completed with transient
+SavingFailed while the lock is still held using
+`prepareSaveRetry(run,{expectedOutcome:'completed',expectedFailureKind:'transient'})`.
+Release the lock and call the actual save-only Retry. Record the exhaustion and
+explicit retry separately from automatic drain. Read diagnostics through DOM,
+neutral event frames, and public runtime snapshots; importing renderer modules
+can initialize a store and does not provide an authoritative diagnostic read.
+Electron reload returns home, so the helper reopens the exact sidebar thread.
+Codex commentary may disappear from the final message; certify PREFIX before the
+fault and require the final COMPLETE after completion.
+
+For Stop/peer progress, create and seed `connectPeer(run)` before the lock; it
+shares the provider configuration but owns its own thread, socket, and audit ID.
+Start the owner paused with cancellation honored, start the peer, hold saving,
+and release the owner. After `waitNative(run,'after-tool')`, click the real Stop
+using `stopComposer`. Require fresh native cancellation and bounded public terminal
+state. Release the peer provider and check its own live frames/COMPLETE before
+unlocking. A global SQLite lock proves peer live publication, not independent
+physical writes. Drain both, clean the peer first, then restore the settings owner.
+
+`startComposer` also supports `longToolPairs:1000,pairDelayMs:10`; release the
+native gate and use `verifyLongTurn`, reload, then compare again. Its offline
+1000-pair protocol check measures fixture protocol throughput, not full UI
+throughput. Use the actual Composer, exact durable tool identities, completed
+outcome, and reload to certify the full application path. Keep a 1ms rate for a
+separate deliberate overflow attempt. Fresh-epoch
+loss helpers (`prepareRestart`, `disconnectForRestart`, `resumeAfterRestart`,
+`verifyRestartLoss`) require a coordinator-owned abrupt server/writer restart
+with the same DB and a fresh explicit identity. Their existence is not crash proof.
+
+Screenshots, redacted receipts, native timestamps/audit, and saved-prefix hashes
+stay in `.dev/verification/live-durability/` after cleanup. Capture failures before
+cleanup. Use 30–60 second tool timeouts and script lock phases together. A genuine
+overlay may be dismissed through its normal UI; capture a blocked click first.
+Fixture coverage is ACP Devin and Codex app-server, without provider accounts or
+real tool commands. Standalone web requires an explicit private URL matched to
+this worktree's port contract and `.dev/db/app.sqlite`. Claude, Cursor, real
+accounts/permissions, capacity overflow, child/continuation hooks, lost RPC
+responses, and restart loss remain separate proof rows. Report actual passed,
+failed, and unexecuted rows; a prepared helper is not a passing product proof.
+
+Prepared native Codex child journeys use `childMode:'completed'` or
+`childMode:'paused'` alongside `pauseBeforeTerminal:true,honorCancel:true`.
+After the saved prefix, hold the writer and release the native gate. The fixture
+binds a raw `spawnAgent` receiver before the child's native turn and streams a
+child tool and message. `captureChild` reads the server-produced alias through
+`canonicalAgent.roster` and its public `conversation.tail`; never invent an alias.
+Require CHILD_PREFIX in the real detail UI and the parent still Running.
+For completion, release `finishChild` and require child Completed while the parent
+remains paused. For Stop, pass the actual observed detail button and region labels
+to `stopChildUI`; require fresh exact native child cancellation, the same alias,
+child Interrupted, and parent still Running. Then `finishProvider`, drain, reopen
+the detail, and compare the same alias/transcript and parent event descriptors.
+The offline raw child checks prove protocol ordering and cancellation only.
+There is no native continuation producer in this fixture.
+
+For deliberate retained-save overflow, create a fresh run with
+`longToolPairs:5000,pairDelayMs:1,honorCancel:true`. Certify the prefix, hold saving,
+release once, then call `verifyCapacityRejection` with the exact owned runtime
+log path. It requires this execution's typed `retention-exhausted` admission
+reason, fresh native cancellation, and an explicit terminal public state before
+the lock lease expires. A provider canonical publisher overflow, including its
+1,024 pending-event limit, an expired gate, or SQLite BUSY retry exhaustion is
+not this proof. Release once and verify exact admitted event identities/drain
+without invoking the provider again. Preserve any missing cancellation, ambiguous
+capacity cause, or failed drain as a failed or incomplete journey.
+
+Standalone web proof uses a coordinator-owned page and this worktree's explicit
+private port/auth contract with `.dev/db/app.sqlite`. Initialize its seed login
+privately before connecting. Repeat the actual Composer and UI Retry/Stop paths;
+public RPC proof alone does not certify the web renderer. Keep private endpoints
+and authentication out of receipts. Child, overflow, standalone web, permanent
+terminal rejection, active failure, and Stop/peer rows remain unexecuted until a
+fresh authorized runtime journey records their actual conditions.
+
 ### Consecutive turns and navigation
 
 In the owned Electron app, select a real provider and model and create a direct

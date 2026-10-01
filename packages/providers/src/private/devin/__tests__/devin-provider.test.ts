@@ -236,6 +236,33 @@ describe("DevinProvider", () => {
     ]));
   });
 
+  it("publishes exactly routed empty completion batches and waits for live acceptance", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-empty", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+    await provider!.sendTurn(turn());
+    const batches = vi.mocked(host.events.submit).mock.calls.map(([batch]) => batch);
+    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "turnComplete", reason: "end_turn" }),
+      expect.objectContaining({ type: "ended", turnExecutionId: "execution-1" }),
+    ]));
+    for (const batch of batches) {
+      expect(batch).toMatchObject({ batchId: batch.events[0]?.eventId, deliveryAttempt: 1,
+        threadId: "thread-1", turnId: "turn-1", executionId: "execution-1" });
+    }
+    expect(new Set(batches.map((batch) => batch.batchId)).size).toBe(batches.length);
+  });
+
+  it("propagates an original canonical admission failure instead of returning a successful prompt", async () => {
+    const host = createHost();
+    const error = new Error("Canonical worker batch does not match execution ownership");
+    vi.mocked(host.events.submit).mockRejectedValue(error);
+    starts.push(mockAcpStart([createFakeRuntime("devin-rejected", 101)]));
+    createProvider(host);
+    await expect(provider!.sendTurn(turn())).rejects.toBe(error);
+  });
+
   it("resumes through session/load when resumeFrom carries an ACP session id", async () => {
     const host = createHost();
     const fake = createFakeRuntime("devin-acp-1", 101);

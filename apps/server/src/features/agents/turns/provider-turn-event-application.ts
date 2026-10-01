@@ -414,7 +414,8 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     this.narrative.pushClosedHook(event.threadId, { ...completed, messageId: "" });
     this.narrative.removeOpenHook(event.threadId, event.hookName);
     if (this.turnCompleteSeenByThread.has(event.threadId)) {
-      this.lateHookCompletions.schedule(event.threadId, completed, this.terminalProjection(event.threadId));
+      if (!event.turnExecutionId) throw new Error("Late hook completion lacks its original execution identity");
+      this.lateHookCompletions.schedule(event.threadId, completed, event.turnExecutionId);
       return OWNED_LATE_HOOK_COMPLETION;
     }
     return true;

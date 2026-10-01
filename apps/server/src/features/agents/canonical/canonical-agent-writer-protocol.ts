@@ -1,4 +1,6 @@
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
+import type { CanonicalAgentEventEnvelope, CanonicalAgentRevision } from "@mcode/contracts";
+import type { SavedProgressReceipt } from "../execution/thread-progress-types.js";
+import type { CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";
 import type { ExecutionSemanticOperation, ExecutionWriteReceipt } from "../execution/execution-worker-handler.js";
 import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 import type {
@@ -27,6 +29,13 @@ export interface CanonicalProviderWriteReceipt {
   events: readonly CanonicalAgentEventEnvelope[];
 }
 
+/** Only a committed append may certify the saved position of an accepted batch. */
+export interface CanonicalAcceptedWriteReceipt {
+  readonly receipt: SavedProgressReceipt;
+  readonly revision: CanonicalAgentRevision;
+  readonly events: readonly CanonicalAgentEventEnvelope[];
+}
+
 /** Acknowledges completed recovery writes; false means the execution was not found. */
 export interface CanonicalParentNarrativeRecoveryReceipt {
   recorded: boolean;
@@ -47,6 +56,7 @@ interface Correlation {
 export type CanonicalWriterRequest =
   | (Correlation & { kind: "open"; dbPath: string })
   | (Correlation & { kind: "commit"; input: CanonicalProviderWriteInput })
+  | (Correlation & { kind: "append-accepted"; input: CanonicalAcceptedWriteInput })
   | (Correlation & { kind: "semantic-transact"; operation: ExecutionSemanticOperation })
   | (Correlation & { kind: "semantic-worker-loss"; input: LostExecutionInterruption })
   | (Correlation & { kind: "record-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
@@ -57,10 +67,12 @@ export type CanonicalWriterRequest =
 export type CanonicalWriterResponse =
   | (Correlation & { kind: "opened" })
   | (Correlation & { kind: "committed"; receipt: CanonicalProviderWriteReceipt })
+  | (Correlation & { kind: "accepted-appended"; result: CanonicalAcceptedWriteReceipt })
   | (Correlation & { kind: "semantic-publication"; events: readonly CanonicalAgentEventEnvelope[] })
   | (Correlation & { kind: "semantic-transacted"; receipt: ExecutionWriteReceipt })
   | (Correlation & { kind: "parent-narrative-recovery-recorded"; receipt: CanonicalParentNarrativeRecoveryReceipt })
   | (Correlation & { kind: "parent-narrative-recovery-classified"; receipt: CanonicalParentNarrativeClassificationReceipt })
   | (Correlation & { kind: "operation-acknowledged" })
   | (Correlation & { kind: "closed" })
-  | (Correlation & { kind: "failed"; reason: "open-failed" | "write-failed" | "operation-conflict" | "receipt-capacity" });
+  | (Correlation & { kind: "failed"; reason: "open-failed" | "write-failed" | "operation-conflict" | "receipt-capacity";
+      failure?: { name: string; message: string; code?: string } });

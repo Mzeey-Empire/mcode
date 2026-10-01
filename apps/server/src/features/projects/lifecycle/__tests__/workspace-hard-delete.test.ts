@@ -16,7 +16,6 @@ import { AttachmentService } from "../../../attachments/storage/attachment-servi
 import { CleanupWorker } from "../../../thread-control/cleanup/cleanup-worker.js";
 import { HandoffStorage } from "../../../handoff/index.js";
 import type { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
-import type { AgentService } from "../../../agents/index.js";
 import type { ClaudeProvider } from "../../../providers/adapters/claude/claude-provider.js";
 import { killDescendantsByName } from "../../../../runtime/process/containment/process-kill.js";
 import type { GitExecutor } from "../../git/execution/index.js";
@@ -52,7 +51,11 @@ function createSandboxWorktreeCleanupPolicyMock(): SandboxWorktreeCleanupPolicy 
 }
 
 function createThreadDeletionTeardownServiceMock(): ThreadDeletionTeardownService {
-  return { teardownThread: vi.fn().mockResolvedValue(undefined) } as unknown as ThreadDeletionTeardownService;
+  return {
+    teardownThread: vi.fn().mockResolvedValue(undefined),
+    bindAcceptedProgress: vi.fn(),
+    deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove(),
+  } as unknown as ThreadDeletionTeardownService;
 }
 
 describe("WorkspaceRepo - soft/hard delete", () => {
@@ -257,81 +260,81 @@ describe("WorkspaceService.delete - two-phase orchestration", () => {
       threadRepo,
       cleanupJobRepo,
       mockAttachmentService,
-      { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService,
+      createThreadDeletionTeardownServiceMock(),
       mockGitExecutor,
     );
   });
 
-  it("immediately hides workspace from listing", () => {
+  it("immediately hides workspace from listing", async () => {
     const ws = workspaceRepo.create("Test", "/tmp/ws");
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
     expect(workspaceRepo.listAll()).toHaveLength(0);
   });
 
-  it("soft-deletes all active threads", () => {
+  it("soft-deletes all active threads", async () => {
     const ws = workspaceRepo.create("Test", "/tmp/ws");
     threadRepo.create(ws.id, "T1", "direct", "main");
     threadRepo.create(ws.id, "T2", "direct", "main");
 
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
     const threads = threadRepo.listAllByWorkspace(ws.id);
     expect(threads.every((t) => t.deleted_at !== null)).toBe(true);
   });
 
-  it("enqueues cleanup jobs for threads with worktrees", () => {
+  it("enqueues cleanup jobs for threads with worktrees", async () => {
     const ws = workspaceRepo.create("Test", "/tmp/ws");
     const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
     db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
       .run("/tmp/ws/.worktrees/feat-x", t1.id);
 
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
     expect(cleanupJobRepo.countByWorkspacePath("/tmp/ws")).toBe(1);
   });
 
-  it("hard-deletes workspace immediately when no worktree threads exist", () => {
+  it("hard-deletes workspace immediately when no worktree threads exist", async () => {
     const ws = workspaceRepo.create("Test", "/tmp/ws");
     threadRepo.create(ws.id, "Direct", "direct", "main");
 
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
     // Workspace should be fully gone
     const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(ws.id);
     expect(row).toBeNull();
   });
 
-  it("keeps workspace in soft-deleted state when worktree cleanup is pending", () => {
+  it("keeps workspace in soft-deleted state when worktree cleanup is pending", async () => {
     const ws = workspaceRepo.create("Test", "/tmp/ws");
     const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
     db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
       .run("/tmp/ws/.worktrees/feat-x", t1.id);
 
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
     // Workspace row still exists (soft-deleted, waiting for cleanup)
     const row = db.prepare("SELECT deleted_at FROM workspaces WHERE id = ?").get(ws.id) as { deleted_at: string | null } | undefined;
     expect(row).toEqual({ deleted_at: expect.any(String) });
   });
 
-  it("removes attachments for non-worktree threads before hard-deleting them", () => {
+  it("removes attachments for non-worktree threads before hard-deleting them", async () => {
     const ws = workspaceRepo.create("Test", "/tmp/ws");
     const t1 = threadRepo.create(ws.id, "Direct", "direct", "main");
 
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
     expect(mockAttachmentService.removeForThread).toHaveBeenCalledWith(t1.id);
   });
 
-  it("handles workspace with no threads (immediate hard-delete)", () => {
+  it("handles workspace with no threads (immediate hard-delete)", async () => {
     const ws = workspaceRepo.create("Empty", "/tmp/empty");
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
     const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(ws.id);
     expect(row).toBeNull();
   });
 
-  it("does not enqueue duplicate cleanup jobs for already-soft-deleted threads with pending jobs", () => {
+  it("does not enqueue duplicate cleanup jobs for already-soft-deleted threads with pending jobs", async () => {
     const ws = workspaceRepo.create("Test", "/tmp/ws");
     const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
     db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
@@ -344,14 +347,14 @@ describe("WorkspaceService.delete - two-phase orchestration", () => {
       worktree_path: "/tmp/ws/.worktrees/feat-x", branch: "feat/x",
     });
 
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
     // Should still be 1 job, not 2
     expect(cleanupJobRepo.countByWorkspacePath("/tmp/ws")).toBe(1);
   });
 
-  it("returns false for non-existent workspace", () => {
-    const result = workspaceService.delete("fake-id");
+  it("returns false for non-existent workspace", async () => {
+    const result = await workspaceService.delete("fake-id");
     expect(result).toBe(false);
   });
 });
@@ -656,14 +659,14 @@ describe("CleanupWorker - shared branch protection", () => {
   });
 });
 
-describe("WorkspaceService.delete - active session handling", () => {
+describe("WorkspaceService.delete - runtime teardown", () => {
   let db: Database;
   let workspaceRepo: WorkspaceRepo;
   let threadRepo: ThreadRepo;
   let cleanupJobRepo: CleanupJobRepo;
   let workspaceService: WorkspaceService;
   let mockAttachmentService: AttachmentService;
-  let mockAgentService: { stopSession: ReturnType<typeof vi.fn> };
+  let mockThreadDeletion: ThreadDeletionTeardownService;
 
   beforeEach(() => {
     db = openMemoryDatabase();
@@ -675,40 +678,46 @@ describe("WorkspaceService.delete - active session handling", () => {
       removeForThread: vi.fn(),
     } as unknown as AttachmentService;
 
-    mockAgentService = {
-      stopSession: vi.fn().mockResolvedValue(undefined),
-    };
+    mockThreadDeletion = createThreadDeletionTeardownServiceMock();
 
     workspaceService = new WorkspaceService(
       workspaceRepo,
       threadRepo,
       cleanupJobRepo,
       mockAttachmentService,
-      mockAgentService as unknown as AgentService,
+      mockThreadDeletion,
       mockGitExecutor,
     );
   });
 
-  it("signals all active agent sessions in the workspace to stop", () => {
+  it("tears down threads with and without a saved session identity", async () => {
     const ws = workspaceRepo.create("Active", "/tmp/active");
     const t1 = threadRepo.create(ws.id, "Running", "direct", "main");
+    const t2 = threadRepo.create(ws.id, "Admission pending", "direct", "main");
     db.prepare("UPDATE threads SET sdk_session_id = ? WHERE id = ?")
       .run("session-123", t1.id);
 
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
-    expect(mockAgentService.stopSession).toHaveBeenCalledWith(t1.id);
+    expect(mockThreadDeletion.teardownThread).toHaveBeenCalledWith(t1.id);
+    expect(mockThreadDeletion.teardownThread).toHaveBeenCalledWith(t2.id);
+    expect(mockThreadDeletion.teardownThread).toHaveBeenCalledTimes(2);
   });
 
-  it("proceeds with deletion even if stop fails", () => {
+  it("retains workspace data when runtime teardown fails", async () => {
     const ws = workspaceRepo.create("Active", "/tmp/active");
     const t1 = threadRepo.create(ws.id, "Running", "direct", "main");
     db.prepare("UPDATE threads SET sdk_session_id = ? WHERE id = ?")
       .run("session-123", t1.id);
 
-    mockAgentService.stopSession.mockRejectedValue(new Error("process gone"));
+    const failure = new Error("runtime teardown failed");
+    vi.mocked(mockThreadDeletion.teardownThread).mockRejectedValue(failure);
 
-    expect(() => workspaceService.delete(ws.id)).not.toThrow();
+    await expect(workspaceService.delete(ws.id)).rejects.toBe(failure);
+    expect(workspaceRepo.listAll()).toHaveLength(0);
+    expect(db.prepare("SELECT id FROM workspaces WHERE id = ?").get(ws.id)).toEqual({ id: ws.id });
+    expect(db.prepare("SELECT id FROM threads WHERE id = ?").get(t1.id)).toEqual({ id: t1.id });
+    expect(mockAttachmentService.removeForThread).not.toHaveBeenCalled();
   });
 });
 
@@ -731,12 +740,12 @@ describe("Workspace delete - cross-workspace fork lineage", () => {
       threadRepo,
       cleanupJobRepo,
       mockAttachmentService,
-      { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService,
+      createThreadDeletionTeardownServiceMock(),
       mockGitExecutor,
     );
   });
 
-  it("nullifies forked_from_message_id on threads in other workspaces", () => {
+  it("nullifies forked_from_message_id on threads in other workspaces", async () => {
     const wsX = workspaceRepo.create("Source", "/tmp/source");
     const wsY = workspaceRepo.create("Target", "/tmp/target");
 
@@ -746,14 +755,14 @@ describe("Workspace delete - cross-workspace fork lineage", () => {
       forkedFromMessageId: "msg-123",
     });
 
-    workspaceService.delete(wsX.id);
+    await workspaceService.delete(wsX.id);
 
     const updatedTB = threadRepo.findById(tB.id);
     expect(updatedTB!.parent_thread_id).toBeNull();
     expect(updatedTB!.forked_from_message_id).toBeNull();
   });
 
-  it("does not nullify lineage within the same workspace (handled by cascade)", () => {
+  it("does not nullify lineage within the same workspace (handled by cascade)", async () => {
     const ws = workspaceRepo.create("Same", "/tmp/same");
     const t1 = threadRepo.create(ws.id, "Parent", "direct", "main");
     const t2 = threadRepo.create(ws.id, "Fork", "direct", "main", true, "claude", {
@@ -761,7 +770,7 @@ describe("Workspace delete - cross-workspace fork lineage", () => {
       forkedFromMessageId: "msg-456",
     });
 
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
     // Both threads should be gone (cascade from workspace hardDelete)
     const row = db.prepare("SELECT id FROM threads WHERE id = ?").get(t2.id);
@@ -991,19 +1000,19 @@ describe("Workspace delete - zero-worktree fast path", () => {
       threadRepo,
       cleanupJobRepo,
       mockAttachmentService,
-      { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService,
+      createThreadDeletionTeardownServiceMock(),
       mockGitExecutor,
     );
   });
 
-  it("synchronously hard-deletes workspace with only direct-mode threads", () => {
+  it("hard-deletes workspace with only direct-mode threads before deletion resolves", async () => {
     const ws = workspaceRepo.create("Direct Only", "/tmp/direct");
     threadRepo.create(ws.id, "T1", "direct", "main");
     threadRepo.create(ws.id, "T2", "direct", "develop");
     const t3 = threadRepo.create(ws.id, "T3", "direct", "main");
     threadRepo.softDelete(t3.id);
 
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
 
     // Everything should be gone from DB
     expect(db.prepare("SELECT COUNT(*) AS c FROM workspaces WHERE id = ?").get(ws.id)).toEqual({ c: 0 });
@@ -1014,12 +1023,12 @@ describe("Workspace delete - zero-worktree fast path", () => {
     expect(mockAttachmentService.removeForThread).toHaveBeenCalledTimes(3);
   });
 
-  it("completes in a single synchronous call (no worker needed)", () => {
+  it("completes without a cleanup worker", async () => {
     const ws = workspaceRepo.create("Fast", "/tmp/fast");
     threadRepo.create(ws.id, "T", "direct", "main");
 
     const before = Date.now();
-    workspaceService.delete(ws.id);
+    await workspaceService.delete(ws.id);
     const elapsed = Date.now() - before;
 
     expect(elapsed).toBeLessThan(100);

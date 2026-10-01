@@ -68,7 +68,9 @@ describe("mapDevinAcpSessionNotification", () => {
     );
     expect(early[0]).not.toHaveProperty("isFinalResponse");
 
-    mapDevinAcpSessionNotification(notification(toolCall("tc-1")), THREAD, state);
+    const tool = mapDevinAcpSessionNotification(notification(toolCall("tc-1")), THREAD, state);
+    expect(tool[0]).toEqual({ type: "assistantMessageBoundary", threadId: THREAD, isFinalResponse: false });
+    expect(tool[1]).toMatchObject({ type: "toolUse", toolCallId: "tc-1" });
     mapDevinAcpSessionNotification(
       notification({
         sessionUpdate: "tool_call_update",

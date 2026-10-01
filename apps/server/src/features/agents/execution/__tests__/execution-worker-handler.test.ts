@@ -53,7 +53,14 @@ const FINISH_INPUT: DataOnlyParentTurnFinishInput = {
   providerId: "codex",
   providerIdentities: [],
   outcome: "cancelled",
-  projection: { message: null, narrative: [] },
+  projection: { kind: "writer-staged" },
+};
+
+const FINISH_COMMAND: Extract<ExecutionWorkCommand, { kind: "finish-live-event" }> = {
+  kind: "finish-live-event", outcome: "cancelled", input: FINISH_INPUT,
+  projection: { threadId: EXECUTION.threadId, executionId: EXECUTION.executionId,
+    outcome: "cancelled", endedAt: "2026-09-24T12:00:00.000Z",
+    assistant: { content: "", model: null, attachments: [] }, narrative: [] },
 };
 
 const NARRATIVE_INPUT: ParentNarrativeRecoveryCommit = {
@@ -328,7 +335,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     await committed(submit(scheduler, lease, { kind: "checkpoint", phase: "stopping", nativeCursor: "cursor-1" }), 4);
     await committed(submit(scheduler, lease, { kind: "effect-result", effectId: "file-1", settled: true }), 5);
     await committed(submit(scheduler, lease, { kind: "provider-outcome", outcome: "cancelled" }), 6);
-    await committed(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled", input: FINISH_INPUT }), 7);
+    await committed(submit(scheduler, lease, FINISH_COMMAND), 7);
     await expect(submit(scheduler, lease, { kind: "release" }).completion).resolves.toEqual({
       kind: "reply",
       result: { kind: "released" },
@@ -336,7 +343,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     expect(scheduler.release(EXECUTION, lease)).toBe(true);
 
     expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual([
-      "begin", "append-events", "stop-requested", "checkpoint", "effect-result", "provider-outcome", "finish",
+      "begin", "append-events", "stop-requested", "checkpoint", "effect-result", "provider-outcome", "finish-live-event",
     ]);
     expect(writer.operations[2]?.mutation).toEqual({
       kind: "stop-requested", requestId: "stop-1", lastAdmittedOrdinal: 2,
@@ -379,7 +386,7 @@ describe("ExecutionWorkerHandler through its scheduler", () => {
     const { scheduler, writer, lease } = fixture();
     await committed(submit(scheduler, lease, { kind: "start", providerId: "codex", input: START_INPUT }), 1);
     const input = { ...FINISH_INPUT, outcome: "completed" as const };
-    await expect(submit(scheduler, lease, { kind: "finalize", outcome: "cancelled", input }).completion)
+    await expect(submit(scheduler, lease, { ...FINISH_COMMAND, input }).completion)
       .resolves.toEqual({ kind: "reply", result: { kind: "rejected", reason: "invalid-transition" } });
     expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin"]);
     scheduler.shutdown();

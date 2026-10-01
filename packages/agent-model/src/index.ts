@@ -70,11 +70,16 @@ export type {
 } from "./records.js";
 
 export {
+  AcceptedCanonicalAgentEventEnvelopeSchema,
+  AgentProgressPositionSchema,
   AgentEventEnvelopeSchema,
+  CanonicalAgentSemanticEnvelopeSchema,
   CanonicalAgentEventEnvelopeSchema,
   CanonicalAgentEventSchema,
 } from "./events.js";
 export type {
+  AcceptedCanonicalAgentEventEnvelope,
+  AgentProgressPosition,
   AgentEventEnvelope,
   CanonicalAgentEvent,
   CanonicalAgentEventEnvelope,
@@ -87,3 +92,5 @@ export {
   reduceAgentEventBatch,
 } from "./reducer.js";
 export type { AgentBatchReduction, AgentModelState, AgentReducerResult } from "./reducer.js";
+export { CollaborationObservationChangeSchema, applyCollaborationObservation } from "./collaboration-observation.js";
+export type { CollaborationObservationChange } from "./collaboration-observation.js";

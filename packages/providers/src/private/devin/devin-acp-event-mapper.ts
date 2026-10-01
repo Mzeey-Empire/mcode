@@ -70,6 +70,7 @@ export interface DevinAcpTurnState {
     toolStartTimes: Map<string, number>;
     pendingToolCalls: Set<string>;
     hasFiredToolThisTurn: boolean;
+    textClassification: "unknown" | "final" | null;
   };
   /** toolCallId -> snapshot for permission-request correlation. */
   toolCallById: Map<string, { toolName: string; input: Record<string, unknown>; title?: string }>;
@@ -102,6 +103,7 @@ export function createDevinAcpTurnState(): DevinAcpTurnState {
       toolStartTimes: new Map(),
       pendingToolCalls: new Set(),
       hasFiredToolThisTurn: false,
+      textClassification: null,
     },
     toolCallById: new Map(),
     pendingSubagentCallIds: [],
@@ -148,7 +150,7 @@ function mapMessageChunk(
   const acc = state.accumulator;
   if (isThought) {
     // Thought text is never part of the user-facing final response.
-    return [{
+    return [...closeAssistantText(threadId, state), {
       type: AgentEventType.TextDelta,
       threadId,
       delta: content.text,
@@ -157,13 +159,29 @@ function mapMessageChunk(
   }
   acc.assistantText += content.text;
   const isFinalResponse = acc.pendingToolCalls.size === 0 && acc.hasFiredToolThisTurn;
+  const boundary = classifyAssistantText(threadId, state, isFinalResponse);
   if (isFinalResponse) acc.assistantFinalText += content.text;
-  return [{
+  return [...boundary, {
     type: AgentEventType.TextDelta,
     threadId,
     delta: content.text,
     ...(isFinalResponse && { isFinalResponse: true }),
   }];
+}
+
+function classifyAssistantText(threadId: string, state: DevinAcpTurnState, isFinalResponse: boolean): AgentEvent[] {
+  const classification = isFinalResponse ? "final" : "unknown";
+  const previous = state.accumulator.textClassification;
+  const boundary = previous !== null && previous !== classification ? closeAssistantText(threadId, state) : [];
+  state.accumulator.textClassification = classification;
+  return boundary;
+}
+
+function closeAssistantText(threadId: string, state: DevinAcpTurnState): AgentEvent[] {
+  const classification = state.accumulator.textClassification;
+  if (classification === null) return [];
+  state.accumulator.textClassification = null;
+  return [{ type: AgentEventType.AssistantMessageBoundary, threadId, isFinalResponse: classification === "final" }];
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +250,8 @@ function mapToolCallStarted(
     // order; a merge ToolUse follows once an update carries rawInput.
     state.deferredToolCallIds.add(toolCallId);
   }
-  return toolCallStartEvents(threadId, toolCallId, toolName, rawInput, parentAgentId, priorOutcome);
+  return [...closeAssistantText(threadId, state),
+    ...toolCallStartEvents(threadId, toolCallId, toolName, rawInput, parentAgentId, priorOutcome)];
 }
 
 /**

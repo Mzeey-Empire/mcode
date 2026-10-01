@@ -7,6 +7,8 @@ import { AgentEventType, type AgentEvent, type ProviderRuntimeExtension } from "
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
+import type { ParentAssistantTextCheckpointInput } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { TaskRepo } from "../../orchestration/persistence/task-repo.js";
 import { CodexLiveEventReducer } from "../../execution/codex-live-event-reducer.js";
@@ -20,6 +22,8 @@ import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-pr
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
+
+import type { DataOnlyParentTerminalProjectionInput, DataOnlyParentTurnFinishInput } from "../canonical-parent-turn-write.js";
 
 const THREAD_ID = "thread-1";
 const TURN_ID = "turn-1";
@@ -110,7 +114,12 @@ function toolNarrative(messageId: string, count: number) {
 }
 
 function operation(ordinal: number, mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation {
-  return { operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation };
+  const semanticMutation = mutation.kind === "finish-live-event" ? {
+    kind: mutation.kind, outcome: mutation.outcome, projection: mutation.projection, input: mutation.input,
+    ...(mutation.providerEvent ? { providerEvent: mutation.providerEvent } : {}),
+  } : mutation;
+  return { operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation: semanticMutation,
+    ...(mutation.kind === "finish-live-event" ? { livePublication: terminalPublication(mutation.input) } : {}) };
 }
 
 function systemLiveOperation(ordinal: number, systemEvent: Extract<AgentEvent, { type: "system" }>): ExecutionSemanticOperation {
@@ -157,6 +166,40 @@ function finishLiveCommand(outcome: "completed" | "errored" | "cancelled" = "com
     } }),
     livePublication: [{ after: "terminal", event: terminal }],
   };
+}
+
+function terminalPublication(input: Pick<DataOnlyParentTurnFinishInput, "threadId" | "executionId" | "outcome">) {
+  return [{ after: "terminal" as const, event: { type: "ended" as const, threadId: input.threadId,
+    turnExecutionId: input.executionId, outcome: input.outcome === "cancelled" ? "interrupted" as const : input.outcome } }];
+}
+
+function compoundFinish(input: DataOnlyParentTurnFinishInput, projection?: DataOnlyParentTerminalProjectionInput):
+  Extract<ExecutionWorkCommand, { kind: "finish-live-event" }> {
+  const terminal = projection ?? terminalProjection(input);
+  return { kind: "finish-live-event", outcome: input.outcome, projection: terminal,
+    livePublication: terminalPublication(input),
+    input: { ...input, projection: { kind: "writer-staged", messageId: terminal.assistant.messageId } } };
+}
+
+function terminalProjection(input: DataOnlyParentTurnFinishInput): DataOnlyParentTerminalProjectionInput {
+  if ("kind" in input.projection) throw new Error("Terminal fixture requires its projection");
+  const { message, narrative } = input.projection;
+  return { threadId: input.threadId, executionId: input.executionId, outcome: input.outcome, endedAt: NOW,
+    assistant: message ? { content: message.content, model: message.model ?? null,
+      attachments: message.attachments ?? [], messageId: message.id } : { content: "", model: null, attachments: [] },
+    narrative: narrative.filter(item => item.kind !== "assistantMessage") };
+}
+
+function textCommand(inputs: readonly ParentAssistantTextCheckpointInput[]):
+  Extract<ExecutionWorkCommand, { kind: "live-event" }> {
+  return { kind: "live-event", text: { kind: "append", inputs }, publication: { after: "writer",
+    event: { type: "textDelta", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+      delta: inputs.map(input => input.text).join(""), isFinalResponse: true } } };
+}
+
+function textOperation(ordinal: number, inputs: readonly ParentAssistantTextCheckpointInput[]): ExecutionSemanticOperation {
+  const { publication, ...mutation } = textCommand(inputs);
+  return { ...operation(ordinal, mutation), livePublication: [publication] };
 }
 
 describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () => {
@@ -322,6 +365,22 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     writer = new CanonicalExecutionSemanticWriter(db, (events) => published.push(...events.map((event) => event.eventId)));
     expect(await writer.transact({ ...operation(2, mutation), livePublication })).toEqual(receipt);
     expect(published).toEqual([]);
+  });
+
+  it("commits and replays an empty provider terminal without inventing an assistant row", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const command = finishLiveCommand();
+    const empty = { ...command, projection: { ...command.projection,
+      assistant: { content: "", model: null, attachments: [] } } };
+    const terminal = await send(2, empty);
+    expect(terminal).toMatchObject({ kind: "committed", terminalPersistence: {
+      outcome: "completed", messageId: null, toolCallCount: 0,
+    } });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant'").get()).toEqual({ count: 0 });
+    expect(new CanonicalAgentBoundary(db).loadTerminalProjection(TURN_ID)).toEqual({ message: null, toolCallCount: 0 });
+    const { livePublication, ...mutation } = empty;
+    expect(await writer.transact({ ...operation(2, mutation), livePublication })).toEqual(terminal);
+    expect(writer.interruptWorkerLoss(loss)).toMatchObject({ kind: "conflict", recoveryState: "already-terminal" });
   });
 
   it("settles Stop through one synthetic terminal command without a provider draft", async () => {
@@ -629,11 +688,11 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(published).toContain(`${EXECUTION_ID}:recovery-interrupted`);
   });
 
-  it("keeps an assistant-text receipt and text across writer restart and worker loss", async () => {
+  it("keeps a live text receipt and text across writer restart and worker loss", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const inputs = [{ ...execution, sequence: 1, text: "Durable partial answer" }];
-    const textOperation = operation(2, { kind: "append-assistant-text", inputs });
-    const appended = await send(2, { kind: "assistant-text", inputs });
+    const appendedOperation = textOperation(2, inputs);
+    const appended = await send(2, textCommand(inputs));
     expect(appended).toMatchObject({
       kind: "committed", operationId: "lease-1:2",
       assistantTextCheckpoint: { outcome: "committed", durableThrough: 1, committedItems: 1 },
@@ -643,7 +702,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     db.close(true);
     db = openDatabase({ dbPath: path });
     writer = new CanonicalExecutionSemanticWriter(db, () => {});
-    expect(await writer.transact(textOperation)).toEqual(appended);
+    expect(await writer.transact(appendedOperation)).toEqual(appended);
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("Durable partial answer");
     expect(db.prepare("SELECT COUNT(*) AS count FROM parent_assistant_text_checkpoint_chunks WHERE execution_id = ?")
       .get(EXECUTION_ID)).toEqual({ count: 1 });
@@ -655,21 +714,20 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
 
   it("cancels after a text checkpoint and retires it only after terminal commit", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    expect((await send(2, { kind: "assistant-text", inputs: [
+    expect((await send(2, textCommand([
       { ...execution, sequence: 1, text: "Saved before cancellation" },
-    ] })).kind).toBe("committed");
+    ]))).kind).toBe("committed");
     expect((await handler.handle({ requestId: 3, execution, lease, ordinal: 3, stopWatermark: 2,
       command: { kind: "stop", requestId: "cancel-1" } })).result.kind).toBe("committed");
-    expect((await send(4, { kind: "provider-outcome", outcome: "cancelled" })).kind).toBe("committed");
-    expect((await send(5, { kind: "stage-terminal", input: {
+    const terminalProjection: DataOnlyParentTerminalProjectionInput = {
       threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "cancelled", endedAt: NOW,
       assistant: { content: "Saved before cancellation", model: null, attachments: [] }, narrative: [],
-    } })).kind).toBe("committed");
+    };
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("Saved before cancellation");
-    const finish = operation(6, { kind: "finish", outcome: "cancelled", input: {
+    const finish = operation(4, compoundFinish({
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
       providerId: "codex", providerIdentities: [], outcome: "cancelled", projection: { kind: "writer-staged" },
-    } });
+    }, terminalProjection));
     db.run("CREATE TRIGGER fail_text_retirement BEFORE DELETE ON parent_assistant_text_checkpoints BEGIN SELECT RAISE(ABORT, 'retirement unavailable'); END");
     await expect(writer.transact(finish)).rejects.toThrow("retirement unavailable");
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
@@ -686,14 +744,18 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect((await writer.transact(finish)).kind).toBe("committed");
   });
 
-  it("publishes the assigned live assistant ID only when finish names the staged ID", async () => {
-    const assignedId = "a".repeat(64);
+  it("publishes the assigned live assistant ID only when the compound finish names it", async () => {
+    const assignedId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    expect((await send(2, { kind: "provider-outcome", outcome: "completed" })).kind).toBe("committed");
-    expect((await send(3, { kind: "stage-terminal", input: {
+    expect((await send(2, { kind: "live-event", text: { kind: "unchanged" },
+      message: { precedingMessageId: "user-1", messageId: assignedId, content: "Live answer", model: null, attachments: [] },
+      publication: { after: "writer", event: { type: "message", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+        messageId: assignedId, content: "Live answer", model: null, tokens: null } },
+    })).kind).toBe("committed");
+    const terminalProjection: DataOnlyParentTerminalProjectionInput = {
       threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
       assistant: { content: "Live answer", model: null, attachments: [], messageId: assignedId }, narrative: [],
-    } })).kind).toBe("committed");
+    };
 
     db.close(true);
     db = openDatabase({ dbPath: path });
@@ -703,13 +765,14 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       providerId: "codex" as const, providerIdentities: [], outcome: "completed" as const,
       projection: { kind: "writer-staged" as const, messageId: assignedId },
     };
-    expect(await writer.transact(operation(4, { kind: "finish", outcome: "completed",
+    const command = compoundFinish(finishInput, terminalProjection);
+    expect(await writer.transact(operation(3, { ...command,
       input: { ...finishInput, projection: { kind: "writer-staged" } } })))
-      .toEqual({ kind: "conflict", operationId: "lease-1:4" });
-    expect(await writer.transact(operation(4, { kind: "finish", outcome: "completed",
+      .toEqual({ kind: "conflict", operationId: "lease-1:3" });
+    expect(await writer.transact(operation(3, { ...command,
       input: { ...finishInput, projection: { kind: "writer-staged", messageId: "b".repeat(64) } } })))
-      .toEqual({ kind: "conflict", operationId: "lease-1:4" });
-    expect((await writer.transact(operation(4, { kind: "finish", outcome: "completed", input: finishInput }))).kind)
+      .toEqual({ kind: "conflict", operationId: "lease-1:3" });
+    expect((await writer.transact(operation(3, command))).kind)
       .toBe("committed");
     expect(new MessageRepo(db).findByIdInThread(THREAD_ID, assignedId))
       .toMatchObject({ id: assignedId, content: "Live answer", is_internal: false });
@@ -769,21 +832,18 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, message.messageId))
       .toMatchObject({ content: "Live answer" });
 
-    expect((await writer.transact(operation(3, { kind: "provider-outcome", outcome: "completed" }))).kind)
-      .toBe("committed");
     const terminal = projection.projectTerminal({
       execution, outcome: "completed", endedAt: NOW, fallbackModel: null, narrative: [],
     });
-    expect(await writer.transact(operation(4, { kind: "stage-terminal", input: {
-      ...terminal, assistant: { ...terminal.assistant, messageId: "b".repeat(64) },
-    } }))).toEqual({ kind: "conflict", operationId: "lease-1:4" });
-    expect((await writer.transact(operation(4, { kind: "stage-terminal", input: terminal }))).kind)
-      .toBe("committed");
-    expect((await writer.transact(operation(5, { kind: "finish", outcome: "completed", input: {
+    const finish = compoundFinish({
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
       providerId: "codex", providerIdentities: [], outcome: "completed",
       projection: { kind: "writer-staged", messageId: message.messageId },
-    } }))).kind).toBe("committed");
+    }, terminal);
+    expect(await writer.transact(operation(3, { ...finish, projection: {
+      ...terminal, assistant: { ...terminal.assistant, messageId: "b".repeat(64) },
+    } }))).toEqual({ kind: "conflict", operationId: "lease-1:3" });
+    expect((await writer.transact(operation(3, finish))).kind).toBe("committed");
     expect(new MessageRepo(db).findByIdInThread(THREAD_ID, message.messageId))
       .toMatchObject({ id: message.messageId, content: "Live answer", outcome: "completed", is_internal: false });
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = ?").get(message.messageId))
@@ -812,35 +872,27 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       .get(THREAD_ID)).toEqual({ count: 1 });
   });
 
-  it("fences assistant-text routing, lease, ordinal, input size, and conflicting replay", async () => {
+  it("fences live text routing, lease, ordinal, input size, and conflicting replay", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const inputs = [{ ...execution, sequence: 1, text: "Saved text" }];
-    const appendText = operation(2, { kind: "append-assistant-text", inputs });
+    const appendText = textOperation(2, inputs);
     expect(await writer.transact({ ...appendText, lease: { ...lease, ownerEpoch: 2, leaseId: "lease-2" },
       operationId: "lease-2:2" })).toEqual({ kind: "conflict", operationId: "lease-2:2" });
     expect(await writer.transact({ ...appendText, ordinal: 3, operationId: "lease-1:3" }))
       .toEqual({ kind: "conflict", operationId: "lease-1:3" });
-    expect(await writer.transact(operation(2, { kind: "append-assistant-text",
-      inputs: [{ ...inputs[0]!, threadId: "wrong-thread" }],
-    }))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
-    expect(await writer.transact(operation(2, { kind: "append-assistant-text",
-      inputs: [{ ...inputs[0]!, text: "x".repeat(16 * 1024 + 1) }],
-    }))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact(textOperation(2, [{ ...inputs[0]!, threadId: "wrong-thread" }]))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact(textOperation(2, [{ ...inputs[0]!, text: "x".repeat(16 * 1024 + 1) }]))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
     expect(await writer.transact(appendText)).toMatchObject({ kind: "committed", operationId: "lease-1:2" });
-    expect(await writer.transact(operation(2, { kind: "append-assistant-text",
-      inputs: [{ ...inputs[0]!, text: "Changed text" }],
-    }))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
-    expect(await writer.transact(operation(3, { kind: "append-assistant-text", inputs })))
+    expect(await writer.transact(textOperation(2, [{ ...inputs[0]!, text: "Changed text" }]))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact(textOperation(3, inputs)))
       .toEqual({ kind: "conflict", operationId: "lease-1:3" });
     expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("Saved text");
   });
 
   it("rolls back assistant text if its semantic receipt cannot commit", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    db.run("CREATE TRIGGER fail_text_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:append-assistant-text' BEGIN SELECT RAISE(ABORT, 'text receipt unavailable'); END");
-    const input = operation(2, { kind: "append-assistant-text",
-      inputs: [{ ...execution, sequence: 1, text: "Keep me out until receipt" }],
-    });
+    db.run("CREATE TRIGGER fail_text_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:live-event' BEGIN SELECT RAISE(ABORT, 'text receipt unavailable'); END");
+    const input = textOperation(2, [{ ...execution, sequence: 1, text: "Keep me out until receipt" }]);
     await expect(writer.transact(input)).rejects.toThrow("text receipt unavailable");
     expect(db.prepare("SELECT COUNT(*) AS count FROM parent_assistant_text_checkpoint_chunks").get())
       .toEqual({ count: 0 });
@@ -1199,16 +1251,15 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       kind: "conflict", operationId: "lease-1:worker-lost", recoveryState: "not-started",
     });
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    expect((await send(2, { kind: "provider-outcome", outcome: "completed" })).kind).toBe("committed");
-    expect((await send(3, { kind: "stage-terminal", input: {
+    const terminalProjection: DataOnlyParentTerminalProjectionInput = {
       threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
       assistant: { content: "Answer", model: null, attachments: [] }, narrative: [],
-    } })).kind).toBe("committed");
-    expect((await send(4, { kind: "finalize", outcome: "completed", input: {
+    };
+    expect((await send(2, compoundFinish({
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
       providerId: "codex", providerIdentities: [], outcome: "completed",
       projection: { kind: "writer-staged" },
-    } })).kind).toBe("committed");
+    }, terminalProjection))).kind).toBe("committed");
     expect(writer.interruptWorkerLoss(loss)).toEqual({
       kind: "conflict", operationId: "lease-1:worker-lost", recoveryState: "already-terminal",
     });
@@ -1238,7 +1289,10 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const begin = operation(1, { kind: "begin", providerId: "codex", input: startInput() });
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     expect((await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [event()] })).kind).toBe("committed");
-    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const staged = new MessageRepo(db).createAssistantIdempotent({
+      id: deriveTurnAssistantMessageId(THREAD_ID, 'execution:' + EXECUTION_ID), threadId: THREAD_ID,
+      content: "Answer", sequence: 2, model: "model", attachments: [], isInternal: true,
+    });
     const finish = {
       threadId: THREAD_ID,
       turnId: TURN_ID,
@@ -1248,7 +1302,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       outcome: "completed" as const,
       projection: { message: staged, narrative: [] },
     };
-    const terminal = await send(3, { kind: "finalize", outcome: "completed", input: finish });
+    const terminal = await send(3, compoundFinish(finish));
     expect(terminal.kind).toBe("committed");
     expect(published).toContain(`${EXECUTION_ID}:turn.completed`);
 
@@ -1261,13 +1315,13 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       providerId: "codex",
       input: { ...startInput(), permissionMode: "full" },
     }))).toEqual({ kind: "conflict", operationId: "lease-1:1" });
-    expect(await writer.transact(operation(3, { kind: "finish", outcome: "completed", input: finish })))
+    expect(await writer.transact(operation(3, compoundFinish(finish))))
       .toEqual(terminal);
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
       .toEqual({ terminal_outcome: "completed" });
     expect(db.prepare("SELECT kind, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
       .get(EXECUTION_ID, "semantic:head")).toMatchObject({ kind: "semantic-head" });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind != 'semantic-publication'").get(EXECUTION_ID))
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind NOT IN ('semantic-publication', 'semantic-publication-acknowledged')").get(EXECUTION_ID))
       .toEqual({ count: 4 });
   });
 
@@ -1283,15 +1337,18 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       .get(EXECUTION_ID)).toEqual({ count: 0 });
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
 
-    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const staged = new MessageRepo(db).createAssistantIdempotent({
+      id: deriveTurnAssistantMessageId(THREAD_ID, 'execution:' + EXECUTION_ID), threadId: THREAD_ID,
+      content: "Answer", sequence: 2, model: "model", attachments: [], isInternal: true,
+    });
     const input = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
       providerId: "codex", providerIdentities: [], outcome: "completed" as const,
       projection: { message: staged, narrative: [] } };
     const finish: ExecutionSemanticOperation = {
-      ...operation(2, { kind: "finish", outcome: "completed", input }),
+      ...operation(2, compoundFinish(input)),
       livePublication: [{ after: "terminal", event: ended }],
     };
-    db.run("CREATE TRIGGER fail_live_finish BEFORE UPDATE OF kind ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:finish' BEGIN SELECT RAISE(ABORT, 'finish unavailable'); END");
+    db.run("CREATE TRIGGER fail_live_finish BEFORE UPDATE OF kind ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:finish-live-event' BEGIN SELECT RAISE(ABORT, 'finish unavailable'); END");
     await expect(writer.transact(finish)).rejects.toThrow("finish unavailable");
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
       .get(EXECUTION_ID)).toEqual({ terminal_outcome: null });
@@ -1379,7 +1436,10 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
 
   it("rolls back terminal checkpoint and semantic receipt together when receipt storage fails", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const staged = new MessageRepo(db).createAssistantIdempotent({
+      id: deriveTurnAssistantMessageId(THREAD_ID, 'execution:' + EXECUTION_ID), threadId: THREAD_ID,
+      content: "Answer", sequence: 2, model: "model", attachments: [], isInternal: true,
+    });
     const finish = {
       threadId: THREAD_ID,
       turnId: TURN_ID,
@@ -1389,8 +1449,8 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       outcome: "completed" as const,
       projection: { message: staged, narrative: [] },
     };
-    db.run("CREATE TRIGGER fail_semantic_receipt BEFORE UPDATE OF kind ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:finish' BEGIN SELECT RAISE(ABORT, 'receipt unavailable'); END");
-    await expect(send(2, { kind: "finalize", outcome: "completed", input: finish })).rejects.toThrow("receipt unavailable");
+    db.run("CREATE TRIGGER fail_semantic_receipt BEFORE UPDATE OF kind ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:finish-live-event' BEGIN SELECT RAISE(ABORT, 'receipt unavailable'); END");
+    await expect(send(2, compoundFinish(finish))).rejects.toThrow("receipt unavailable");
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
       .toEqual({ terminal_outcome: null });
     expect(db.prepare("SELECT kind FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
@@ -1399,7 +1459,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(published).not.toContain(`${EXECUTION_ID}:turn.completed`);
 
     db.run("DROP TRIGGER fail_semantic_receipt");
-    expect((await send(2, { kind: "finalize", outcome: "completed", input: finish })).kind).toBe("committed");
+    expect((await send(2, compoundFinish(finish))).kind).toBe("committed");
   });
 
   it("rolls back an event and its checkpoint when its semantic receipt cannot be stored", async () => {
@@ -1457,7 +1517,10 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     });
     handler = new ExecutionWorkerHandler(writer);
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const staged = new MessageRepo(db).createAssistantIdempotent({
+      id: deriveTurnAssistantMessageId(THREAD_ID, 'execution:' + EXECUTION_ID), threadId: THREAD_ID,
+      content: "Answer", sequence: 2, model: "model", attachments: [], isInternal: true,
+    });
     const finish = {
       threadId: THREAD_ID,
       turnId: TURN_ID,
@@ -1467,12 +1530,12 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       outcome: "completed" as const,
       projection: { message: staged, narrative: [] },
     };
-    await expect(send(2, { kind: "finalize", outcome: "completed", input: finish }))
+    await expect(send(2, compoundFinish(finish)))
       .rejects.toThrow("terminal publisher unavailable");
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
       .toEqual({ terminal_outcome: "completed" });
     expect(db.prepare("SELECT kind FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
-      .get(EXECUTION_ID, "lease-1:2")).toEqual({ kind: "semantic:finish" });
+      .get(EXECUTION_ID, "lease-1:2")).toEqual({ kind: "semantic:finish-live-event" });
 
     db.close(true);
     db = openDatabase({ dbPath: path });
@@ -1480,12 +1543,12 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     writer = new CanonicalExecutionSemanticWriter(db, (events) => {
       published.push(...events.map((item) => item.eventId));
     });
-    expect(await writer.transact(operation(2, { kind: "finish", outcome: "completed", input: finish })))
+    expect(await writer.transact(operation(2, compoundFinish(finish))))
       .toMatchObject({ kind: "committed", operationId: "lease-1:2" });
     expect(published).toContain(`${EXECUTION_ID}:turn.completed`);
   });
 
-  it("replays earlier terminal batches after publication failed before finalization", async () => {
+  it("replays retained terminal batches after compound finalization and publication failure", async () => {
     let failTerminalBatch = false;
     writer = new CanonicalExecutionSemanticWriter(db, (events) => {
       if (failTerminalBatch) {
@@ -1498,7 +1561,10 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     const start = await send(1, { kind: "start", providerId: "codex", input: startInput() });
     expect(start.kind).toBe("committed");
     if (start.kind !== "committed") throw new Error("Canonical start did not commit");
-    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const staged = new MessageRepo(db).createAssistantIdempotent({
+      id: deriveTurnAssistantMessageId(THREAD_ID, 'execution:' + EXECUTION_ID), threadId: THREAD_ID,
+      content: "Answer", sequence: 2, model: "model", attachments: [], isInternal: true,
+    });
     const finish = {
       threadId: THREAD_ID,
       turnId: TURN_ID,
@@ -1509,20 +1575,16 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       projection: { message: staged, narrative: toolNarrative(staged.id, 100) },
     };
     failTerminalBatch = true;
-    await expect(send(2, { kind: "finalize", outcome: "completed", input: finish }))
+    await expect(send(2, compoundFinish(finish)))
       .rejects.toThrow("first terminal batch unavailable");
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
-      .toEqual({ terminal_outcome: null });
+      .toEqual({ terminal_outcome: "completed" });
     expect(db.prepare("SELECT kind FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
-      .get(EXECUTION_ID, "lease-1:2")).toEqual({ kind: "semantic:finish-pending" });
+      .get(EXECUTION_ID, "lease-1:2")).toEqual({ kind: "semantic:finish-live-event" });
     const priorChunks = db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'semantic-publication'")
       .get(EXECUTION_ID) as { count: number };
     expect(priorChunks.count).toBeGreaterThan(0);
-    expect(await writer.transact(operation(2, {
-      kind: "finish",
-      outcome: "completed",
-      input: { ...finish, error: "different input" },
-    }))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact(operation(2, compoundFinish({ ...finish, error: "different input" })))).toEqual({ kind: "conflict", operationId: "lease-1:2" });
 
     db.close(true);
     db = openDatabase({ dbPath: path });
@@ -1530,7 +1592,7 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     writer = new CanonicalExecutionSemanticWriter(db, (events) => {
       published.push(...events.map((item) => item.eventId));
     });
-    expect(await writer.transact(operation(2, { kind: "finish", outcome: "completed", input: finish })))
+    expect(await writer.transact(operation(2, compoundFinish(finish))))
       .toMatchObject({ kind: "committed", operationId: "lease-1:2" });
     const terminalEventCount = db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ? AND accepted_sequence > ?")
       .get(EXECUTION_ID, start.durableRevision) as { count: number };
@@ -1588,13 +1650,13 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     });
     handler = new ExecutionWorkerHandler(writer);
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const staged = new MessageRepo(db).createAssistantIdempotent({
+      id: deriveTurnAssistantMessageId(THREAD_ID, 'execution:' + EXECUTION_ID), threadId: THREAD_ID,
+      content: "Answer", sequence: 2, model: "model", attachments: [], isInternal: true,
+    });
     const narrative = toolNarrative(staged.id, 100);
     finishing = true;
-    expect((await send(2, {
-      kind: "finalize",
-      outcome: "completed",
-      input: {
+    expect((await send(2, compoundFinish({
         threadId: THREAD_ID,
         turnId: TURN_ID,
         executionId: EXECUTION_ID,
@@ -1602,47 +1664,52 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
         providerIdentities: [],
         outcome: "completed",
         projection: { message: staged, narrative },
-      },
-    })).kind).toBe("committed");
+      }))).kind).toBe("committed");
     expect(await secondStart).toMatchObject({ kind: "committed", operationId: "lease-2:1" });
     expect(published).toContain(`${EXECUTION_ID}:turn.completed`);
     expect(published.some((eventId) => eventId.startsWith(otherExecution.executionId))).toBe(true);
     const terminalReceipt = db.prepare("SELECT receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
       .get(EXECUTION_ID, "lease-1:2") as { receipt_json: string };
-    expect(terminalReceipt.receipt_json.length).toBeLessThan(256);
-    const chunks = db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'semantic-publication'")
+    expect(terminalReceipt.receipt_json.length).toBeLessThan(512);
+    expect(JSON.parse(terminalReceipt.receipt_json)).toMatchObject({ kind: "committed", operationId: "lease-1:2" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tool_call_records WHERE message_id = ?").get(staged.id))
+      .toEqual({ count: 100 });
+    expect(terminalReceipt.receipt_json).not.toContain("tool-0");
+    const chunks = db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind IN ('semantic-publication', 'semantic-publication-acknowledged')")
       .get(EXECUTION_ID) as { count: number };
     expect(chunks.count).toBeGreaterThan(1);
-    const chunkSize = db.prepare("SELECT MAX(json_array_length(receipt_json)) AS size FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'semantic-publication'")
+    const chunkSize = db.prepare("SELECT MAX(json_array_length(receipt_json)) AS size FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind IN ('semantic-publication', 'semantic-publication-acknowledged')")
       .get(EXECUTION_ID) as { size: number };
     expect(chunkSize.size).toBeLessThanOrEqual(64);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE kind = 'semantic-head'").get())
       .toEqual({ count: 2 });
   });
 
-  it("replays terminal publication across multiple bounded receipt pages", async () => {
+  it("retains bounded acknowledged terminal pages without duplicate publication after restart", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
-    const staged = new MessageRepo(db).create(
-      THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true,
-    );
+    const staged = new MessageRepo(db).createAssistantIdempotent({
+      id: deriveTurnAssistantMessageId(THREAD_ID, 'execution:' + EXECUTION_ID), threadId: THREAD_ID,
+      content: "Answer", sequence: 2, model: "model", attachments: [], isInternal: true,
+    });
     const input = {
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
       providerIdentities: [], outcome: "completed" as const,
       projection: { message: staged, narrative: toolNarrative(staged.id, 1_025) },
     };
     published = [];
-    expect((await send(2, { kind: "finalize", outcome: "completed", input })).kind).toBe("committed");
+    expect((await send(2, compoundFinish(input))).kind).toBe("committed");
     const firstPublication = [...published];
     expect(firstPublication).toContain(`${EXECUTION_ID}:turn.completed`);
-    expect((db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'semantic-publication'")
+    expect((db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND kind = 'semantic-publication-acknowledged'")
       .get(EXECUTION_ID) as { count: number }).count).toBeGreaterThan(16);
 
     db.close(true);
     db = openDatabase({ dbPath: path });
     published = [];
     writer = new CanonicalExecutionSemanticWriter(db, (events) => published.push(...events.map((item) => item.eventId)));
-    expect(await writer.transact(operation(2, { kind: "finish", outcome: "completed", input })))
+    expect(await writer.transact(operation(2, compoundFinish(input))))
       .toMatchObject({ kind: "committed" });
-    expect(published).toEqual(firstPublication);
+    expect(firstPublication.length).toBeGreaterThan(1_025);
+    expect(published).toEqual([]);
   }, 30_000);
 });

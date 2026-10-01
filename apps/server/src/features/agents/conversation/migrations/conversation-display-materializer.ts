@@ -52,6 +52,7 @@ interface DisplayToolRecord {
 }
 
 interface NarrativeDisplayResolver {
+  invalidate(): void;
   childAnchor(): string | null;
   recoveryAnchor(): string | null;
   displayMessageId(value: unknown, row: CanonicalItemRow): string | null;
@@ -327,7 +328,17 @@ export class ConversationDisplayMaterializer {
       .where(inArray(canonicalAgentItems.id, itemIds))
       .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
       .all();
-    for (const row of rows) this.materializeRow(row);
+    let group: { threadId: string; turnId: string; resolver: NarrativeDisplayResolver } | undefined;
+    for (const row of rows) {
+      if (!group || group.threadId !== row.threadId || group.turnId !== row.turnId) {
+        group = {
+          threadId: row.threadId,
+          turnId: row.turnId,
+          resolver: this.narrativeMessageResolver(row),
+        };
+      }
+      this.materializeRow(row, group.resolver);
+    }
   }
 
   /** Removes a discarded canonical recovery projection and its orphaned display row. */
@@ -393,6 +404,8 @@ export class ConversationDisplayMaterializer {
 
   private materializeRow(row: CanonicalItemRow, resolver?: NarrativeDisplayResolver): void {
     const payload = parsePayload(row);
+    // Message projections can rewrite the anchor while reanchoring children.
+    if (payload.projection === "message") resolver?.invalidate();
     const target = this.materializePayload(row, payload, resolver);
     if (!target) return;
     this.mapSource.run({
@@ -838,7 +851,7 @@ export class ConversationDisplayMaterializer {
       ))
       .orderBy(asc(canonicalAgentItems.createdAt), asc(canonicalAgentItems.id))
       .all();
-    const resolver = this.reanchorMessageResolver(row);
+    const resolver = this.narrativeMessageResolver(row);
     for (const child of children) this.materializeRow(child, resolver);
   }
 
@@ -847,7 +860,7 @@ export class ConversationDisplayMaterializer {
     return anchor ? this.displayMessageId(anchor, row) : null;
   }
 
-  private reanchorMessageResolver(row: CanonicalItemRow): NarrativeDisplayResolver {
+  private narrativeMessageResolver(row: CanonicalItemRow): NarrativeDisplayResolver {
     // Resolution also updates the display message. Only consecutive identical
     // lookups can skip that write when canonical sources share a message ID.
     let previous: { key: string; messageId: string | null } | undefined;
@@ -858,6 +871,7 @@ export class ConversationDisplayMaterializer {
       return messageId;
     };
     return {
+      invalidate: () => { previous = undefined; },
       childAnchor: () => resolve("child", () => this.childAnchor(row)),
       recoveryAnchor: () => resolve("recovery", () => this.recoveryAnchor(row)),
       displayMessageId: (value, child) => {

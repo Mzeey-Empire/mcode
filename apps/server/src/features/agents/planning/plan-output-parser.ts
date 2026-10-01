@@ -20,6 +20,15 @@ export class PlanOutputParser {
    * Advances past failed blocks so the same malformed content is never retried. */
   private _scanFrom = 0;
 
+  /** Keep partial parser input in a detached admission candidate. */
+  fork(): PlanOutputParser {
+    const copy = new PlanOutputParser();
+    copy.buffer = this.buffer;
+    copy._hasPlan = this._hasPlan;
+    copy._scanFrom = this._scanFrom;
+    return copy;
+  }
+
   /**
    * Append a streaming text delta to the internal buffer and attempt to
    * extract a plan-output block. Returns the parsed PlanOutput if a

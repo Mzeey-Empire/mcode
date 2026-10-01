@@ -1460,137 +1460,7 @@ describe("AgentService narrative persistence", () => {
     expect(hooks[0].messageId).toBe(MSG_ID);
   });
 
-  it("persists late hooks (arriving after persistTurn) attached to the last message id", async () => {
-    const { service, providerEmitter, hookBulk } = build();
-
-    // The turn must have substance so TurnFinalizer materializes an assistant
-    // row to attach the late hook to (#578: empty turns leave no row). A streamed
-    // body satisfies the TurnSubstance predicate.
-    providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "Done." });
-    // Emit TurnComplete to simulate the SDK result arriving before hooks.
-    providerEmitter.emit("event", {
-      type: AgentEventType.TurnComplete,
-      threadId: THREAD_ID,
-      tokensIn: 0,
-      tokensOut: 0,
-      contextWindow: 0,
-    });
-
-    // Let persistTurn settle so lastPersistedMessageIdByThread is populated.
-    await waitForAgentServiceIngressForTest(service, THREAD_ID);
-    await vi.waitFor(() => {
-      expect(finalizerForAgentServiceTest(service).getLastPersistedMessageId(THREAD_ID)).toBe(MSG_ID);
-    });
-
-    // Now emit Stop hook events (as the SDK would after the result).
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookStarted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      hookType: "stop",
-    });
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookCompleted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      exitCode: 0,
-      durationMs: 42,
-      didBlock: false,
-    });
-    await waitForAgentServiceIngressForTest(service, THREAD_ID);
-
-    // bulkCreate should have been called twice: once for mid-turn (empty array
-    // skipped) and once for the late hook flush.
-    // persistTurn's bulkCreate call is skipped because hooks list was empty.
-    // The late hook flush calls bulkCreate with one item.
-    expect(hookBulk).toHaveBeenCalledOnce();
-    const lateHooks: CreateHookExecutionInput[] = hookBulk.mock.calls[0][0];
-    expect(lateHooks).toHaveLength(1);
-    expect(lateHooks[0].hookName).toBe("Stop");
-    expect(lateHooks[0].messageId).toBe(MSG_ID);
-    expect(lateHooks[0].phase).toBe("stop");
-    expect(lateHooks[0].durationMs).toBe(42);
-  });
-
-  it("publishes each late hook once after the terminal projection is durable", async () => {
-    const published: AgentEvent[] = [];
-    const publicationOrder: string[] = [];
-    vi.mocked(broadcast).mockReset();
-    const { service, providerEmitter, hookBulk } = build({
-      onProviderEvent: (event) => {
-        published.push(event);
-        if (event.type === AgentEventType.HookStarted || event.type === AgentEventType.HookCompleted) {
-          publicationOrder.push(`provider:${event.type}`);
-        }
-      },
-    });
-    const finalizer = finalizerForAgentServiceTest(service);
-    let completeFinalization!: () => void;
-    vi.spyOn(finalizer, "finalize").mockReturnValue(new Promise<void>((resolve) => {
-      completeFinalization = resolve;
-    }));
-    vi.spyOn(finalizer, "getLastPersistedMessageId").mockReturnValue(MSG_ID);
-    vi.mocked(broadcast).mockImplementation(((channel: string, payload: unknown) => {
-      if (channel === "agent.event"
-        && typeof payload === "object"
-        && payload !== null
-        && (payload as { type?: string }).type === AgentEventType.HookCompleted) {
-        publicationOrder.push("broadcast:hookCompleted");
-      }
-    }) as typeof broadcast);
-
-    providerEmitter.emit("event", {
-      type: AgentEventType.TurnComplete,
-      threadId: THREAD_ID,
-      tokensIn: 0,
-      tokensOut: 0,
-      contextWindow: 0,
-    });
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookStarted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      hookType: "stop",
-    });
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookCompleted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      exitCode: 0,
-      durationMs: 42,
-      didBlock: false,
-    });
-    await waitForAgentServiceIngressForTest(service, THREAD_ID);
-
-    expect(published.filter((event) => (
-      event.type === AgentEventType.HookStarted || event.type === AgentEventType.HookCompleted
-    ))).toEqual([]);
-    expect(hookBulk).not.toHaveBeenCalled();
-
-    completeFinalization();
-
-    await vi.waitFor(() => {
-      expect(hookBulk).toHaveBeenCalledOnce();
-      expect(publicationOrder).toEqual([
-        "provider:hookStarted",
-        "broadcast:hookCompleted",
-      ]);
-    });
-    expect(published.filter((event) => event.type === AgentEventType.HookCompleted)).toEqual([]);
-    const completedBroadcasts = vi.mocked(broadcast).mock.calls.filter(([channel, payload]) => (
-      channel === "agent.event"
-      && typeof payload === "object"
-      && payload !== null
-      && (payload as { type?: string }).type === AgentEventType.HookCompleted
-    ));
-    expect(completedBroadcasts).toHaveLength(1);
-    expect(completedBroadcasts[0]?.[1]).toMatchObject({
-      persistedMessageId: MSG_ID,
-      persistedHookId: expect.any(String),
-    });
-  });
-
-  it("retains an owned completed late hook when terminal finalization fails", async () => {
+  it("retains completed hook narrative when terminal finalization fails", async () => {
     const db = openMemoryDatabase();
     const now = "2026-08-24T10:00:00.000Z";
     db.prepare(
@@ -1618,15 +1488,6 @@ describe("AgentService narrative persistence", () => {
     });
     const finalizer = finalizerForAgentServiceTest(service);
     vi.spyOn(finalizer, "finalize").mockRejectedValue(new Error("forced terminal failure"));
-
-    providerEmitter.emit("event", {
-      type: AgentEventType.TurnComplete,
-      threadId: THREAD_ID,
-      turnExecutionId: executionId,
-      tokensIn: 0,
-      tokensOut: 0,
-      contextWindow: 0,
-    });
     providerEmitter.emit("event", {
       type: AgentEventType.HookStarted,
       threadId: THREAD_ID,
@@ -1643,7 +1504,17 @@ describe("AgentService narrative persistence", () => {
       durationMs: 42,
       didBlock: false,
     });
-
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      turnExecutionId: executionId,
+      tokensIn: 0,
+      tokensOut: 0,
+      contextWindow: 0,
+    });
+    await vi.waitFor(() => expect(finalizer.finalize).toHaveBeenCalledOnce());
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     await vi.waitFor(() => {
       expect(canonicalSink.loadParentNarrativeRecovery("turn-late-hook-failure")).toEqual([
         expect.objectContaining({
@@ -1662,7 +1533,10 @@ describe("AgentService narrative persistence", () => {
     expect(hookBulk).not.toHaveBeenCalled();
     expect(published.filter((event) => (
       event.type === AgentEventType.HookStarted || event.type === AgentEventType.HookCompleted
-    ))).toEqual([]);
+    ))).toEqual([
+      expect.objectContaining({ type: AgentEventType.HookStarted, hookName: "Stop", turnExecutionId: executionId }),
+      expect.objectContaining({ type: AgentEventType.HookCompleted, hookName: "Stop", turnExecutionId: executionId, durationMs: 42 }),
+    ]);
     db.close();
   });
 
@@ -1712,42 +1586,6 @@ describe("AgentService narrative persistence", () => {
       && payload !== null
       && (payload as { type?: string }).type === AgentEventType.HookCompleted
     ))).toHaveLength(0);
-  });
-
-  it("discards a late hook when the turn produced no recordable activity (no row to attach)", async () => {
-    const { providerEmitter, hookBulk } = build();
-
-    // A fully empty turn: no body, tool call, narration, or hook before finalize.
-    // The TurnSubstance predicate is false, so no assistant row is materialized
-    // (#578) and the finalizer records no last-persisted message id.
-    providerEmitter.emit("event", {
-      type: AgentEventType.TurnComplete,
-      threadId: THREAD_ID,
-      tokensIn: 0,
-      tokensOut: 0,
-      contextWindow: 0,
-    });
-
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-
-    // A late Stop hook now arrives but has nothing to attach to, so it is dropped.
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookStarted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      hookType: "stop",
-    });
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookCompleted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      exitCode: 0,
-      durationMs: 42,
-      didBlock: false,
-    });
-
-    expect(hookBulk).not.toHaveBeenCalled();
   });
 
   it("marks a non-final thought as isFinalResponse when its text equals the assistant message body", async () => {
@@ -2532,30 +2370,14 @@ describe("AgentService narrative persistence", () => {
       .get(dispatched!.id)).toEqual({ target_turn_id: dispatched!.target_turn_id });
   });
 
-  it("rejects provider continuation evidence targeting another canonical thread", () => {
-    const { service: _service, canonicalSink } = build();
-    const sink = canonicalSink as unknown as {
-      loadThreadByProviderIdentity: ReturnType<typeof vi.fn>;
-      loadTurnByProviderIdentity: ReturnType<typeof vi.fn>;
-      loadCollaborationActionBySourceProviderIdentity: ReturnType<typeof vi.fn>;
-      loadExecutionIdForTurn: ReturnType<typeof vi.fn>;
-      loadThread: ReturnType<typeof vi.fn>;
-      startProviderContinuation: ReturnType<typeof vi.fn>;
-    };
-    sink.loadThreadByProviderIdentity = vi.fn((identity: { value: string }) => (
-      identity.value === "native-source-child"
-        ? { id: "source-child" }
-        : { id: "another-parent" }
-    ));
-    sink.loadTurnByProviderIdentity = vi.fn(() => ({
-      id: "source-child-turn",
-      threadId: "source-child",
-    }));
-    sink.loadCollaborationActionBySourceProviderIdentity = vi.fn();
-    sink.loadExecutionIdForTurn = vi.fn(() => "00000000-0000-4000-8000-000000000098");
-    sink.loadThread = vi.fn(() => ({ id: THREAD_ID }));
-    sink.startProviderContinuation = vi.fn();
-    sink.recordCodexChildRoutingDiagnostic = vi.fn(() => true);
+  it("rejects unsupported provider continuation evidence without starting a turn", () => {
+    const { canonicalSink } = build();
+    canonicalSink.loadThreadByProviderIdentity = vi.fn(() => null);
+    canonicalSink.loadTurnByProviderIdentity = vi.fn(() => null);
+    canonicalSink.loadCollaborationActionBySourceProviderIdentity = vi.fn(() => null);
+    canonicalSink.loadThread = vi.fn(() => null);
+    canonicalSink.recordCodexChildRoutingDiagnostic = vi.fn(() => true);
+    const startParentTurn = vi.spyOn(canonicalSink, "startParentTurn");
 
     const projection = new CodexCollaborationEventAdapter(canonicalSink).project({
       providerId: "codex",
@@ -2578,12 +2400,12 @@ describe("AgentService narrative persistence", () => {
     });
 
     expect(projection.status).toBe("rejected");
-    expect(sink.loadCollaborationActionBySourceProviderIdentity).toHaveBeenCalled();
-    expect(sink.startProviderContinuation).not.toHaveBeenCalled();
-    expect(sink.recordCodexChildRoutingDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
+    expect(canonicalSink.loadCollaborationActionBySourceProviderIdentity).not.toHaveBeenCalled();
+    expect(startParentTurn).not.toHaveBeenCalled();
+    expect(canonicalSink.recordCodexChildRoutingDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
       reason: "continuation-evidence-not-found",
-      threadId: "source-child",
-      executionId: "00000000-0000-4000-8000-000000000098",
+      threadId: THREAD_ID,
+      executionId: "00000000-0000-4000-8000-000000000099",
     }));
   });
 

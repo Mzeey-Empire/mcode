@@ -25,7 +25,6 @@ import {
   WorkspaceService,
 } from "../../../projects/index.js";
 import type { ThreadDeletionTeardownService } from "../../lifecycle/thread-deletion-teardown-service.js";
-import type { AgentService } from "../../../agents/index.js";
 import { killDescendantsByName } from "../../../../runtime/process/containment/process-kill.js";
 import { getMcodeDir } from "@mcode/shared";
 
@@ -52,7 +51,6 @@ describe("Cleanup integration", () => {
   let mockCleanupPolicy: SandboxWorktreeCleanupPolicy;
   let mockAttachmentService: AttachmentService;
   let mockHandoffStorage: HandoffStorage;
-  let mockAgentService: AgentService;
   let workspaceService: WorkspaceService;
   let projectWorktreeService: ProjectWorktreeService;
 
@@ -88,6 +86,8 @@ describe("Cleanup integration", () => {
     } as unknown as HandoffStorage;
     mockThreadDeletion = {
       teardownThread: vi.fn().mockResolvedValue(undefined),
+      bindAcceptedProgress: vi.fn(),
+      deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove(),
     } as unknown as ThreadDeletionTeardownService;
     projectWorktreeService = new ProjectWorktreeService(
       threadRepo,
@@ -119,13 +119,12 @@ describe("Cleanup integration", () => {
       TEST_HOST_RUNTIME,
     );
 
-    mockAgentService = { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService;
     workspaceService = new WorkspaceService(
       workspaceRepo,
       threadRepo,
       cleanupJobRepo,
       mockAttachmentService,
-      mockAgentService,
+      mockThreadDeletion,
       {} as unknown as GitExecutor,
     );
   });
@@ -310,7 +309,7 @@ describe("Cleanup integration", () => {
         .run("/tmp/full/.worktrees/b", wt2.id);
 
       // Phase 1: workspace service delete
-      workspaceService.delete(ws.id);
+      await workspaceService.delete(ws.id);
 
       // Direct thread is hard-deleted immediately
       expect(threadRepo.findById(direct.id)).toBeNull();

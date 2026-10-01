@@ -49,14 +49,12 @@ function durability(overrides: Partial<CodexCollaborationDurability> = {}): Code
     loadThread: vi.fn(() => parentThread()),
     loadThreadByProviderIdentity: vi.fn(() => parentThread()),
     loadTurn: vi.fn(() => parentTurn()),
+    loadLatestTurn: vi.fn(() => parentTurn()),
     loadTurnByExecution: vi.fn(() => parentTurn()),
     loadTurnByProviderIdentity: vi.fn(() => parentTurn()),
     loadExecutionIdForTurn: vi.fn(() => EXECUTION_ID),
-    loadLatestPermissionMode: vi.fn(() => "supervised"),
     loadCollaborationActionBySourceProviderIdentity: vi.fn(() => null),
     recordCollaborationAction: vi.fn(),
-    startProviderContinuation: vi.fn(),
-    activateProviderContinuation: vi.fn(),
     loadCodexChildDelegation: vi.fn(() => null),
     loadCodexChildDelegationByReceiverThreadId: vi.fn(() => null),
     startCodexChildDelegation: vi.fn(),
@@ -269,15 +267,14 @@ describe("CodexCollaborationEventAdapter", () => {
     }));
   });
 
-  it("records a continuation failure against its resolved source turn", () => {
+  it("rejects unsupported continuation evidence even when its source action exists", () => {
     const sourceThread = { ...parentThread(), id: "source-thread" };
     const sourceTurn = { ...parentTurn(), id: "source-turn", threadId: sourceThread.id };
     const store = durability({
       loadThreadByProviderIdentity: vi.fn((identity: { value: string }) => (
-        identity.value === "native-source" ? sourceThread : { ...parentThread(), id: "wrong-target" }
+        identity.value === "native-source" ? sourceThread : parentThread()
       )),
       loadTurnByProviderIdentity: vi.fn(() => sourceTurn),
-      loadExecutionIdForTurn: vi.fn(() => "source-execution"),
       loadCollaborationActionBySourceProviderIdentity: vi.fn(() => ({
         id: "return-action",
         kind: "return-result",
@@ -299,20 +296,23 @@ describe("CodexCollaborationEventAdapter", () => {
         sourceNativeThreadId: "native-source",
         sourceNativeTurnId: "native-source-turn",
         sourceNativeItemId: "native-source-item",
-        targetNativeThreadId: "native-wrong-target",
+        targetNativeThreadId: "native-parent",
       } })));
 
     expect(projection.status).toBe("rejected");
     expect(store.recordCodexChildRoutingDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
-      threadId: sourceThread.id,
-      executionId: "source-execution",
-      parentItemId: "source-item",
+      threadId: "parent-thread",
+      executionId: EXECUTION_ID,
       reason: "continuation-evidence-not-found",
     }));
-    expect(store.startProviderContinuation).not.toHaveBeenCalled();
+    expect(store.loadThreadByProviderIdentity).not.toHaveBeenCalled();
+    expect(store.loadTurnByProviderIdentity).not.toHaveBeenCalled();
+    expect(store.loadCollaborationActionBySourceProviderIdentity).not.toHaveBeenCalled();
+    expect(store.recordCollaborationAction).not.toHaveBeenCalled();
+    expect(JSON.stringify(projection)).not.toContain("sourceNativeThreadId");
   });
 
-  it("attaches an unresolvable continuation source to the target thread's latest turn", () => {
+  it("records unsupported continuation evidence against the target thread's latest turn", () => {
     const store = durability({
       loadThreadByProviderIdentity: vi.fn(() => null),
       loadLatestTurn: vi.fn(() => parentTurn()),
@@ -321,7 +321,7 @@ describe("CodexCollaborationEventAdapter", () => {
     const projection = new CodexCollaborationEventAdapter(store).project(ingressEvent({
       type: AgentEventType.TurnStarted,
       threadId: "parent-thread",
-      turnExecutionId: EXECUTION_ID,
+      turnExecutionId: "00000000-0000-4000-8000-000000000002",
     }, codexExtension({ continuation: {
         sourceNativeThreadId: "unknown-source",
         sourceNativeTurnId: "unknown-turn",

@@ -99,7 +99,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       if (!dbPath || dbPath === ":memory:") {
         throw new Error("Execution workers require a file-backed database");
       }
-      return new WorkerOwnedTurnRuntime(NodePath.resolve(dbPath), c.resolve(AgentEventPublicationRegistry));
+      return new WorkerOwnedTurnRuntime(NodePath.resolve(dbPath), c.resolve(AgentEventPublicationRegistry), c.resolve(CanonicalAgentBoundary));
     }),
   });
   container.register("WorkerOwnedTurnRuntime", {

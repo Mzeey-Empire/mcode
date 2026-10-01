@@ -26,7 +26,7 @@ export class DevinCanonicalEventPublisher {
 
   constructor(private readonly sink: ProviderEventSinkPort) {}
 
-  /** Queues one Devin runtime event for durable canonical delivery. */
+  /** Queue one exactly routed observation for live acceptance. */
   publish(
     routing: DevinCanonicalEventRouting,
     runtimeEvent: ProviderRuntimeEvent,
@@ -46,13 +46,18 @@ export class DevinCanonicalEventPublisher {
     queue.tail = queue.tail
       .then(async () => {
         if (queue.failure) return;
-        await this.sink.submit({
+        const receipt = await this.sink.submit({
           threadId: routing.threadId,
           turnId: routing.turnId,
           executionId: routing.executionId,
+          batchId: draft.eventId,
+          deliveryAttempt: routing.deliveryAttempt,
           phase: "running",
           events: [draft],
         });
+        if (receipt.commit.outcome === "conflict" || receipt.commit.outcome === "ingest-overflow") {
+          throw new Error(`Devin canonical event ${draft.eventId} was ${receipt.commit.outcome}`);
+        }
       })
       .catch((error: unknown) => {
         queue.failure ??= toError(error);
