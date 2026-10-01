@@ -324,6 +324,7 @@ export class CodexLiveEventReducer {
       }
       this.unknownText = "";
     } else {
+      this.narrative.closeOpenThought(event.threadId);
       if (this.unknownText) {
         const staged = this.narrative.stageNarrationSegment(event.threadId, this.unknownText);
         if (staged) this.narrative.applyStagedNarrationSegment(event.threadId, staged);
@@ -332,7 +333,6 @@ export class CodexLiveEventReducer {
           ...(retainedText ? { retainedText } : {}), classification: "narration" });
         this.unknownText = "";
       }
-      this.narrative.closeOpenThought(event.threadId);
     }
     this.knownFinalText = false;
     writer.push(this.recovery());
