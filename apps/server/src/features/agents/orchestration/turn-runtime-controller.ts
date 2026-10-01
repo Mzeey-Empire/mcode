@@ -1869,14 +1869,14 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     for (const provider of this.providerRegistry.resolveAll()) {
       const memoryAware = provider as IAgentProvider & {
         setOutputTruncationMode?: (enabled: boolean) => void;
-        shedMemoryPressure?: (level: MemoryPressureSnapshot["level"]) => Promise<void> | void;
+        shedMemoryPressure?: (level: MemoryPressureSnapshot["level"], isThreadProtected: (threadId: string) => boolean) => Promise<void> | void;
       };
 
       memoryAware.setOutputTruncationMode?.(truncateOutput);
       if (snapshot.level === "normal" || typeof memoryAware.shedMemoryPressure !== "function") {
         continue;
       }
-      Promise.resolve(memoryAware.shedMemoryPressure(snapshot.level)).catch((err: unknown) => {
+      Promise.resolve(memoryAware.shedMemoryPressure(snapshot.level, (threadId) => this.activeSessionIds.has(threadId))).catch((err: unknown) => {
         logger.warn("Provider memory-pressure shedding failed", {
           level: snapshot.level,
           error: err instanceof Error ? err.message : String(err),

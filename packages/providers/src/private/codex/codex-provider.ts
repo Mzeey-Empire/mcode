@@ -996,9 +996,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     } satisfies AgentEvent));
   }
 
-  /** Evict idle Codex sessions while preserving active turns. */
-  async shedMemoryPressure(level: MemoryPressureLevel): Promise<void> {
-    const result = await this.runtime.evictNonBusy(`memory-pressure:${level}`);
+  /** Evict idle Codex sessions while preserving admitted and active turns. */
+  async shedMemoryPressure(level: MemoryPressureLevel, isThreadProtected: (threadId: string) => boolean = () => false): Promise<void> {
+    const result = await this.runtime.evictNonBusy(`memory-pressure:${level}`, (sessionId) => isThreadProtected(this.threadIdForSession(sessionId)));
     logger.info("Codex session pool shed memory pressure", {
       level,
       before: result.before,

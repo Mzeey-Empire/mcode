@@ -91,7 +91,7 @@ export class SessionRuntime<TState> {
       // Providers can hold exclusive resources (state DBs, sockets) that a
       // spawn would race while the previous incarnation is still closing.
       await Promise.race([teardown, delay(TEARDOWN_REUSE_TIMEOUT_MS).then(() => {
-        throw new Error(`Provider session teardown is still pending: ${args.sessionId}`);
+        throw new Error("The previous agent session is still closing. This turn could not start.");
       })]);
       if (this.shuttingDown) throw new Error("Provider session runtime is shutting down");
     }
@@ -138,13 +138,13 @@ export class SessionRuntime<TState> {
     return [...this.sessions.values()].map((entry) => entry.state);
   }
 
-  /** Evicts every non-busy session under memory pressure. */
-  async evictNonBusy(reason: string): Promise<{ before: number; after: number; evicted: string[] }> {
+  /** Evicts unprotected non-busy sessions under memory pressure. */
+  async evictNonBusy(reason: string, isSessionProtected: (sessionId: string) => boolean = () => false): Promise<{ before: number; after: number; evicted: string[] }> {
     const before = this.sessions.size;
     const evicted: string[] = [];
     const sessions = Array.from(this.sessions);
     for (const [sessionId, entry] of sessions) {
-      if (this.adapter.isBusy(entry.state)) continue;
+      if (this.sessions.get(sessionId) !== entry || isSessionProtected(sessionId) || this.adapter.isBusy(entry.state)) continue;
       evicted.push(sessionId);
       this.deps.logger?.info("SessionRuntime evicting non-busy session", { sessionId, reason });
       await this.stop(sessionId);

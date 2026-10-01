@@ -2,6 +2,101 @@ import { describe, expect, it, vi } from "vitest";
 import { SessionRuntime, type ProtocolAdapter } from "../session-runtime.js";
 
 describe("SessionRuntime", () => {
+  it("preserves admitted preparation and native busy sessions while evicting an idle peer", async () => {
+    const adapter: ProtocolAdapter<{ id: string; busy: boolean }> = {
+      spawn: async ({ sessionId }) => ({ state: { id: sessionId, busy: sessionId === "busy" }, pids: [] }),
+      isBusy: (state) => state.busy,
+      interrupt: () => undefined,
+      close: vi.fn(),
+      isStale: () => false,
+    };
+    const runtime = new SessionRuntime(adapter, {
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
+      envService: { getEnv: () => ({}) },
+    });
+    const admitted = new Set(["preparing"]);
+    try {
+      for (const sessionId of ["preparing", "idle", "busy"]) {
+        await runtime.acquire({ sessionId, threadId: sessionId, cwd: ".", permissionMode: "full" });
+      }
+      expect(await runtime.evictNonBusy("critical", (sessionId) => admitted.has(sessionId))).toEqual({ before: 3, after: 2, evicted: ["idle"] });
+      expect(adapter.close).toHaveBeenCalledExactlyOnceWith({ id: "idle", busy: false });
+      admitted.delete("preparing");
+      expect(await runtime.evictNonBusy("critical", (sessionId) => admitted.has(sessionId))).toEqual({ before: 2, after: 1, evicted: ["preparing"] });
+      expect(runtime.get("busy")).toBeDefined();
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it("rechecks admission protection after awaiting an earlier peer teardown", async () => {
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
+    const adapter: ProtocolAdapter<{ id: string }> = {
+      spawn: async ({ sessionId }) => ({ state: { id: sessionId }, pids: [] }),
+      isBusy: () => false,
+      interrupt: () => undefined,
+      close: vi.fn((state) => state.id === "first" ? closeGate : Promise.resolve()),
+      isStale: () => false,
+    };
+    const runtime = new SessionRuntime(adapter, {
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
+      envService: { getEnv: () => ({}) },
+    });
+    const admitted = new Set<string>();
+    try {
+      for (const sessionId of ["first", "later"]) {
+        await runtime.acquire({ sessionId, threadId: sessionId, cwd: ".", permissionMode: "full" });
+      }
+      const shedding = runtime.evictNonBusy("critical", (sessionId) => admitted.has(sessionId));
+      await vi.waitFor(() => expect(adapter.close).toHaveBeenCalledExactlyOnceWith({ id: "first" }));
+      admitted.add("later");
+      releaseClose();
+      expect(await shedding).toEqual({ before: 2, after: 1, evicted: ["first"] });
+      expect(adapter.close).toHaveBeenCalledOnce();
+      expect(runtime.get("later")).toEqual({ id: "later" });
+    } finally {
+      releaseClose();
+      await runtime.shutdown();
+    }
+  });
+
+  it("preserves a replacement created while an earlier peer teardown is pending", async () => {
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
+    let generation = 0;
+    const adapter: ProtocolAdapter<{ id: string; generation: number; busy: boolean }> = {
+      spawn: async ({ sessionId }) => ({ state: { id: sessionId, generation: ++generation, busy: false }, pids: [] }),
+      isBusy: (state) => state.busy,
+      interrupt: () => undefined,
+      close: vi.fn((state) => state.id === "first" ? closeGate : Promise.resolve()),
+      isStale: () => false,
+    };
+    const runtime = new SessionRuntime(adapter, {
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
+      envService: { getEnv: () => ({}) },
+    });
+    const request = { sessionId: "later", threadId: "later", cwd: ".", permissionMode: "full" };
+    try {
+      await runtime.acquire({ ...request, sessionId: "first", threadId: "first" });
+      const original = await runtime.acquire(request);
+      const shedding = runtime.evictNonBusy("critical");
+      await vi.waitFor(() => expect(adapter.close).toHaveBeenCalledExactlyOnceWith({ id: "first", generation: 1, busy: false }));
+      await runtime.stop(request.sessionId);
+      const replacement = await runtime.acquire(request);
+      replacement.busy = true;
+      releaseClose();
+      expect(await shedding).toEqual({ before: 2, after: 1, evicted: ["first"] });
+      expect(runtime.get(request.sessionId)).toBe(replacement);
+      expect(adapter.close).toHaveBeenCalledTimes(2);
+      expect(adapter.close).toHaveBeenCalledWith(original);
+      expect(adapter.close).not.toHaveBeenCalledWith(replacement);
+    } finally {
+      releaseClose();
+      await runtime.shutdown();
+    }
+  });
+
   it("rejects a timed-out teardown wait without spawning an overlapping session", async () => {
     vi.useFakeTimers();
     let releaseClose!: () => void;
@@ -25,7 +120,7 @@ describe("SessionRuntime", () => {
       await vi.advanceTimersByTimeAsync(0);
       const acquiring = Promise.allSettled([runtime.acquire(request)]);
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(await acquiring).toEqual([{ status: "rejected", reason: expect.objectContaining({ message: "Provider session teardown is still pending: session" }) }]);
+      expect(await acquiring).toEqual([{ status: "rejected", reason: expect.objectContaining({ message: "The previous agent session is still closing. This turn could not start." }) }]);
       expect(adapter.spawn).toHaveBeenCalledOnce();
       expect(runtime.get(request.sessionId)).toBeUndefined();
 

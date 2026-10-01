@@ -24,7 +24,7 @@ import { ParentAssistantTextCheckpointService } from "../../turns/parent-assista
 import type { GitService } from "../../../projects/index.js";
 import type { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import type { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
-import type { MemoryPressureService } from "../../../../runtime/memory/memory-pressure-service.js";
+import type { MemoryPressureService, MemoryPressureSnapshot } from "../../../../runtime/memory/memory-pressure-service.js";
 import type { ThreadService } from "../../../thread-control/index.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
 import type { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
@@ -52,8 +52,14 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
   // Snapshot of capturedEvents.length taken synchronously when the provider's
   // sendMessage body is entered. If emit truly precedes the call, this must be >= 1.
   let eventsLengthAtSendMessageEntry: number;
+  let pressureListener: ((snapshot: MemoryPressureSnapshot) => void) | undefined;
+  let memoryActivation: ReturnType<typeof vi.fn<() => void>>;
+  let attachmentGate: Promise<void> | undefined;
 
   beforeEach(() => {
+    pressureListener = undefined;
+    attachmentGate = undefined;
+    memoryActivation = vi.fn();
     db = openAgentStorageTestDatabase();
     const writer = agentStorageTestWriter(db);
     threadRepo = new ThreadRepo(db, writer);
@@ -96,7 +102,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     } as unknown as GitService;
 
     const attachmentServiceStub = {
-      persist: vi.fn(async () => ({ stored: [], persisted: [] })),
+      persist: vi.fn(async () => { await attachmentGate; return { stored: [], persisted: [] }; }),
     } as unknown as AttachmentService;
 
     const snapshotServiceStub = {
@@ -104,9 +110,9 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     } as unknown as SnapshotService;
 
     const memoryPressureServiceStub = {
-      markActive: vi.fn(),
+      markActive: memoryActivation,
       markIdle: vi.fn(),
-      onPressureChange: vi.fn(),
+      onPressureChange: vi.fn((listener: (snapshot: MemoryPressureSnapshot) => void) => { pressureListener = listener; return () => { pressureListener = undefined; }; }),
     } as unknown as MemoryPressureService;
 
     const settingsServiceStub = {
@@ -218,6 +224,38 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     expect(providerStub.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
       turnId: "canonical-source-turn",
     }));
+  });
+
+  it("protects admission before native dispatch and releases the live pressure authority on stop", async () => {
+    const workspace = await workspaceRepo.create("pressure-ws", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Preparing Turn", "direct", "main", true, "claude");
+    const pressure: MemoryPressureSnapshot = { level: "critical", source: "process-rss", usedBytes: 700, budgetBytes: 512, ratio: 700 / 512 };
+    const shedMemoryPressure = vi.fn<(level: MemoryPressureSnapshot["level"], isThreadProtected: (threadId: string) => boolean) => Promise<void>>().mockResolvedValue(undefined);
+    Object.assign(providerStub, { shedMemoryPressure });
+    providerStub.sendTurn.mockResolvedValue(undefined);
+    startAgentServiceIngressForTest(svc);
+    memoryActivation.mockImplementation(() => { pressureListener?.(pressure); });
+    let releaseAttachments!: () => void;
+    attachmentGate = new Promise<void>((resolve) => { releaseAttachments = resolve; });
+    const sending = svc.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "full" });
+    try {
+      await vi.waitFor(() => expect(shedMemoryPressure).toHaveBeenCalledOnce());
+      expect(providerStub.sendTurn).not.toHaveBeenCalled();
+      const isThreadProtected = shedMemoryPressure.mock.calls[0]?.[1];
+      if (!isThreadProtected) throw new Error("Memory shedding has no admission authority");
+      expect(isThreadProtected(thread.id)).toBe(true);
+      expect(isThreadProtected("unrelated-idle-thread")).toBe(false);
+      releaseAttachments();
+      await sending;
+      await svc.stopSession(thread.id);
+      expect(isThreadProtected(thread.id)).toBe(false);
+      pressureListener?.(pressure);
+      expect(shedMemoryPressure).toHaveBeenCalledTimes(2);
+      expect(shedMemoryPressure.mock.calls[1]?.[1](thread.id)).toBe(false);
+    } finally {
+      releaseAttachments();
+      await sending;
+    }
   });
 
   it("starts canonical providers through AgentService without leaving terminal suppression behind", async () => {
