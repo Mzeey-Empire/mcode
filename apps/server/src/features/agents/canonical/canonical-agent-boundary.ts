@@ -2553,7 +2553,8 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
             providerIdentities: sourceIdentities,
             activityState: "Active",
             conversationRevision: 0,
-            rosterRevision: 0,
+            // Recovery rejects older roster revisions when the parent starts another turn.
+            rosterRevision: this.loadThread(input.thread.id)?.rosterRevision ?? 0,
             createdAt: input.thread.createdAt,
             updatedAt: startedAt,
           },

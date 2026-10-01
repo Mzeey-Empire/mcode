@@ -1,5 +1,5 @@
 import * as NodeCrypto from "node:crypto";
-import type { AgentItem, AgentThread, AgentTurn, ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import { encodeCanonicalSubagentDetailTarget, type AgentItem, type AgentThread, type AgentTurn, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import type { CanonicalAgentEventDraft, ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 
 /** Builds recovery events from hydrated items before any storage work. */
@@ -20,7 +20,7 @@ export function prepareParentNarrativeRecoveryEvents(input: {
       updatedAt: entry.kind === "toolCall" ? entry.record.completed_at ?? entry.record.started_at
         : entry.record.ended_at ?? entry.record.started_at,
     };
-    return { eventId: `narrative:${recovery.executionId}:${itemId}:${fingerprint(entry)}`,
+    return { eventId: `narrative:${recovery.executionId}:${itemId}:${fingerprint(item.payload)}`,
       routing: { threadId: thread.id, turnId: turn.id, executionId: recovery.executionId, itemId },
       sourceProviderId: thread.providerId, sourceIdentities: [], payload: { type: "item.recorded", item } };
   });
@@ -61,11 +61,18 @@ function narrativeKind(item: ParentNarrativeRecoveryItem): AgentItem["kind"] {
 function recoveryPayload(item: ParentNarrativeRecoveryItem, existing: AgentItem["payload"]): AgentItem["payload"] {
   const metadata: Record<string, string> = {};
   if (item.kind === "toolCall") {
-    for (const key of ["identity", "model", "reasoningEffort"]) {
+    for (const key of ["identity", "model", "reasoningEffort", "childThreadId"]) {
       if (typeof existing[key] === "string") metadata[key] = existing[key];
     }
   }
-  return { projection: "narrativeRecovery", narrative: item, ...metadata };
+  return { projection: "narrativeRecovery", narrative: retainCanonicalSubagentTarget(item, existing), ...metadata };
+}
+
+/** Keeps the canonical child target when worker narrative updates carry only provider tool fields. */
+export function retainCanonicalSubagentTarget(item: ParentNarrativeRecoveryItem, existing: AgentItem["payload"]): ParentNarrativeRecoveryItem {
+  if (item.kind !== "toolCall" || item.record.tool_name !== "Agent" || typeof existing.childThreadId !== "string") return item;
+  return { ...item, record: { ...item.record,
+    subagent_identity_key: encodeCanonicalSubagentDetailTarget(existing.childThreadId) } };
 }
 
 function fingerprint(value: unknown): string {

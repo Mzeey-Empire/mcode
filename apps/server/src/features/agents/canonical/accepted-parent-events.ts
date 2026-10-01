@@ -15,7 +15,7 @@ import type { ExecutionSemanticOperation, ParentLiveEffects } from "../execution
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";
 import type { CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
-import { prepareParentNarrativeRecoveryEvents } from "./parent-narrative-recovery-events.js";
+import { prepareParentNarrativeRecoveryEvents, retainCanonicalSubagentTarget } from "./parent-narrative-recovery-events.js";
 
 const MAX_ACCEPTED_OPERATION_EVENTS = 8_192;
 
@@ -116,13 +116,14 @@ function terminalEvents(
 
 function changedTerminalNarrative(input: PreparationInput,
   narrative: readonly ParentNarrativeRecoveryItem[]): ParentNarrativeRecoveryItem[] {
-  return narrative.filter((entry) => {
+  return narrative.flatMap((entry) => {
     const existing = input.items[`${entry.kind}:${entry.record.id}`];
-    if (!existing || existing.threadId !== input.thread.id || existing.turnId !== input.turn.id) return true;
+    if (!existing || existing.threadId !== input.thread.id || existing.turnId !== input.turn.id) return [entry];
+    const canonical = retainCanonicalSubagentTarget(entry, existing.payload);
     if (existing.payload.projection === "narrativeRecovery") {
-      return !NodeUtil.isDeepStrictEqual(entry, existing.payload.narrative);
+      return NodeUtil.isDeepStrictEqual(canonical, existing.payload.narrative) ? [] : [canonical];
     }
-    return existing.payload.projection !== entry.kind || !NodeUtil.isDeepStrictEqual(entry.record, existing.payload.record);
+    return existing.payload.projection === canonical.kind && NodeUtil.isDeepStrictEqual(canonical.record, existing.payload.record) ? [] : [canonical];
   });
 }
 
