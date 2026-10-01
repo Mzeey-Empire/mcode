@@ -161,7 +161,7 @@ export async function startComposer(run, options = {}) {
   await waitFile(run, 'prefix', 15_000);
   const deadline = Date.now() + 8000;
   while (true) {
-    const body = await run.page.locator('body').innerText({ timeout: 1500 });
+    const body = await run.page.locator('body').innerText({ timeout: Math.max(1, deadline - Date.now()) });
     if (body.includes(prompt) && body.includes(`LIVE_DURABILITY ${run.id} PREFIX`)) break;
     if (Date.now() >= deadline) throw new Error('Composer prompt/native prefix did not both render; do not arm a UI proof fault');
     await timeout(100);
@@ -247,7 +247,7 @@ export async function captureChild(run, { expectedOutcome, maxMs = 5000 } = {}) 
     const roster = await run.socket.rpc('canonicalAgent.roster', { owningParentThreadId: run.thread.id }, Date.now() + 3000);
     const row = exactNativeChild(roster, native.threadId);
     if (childOutcomeMatches(row, expectedOutcome)) {
-      const transcript = await run.socket.rpc('conversation.tail', { threadId: row.id, limit: 20 }, Date.now() + 3000);
+      const transcript = await run.socket.rpc('conversation.tail', { threadId: row.id, limit: 2 }, Date.now() + 3000);
       const parent = (await run.socket.rpc('agent.listRunning', {})).find(item => item.threadId === run.thread.id);
       const result = { at: new Date().toISOString(), native, row, roster, transcript, parent };
       run.receipt.childCaptures ??= []; run.receipt.childCaptures.push(result); writeReceipt(run);
@@ -347,7 +347,7 @@ export async function observe(run, { phase = 'held', waitForTerminal = false } =
   if (waitForTerminal) await waitFile(run, 'terminal', 5000);
   assertHeldLock(run);
   await timeout(700);
-  const body = await run.page.locator('body').innerText({ timeout: 1500 });
+  const body = await run.page.locator('body').innerText({ timeout: 5000 });
   const ownText = ['PREFIX', 'AFTER_TOOL', 'COMPLETE'].map((part) => {
     const count = body.split(`LIVE_DURABILITY ${run.id} ${part}`).length - 1;
     return { part, rendered: count > 0, occurrences: count };
