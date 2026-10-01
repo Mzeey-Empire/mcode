@@ -9,7 +9,7 @@ interface AgentOrchestrationDependencies {
   runtime: AgentEventPublicationRuntime;
   publicationRegistry: AgentEventPublicationRegistry;
   threadRepo: ThreadRepo;
-  pullRequestCompletionEffect: TurnPullRequestCompletionEffect;
+  pullRequestCompletionEffect: Pick<TurnPullRequestCompletionEffect, "schedule">;
   providerRegistry: IProviderRegistry;
   publishPermissionRequest: (request: PermissionRequest) => void;
   publishPermissionResolved: (payload: { requestId: string; decision: "allow" | "allow-session" | "deny" | "cancelled"; optionLabel?: string }) => void;

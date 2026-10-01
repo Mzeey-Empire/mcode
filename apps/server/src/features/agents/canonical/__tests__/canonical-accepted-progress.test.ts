@@ -950,6 +950,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
   it("waits for accepted save capacity instead of rejecting a long provider stream", async () => {
     await send(1, start("codex"));
     holdWrites();
+    const toolOutput = "export const example = 'fixture source';\n".repeat(800);
     let blocked: Promise<Awaited<ReturnType<typeof send>>> | undefined;
     let blockedOrdinal = 0;
     for (let ordinal = 2; ordinal < 2_500; ordinal += 1) {
@@ -958,10 +959,12 @@ describe("accepted parent progress with the actual SQLite writer", () => {
       const toolCallId = `tool-${pair}`;
       const event = index % 2 === 0
         ? draft("codex", index + 1, "toolUse", { toolCallId, toolName: "Read", toolInput: { file_path: "file.txt" } })
-        : draft("codex", index + 1, "toolResult", { toolCallId, output: "Done", isError: false });
+        : draft("codex", index + 1, "toolResult", { toolCallId, output: toolOutput, isError: false });
       const pending = send(ordinal, { kind: "event", phase: "running", nativeCursor: null, events: [event] });
+      let deadline: ReturnType<typeof setTimeout> | undefined;
       const settled = await Promise.race([pending.then(() => true, () => true),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500))]);
+        new Promise<boolean>((resolve) => { deadline = setTimeout(() => resolve(false), 500); })]);
+      if (deadline) clearTimeout(deadline);
       if (!settled) {
         blocked = pending;
         blockedOrdinal = ordinal;

@@ -2169,12 +2169,12 @@ describe("AgentService Ended finalization", () => {
         },
       },
     });
-    expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
       threadId: thread.id,
       messageId: assistant?.id,
       outcome: "errored",
       executionId,
-    }));
+    })));
   });
 
   it("keeps a completed turn completed when a provider sends a late error", async () => {

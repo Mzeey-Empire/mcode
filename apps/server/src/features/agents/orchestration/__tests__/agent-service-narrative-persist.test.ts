@@ -408,11 +408,11 @@ describe("AgentService narrative persistence", () => {
         .filter((event) => event.type === AgentEventType.TextDelta)
         .map((event) => event.delta))
         .toEqual(["durable ", "text"]);
-      expect(db.prepare(`
+      await vi.waitFor(() => expect(db.prepare(`
         SELECT first_sequence, last_sequence, text
         FROM parent_assistant_text_checkpoint_chunks
         WHERE execution_id = ?
-      `).all(executionId)).toEqual([]);
+      `).all(executionId)).toEqual([]));
     } finally {
       vi.useRealTimers();
 

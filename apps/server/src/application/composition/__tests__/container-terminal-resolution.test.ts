@@ -9,6 +9,7 @@ import { container } from "tsyringe";
 
 import { TERMINAL_BACKEND_TOKEN, type TerminalBackend } from "../../../features/terminal/backends/terminal-backend.js";
 import { WindowsProcessScopeFactory } from "../../../runtime/process/containment/windows-process-scope.js";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { setupContainer } from "../container.js";
 
 const SENTINEL_HOST_RUNTIME: HostRuntime = Object.freeze({
@@ -23,18 +24,21 @@ describe("server container terminal composition", () => {
   const previousDatabasePath = process.env.MCODE_DB_PATH;
   const previousBackend = process.env.MCODE_TERMINAL_BACKEND;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     container.reset();
     temporaryDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-container-terminal-"));
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
     process.env.MCODE_TERMINAL_BACKEND = "legacy";
-    setupContainer(temporaryDirectory);
+    await setupContainer(temporaryDirectory);
     container.register<HostRuntime>("HostRuntime", { useValue: SENTINEL_HOST_RUNTIME });
     database = container.resolve<Database>("Database");
   });
 
-  afterEach(() => {
-    database?.close();
+  afterEach(async () => {
+    if (container.isRegistered(ApplicationDatabaseWriter)) {
+      await container.resolve(ApplicationDatabaseWriter).close();
+    }
+    database?.close(true);
     database = undefined;
     container.reset();
     if (previousDatabasePath === undefined) delete process.env.MCODE_DB_PATH;
