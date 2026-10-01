@@ -12,6 +12,8 @@ import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient, CanonicalWriterAcknowledgementCapacity } from "../canonical-agent-writer-client.js";
 import { CanonicalAcceptedProgress } from "../canonical-accepted-progress.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
+import type { SessionNotification } from "@agentclientprotocol/sdk";
+import { createDevinAcpTurnState, mapDevinAcpSessionNotification } from "../../../../../../../packages/providers/src/private/devin/devin-acp-event-mapper.js";
 
 const pushes = vi.hoisted(() => ({ frames: [] as unknown[] }));
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: (channel: string, frame: unknown) => {
@@ -268,6 +270,39 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     const parentPage = saved.loadConversationProjection(execution.threadId, 20);
     expect(Object.values(parentPage.narrativeByMessage).flatMap((batch) => batch.tools).find((tool) => tool.id === "spawn"))
       .toMatchObject({ subagent_identity_key: detailTarget });
+  });
+
+  it("saves native ACP thought and unknown assistant channels as distinct narration before the next thought", async () => {
+    await send(1, start("devin"));
+    const append = vi.spyOn(writer, "appendAccepted");
+    const state = createDevinAcpTurnState();
+    const notifications: SessionNotification[] = [
+      { sessionId: "devin-session", update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "THOUGHT" } } },
+      { sessionId: "devin-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "UNKNOWN" } } },
+      { sessionId: "devin-session", update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "NEXT" } } },
+    ];
+    let ordinal = 1;
+    let sequence = 0;
+    for (const notification of notifications) {
+      for (const event of mapDevinAcpSessionNotification(notification, execution.threadId, state)) {
+        const { type, ...fields } = event;
+        expect((await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+          events: [draft("devin", ++sequence, type, fields)] })).result.kind).toBe("accepted");
+      }
+    }
+    await expect.poll(() => append.mock.results.length).toBeGreaterThanOrEqual(3);
+    await expect(append.mock.results[2]?.value).resolves.toHaveProperty("receipt");
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const canonical = new CanonicalAgentBoundary(db, () => {});
+    expect(canonical.loadParentNarrativeForBinding(execution.threadId, execution.turnId)
+      .flatMap((item) => item.kind === "narrationSegment" ? [item.record.text] : [])).toEqual(["THOUGHT", "UNKNOWN", "NEXT"]);
+    expect(db.prepare("SELECT retained_bytes FROM parent_assistant_text_checkpoints WHERE execution_id = ?")
+      .get(execution.executionId)).toBeNull();
+    await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("devin", ++sequence, "turnComplete")], terminalInput: { ...execution,
+        providerId: "devin", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(canonical.loadTurn(execution.turnId)?.status).toBe("Completed");
   });
 
   it("accepts the native Devin final-prefix, later unknown narration and final completion sequence while saving is held", async () => {

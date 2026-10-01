@@ -840,6 +840,48 @@ describe("CodexProvider first turn on new session", () => {
     await provider.shutdown();
   });
 
+  it.each([{}, { turnId: "child-turn" }])("holds a linked child's startup notice until its native turn is bound (%j)", async (nativeTurn) => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({ turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const server = appServers[0];
+    if (!server) throw new Error("Expected native app-server session");
+    server.emit("notification", { method: "item/started", params: { threadId: "sdk-thread-1",
+      turnId: "turn-test-id", item: { type: "subAgentActivity", id: "spawn-child", kind: "started",
+        agentThreadId: "native-child", agentPath: "/root/worker" } } });
+    server.emit("notification", { method: "future/childStartupNotice", params: { threadId: "native-child", ...nativeTurn } });
+    await provider.waitForCanonicalTurnEvents({ threadId, turnId: "test-turn",
+      executionId: schemaValidExecutionId, deliveryAttempt: 2 });
+    expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+      .filter((event) => event.event.type === AgentEventType.System && event.extension?.child)).toEqual([]);
+
+    server.emit("notification", { method: "turn/started",
+      params: { threadId: "native-child", turn: { id: "child-turn" } } });
+    server.emit("notification", { method: "turn/completed",
+      params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } } });
+    server.emit("notification", { method: "turn/completed",
+      params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } } });
+    await provider.waitForCanonicalTurnEvents({ threadId, turnId: "test-turn",
+      executionId: schemaValidExecutionId, deliveryAttempt: 2 });
+    const childEvents = submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+      .filter((event) => event.extension?.child);
+    const noticeIndex = childEvents.findIndex((event) => event.event.type === AgentEventType.System);
+    const startedIndex = childEvents.findIndex((event) => event.event.type === AgentEventType.TurnStarted);
+    expect(startedIndex).toBeGreaterThanOrEqual(0);
+    expect(noticeIndex).toBeGreaterThan(startedIndex);
+    expect(childEvents[noticeIndex]?.event).toMatchObject({ subtype: "provider.notice.unknown-event",
+      turnExecutionId: schemaValidExecutionId });
+    expect(childEvents.filter((event) => event.event.type === AgentEventType.System)).toHaveLength(1);
+    expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)).at(-1)?.event)
+      .toMatchObject({ type: AgentEventType.Ended, outcome: "completed" });
+    await provider.shutdown();
+  });
+
   it("rejects stale child callbacks after replacing a canonical delivery attempt", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue(acceptedEventReceipt);

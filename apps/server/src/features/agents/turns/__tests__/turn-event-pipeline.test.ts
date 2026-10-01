@@ -283,6 +283,25 @@ describe("TurnEventPipeline", () => {
     });
   });
 
+  it("contains a synchronous write failure to its thread while another provider completes", async () => {
+    const applied: string[] = [];
+    const { pipeline, finalize } = createPipeline((_input, event) => {
+      if (event.threadId === "failed-thread") throw new Error("SQLITE_BUSY: database is locked");
+      applied.push(event.threadId);
+      return true;
+    });
+    expect(() => pipeline.handleProviderEvent({ ...textDelta("notice", "failed-thread"), providerId: "codex" }))
+      .not.toThrow();
+    pipeline.handleProviderEvent({ ...textDelta("still running", "healthy-thread"), providerId: "devin" });
+    await expect(pipeline.finalizeTurn({ threadId: "failed-thread", executionId: EXECUTION_ID,
+      outcome: "completed", source: "provider" })).rejects.toThrow("SQLITE_BUSY: database is locked");
+    await expect(pipeline.finalizeTurn({ threadId: "healthy-thread", executionId: EXECUTION_ID,
+      outcome: "completed", source: "provider" })).resolves.toBe(true);
+    expect(applied).toEqual(["healthy-thread"]);
+    expect(finalize).toHaveBeenCalledOnce();
+    expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ threadId: "healthy-thread" }));
+  });
+
   it("does not finalize after an asynchronous application fails", async () => {
     let fail!: (error: Error) => void;
     const durable = new Promise<boolean>((_resolve, reject) => { fail = reject; });
