@@ -22,6 +22,15 @@ const ledgerSchema = z.array(z.object({
   hash: z.string(),
   created_at: z.number().int(),
 }));
+const sqlDefinitionSchema = z.object({ sql: z.string() });
+const sqlDefinitionsSchema = z.array(sqlDefinitionSchema);
+const columnNamesSchema = z.array(z.object({ name: z.string().regex(/^[a-z_][a-z0-9_]*$/i) }));
+const schemaSnapshotSchema = z.array(z.object({
+  type: z.string(),
+  name: z.string(),
+  tbl_name: z.string(),
+  sql: z.string().nullable(),
+}));
 
 const sourceCatalogue = NodePath.join(process.cwd(), "drizzle");
 const currentJournal = journalSchema.parse(JSON.parse(
@@ -73,6 +82,106 @@ function readLedger(database: Database): z.infer<typeof ledgerSchema> {
   return ledgerSchema.parse(database.prepare(
     "SELECT id, hash, created_at FROM __drizzle_migrations ORDER BY created_at, id",
   ).all());
+}
+
+function readSchema(database: Database): z.infer<typeof schemaSnapshotSchema> {
+  return schemaSnapshotSchema.parse(database.prepare(
+    "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name",
+  ).all());
+}
+
+function inspectSavedDatabase<T>(dbPath: string, inspect: (database: Database) => T): T {
+  const database = new Database(dbPath, { readonly: true, strict: true });
+  try {
+    return inspect(database);
+  } finally {
+    database.close(true);
+  }
+}
+
+function removeWindowReceipts(database: Database): void {
+  const remove = database.prepare("DELETE FROM __drizzle_migrations WHERE created_at = ?");
+  for (const entry of currentJournal.entries.filter((entry) => entry.idx >= 61 && entry.idx <= 66)) {
+    remove.run(entry.when);
+  }
+}
+
+function removeReceipt(database: Database, index: number): void {
+  const entry = currentJournal.entries.find((candidate) => candidate.idx === index);
+  if (!entry) throw new Error(`Missing fixture migration ${index}`);
+  database.prepare("DELETE FROM __drizzle_migrations WHERE created_at = ?").run(entry.when);
+}
+
+function rebuildEmptyFixtureTable(database: Database, options: {
+  name: "canonical_writer_live_publication_heads" | "canonical_conversation_display_mappings" | "conversation_display_materialization_state";
+  changeSql: (sql: string) => string;
+}): void {
+  const definition = sqlDefinitionSchema.parse(database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(options.name));
+  const indexes = sqlDefinitionsSchema.parse(database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL",
+  ).all(options.name));
+  const changed = options.changeSql(definition.sql);
+  expect(changed).not.toBe(definition.sql);
+  database.exec(`DROP TABLE ${options.name}`);
+  database.exec(changed);
+  for (const index of indexes) database.exec(index.sql);
+}
+
+function rebuildFixtureMessages(database: Database, changeSql: (sql: string) => string): void {
+  const definition = sqlDefinitionSchema.parse(database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages'",
+  ).get());
+  const indexes = sqlDefinitionsSchema.parse(database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'messages' AND sql IS NOT NULL",
+  ).all());
+  const columns = columnNamesSchema.parse(database.prepare("PRAGMA table_info(messages)").all())
+    .map((column) => `"${column.name}"`).join(", ");
+  const originalRows = database.prepare("SELECT * FROM messages ORDER BY id").all();
+  const changed = changeSql(definition.sql);
+  expect(changed).not.toBe(definition.sql);
+  const replacement = changed.replace(/^CREATE TABLE\s+[`"]?messages[`"]?/i, "CREATE TABLE migration_history_rebuilt_messages");
+  expect(replacement).not.toBe(changed);
+
+  // Rebuild only this owned fixture, copying every row before replacing a table with inbound references.
+  database.exec("PRAGMA foreign_keys = OFF");
+  try {
+    database.transaction(() => {
+      database.exec(replacement);
+      database.exec(`INSERT INTO migration_history_rebuilt_messages (${columns}) SELECT ${columns} FROM messages`);
+      database.exec("DROP TABLE messages");
+      database.exec("ALTER TABLE migration_history_rebuilt_messages RENAME TO messages");
+      for (const index of indexes) database.exec(index.sql);
+    })();
+  } finally {
+    database.exec("PRAGMA foreign_keys = ON");
+  }
+  expect(database.prepare("SELECT * FROM messages ORDER BY id").all()).toEqual(originalRows);
+}
+
+function changeLegacyProvenanceDeclaration(sql: string, constraint: string): string {
+  return sql.replace(
+    /(?:`legacy_provenance`|"legacy_provenance"|legacy_provenance)\s+text\b/i,
+    `"legacy_provenance" TEXT ${constraint}`,
+  );
+}
+
+function expectCurrentUpgrade(database: Database): z.infer<typeof ledgerSchema> {
+  expectFixtureData(database);
+  const ledger = readLedger(database);
+  expect(ledger.map((entry) => entry.created_at)).toEqual(
+    currentJournal.entries.filter((entry) => entry.idx <= 67).map((entry) => entry.when).sort((a, b) => a - b),
+  );
+  expect(database.prepare(
+    "SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?",
+  ).get(fixtureThreadId)).toEqual({ last_sequence: 37 });
+  expect(database.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get("canonical_writer_thread_operation_receipts")).toEqual({
+    name: "canonical_writer_thread_operation_receipts",
+  });
+  return ledger;
 }
 
 function seedFixtureData(database: Database): void {
@@ -133,6 +242,31 @@ function expectFixtureData(database: Database): void {
   ).get("migration-history-event")).toEqual({ envelope_json: fixtureEnvelope });
 }
 
+function createDamagedFixture(options: Parameters<typeof createUpgradedFixture>[0], damage: (database: Database) => void) {
+  createUpgradedFixture(options);
+  return withDatabase(options, (database) => {
+    database.transaction(() => {
+      removeWindowReceipts(database);
+      damage(database);
+    })();
+    return { ledger: readLedger(database), schema: readSchema(database) };
+  });
+}
+
+function expectRejectedRecovery(options: Parameters<typeof withDatabase>[0], snapshot: {
+  ledger: z.infer<typeof ledgerSchema>;
+  schema: z.infer<typeof schemaSnapshotSchema>;
+}, affectedObject: string): void {
+  expect(() => withDatabase(options, () => {})).toThrow(
+    new RegExp(`^Migration history repair refused:.*${affectedObject}`),
+  );
+  inspectSavedDatabase(options.dbPath, (database) => {
+    expect(readLedger(database)).toEqual(snapshot.ledger);
+    expect(readSchema(database)).toEqual(snapshot.schema);
+    expectFixtureData(database);
+  });
+}
+
 describe("migration history integrity", () => {
   let directory: string;
   let databasePath: string;
@@ -161,6 +295,37 @@ describe("migration history integrity", () => {
     });
   });
 
+  it.each([60, 61, 62, 63, 64, 65])("upgrades a healthy database through 00%i without treating its pending suffix as damaged", (lastIndex) => {
+    const previous = copyCatalogue({ root: directory, lastIndex, lineEndings: "lf" });
+    const originalLedger = createUpgradedFixture({ dbPath: databasePath, catalogue: previous });
+    const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
+
+    withDatabase({ dbPath: databasePath, catalogue: current }, (database) => {
+      const ledger = expectCurrentUpgrade(database);
+      expect(ledger.slice(0, originalLedger.length)).toEqual(originalLedger);
+    });
+  });
+
+  it.each(["unrecognized historical", "future"])("preserves an %s receipt across older and current catalogues", (kind) => {
+    const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
+    createUpgradedFixture({ dbPath: databasePath, catalogue: previous });
+    const ledger = withDatabase({ dbPath: databasePath, catalogue: previous }, (database) => {
+      const entry = currentJournal.entries.find((candidate) => candidate.idx === (kind === "future" ? 67 : 59));
+      if (!entry) throw new Error("Missing fixture migration timestamp");
+      database.prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)")
+        .run(`unrecognized-${kind}-receipt`, entry.when + 1);
+      return readLedger(database);
+    });
+    const older = copyCatalogue({ root: directory, lastIndex: 60, lineEndings: "lf" });
+
+    for (const catalogue of [older, previous]) {
+      withDatabase({ dbPath: databasePath, catalogue }, (database) => {
+        expect(readLedger(database)).toEqual(ledger);
+        expectFixtureData(database);
+      });
+    }
+  });
+
   it.each([
     { initial: "lf", subsequent: "crlf" },
     { initial: "crlf", subsequent: "lf" },
@@ -181,39 +346,249 @@ describe("migration history integrity", () => {
   it("recovers missing 0061-0066 receipts before applying 0067 and keeps restart idempotent", () => {
     const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
     const originalLedger = createUpgradedFixture({ dbPath: databasePath, catalogue: previous });
-    const removedEntries = currentJournal.entries.filter((entry) => entry.idx >= 61 && entry.idx <= 66);
     withDatabase({ dbPath: databasePath, catalogue: previous }, (database) => {
-      const removeReceipt = database.prepare("DELETE FROM __drizzle_migrations WHERE created_at = ?");
-      database.transaction(() => {
-        for (const entry of removedEntries) removeReceipt.run(entry.when);
-      })();
+      database.transaction(() => removeWindowReceipts(database))();
       expect(readLedger(database)).toHaveLength(originalLedger.length - 6);
     });
 
     const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
-    const upgradedLedger = withDatabase({ dbPath: databasePath, catalogue: current }, (database) => {
-      expectFixtureData(database);
-      const ledger = readLedger(database);
-      expect(ledger.map((entry) => entry.created_at)).toEqual(
-        currentJournal.entries.filter((entry) => entry.idx <= 67).map((entry) => entry.when),
-      );
-      expect(database.prepare(
-        "SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?",
-      ).get(fixtureThreadId)).toEqual({ last_sequence: 37 });
-      expect(database.prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-      ).get("canonical_writer_thread_operation_receipts")).toEqual({
-        name: "canonical_writer_thread_operation_receipts",
-      });
-      return ledger;
-    });
+    const upgradedLedger = withDatabase({ dbPath: databasePath, catalogue: current }, expectCurrentUpgrade);
 
     withDatabase({ dbPath: databasePath, catalogue: current }, (database) => {
       expect(readLedger(database)).toEqual(upgradedLedger);
+      expectCurrentUpgrade(database);
+    });
+  });
+
+  it("repairs a missing 0062 receipt below the latest recorded migration only when the complete schema exists", () => {
+    const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
+    const originalLedger = createUpgradedFixture({ dbPath: databasePath, catalogue: previous });
+    const retainedLedger = withDatabase({ dbPath: databasePath, catalogue: previous }, (database) => {
+      removeReceipt(database, 62);
+      return readLedger(database);
+    });
+    const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
+
+    withDatabase({ dbPath: databasePath, catalogue: current }, (database) => {
+      const ledger = expectCurrentUpgrade(database);
+      expect(ledger).toEqual(expect.arrayContaining(retainedLedger));
+      expect(ledger).toHaveLength(originalLedger.length + 1);
+    });
+  });
+
+  it("rejects a ledger hole whose 0062 column is absent rather than silently skipping it", () => {
+    const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
+    createUpgradedFixture({ dbPath: databasePath, catalogue: previous });
+    const snapshot = withDatabase({ dbPath: databasePath, catalogue: previous }, (database) => {
+      removeReceipt(database, 62);
+      database.exec("ALTER TABLE messages DROP COLUMN legacy_provenance");
+      return { ledger: readLedger(database), schema: readSchema(database) };
+    });
+    const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
+
+    expectRejectedRecovery({ dbPath: databasePath, catalogue: current }, snapshot, "messages");
+  });
+
+  it.each([
+    {
+      label: "inline CHECK",
+      damage: (database: Database) => rebuildFixtureMessages(database, (sql) => changeLegacyProvenanceDeclaration(
+        sql, "CHECK(length(legacy_provenance) <= 1)",
+      )),
+    },
+    {
+      label: "COLLATE",
+      damage: (database: Database) => rebuildFixtureMessages(database, (sql) => changeLegacyProvenanceDeclaration(
+        sql, "COLLATE NOCASE",
+      )),
+    },
+    {
+      label: "inline REFERENCES",
+      damage: (database: Database) => rebuildFixtureMessages(database, (sql) => changeLegacyProvenanceDeclaration(
+        sql, "REFERENCES workspaces(id)",
+      )),
+    },
+    {
+      label: "table CHECK",
+      damage: (database: Database) => rebuildFixtureMessages(database, (sql) => sql.replace(
+        /\)\s*$/, ", CHECK(length(legacy_provenance) <= 1))",
+      )),
+    },
+    {
+      label: "table foreign key",
+      damage: (database: Database) => rebuildFixtureMessages(database, (sql) => sql.replace(
+        /\)\s*$/, ", FOREIGN KEY(legacy_provenance) REFERENCES workspaces(id))",
+      )),
+    },
+    {
+      label: "table UNIQUE",
+      damage: (database: Database) => rebuildFixtureMessages(database, (sql) => sql.replace(
+        /\)\s*$/, ", UNIQUE(legacy_provenance))",
+      )),
+    },
+    {
+      label: "external UNIQUE index",
+      damage: (database: Database) => database.exec(
+        "CREATE UNIQUE INDEX fixture_legacy_provenance_unique ON messages(legacy_provenance)",
+      ),
+    },
+    {
+      label: "UNIQUE expression index",
+      damage: (database: Database) => database.exec(
+        "CREATE UNIQUE INDEX fixture_legacy_expression_unique ON messages(lower(legacy_provenance))",
+      ),
+    },
+    {
+      label: "UNIQUE index with owned column predicate",
+      damage: (database: Database) => database.exec(
+        "CREATE UNIQUE INDEX fixture_legacy_predicate_unique ON messages(content) WHERE legacy_provenance IS NOT NULL",
+      ),
+    },
+  ])("rejects an added 0062 column with $label rather than certifying only table_xinfo", ({ damage }) => {
+    const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
+    createUpgradedFixture({ dbPath: databasePath, catalogue: previous });
+    const snapshot = withDatabase({ dbPath: databasePath, catalogue: previous }, (database) => {
+      damage(database);
+      removeReceipt(database, 62);
+      return { ledger: readLedger(database), schema: readSchema(database) };
+    });
+    const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
+
+    expectRejectedRecovery({ dbPath: databasePath, catalogue: current }, snapshot, "legacy_provenance");
+  });
+
+  it("repairs owned column history while preserving unrelated legacy CHECK and UNIQUE definitions", () => {
+    const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
+    createUpgradedFixture({ dbPath: databasePath, catalogue: previous });
+    const retainedLedger = withDatabase({ dbPath: databasePath, catalogue: previous }, (database) => {
+      rebuildFixtureMessages(database, (sql) => sql.replace(/\)\s*$/, ", CHECK(length(content) < 100000))"));
+      database.exec("CREATE UNIQUE INDEX fixture_content_unique ON messages(content)");
+      removeReceipt(database, 62);
+      return readLedger(database);
+    });
+    const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
+
+    withDatabase({ dbPath: databasePath, catalogue: current }, (database) => {
+      const ledger = expectCurrentUpgrade(database);
+      expect(ledger).toEqual(expect.arrayContaining(retainedLedger));
+      expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'fixture_content_unique'").get())
+        .toEqual({ name: "fixture_content_unique" });
+      expect(() => database.prepare(
+        "UPDATE messages SET content = ? WHERE id = ?",
+      ).run("x".repeat(100000), "migration-history-message")).toThrow(/CHECK/);
+      expectFixtureData(database);
+    });
+  });
+
+  it.each([
+    {
+      label: "incorrect foreign key target",
+      object: "canonical_writer_live_publication_heads",
+      damage: (database: Database) => rebuildEmptyFixtureTable(database, {
+        name: "canonical_writer_live_publication_heads",
+        changeSql: (sql) => sql.replace("REFERENCES `threads`(`id`)", "REFERENCES `workspaces`(`id`)"),
+      }),
+    },
+    {
+      label: "changed column default",
+      object: "conversation_display_materialization_state",
+      damage: (database: Database) => rebuildEmptyFixtureTable(database, {
+        name: "conversation_display_materialization_state",
+        changeSql: (sql) => sql.replace("DEFAULT 0", "DEFAULT 1"),
+      }),
+    },
+    {
+      label: "extra CHECK constraint",
+      object: "canonical_conversation_display_mappings",
+      damage: (database: Database) => rebuildEmptyFixtureTable(database, {
+        name: "canonical_conversation_display_mappings",
+        changeSql: (sql) => sql.replace(/\)\s*$/, ", CHECK (length(source_item_id) > 0))"),
+      }),
+    },
+    {
+      label: "STRICT table flag",
+      object: "canonical_conversation_display_mappings",
+      damage: (database: Database) => rebuildEmptyFixtureTable(database, {
+        name: "canonical_conversation_display_mappings",
+        changeSql: (sql) => `${sql} STRICT`,
+      }),
+    },
+    {
+      label: "WITHOUT ROWID table flag",
+      object: "canonical_conversation_display_mappings",
+      damage: (database: Database) => rebuildEmptyFixtureTable(database, {
+        name: "canonical_conversation_display_mappings",
+        changeSql: (sql) => `${sql} WITHOUT ROWID`,
+      }),
+    },
+    {
+      label: "missing required index",
+      object: "idx_messages_thread_sequence_id",
+      damage: (database: Database) => database.exec("DROP INDEX idx_messages_thread_sequence_id"),
+    },
+    {
+      label: "reversed index key order",
+      object: "idx_messages_thread_sequence_id",
+      damage: (database: Database) => database.exec(`
+        DROP INDEX idx_messages_thread_sequence_id;
+        CREATE INDEX idx_messages_thread_sequence_id ON messages(sequence, thread_id, id);
+      `),
+    },
+    {
+      label: "descending index key",
+      object: "idx_messages_thread_sequence_id",
+      damage: (database: Database) => database.exec(`
+        DROP INDEX idx_messages_thread_sequence_id;
+        CREATE INDEX idx_messages_thread_sequence_id ON messages(thread_id, sequence DESC, id);
+      `),
+    },
+    {
+      label: "incorrect partial index predicate",
+      object: "idx_thought_segments_final_message_sort_order_id",
+      damage: (database: Database) => database.exec(`
+        DROP INDEX idx_thought_segments_final_message_sort_order_id;
+        CREATE INDEX idx_thought_segments_final_message_sort_order_id
+          ON thought_segments(message_id, sort_order, id) WHERE is_final_response <> 1;
+      `),
+    },
+  ])("rejects orphaned receipts with $label and restores the original database", ({ object, damage }) => {
+    const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
+    const snapshot = createDamagedFixture({ dbPath: databasePath, catalogue: previous }, damage);
+    const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
+
+    expectRejectedRecovery({ dbPath: databasePath, catalogue: current }, snapshot, object);
+  });
+
+  it("rejects changed reviewed migration SQL instead of manufacturing a receipt for it", () => {
+    const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
+    const snapshot = createDamagedFixture({ dbPath: databasePath, catalogue: previous }, () => {});
+    const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
+    NodeFS.appendFileSync(NodePath.join(current, "0061_hard_human_cannonball.sql"), "\n-- Different reviewed migration\n");
+
+    expectRejectedRecovery({ dbPath: databasePath, catalogue: current }, snapshot, "0061_hard_human_cannonball");
+  });
+
+  it("restores the entire old ledger and schema when 0067 fails after receipt recovery", () => {
+    const previous = copyCatalogue({ root: directory, lastIndex: 66, lineEndings: "lf" });
+    const snapshot = createDamagedFixture({ dbPath: databasePath, catalogue: previous }, () => {});
+    const current = copyCatalogue({ root: directory, lastIndex: 67, lineEndings: "lf" });
+    NodeFS.appendFileSync(
+      NodePath.join(current, "0067_cooing_tomorrow_man.sql"),
+      "\n--> statement-breakpoint\nINSERT INTO missing_migration_fixture_table (value) VALUES (1);\n",
+    );
+
+    expect(() => withDatabase({ dbPath: databasePath, catalogue: current }, () => {}))
+      .toThrow(/missing_migration_fixture_table/);
+    inspectSavedDatabase(databasePath, (database) => {
+      expect(readLedger(database)).toEqual(snapshot.ledger);
+      expect(readSchema(database)).toEqual(snapshot.schema);
       expectFixtureData(database);
       expect(database.prepare(
         "SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?",
-      ).get(fixtureThreadId)).toEqual({ last_sequence: 37 });
+      ).get(fixtureThreadId)).toBeNull();
+      expect(database.prepare(
+        "SELECT name FROM sqlite_master WHERE name = 'canonical_writer_thread_operation_receipts'",
+      ).get()).toBeNull();
     });
   });
 });
