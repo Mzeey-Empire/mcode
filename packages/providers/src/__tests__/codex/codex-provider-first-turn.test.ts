@@ -80,8 +80,8 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
 });
 
 import { BrowserAutomationSessionLease, CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
-import { AgentEventSchema, AgentEventType } from "@mcode/contracts";
-import type { ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate } from "@mcode/contracts";
+import { AgentEventSchema, AgentEventType, ProviderRuntimeEventSchema } from "@mcode/contracts";
+import type { ProviderFileMutationStart, ProviderRuntimeEvent, ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts";
 import type { ProviderEventBatch, ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "../../host-ports.js";
 
 const schemaValidExecutionId = "00000000-0000-4000-8000-000000000001";
@@ -92,6 +92,13 @@ const acceptedEventReceipt: ProviderEventSubmissionReceipt = {
   },
   delivery: { ingress: "queued" },
 };
+
+function submittedRuntimeEvents(batches: readonly ProviderEventBatch[]): ProviderRuntimeEvent[] {
+  return batches.flatMap((batch) => batch.events.flatMap((draft) => {
+    if (draft.payload.type !== "item.recorded" || draft.payload.item.payload.projection !== "providerRuntimeEvent") return [];
+    return [ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent)];
+  }));
+}
 
 function makeProvider(
   catalogService: {
@@ -717,6 +724,174 @@ describe("CodexProvider first turn on new session", () => {
 
     expect(legacy.some((event) => event.event.type === AgentEventType.TextDelta)).toBe(true);
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps native child progress in the parent's canonical stream through parent completion", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    await provider.sendTurn({
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const server = appServers[0];
+    if (!server) throw new Error("Expected native app-server session");
+    server.emit("notification", {
+      method: "item/started",
+      params: { threadId: "sdk-thread-1", turnId: "turn-test-id", item: {
+        type: "subAgentActivity", id: "spawn-child", kind: "started",
+        agentThreadId: "native-child", agentPath: "/root/worker",
+      } },
+    });
+    server.emit("notification", {
+      method: "turn/started", params: { threadId: "native-child", turn: { id: "child-turn" } },
+    });
+    server.emit("notification", {
+      method: "item/agentMessage/delta", params: {
+        threadId: "native-child", turnId: "child-turn", itemId: "child-message", delta: "Child answer",
+      },
+    });
+    server.emit("notification", {
+      method: "turn/completed", params: { threadId: "native-child", turn: { id: "child-turn", status: "completed" } },
+    });
+    server.emit("notification", {
+      method: "item/agentMessage/delta", params: {
+        threadId: "sdk-thread-1", turnId: "turn-test-id", itemId: "parent-message", delta: "Parent continues",
+      },
+    });
+    server.emit("notification", {
+      method: "turn/completed", params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
+    });
+    const runtimeEvents = () => submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch));
+    await vi.waitFor(() => expect(runtimeEvents().at(-1)?.event.type).toBe(AgentEventType.Ended));
+
+    const childEvents = runtimeEvents().filter((event) => event.extension?.child);
+    expect(childEvents.map((event) => event.event.type)).toEqual([
+      AgentEventType.TurnStarted, AgentEventType.TextDelta, AgentEventType.TurnComplete,
+    ]);
+    expect(childEvents).toContainEqual(expect.objectContaining({
+      deliveryAttempt: 2,
+      event: { type: AgentEventType.TextDelta, threadId, turnExecutionId: schemaValidExecutionId,
+        delta: "Child answer", isFinalResponse: false },
+      extension: expect.objectContaining({ child: expect.objectContaining({
+        nativeThreadId: "native-child", nativeTurnId: "child-turn", parentCollaborationItemId: "spawn-child",
+      }) }),
+    }));
+    expect(runtimeEvents().filter((event) => !event.extension?.child && event.event.type === AgentEventType.TextDelta)
+      .map((event) => event.event.delta)).toEqual(["Parent continues"]);
+    expect(runtimeEvents().filter((event) => !event.extension?.child && event.event.type === AgentEventType.TurnComplete))
+      .toHaveLength(1);
+    expect(legacy.filter((event) => event.extension?.child)).toEqual([]);
+    expect(submit.mock.calls.every(([batch]) => batch.executionId === schemaValidExecutionId
+      && batch.threadId === threadId && batch.turnId === "test-turn" && batch.deliveryAttempt === 2)).toBe(true);
+  });
+
+  it("rejects stale child callbacks after replacing a canonical delivery attempt", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    sendTurnMock.mockResolvedValueOnce("native-attempt-1").mockResolvedValueOnce("native-attempt-2");
+    const request: TurnRequest<"codex"> = {
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 1,
+      sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto",
+    };
+    const childProgress = (server: (typeof appServers)[number], nativeParentTurnId: string, delta: string) => {
+      server.emit("notification", {
+        method: "item/started", params: { threadId: "sdk-thread-1", turnId: nativeParentTurnId, item: {
+          type: "subAgentActivity", id: "spawn-child", kind: "started",
+          agentThreadId: "native-child", agentPath: "/root/worker",
+        } },
+      });
+      server.emit("notification", {
+        method: "turn/started", params: { threadId: "native-child", turn: { id: "child-turn" } },
+      });
+      server.emit("notification", {
+        method: "item/agentMessage/delta", params: {
+          threadId: "native-child", turnId: "child-turn", itemId: "child-message", delta,
+        },
+      });
+    };
+
+    await provider.sendTurn(request);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const firstServer = appServers[0];
+    if (!firstServer) throw new Error("Expected first native app-server session");
+    childProgress(firstServer, "native-attempt-1", "First child");
+    await provider.waitForCanonicalTurnEvents({
+      threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 1,
+    });
+    await provider.discardSession(sessionId);
+    await provider.sendTurn({ ...request, deliveryAttempt: 2, resumeFrom: undefined });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const retryServer = appServers[1];
+    if (!retryServer) throw new Error("Expected retry native app-server session");
+    childProgress(firstServer, "native-attempt-1", "Stale child");
+    childProgress(retryServer, "native-attempt-2", "Retry child");
+    await provider.waitForCanonicalTurnEvents({
+      threadId, turnId: "test-turn", executionId: schemaValidExecutionId, deliveryAttempt: 2,
+    });
+
+    expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))
+      .filter((event) => event.extension?.child && event.event.type === AgentEventType.TextDelta)
+      .map((event) => ({ delta: event.event.delta, attempt: event.deliveryAttempt }))).toEqual([
+      { delta: "First child", attempt: 1 }, { delta: "Retry child", attempt: 2 },
+    ]);
+    await provider.shutdown();
+  });
+
+  it("owns a later turn's unlinked native thread notice through its active canonical stream", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
+      .mockResolvedValue(acceptedEventReceipt);
+    const provider = makeProvider(undefined, new BrowserAutomationSessionLease(), undefined, { submit });
+    const legacy: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => legacy.push(event));
+    provider.setCanonicalTurnEventDeliveryEnabled(true);
+    const request: TurnRequest<"codex"> = {
+      turnId: "test-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2,
+      sessionId, workspaceId: "workspace-test", threadId, message: "delegate", cwd: process.cwd(),
+      model: "gpt-5.4", interactionMode: "build", providerOptions: {}, permissionMode: "auto",
+    };
+    await provider.sendTurn(request);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const server = appServers[0];
+    if (!server) throw new Error("Expected native app-server session");
+    server.emit("notification", {
+      method: "turn/completed", params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
+    });
+    await vi.waitFor(() => expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)).at(-1)?.event.type)
+      .toBe(AgentEventType.Ended));
+    const nextExecutionId = "00000000-0000-4000-8000-000000000002";
+    sendTurnMock.mockResolvedValueOnce("next-native-turn");
+    await provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: nextExecutionId });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    server.emit("notification", {
+      method: "mcpServer/startupStatus/updated", params: { threadId: "unlinked-child", name: "native-mcp", status: "ready" },
+    });
+    server.emit("notification", {
+      method: "mcpServer/startupStatus/updated", params: {
+        threadId: "unlinked-child", turnId: "turn-test-id", name: "stale-mcp", status: "ready",
+      },
+    });
+    await provider.waitForCanonicalTurnEvents({
+      threadId, turnId: "next-turn", executionId: nextExecutionId, deliveryAttempt: 2,
+    });
+
+    expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch))).toContainEqual(expect.objectContaining({
+      deliveryAttempt: 2,
+      event: expect.objectContaining({ type: AgentEventType.System, threadId, turnExecutionId: nextExecutionId,
+        subtype: "provider.notice.unknown-event", systemNotice: expect.objectContaining({ origin: "unattributed-thread" }) }),
+    }));
+    expect(submittedRuntimeEvents(submit.mock.calls.map(([batch]) => batch)).filter((event) =>
+      event.event.type === AgentEventType.System && event.event.subtype === "provider.notice.unknown-event")).toHaveLength(1);
+    expect(legacy.filter((event) => event.event.type === AgentEventType.System
+      && event.event.subtype === "provider.notice.unknown-event")).toEqual([]);
   });
 
   it("fences duplicate parent Ended callbacks for an owned attempt", async () => {

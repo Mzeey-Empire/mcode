@@ -4,6 +4,7 @@ import type { Message } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
 import { ConversationDisplayMaterializer } from "../conversation-display-materializer.js";
+import { CanonicalConversationProjectionReader } from "../../../canonical/canonical-conversation-projection-reader.js";
 
 const NOW = "2026-09-22T10:00:00.000Z";
 const THREAD_ID = "thread-1";
@@ -108,6 +109,67 @@ describe("ConversationDisplayMaterializer", () => {
 
   afterEach(() => {
     db.close();
+  });
+
+  it.each(["Completed", "Cancelled", "Interrupted", "Errored"])("reveals a provider child answer only after its exact turn is %s", (status) => {
+    db.prepare("DELETE FROM canonical_agent_ingest_checkpoints").run();
+    db.prepare("UPDATE canonical_agent_threads SET parent_thread_id = 'parent', owning_parent_thread_id = 'parent'").run();
+    db.prepare("UPDATE canonical_agent_turns SET status = 'Running', trigger_json = '{\"kind\":\"child\"}'").run();
+    insertItem(db, "prompt", { projection: "message", message: message("prompt-1", "user", 1) });
+    insertItem(db, "answer", { projection: "message", message: message("assistant-1", "assistant", 2) });
+    insertItem(db, "reasoning", { projection: "codexChildReasoning", nativeItemId: "reasoning", content: "Thinking" });
+    db.prepare("UPDATE canonical_agent_items SET kind = 'reasoning' WHERE id = 'reasoning'").run();
+    seedCanonicalTurn(db, THREAD_ID, "other-turn", "other-execution");
+    const materializer = new ConversationDisplayMaterializer(db);
+    const reader = new CanonicalConversationProjectionReader(db);
+    materializer.materializeItems(["prompt", "answer", "reasoning"]);
+    expect(reader.load(THREAD_ID, 20).messages.map((entry) => entry.id)).toEqual(["prompt-1"]);
+    expect(db.prepare("SELECT id FROM messages").all()).toEqual([{ id: "prompt-1" }]);
+    expect(db.prepare("SELECT message_id FROM thought_segments").all()).toEqual([{ message_id: "prompt-1" }]);
+
+    db.prepare("UPDATE canonical_agent_turns SET status = ? WHERE id = ?").run(status, TURN_ID);
+    materializer.materializeItems(["answer"]);
+    expect(reader.load(THREAD_ID, 20).messages.map((entry) => entry.id)).toEqual(["prompt-1", "assistant-1"]);
+    expect(db.prepare("SELECT id FROM messages ORDER BY sequence").all()).toEqual([{ id: "prompt-1" }, { id: "assistant-1" }]);
+    expect(db.prepare("SELECT message_id FROM thought_segments").all()).toEqual([{ message_id: "assistant-1" }]);
+    expect(reader.load(THREAD_ID, 20).narrativeByMessage["assistant-1"]?.thoughts.map((entry) => entry.text)).toEqual(["Thinking"]);
+  });
+
+  it("backfills a completed provider child answer after the startup cursor passed its hidden message", async () => {
+    db.prepare("DELETE FROM canonical_agent_ingest_checkpoints").run();
+    db.prepare("UPDATE canonical_agent_threads SET parent_thread_id = 'parent', owning_parent_thread_id = 'parent'").run();
+    db.prepare("UPDATE canonical_agent_turns SET status = 'Running', trigger_json = '{\"kind\":\"child\"}'").run();
+    insertItem(db, "prompt", { projection: "message", message: message("prompt-1", "user", 1) });
+    insertItem(db, "answer", { projection: "message", message: message("assistant-1", "assistant", 2) });
+    insertItem(db, "reasoning", { projection: "codexChildReasoning", nativeItemId: "reasoning", content: "Thinking" });
+    db.prepare("UPDATE canonical_agent_items SET kind = 'reasoning' WHERE id = 'reasoning'").run();
+    await new ConversationDisplayMaterializer(db).runToCompletion();
+    const cursor = db.prepare("SELECT last_source_created_at, last_source_id FROM conversation_display_materialization_state WHERE id = 1").get();
+    expect(db.prepare("SELECT id FROM messages").all()).toEqual([{ id: "prompt-1" }]);
+    db.prepare("UPDATE canonical_agent_turns SET status = 'Completed'").run();
+
+    await new ConversationDisplayMaterializer(db).runToCompletion();
+    expect(db.prepare("SELECT id FROM messages ORDER BY sequence").all()).toEqual([{ id: "prompt-1" }, { id: "assistant-1" }]);
+    expect(db.prepare("SELECT message_id FROM thought_segments").all()).toEqual([{ message_id: "assistant-1" }]);
+    expect(db.prepare("SELECT last_source_created_at, last_source_id FROM conversation_display_materialization_state WHERE id = 1").get()).toEqual(cursor);
+    await new ConversationDisplayMaterializer(db).runToCompletion();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_conversation_display_mappings").get()).toEqual({ count: 3 });
+  });
+
+  it.each([
+    { scope: "parent without a checkpoint", parentId: null, trigger: "user", checkpoint: false },
+    { scope: "worker child awaiting its checkpoint", parentId: "parent", trigger: "child", checkpoint: true },
+    { scope: "owned thread without a child turn", parentId: "parent", trigger: "user", checkpoint: false },
+  ])("keeps a terminal $scope answer hidden", ({ parentId, trigger, checkpoint }) => {
+    if (checkpoint) db.prepare("UPDATE canonical_agent_ingest_checkpoints SET terminal_outcome = NULL").run();
+    else db.prepare("DELETE FROM canonical_agent_ingest_checkpoints").run();
+    db.prepare("UPDATE canonical_agent_threads SET parent_thread_id = ?, owning_parent_thread_id = ?").run(parentId, parentId);
+    db.prepare("UPDATE canonical_agent_turns SET trigger_json = ?").run(JSON.stringify({ kind: trigger }));
+    insertItem(db, "answer", { projection: "message", message: message("assistant-1", "assistant", 2) });
+
+    new ConversationDisplayMaterializer(db).materializeItems(["answer"]);
+    expect(db.prepare("SELECT id FROM messages").all()).toEqual([]);
+    expect(new CanonicalConversationProjectionReader(db).load(THREAD_ID, 20).messages).toEqual([]);
   });
 
   it("resolves a repeated terminal message once while preserving every bound tool record", () => {

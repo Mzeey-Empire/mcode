@@ -8,6 +8,7 @@ import { AcceptedCanonicalAgentEventEnvelopeSchema, AgentEventType, type ParentN
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import { CanonicalAgentWriterReceipts } from "../canonical-agent-writer-receipts.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 import { AgentEventPublicationRegistry } from "../../orchestration/agent-event-publication-registry.js";
@@ -196,6 +197,33 @@ describe("canonical SQLite writer", () => {
     await expect(writer.appendAccepted("accepted:wrong-next", { ...input, contentHash: "b".repeat(64), events: [{ ...accepted,
       eventId: "accepted:other", acceptedSequence: accepted.acceptedSequence + 1 }] }))
       .rejects.toThrow();
+  });
+
+  it("reserves the receipt writer before a peer can invalidate its read snapshot", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const input = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+      phase: "running", events: events() };
+    const receipt = await writer.commit("receipt-lock:start", input);
+    const peer = openDatabase({ dbPath });
+    peer.run("PRAGMA busy_timeout = 0");
+    try {
+      let peerFailure: unknown;
+      const receipts = new CanonicalAgentWriterReceipts(db);
+      const response = receipts.execute({ kind: "commit", requestId: "receipt-lock:request",
+        operationId: "receipt-lock:append", executionId: EXECUTION_ID, input }, () => {
+        try {
+          peer.prepare("UPDATE threads SET title = ? WHERE id = ?").run("Peer update", THREAD_ID);
+        } catch (error) { peerFailure = error; }
+        return { kind: "committed", requestId: "receipt-lock:request", operationId: "receipt-lock:append",
+          executionId: EXECUTION_ID, receipt };
+      });
+      expect(response.kind).toBe("committed");
+      expect(peerFailure).toMatchObject({ code: "SQLITE_BUSY" });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
+        .get("receipt-lock:append")).toEqual({ count: 1 });
+      peer.prepare("UPDATE threads SET title = ? WHERE id = ?").run("Peer update", THREAD_ID);
+      expect(db.prepare("SELECT title FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ title: "Peer update" });
+    } finally { peer.close(true); }
   });
 
   it("recovers one durable live publication identity after a file-backed writer loses its reply", async () => {

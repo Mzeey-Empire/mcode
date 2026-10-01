@@ -81,6 +81,37 @@ function noticeMessage(id: string, sequence: number, overrides: Partial<Message>
 }
 
 describe("prepareAcceptedFeatureObservations", () => {
+  it("preserves exact child publications without applying their notices or context to the parent", () => {
+    const childThread: AgentThread = { ...thread, id: "child-thread", parentThreadId: thread.id, owningParentThreadId: thread.id };
+    const childTurn: AgentTurn = { ...turn, id: "child-turn", threadId: childThread.id,
+      executionId: "00000000-0000-4000-8000-000000000002" };
+    for (const fields of [
+      { type: "system", subtype: "provider.session.started", systemNotice: { kind: "diagnostic", presentation: "timeline",
+        scope: "session", sessionId: "child-session" } },
+      { type: "system", subtype: "provider.notice.warning", message: "Child warning", systemNotice: {
+        kind: "warning", presentation: "timeline", scope: "session", sessionId: "child-session" } },
+      { type: "contextEstimate", tokensIn: 900, totalProcessedTokens: 1200, contextWindow: 1000 },
+      { type: "compacting", active: true },
+    ]) {
+      const source = event({ ...fields, threadId: childThread.id, turnExecutionId: childTurn.executionId });
+      const op: ExecutionSemanticOperation = { ...operation(), mutation: {
+        kind: "append-events", phase: "running", nativeCursor: null, events: [],
+      }, livePublication: [{ after: "writer", event: source }] };
+      const input = { ...base, operation: op, items: {}, childPublicationOwners: [{ thread: childThread, turn: childTurn }] };
+      expect(prepareAcceptedFeatureObservations(input)).toEqual({ events: [], publications: op.livePublication });
+      expect(() => prepareAcceptedFeatureObservations({ ...input, childPublicationOwners: [] }))
+        .toThrow("exact execution ownership");
+      expect(() => prepareAcceptedFeatureObservations({ ...input, childPublicationOwners: [{ thread: childThread,
+        turn: { ...childTurn, executionId: execution.executionId } }] })).toThrow("exact execution ownership");
+      expect(() => prepareAcceptedFeatureObservations({ ...input, childPublicationOwners: [{
+        thread: { ...childThread, owningParentThreadId: "other-parent" }, turn: childTurn }] }))
+        .toThrow("exact execution ownership");
+      expect(() => prepareAcceptedFeatureObservations({ ...input, operation: { ...op,
+        mutation: { kind: "append-events", phase: "running", nativeCursor: null, events: [],
+          parentLive: { text: { kind: "unchanged" } } } } })).toThrow("parent feature effects");
+    }
+  });
+
   it("applies real update_plan task intents while preserving other groups and leaving accepted input untouched", () => {
     const original = board([{ id: "1", content: "Child task", status: "in_progress", group: "Child" },
       { content: "Old parent task", status: "pending" }]);

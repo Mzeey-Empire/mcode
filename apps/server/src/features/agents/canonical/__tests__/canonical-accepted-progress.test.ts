@@ -127,16 +127,28 @@ describe("accepted parent progress with the actual SQLite writer", () => {
       .toMatchObject({ nativeThreadId: "native-child", nativeTurnId: "native-turn", latestTurn: { status: "Running" } });
     expect(db.prepare("SELECT id FROM threads WHERE id = ?").get(childId)).toBeNull();
     expect((await send(4, { kind: "event", phase: "running", nativeCursor: null,
-      events: [familyDraft(3, "textDelta", { delta: "Child answer" }, { child: { ...evidence,
+      events: [familyDraft(3, "system", { subtype: "provider.notice.warning", message: "Child provider warning",
+        systemNotice: { kind: "warning", presentation: "timeline", scope: "session", sessionId: "child-session" } },
+      { child: evidence })] })).result.kind).toBe("accepted");
+    const childTurn = progress.loadSubagentStopTarget({ owningParentThreadId: execution.threadId, childThreadId: childId })?.latestTurn;
+    const childNotice = recovery().retained.find((envelope) => envelope.payload.type === "publication.recorded"
+      && envelope.payload.event.type === "system" && envelope.payload.event.message === "Child provider warning");
+    expect(childNotice).toMatchObject({ payload: { event: { threadId: childId, turnExecutionId: childTurn?.executionId } } });
+    expect((await send(5, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(4, "textDelta", { delta: "Child answer" }, { child: { ...evidence,
         nativeItemId: "child-message", itemEventKey: "delta" } })] })).result.kind).toBe("accepted");
     const beforeStop = progress.recover(childId, { conversationRevision: 0, rosterRevision: 0 });
     expect(beforeStop.ownerThreadId).toBe(execution.threadId);
     expect(beforeStop.retained.some((event) => event.payload.type === "collaboration.observed"
-      && event.payload.changes.some((change) => change.kind === "item-recorded" && change.item.threadId === childId))).toBe(true);
+      && event.payload.changes.some((change) => change.kind === "item-recorded" && change.item.threadId === childId
+        && JSON.stringify(change.item.payload).includes("Child answer")))).toBe(true);
     expect(progress.finishSubagentTurn({ childThreadId: childId, nativeTurnId: "native-turn",
       outcome: "interrupted", error: "Interrupted by user" })?.status).toBe("Interrupted");
-    expect((await send(5, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("codex", 4, "textDelta", { delta: "Parent continues", isFinalResponse: true })] })).result.kind).toBe("accepted");
+    expect((await send(6, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 5, "textDelta", { delta: "Parent continues", isFinalResponse: true })] })).result.kind).toBe("accepted");
+    expect((await send(7, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 6, "turnComplete")], terminalInput: { ...execution, providerId: "codex", providerIdentities: [],
+        outcome: "completed", projection: { kind: "writer-staged" } } })).result.kind).toBe("accepted");
     release?.();
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(db.prepare("SELECT id FROM threads WHERE id = ?").get(childId)).toEqual({ id: childId });
@@ -145,7 +157,46 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     const saved = new CanonicalAgentBoundary(db, () => {});
     expect(saved.loadSubagentStopTarget({ owningParentThreadId: execution.threadId, childThreadId: childId }))
       .toMatchObject({ latestTurn: { status: "Interrupted" } });
+    expect(saved.loadTurn(execution.turnId)?.status).toBe("Completed");
+    expect(saved.loadConversationProjection(childId, 20).messages.map((message) => message.content))
+      .toEqual(["Child task", "Child answer"]);
+    expect(db.prepare("SELECT role, content FROM messages WHERE thread_id = ? AND role <> 'system' ORDER BY sequence").all(childId))
+      .toEqual([{ role: "user", content: "Child task" }, { role: "assistant", content: "Child answer" }]);
+    const childPublication = db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE event_id = ?")
+      .get(`${lease.leaseId}:4:publication:0`);
+    expect(childPublication).toBeTruthy();
+    expect(saved.loadAcceptedFeatureSeed(execution.threadId).noticeSessionId).not.toBe("child-session");
     expect(progress.recover(childId, { conversationRevision: 0, rosterRevision: 0 }).retained).toEqual([]);
+  });
+
+  it("materializes a native child completion before the parent finishes without a child writer checkpoint", async () => {
+    await send(1, start("codex"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(1, "toolUse", { toolCallId: "spawn", toolName: "Agent", toolInput: {} },
+        { collaboration: { kind: "spawnAgent", receiverThreadIds: ["native-child"], prompt: "Child task" } })] });
+    const evidence = { nativeThreadId: "native-child", nativeTurnId: "native-turn", parentCollaborationItemId: "spawn" };
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(2, "turnStarted", {}, { child: evidence })] });
+    const childId = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId })?.active[0]?.id;
+    if (!childId) throw new Error("Expected accepted child roster");
+    await send(4, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(3, "textDelta", { delta: "Child answer" }, { child: { ...evidence,
+        nativeItemId: "child-message", itemEventKey: "delta" } })] });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const saved = new CanonicalAgentBoundary(db, () => {});
+    expect(saved.loadConversationProjection(childId, 20).messages.map((message) => message.content)).toEqual(["Child task"]);
+    expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").all(childId)).toEqual([]);
+    await send(5, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(4, "turnComplete", {}, { child: evidence })] });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+
+    expect(saved.loadLatestTurn(childId)?.status).toBe("Completed");
+    expect(saved.loadTurn(execution.turnId)?.status).toBe("Running");
+    expect(db.prepare("SELECT turn_id FROM canonical_agent_ingest_checkpoints WHERE thread_id = ?").all(childId)).toEqual([]);
+    expect(saved.loadConversationProjection(childId, 20).messages.map((message) => message.content))
+      .toEqual(["Child task", "Child answer"]);
+    expect(db.prepare("SELECT role, content FROM messages WHERE thread_id = ? ORDER BY sequence").all(childId))
+      .toEqual([{ role: "user", content: "Child task" }, { role: "assistant", content: "Child answer" }]);
   });
 
   it("accepts the native Devin final-prefix, later unknown narration and final completion sequence while saving is held", async () => {
