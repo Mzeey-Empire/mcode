@@ -42,7 +42,6 @@ const baseThread: Thread = {
   context_window_mode: null,
   thinking: null,
   codex_fast_mode: null,
-  copilot_agent: null,
   default_open_in_app: null,
   has_file_changes: false,
   parent_thread_id: null,

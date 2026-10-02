@@ -198,7 +198,6 @@ function snapshotDraftSelection(selection: ComposerAgentSelection): ThreadDraftS
     permissionMode: selection.permissionMode,
     orchestrationMode: selection.orchestrationMode,
     approvalReviewMode: selection.approvalReviewMode,
-    copilotAgent: selection.copilotAgent,
     thinking: selection.thinking,
   };
 }
@@ -749,7 +748,6 @@ export function useComposerFormController({
           : ORCHESTRATION_MODES.STANDARD),
       approvalReviewMode: session.approvalReviewMode ?? current.approvalReviewMode,
       permissionMode: session.permissionMode,
-      copilotAgent: session.copilotAgent,
       contextWindow: session.contextWindow,
       thinking: session.thinking,
       codexFastMode: session.codexFastMode,

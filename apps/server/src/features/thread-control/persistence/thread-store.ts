@@ -131,13 +131,12 @@ function rowToThreadPreferences(row: ThreadRow): Pick<Thread,
 }
 
 function rowToThreadProviderSettings(row: ThreadRow): Pick<Thread,
-  "thinking" | "codex_fast_mode" | "copilot_agent" | "devin_mode" | "default_open_in_app"
+  "thinking" | "codex_fast_mode" | "devin_mode" | "default_open_in_app"
 > {
   return {
     thinking: row.thinking == null ? null : row.thinking === 1,
     codex_fast_mode:
       row.codexFastMode == null ? null : row.codexFastMode === 1,
-    copilot_agent: (row.copilotAgent ?? null) as string | null,
     devin_mode: parseStoredDevinMode(row.devinMode),
     default_open_in_app: row.defaultOpenInApp ?? null,
   };
@@ -203,7 +202,6 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     context_window_mode: null,
     thinking: null,
     codex_fast_mode: null,
-    copilot_agent: null,
     devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: input.lineage?.parentThreadId ?? null,
@@ -315,7 +313,6 @@ type ThreadSettings = {
   context_window_mode?: ContextWindowMode | null;
   thinking?: boolean | null;
   codex_fast_mode?: boolean | null;
-  copilot_agent?: string | null;
   devin_mode?: string | null;
   default_open_in_app?: string | null;
 };
@@ -328,7 +325,6 @@ const TEXT_SETTING_COLUMNS = [
   ["orchestration_mode", "orchestrationMode"],
   ["permission_mode", "permissionMode"],
   ["context_window_mode", "contextWindowMode"],
-  ["copilot_agent", "copilotAgent"],
   ["devin_mode", "devinMode"],
   ["default_open_in_app", "defaultOpenInApp"],
 ] as const satisfies readonly (readonly [keyof ThreadSettings, keyof typeof threads.$inferInsert])[];

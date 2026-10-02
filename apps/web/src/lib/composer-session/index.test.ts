@@ -11,7 +11,6 @@ const globalDefaults = {
 const threadSettings = {
   interactionMode: INTERACTION_MODES.PLAN,
   permissionMode: PERMISSION_MODES.SUPERVISED,
-  copilotAgent: "code-review",
   contextWindow: "1m" as const,
   thinking: true,
   codexFastMode: false,
@@ -32,7 +31,6 @@ describe("resolveComposerSession", () => {
     expect(session.attachments).toEqual([]);
     expect(session.interactionMode).toBe(INTERACTION_MODES.BUILD);
     expect(session.permissionMode).toBe(PERMISSION_MODES.FULL);
-    expect(session.copilotAgent).toBeNull();
   });
 
   it("restores a saved draft with thread settings for mode fields", () => {
@@ -135,7 +133,6 @@ describe("resolveComposerSession", () => {
         reasoning_level: "high",
         interaction_mode: "build",
         permission_mode: "full",
-        copilot_agent: null,
         context_window_mode: null,
         thinking: null,
         codex_fast_mode: null,

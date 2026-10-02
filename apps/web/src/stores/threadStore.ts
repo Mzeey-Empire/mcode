@@ -437,7 +437,7 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode) => Promise<boolean>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode) => Promise<boolean>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
@@ -761,7 +761,6 @@ export function scheduleDrainAfterEdit(threadId: string): void {
             next.displayContent,
             next.reasoningLevel,
             next.provider,
-            next.copilotAgent,
             next.contextWindow,
             next.thinking,
             next.codexFastMode,
@@ -974,7 +973,6 @@ export function resolveWorkspaceThreadSettings(threadId: string): ThreadSettings
     reasoningLevel: thread.reasoning_level !== null
       ? (thread.reasoning_level as ReasoningLevel)
       : undefined,
-    copilotAgent: thread.copilot_agent,
     ...nullableThreadFields(thread),
   };
 }
@@ -2725,7 +2723,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     source: Partial<ThreadSettings>,
     target: Partial<ThreadSettings>,
   ): void => {
-    if ("copilotAgent" in source) target.copilotAgent = source.copilotAgent;
     if ("contextWindow" in source) target.contextWindow = source.contextWindow;
     if ("thinking" in source) target.thinking = source.thinking;
     if ("codexFastMode" in source) target.codexFastMode = source.codexFastMode;
@@ -2755,7 +2752,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     thread: ReturnType<typeof useWorkspaceStore.getState>["threads"][number],
     patch: Partial<ThreadSettings>,
   ) => {
-    if ("copilotAgent" in patch) thread = { ...thread, copilot_agent: patch.copilotAgent ?? null };
     if ("contextWindow" in patch) thread = { ...thread, context_window_mode: patch.contextWindow ?? null };
     if ("thinking" in patch) thread = { ...thread, thinking: patch.thinking ?? null };
     if ("devinMode" in patch) thread = { ...thread, devin_mode: patch.devinMode ?? null };
@@ -2787,7 +2783,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   });
 
   const nullableThreadSettingsPatch = (patch: Partial<ThreadSettings>) => ({
-    ...("copilotAgent" in patch ? { copilotAgent: patch.copilotAgent } : {}),
     ...("contextWindow" in patch ? { contextWindow: patch.contextWindow } : {}),
     ...("thinking" in patch ? { thinking: patch.thinking } : {}),
     ...("codexFastMode" in patch ? { codexFastMode: patch.codexFastMode } : {}),
@@ -3488,7 +3483,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode) => {
     conversationResidency.invalidateConversation(threadId);
 
     const { isControlCommand, runningBeforeControl } = prepareOutgoingTurn(threadId, content);
@@ -3518,7 +3513,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         reasoningLevel,
         provider: provider === undefined ? undefined : ProviderIdSchema.parse(provider),
         interactionMode,
-        copilotAgent,
         contextWindow,
         thinking,
         codexFastMode,
@@ -3991,7 +3985,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       undefined,
       reasoningLevel,
       provider,
-      undefined,
       contextWindow ?? undefined,
       thinking ?? undefined,
       undefined,

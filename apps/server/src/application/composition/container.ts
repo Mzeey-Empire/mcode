@@ -16,6 +16,8 @@ import { registerCodexProvider } from "../../features/providers/composition/code
 import { registerClaudeProvider } from "../../features/providers/composition/claude-provider-registration.js";
 import { CleanForker } from "../../features/handoff/index.js";
 import { registerCursorProvider } from "../../features/providers/composition/cursor-provider-registration.js";
+import { registerCopilotProvider } from "../../features/providers/composition/copilot-provider-registration.js";
+import { createCopilotLaunchPort } from "../../features/providers/composition/copilot-launch.js";
 import { registerDevinProvider } from "../../features/providers/composition/devin-provider-registration.js";
 import { CursorAdminUsageSource } from "../../features/providers/adapters/cursor/usage/cursor-admin-usage-source.js";
 import { CursorCliUsageEmailResolver } from "../../features/providers/adapters/cursor/usage/cursor-cli-usage-email.js";
@@ -277,6 +279,13 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
     },
   });
   container.registerInstance("CodexProvider", codexProvider);
+
+  const copilotHost = container.resolve<import("@mcode/providers").ProviderHostPorts>("ProviderHostPorts");
+  registerCopilotProvider(container, {
+    configuration: { cliPath: "copilot", idleSessionTtlMs: 10 * 60 * 1_000 },
+    host: copilotHost,
+    copilot: { launch: createCopilotLaunchPort(container.resolve(SettingsService), copilotHost) },
+  });
 
   const cursorSettings = container.resolve(SettingsService).get();
   // The usage email is auto-derived from the Cursor CLI (`about --format json`)

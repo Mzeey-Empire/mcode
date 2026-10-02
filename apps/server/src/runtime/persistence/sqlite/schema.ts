@@ -118,7 +118,6 @@ export const threads = sqliteTable(
     delegationCreationKind: text("delegation_creation_kind"),
     createdByIntegrationId: text("created_by_integration_id"),
     lastCompactSummary: text("last_compact_summary"),
-    copilotAgent: text("copilot_agent"),
     /** Devin-only: native session mode (normal|accept-edits|smart|bypass|plan). */
     devinMode: text("devin_mode"),
     contextWindowMode: text("context_window_mode"),

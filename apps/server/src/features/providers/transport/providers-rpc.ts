@@ -13,7 +13,6 @@ import type {
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
-import { discoverCopilotAgents } from "../adapters/copilot/copilot-agent-discovery.js";
 import type { ProviderAvailabilityService } from "../availability/provider-availability-service.js";
 import type {
   CodexCatalogRefreshResult,
@@ -37,7 +36,6 @@ type ProviderRpcMethod = Extract<
   | "provider.listModes"
   | "provider.getUsage"
   | "providers.listAvailability"
-  | "provider.copilotAgents"
 >;
 
 type ProviderIdParams = {
@@ -51,7 +49,6 @@ type ProviderRpcParamsByMethod = {
   "provider.listModes": ProviderIdParams;
   "provider.getUsage": ProviderIdParams;
   "providers.listAvailability": Record<never, never>;
-  "provider.copilotAgents": { workspaceId: string };
 };
 
 /** Defines the dependencies required by provider transport routes. */
@@ -93,7 +90,6 @@ const providerRpcHandlers: ProviderRpcHandlerMap = {
   },
   "provider.getUsage": (deps, params) => routeProviderUsage(deps, params.providerId),
   "providers.listAvailability": (deps) => deps.providerAvailability.listAvailability(),
-  "provider.copilotAgents": (deps, params) => routeCopilotAgents(deps, params.workspaceId),
 };
 
 /** Checks whether a method belongs to the Provider transport route family. */
@@ -307,10 +303,4 @@ function redactedUsageDiagnostic(error: unknown): string {
     .replace(/(token|api[_-]?key|authorization|password|secret)=\S+/gi, "$1=[redacted]")
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
     .slice(0, 240);
-}
-
-function routeCopilotAgents(deps: ProviderRouterDeps, workspaceId: string) {
-  const workspace = deps.workspaceService.findById(workspaceId);
-  if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
-  return discoverCopilotAgents(workspace.path, deps.runtime.platform);
 }

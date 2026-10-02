@@ -1,6 +1,5 @@
-import "reflect-metadata";
 import { describe, expect, it } from "vitest";
-import { buildCopilotInternalMcpServers } from "../copilot-provider.js";
+import { buildCopilotInternalMcpServers } from "../copilot-helpers.js";
 
 describe("Copilot internal MCP configuration", () => {
   it("serializes the remote HTTP server with all tools enabled", () => {

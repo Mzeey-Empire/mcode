@@ -507,7 +507,6 @@ function preserveIncompleteDraft(thread: WorkspaceThread, draft: ThreadDraftPayl
       permissionMode: thread.permission_mode ?? "full",
       orchestrationMode: thread.orchestration_mode ?? "standard",
       approvalReviewMode: "manual",
-      copilotAgent: thread.copilot_agent,
       thinking: thread.thinking,
     },
     target: {

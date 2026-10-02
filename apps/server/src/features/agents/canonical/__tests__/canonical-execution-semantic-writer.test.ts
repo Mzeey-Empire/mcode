@@ -12,6 +12,7 @@ import type { ParentAssistantTextCheckpointInput } from "../../turns/parent-assi
 import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
 import { TaskStore as TaskRepo } from "../../orchestration/persistence/task-store.js";
 import { CodexLiveEventReducer } from "../../execution/codex-live-event-reducer.js";
+import { OtherProviderLiveEventEffects } from "../../execution/provider-live-event-effects.js";
 import type { ExecutionSemanticOperation, ExecutionWorkCommand } from "../../execution/execution-worker-handler.js";
 import { ExecutionWorkerHandler } from "../../execution/execution-worker-handler.js";
 import { ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-store.js";
@@ -20,6 +21,7 @@ import { NarrativeRecoveryDelta } from "../../turns/narrative-recovery-delta.js"
 import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agent-store.js";
 import type { CodexSystemWriterIntent } from "../canonical-codex-system-error-projection.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
+import { CanonicalAcceptedEventWrite } from "../canonical-accepted-write.js";
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 import type { DataOnlyParentTurnStartInput } from "../canonical-parent-turn-write.js";
 
@@ -236,6 +238,34 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     reason: "The execution worker exited before its provider turn could be proved live.",
     recoveryIncidentId: "incident-1",
   };
+
+  it("persists accepted native Copilot system evidence without inventing feature effects", async () => {
+    db.prepare("UPDATE threads SET provider = 'copilot' WHERE id = ?").run(THREAD_ID);
+    const input = startInput(); input.thread.providerId = "copilot";
+    expect(await writer.transact(operation(1, { kind: "begin", providerId: "copilot", input }))).toMatchObject({ kind: "committed" });
+    const owner = new OtherProviderLiveEventEffects("copilot", execution, "user-1");
+    const canonical = new CanonicalAgentBoundary(db);
+    const accepted = new CanonicalAcceptedEventWrite(db, canonical, writer);
+    for (const [index, subtype] of ["copilot_native:session.start", "copilot_child:assistant.message", "copilot_idle"].entries()) {
+      const ordinal = index + 2;
+      const native: AgentEvent = { type: "system", threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, subtype };
+      const prepared = owner.prepare(native);
+      if (prepared.kind !== "prepared") throw new Error("Expected prepared native evidence");
+      expect(prepared.effects).toEqual({ text: { kind: "unchanged" }, systemIntents: [] });
+      const draft = { ...runtimeEvent(ordinal, native), sourceProviderId: "copilot" };
+      const op = { ...operation(ordinal, { kind: "append-events", phase: "running", nativeCursor: null, events: [draft], parentLive: prepared.effects }), livePublication: [prepared.publication] };
+      const baseRevision = canonical.loadThread(THREAD_ID)?.conversationRevision ?? 0;
+      const acceptedSequence = (canonical.loadCheckpoint(EXECUTION_ID)?.lastAcceptedSequence ?? 0) + 1;
+      const receipt = db.transaction(() => accepted.apply({ execution, phase: "running", nativeCursor: null, contentHash: "a".repeat(64), baseRevision,
+        predecessor: { epoch: EXECUTION_ID, sequence: index }, through: { epoch: EXECUTION_ID, sequence: index + 1 }, compatibility: op,
+        events: [{ ...draft, acceptedSequence, progressPosition: { epoch: EXECUTION_ID, sequence: index + 1 }, serverTimestamps: { acceptedAt: NOW } }],
+      }, op.operationId))();
+      expect(receipt.events).toHaveLength(1);
+    }
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE json_extract(envelope_json, '$.sourceProviderId') = 'copilot' AND event_id LIKE ?").get(`${EXECUTION_ID}:runtime-%`)).toEqual({ count: 3 });
+    expect(new MessageRepo(db).listIncludingInternal(THREAD_ID)).toEqual([expect.objectContaining({ role: "user", content: "Question" })]);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
 
   it("persists raw late hooks after terminal and releases their committed message identity", async () => {
     const operations: ExecutionSemanticOperation[] = [];

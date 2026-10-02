@@ -42,7 +42,6 @@ import type {
   PrDraft,
   CreatePrResult,
   ChecksStatus,
-  CopilotSubagent,
   DevinMode,
   GitRemoteUrl,
   PermissionDecision,
@@ -167,7 +166,7 @@ export type {
   CreateAndSendInput,
 } from "@mcode/contracts";
 
-export type { PaginatedMessages, ConversationPage, ConversationTail, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord, TurnSnapshot, CopilotSubagent } from "@mcode/contracts";
+export type { PaginatedMessages, ConversationPage, ConversationTail, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord, TurnSnapshot } from "@mcode/contracts";
 
 /** Server response containing detected certified and persisted custom profiles. */
 export interface TerminalProfileList {
@@ -488,7 +487,6 @@ export interface McodeTransport {
       interactionMode?: InteractionMode;
       orchestrationMode?: OrchestrationMode;
       permissionMode?: PermissionMode;
-      copilotAgent?: string | null;
       contextWindow?: ContextWindowMode | null;
       thinking?: boolean | null;
       codexFastMode?: boolean | null;
@@ -843,8 +841,6 @@ export interface McodeTransport {
   listProviderModes(providerId: string): Promise<string[] | null>;
   /** Fetch current usage/quota state for a provider. */
   getProviderUsage(providerId: string): Promise<ProviderUsageInfo>;
-  /** Fetches Copilot sub-agents available for the given workspace. */
-  listCopilotAgents(workspaceId: string): Promise<CopilotSubagent[]>;
   /** Fetch the current availability snapshot for all registered providers. */
   listProviderAvailability(): Promise<ProviderAvailability[]>;
 

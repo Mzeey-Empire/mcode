@@ -312,7 +312,6 @@ function updateThreadSettings(
     interactionMode?: string;
     orchestrationMode?: string;
     permissionMode?: string;
-    copilotAgent?: string | null;
     contextWindow?: Thread["context_window_mode"];
     thinking?: boolean | null;
     codexFastMode?: boolean | null;
@@ -324,7 +323,6 @@ function updateThreadSettings(
     interaction_mode: params.interactionMode,
     orchestration_mode: params.orchestrationMode,
     permission_mode: params.permissionMode,
-    copilot_agent: params.copilotAgent,
     context_window_mode: params.contextWindow,
     thinking: params.thinking,
     codex_fast_mode: params.codexFastMode,

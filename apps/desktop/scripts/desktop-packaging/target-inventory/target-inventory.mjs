@@ -271,7 +271,8 @@ export function resolveCopilotTargetPackagePlan(serverPackageRoot, platform, arc
     targetPlatform.platform
   ];
   const serverRequire = NodeModule.createRequire(NodePath.resolve(serverPackageRoot, "package.json"));
-  const sdkEntry = serverRequire.resolve("@github/copilot-sdk");
+  const providerRequire = NodeModule.createRequire(serverRequire.resolve("@mcode/providers"));
+  const sdkEntry = providerRequire.resolve("@github/copilot-sdk");
   const copilotPackageDir = NodePath.resolve(NodePath.dirname(sdkEntry), "..", "..", "..", "copilot");
   const packageName = copilotSdkPlatformPackageName(npmPlatform, arch);
   return planLockData(

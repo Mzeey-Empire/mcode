@@ -1,7 +1,6 @@
 import { instanceCachingFactory, Lifecycle, type DependencyContainer } from "tsyringe";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 
-import { CopilotProvider } from "../adapters/copilot/copilot-provider.js";
 import { OpenCodeProvider } from "../adapters/opencode/opencode-provider.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { createProviderHostPorts } from "./provider-host-ports.js";
@@ -38,14 +37,6 @@ export function registerProviderAdapters(container: DependencyContainer): void {
     PROVIDER_EVENT_INGRESS_DIAGNOSTIC_SINK,
     { useValue: logProviderEventIngressDiagnostic },
   );
-  container.register(
-    CopilotProvider,
-    { useClass: CopilotProvider },
-    { lifecycle: Lifecycle.Singleton },
-  );
-  container.register("IAgentProvider", {
-    useFactory: (c) => c.resolve(CopilotProvider),
-  });
   container.register(
     OpenCodeProvider,
     { useClass: OpenCodeProvider },

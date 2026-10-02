@@ -308,7 +308,8 @@ export function resolveCopilotSdkSources(serverPackageRoot, platform, arch) {
   const binName = platform === "win32" ? "copilot.exe" : "copilot";
   try {
     const serverRequire = NodeModule.createRequire(NodePath.resolve(serverPackageRoot, "package.json"));
-    const sdkEntry = serverRequire.resolve("@github/copilot-sdk");
+    const providerRequire = NodeModule.createRequire(serverRequire.resolve("@mcode/providers"));
+    const sdkEntry = providerRequire.resolve("@github/copilot-sdk");
     const sdkRequire = NodeModule.createRequire(sdkEntry);
     const copilotPackageDir = NodeFS.realpathSync(NodePath.resolve(NodePath.dirname(sdkEntry), "..", "..", "..", "copilot"));
     const platformPackageDir = resolveCopilotSdkPlatformPackageDir(

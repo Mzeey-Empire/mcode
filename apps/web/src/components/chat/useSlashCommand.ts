@@ -172,7 +172,7 @@ interface UseSlashCommandOptions {
   workspaceId?: string;
   /** Thread whose worktree path scopes provider discovery. */
   threadId?: string;
-  /** Provider ID used to scope skill loading and filter built-in commands (e.g., hides /plan for "copilot"). */
+  /** Provider ID used to scope skill loading and resolve built-in capabilities. */
   providerId?: string;
   /** Model ID used to resolve model-specific composer capabilities. */
   modelId?: string;

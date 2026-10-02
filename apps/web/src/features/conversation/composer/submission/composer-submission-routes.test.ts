@@ -112,7 +112,6 @@ describe("dispatchComposerTarget selected-text comments", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       "",
       [],
       undefined,

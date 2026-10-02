@@ -22,7 +22,6 @@ const selection: ThreadDraftSelection = {
   permissionMode: PERMISSION_MODES.FULL,
   orchestrationMode: ORCHESTRATION_MODES.STANDARD,
   approvalReviewMode: "manual",
-  copilotAgent: null,
   thinking: null,
 };
 
@@ -66,6 +65,40 @@ describe("threadDraftStore", () => {
     const stored = JSON.parse(localStorage.getItem("mcode-thread-drafts") ?? "{}");
     expect(stored.state.drafts[id!].draft.input).toBe("unsent message");
     expect(stored.state.drafts[id!].workspaceId).toBe("ws-1");
+  });
+
+  it("restores legacy Copilot drafts while discarding the retired agent selection", async () => {
+    const legacyDraft = {
+      id: "legacy-copilot",
+      workspaceId: "ws-1",
+      createdAt: 100,
+      updatedAt: 200,
+      draft: { ...composerDraft, provider: "copilot", modelId: "gpt-4.1" },
+      selection: { ...selection, copilotAgent: "code-review", thinking: true },
+      target,
+    };
+    localStorage.setItem("mcode-thread-drafts", JSON.stringify({
+      version: 1,
+      state: { drafts: { [legacyDraft.id]: legacyDraft } },
+    }));
+
+    await useThreadDraftStore.persist.rehydrate();
+
+    const restored = useThreadDraftStore.getState().drafts[legacyDraft.id];
+    expect(restored).toEqual({
+      ...legacyDraft,
+      draft: expect.objectContaining(legacyDraft.draft),
+      selection: { ...selection, thinking: true },
+    });
+    expect(restored.selection).not.toHaveProperty("copilotAgent");
+
+    useThreadDraftStore.getState().saveDraft({
+      ...restored,
+      draft: { ...restored.draft, input: "continue the saved draft" },
+    });
+    const persisted = JSON.parse(localStorage.getItem("mcode-thread-drafts") ?? "{}");
+    expect(persisted.state.drafts[legacyDraft.id].selection).toEqual({ ...selection, thinking: true });
+    expect(persisted.state.drafts[legacyDraft.id].draft.input).toBe("continue the saved draft");
   });
 
   it("removes the entity when the draft empties and ignores fresh empty saves", () => {

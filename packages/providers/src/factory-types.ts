@@ -26,6 +26,7 @@ export interface ProviderFactoryInput {
   cursor?: CursorProviderPorts;
   devin?: DevinProviderPorts;
   claude?: ClaudeProviderPorts;
+  copilot?: CopilotProviderPorts;
 }
 
 /** Narrow generation operation composed with the server's handoff policy. */
@@ -54,6 +55,18 @@ export type ClaudeProviderBoundary = IGoalCapable & ISessionEvictable & IComplet
   waitForSessionExit(sessionId: string, timeoutMs?: number): Promise<void>;
   setPlanAnswerMode(threadId: string, enabled: boolean): void;
   setCanonicalTurnDeliveryFailureHandler(handler: (routing: ClaudeCanonicalEventRouting, error: Error) => void | Promise<void>): void;
+};
+
+/** Normalized launch data supplied by the server's CLI discovery authority. */
+export interface CopilotProviderPorts {
+  launch: {
+    resolve(): Promise<{ cliPath: string; env: Record<string, string>; githubToken?: string }>;
+  };
+}
+
+/** Usable Copilot Provider returned by its public factory. */
+export type CopilotProviderBoundary = IAgentProvider & ProviderBoundary & {
+  setCanonicalTurnDeliveryFailureHandler(handler: (routing: { threadId: string; turnId: string; executionId: string; deliveryAttempt: number }, error: Error) => Promise<void>): void;
 };
 
 /** Server-owned authorities required by the Codex Provider. */

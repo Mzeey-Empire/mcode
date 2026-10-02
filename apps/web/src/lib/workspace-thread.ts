@@ -56,7 +56,6 @@ type PlaceholderWorkspaceThreadParams = {
   contextWindow?: ContextWindowMode | null;
   thinking?: boolean | null;
   codexFastMode?: boolean | null;
-  copilotAgent?: string | null;
   devinMode?: Thread["devin_mode"];
   parentThreadId?: string | null;
   forkedFromMessageId?: string | null;
@@ -91,7 +90,6 @@ function resolveProviderOptionFields(params: PlaceholderWorkspaceThreadParams) {
     context_window_mode: params.contextWindow ?? null,
     thinking: params.thinking ?? null,
     codex_fast_mode: params.codexFastMode ?? null,
-    copilot_agent: params.copilotAgent ?? null,
     devin_mode: params.devinMode ?? null,
     parent_thread_id: params.parentThreadId ?? null,
     forked_from_message_id: params.forkedFromMessageId ?? null,

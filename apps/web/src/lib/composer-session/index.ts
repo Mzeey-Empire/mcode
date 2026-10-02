@@ -32,7 +32,6 @@ export interface ComposerSession {
   reasoning: ReasoningLevel;
   interactionMode: InteractionMode;
   permissionMode: PermissionMode;
-  copilotAgent: string | null;
   contextWindow: ContextWindowMode | null;
   thinking: boolean | null;
   codexFastMode: boolean | null;
@@ -50,7 +49,6 @@ export interface ResolveComposerSessionInput {
   threadSettings: {
     interactionMode: InteractionMode;
     permissionMode: PermissionMode;
-    copilotAgent: string | null;
     contextWindow: ContextWindowMode | null;
     thinking: boolean | null;
     codexFastMode: boolean | null;
@@ -118,7 +116,6 @@ function buildDefaultComposerSession(
         ? INTERACTION_MODES.PLAN
         : INTERACTION_MODES.BUILD,
     permissionMode: defaults.permissionMode,
-    copilotAgent: null,
     contextWindow: null,
     thinking: null,
     codexFastMode: null,
@@ -149,7 +146,6 @@ export function buildSavedComposerSession(
     reasoning: normalizeReasoningLevel(saved.provider, saved.modelId, saved.reasoning),
     interactionMode: threadSettings.interactionMode,
     permissionMode: threadSettings.permissionMode,
-    copilotAgent: threadSettings.copilotAgent,
     contextWindow: threadSettings.contextWindow,
     thinking: threadSettings.thinking,
     codexFastMode: resolveSavedCodexFastMode(saved.codexFastMode, threadSettings.codexFastMode),
@@ -211,9 +207,8 @@ function flagOrNull<T>(value: T | null | undefined): T | null {
 
 function buildThreadFlags(
   threadRow: WorkspaceThread | undefined,
-): Pick<ComposerSession, "copilotAgent" | "contextWindow" | "thinking" | "codexFastMode" | "devinMode"> {
+): Pick<ComposerSession, "contextWindow" | "thinking" | "codexFastMode" | "devinMode"> {
   return {
-    copilotAgent: flagOrNull(threadRow?.copilot_agent),
     contextWindow: flagOrNull(threadRow?.context_window_mode as ContextWindowMode | null | undefined),
     thinking: flagOrNull(threadRow?.thinking),
     codexFastMode: flagOrNull(threadRow?.codex_fast_mode),

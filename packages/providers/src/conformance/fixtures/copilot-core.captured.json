@@ -1,0 +1,642 @@
+{
+  "contractVersion": 1,
+  "providerId": "copilot",
+  "cliVersion": "1.0.25",
+  "protocolVersion": "sdk-0.2.2",
+  "provenance": "captured",
+  "requiredProfiles": [
+    "core",
+    "build",
+    "plan",
+    "completion",
+    "permissions",
+    "usage",
+    "session-eviction",
+    "clean-fork",
+    "browser-access",
+    "thread-control"
+  ],
+  "scenario": "native SDK discovered child, ordinary follow-up, replay and abort evidence",
+  "sourceHash": "9ed97cd453c1de4006328c9989232bca0adf97380f5b6dc49e28797924e9504d",
+  "redaction": {
+    "reviewed": true,
+    "removedFields": [
+      "prompt",
+      "response",
+      "environment",
+      "tool output",
+      "absolute paths",
+      "native prompts and tool data replaced with fixed placeholders",
+      "raw-source-sha256:87e96984a7c951e2f3f82c6881e6360cf09799dc834a9beff2092bc1ca803ec1"
+    ]
+  },
+  "input": {
+    "events": [
+      {
+        "kind": "turn",
+        "sequence": 1,
+        "nativeId": "EVENT_2"
+      },
+      {
+        "kind": "item",
+        "sequence": 2,
+        "nativeId": "EVENT_5"
+      },
+      {
+        "kind": "item",
+        "sequence": 3,
+        "nativeId": "EVENT_7",
+        "pairId": "TOOL_6",
+        "status": "started"
+      },
+      {
+        "kind": "item",
+        "sequence": 4,
+        "nativeId": "EVENT_10"
+      },
+      {
+        "kind": "item",
+        "sequence": 5,
+        "nativeId": "EVENT_12"
+      },
+      {
+        "kind": "item",
+        "sequence": 6,
+        "nativeId": "EVENT_13"
+      },
+      {
+        "kind": "item",
+        "sequence": 7,
+        "nativeId": "EVENT_14",
+        "pairId": "TOOL_6",
+        "status": "completed"
+      },
+      {
+        "kind": "turn",
+        "sequence": 8,
+        "nativeId": "EVENT_15"
+      },
+      {
+        "kind": "turn",
+        "sequence": 9,
+        "nativeId": "EVENT_17"
+      },
+      {
+        "kind": "item",
+        "sequence": 10,
+        "nativeId": "EVENT_19"
+      },
+      {
+        "kind": "item",
+        "sequence": 11,
+        "nativeId": "EVENT_20"
+      },
+      {
+        "kind": "item",
+        "sequence": 12,
+        "nativeId": "EVENT_21"
+      },
+      {
+        "kind": "item",
+        "sequence": 13,
+        "nativeId": "EVENT_22"
+      },
+      {
+        "kind": "item",
+        "sequence": 14,
+        "nativeId": "EVENT_23"
+      },
+      {
+        "kind": "item",
+        "sequence": 15,
+        "nativeId": "EVENT_24"
+      },
+      {
+        "kind": "item",
+        "sequence": 16,
+        "nativeId": "EVENT_25"
+      },
+      {
+        "kind": "item",
+        "sequence": 17,
+        "nativeId": "EVENT_26"
+      },
+      {
+        "kind": "item",
+        "sequence": 18,
+        "nativeId": "EVENT_27"
+      },
+      {
+        "kind": "item",
+        "sequence": 19,
+        "nativeId": "EVENT_28"
+      },
+      {
+        "kind": "item",
+        "sequence": 20,
+        "nativeId": "EVENT_29"
+      },
+      {
+        "kind": "item",
+        "sequence": 21,
+        "nativeId": "EVENT_30"
+      },
+      {
+        "kind": "turn",
+        "sequence": 22,
+        "nativeId": "EVENT_31"
+      },
+      {
+        "kind": "terminal",
+        "sequence": 23,
+        "nativeId": "EVENT_32",
+        "status": "completed"
+      }
+    ],
+    "copilotNativeEvents": [
+      {
+        "type": "assistant.turn_start",
+        "id": "EVENT_2",
+        "parentId": "EVENT_3",
+        "timestamp": "2000-01-01T00:00:00.000Z",
+        "data": {
+          "turnId": "TURNID_1"
+        }
+      },
+      {
+        "type": "assistant.message",
+        "id": "EVENT_5",
+        "parentId": "EVENT_2",
+        "timestamp": "2000-01-01T00:00:01.000Z",
+        "data": {
+          "messageId": "MESSAGEID_4",
+          "content": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "tool.execution_start",
+        "id": "EVENT_7",
+        "parentId": "EVENT_5",
+        "timestamp": "2000-01-01T00:00:02.000Z",
+        "data": {
+          "toolCallId": "TOOL_6",
+          "toolName": "task",
+          "arguments": {}
+        }
+      },
+      {
+        "type": "subagent.started",
+        "id": "EVENT_10",
+        "parentId": "EVENT_7",
+        "timestamp": "2000-01-01T00:00:03.000Z",
+        "data": {
+          "toolCallId": "TOOL_6",
+          "agentName": "AGENT_8",
+          "agentDisplayName": "AGENT_8",
+          "agentDescription": "AGENT_9"
+        }
+      },
+      {
+        "type": "assistant.message",
+        "id": "EVENT_12",
+        "parentId": "EVENT_10",
+        "timestamp": "2000-01-01T00:00:04.000Z",
+        "data": {
+          "parentToolCallId": "TOOL_6",
+          "messageId": "MESSAGEID_11",
+          "content": "REDACTED_CHILD_CONTENT"
+        }
+      },
+      {
+        "type": "subagent.completed",
+        "id": "EVENT_13",
+        "parentId": "EVENT_12",
+        "timestamp": "2000-01-01T00:00:05.000Z",
+        "data": {
+          "toolCallId": "TOOL_6",
+          "agentName": "AGENT_8",
+          "agentDisplayName": "AGENT_8"
+        }
+      },
+      {
+        "type": "tool.execution_complete",
+        "id": "EVENT_14",
+        "parentId": "EVENT_13",
+        "timestamp": "2000-01-01T00:00:06.000Z",
+        "data": {
+          "toolCallId": "TOOL_6",
+          "success": true,
+          "result": {
+            "content": "REDACTED_TOOL_OUTPUT"
+          }
+        }
+      },
+      {
+        "type": "assistant.turn_end",
+        "id": "EVENT_15",
+        "parentId": "EVENT_14",
+        "timestamp": "2000-01-01T00:00:07.000Z",
+        "data": {
+          "turnId": "TURNID_1"
+        }
+      },
+      {
+        "type": "assistant.turn_start",
+        "id": "EVENT_17",
+        "parentId": "EVENT_15",
+        "timestamp": "2000-01-01T00:00:08.000Z",
+        "data": {
+          "turnId": "TURNID_16"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_19",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:09.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_20",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:10.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_21",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:11.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_22",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:12.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_23",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:13.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_24",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:14.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_25",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:15.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_26",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:16.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_27",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:17.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_28",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:18.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_29",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:19.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message",
+        "id": "EVENT_30",
+        "parentId": "EVENT_17",
+        "timestamp": "2000-01-01T00:00:20.000Z",
+        "data": {
+          "messageId": "MESSAGEID_18",
+          "content": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.turn_end",
+        "id": "EVENT_31",
+        "parentId": "EVENT_30",
+        "timestamp": "2000-01-01T00:00:21.000Z",
+        "data": {
+          "turnId": "TURNID_16"
+        }
+      },
+      {
+        "type": "session.idle",
+        "id": "EVENT_32",
+        "parentId": "EVENT_31",
+        "timestamp": "2000-01-01T00:00:22.000Z",
+        "ephemeral": true,
+        "data": {}
+      },
+      {
+        "type": "assistant.turn_start",
+        "id": "EVENT_33",
+        "parentId": "EVENT_34",
+        "timestamp": "2000-01-01T00:00:23.000Z",
+        "data": {
+          "turnId": "TURNID_1"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_36",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:24.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_37",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:25.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_38",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:26.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_39",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:27.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_40",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:28.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_41",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:29.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_42",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:30.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_43",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:31.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_44",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:32.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_45",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:33.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message_delta",
+        "id": "EVENT_46",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:34.000Z",
+        "ephemeral": true,
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "deltaContent": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.message",
+        "id": "EVENT_47",
+        "parentId": "EVENT_33",
+        "timestamp": "2000-01-01T00:00:35.000Z",
+        "data": {
+          "messageId": "MESSAGEID_35",
+          "content": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "assistant.turn_end",
+        "id": "EVENT_48",
+        "parentId": "EVENT_47",
+        "timestamp": "2000-01-01T00:00:36.000Z",
+        "data": {
+          "turnId": "TURNID_1"
+        }
+      },
+      {
+        "type": "session.idle",
+        "id": "EVENT_49",
+        "parentId": "EVENT_48",
+        "timestamp": "2000-01-01T00:00:37.000Z",
+        "ephemeral": true,
+        "data": {}
+      },
+      {
+        "type": "assistant.turn_start",
+        "id": "EVENT_50",
+        "parentId": "EVENT_51",
+        "timestamp": "2000-01-01T00:00:38.000Z",
+        "data": {
+          "turnId": "TURNID_1"
+        }
+      },
+      {
+        "type": "assistant.message",
+        "id": "EVENT_53",
+        "parentId": "EVENT_50",
+        "timestamp": "2000-01-01T00:00:39.000Z",
+        "data": {
+          "messageId": "MESSAGEID_52",
+          "content": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "tool.execution_start",
+        "id": "EVENT_55",
+        "parentId": "EVENT_53",
+        "timestamp": "2000-01-01T00:00:40.000Z",
+        "data": {
+          "toolCallId": "TOOL_54",
+          "toolName": "powershell",
+          "arguments": {}
+        }
+      },
+      {
+        "type": "abort",
+        "id": "EVENT_56",
+        "parentId": "EVENT_55",
+        "timestamp": "2000-01-01T00:00:41.000Z",
+        "data": {
+          "reason": "REDACTED_CONTENT"
+        }
+      },
+      {
+        "type": "session.idle",
+        "id": "EVENT_57",
+        "parentId": "EVENT_56",
+        "timestamp": "2000-01-01T00:00:42.000Z",
+        "ephemeral": true,
+        "data": {
+          "aborted": true
+        }
+      }
+    ]
+  },
+  "expected": {
+    "orderedKinds": [
+      "turn",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "turn",
+      "turn",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "turn",
+      "terminal"
+    ],
+    "terminal": "completed",
+    "toolPairs": [
+      [
+        "TOOL_6",
+        "TOOL_6"
+      ]
+    ]
+  }
+}

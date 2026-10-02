@@ -35,7 +35,6 @@ export interface ThreadSettings {
   interactionMode: InteractionMode;
   reasoningLevel?: ReasoningLevel;
   orchestrationMode?: OrchestrationMode;
-  copilotAgent?: string | null;
   contextWindow?: ContextWindowMode | null;
   thinking?: boolean | null;
   codexFastMode?: boolean | null;

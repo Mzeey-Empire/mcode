@@ -287,7 +287,6 @@ export class TurnAdmissionDispatchCoordinator {
       orchestrationMode: submission.orchestrationMode as SendMessageCommand["orchestrationMode"],
       maxBudgetUsd: submission.maxBudgetUsd,
       maxTurns: submission.maxTurns,
-      copilotAgent: submission.copilotAgent,
       contextWindow: submission.contextWindow as ContextWindowMode | undefined,
       thinking: submission.thinking,
       codexFastMode: submission.codexFastMode,
@@ -634,7 +633,6 @@ export class TurnAdmissionDispatchCoordinator {
         orchestrationMode: command.orchestrationMode,
         maxBudgetUsd: command.maxBudgetUsd,
         maxTurns: command.maxTurns,
-        copilotAgent: command.copilotAgent,
         contextWindow: command.contextWindow,
         thinking: command.thinking,
         codexFastMode: command.codexFastMode,
@@ -835,7 +833,6 @@ export class TurnAdmissionDispatchCoordinator {
     this.assignPermissionSetting(settings, command.permissionMode);
     this.assignSetting(settings, "context_window_mode", command.contextWindow);
     this.assignSetting(settings, "thinking", command.thinking);
-    this.assignSetting(settings, "copilot_agent", command.copilotAgent);
     this.assignCodexFastMode(settings, command.codexFastMode, providerId);
     this.assignDevinMode(settings, command.devinMode, providerId);
     return settings;
@@ -966,7 +963,6 @@ export class TurnAdmissionDispatchCoordinator {
       contextWindow: this.contextWindowDefault(command, prepared, settings),
       thinking: this.thinkingDefault(command, prepared, settings),
       fastMode: this.fastModeDefault(command, prepared, settings),
-      copilotAgent: command.copilotAgent ?? prepared.thread.copilot_agent ?? undefined,
       devinMode: command.devinMode ?? prepared.thread.devin_mode ?? undefined,
     };
   }
@@ -1002,11 +998,10 @@ export class TurnAdmissionDispatchCoordinator {
 
   private providerSpecificOptions(
     providerId: ProviderId,
-    defaults: { contextWindow: ContextWindowMode; thinking: boolean; fastMode: boolean; copilotAgent: string | undefined; devinMode: DevinMode | undefined },
+    defaults: { contextWindow: ContextWindowMode; thinking: boolean; fastMode: boolean; devinMode: DevinMode | undefined },
   ) {
     if (providerId === "claude") return { contextWindowMode: defaults.contextWindow, thinking: defaults.thinking };
     if (providerId === "codex") return { fastMode: defaults.fastMode };
-    if (providerId === "copilot") return { agent: defaults.copilotAgent };
     if (providerId === "devin") return { mode: defaults.devinMode };
     return {};
   }

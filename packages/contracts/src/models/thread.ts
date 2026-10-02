@@ -70,7 +70,6 @@ export const ThreadSchema = lazySchema(() =>
    */
   codex_fast_mode: z.boolean().nullable(),
   /** Selected Copilot sub-agent name. Null means provider default (interactive). */
-  copilot_agent: z.string().nullable(),
   /**
    * Devin native session mode restored when a thread returns to build from
    * plan. Null means the Devin CLI default (normal).

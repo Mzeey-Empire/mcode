@@ -150,7 +150,6 @@ export class ThreadService {
       interaction_mode?: string;
       orchestration_mode?: string;
       permission_mode?: string;
-      copilot_agent?: string | null;
       context_window_mode?: ContextWindowMode | null;
       thinking?: boolean | null;
       codex_fast_mode?: boolean | null;
@@ -162,7 +161,6 @@ export class ThreadService {
       ...(settings.interaction_mode !== undefined && { interaction_mode: settings.interaction_mode }),
       ...(settings.orchestration_mode !== undefined && { orchestration_mode: settings.orchestration_mode }),
       ...(settings.permission_mode !== undefined && { permission_mode: settings.permission_mode }),
-      ...("copilot_agent" in settings && { copilot_agent: settings.copilot_agent }),
       ...("context_window_mode" in settings && { context_window_mode: settings.context_window_mode }),
       ...("thinking" in settings && { thinking: settings.thinking }),
       ...("codex_fast_mode" in settings && { codex_fast_mode: settings.codex_fast_mode }),

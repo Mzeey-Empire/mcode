@@ -9,6 +9,7 @@ import type {
 } from "./types.js";
 import { PROVIDER_CONFORMANCE_CONTRACT_VERSION } from "./types.js";
 import { ClaudeNativeTraceSchema } from "./claude-native-trace-schema.js";
+import { parseCopilotCapturedTrace } from "./copilot-trace.js";
 
 const PROVIDER_IDS = new Set(["claude", "codex", "copilot", "cursor", "opencode"]);
 const PROFILES = new Set([
@@ -90,7 +91,7 @@ export function validateProviderFixtureManifest(value: unknown): ProviderFixture
   ], "fixture manifest");
   const isCursor = validateManifestMetadata(manifest);
   validateManifestRedaction(manifest.redaction);
-  validateManifestInput(manifest.input, isCursor, manifest.providerId === "claude");
+  validateManifestInput(manifest.input, isCursor, manifest.providerId);
   validateManifestExpected(manifest.expected);
 
   const typed = manifest as unknown as ProviderFixtureManifest;
@@ -131,9 +132,10 @@ function validateManifestRedaction(value: unknown): void {
   requireStringArray(redaction.removedFields, "removedFields", 64);
 }
 
-function validateManifestInput(value: unknown, isCursor: boolean, isClaude: boolean): void {
+function validateManifestInput(value: unknown, isCursor: boolean, providerId: unknown): void {
   const input = requireRecord(value, "input");
-  requireExactKeys(input, isCursor ? ["events", "cursorAcpTrace"] : isClaude ? ["events", "claudeNativeTrace"] : ["events"], "input");
+  const nativeKeys = nativeFixtureInputKeys(providerId);
+  requireExactKeys(input, isCursor ? ["events", "cursorAcpTrace"] : ["events", ...nativeKeys], "input");
   if (!Array.isArray(input.events) || input.events.length === 0 || input.events.length > 10_000) {
     throw new TypeError("Provider fixture events are invalid");
   }
@@ -144,6 +146,11 @@ function validateManifestInput(value: unknown, isCursor: boolean, isClaude: bool
     }
   }
   if (isCursor) parseCursorAcpTrace(input.cursorAcpTrace);
+  if (input.copilotNativeEvents !== undefined) parseCopilotCapturedTrace(input.copilotNativeEvents);
+}
+
+function nativeFixtureInputKeys(providerId: unknown): string[] {
+  return providerId === "claude" ? ["claudeNativeTrace"] : providerId === "copilot" ? ["copilotNativeEvents"] : [];
 }
 
 function validateManifestExpected(value: unknown): void {
@@ -457,7 +464,8 @@ function rejectForbiddenArray(value: readonly unknown[], key: string, depth: num
 
 function rejectForbiddenRecord(value: object, depth: number): void {
   for (const [childKey, childValue] of Object.entries(value)) {
-    if (FORBIDDEN_KEYS.test(childKey)) throw new TypeError(`Provider fixture contains forbidden field: ${childKey}`);
+    const fixedRedaction = childKey === "content" && (childValue === "REDACTED_CONTENT" || childValue === "REDACTED_CHILD_CONTENT" || childValue === "REDACTED_TOOL_OUTPUT");
+    if (FORBIDDEN_KEYS.test(childKey) && !fixedRedaction) throw new TypeError(`Provider fixture contains forbidden field: ${childKey}`);
     rejectForbiddenContent(childValue, childKey, depth + 1);
   }
 }

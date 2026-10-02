@@ -21,7 +21,6 @@ export function useQueuedMessageDispatch(threadId: string | undefined): {
           message.displayContent,
           message.reasoningLevel,
           message.provider,
-          message.copilotAgent,
           message.contextWindow,
           message.thinking,
           message.codexFastMode,

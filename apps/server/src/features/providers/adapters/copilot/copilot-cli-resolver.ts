@@ -73,39 +73,20 @@ function parseVersion(out: string): string | null {
   return m ? m[1]! : null;
 }
 
-/** Minimum 0.0.x build that accepts the SDK's programmatic spawn flags. */
-const MIN_COPILOT_CLI_0X = "0.0.403";
+/** Oldest native mode, child and cancellation version covered by this adapter's traces. */
+const MIN_COPILOT_CLI = "1.0.25";
 
-/** Minimum 1.x line accepted for SDK integration (headless may be omitted from --help). */
-const MIN_COPILOT_CLI_1X = "1.0.0";
-
-/**
- * True when the located CLI can host the Copilot SDK. Uses semver first because
- * 1.x builds support `--headless` at runtime even when `--help` only lists `--acp`.
- */
-function supportsSdkCompatibleCli(
-  entry: string,
-  version: string | null,
-  io: CopilotCliResolverIO,
-): boolean {
-  if (version) {
-    if (isProviderVersionAtLeast(version, MIN_COPILOT_CLI_1X)) return true;
-    if (isProviderVersionAtLeast(version, MIN_COPILOT_CLI_0X)) return true;
-  }
-  const help = io.exec(entry, ["--help"]);
-  if (help != null && (/--headless\b/.test(help) || /--acp\b/.test(help))) return true;
-  return false;
+function supportsSdkCompatibleCli(version: string | null): boolean {
+  return version !== null && isProviderVersionAtLeast(version, MIN_COPILOT_CLI);
 }
 
 /**
  * Returns a not-found resolution when the located CLI is too old for the SDK.
  */
 function tooOldForSdk(
-  entry: string,
   version: string | null,
-  io: CopilotCliResolverIO,
 ): CopilotCliNotFound | null {
-  if (supportsSdkCompatibleCli(entry, version, io)) return null;
+  if (supportsSdkCompatibleCli(version)) return null;
   return {
     source: "not-found",
     entry: null,
@@ -121,7 +102,7 @@ export function formatCopilotUpgradeMessage(version: string | null): string {
   const versionLabel = version ?? "unknown";
   return (
     `GitHub Copilot CLI ${versionLabel} is too old for Mcode. ` +
-    `Update to ${MIN_COPILOT_CLI_1X} or newer (or ${MIN_COPILOT_CLI_0X}+ on the 0.0.x line).\n\n` +
+    `Update to ${MIN_COPILOT_CLI} or newer.\n\n` +
     "Update with: npm install -g @github/copilot@latest"
   );
 }
@@ -304,7 +285,7 @@ export function resolveCopilotCli(
   }
 
   if (resolution.source !== "not-found") {
-    const outdated = tooOldForSdk(resolution.entry, resolution.version, io);
+    const outdated = tooOldForSdk(resolution.version);
     if (outdated) resolution = outdated;
   }
 

@@ -38,7 +38,6 @@ function serializeQueuedSelection(
   | "reasoningLevel"
   | "orchestrationMode"
   | "provider"
-  | "copilotAgent"
   | "contextWindow"
   | "thinking"
   | "codexFastMode"
@@ -51,8 +50,6 @@ function serializeQueuedSelection(
     reasoningLevel: selection.reasoning,
     orchestrationMode: selection.orchestrationMode,
     provider: selection.provider,
-    copilotAgent:
-      selection.provider === "copilot" ? selection.copilotAgent ?? undefined : undefined,
     contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
     codexFastMode:

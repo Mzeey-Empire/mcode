@@ -95,6 +95,30 @@ describe("successful database migration recovery", () => {
     process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = NodePath.join(process.cwd(), "drizzle");
   });
 
+  it("removes the obsolete Copilot selection without rebuilding or cascading thread history", () => {
+    const current = NodePath.join(process.cwd(), "drizzle");
+    const previous = NodePath.join(directory, "drizzle-through-0067");
+    copyMigrationsThrough(current, previous, "0067_cooing_tomorrow_man");
+    const db = new Database(databasePath, { strict: true });
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(previous) });
+      db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("copilot-workspace", "Copilot", "/fixture");
+      const insert = db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, copilot_agent, parent_thread_id) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      insert.run("copilot-parent", "copilot-workspace", "Parent", "main", "copilot", "old-native-agent", null);
+      insert.run("copilot-child", "copilot-workspace", "Child", "main", "copilot", "old-native-agent", "copilot-parent");
+      db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES (?, ?, ?, ?, ?)").run("copilot-message", "copilot-parent", "assistant", "Preserved history", 1);
+      db.prepare("INSERT INTO tool_call_records (id, message_id, tool_name) VALUES (?, ?, ?)").run("copilot-tool", "copilot-message", "Read");
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
+      expect(columnNames(db, "threads")).not.toContain("copilot_agent");
+      expect(db.prepare("SELECT id, parent_thread_id FROM threads WHERE workspace_id = ? ORDER BY id").all("copilot-workspace")).toEqual([{ id: "copilot-child", parent_thread_id: "copilot-parent" }, { id: "copilot-parent", parent_thread_id: null }]);
+      expect(db.prepare("SELECT content FROM messages WHERE id = ?").get("copilot-message")).toEqual({ content: "Preserved history" });
+      expect(db.prepare("SELECT message_id FROM tool_call_records WHERE id = ?").get("copilot-tool")).toEqual({ message_id: "copilot-message" });
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+      expect(NodeFS.readFileSync(NodePath.join(current, "0068_tricky_morg.sql"), "utf8").trim()).toBe("ALTER TABLE `threads` DROP COLUMN `copilot_agent`;");
+    } finally { db.close(true); }
+  });
+
   afterEach(() => {
     if (originalMigrationsDirectory === undefined) {
       delete process.env.MCODE_DRIZZLE_MIGRATIONS_DIR;

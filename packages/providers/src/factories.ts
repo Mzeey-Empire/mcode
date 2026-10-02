@@ -5,11 +5,13 @@ import type {
   DevinProviderBoundary,
   ProviderBoundary,
   ProviderFactoryInput,
+  CopilotProviderBoundary,
 } from "./factory-types.js";
 import { createProviderBoundary } from "./private/factory.js";
 import { createCursorAcpProvider, createDevinAcpProvider } from "./private/protocols/acp.js";
 import { CodexProvider } from "./private/codex/codex-provider.js";
 import { ClaudeProvider } from "./private/claude/claude-provider.js";
+import { CopilotProvider } from "./private/copilot/copilot-provider.js";
 
 /** Prepares the Claude Provider boundary without inspecting or spawning its CLI. */
 export function createClaudeProvider(input: ProviderFactoryInput): ClaudeProviderBoundary {
@@ -30,8 +32,12 @@ export function createCodexProvider(input: ProviderFactoryInput): CodexProviderB
 }
 
 /** Prepares the Copilot Provider boundary without inspecting or spawning its CLI. */
-export function createCopilotProvider(input: ProviderFactoryInput): ProviderBoundary {
-  return createProviderBoundary("copilot", [], input);
+export function createCopilotProvider(input: ProviderFactoryInput): CopilotProviderBoundary {
+  createProviderBoundary("copilot", [], input);
+  if (typeof input.copilot?.launch?.resolve !== "function") {
+    throw new TypeError("Copilot Provider port launch.resolve is required");
+  }
+  return new CopilotProvider(input.host, input.copilot, input.configuration.idleSessionTtlMs);
 }
 
 /** Prepares the Cursor Provider boundary with private generic ACP machinery. */

@@ -567,18 +567,29 @@ describe("provider-scoped commands", () => {
     expect(mockCatalog).toHaveBeenCalledWith({ providerId: "codex", cwd: "/my/project" });
   });
 
-  it("hides /plan for copilot provider", async () => {
+  it("offers and dispatches /plan for copilot provider", async () => {
     const ref = makeAnchor();
+    const onMcodeCommand = vi.fn();
     const { result } = renderHook(() =>
-      useSlashCommand({ anchorRef: ref, providerId: "copilot" })
+      useSlashCommand({ anchorRef: ref, providerId: "copilot", onMcodeCommand })
     );
 
     await act(async () => { result.current.onInputChange("/"); });
     await act(async () => {});
 
     const names = result.current.allCommands.map((c) => c.name);
-    expect(names).not.toContain("plan");
+    expect(names).toContain("plan");
     expect(names).toContain("compact");
+
+    const planCommand = result.current.items.find((command) => command.name === "plan");
+    if (!planCommand) throw new Error("Copilot Plan command is missing");
+    let emittedValue = "unchanged";
+    await act(async () => {
+      result.current.onSelect(planCommand, (value) => { emittedValue = value; });
+    });
+    expect(onMcodeCommand.mock.calls).toEqual([["attach-plan"]]);
+    expect(emittedValue).toBe("");
+    expect(result.current.isOpen).toBe(false);
   });
 
   it("shows /plan for claude provider", async () => {

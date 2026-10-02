@@ -67,7 +67,6 @@ function makeThread(overrides: Partial<PersistedThread> = {}): Thread {
     reasoning_level: null,
     interaction_mode: null,
     permission_mode: null,
-    copilot_agent: null,
     last_compact_summary: null,
     parent_thread_id: null,
     forked_from_message_id: null,

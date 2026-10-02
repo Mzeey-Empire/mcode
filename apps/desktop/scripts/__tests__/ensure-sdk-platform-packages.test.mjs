@@ -106,8 +106,11 @@ describe("Copilot SDK target package preparation", () => {
     const testSource = NodeFS.readFileSync(import.meta.filename, "utf8");
     expect(testSource).not.toMatch(/@github\+copilot@\d+\.\d+\.\d+/);
     const plan = resolveCopilotTargetPackagePlan(serverRoot, "darwin", "x64");
-    const sdkEntry = NodeModule.createRequire(
+    const serverRequire = NodeModule.createRequire(
       NodePath.join(serverRoot, "package.json"),
+    );
+    const sdkEntry = NodeModule.createRequire(
+      serverRequire.resolve("@mcode/providers"),
     ).resolve("@github/copilot-sdk");
     const installed = JSON.parse(
       NodeFS.readFileSync(

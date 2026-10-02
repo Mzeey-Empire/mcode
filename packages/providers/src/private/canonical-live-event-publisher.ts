@@ -26,7 +26,20 @@ interface ProviderExecutionQueue {
   nativeEvents: Map<string, string>;
 }
 
-/** Serializes one provider's live events into canonical drafts for an execution. */
+/** Source evidence supplied by a native protocol event. */
+export interface NativeLiveEventEvidence {
+  id: string;
+  timestamp: string;
+  predecessorEventId: string | null;
+  type: string;
+  data?: unknown;
+}
+
+/**
+ * Serializes one provider's live events into canonical drafts for an execution.
+ * Provider lifetime retains retired failures. Execution lifetime drains admitted drafts
+ * and reserves two terminal slots while its worker owns the final failure outcome.
+ */
 export class CanonicalLiveEventPublisher {
   private readonly queues = new Map<string, ProviderExecutionQueue>();
   private admissionStopped = false;
@@ -38,14 +51,15 @@ export class CanonicalLiveEventPublisher {
     private readonly providerId: ProviderId,
     private readonly sink: ProviderEventSinkPort,
     private readonly onFailure?: (routing: CanonicalLiveEventRouting, error: Error) => void,
+    private readonly failureLifetime: "provider" | "execution" = "provider",
   ) {}
 
-  /** Queues one provider runtime event for durable canonical delivery. */
+  /** Queues one runtime event; a replay ID alone does not imply a native timestamp. */
   publish(
     routing: CanonicalLiveEventRouting,
     runtimeEvent: ProviderRuntimeEvent,
     sourceIdentities: readonly ProviderIdentity[],
-    nativeEventId?: string,
+    native?: NativeLiveEventEvidence | string,
   ): void {
     if (this.admissionStopped) {
       if (!this.lateEventReported) {
@@ -55,19 +69,14 @@ export class CanonicalLiveEventPublisher {
       return;
     }
     const queue = this.queueFor(routing);
-    if (queue.failure) return;
-    if (nativeEventId && this.replayed(queue, routing, runtimeEvent, sourceIdentities, nativeEventId)) return;
-    if (queue.pendingEventCount >= MAX_PENDING_EVENTS_PER_EXECUTION) {
-      this.fail(queue, routing, new Error(`${this.providerId} canonical event queue overflowed for execution ${routing.executionId}`));
-      return;
-    }
+    if (!this.admit(queue, routing, runtimeEvent, sourceIdentities, native)) return;
     const sourceSequence = queue.nextSourceSequence;
     queue.nextSourceSequence += 1;
     queue.pendingEventCount += 1;
-    const draft = this.createDraft(routing, runtimeEvent, sourceIdentities, sourceSequence);
+    const draft = this.createDraft(routing, runtimeEvent, sourceIdentities, sourceSequence, typeof native === "string" ? undefined : native);
     queue.tail = queue.tail
       .then(async () => {
-        if (queue.failure) return;
+        if (queue.failure && this.failureLifetime === "provider") return;
         const receipt = await this.sink.submit({
           threadId: routing.threadId,
           turnId: routing.turnId,
@@ -78,7 +87,7 @@ export class CanonicalLiveEventPublisher {
           events: [draft],
         });
         if (receipt.commit.outcome === "conflict" || receipt.commit.outcome === "ingest-overflow") {
-          throw new Error(`Canonical provider submission failed: ${receipt.commit.outcome}`);
+          throw new Error(`${this.providerId} canonical event was ${receipt.commit.outcome}`);
         }
       })
       .catch((error: unknown) => {
@@ -87,6 +96,19 @@ export class CanonicalLiveEventPublisher {
       .finally(() => {
         queue.pendingEventCount -= 1;
       });
+  }
+
+  private admit(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent,
+    sourceIdentities: readonly ProviderIdentity[], native: NativeLiveEventEvidence | string | undefined): boolean {
+    const terminal = runtimeEvent.event.type === AgentEventType.TurnComplete || runtimeEvent.event.type === AgentEventType.Ended;
+    if (queue.failure && (this.failureLifetime === "provider" || !terminal)) return false;
+    if (typeof native === "string" && this.replayed(queue, routing, runtimeEvent, sourceIdentities, native)) return false;
+    const terminalReserve = this.failureLifetime === "execution" && !terminal ? 2 : 0;
+    if (queue.pendingEventCount >= MAX_PENDING_EVENTS_PER_EXECUTION - terminalReserve) {
+      this.fail(queue, routing, new Error(`${this.providerId} canonical event queue overflowed for execution ${routing.executionId}`));
+      return false;
+    }
+    return true;
   }
 
   /** Checks delivery so a pooled provider can report turn failure before stream teardown. */
@@ -143,17 +165,12 @@ export class CanonicalLiveEventPublisher {
   private fail(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, error: Error): void {
     if (queue.failure) return;
     queue.failure = error;
-    this.firstFailure ??= error;
+    if (this.failureLifetime === "provider") this.firstFailure ??= error;
     this.onFailure?.(routing, error);
   }
 
-  private replayed(
-    queue: ProviderExecutionQueue,
-    routing: CanonicalLiveEventRouting,
-    runtimeEvent: ProviderRuntimeEvent,
-    identities: readonly ProviderIdentity[],
-    nativeEventId: string,
-  ): boolean {
+  private replayed(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent,
+    identities: readonly ProviderIdentity[], nativeEventId: string): boolean {
     const item = "toolCallId" in runtimeEvent.event ? runtimeEvent.event.toolCallId : "";
     const projection = runtimeEvent.event.type === AgentEventType.System ? runtimeEvent.event.subtype : undefined;
     const key = JSON.stringify([nativeEventId, runtimeEvent.event.type, item ?? "", projection ?? null]);
@@ -177,10 +194,11 @@ export class CanonicalLiveEventPublisher {
     runtimeEvent: ProviderRuntimeEvent,
     sourceIdentities: readonly ProviderIdentity[],
     sourceSequence: number,
+    native?: NativeLiveEventEvidence,
   ): ProviderEventBatch["events"][number] {
-    const eventId = `${this.providerId}:${routing.executionId}:attempt:${routing.deliveryAttempt}:event:${sourceSequence}`;
-    const itemId = `${this.providerId}:${routing.executionId}:attempt:${routing.deliveryAttempt}:item:${sourceSequence}`;
-    const timestamp = new Date().toISOString();
+    const eventId = native ? `${this.providerId}:native:${native.id}:${runtimeEvent.event.type}` : `${this.providerId}:${routing.executionId}:attempt:${routing.deliveryAttempt}:event:${sourceSequence}`;
+    const itemId = native ? `${this.providerId}:native-item:${native.id}:${runtimeEvent.event.type}` : `${this.providerId}:${routing.executionId}:attempt:${routing.deliveryAttempt}:item:${sourceSequence}`;
+    const timestamp = native?.timestamp ?? new Date().toISOString();
     return {
       eventId,
       routing: {
@@ -191,7 +209,7 @@ export class CanonicalLiveEventPublisher {
       },
       sourceProviderId: this.providerId,
       sourceIdentities,
-      sourceSequence,
+      ...(native ? {} : { sourceSequence }),
       providerTimestamp: timestamp,
       ...(runtimeEvent.event.type === AgentEventType.TextDelta ? { ingestClass: "volatile" as const } : {}),
       payload: {
@@ -202,7 +220,7 @@ export class CanonicalLiveEventPublisher {
           turnId: routing.turnId,
           kind: "system",
           providerIdentities: [...sourceIdentities],
-          payload: { projection: "providerRuntimeEvent", runtimeEvent },
+          payload: { projection: "providerRuntimeEvent", runtimeEvent, ...(native ? { native } : { provenance: "generated" }) },
           createdAt: timestamp,
           updatedAt: timestamp,
         },

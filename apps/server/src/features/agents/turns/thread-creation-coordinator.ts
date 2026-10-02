@@ -62,7 +62,6 @@ export interface CreateThreadForTurnInput {
   orchestrationMode?: OrchestrationMode;
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
-  copilotAgent?: string;
   codexFastMode?: boolean;
   devinMode?: DevinMode;
 }
@@ -88,7 +87,6 @@ interface BranchedInitialTurnParams {
   title: string;
   maxBudgetUsd?: number;
   maxTurns?: number;
-  copilotAgent?: string;
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
@@ -222,7 +220,7 @@ export class ThreadCreationCoordinator {
       forkedFromMessageId,
       maxBudgetUsd,
       maxTurns,
-      copilotAgent,
+
       contextWindow: contextWindowMode,
       thinking,
       codexFastMode,
@@ -238,7 +236,7 @@ export class ThreadCreationCoordinator {
       workspaceId, content, model, permissionMode, approvalReviewMode, mode, branch, pullRequestNumber, worktreeBranchMode,
       existingWorktreePath, existingWorktreeBaseBranch, attachments, reasoningLevel,
       provider, interactionMode, parentThreadId, forkedFromMessageId,
-      title: titleFrom(displayContent ?? content), maxBudgetUsd, maxTurns, copilotAgent,
+      title: titleFrom(displayContent ?? content), maxBudgetUsd, maxTurns,
       contextWindowMode, thinking, codexFastMode, devinMode, displayContent, mentions,
       previewAnnotations, selectedTextComments, goalObjective, orchestrationMode,
     };
@@ -265,7 +263,6 @@ export class ThreadCreationCoordinator {
       orchestrationMode: params.orchestrationMode,
       contextWindowMode: params.contextWindowMode,
       thinking: params.thinking,
-      copilotAgent: params.copilotAgent,
       codexFastMode: params.codexFastMode,
       devinMode: params.devinMode,
     };
@@ -338,7 +335,6 @@ export class ThreadCreationCoordinator {
       interactionMode: params.interactionMode,
       maxBudgetUsd: params.maxBudgetUsd,
       maxTurns: params.maxTurns,
-      copilotAgent: params.copilotAgent,
       contextWindow: params.contextWindowMode,
       thinking: params.thinking,
       displayContent: params.displayContent,
@@ -377,7 +373,6 @@ export class ThreadCreationCoordinator {
         interactionMode: params.interactionMode,
         maxBudgetUsd: params.maxBudgetUsd,
         maxTurns: params.maxTurns,
-        copilotAgent: params.copilotAgent,
         contextWindow: params.contextWindowMode,
         thinking: params.thinking,
         displayContent: params.displayContent,
@@ -520,7 +515,6 @@ export class ThreadCreationCoordinator {
       permission_mode: input.permissionMode === "default" ? created.permission_mode : input.permissionMode,
       context_window_mode: input.contextWindowMode ?? created.context_window_mode,
       thinking: input.thinking ?? created.thinking,
-      copilot_agent: input.copilotAgent ?? created.copilot_agent,
       devin_mode: input.devinMode ?? created.devin_mode,
     };
   }
@@ -545,7 +539,6 @@ export class ThreadCreationCoordinator {
       ...(input.permissionMode !== "default" && { permission_mode: input.permissionMode }),
       ...(input.contextWindowMode !== undefined && { context_window_mode: input.contextWindowMode }),
       ...(input.thinking !== undefined && { thinking: input.thinking }),
-      ...(input.copilotAgent !== undefined && { copilot_agent: input.copilotAgent }),
     };
   }
 
@@ -607,7 +600,6 @@ export class ThreadCreationCoordinator {
       parentThreadId: params.parentThreadId,
       forkedFromMessageId: params.forkedFromMessageId,
       title: params.title,
-      copilotAgent: params.copilotAgent,
       contextWindowMode: params.contextWindowMode,
       thinking: params.thinking,
       codexFastMode: params.codexFastMode,
@@ -637,7 +629,6 @@ export class ThreadCreationCoordinator {
         interactionMode: params.interactionMode,
         maxBudgetUsd: params.maxBudgetUsd,
         maxTurns: params.maxTurns,
-        copilotAgent: params.copilotAgent,
         contextWindow: provisioned.contextWindowMode,
         thinking: provisioned.thinking,
         codexFastMode: provisioned.codexFastMode,

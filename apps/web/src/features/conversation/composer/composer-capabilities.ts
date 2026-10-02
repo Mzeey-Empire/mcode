@@ -80,11 +80,7 @@ export function resolveComposerCapabilities({
   providerId,
   modelId,
 }: ResolveComposerCapabilitiesOptions): ResolvedComposerCapability[] {
-  const capabilities: ResolvedComposerCapability[] = [];
-
-  if (providerId !== "copilot") {
-    capabilities.push(PLAN_CAPABILITY);
-  }
+  const capabilities: ResolvedComposerCapability[] = [PLAN_CAPABILITY];
   if (providerId === "claude" || providerId === "codex") {
     capabilities.push(GOAL_CAPABILITY);
   }

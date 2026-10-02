@@ -4,7 +4,7 @@ import {
   appendCursorMcodeInstructions,
   carryCursorMcodeSentState,
 } from "../../../../../../../packages/providers/src/private/cursor/cursor-provider.js";
-import { composeCopilotSystemMessage } from "../../adapters/copilot/copilot-provider.js";
+import { composeCopilotSystemMessage } from "../../../../../../../packages/providers/src/private/copilot/copilot-helpers.js";
 import {
   buildMcodeInstructionPlan,
   MCODE_BROWSER_GUIDE,

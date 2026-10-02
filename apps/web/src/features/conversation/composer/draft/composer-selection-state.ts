@@ -17,7 +17,6 @@ export interface ComposerAgentSelection {
   permissionMode: PermissionMode;
   approvalReviewMode: ApprovalReviewMode;
   orchestrationMode: OrchestrationMode;
-  copilotAgent: string | null;
   contextWindow: ContextWindowMode | null;
   thinking: boolean | null;
   codexFastMode: boolean | null;
@@ -32,7 +31,6 @@ export interface ComposerSelectionState {
 }
 
 type NullableSelectionField =
-  | "copilotAgent"
   | "contextWindow"
   | "thinking"
   | "codexFastMode"
@@ -69,7 +67,6 @@ function hasSameComposerAgentSelection(
   next: ComposerAgentSelection,
 ): boolean {
   return hasSameCoreComposerAgentSelection(current, next)
-    && current.copilotAgent === next.copilotAgent
     && current.contextWindow === next.contextWindow
     && current.thinking === next.thinking
     && current.codexFastMode === next.codexFastMode
@@ -86,7 +83,6 @@ export function createDefaultComposerAgentSelection(): ComposerAgentSelection {
     permissionMode: PERMISSION_MODES.FULL,
     approvalReviewMode: "manual",
     orchestrationMode: ORCHESTRATION_MODES.STANDARD,
-    copilotAgent: null,
     contextWindow: null,
     thinking: null,
     codexFastMode: null,
@@ -110,7 +106,6 @@ export function mergeComposerAgentSelection(
       current.orchestrationMode,
       patch.orchestrationMode,
     ),
-    copilotAgent: readNullableSelectionPatch(current, patch, "copilotAgent"),
     contextWindow: readNullableSelectionPatch(current, patch, "contextWindow"),
     thinking: readNullableSelectionPatch(current, patch, "thinking"),
     codexFastMode: readNullableSelectionPatch(current, patch, "codexFastMode"),

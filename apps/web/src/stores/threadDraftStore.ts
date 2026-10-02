@@ -39,7 +39,6 @@ export interface ThreadDraftSelection {
   permissionMode: PermissionMode;
   orchestrationMode: OrchestrationMode;
   approvalReviewMode: ApprovalReviewMode;
-  copilotAgent: string | null;
   thinking: boolean | null;
 }
 
@@ -101,7 +100,6 @@ function isValidStoredSelection(raw: unknown): raw is ThreadDraftSelection {
     && typeof s.permissionMode === "string"
     && typeof s.orchestrationMode === "string"
     && typeof s.approvalReviewMode === "string"
-    && (s.copilotAgent === null || typeof s.copilotAgent === "string")
     && (s.thinking === null || typeof s.thinking === "boolean");
 }
 
@@ -142,7 +140,14 @@ function parseStoredThreadDrafts(raw: unknown): Record<string, ThreadDraft> {
     if (!isValidStoredThreadDraft(value)) continue;
     const draft = parseStoredComposerDraft(value.draft);
     if (!draft) continue;
-    drafts[id] = { ...value, id, draft };
+    // Reconstruct the supported selection so retired fields in older drafts do not survive hydration.
+    const { interactionMode, permissionMode, orchestrationMode, approvalReviewMode, thinking } = value.selection;
+    drafts[id] = {
+      ...value,
+      id,
+      draft,
+      selection: { interactionMode, permissionMode, orchestrationMode, approvalReviewMode, thinking },
+    };
   }
   return drafts;
 }

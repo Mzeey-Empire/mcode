@@ -307,6 +307,7 @@ function createConformanceFactoryInput(
   const configuration = { cliPath: providerId === "claude" ? process.execPath : "conformance-provider", idleSessionTtlMs: 600_000 };
   if (providerId === "claude") return { configuration, host, claude: { createForker: () => ({ fork: async () => { throw new Error("Conformance handoff is not configured"); } }) } };
   if (providerId === "codex") return { configuration, host, codex: createFakeCodexPorts() };
+  if (providerId === "copilot") return { configuration, host, copilot: { launch: { resolve: async () => ({ cliPath: "copilot", env: {} }) } } };
   if (providerId === "cursor") return { configuration, host, cursor: createFakeCursorPorts() };
   return { configuration, host };
 }
