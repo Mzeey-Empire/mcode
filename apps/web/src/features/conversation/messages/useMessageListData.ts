@@ -139,6 +139,9 @@ export function useMessageListData(displayThreadId: string | undefined) {
     toolCalls: legacyToolCalls ?? EMPTY_TOOL_CALLS,
     thoughtSegments: legacyThoughtSegments,
   });
+  const canonicalResponseText = canonicalLifecycleProjection
+    ? { streamingText: canonicalLifecycleProjection.streamingText, responseTextIsStreaming: false }
+    : { streamingText: canonicalProjection?.streamingText ?? streamingText, responseTextIsStreaming };
   const persistedFilesChanged = useThreadStore(
     useShallow((state) => {
       if (!renderedThreadId) return EMPTY_FILES_CHANGED;
@@ -189,8 +192,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     agentDisplayState: canonicalContent.agentDisplayState,
     isAgentRunning: isAgentDisplayActive(canonicalContent.agentDisplayState),
     agentStartTime: canonicalContent.agentStartTime,
-    streamingText: canonicalProjection?.streamingText ?? streamingText,
-    responseTextIsStreaming,
+    ...canonicalResponseText,
     toolCalls: canonicalActivity.toolCalls,
     thoughtSegments: canonicalActivity.thoughtSegments,
     persistedFilesChanged,

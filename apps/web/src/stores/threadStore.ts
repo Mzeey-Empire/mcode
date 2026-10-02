@@ -2171,7 +2171,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       return;
     }
     patchRec(event.threadId, (record) => {
-      const thoughtSegments = projectAssistantMessageBoundary(record.thoughtSegments, event);
+      const thoughtSegments = projectAssistantMessageBoundary(record.thoughtSegments, normalizedEvent);
       return thoughtSegments ? { thoughtSegments } : {};
     });
   };

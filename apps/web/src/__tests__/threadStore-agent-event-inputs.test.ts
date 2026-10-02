@@ -161,6 +161,20 @@ describe("thread store agent-event input boundaries", () => {
     );
   });
 
+  it("normalizes a deferred malformed boundary before its conversation becomes active", () => {
+    useThreadStore.setState({ currentThreadId: "another-thread" });
+    dispatch({ type: "textDelta", threadId: THREAD_ID, delta: "preamble", isFinalResponse: "invalid" });
+    vi.runAllTimers();
+    dispatch({ type: "assistantMessageBoundary", threadId: THREAD_ID, isFinalResponse: "invalid" });
+    expect(useThreadStore.getState().records.get(THREAD_ID)?.thoughtSegments).toEqual([]);
+
+    useThreadStore.setState({ currentThreadId: THREAD_ID });
+    dispatch({ type: "toolProgress", threadId: THREAD_ID, toolCallId: "missing", elapsedSeconds: 1 });
+    expect(useThreadStore.getState().records.get(THREAD_ID)?.thoughtSegments).toEqual([
+      expect.objectContaining({ text: "preamble", endedAt: expect.any(Number) }),
+    ]);
+  });
+
   it("preserves state identity for ignored and duplicate event patches", () => {
     resetThreadStoreForTests({
       currentThreadId: THREAD_ID,

@@ -138,6 +138,43 @@ describe("one lifecycle for the current turn", () => {
       .toEqual([["previous-answer", "interrupted"]]);
   });
 
+  it("keeps a stale legacy text buffer out of an owning canonical child response", () => {
+    const record = createEmptyThreadRecord();
+    record.streaming = "Stale legacy parent buffer";
+    record.responseTextIsStreaming = true;
+    const childAnswer = answer("child-answer", "child-execution");
+    record.canonicalAgent.state.turns["canonical-turn"] = canonicalTurn("Running", {
+      kind: "child", sourceThreadId: "parent", sourceTurnId: "parent-turn",
+    });
+    record.canonicalAgent.state.items["child-answer"] = {
+      id: "child-answer", threadId: THREAD, turnId: "canonical-turn", kind: "message",
+      payload: { projection: "message", message: childAnswer }, providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+    };
+    resetThreadStoreForTests({ records: new Map([[THREAD, record]]) });
+    useThreadStore.getState().applyCanonicalReconnectRecoveries([{
+      threadId: THREAD, mode: "snapshot",
+      snapshot: { state: record.canonicalAgent.state, revision: { conversationRevision: 1, rosterRevision: 0 } },
+    }]);
+    const { result } = renderHook(useLifecycle);
+    expect(useThreadStore.getState().records.get(THREAD)?.streaming).toBe("Stale legacy parent buffer");
+    expect(result.current.data.streamingText).toBeUndefined();
+    expect(result.current.data.responseTextIsStreaming).toBe(false);
+    expect(result.current.items.find((item) => item.type === "message" && item.message.id === childAnswer.id))
+      .toMatchObject({ textIsStreaming: false });
+    expect(result.current.data.isAgentRunning).toBe(true);
+
+    const completed = structuredClone(record.canonicalAgent.state);
+    completed.turns["canonical-turn"].status = "Completed";
+    act(() => useThreadStore.getState().applyCanonicalReconnectRecoveries([{
+      threadId: THREAD, mode: "snapshot",
+      snapshot: { state: completed, revision: { conversationRevision: 2, rosterRevision: 0 } },
+    }]));
+    expect(result.current.data.messages).toEqual([childAnswer]);
+    expect(result.current.data.streamingText).toBeUndefined();
+    expect(result.current.data.responseTextIsStreaming).toBe(false);
+    expect(result.current.data.isAgentRunning).toBe(false);
+  });
+
   it("uses the canonical child lifecycle when the provider owns its execution", () => {
     const record = createEmptyThreadRecord();
     const childAnswer = answer("child-answer", "child-execution");
