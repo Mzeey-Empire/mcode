@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { AgentEventSchema, CanonicalAgentProgressFrameSchema, ProviderRuntimeExtensionSchema, MessageSchema, encodeCanonicalSubagentDetailTarget, type ProviderRuntimeExtension, type AgentEvent, type CanonicalAgentProgressFrame,
+import { AgentEventSchema, CanonicalAgentProgressFrameSchema, ProviderRuntimeExtensionSchema, MessageSchema, ParentNarrativeRecoveryItemSchema, encodeCanonicalSubagentDetailTarget, type ProviderRuntimeExtension, type AgentEvent, type CanonicalAgentProgressFrame,
   type AcceptedCanonicalAgentEventEnvelope,
   type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -363,6 +363,37 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     const saved = frames().flatMap((frame) => frame.phase === "saved" ? frame.events : [])
       .filter((value) => before.some((event) => event.id === value.eventId));
     expect(saved.map((value) => ({ id: value.eventId, position: value.progressPosition }))).toEqual(before);
+  });
+
+  it("cancels an ACP turn when its terminal snapshot restores an earlier accepted tool record", async () => {
+    await send(1, start("devin"));
+    holdWrites();
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("devin", 1, "toolUse", { toolCallId: "agent", toolName: "Agent",
+        toolInput: { name: "Original", agentId: "child-agent" } })] })).result.kind).toBe("accepted");
+    const source = recovery().retained.find((event) => event.payload.type === "item.recorded"
+      && event.payload.item.id === "toolCall:agent");
+    if (source?.payload.type !== "item.recorded") throw new Error("Expected accepted ACP tool narrative");
+    const narrative = ParentNarrativeRecoveryItemSchema().parse(source.payload.item.payload.narrative);
+    if (narrative.kind !== "toolCall") throw new Error("Expected tool recovery record");
+    expect((await send(3, { kind: "narrative-delta", input: { executionId: execution.executionId,
+      items: [{ ...narrative, record: { ...narrative.record, display_name: "Enriched display identity" } }] } })).result.kind)
+      .toBe("accepted");
+
+    expect((await handler.handle({ requestId: 4, execution, lease, ordinal: 4, stopWatermark: 3,
+      command: { kind: "stop", requestId: "user-stop" } })).result.kind).toBe("accepted");
+    await expect(send(5, { kind: "finish-from-state", outcome: "cancelled", input: { ...execution,
+      providerId: "devin", providerIdentities: [], outcome: "cancelled", projection: { kind: "writer-staged" } } }))
+      .resolves.toMatchObject({ result: { kind: "accepted" } });
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+
+    const saved = new CanonicalAgentBoundary(db, () => {});
+    expect(saved.loadTurn(execution.turnId)?.status).toBe("Cancelled");
+    expect(db.prepare("SELECT id, status FROM tool_call_records").all())
+      .toEqual([{ id: "agent", status: "cancelled" }]);
+    expect(Object.values(saved.loadConversationProjection(execution.threadId, 20).narrativeByMessage)
+      .flatMap((batch) => batch.tools).map((tool) => tool.id)).toEqual(["agent"]);
   });
 
   it("publishes and saves thread-scoped synthesized observations without a turn", async () => {
