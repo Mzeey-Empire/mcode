@@ -10,8 +10,10 @@ import {
   readActiveThreadField,
 } from "@/stores/thread-store-test-utils";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
+import { useToastStore } from "@/stores/toastStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { mockTransport, createMockMessage } from "./mocks/transport";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
 import type { AgentEvent, PreviewAnnotationBundle, SelectedTextComment } from "@mcode/contracts";
@@ -98,10 +100,18 @@ function makeSelectedTextComments(): SelectedTextComment[] {
 }
 
 describe("Thread Lifecycle Behavior", () => {
+  let previousActiveThreadId: string | null = null;
   beforeEach(() => {
+    previousActiveThreadId = useWorkspaceStore.getState().activeThreadId;
     clearRecordCache();
     resetThreadStoreForTests();
     vi.clearAllMocks();
+    for (const toast of useToastStore.getState().toasts) useToastStore.getState().dismiss(toast.id);
+  });
+
+  afterEach(() => {
+    useWorkspaceStore.setState({ activeThreadId: previousActiveThreadId });
+    for (const toast of useToastStore.getState().toasts) useToastStore.getState().dismiss(toast.id);
   });
 
   it("when the user sends a message, the thread is marked as running", async () => {
@@ -322,8 +332,9 @@ describe("Thread Lifecycle Behavior", () => {
 
   it("when stopAgent fails, the thread remains running for retry", async () => {
     const threadId = "thread-1";
-    useThreadStore.setState({
-      runningThreadIds: new Set([threadId]),
+    useWorkspaceStore.setState({ activeThreadId: threadId });
+    useThreadStore.getState().applyThreadRuntimeSnapshot({
+      threadId, turnExecutionId: "00000000-0000-4000-8000-000000000001", phase: "running",
     });
     (
       mockTransport.stopAgent as ReturnType<typeof vi.fn>
@@ -335,7 +346,11 @@ describe("Thread Lifecycle Behavior", () => {
     expect(useThreadStore.getState().runningThreadIds.has(threadId)).toBe(
       true,
     );
-    expect(getTestThreadError("thread-1")).toBeTruthy();
+    expect(useThreadStore.getState().records.get(threadId)?.runtimePhase).toBe("running");
+    expect(useThreadStore.getState().records.get(threadId)?.error).toBeNull();
+    expect(useToastStore.getState().toasts).toMatchObject([{
+      level: "error", title: "Couldn't stop this turn", message: "Try Stop again. connection lost",
+    }]);
   });
 
   it("recalls only an undispatched stopped message", async () => {
