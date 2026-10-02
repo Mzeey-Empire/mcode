@@ -4,7 +4,7 @@ import {
   createSubagentPresentation, mergeSubagentPresentation, resolveBrowserNarrativeTool,
   resolveSubagentDuration, resolveSubagentMetadata, resolveSubagentPrompt,
   encodeCanonicalSubagentDetailTarget, encodeSubagentAliasDetailTarget,
-  type ParentNarrativeRecoveryItem, type SubagentPresentation,
+  type ParentNarrativeRecoveryItem, type SubagentPresentation, type AgentEvent,
 } from "@mcode/contracts";
 import type { CreateToolCallRecordInput } from "../../tools/persistence/tool-call-record-repo.js";
 import type { CreateThoughtSegmentInput } from "./persistence/thought-segment-repo.js";
@@ -270,13 +270,16 @@ export class NarrativeTurnState {
    * keep the same slot, taken BEFORE any following tool call's slot — matching
    * the live client builder. Never touches the `agentCallStack` (Trap 2).
    */
-  openOrExtendThought(threadId: string, delta: string): void {
+  openOrExtendThought(threadId: string, delta: string, textItemId?: string): void {
     this.assertThread(threadId);
+    if (textItemId && (this.turnThoughts.some((thought) => thought.id === textItemId)
+      || this.recoveryDiscards.has(`narrationSegment:${textItemId}`))) return;
+    if (textItemId && this.turnOpenThought && this.turnOpenThought.id !== textItemId) this.closeOpenThought(threadId);
     const open = this.turnOpenThought;
     if (!open) {
       const sortOrder = this.nextSortOrder(threadId);
       this.turnOpenThought = {
-        id: NodeCrypto.randomUUID(),
+        id: textItemId ?? NodeCrypto.randomUUID(),
         text: delta,
         startedAt: new Date().toISOString(),
         sortOrder,
@@ -301,6 +304,7 @@ export class NarrativeTurnState {
     const thought: CreateThoughtSegmentInput = {
       id: open.id,
       messageId: "",
+      ...(open.id.startsWith("assistant-text:") ? { isFinalResponse: 0 } : {}),
       text: open.text,
       startedAt: open.startedAt,
       endedAt: new Date().toISOString(),
@@ -310,6 +314,47 @@ export class NarrativeTurnState {
     this.turnThoughts = list;
     this.turnOpenThought = null;
     this.recordRecoveryChange(this.thoughtRecoveryItem(thought));
+  }
+
+  /** Reconcile or transfer exactly one assistant item, including an already closed thought. */
+  settleAssistantTextItem(threadId: string, boundary: Extract<AgentEvent, { type: "assistantMessageBoundary" }>):
+    { kind: "unchanged" } | { kind: "closed" } | { kind: "promoted"; text: string } {
+    this.assertThread(threadId);
+    const id = boundary.textItemId;
+    if (!id) {
+      if (boundary.isFinalResponse) return { kind: "promoted", text: this.takeOpenThought(threadId) };
+      this.closeOpenThought(threadId);
+      return { kind: "closed" };
+    }
+    return this.settleOwnedAssistantTextItem(threadId, boundary, id);
+  }
+
+  private settleOwnedAssistantTextItem(threadId: string,
+    boundary: Extract<AgentEvent, { type: "assistantMessageBoundary" }>, id: string):
+    { kind: "unchanged" } | { kind: "closed" } | { kind: "promoted"; text: string } {
+    const open = this.turnOpenThought?.id === id ? this.turnOpenThought : undefined;
+    const index = this.turnThoughts.findIndex((thought) => thought.id === id);
+    const thought = open ?? this.turnThoughts[index];
+    if (!thought) return { kind: "unchanged" };
+    const text = boundary.content ?? thought.text;
+    if (boundary.isFinalResponse) {
+      if (open) this.turnOpenThought = null;
+      else this.turnThoughts.splice(index, 1);
+      this.recordRecoveryDiscard(`narrationSegment:${id}`);
+      return { kind: "promoted", text };
+    }
+    if (open) {
+      this.turnOpenThought = { ...open, text };
+      this.closeOpenThought(threadId);
+    } else {
+      const closed = this.turnThoughts[index];
+      if (closed) {
+        const corrected = { ...closed, text };
+        this.turnThoughts[index] = corrected;
+        this.recordRecoveryChange(this.thoughtRecoveryItem(corrected));
+      }
+    }
+    return { kind: "closed" };
   }
 
   /**
@@ -846,7 +891,7 @@ export class NarrativeTurnState {
         started_at: this.requireRecoveryString(thought.startedAt, "thought start time"),
         ended_at: thought.endedAt ?? null,
         sort_order: thought.sortOrder,
-        ...(thought.isFinalResponse ? { is_final_response: thought.isFinalResponse } : {}),
+        ...(thought.isFinalResponse !== undefined ? { is_final_response: thought.isFinalResponse } : {}),
       },
     };
   }
@@ -1226,9 +1271,10 @@ export class NarrativeTurnState {
     message: string,
     maxSortOrder: number,
   ): boolean {
+    if (thought.isFinalResponse === 1) return true;
+    if (thought.id?.startsWith("assistant-text:")) return false;
     if (text === message) return true;
-    return thought.sortOrder === maxSortOrder
-      && (thought.isFinalResponse === 1 || message.endsWith(text));
+    return thought.sortOrder === maxSortOrder && message.endsWith(text);
   }
 
   private prepareHooksForPersistence(

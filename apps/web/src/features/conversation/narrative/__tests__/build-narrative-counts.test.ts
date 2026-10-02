@@ -23,6 +23,16 @@ function mkThought(text: string, startedAt: number, endedAt?: number): ThoughtSe
 }
 
 describe("buildNarrativeItems counts", () => {
+  it("keeps closed owned narration separate from the response-only text tape", () => {
+    const id = `assistant-text:${"a".repeat(64)}`;
+    const { items } = buildNarrativeItems({ toolCalls: [], hooks: [], isAgentRunning: true,
+      thoughtSegments: [{ id, text: "Earlier commentary", startedAt: 1, endedAt: 2, isExplicitNonFinal: true }],
+      streamingText: "Answer" });
+    expect(items).toMatchObject([{ type: "thought", segment: { id, text: "Earlier commentary" } },
+      { type: "delta", text: "Answer" }]);
+    expect(items).toHaveLength(2);
+  });
+
   it("keeps overlapping calls visible and preserves the completed command group", () => {
     const calls = Array.from({ length: 5 }, (_, index) => ({ ...mkTool({
       id: `command-${index}`, toolName: "Bash", startedAt: index, isComplete: false,

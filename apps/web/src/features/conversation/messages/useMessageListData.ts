@@ -103,6 +103,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const legacyAgentError = useThreadRecord(renderedThreadId, (record) => record.error);
   const legacyAgentStartTime = useThreadRecord(renderedThreadId, (record) => record.agentStartTime);
   const streamingText = useThreadRecord(renderedThreadId, (record) => record.streaming);
+  const responseTextIsStreaming = useThreadRecord(renderedThreadId, (record) => record.responseTextIsStreaming);
   const legacyToolCalls = useThreadRecord(renderedThreadId, (record) => record.toolCalls);
   const legacyThoughtSegments = useThreadRecord(renderedThreadId, (record) => record.thoughtSegments);
   const canonicalAgentState = useThreadRecord(renderedThreadId, (record) => record.canonicalAgent.state);
@@ -138,6 +139,9 @@ export function useMessageListData(displayThreadId: string | undefined) {
     toolCalls: legacyToolCalls ?? EMPTY_TOOL_CALLS,
     thoughtSegments: legacyThoughtSegments,
   });
+  const canonicalResponseText = canonicalLifecycleProjection
+    ? { streamingText: canonicalLifecycleProjection.streamingText, responseTextIsStreaming: false }
+    : { streamingText: canonicalProjection?.streamingText ?? streamingText, responseTextIsStreaming };
   const persistedFilesChanged = useThreadStore(
     useShallow((state) => {
       if (!renderedThreadId) return EMPTY_FILES_CHANGED;
@@ -188,7 +192,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     agentDisplayState: canonicalContent.agentDisplayState,
     isAgentRunning: isAgentDisplayActive(canonicalContent.agentDisplayState),
     agentStartTime: canonicalContent.agentStartTime,
-    streamingText: canonicalLifecycleTurn ? canonicalProjection?.streamingText : streamingText,
+    ...canonicalResponseText,
     toolCalls: canonicalActivity.toolCalls,
     thoughtSegments: canonicalActivity.thoughtSegments,
     persistedFilesChanged,

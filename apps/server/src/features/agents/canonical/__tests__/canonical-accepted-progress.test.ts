@@ -25,6 +25,7 @@ import { ProviderRuntimeEventSchema, type TurnOutcome } from "@mcode/contracts";
 import type { SessionEvent } from "../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js";
 import { ThoughtSegmentStore } from "../../conversation/narrative/persistence/thought-segment-store.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
+import { ProgressAdmissionError } from "../../execution/execution-writer-failure.js";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -247,6 +248,25 @@ describe("accepted parent progress with the actual SQLite writer", () => {
         expect(progress.recover(execution.threadId, { conversationRevision: 0, rosterRevision: 0 }).durable).toEqual(before);
       }
     } finally { await provider.shutdown(); }
+  });
+
+  it("saves native completion in order after checkpointing a rejected live observation", async () => {
+    await send(1, start("codex"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnStarted")] });
+    vi.spyOn(progress, "accept").mockImplementationOnce(() => { throw new Error("tool projection unavailable"); });
+    const dropped = await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 2, "toolUse", { toolCallId: "lost-tool", toolName: "Read", toolInput: {} })] });
+    expect(dropped.result).toMatchObject({ kind: "dropped", reason: "acceptance-rejected", receipt: { kind: "accepted" } });
+    await send(4, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 3, "textDelta", { delta: "Still completes", isFinalResponse: true })] });
+    expect((await send(5, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 4, "ended", { outcome: "completed" })],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } })).result.kind).toBe("accepted");
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
+    expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").get(execution.threadId)).toEqual({ content: "Still completes" });
+    expect(new CanonicalAgentBoundary(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
+    expect((await send(6, { kind: "release" })).result.kind).toBe("released");
   });
 
   it("preserves the durable child roster revision across a parent follow-up and fresh recovery owner", async () => {
@@ -1154,10 +1174,14 @@ describe("accepted parent progress with the actual SQLite writer", () => {
       .toEqual(previousPublicationHead);
     expect(failures).toEqual([]);
     await expect(progress.beforeDurableCommand(execution.threadId)).rejects.toThrow("disk checkpoint unavailable");
+    vi.spyOn(progress, "accept").mockImplementationOnce(() => { throw new ProgressAdmissionError("retention-exhausted"); });
     expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("codex", 2, "textDelta", { delta: " and after failed save", isFinalResponse: true })] })).result.kind).toBe("accepted");
+      events: [draft("codex", 2, "toolUse", { toolCallId: "blocked-tool", toolName: "Read", toolInput: {} })] })).result)
+      .toMatchObject({ kind: "dropped", reason: "acceptance-rejected" });
     expect((await send(4, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("codex", 3, "turnComplete")], terminalInput: { ...execution, providerId: "codex",
+      events: [draft("codex", 3, "textDelta", { delta: " and after failed save", isFinalResponse: true })] })).result.kind).toBe("accepted");
+    expect((await send(5, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 4, "turnComplete")], terminalInput: { ...execution, providerId: "codex",
         providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } })).result.kind).toBe("accepted");
     expect(recovery().retained.some((event) => event.payload.type === "turn.interrupted")).toBe(false);
     db.run("DROP TRIGGER fail_progress");

@@ -128,7 +128,7 @@ describe("canonical agent event residency guards", () => {
     useThreadStore.getState().applyCanonicalReconnectRecoveries([recovery]);
     const record = useThreadStore.getState().records.get(threadId)!;
     expect(record.toolCalls).toMatchObject([{ id: "missed-read", output: "recovered output", isComplete: true }]);
-    expect(record.thoughtSegments).toEqual([{ text: "Before the read", startedAt: Date.parse(NOW), endedAt: Date.parse(NOW), isExplicitNonFinal: true }]);
+    expect(record.thoughtSegments).toEqual([{ id: "missed-thought", text: "Before the read", startedAt: Date.parse(NOW), endedAt: Date.parse(NOW), isExplicitNonFinal: true }]);
   });
 
   it.each(["narrativeRecovery", "narrationSegment"])("restores a completed retained %s response exactly once without replaying live effects", (projection) => {

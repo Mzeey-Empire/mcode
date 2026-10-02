@@ -39,7 +39,7 @@ describe("Codex notification boundary", () => {
     const results = inputs.map((input) => mapper.mapNotificationWithDisposition(input));
     expect(results.map((result) => result.disposition.kind)).toEqual(["state-only", "mapped", "mapped", "mapped", "mapped", "mapped", "mapped", "mapped"]);
     const events = results.flatMap((result) => result.events.map(({ event }) => event));
-    expect(events.filter((event) => event.type === "textDelta")).toMatchObject([{ delta: "Check output\nRead the result", isFinalResponse: false }, { delta: "Verified", isFinalResponse: false }]);
+    expect(events.filter((event) => event.type === "textDelta")).toMatchObject([{ delta: "Check output\nRead the result", isFinalResponse: false }, { delta: "Verified", isFinalResponse: true }]);
     expect(events.filter((event) => event.type === "toolResult")).toMatchObject([{ toolCallId: "cmd-1", output: "verified\n", isError: false }, { toolCallId: "mcp-1", isError: false }]);
     expect(events.filter((event) => event.type === "goalUpdated")).toMatchObject([{ goal: { objective: "Verify notices", status: "active", tokensUsed: 12 } }]);
     expect(events.slice(-2)).toMatchObject([{ type: "message", content: "Verified" }, { type: "turnComplete", reason: "end_turn" }]);

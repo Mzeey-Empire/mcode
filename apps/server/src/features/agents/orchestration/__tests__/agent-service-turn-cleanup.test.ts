@@ -62,7 +62,7 @@ import { ThreadControlMutationReservationService } from "../../../thread-control
 import { publishParentProviderEvent } from "../../events/provider-event-publication.js";
 import { SubagentLifecycleService } from "../../collaboration/subagent-lifecycle-service.js";
 
-vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
+vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
 
 const THREAD_ID = "thread-cleanup-test";
 
@@ -845,6 +845,31 @@ describe("AgentService turn cleanup", () => {
     } finally {
       provider.stopSession.mockResolvedValue(undefined);
     }
+  });
+
+  it("does not evict or reset a newer execution when detached Stop teardown rejects", async () => {
+    const { service, providerEmitter } = await buildService();
+    startAgentServiceIngressForTest(service);
+    let rejectStop!: (error: Error) => void;
+    const stopSession = vi.fn(async () => {});
+    const discardSession = vi.fn(async () => {});
+    stopSession.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectStop = reject; }));
+    Object.assign(providerEmitter, { stopSession, discardSession });
+    const send = (content: string) => service.sendMessage({
+      threadId: THREAD_ID, content, permissionMode: "default", model: "claude-sonnet-4-6", attachments: [], provider: "claude",
+    });
+    await send("first turn");
+    const firstExecutionId = activeExecutionId(service);
+    expect((await service.stopSession(THREAD_ID)).status).toBe("cancelled");
+    await send("next turn");
+    const nextExecutionId = activeExecutionId(service);
+    expect(nextExecutionId).not.toBe(firstExecutionId);
+    rejectStop(new Error("Late teardown failure"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(discardSession).not.toHaveBeenCalled();
+    expect(service.runtimeAccess().runtimeSnapshots()).toContainEqual(expect.objectContaining({
+      threadId: THREAD_ID, turnExecutionId: nextExecutionId, phase: "running",
+    }));
   });
 
   it("does not let completion race overwrite an explicit stop", async () => {

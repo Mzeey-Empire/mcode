@@ -14,7 +14,7 @@ import type {
 
 type Work =
   | { readonly kind: "start" }
-  | { readonly kind: "event"; readonly sequence: number }
+  | { readonly kind: "event"; readonly sequence: number; readonly terminalInput?: { readonly outcome: "completed" } }
   | { readonly kind: "checkpoint"; readonly revision: number }
   | { readonly kind: "effect-result"; readonly effectId: string }
   | { readonly kind: "finish-from-state" }
@@ -122,6 +122,18 @@ describe("ExecutionMailboxScheduler", () => {
     worker.reply(request(worker, 1), 2);
     await expect(stop.completion).resolves.toMatchObject({ kind: "reply" });
     await expect(finish.completion).resolves.toMatchObject({ kind: "reply" });
+    scheduler.shutdown();
+  });
+
+  it("admits native completion using reserved capacity after Stop", async () => {
+    const { scheduler, workers } = fixture();
+    const identity = execution("native-stop");
+    const lease = claimed(scheduler, identity);
+    for (let sequence = 1; sequence <= 3; sequence++) admitted(scheduler, identity, lease, { kind: "event", sequence });
+    admitted(scheduler, identity, lease, { kind: "stop", requestId: "stop" });
+    const terminal = admitted(scheduler, identity, lease, { kind: "event", sequence: 4, terminalInput: { outcome: "completed" } });
+    for (let index = 0; index < 5; index++) workers[0]?.reply(request(workers[0]!, index), index + 1);
+    await expect(terminal.completion).resolves.toMatchObject({ kind: "reply" });
     scheduler.shutdown();
   });
 

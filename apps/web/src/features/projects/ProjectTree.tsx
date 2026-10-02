@@ -19,7 +19,7 @@ import { useWorkspaceStore } from "./state/workspaceStore";
 import { useThreadDraftStore, type ThreadDraft } from "@/stores/threadDraftStore";
 import { hasRecoveryEntry, useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { useUiStore } from "@/stores/uiStore";
-import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
+import { getExecutingThreadIds, isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import {
   Trash2,
@@ -891,7 +891,10 @@ export function ProjectTree() {
 
   const worktrees = useWorkspaceStore((s) => s.worktrees);
   const availableProviders = useProviderAvailabilityStore((s) => s.providers);
-  const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
+  const executingThreadIds = useThreadStore(useShallow(getExecutingThreadIds));
+  const runningThreadIds = useMemo(() => new Set(executingThreadIds), [executingThreadIds]);
+  const pendingStartupIds = useWorkspaceStore(useShallow((state) => Object.keys(state.pendingStartupByThreadId)));
+  const startupThreadIds = useMemo(() => new Set(pendingStartupIds), [pendingStartupIds]);
   // Normalized set of existing worktree paths for stale detection.
   const validWorktreePaths = useMemo(() => {
     const set = new Set<string>();
@@ -954,6 +957,7 @@ export function ProjectTree() {
         activeThreadId,
         activeWorkspaceId,
         runningThreadIds,
+        startupThreadIds,
       }),
     [
       workspaces,
@@ -966,6 +970,7 @@ export function ProjectTree() {
       activeThreadId,
       activeWorkspaceId,
       runningThreadIds,
+      startupThreadIds,
     ],
   );
 
@@ -1314,6 +1319,7 @@ interface ProjectTreeRowsInput {
   readonly activeThreadId: string | null;
   readonly activeWorkspaceId: string | null;
   readonly runningThreadIds: ReadonlySet<string>;
+  readonly startupThreadIds: ReadonlySet<string>;
 }
 
 /** Maps workspaces to virtual rows; children live inside the group row so a
@@ -1347,7 +1353,9 @@ function buildProjectTreeRows(
         isThreadListExpanded,
         isActive: input.activeWorkspaceId === workspace.id,
         hasRunning: wsThreads.some((thread) =>
-          input.runningThreadIds.has(thread.id),
+          input.runningThreadIds.has(thread.id)
+            || input.startupThreadIds.has(thread.id)
+            || thread.clientPreparing === true,
         ),
       },
     };

@@ -283,6 +283,24 @@ describe("canonical accepted and saved progress", () => {
     expect(gap.replica.state.turns[TURN_ID]?.status).toBe("Running");
   });
 
+  it("keeps a durable gap pending while a valid live terminal advances, then clears it after repair", () => {
+    const events = initialEvents();
+    const live = applyCanonicalProgressFrame(createCanonicalAgentReplica(), acceptedFrame(events));
+    const saved = applyCanonicalProgressFrame(live.replica, savedFrame(events));
+    const terminal = envelope("complete", 4, 2, { type: "turn.completed", endedAt: NOW });
+    const gap = applyCanonicalProgressFrame(saved.replica, savedFrame([{ ...terminal, durableRevision: 3 }]));
+    const completed = applyCanonicalProgressFrame(gap.replica, acceptedFrame([terminal]));
+    expect(completed.outcome).toBe("applied");
+    expect(completed.publications.map((event) => event.eventId)).toEqual(["complete"]);
+    expect(completed.replica.state.turns[TURN_ID]?.status).toBe("Completed");
+    expect(completed.replica.recoveryRequired).toBe(true);
+
+    const repaired = applyCanonicalProgressFrame(completed.replica, savedFrame([terminal]));
+    expect(repaired.outcome).toBe("applied");
+    expect(repaired.replica.state.turns[TURN_ID]?.status).toBe("Completed");
+    expect(repaired.replica.recoveryRequired).toBe(false);
+  });
+
   it.each(["epoch", "revision"] as const)("rejects an invalid %s acknowledgement before preserving or advancing the saved prefix", (invalid) => {
     const events = initialEvents();
     const live = applyCanonicalProgressFrame(createCanonicalAgentReplica(), acceptedFrame(events));

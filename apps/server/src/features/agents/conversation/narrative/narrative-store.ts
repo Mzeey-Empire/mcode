@@ -177,6 +177,10 @@ export class NarrativeStore {
     return this.stateFor(args[0]).openOrExtendThought(...args);
   }
 
+  settleAssistantTextItem(...args: Parameters<NarrativeTurnState["settleAssistantTextItem"]>): ReturnType<NarrativeTurnState["settleAssistantTextItem"]> {
+    return this.stateFor(args[0]).settleAssistantTextItem(...args);
+  }
+
   closeOpenThought(...args: Parameters<NarrativeTurnState["closeOpenThought"]>): ReturnType<NarrativeTurnState["closeOpenThought"]> {
     this.narrativeStates.get(args[0])?.closeOpenThought(...args);
   }

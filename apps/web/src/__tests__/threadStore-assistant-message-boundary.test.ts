@@ -94,5 +94,49 @@ describe("threadStore assistantMessageBoundary", () => {
 
     const segs = getTestThreadThoughtSegments(tid) ?? [];
     expect(segs).toEqual([{ text: "old thought", startedAt: 1, endedAt: 2 }]);
+  });  it("closes and later promotes the exact keyed item while preserving identical earlier narration", () => {
+    const tid = "owned-items";
+    resetThreadStoreForTests({ currentThreadId: tid });
+    const first = `assistant-text:${"1".repeat(64)}`;
+    const final = `assistant-text:${"2".repeat(64)}`;
+    for (const textItemId of [first, final]) {
+      useThreadStore.getState().handleAgentEvent({ type: "textDelta", threadId: tid, textItemId, delta: "Same", isFinalResponse: false });
+      useThreadStore.getState().handleAgentEvent({ type: "assistantMessageBoundary", threadId: tid, textItemId, content: "Same", isFinalResponse: false });
+    }
+    expect(getTestThreadThoughtSegments(tid)).toMatchObject([{ id: first, endedAt: expect.any(Number) }, { id: final, endedAt: expect.any(Number) }]);
+    useThreadStore.getState().handleAgentEvent({ type: "assistantMessageBoundary", threadId: tid, textItemId: final, content: "Same", isFinalResponse: true });
+    expect(getTestThreadThoughtSegments(tid)).toMatchObject([{ id: first, text: "Same" }]);
   });
+
+  it("closes final text on item completion while execution stays running", () => {
+    const tid = "owned-final";
+    resetThreadStoreForTests({ currentThreadId: tid });
+    const textItemId = `assistant-text:${"3".repeat(64)}`;
+    useThreadStore.getState().handleAgentEvent({ type: "turnStarted", threadId: tid });
+    useThreadStore.getState().handleAgentEvent({ type: "textDelta", threadId: tid, textItemId, delta: "Final", isFinalResponse: true });
+    useThreadStore.getState().handleAgentEvent({ type: "assistantMessageBoundary", threadId: tid, textItemId, content: "Final", isFinalResponse: true });
+    useThreadStore.getState().handleAgentEvent({ type: "message", threadId: tid, content: "Final", tokens: null });
+    const record = useThreadStore.getState().records.get(tid);
+    expect(record?.responseTextIsStreaming).toBe(false);
+    expect(record?.runtimePhase).toBe("running");
+    expect(useThreadStore.getState().runningThreadIds.has(tid)).toBe(true);
+    expect(record?.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+    useThreadStore.getState().handleAgentEvent({ type: "turnComplete", threadId: tid, reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+    expect(useThreadStore.getState().runningThreadIds.has(tid)).toBe(false);
+  });
+
+  it("preserves keyed item boundaries while a background conversation defers its narration", () => {
+    const tid = "background-items";
+    resetThreadStoreForTests({ currentThreadId: "foreground" });
+    const first = `assistant-text:${"4".repeat(64)}`;
+    const second = `assistant-text:${"5".repeat(64)}`;
+    for (const textItemId of [first, second]) {
+      useThreadStore.getState().handleAgentEvent({ type: "textDelta", threadId: tid, textItemId, delta: "small", isFinalResponse: false });
+      useThreadStore.getState().handleAgentEvent({ type: "assistantMessageBoundary", threadId: tid, textItemId, content: "small", isFinalResponse: false });
+    }
+    useThreadStore.setState({ currentThreadId: tid });
+    useThreadStore.getState().handleAgentEvent({ type: "assistantMessageBoundary", threadId: tid, textItemId: second, content: "small", isFinalResponse: false });
+    expect(getTestThreadThoughtSegments(tid)).toMatchObject([{ id: first, endedAt: expect.any(Number) }, { id: second, endedAt: expect.any(Number) }]);
+  });
+
 });

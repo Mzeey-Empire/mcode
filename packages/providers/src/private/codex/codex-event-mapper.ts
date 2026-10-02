@@ -28,6 +28,16 @@ import type {
 type CodexMappedEvent = AgentEvent & {
   codexChild?: CodexChildEvidence;
 };
+interface CodexAssistantTextItem {
+  text: string;
+  phase: "commentary" | "final_answer" | undefined;
+  status: "open" | "closed" | "completed";
+}
+
+function assistantPhase(phase: unknown): CodexAssistantTextItem["phase"] {
+  return phase === "commentary" || phase === "final_answer" ? phase : undefined;
+}
+
 type ToolResultAgentEvent = Extract<CodexMappedEvent, { type: typeof AgentEventType.ToolResult }>;
 type ChildNotificationContext = {
   childThreadId: string | undefined;
@@ -85,9 +95,9 @@ const SILENT_ITEM_TYPES = new Set([
  * Thinking stream: `item/reasoning/*` plus experimental `item/plan/delta` map to non-final
  * text deltas (`AgentEventType.TextDelta` with `isFinalResponse: false`) so the UI can show thought segments.
  *
- * Assistant text classification: Codex does not expose a stop reason. The mapper
- * streams every assistant message as narration and retroactively promotes only
- * the last assistant item to the final reply when the main turn completes.
+ * Native phase classifies assistant text when available. Item completion closes
+ * text immediately; phase-less items retain exact identity for later promotion.
+ * Only the owning native turn completion ends execution.
  */
 /** Item types that appear as user-visible tools in the narrative. */
 const TOOL_LIKE_ITEM_TYPES = new Set([
@@ -118,16 +128,13 @@ const EARLY_CHILD_FILE_TOOL_NAMES = new Set([
 
 /** Maps Codex app-server notifications into Mcode agent events. */
 export class CodexEventMapper {
-  /** Main-thread assistant text buffers keyed by Codex item id. */
-  private readonly assistantTextByItemId = new Map<string, string>();
-  /** The assistant item currently receiving streamed text. */
+  private readonly assistantItems = new Map<string, CodexAssistantTextItem>();
+  private readonly assistantItemAliases = new Map<string, string>();
   private currentAssistantItemId: string | undefined;
-  /** Text for the current assistant item, used when old Codex builds omit item ids. */
-  private currentAssistantItemText = "";
-  /** Last completed assistant item on the main Codex thread. Promoted on turn completion. */
-  private lastCompletedAssistantText = "";
-  /** Held assistant-message boundary waiting for one-event lookahead. */
-  private pendingAssistantBoundaryItemId: string | undefined;
+  private legacyAssistantCandidateId: string | undefined;
+  private finalAssistantText: string | undefined;
+  private assistantIdentityScope: string = NodeCrypto.randomUUID();
+  private assistantFallbackSequence = 0;
   /** Dedupes `item/completed` reasoning payloads against streamed reasoning deltas. */
   private lastReasoningText = "";
   /** Per-turn sequence for synthetic update_plan tool calls from turn/plan/updated. */
@@ -1436,122 +1443,128 @@ export class CodexEventMapper {
     return started == null || started !== this.toolUseSignature(event);
   }
 
-  /** Returns a stable id for assistant-text notifications, including older shapes without item ids. */
-  private assistantItemId(
-    notification: CodexNotification,
-    item?: CompletedItem,
-  ): string {
-    const rawItemId = item?.id;
-    if (typeof rawItemId === "string" && rawItemId.length > 0) return rawItemId;
-    const paramsItemId = (notification.params as { itemId?: unknown }).itemId;
-    if (typeof paramsItemId === "string" && paramsItemId.length > 0) return paramsItemId;
-    return this.currentAssistantItemId ?? FALLBACK_ASSISTANT_ITEM_ID;
+  private assistantItemId(notification: CodexNotification, item?: CompletedItem): string {
+    const paramsId = "itemId" in notification.params ? notification.params.itemId : undefined;
+    const nativeId = typeof item?.id === "string" && item.id.length > 0 ? item.id : paramsId;
+    if (typeof nativeId === "string" && nativeId.length > 0) return this.resolveAssistantNativeItemId(nativeId);
+    const current = this.currentAssistantItemId;
+    if (current && this.assistantItems.get(current)?.status === "open") return current;
+    return `${FALLBACK_ASSISTANT_ITEM_ID}:${++this.assistantFallbackSequence}`;
   }
 
-  /** Extracts assistant text from completed assistant message item shapes. */
-  private assistantTextFromCompletedItem(item: CompletedItem): string {
-    const content = item.content;
-    if (Array.isArray(content)) {
-      return content
-        .filter((c) => c.type === "output_text" || c.type === "text")
-        .map((c) => c.text ?? "")
-        .join("");
+  private resolveAssistantNativeItemId(nativeId: string): string {
+    const alias = this.assistantItemAliases.get(nativeId);
+    if (alias) return alias;
+    const current = this.currentAssistantItemId;
+    if (current?.startsWith(FALLBACK_ASSISTANT_ITEM_ID) && this.assistantItems.get(current)?.status === "open") {
+      this.assistantItemAliases.set(nativeId, current);
+      return current;
     }
-    const raw = item as { text?: unknown; output?: unknown };
-    if (typeof raw.text === "string") return raw.text;
-    if (typeof raw.output === "string") return raw.output;
-    return "";
+    return nativeId;
   }
 
-  /** True when there is assistant text whose boundary has not yet been classified. */
-  private hasOpenAssistantText(): boolean {
-    return (
-      this.pendingAssistantBoundaryItemId !== undefined
-      || this.currentAssistantItemText.length > 0
-    );
+  private assistantTextItemId(itemId: string): string {
+    return `assistant-text:${NodeCrypto.createHash("sha256").update(JSON.stringify([
+      this.threadId, this.assistantIdentityScope, itemId,
+    ])).digest("hex")}`;
   }
 
-  /**
-   * Flushes the held assistant-message boundary using Codex lookahead.
-   * Non-final boundaries clear assistant text so later turn failure/cancel
-   * cannot persist narration as the assistant reply.
-   */
+  private assistantItem(itemId: string, phase?: unknown) {
+    let item = this.assistantItems.get(itemId);
+    if (!item) {
+      item = { text: "", phase: undefined, status: "open" };
+      this.assistantItems.set(itemId, item);
+    }
+    if (phase === "commentary" || phase === "final_answer") item.phase = phase;
+    return item;
+  }
+
+  private assistantTextFromCompletedItem(item: CompletedItem): string | undefined {
+    if (Array.isArray(item.content)) return item.content
+      .filter((part) => part.type === "output_text" || part.type === "text")
+      .map((part) => part.text ?? "").join("");
+    if (typeof item.text === "string") return item.text;
+    return typeof item.output === "string" ? item.output : undefined;
+  }
+
+  private assistantBoundary(itemId: string, isFinalResponse: boolean): CodexMappedEvent {
+    return { type: AgentEventType.AssistantMessageBoundary, threadId: this.threadId,
+      textItemId: this.assistantTextItemId(itemId),
+      content: this.assistantItems.get(itemId)?.text ?? "", isFinalResponse };
+  }
+
+  /** Close partial text on non-success paths, or promote the exact legacy success candidate. */
   drainPendingAssistantBoundary(isFinalResponse = false): CodexMappedEvent[] {
-    if (!this.hasOpenAssistantText()) return [];
-    if (isFinalResponse && this.lastCompletedAssistantText.length === 0) {
-      this.lastCompletedAssistantText = this.currentAssistantItemText;
+    const candidateId = this.legacyAssistantCandidateId;
+    this.legacyAssistantCandidateId = undefined;
+    if (isFinalResponse && candidateId && this.finalAssistantText === undefined) {
+      this.finalAssistantText = this.assistantItems.get(candidateId)?.text;
+      return [this.assistantBoundary(candidateId, true)];
     }
-    const event: CodexMappedEvent = {
-      type: AgentEventType.AssistantMessageBoundary,
-      threadId: this.threadId,
-      isFinalResponse,
-    };
-    this.pendingAssistantBoundaryItemId = undefined;
-    if (!isFinalResponse) {
-      this.assistantTextByItemId.clear();
-      this.currentAssistantItemId = undefined;
-      this.currentAssistantItemText = "";
-      this.lastCompletedAssistantText = "";
-    }
-    return [event];
+    return this.closeCurrentAssistantText(isFinalResponse);
   }
 
-  /** Flushes a pending boundary when a different item starts producing work. */
+  private closeCurrentAssistantText(isFinalResponse: boolean): CodexMappedEvent[] {
+    const itemId = this.currentAssistantItemId;
+    const item = itemId ? this.assistantItems.get(itemId) : undefined;
+    if (!itemId || !item || item.status !== "open") return [];
+    item.status = "closed";
+    const final = item.phase === "final_answer" || (isFinalResponse && item.phase === undefined && this.finalAssistantText === undefined);
+    if (final) this.finalAssistantText = item.text;
+    return [this.assistantBoundary(itemId, final)];
+  }
+
   private drainAssistantBoundaryBeforeItem(nextItemId?: string): CodexMappedEvent[] {
-    if (!this.hasOpenAssistantText()) return [];
     if (nextItemId && this.currentAssistantItemId === nextItemId) return [];
     return this.drainPendingAssistantBoundary(false);
   }
 
-  /** Records streamed assistant text and emits it as narration until a boundary promotes it. */
-  private recordAssistantDelta(itemId: string, delta: string): void {
-    const prev = this.assistantTextByItemId.get(itemId) ?? "";
-    const next = prev + delta;
-    this.assistantTextByItemId.set(itemId, next);
-    this.currentAssistantItemId = itemId;
-    this.currentAssistantItemText = next;
-  }
-
-  /**
-   * Handles completed assistant items. It may emit a missing non-final delta for
-   * completed-only message shapes, but it holds the boundary until lookahead.
-   */
-  private recordAssistantCompletion(
-    item: CompletedItem,
-    notification: CodexNotification,
-  ): CodexMappedEvent[] {
+  private recordAssistantCompletion(item: CompletedItem, notification: CodexNotification): CodexMappedEvent[] {
     const itemId = this.assistantItemId(notification, item);
+    const previous = this.assistantItems.get(itemId);
     const completedText = this.assistantTextFromCompletedItem(item);
-    this.replaceFallbackAssistantItemId(itemId);
-    const boundaryEvents = this.drainAssistantBoundaryBeforeItem(itemId);
-    const previousText = this.assistantTextByItemId.get(itemId) ?? "";
-    const events = this.completedAssistantDeltaEvents(itemId, completedText, previousText, boundaryEvents);
-    this.rememberCompletedAssistantBoundary(itemId);
+    const phase = this.completedAssistantPhase(previous, item.phase);
+    if (this.isDuplicateAssistantCompletion(previous, completedText, phase)) return [];
+    const isCurrent = previous === undefined || previous.status === "open" || this.currentAssistantItemId === itemId;
+    const events = this.closePreviousAssistantItem(itemId, previous);
+    const state = this.assistantItem(itemId, phase);
+    this.appendCompletedAssistantSuffix(events, state, itemId, completedText);
+    state.status = "completed";
+    if (isCurrent) this.currentAssistantItemId = itemId;
+    events.push(this.assistantBoundary(itemId, state.phase === "final_answer"));
+    this.classifyCompletedAssistantItem(events, state, itemId, isCurrent);
     return events;
   }
 
-  private replaceFallbackAssistantItemId(itemId: string): void {
-    const canReplace = itemId !== FALLBACK_ASSISTANT_ITEM_ID && this.currentAssistantItemId === FALLBACK_ASSISTANT_ITEM_ID && this.currentAssistantItemText.length > 0 && !this.assistantTextByItemId.has(itemId);
-    if (!canReplace) return;
-    this.assistantTextByItemId.delete(FALLBACK_ASSISTANT_ITEM_ID);
-    this.assistantTextByItemId.set(itemId, this.currentAssistantItemText);
-    this.currentAssistantItemId = itemId;
+  private completedAssistantPhase(previous: CodexAssistantTextItem | undefined, phase: unknown): CodexAssistantTextItem["phase"] {
+    if (previous?.status === "completed" && previous.phase === "final_answer") return previous.phase;
+    return assistantPhase(phase) ?? previous?.phase;
   }
 
-  private completedAssistantDeltaEvents(itemId: string, completedText: string, previousText: string, boundaryEvents: CodexMappedEvent[]): CodexMappedEvent[] {
-    if (completedText.length === 0) return boundaryEvents;
-    const delta = completedText.length > previousText.length ? completedText.slice(previousText.length) : "";
-    this.assistantTextByItemId.set(itemId, completedText);
-    this.currentAssistantItemId = itemId;
-    this.currentAssistantItemText = completedText;
-    return delta ? [...boundaryEvents, { type: AgentEventType.TextDelta, threadId: this.threadId, delta, isFinalResponse: false }] : boundaryEvents;
+  private isDuplicateAssistantCompletion(previous: CodexAssistantTextItem | undefined, content: string | undefined,
+    phase: CodexAssistantTextItem["phase"]): boolean {
+    return previous?.status === "completed" && (content === undefined || content === previous.text) && phase === previous.phase;
   }
 
-  private rememberCompletedAssistantBoundary(itemId: string): void {
-    const text = this.assistantTextByItemId.get(itemId) ?? "";
-    if (text.length === 0) return;
-    this.lastCompletedAssistantText = text;
-    this.pendingAssistantBoundaryItemId = itemId;
+  private closePreviousAssistantItem(itemId: string, previous: CodexAssistantTextItem | undefined): CodexMappedEvent[] {
+    return previous && previous.status !== "open" ? [] : this.drainAssistantBoundaryBeforeItem(itemId);
+  }
+
+  private appendCompletedAssistantSuffix(events: CodexMappedEvent[], state: CodexAssistantTextItem,
+    itemId: string, completedText: string | undefined): void {
+    const content = completedText ?? state.text;
+    const delta = state.status === "open" && content.startsWith(state.text) ? content.slice(state.text.length) : "";
+    state.text = content;
+    if (delta) events.push({ type: AgentEventType.TextDelta, threadId: this.threadId,
+      textItemId: this.assistantTextItemId(itemId), delta, isFinalResponse: state.phase === "final_answer" });
+  }
+
+  private classifyCompletedAssistantItem(events: CodexMappedEvent[], state: CodexAssistantTextItem,
+    itemId: string, isCurrent: boolean): void {
+    if (state.phase === "final_answer") {
+      this.finalAssistantText = state.text;
+      events.push({ type: AgentEventType.Message, threadId: this.threadId, content: state.text, tokens: null });
+    } else if (state.phase === undefined && isCurrent) this.legacyAssistantCandidateId = itemId;
   }
 
   /**
@@ -1887,10 +1900,20 @@ export class CodexEventMapper {
 
   private mapMainItemStarted(notification: CodexNotification): CodexMappedEvent[] {
     const item = (notification.params as { item?: CompletedItem }).item;
+    if (item?.type === "agentMessage" || item?.type === "message") return this.mapAssistantItemStarted(notification, item);
     const itemId = typeof item?.id === "string" ? item.id : undefined;
     if (item?.type === "collabAgentToolCall" && this.isWaitCollab(item)) return [];
-    const boundaryEvents = this.drainAssistantBoundaryBeforeItem(itemId);
-    return this.mapStartedMainItem(item, itemId, notification, boundaryEvents);
+    return this.mapStartedMainItem(item, itemId, notification, this.drainAssistantBoundaryBeforeItem(itemId));
+  }
+
+  private mapAssistantItemStarted(notification: CodexNotification, item: CompletedItem): CodexMappedEvent[] {
+    const itemId = this.assistantItemId(notification, item);
+    const boundaries = this.drainAssistantBoundaryBeforeItem(itemId);
+    if (this.assistantItems.get(itemId)?.status !== "completed") {
+      this.assistantItem(itemId, item.phase);
+      this.currentAssistantItemId = itemId;
+    }
+    return boundaries;
   }
 
   private mapStartedMainItem(item: CompletedItem | undefined, itemId: string | undefined, notification: CodexNotification, boundaryEvents: CodexMappedEvent[]): CodexMappedEvent[] {
@@ -1971,9 +1994,13 @@ export class CodexEventMapper {
     const delta = (notification.params as { delta?: string }).delta;
     if (!delta) return [];
     const itemId = this.assistantItemId(notification);
+    if (this.assistantItems.get(itemId)?.status !== undefined && this.assistantItems.get(itemId)?.status !== "open") return [];
     const boundaryEvents = this.drainAssistantBoundaryBeforeItem(itemId);
-    this.recordAssistantDelta(itemId, delta);
-    return [...boundaryEvents, { type: AgentEventType.TextDelta, threadId: this.threadId, delta, isFinalResponse: false }];
+    const item = this.assistantItem(itemId);
+    item.text += delta;
+    this.currentAssistantItemId = itemId;
+    return [...boundaryEvents, { type: AgentEventType.TextDelta, threadId: this.threadId,
+      textItemId: this.assistantTextItemId(itemId), delta, isFinalResponse: item.phase === "final_answer" }];
   }
 
   private mapCommandOutputDelta(notification: CodexNotification): CodexMappedEvent[] {
@@ -2051,7 +2078,7 @@ export class CodexEventMapper {
 
   private finishCompletedMainTurn(usage: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number } | undefined): CodexMappedEvent[] {
     const events = [...this.drainPendingAssistantBoundary(true), ...this.finishActiveApprovalReviews("Review aborted")];
-    if (this.lastCompletedAssistantText) events.push({ type: AgentEventType.Message, threadId: this.threadId, content: this.lastCompletedAssistantText, tokens: null });
+    if (this.finalAssistantText !== undefined) events.push({ type: AgentEventType.Message, threadId: this.threadId, content: this.finalAssistantText, tokens: null });
     events.push({ type: AgentEventType.TurnComplete, threadId: this.threadId, reason: "end_turn", costUsd: null, ...this.currentTokenUsage(usage), providerId: "codex" });
     this.completeMainTurnState();
     return events;
@@ -2082,7 +2109,9 @@ export class CodexEventMapper {
     const params = notification.params as { error?: { message?: string }; willRetry?: boolean };
     const error = params.error?.message ?? "Unknown error from codex app-server";
     logger.debug("Codex error notification", { error, willRetry: params.willRetry ?? false });
-    const event = params.willRetry ? { type: AgentEventType.ApiRetry, threadId: this.threadId, reason: error } : { type: AgentEventType.Error, threadId: this.threadId, error };
+    const event = params.willRetry
+      ? { type: AgentEventType.ApiRetry, threadId: this.threadId, reason: error }
+      : { type: AgentEventType.System, threadId: this.threadId, subtype: "provider.notice.codex-error", message: error };
     return [...this.drainPendingAssistantBoundary(false), event];
   }
 
@@ -2090,11 +2119,13 @@ export class CodexEventMapper {
   reset(): void {
     this.turnTokenUsage = undefined;
     this.turnTokenBaseline = undefined;
-    this.assistantTextByItemId.clear();
+    this.assistantItems.clear();
+    this.assistantItemAliases.clear();
     this.currentAssistantItemId = undefined;
-    this.currentAssistantItemText = "";
-    this.lastCompletedAssistantText = "";
-    this.pendingAssistantBoundaryItemId = undefined;
+    this.legacyAssistantCandidateId = undefined;
+    this.finalAssistantText = undefined;
+    this.assistantFallbackSequence = 0;
+    this.assistantIdentityScope = NodeCrypto.randomUUID();
     this.lastReasoningText = "";
     this.planUpdateSeq = 0;
     this.commandOutputBuffers.clear();
@@ -2130,8 +2161,9 @@ export class CodexEventMapper {
    * Call from CodexProvider before runTurn on a reused session so streaming
    * tokens are not suppressed while waiting for turn/started.
    */
-  prepareForTurn(): void {
+  prepareForTurn(owner?: { executionId: string; deliveryAttempt: number }): void {
     this.reset();
+    if (owner) this.assistantIdentityScope = JSON.stringify(owner);
     this.turnEnded = false;
   }
 

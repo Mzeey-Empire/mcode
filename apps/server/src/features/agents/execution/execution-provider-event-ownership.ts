@@ -134,6 +134,11 @@ export class ExecutionProviderEventOwnership implements ProviderEventOwnership {
 
   private async commitAndNotify(route: ActiveRoute, batch: WorkerOwnedProviderEventBatch): Promise<WorkerOwnedProviderEventResult> {
     const result = await this.submitPrepared(route, batch);
+    if (result.kind === "dropped") {
+      await this.notifyCommitted(route.execution, result.receipt);
+      return { batchId: batch.batchId, deliveryAttempt: batch.deliveryAttempt,
+        commit: { outcome: "dropped", reason: result.reason }, providerEvents: [] };
+    }
     if (result.kind === "accepted") {
       await this.notifyCommitted(route.execution, result);
       return { batchId: batch.batchId, deliveryAttempt: batch.deliveryAttempt,

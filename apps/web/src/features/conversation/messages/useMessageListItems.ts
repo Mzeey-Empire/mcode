@@ -29,6 +29,7 @@ type MessageListItemsInput = Pick<
   | "persistedNarrativeByMessage"
   | "renderedThreadId"
   | "streamingText"
+  | "responseTextIsStreaming"
   | "thoughtSegments"
   | "toolCalls"
   | "turnSummariesByMessageId"
@@ -108,6 +109,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
     persistedNarrativeByMessage,
     renderedThreadId,
     streamingText,
+    responseTextIsStreaming,
     thoughtSegments,
     toolCalls,
     turnSummariesByMessageId,
@@ -144,6 +146,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       agentDisplayState,
       agentStartTime,
       streamingText,
+    responseTextIsStreaming,
       permissions,
       hooks,
       thoughtSegments,
@@ -166,6 +169,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       persistedNarrativeByMessage,
       renderedThreadId,
       streamingText,
+    responseTextIsStreaming,
       thoughtSegments,
       toolCalls,
       turnSummariesByMessageId,

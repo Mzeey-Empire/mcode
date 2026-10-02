@@ -11,6 +11,22 @@ function item(id: string, kind: string, record: Record<string, unknown>, threadI
 const input = { threadId: "thread", turnId: "turn", messageId: "message", endedAt: END, outcome: "interrupted" } as const;
 
 describe("response narrative binding", () => {
+  it("preserves owned commentary and explicit final flags even when their text matches the answer", () => {
+    const exactId = `assistant-text:${"a".repeat(64)}`;
+    const suffixId = `assistant-text:${"b".repeat(64)}`;
+    const finalId = `assistant-text:${"c".repeat(64)}`;
+    const exact = item("exact", "narrationSegment", { id: exactId, text: "Answer", sort_order: 1, is_final_response: 0 });
+    const suffix = item("suffix", "narrationSegment", { id: suffixId, text: "swer", sort_order: 3, is_final_response: 0 });
+    const final = item("final", "narrationSegment", { id: finalId, text: "Answer", sort_order: 2, is_final_response: 1 });
+    const response: AgentItem = { ...exact, id: "message:message", kind: "message",
+      payload: { projection: "message", message: { content: "Answer" } } };
+    const values = [exact, suffix, final, response];
+    const bound = bindResponseItems(Object.fromEntries(values.map((value) => [value.id, value])), input);
+    expect(bound.exact?.payload.record).toMatchObject({ text: "Answer", is_final_response: 0 });
+    expect(bound.suffix?.payload.record).toMatchObject({ text: "swer", is_final_response: 0 });
+    expect(bound.final?.payload.record).toMatchObject({ text: "Answer", is_final_response: 1 });
+  });
+
   it("binds5000 accepted records in one immutable pass and preserves other turns", () => {
     const tools = Array.from({ length: 5_000 }, (_, i) => item(`toolCall:${i}`, "toolCall", {
       id: String(i), message_id: "", status: "completed", completed_at: NOW }));

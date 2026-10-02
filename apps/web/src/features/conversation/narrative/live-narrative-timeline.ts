@@ -212,7 +212,8 @@ function liveStreamingSuffix(
   hasRunningTopLevelTool: boolean,
 ): string {
   if (!isAgentRunning || hasRunningTopLevelTool) return "";
-  const thoughtTape = thoughtSegments.map((segment) => segment.text).join("");
+  const thoughtTape = thoughtSegments.filter((segment) => !segment.id?.startsWith("assistant-text:"))
+    .map((segment) => segment.text).join("");
   return streamingText.startsWith(thoughtTape)
     ? streamingText.slice(thoughtTape.length)
     : "";

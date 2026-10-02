@@ -118,6 +118,51 @@ function applyPrepared(events: readonly CanonicalAgentEventDraft[], items: Reado
 }
 
 describe("prepareAcceptedParentEvents", () => {
+  it("keeps owned identical commentary and explicit final classification through terminal binding", () => {
+    const commentary = thought(`assistant-text:${"a".repeat(64)}`, "Answer", 1);
+    const explicitFinal = thought(`assistant-text:${"b".repeat(64)}`, "Answer", 2);
+    explicitFinal.record.is_final_response = 1;
+    const accepted = narrativeItems([commentary, explicitFinal]);
+    const result = prepare(finish("completed", [commentary, explicitFinal]), accepted);
+    const state = applyPrepared(result.events, accepted);
+    expect(state.items[`narrationSegment:${commentary.record.id}`]?.payload.record)
+      .toMatchObject({ text: "Answer", is_final_response: 0 });
+    expect(state.items[`narrationSegment:${explicitFinal.record.id}`]?.payload.record)
+      .toMatchObject({ text: "Answer", is_final_response: 1 });
+    expect(state.turns[turn.id]?.status).toBe("Completed");
+  });
+
+  it("records one response text slot for partial deltas, closure, and authoritative full body", () => {
+    const append = operation({ kind: "live-event", text: { kind: "append", inputs: [{ ...execution, sequence: 1, text: "Part" }] } });
+    const initial = prepare(append);
+    const slot = projectedItems(initial.events)[0];
+    if (!slot) throw new Error("Missing text recovery");
+    expect(slot.payload).toEqual({ projection: "assistantText", content: "Part", isStreaming: true });
+    const second = prepare({ ...append, operationId: "lease:3", mutation: { kind: "live-event",
+      text: { kind: "append", inputs: [{ ...execution, sequence: 2, text: "ial" }] } } }, { [slot.id]: slot });
+    const streamed = projectedItems(second.events)[0];
+    if (!streamed) throw new Error("Missing updated recovery");
+    expect(streamed.id).toBe(slot.id);
+    expect(streamed.payload).toEqual({ projection: "assistantText", content: "Partial", isStreaming: true });
+    const closed = prepare({ ...operation({ kind: "live-event", text: { kind: "unchanged" } }), operationId: "lease:4",
+      livePublication: [{ after: "writer", event: { type: "assistantMessageBoundary", threadId: thread.id,
+        turnExecutionId: execution.executionId, content: "Corrected", isFinalResponse: true } }],
+    }, { [streamed.id]: streamed });
+    const sealed = projectedItems(closed.events)[0];
+    if (!sealed) throw new Error("Missing closed recovery");
+    expect(sealed.payload).toEqual({ projection: "assistantText", content: "Corrected", isStreaming: false });
+    const body = prepare({ ...operation({ kind: "live-event", text: { kind: "unchanged" },
+      message: { precedingMessageId: "user", messageId: "answer", content: "Corrected", model: null, attachments: [] } }),
+      operationId: "lease:5" }, { [sealed.id]: sealed });
+    const projected = applyPrepared(body.events, { [sealed.id]: sealed });
+    expect(projected.items[slot.id]?.payload).toEqual({ projection: "assistantText", content: "Corrected", isStreaming: false });
+    expect(Object.values(projected.items).filter((item) => item.payload.projection === "assistantText")).toHaveLength(1);
+    expect(projected.turns[turn.id]?.status).toBe("Running");
+    expect(Object.values(projected.items).find((item) => item.payload.projection === "message")?.payload.message).toMatchObject({ id: "answer", content: "Corrected" });
+    const newAttempt = prepare({ ...append, operationId: "lease:6" }, projected.items);
+    expect(projectedItems(newAttempt.events)[0]?.payload).toEqual({ projection: "assistantText", content: "Part", isStreaming: true });
+  });
+
   it("assigns a new recovery identity for a late child target and retains it through repeat preparation and terminal binding", () => {
     const base = tool("completed");
     const entry = { ...base, record: { ...base.record, tool_name: "Agent" } };

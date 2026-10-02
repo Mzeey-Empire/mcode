@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ExecutionWorkerHandler, type ExecutionSemanticOperation, type ExecutionSemanticWriter,
   type ExecutionWorkCommand, type ExecutionWriteReceipt } from "../execution-worker-handler.js";
 import { TurnFileTracker } from "../../turns/turn-file-tracker.js";
+import { RejectedProviderObservationError } from "../execution-writer-failure.js";
 
 const execution = { threadId: "thread", turnId: "turn", executionId: "11111111-1111-4111-8111-111111111111" };
 const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "lease-1" };
@@ -46,8 +47,13 @@ class Writer implements ExecutionSemanticWriter {
   readonly operations: ExecutionSemanticOperation[] = [];
   fail = false;
   throwFailure = false;
+  rejectObservation = false;
   async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
     this.operations.push(operation);
+    if (this.rejectObservation && operation.mutation.kind === "append-events") {
+      this.rejectObservation = false;
+      throw new RejectedProviderObservationError(new Error("invalid observation"));
+    }
     if (this.throwFailure) throw new Error("writer disconnected");
     return this.fail ? { kind: "conflict", operationId: operation.operationId }
       : { kind: "committed", operationId: operation.operationId, durableRevision: this.operations.length };
@@ -134,20 +140,21 @@ describe("execution worker parent event ownership", () => {
     expect((await send(7, { kind: "release" })).result).toEqual({ kind: "released" });
   });
 
-  it("fences attempts and poisons a terminal whose file evidence is missing", async () => {
+  it("drops stale observations and finishes without unavailable file evidence", async () => {
     const { cwd, handoff } = await fileFixture();
     const { writer, send } = fixture();
     await send(1, start());
     await send(2, { kind: "begin-files", cwd, handoff, deliveryAttempt: 1 });
     const started = { kind: "event", phase: "running", nativeCursor: null, events: [eventDraft(1, "turnStarted")] } satisfies ExecutionWorkCommand;
-    expect((await send(3, { ...started, deliveryAttempt: 2 })).result).toMatchObject({ kind: "rejected", reason: "invalid-event-routing" });
-    expect((await send(3, { ...started, deliveryAttempt: 1 })).result.kind).toBe("committed");
+    expect((await send(3, { ...started, deliveryAttempt: 2 })).result).toMatchObject({ kind: "dropped", reason: "invalid-event-routing" });
+    expect((await send(4, { ...started, deliveryAttempt: 1 })).result.kind).toBe("committed");
     const terminal = { ...started, events: [eventDraft(2, "error", { error: "Disconnected" })], deliveryAttempt: 1,
       terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "errored", projection: { kind: "writer-staged" } },
     } satisfies ExecutionWorkCommand;
-    expect((await send(4, terminal)).result).toMatchObject({ kind: "rejected", reason: "invalid-event-routing" });
-    expect((await send(4, terminal)).result).toMatchObject({ kind: "rejected", reason: "invalid-transition" });
-    expect(writer.operations).toHaveLength(3);
+    expect((await send(5, terminal)).result.kind).toBe("committed");
+    expect(writer.operations[4]?.mutation).toMatchObject({ kind: "finish-live-event", outcome: "errored" });
+    expect(writer.operations[4]?.mutation).not.toHaveProperty("input.fileEvidence");
+    expect((await send(6, { kind: "release" })).result).toEqual({ kind: "released" });
   });
 
   it.each(["claude", "cursor"] as const)("prepares %s parent text, message features, and terminal writes", async (providerId) => {
@@ -178,10 +185,10 @@ describe("execution worker parent event ownership", () => {
     const { writer, send, event } = fixture();
     const command = start();
     await send(1, { ...command, providerId, input: { ...command.input, thread: { ...command.input.thread, providerId } } });
-    expect((await event(2, eventDraft(1, "turnStarted"))).result).toMatchObject({ kind: "rejected", reason: "invalid-event-routing" });
-    expect((await event(2, { ...eventDraft(2, "textDelta", { delta: "Before start" }), sourceProviderId: providerId })).result)
-      .toMatchObject({ kind: "rejected", reason: "invalid-event-routing" });
-    expect(writer.operations).toHaveLength(1);
+    expect((await event(2, eventDraft(1, "turnStarted"))).result).toMatchObject({ kind: "dropped" });
+    expect((await event(3, { ...eventDraft(2, "textDelta", { delta: "Before start" }), sourceProviderId: providerId })).result)
+      .toMatchObject({ kind: "dropped" });
+    expect(writer.operations.slice(1).map((operation) => operation.mutation.kind)).toEqual(["checkpoint", "checkpoint"]);
   });
 
   it("derives text writes inside the worker and commits them with their canonical draft", async () => {
@@ -204,8 +211,8 @@ describe("execution worker parent event ownership", () => {
     await send(1, start());
     const reply = await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [eventDraft(1, "turnStarted")], parentLive: { text: { kind: "unchanged" } } });
-    expect(reply.result).toMatchObject({ kind: "rejected", reason: "invalid-event-routing" });
-    expect(writer.operations).toHaveLength(1);
+    expect(reply.result).toMatchObject({ kind: "dropped", reason: "invalid-event-routing" });
+    expect(writer.operations[1]?.mutation).toMatchObject({ kind: "checkpoint" });
   });
 
   it("rejects malformed parent identity before writing or advancing the reducer", async () => {
@@ -214,8 +221,23 @@ describe("execution worker parent event ownership", () => {
     const stale = eventDraft(1, "turnStarted");
     if (stale.payload.type !== "item.recorded") throw new Error("Expected runtime item");
     const reply = await event(2, { ...stale, payload: { ...stale.payload, item: { ...stale.payload.item, turnId: "other" } } });
-    expect(reply.result).toMatchObject({ kind: "rejected", reason: "invalid-event-routing" });
-    expect(writer.operations).toHaveLength(1);
+    expect(reply.result).toMatchObject({ kind: "dropped" });
+    expect(writer.operations[1]?.mutation).toMatchObject({ kind: "checkpoint" });
+  });
+
+  it("retains good text and native completion after a rejected observation", async () => {
+    const { writer, send, event } = fixture();
+    await send(1, start());
+    await event(2, eventDraft(1, "turnStarted"));
+    writer.rejectObservation = true;
+    expect((await event(3, eventDraft(2, "textDelta", { delta: "Discard this" }))).result).toMatchObject({ kind: "dropped", reason: "acceptance-rejected" });
+    expect(writer.operations[3]).toMatchObject({ ordinal: 3, mutation: { kind: "checkpoint" } });
+    await event(4, eventDraft(3, "textDelta", { delta: "Valid answer", isFinalResponse: true }));
+    const reply = await send(5, { kind: "event", phase: "running", nativeCursor: null,
+      events: [eventDraft(4, "ended", { outcome: "completed" })],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    expect(reply.result).toMatchObject({ kind: "committed", parentEvent: { terminal: { outcome: "completed", assistant: { content: "Valid answer" } } } });
+    expect((await send(6, { kind: "release" })).result).toEqual({ kind: "released" });
   });
 
   it("poisons prepared reducer state when its write conflicts", async () => {

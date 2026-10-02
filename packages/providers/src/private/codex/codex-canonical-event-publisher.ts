@@ -4,6 +4,7 @@ import { logger } from "@mcode/shared";
 import type { ProviderEventDraft, ProviderEventSinkPort } from "../../host-ports.js";
 
 const MAX_PENDING_EVENTS_PER_EXECUTION = 1_024;
+const RESERVED_TERMINAL_EVENTS = 4;
 
 /** Exact Mcode turn and delivery attempt that produced a Codex event. */
 export interface CodexCanonicalEventRouting {
@@ -19,6 +20,7 @@ interface ExecutionQueue {
   tail: Promise<void>;
   failure: Error | undefined;
   discardQueued: boolean;
+  overflowReported: boolean;
 }
 
 /** Serializes Codex parent events through the server-owned canonical sink. */
@@ -52,8 +54,14 @@ export class CodexCanonicalEventPublisher {
     }
     const queue = this.queueFor(routing);
     if (queue.failure || queue.discardQueued) return;
-    if (queue.pendingEventCount >= MAX_PENDING_EVENTS_PER_EXECUTION) {
-      this.reportFailure(routing, queue, new Error(`Codex canonical event queue overflowed for execution ${routing.executionId}`));
+    const terminal = isTerminalEvent(runtimeEvent.event);
+    const limit = MAX_PENDING_EVENTS_PER_EXECUTION + (terminal ? RESERVED_TERMINAL_EVENTS : 0);
+    if (queue.pendingEventCount >= limit) {
+      if (terminal) this.reportFailure(routing, queue, new Error("Codex terminal event reserve exhausted"));
+      else if (!queue.overflowReported) {
+        queue.overflowReported = true;
+        this.logDropped(routing, runtimeEvent.event.type, "queue-capacity");
+      }
       return;
     }
 
@@ -75,9 +83,19 @@ export class CodexCanonicalEventPublisher {
         if (receipt.commit.outcome === "conflict" || receipt.commit.outcome === "ingest-overflow") {
           throw new Error(`Codex canonical event ${draft.eventId} was ${receipt.commit.outcome}`);
         }
+        if (receipt.commit.outcome === "dropped") {
+          if (terminal) throw new Error("Codex terminal observation was dropped");
+          this.logDropped(routing, runtimeEvent.event.type, receipt.commit.reason);
+        }
       })
-      .catch((error: unknown) => { this.reportFailure(routing, queue, toError(error)); })
-      .finally(() => { queue.pendingEventCount--; });
+      .catch((error: unknown) => {
+        if (terminal) this.reportFailure(routing, queue, toError(error));
+        else this.logDropped(routing, runtimeEvent.event.type, "delivery-failed");
+      })
+      .finally(() => {
+        queue.pendingEventCount--;
+        if (queue.pendingEventCount < MAX_PENDING_EVENTS_PER_EXECUTION) queue.overflowReported = false;
+      });
   }
 
   /** Waits for acknowledged delivery and exposes a failed or overflowing queue. */
@@ -127,9 +145,15 @@ export class CodexCanonicalEventPublisher {
       tail: Promise.resolve(),
       failure: undefined,
       discardQueued: false,
+      overflowReported: false,
     };
     this.queues.set(key, queue);
     return queue;
+  }
+
+  private logDropped(routing: CodexCanonicalEventRouting, eventType: string, reason: string): void {
+    logger.warn("Codex observation dropped; execution continues", { threadId: routing.threadId,
+      executionId: routing.executionId, deliveryAttempt: routing.deliveryAttempt, eventType, reason });
   }
 
   private queueKey(routing: CodexCanonicalEventRouting): string {
@@ -186,6 +210,11 @@ export class CodexCanonicalEventPublisher {
       },
     };
   }
+}
+
+function isTerminalEvent(event: ProviderRuntimeEvent["event"]): boolean {
+  return event.type === AgentEventType.TurnComplete || event.type === AgentEventType.Error
+    || event.type === AgentEventType.Ended && event.outcome !== undefined;
 }
 
 function toError(error: unknown): Error {

@@ -137,17 +137,19 @@ describe("CodexCanonicalEventPublisher", () => {
     await publisher.retireExecution(routing);
   });
 
-  it("stops submitting later events after the sink fails", async () => {
+  it("continues through a failed observation to native completion", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
-      .mockRejectedValueOnce(new Error("canonical sink unavailable"));
+      .mockRejectedValueOnce(new Error("canonical sink unavailable")).mockResolvedValue(acceptedReceipt);
     const publisher = new CodexCanonicalEventPublisher(sink(submit));
     const event = providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "notice" });
 
     publisher.publish(routing, event);
     publisher.publish(routing, event);
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.Ended, threadId: routing.threadId,
+      turnExecutionId: routing.executionId, outcome: "completed" }));
 
-    await expect(publisher.waitForExecution(routing)).rejects.toThrow("canonical sink unavailable");
-    expect(submit).toHaveBeenCalledTimes(1);
+    await publisher.waitForExecution(routing);
+    expect(submit).toHaveBeenCalledTimes(3);
   });
 
   it("reports the first sink failure for the exact attempt before a delivery drain", async () => {
@@ -157,7 +159,7 @@ describe("CodexCanonicalEventPublisher", () => {
     const publisher = new CodexCanonicalEventPublisher(sink(submit));
     const onFailure = vi.fn(async () => undefined);
     publisher.setFailureHandler(onFailure);
-    const event = providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "notice" });
+    const event = providerRuntimeEvent({ type: AgentEventType.Ended, threadId: routing.threadId, outcome: "completed" });
 
     publisher.publish(routing, event);
     await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
@@ -173,7 +175,7 @@ describe("CodexCanonicalEventPublisher", () => {
     expect(onFailure).toHaveBeenCalledOnce();
   });
 
-  it.each(["conflict", "ingest-overflow"] as const)("rejects a resolved %s receipt", async (outcome) => {
+  it.each(["conflict", "ingest-overflow"] as const)("continues past an observation with a %s receipt", async (outcome) => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>()
       .mockResolvedValue({ ...acceptedReceipt, commit: { ...acceptedReceipt.commit, outcome } });
     const publisher = new CodexCanonicalEventPublisher(sink(submit));
@@ -182,7 +184,27 @@ describe("CodexCanonicalEventPublisher", () => {
     publisher.publish(routing, event);
     publisher.publish(routing, event);
 
-    await expect(publisher.waitForExecution(routing)).rejects.toThrow(outcome);
-    expect(submit).toHaveBeenCalledTimes(1);
+    await publisher.waitForExecution(routing);
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it("reserves terminal delivery when ordinary observations fill the queue", async () => {
+    let release!: (receipt: ProviderEventSubmissionReceipt) => void;
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(acceptedReceipt)
+      .mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const publisher = new CodexCanonicalEventPublisher(sink(submit));
+    const onFailure = vi.fn();
+    publisher.setFailureHandler(onFailure);
+    const notice = providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "notice" });
+    publisher.publish(routing, notice);
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    for (let index = 0; index < 1100; index++) publisher.publish(routing, notice);
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.Ended, threadId: routing.threadId, outcome: "completed" }));
+    release(acceptedReceipt);
+    await publisher.waitForExecution(routing);
+    expect(submit).toHaveBeenCalledTimes(1025);
+    expect(submit.mock.lastCall?.[0].events[0]?.payload).toMatchObject({ type: "item.recorded",
+      item: { payload: { runtimeEvent: { event: { type: "ended", outcome: "completed" } } } } });
+    expect(onFailure).not.toHaveBeenCalled();
   });
 });

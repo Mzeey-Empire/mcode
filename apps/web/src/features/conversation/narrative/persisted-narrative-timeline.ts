@@ -296,6 +296,7 @@ function recordToThoughtSegment(record: ThoughtSegmentRecord): ThoughtSegment {
   const cached = thoughtSegmentCache.get(record);
   if (cached) return cached;
   const segment: ThoughtSegment = {
+    id: record.id,
     text: record.text,
     startedAt: isoToMs(record.started_at),
     endedAt: record.ended_at ? isoToMs(record.ended_at) : undefined,

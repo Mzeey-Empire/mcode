@@ -243,11 +243,12 @@ describe("liveness heartbeat", () => {
     });
     mockWsInstance.simulateOpen();
 
-    // 30s interval fires the probe; the mock never responds; the 10s
-    // heartbeat timeout closes the socket and drives the reconnect path.
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(5_000);
     statusSpy.mockClear();
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(mockWsInstance.readyState).toBe(MockWebSocket.OPEN);
+    expect(statusSpy).not.toHaveBeenCalledWith("reconnecting");
+    await vi.advanceTimersByTimeAsync(1);
 
     expect(statusSpy).toHaveBeenCalledWith("reconnecting");
     transport.close();
@@ -261,21 +262,19 @@ describe("liveness heartbeat", () => {
       onStatusChange: statusSpy,
     });
     mockWsInstance.simulateOpen();
-    const sendSpy = vi.spyOn(mockWsInstance, "send");
-
-    await vi.advanceTimersByTimeAsync(30_000);
-    const heartbeat = sendSpy.mock.calls
-      .map(([raw]) => JSON.parse(raw as string) as { id: string; method?: string })
-      .find((message) => message.method === "app.version");
-    expect(heartbeat).toBeDefined();
-    mockWsInstance.onmessage?.({
-      data: JSON.stringify({ id: heartbeat!.id, result: "0.0.1" }),
+    let answeredHeartbeats = 0;
+    vi.spyOn(mockWsInstance, "send").mockImplementation((raw) => {
+      const request: unknown = JSON.parse(raw);
+      if (!request || typeof request !== "object" || !("method" in request)
+        || request.method !== "app.version" || !("id" in request) || typeof request.id !== "string") return;
+      answeredHeartbeats++;
+      mockWsInstance.onmessage?.({ data: JSON.stringify({ id: request.id, result: "0.0.1" }) });
     });
-
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(mockWsInstance.readyState).toBe(1);
     statusSpy.mockClear();
-    await vi.advanceTimersByTimeAsync(10_000);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(answeredHeartbeats).toBe(12);
+    expect(mockWsInstance.readyState).toBe(MockWebSocket.OPEN);
     expect(statusSpy).not.toHaveBeenCalledWith("reconnecting");
     transport.close();
     vi.useRealTimers();

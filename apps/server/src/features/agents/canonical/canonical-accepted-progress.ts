@@ -28,7 +28,7 @@ import { acceptedNarrative, advanceAcceptedExecution, seedAcceptedExecution, typ
 import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 import { sameExecution, sameLease } from "../execution/execution-mailbox-protocol.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
-import { ProgressAdmissionError } from "../execution/execution-writer-failure.js";
+import { ProgressAdmissionError, RejectedProviderObservationError } from "../execution/execution-writer-failure.js";
 import { prepareAcceptedCollaboration } from "./accepted-collaboration-preparation.js";
 import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";
 import type { SubagentStopTarget } from "../collaboration/subagent-lifecycle-durability.js";
@@ -141,10 +141,27 @@ export class CanonicalAcceptedProgress {
       try {
         return this.accept(operation);
       } catch (error) {
-        if (!this.shouldWaitForCapacity(error, operation.execution.threadId)) throw error;
-        await this.waitForAcceptedCapacity(operation.execution.threadId, error instanceof Error ? error : new Error(String(error)));
+        if (!this.shouldWaitForCapacity(error, operation.execution.threadId)) {
+          throw this.observationRejection(operation, error);
+        }
+        try {
+          await this.waitForAcceptedCapacity(operation.execution.threadId, error instanceof Error ? error : new Error(String(error)));
+        } catch (failure) {
+          throw this.observationRejection(operation, failure);
+        }
       }
     }
+  }
+
+  private observationRejection(operation: ExecutionSemanticOperation, error: unknown): unknown {
+    if (operation.mutation.kind !== "append-events") return error;
+    const thread = this.threads.get(operation.execution.threadId);
+    const head = thread?.head;
+    if (!thread || !head || !sameExecution(head.execution, operation.execution)
+      || !sameLease(head.lease, operation.lease) || operation.ordinal !== head.ordinal + 1) return error;
+    // A committed/accepted identity must never be reused for different content.
+    if (thread.owner.replay(operation.operationId, operationInputHash(operation)).kind !== "unknown") return error;
+    return new RejectedProviderObservationError(error);
   }
 
   /** Reserve the complete prepared operation before releasing its live frames. */
@@ -193,12 +210,21 @@ export class CanonicalAcceptedProgress {
     thread.publicationSequence += publications.length;
     this.publishAccepted(admission.batch);
     this.saves.enqueue(admission.batch);
-    this.publishSaving(operation.execution.threadId);
-    this.publishPlanQuestions(operation);
-    if (features.planGenerated) broadcast("plan.generated", features.planGenerated);
+    this.publishAcceptedFeatures(operation, features);
     const original = thread.owner.replay(operation.operationId, inputHash);
     if (original.kind !== "duplicate") throw new Error("Accepted operation lost its producer receipt");
     return original.receipt;
+  }
+
+  private publishAcceptedFeatures(operation: ExecutionSemanticOperation, features: ReturnType<typeof prepareAcceptedFeatureObservations>): void {
+    try {
+      this.publishSaving(operation.execution.threadId);
+      this.publishPlanQuestions(operation);
+      if (features.planGenerated) broadcast("plan.generated", features.planGenerated);
+    } catch (error) {
+      logger.warn("Accepted progress feature publication failed", { threadId: operation.execution.threadId,
+        executionId: operation.execution.executionId, errorType: error instanceof Error ? error.name : "unknown" });
+    }
   }
 
   private installCollaboration(thread: ProgressThread, candidate?: AcceptedCodexCollaboration): void {
@@ -767,8 +793,13 @@ export class CanonicalAcceptedProgress {
     const events = acceptedEnvelopes(batch);
     for (let offset = 0; offset < events.length; offset += 256) {
       const page = events.slice(offset, offset + 256);
-      this.publishFamily({ phase: "accepted", threadId: batch.execution.threadId, epoch: batch.through.epoch,
-        from: batch.predecessor.sequence + offset, through: batch.predecessor.sequence + offset + page.length, events: page });
+      try {
+        this.publishFamily({ phase: "accepted", threadId: batch.execution.threadId, epoch: batch.through.epoch,
+          from: batch.predecessor.sequence + offset, through: batch.predecessor.sequence + offset + page.length, events: page });
+      } catch (error) {
+        logger.warn("Accepted progress publication failed", { threadId: batch.execution.threadId,
+          executionId: batch.execution.executionId, errorType: error instanceof Error ? error.name : "unknown" });
+      }
     }
   }
 

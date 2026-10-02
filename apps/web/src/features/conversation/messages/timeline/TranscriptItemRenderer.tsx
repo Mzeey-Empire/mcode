@@ -63,6 +63,7 @@ function MessageTranscriptItemRenderer({
         onBranch={agentActionsDisabled ? undefined : onBranch}
         onScrollToMessage={onScrollToMessage}
         agentDisplayState={messageItem.agentDisplayState}
+        textIsStreaming={messageItem.textIsStreaming}
         showParentAgentProvenance={showParentAgentProvenance}
       />
     </div>

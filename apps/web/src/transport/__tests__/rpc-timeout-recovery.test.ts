@@ -34,6 +34,7 @@ class TimeoutSocket {
   onmessage: ((event: { data: string }) => void) | null = null;
   readyState = 0;
   readonly requests: RpcRequest[] = [];
+  respondToHeartbeats = true;
 
   constructor() {
     TimeoutSocket.instances.push(this);
@@ -51,7 +52,7 @@ class TimeoutSocket {
     this.requests.push(parsed);
     // A socket that ignores the liveness probe is closed by the watchdog;
     // these tests exercise RPC timeouts on a live connection instead.
-    if (parsed.method === "app.version") {
+    if (parsed.method === "app.version" && this.respondToHeartbeats) {
       queueMicrotask(() => this.respond(parsed, "0.0.1"));
     }
   }
@@ -131,6 +132,62 @@ describe("interactive RPC timeout recovery", () => {
     transport.close();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("checks every five seconds and reconnects after three missed reply checks", async () => {
+    socket.respondToHeartbeats = false;
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(socket.requests.filter((request) => request.method === "app.version")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(socket.readyState).toBe(TimeoutSocket.OPEN);
+    expect(socket.requests.filter((request) => request.method === "app.version")).toHaveLength(3);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(socket.readyState).toBe(3);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(TimeoutSocket.instances).toHaveLength(2);
+  });
+
+  it("resets missed checks when a delayed heartbeat reply arrives", async () => {
+    socket.respondToHeartbeats = false;
+    await vi.advanceTimersByTimeAsync(15_000);
+    socket.respond(latestRequest(socket, "app.version"), "0.0.1");
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(socket.readyState).toBe(TimeoutSocket.OPEN);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(socket.readyState).toBe(3);
+  });
+
+  it("stops heartbeat requests when the transport is closed", async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+    const requestCount = socket.requests.length;
+    transport.close();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(socket.requests).toHaveLength(requestCount);
+    expect(TimeoutSocket.instances).toHaveLength(1);
+  });
+
+  it("ignores an old heartbeat reply after a replacement connection starts checking", async () => {
+    socket.respondToHeartbeats = false;
+    await vi.advanceTimersByTimeAsync(5_000);
+    socket.respond(latestRequest(socket, "app.version"), "0.0.1");
+    socket.close();
+    // Keep the old reply's Promise continuation queued until the new socket
+    // has sent its first probe, reproducing a reconnect boundary race.
+    vi.advanceTimersByTime(1_000);
+    const replacement = TimeoutSocket.instances[1];
+    if (!replacement) throw new Error("Expected replacement WebSocket");
+    replacement.respondToHeartbeats = false;
+    replacement.open();
+    vi.advanceTimersByTime(5_000);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(replacement.readyState).toBe(3);
   });
 
   it("bounds repeated model discovery requests and allows a later retry to complete", async () => {

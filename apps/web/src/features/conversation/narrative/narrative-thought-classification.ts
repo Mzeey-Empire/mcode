@@ -21,7 +21,8 @@ export function computeLiveStreamingText(params: {
     return lastSegment.isExplicitNonFinal ? "" : lastSegment.text;
   }
 
-  const tape = thoughtSegments.map((segment) => segment.text).join("");
+  const tape = thoughtSegments.filter((segment) => !segment.id?.startsWith("assistant-text:"))
+    .map((segment) => segment.text).join("");
   return streamingText.startsWith(tape) && streamingText.length > tape.length
     ? streamingText.slice(tape.length)
     : "";
@@ -36,6 +37,7 @@ export function filterThoughtsMatchingAssistantBody(
 
   const latestStartedAt = Math.max(...segments.map((segment) => segment.startedAt));
   return segments.filter((segment) => {
+    if (segment.id?.startsWith("assistant-text:")) return true;
     const segmentTrimmed = segment.text.trim();
     if (segmentTrimmed.length > 0 && segmentTrimmed === messageBodyTrimmed) return false;
     return segment.startedAt !== latestStartedAt
@@ -55,6 +57,7 @@ export function filterPersistedFinalResponseThoughts(
   const latestSortOrder = Math.max(...thoughts.map((thought) => thought.sort_order));
   return thoughts.filter((thought) => {
     if (thought.is_final_response) return false;
+    if (thought.id.startsWith("assistant-text:")) return true;
     const thoughtTrimmed = thought.text.trim();
     if (messageTrimmed.length > 0 && thoughtTrimmed === messageTrimmed) return false;
     return thought.sort_order !== latestSortOrder

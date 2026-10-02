@@ -3,6 +3,7 @@ import * as NodeStream from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentEventType, type ProviderRuntimeEvent, type TurnRequest } from "@mcode/contracts";
 import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
+import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 
 const { spawn } = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock("node:child_process", async (importOriginal) => ({
@@ -92,12 +93,91 @@ function createProvider() {
       type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: executionId, outcome: "completed",
     } }));
   };
-  return { provider, child, settings, getSettings, starts, complete };
+  return { provider, child, settings, getSettings, starts, complete, events };
 }
 
 afterEach(() => vi.clearAllMocks());
 
 describe("Codex provider lifecycle through native transport", () => {
+  it("keeps a silent turn active without model-list probes until native completion", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const { provider, child, starts, complete, events } = createProvider();
+    try {
+      await provider.sendTurn(request);
+      await vi.waitFor(() => expect(starts()).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(6 * 60 * 1000);
+      expect(child.requests.some(({ method }) => method === "model/list")).toBe(false);
+      expect(events.some(({ event }) => event.type === AgentEventType.Ended || event.type === AgentEventType.Error)).toBe(false);
+      await complete(1, request.turnExecutionId);
+    } finally {
+      vi.useRealTimers();
+      await provider.shutdown();
+    }
+  });
+
+  it("still settles an active turn when the native process exits unexpectedly", async () => {
+    const { provider, child, starts, events } = createProvider();
+    try {
+      await provider.sendTurn(request);
+      await vi.waitFor(() => expect(starts()).toHaveLength(1));
+      child.emit("exit", 1, null);
+      await vi.waitFor(() => expect(events).toContainEqual({ deliveryAttempt: 1, event: {
+        type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: request.turnExecutionId, outcome: "errored",
+      } }));
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
+  it("settles process exit even when optional assistant boundary projection throws", async () => {
+    const { provider, child, starts, events } = createProvider();
+    let fault: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await provider.sendTurn(request);
+      await vi.waitFor(() => expect(starts()).toHaveLength(1));
+      fault = vi.spyOn(CodexEventMapper.prototype, "drainPendingAssistantBoundary")
+        .mockImplementationOnce(() => { throw new Error("optional boundary projection failed"); });
+      expect(() => child.emit("exit", 1, null)).not.toThrow();
+      await vi.waitFor(() => expect(events).toContainEqual({ deliveryAttempt: 1, event: {
+        type: AgentEventType.Ended, threadId: request.threadId,
+        turnExecutionId: request.turnExecutionId, outcome: "errored",
+      } }));
+      expect(events.filter(({ event }) => event.type === AgentEventType.Ended)).toHaveLength(1);
+    } finally {
+      fault?.mockRestore();
+      await provider.shutdown();
+    }
+  });
+
+  it("consumes native completion even when its optional mapper throws", async () => {
+    const { provider, complete, events } = createProvider();
+    let mapperFault: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await provider.sendTurn(request);
+      mapperFault = vi.spyOn(CodexEventMapper.prototype, "mapNotification").mockImplementationOnce(() => { throw new Error("optional projection failed"); });
+      await complete(1, request.turnExecutionId);
+      expect(events.filter(({ event }) => event.type === AgentEventType.Ended)).toHaveLength(1);
+      expect(events.some(({ event }) => event.type === AgentEventType.Error)).toBe(false);
+    } finally {
+      mapperFault?.mockRestore();
+      await provider.shutdown();
+    }
+  });
+
+  it("keeps a standalone nonretry error diagnostic active until native completion", async () => {
+    const { provider, child, complete, events } = createProvider();
+    try {
+      await provider.sendTurn(request);
+      child.stdout.write(JSON.stringify({ method: "error", params: { threadId: "native-thread", turnId: "native-turn-1",
+        willRetry: false, error: { message: "Tool update failed" } } }) + "\n");
+      await vi.waitFor(() => expect(events.some(({ event }) => event.type === AgentEventType.System && event.subtype === "provider.notice.codex-error")).toBe(true));
+      expect(events.some(({ event }) => event.type === AgentEventType.Ended || event.type === AgentEventType.Error)).toBe(false);
+      await complete(1, request.turnExecutionId);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
   it("maps pooled session IDs to live thread protection before memory eviction", async () => {
     const { provider, child, complete } = createProvider();
     const isThreadProtected = vi.fn((threadId: string) => threadId === request.threadId);

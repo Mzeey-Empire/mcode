@@ -5,7 +5,7 @@ import { overviewResponsivePaddingRight } from "@/lib/composer-layout";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useOverviewStore } from "@/stores/overviewStore";
-import { useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useActiveWorkspaceThread, useParentThreadExists } from "@/features/projects/state/workspace-selectors";
@@ -109,7 +109,8 @@ export function useChatViewState() {
   const chatPaneRef = useRef<HTMLDivElement>(null);
   const threadPaneWidth = useElementWidth(chatPaneRef, activeThreadId);
   const reserveOverviewSpace = useOverviewStore((state) => state.reserveThreadId === activeThreadId);
-  const isAgentRunning = activeThreadId ? runningThreadIds.has(activeThreadId) : false;
+  const isAgentRunning = useThreadStore((state) =>
+    activeThreadId ? isThreadExecuting(activeThreadId, state) : false);
   // A resident target record (kept-alive or previously hydrated) can paint
   // immediately; gating on the hydration commit would hide already-rendered
   // content behind the transition shell on every warm switch.

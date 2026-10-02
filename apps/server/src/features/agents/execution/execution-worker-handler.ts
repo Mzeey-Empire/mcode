@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentProgressPosition, ParentNarrativeRecoveryItem, PlanQuestion, PlanRecord, TurnFileEffectSummary, TurnOutcome } from "@mcode/contracts";
+import { ProviderRuntimeEventSchema, type AgentEvent, type AgentProgressPosition, type ParentNarrativeRecoveryItem, type PlanQuestion, type PlanRecord, type TurnFileEffectSummary, type TurnOutcome } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 
 import type {
@@ -26,6 +26,8 @@ import type {
 } from "./execution-mailbox-protocol.js";
 import type { ExecutionMailboxCommand, ExecutionRecoveryReceipt } from "./execution-mailbox-scheduler.js";
 import type { ExecutionWriterFailure, ProgressAdmissionFailureReason } from "./execution-writer-failure.js";
+import { RejectedProviderObservationError } from "./execution-writer-failure.js";
+import { logger } from "@mcode/shared";
 import { ProviderExecutionEventState, type ExecutionParentStartContext, type PreparedProviderLiveEvent } from "./provider-execution-event-state.js";
 import { ExecutionWorkerFileEvidence } from "./execution-worker-file-evidence.js";
 import type { FrozenExecutionFileEvidence } from "./execution-file-evidence-coordinator.js";
@@ -173,6 +175,7 @@ export type ExecutionParentEventResult = Pick<PreparedProviderLiveEvent, "runtim
 /** A command result that never calls an uncommitted mutation successful. */
 export type ExecutionWorkerResult =
   | (Extract<ExecutionWriteReceipt, { kind: "committed" | "accepted" }> & { readonly parentEvent?: ExecutionParentEventResult })
+  | { readonly kind: "dropped"; readonly reason: string; readonly receipt: Extract<ExecutionWriteReceipt, { kind: "committed" | "accepted" }> }
   | { readonly kind: "released" }
   | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-text-routing" | "invalid-narrative-routing" | "invalid-stop-watermark" | "writer-conflict" | "writer-failure" | ProgressAdmissionFailureReason;
     readonly failure?: ExecutionWriterFailure };
@@ -237,10 +240,10 @@ export class ExecutionWorkerHandler {
     const rejection = commandRejection(request, state);
     if (rejection) return { kind: "rejected", reason: rejection };
     if (request.command.kind === "release") return this.release(request, state);
-    if (state.phase === "poisoned" || state.phase === "finalized"
-      && request.command.kind !== "event" && request.command.kind !== "post-terminal-event") {
+    if (this.isBlockedPhase(request.command, state)) {
       return { kind: "rejected", reason: "invalid-transition" };
     }
+    if (this.isOptionalEvent(request.command, state)) return this.applyObservation(request, state);
     const prepared = await this.prepareOwnedRequest(request, state);
     if (!prepared) return { kind: "rejected", reason: "invalid-event-routing" };
     const mutation = mutationFor(prepared.request, state);
@@ -251,6 +254,47 @@ export class ExecutionWorkerHandler {
     return await this.commitRequest(prepared, state, mutation);
   }
 
+  private isOptionalEvent(command: WorkerCommand, state: ExecutionState): boolean {
+    return state.parentEvents !== undefined && state.phase !== "finalized"
+      && command.kind === "event" && isOptionalObservation(command);
+  }
+
+  private isBlockedPhase(command: WorkerCommand, state: ExecutionState): boolean {
+    return state.phase === "poisoned" || state.phase === "finalized"
+      && command.kind !== "event" && command.kind !== "post-terminal-event";
+  }
+
+  private async applyObservation(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): Promise<ExecutionWorkerResult> {
+    if (request.command.kind !== "event" || !validOwnedEventCommand(request.command, state)) {
+      return this.dropObservation(request, state, "invalid-event-routing");
+    }
+    let prepared: PreparedExecutionRequest | undefined;
+    try {
+      const candidate = this.prepareRequest(request, state);
+      prepared = candidate ? await this.prepareFileEffects(candidate, state) : undefined;
+    } catch {
+      return this.dropObservation(request, state, "projection-failed");
+    }
+    if (!prepared) return this.dropObservation(request, state, "projection-rejected");
+    const mutation = mutationFor(prepared.request, state);
+    if (!mutation) return this.dropObservation(request, state, "invalid-observation");
+    try {
+      return await this.commitRequest(prepared, state, mutation);
+    } catch (error) {
+      if (!(error instanceof RejectedProviderObservationError)) throw error;
+      return this.dropObservation(request, state, "acceptance-rejected");
+    }
+  }
+
+  private async dropObservation(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState, reason: string): Promise<ExecutionWorkerResult> {
+    // A rejected observation still consumes its admitted ordinal, without installing its candidate reducer.
+    const checkpoint = { ...request, command: { kind: "checkpoint", phase: state.phase, nativeCursor: null } } satisfies ExecutionWorkerRequest<WorkerCommand>;
+    const receipt = await this.writer.transact(operationFor(checkpoint, checkpoint.command));
+    if (!validWriteReceipt(receipt, checkpoint, state.durableRevision)) return { kind: "rejected", reason: "writer-conflict" };
+    this.advanceAcceptedState({ request: checkpoint }, state, receipt);
+    return { kind: "dropped", reason, receipt };
+  }
+
   private async prepareOwnedRequest(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): Promise<PreparedExecutionRequest | undefined> {
     try {
       const prepared = this.prepareRequest(request, state);
@@ -259,7 +303,7 @@ export class ExecutionWorkerHandler {
       if (!withFiles && prepared.parentEvent) state.phase = "poisoned";
       return withFiles;
     } catch (error) {
-      if (state.parentEvents) state.phase = "poisoned";
+      if (state.parentEvents && !(error instanceof RejectedProviderObservationError)) state.phase = "poisoned";
       throw error;
     }
   }
@@ -274,7 +318,7 @@ export class ExecutionWorkerHandler {
     try {
       receipt = await this.writer.transact(operationFor(request, mutation));
     } catch (error) {
-      if (state.parentEvents) state.phase = "poisoned";
+      if (state.parentEvents && !(error instanceof RejectedProviderObservationError)) state.phase = "poisoned";
       throw error;
     }
     if (!validWriteReceipt(receipt, request, state.durableRevision)) {
@@ -370,7 +414,17 @@ export class ExecutionWorkerHandler {
       return command.frozenFileEvidence ? undefined : prepared;
     }
     if (command.kind !== "event" || state.fileAttempt === undefined) return prepared;
-    return await this.observeEventFiles(prepared, command, state) ? prepared : undefined;
+    try {
+      if (!await this.observeEventFiles(prepared, command, state)) this.logUnavailableFiles(state);
+    } catch {
+      this.logUnavailableFiles(state);
+    }
+    return prepared;
+  }
+
+  private logUnavailableFiles(state: ExecutionState): void {
+    logger.warn("Execution file observation unavailable", { threadId: state.execution.threadId,
+      executionId: state.execution.executionId, deliveryAttempt: state.fileAttempt });
   }
 
   private beginFileEffects(command: Extract<WorkerCommand, { kind: "begin-files" }>, state: ExecutionState): boolean {
@@ -404,11 +458,22 @@ export class ExecutionWorkerHandler {
     state: ExecutionState,
   ): Promise<PreparedExecutionRequest | undefined> {
     const frozen = command.frozenFileEvidence;
-    if (!frozen || frozen.outcome !== command.outcome || frozen.deliveryAttempt !== state.fileAttempt) return undefined;
-    const evidence = await this.files.settle(frozen);
-    if (!evidence) return undefined;
+    if (frozen && (frozen.outcome !== command.outcome || frozen.deliveryAttempt !== state.fileAttempt)) return undefined;
+    const evidence = await this.settleOptionalFiles(frozen, state);
+    if (!evidence) return prepared;
     return { ...prepared, request: { ...prepared.request, command: { ...command,
       input: { ...command.input, deliveryAttempt: state.fileAttempt, fileEvidence: evidence } } } };
+  }
+
+  private async settleOptionalFiles(frozen: FrozenExecutionFileEvidence | undefined, state: ExecutionState) {
+    try {
+      const evidence = frozen ? await this.files.settle(frozen) : null;
+      if (!evidence) this.logUnavailableFiles(state);
+      return evidence;
+    } catch {
+      this.logUnavailableFiles(state);
+      return null;
+    }
   }
 
   private async begin(
@@ -459,6 +524,18 @@ export class ExecutionWorkerHandler {
     this.states.delete(request.execution.threadId);
     return { kind: "released" };
   }
+}
+
+function isOptionalObservation(command: Extract<WorkerCommand, { kind: "event" }>): boolean {
+  if (command.terminalInput) return false;
+  return !command.events.some((draft) => {
+    if (draft.payload.type !== "item.recorded" || draft.payload.item.payload.projection !== "providerRuntimeEvent") return false;
+    const parsed = ProviderRuntimeEventSchema().safeParse(draft.payload.item.payload.runtimeEvent);
+    if (!parsed.success) return false;
+    const event = parsed.data.event;
+    return event.type === "turnComplete" || event.type === "error"
+      || event.type === "ended" && event.outcome !== undefined;
+  });
 }
 
 function beginRejection(
@@ -539,7 +616,8 @@ function errorTerminalInput(error: unknown): Extract<SyntheticTerminalInput, { o
 }
 
 function validOwnedEventCommand(command: Extract<WorkerCommand, { kind: "event" }>, state: ExecutionState): boolean {
-  return command.parentLive === undefined && command.livePublication === undefined && state.phase === "running"
+  return command.parentLive === undefined && command.livePublication === undefined
+    && (state.phase === "running" || state.phase === "stopping" && command.terminalInput !== undefined)
     && (state.fileAttempt === undefined || command.deliveryAttempt === state.fileAttempt);
 }
 

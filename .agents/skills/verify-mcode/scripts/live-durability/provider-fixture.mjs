@@ -81,9 +81,20 @@ function fixtureControl(text) {
   const longToolPairs = Number(/LIVE_DURABILITY_LONG_TOOLS=(\d+)/.exec(text)?.[1] ?? 0);
   const pairDelayMs = Number(/LIVE_DURABILITY_PAIR_DELAY_MS=(\d+)/.exec(text)?.[1] ?? 10);
   if (!validHistoryControl(longToolPairs, pairDelayMs)) return null;
+  const final = finalControl(text);
+  if (!final) return null;
   const childMode = childControl(text);
   if (childMode === null) return null;
-  return { honorCancel: text.includes('LIVE_DURABILITY_CANCEL=honor'), pausedBeforeTerminal: text.includes('LIVE_DURABILITY_TERMINAL=pause'), cancelled: false, longToolPairs, pairDelayMs, childMode };
+  return { ...final, cancelled: false, longToolPairs, pairDelayMs, childMode };
+}
+
+function finalControl(text) {
+  const pausedAfterFinal = text.includes('LIVE_DURABILITY_AFTER_FINAL=pause');
+  const pausedDuringFinal = text.includes('LIVE_DURABILITY_DURING_FINAL=pause');
+  const legacyIdenticalText = text.includes('LIVE_DURABILITY_LEGACY_IDENTICAL_TEXT=true');
+  if (provider !== 'codex' && [pausedAfterFinal, pausedDuringFinal, legacyIdenticalText].includes(true)) return null;
+  if (pausedDuringFinal && legacyIdenticalText) return null;
+  return { honorCancel: [pausedAfterFinal, pausedDuringFinal, text.includes('LIVE_DURABILITY_CANCEL=honor')].includes(true), pausedBeforeTerminal: text.includes('LIVE_DURABILITY_TERMINAL=pause'), pausedAfterFinal, pausedDuringFinal, legacyIdenticalText };
 }
 
 function validHistoryControl(longToolPairs, pairDelayMs) {
@@ -115,9 +126,11 @@ function handlePrompt(request) {
 }
 
 async function turn(request, runId, reply, notify, control) {
-  const prefix = `LIVE_DURABILITY ${runId} PREFIX`;
+  const identicalText = `LIVE_DURABILITY ${runId} IDENTICAL_LEGACY_TEXT`;
+  const { prefix, final } = control.legacyIdenticalText
+    ? { prefix: identicalText, final: identicalText }
+    : { prefix: `LIVE_DURABILITY ${runId} PREFIX`, final: `LIVE_DURABILITY ${runId} COMPLETE` };
   const tail = `LIVE_DURABILITY ${runId} AFTER_TOOL`;
-  const final = `LIVE_DURABILITY ${runId} COMPLETE`;
   const sessionId = request.params.sessionId;
   const threadId = request.params.threadId;
   const turnId = NodeCrypto.randomUUID();
@@ -165,15 +178,40 @@ async function turn(request, runId, reply, notify, control) {
     notify('item/completed', { ...base, item: { id: toolId, type: 'commandExecution', command: 'fixture durability observation', cwd: '.', status: 'completed', aggregatedOutput: 'Owned fixture result', exitCode: 0, durationMs: 400 } });
   }
   stamp('after-tool');
-  if (!await waitFinish(channel)) return;
+  if (!await waitFinish(channel, control.pausedBeforeTerminal, 'finish')) return;
+  await emitFinal(channel, final);
+}
+
+async function emitFinal(channel, final) {
+  const { request, runId, reply, notify, control, threadId, turnId, stamp, update } = channel;
+  if (control.pausedDuringFinal) final = `LIVE_DURABILITY ${runId} PARTIAL_FINAL COMPLETE`;
   if (provider === 'devin') {
     update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: final } });
     reply(request.id, { stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } });
   } else {
-    codexMessage(notify, base, `${runId}-final`, final, 'final_answer');
+    const finalItemId = `${runId}-final`;
+    if (!await emitCodexFinal(channel, finalItemId, final)) return;
+    stamp('after-final', { turnId, itemId: finalItemId, prefixItemId: `${runId}-prefix`, textMarker: final });
+    if (!await waitFinish(channel, control.pausedAfterFinal, 'finish-final')) return;
     notify('turn/completed', { threadId, turn: { id: turnId, items: [], status: 'completed', error: null } });
   }
   stamp('terminal');
+}
+
+async function emitCodexFinal(channel, itemId, text) {
+  const { control, runId, turnId, notify, base, stamp } = channel;
+  if (!control.pausedDuringFinal) {
+    codexMessage(notify, base, itemId, text, control.legacyIdenticalText ? undefined : 'final_answer');
+    return true;
+  }
+  const partialText = `LIVE_DURABILITY ${runId} PARTIAL_FINAL`;
+  notify('item/started', { ...base, item: { id: itemId, type: 'agentMessage', text: '', phase: 'final_answer' } });
+  notify('item/agentMessage/delta', { ...base, itemId, delta: partialText });
+  stamp('partial-final', { turnId, itemId, textMarker: partialText, fullTextMarker: text });
+  if (!await waitFinish(channel, true, 'continue-final')) return false;
+  notify('item/agentMessage/delta', { ...base, itemId, delta: text.slice(partialText.length) });
+  notify('item/completed', { ...base, item: { id: itemId, type: 'agentMessage', text, phase: 'final_answer', memoryCitation: null } });
+  return true;
 }
 
 async function optionalChild(channel) {
@@ -217,8 +255,8 @@ async function emitHistory({ runId, control, cancelled, stamp, update, notify, b
   return true;
 }
 
-async function waitFinish({ control, runId, cancelled, deadline, stamp }) {
-  while (control.pausedBeforeTerminal && !NodeFS.existsSync(NodePath.join(controlDir, `${runId}.finish`))) {
+async function waitFinish({ control, runId, cancelled, deadline, stamp }, paused, gate) {
+  while (paused && !NodeFS.existsSync(NodePath.join(controlDir, `${runId}.${gate}`))) {
     if (cancelled()) return false;
     if (Date.now() > deadline) {
       control.cancelled = true; cancelled(); stamp('expired'); return false;

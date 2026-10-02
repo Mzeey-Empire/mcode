@@ -670,15 +670,26 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const active = this.requireActiveWorkerTurn(execution, batch.deliveryAttempt);
     const event = this.parentRuntimeEvent(batch);
     const fileObservation = event?.type === "toolUse"
-      ? this.requireWorkerFiles().take(event, batch.deliveryAttempt) : null;
+      ? this.takeOptionalFileObservation(event, batch.deliveryAttempt) : null;
     const outcome = event ? workerTerminalOutcome(event) : null;
     const terminal = outcome ? this.prepareWorkerTerminal(active, outcome) : null;
     return {
       kind: "event", phase: batch.phase, nativeCursor: batch.nativeCursor ?? null,
       events: batch.events, deliveryAttempt: batch.deliveryAttempt,
       ...(fileObservation ? { capturedFileObservation: fileObservation } : {}),
-      ...(terminal ? { terminalInput: terminal.input, frozenFileEvidence: terminal.files } : {}),
+      ...(terminal ? { terminalInput: terminal.input } : {}),
+      ...(terminal?.files ? { frozenFileEvidence: terminal.files } : {}),
     };
+  }
+
+  private takeOptionalFileObservation(event: Extract<AgentEvent, { type: "toolUse" }>, attempt: number) {
+    try {
+      return this.requireWorkerFiles().take(event, attempt);
+    } catch (error) {
+      logger.warn("Provider file capture unavailable", { threadId: event.threadId, executionId: event.turnExecutionId,
+        deliveryAttempt: attempt, errorType: error instanceof Error ? error.name : "unknown" });
+      return null;
+    }
   }
 
   private requireActiveWorkerTurn(execution: ExecutionIdentity, attempt: number): WorkerOwnedTurn {
@@ -708,11 +719,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   private prepareWorkerTerminal(active: WorkerOwnedTurn, outcome: TurnOutcome): {
     input: DataOnlyParentTurnFinishInput;
-    files: NonNullable<ReturnType<ExecutionFileEvidenceCoordinator["seal"]>>;
+    files: ReturnType<ExecutionFileEvidenceCoordinator["seal"]>;
   } {
-    const files = this.requireWorkerFiles().seal({ ...active.execution,
-      deliveryAttempt: active.deliveryAttempt, outcome });
-    if (!files) throw new Error("Terminal event lost its exact file evidence generation");
+    const files = this.sealOptionalFileEvidence(active, outcome);
+    if (!files) logger.warn("Provider terminal file evidence unavailable", { threadId: active.execution.threadId,
+      executionId: active.execution.executionId, deliveryAttempt: active.deliveryAttempt });
     return {
       files,
       input: {
@@ -726,6 +737,16 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     };
   }
 
+  private sealOptionalFileEvidence(active: WorkerOwnedTurn, outcome: TurnOutcome): ReturnType<ExecutionFileEvidenceCoordinator["seal"]> {
+    try {
+      return this.requireWorkerFiles().seal({ ...active.execution, deliveryAttempt: active.deliveryAttempt, outcome });
+    } catch (error) {
+      logger.warn("Provider terminal file capture failed", { threadId: active.execution.threadId,
+        executionId: active.execution.executionId, errorType: error instanceof Error ? error.name : "unknown" });
+      return null;
+    }
+  }
+
   /** Update volatile runtime state only after the semantic writer has acknowledged the event. */
   private async applyWorkerReceipt(
     execution: ExecutionIdentity,
@@ -735,9 +756,14 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!active || active.execution.executionId !== execution.executionId) return;
     const event = result.parentEvent?.publication.event;
     if (!event) return;
-    this.applyWorkerFeatureReceipt(active, result);
-    this.publishWorkerPersistence(active, result);
     this.applyWorkerTerminalReceipt(active, event);
+    try {
+      this.applyWorkerFeatureReceipt(active, result);
+      this.publishWorkerPersistence(active, result);
+    } catch (error) {
+      logger.warn("Accepted provider event side effect failed", { threadId: execution.threadId,
+        executionId: execution.executionId, eventType: event.type, errorType: error instanceof Error ? error.name : "unknown" });
+    }
     if (event.type === "ended") {
       // The callback still belongs to the route's pending set. Release on the next task.
       setTimeout(() => { void this.releaseWorkerTurn(active).catch((error: unknown) => {
@@ -1391,6 +1417,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private evictUnresponsiveSession(prepared: PreparedStop): void {
     const providerId = prepared.providerId;
     if (!providerId) return;
+    if (this.turnRuntime.snapshot(prepared.threadId)?.turnExecutionId !== prepared.runtime.turnExecutionId) return;
     void (async () => {
       const provider = this.providerRegistry.resolve(providerId);
       await this.evictPooledSession(provider, prepared.sessionId);
@@ -1408,10 +1435,13 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     try {
       await this.providerRegistry.resolve(prepared.providerId).stopSession(prepared.sessionId);
     } catch (error) {
-      if (!isRunningRuntime(this.turnRuntime.snapshot(prepared.threadId) ?? idleRuntime(prepared.threadId))) {
+      const current = this.turnRuntime.snapshot(prepared.threadId) ?? idleRuntime(prepared.threadId);
+      // Detached teardown belongs to the stopped execution, never a newer turn.
+      if (current.turnExecutionId !== prepared.runtime.turnExecutionId) return;
+      if (!isRunningRuntime(current)) {
         // The turn already finalized as cancelled; a session that failed
         // teardown is untrusted, so evict it rather than reuse it.
-        this.evictUnresponsiveSession(prepared);
+        if (current.phase === "cancelled") this.evictUnresponsiveSession(prepared);
         return;
       }
       if (prepared.reservationToken) {

@@ -141,6 +141,8 @@ export interface ThreadRecord {
   error: string | null;
   streaming: string;
   streamingPreview: string;
+  /** Whether the current response text accepts deltas, independently of turn activity. */
+  responseTextIsStreaming: boolean;
   toolCalls: ToolCall[];
   agentStartTime?: number;
   currentTurnMessageId: string;
@@ -192,6 +194,7 @@ export const CONVERSATION_REVISION_FIELD_KEYS = [
   "answeredPlanMessageIds",
   "streaming",
   "streamingPreview",
+  "responseTextIsStreaming",
   "toolCalls",
   "thoughtSegments",
   "hooks",
@@ -238,6 +241,7 @@ export function createEmptyThreadRecord(): ThreadRecord {
     error: null,
     streaming: "",
     streamingPreview: "",
+    responseTextIsStreaming: false,
     toolCalls: [],
     currentTurnMessageId: "",
     pendingTurnPersistMessageIds: [],
