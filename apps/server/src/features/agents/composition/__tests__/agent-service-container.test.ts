@@ -30,6 +30,7 @@ import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
+import type { WorkerOwnedProviderEventResult } from "../../../providers/composition/provider-host-ports.js";
 import { addClient, removeClient, subscribeClientToThread } from "../../../../application/transport/push.js";
 
 describe("AgentService container composition", () => {
@@ -419,17 +420,63 @@ describe("AgentService container composition", () => {
     expect(workerRuntime?.scheduler.depth().activeExecutions).toBe(0);
   });
 
-  it("interrupts and releases a rejected provider event whose ordinal cannot be replayed", async () => {
+  it("drops an optional rejected event and keeps its turn running until native completion", async () => {
+    let sent: TurnRequest | undefined;
+    let dropped: WorkerOwnedProviderEventResult | undefined;
+    const runtime = requireValue(workerRuntime, "Expected worker runtime");
+    const provider = fakeCodexProvider(async (request) => {
+      sent = request;
+      dropped = await submitCodexEvent(runtime, request, 1, { type: "turnStarted",
+        threadId: request.threadId, turnExecutionId: request.turnExecutionId });
+    });
+    registerFakeCodex(provider);
+    const registry = container.resolve(AgentEventPublicationRegistry);
+    registry.bind(() => undefined);
+    registry.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-optional-rejected", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Dropped observation", "direct", "main", true, "codex");
+
+    await container.resolve(AgentService).sendMessage({ threadId: thread.id,
+      content: "hello", permissionMode: "default" });
+    const request = requireValue(sent, "Expected provider dispatch");
+    expect(dropped).toMatchObject({ commit: { outcome: "dropped", reason: "projection-rejected" }, providerEvents: [] });
+    expect(runtime.owner.current(thread.id)?.execution.executionId).toBe(request.turnExecutionId);
+    expect(container.resolve(TurnRuntimeController).snapshot(thread.id)?.phase).toBe("running");
+    expect(runtime.scheduler.depth().activeExecutions).toBe(1);
+
+    await submitCodexEvent(runtime, request, 2, { type: "turnComplete", threadId: thread.id,
+      turnExecutionId: request.turnExecutionId, providerId: "codex", reason: "end_turn",
+      costUsd: null, tokensIn: 1, tokensOut: 1 });
+    await submitCodexEvent(runtime, request, 3, { type: "ended", threadId: thread.id,
+      turnExecutionId: request.turnExecutionId });
+    await waitFor(() => runtime.owner.current(thread.id) === undefined);
+    expect(container.resolve(TurnRuntimeController).snapshot(thread.id)?.phase).toBe("completed");
+    expect(runtime.scheduler.depth().activeExecutions).toBe(0);
+    await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.completed"));
+    expect(canonicalPayloadTypes(thread.id).filter((type) => ["turn.completed", "turn.cancelled", "turn.errored", "turn.interrupted"].includes(type)))
+      .toEqual(["turn.completed"]);
+  });
+
+  it("interrupts and releases a rejected mandatory terminal whose ordinal cannot be replayed", async () => {
     let reportFailure: ((routing: { threadId: string; turnId: string;
       executionId: string; deliveryAttempt: number }, error: Error) => void | Promise<void>) | undefined;
+    let rejected: Error | undefined;
+    let sent: TurnRequest | undefined;
+    const runtime = requireValue(workerRuntime, "Expected worker runtime");
+    const recover = vi.spyOn(runtime, "recoverRejected");
     const provider = fakeCodexProvider(async (request) => {
+      sent = request;
+      await submitCodexEvent(runtime, request, 1, { type: "textDelta", threadId: request.threadId,
+        turnExecutionId: request.turnExecutionId, delta: "Text without its required message boundary" });
       try {
-        await submitCodexEvent(workerRuntime!, request, 1, { type: "turnStarted",
-          threadId: request.threadId, turnExecutionId: request.turnExecutionId });
+        // A mandatory terminal with unclassified text is rejected after its mailbox ordinal is admitted.
+        await submitCodexEvent(runtime, request, 2, { type: "error", threadId: request.threadId,
+          turnExecutionId: request.turnExecutionId, error: "Native provider failure" });
       } catch (error) {
-        if (!reportFailure) throw error;
+        if (!reportFailure || !(error instanceof Error)) throw error;
+        rejected = error;
         await reportFailure({ threadId: request.threadId, turnId: request.turnId,
-          executionId: request.turnExecutionId, deliveryAttempt: 1 }, error as Error);
+          executionId: request.turnExecutionId, deliveryAttempt: 1 }, error);
       }
     });
     Object.assign(provider, { setCanonicalTurnDeliveryFailureHandler: (handler: NonNullable<typeof reportFailure>) => {
@@ -446,8 +493,18 @@ describe("AgentService container composition", () => {
       content: "hello", permissionMode: "default" });
     await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
 
-    expect(container.resolve(TurnRuntimeController).snapshot(thread.id)?.phase).toBe("interrupted");
+    const request = requireValue(sent, "Expected provider dispatch");
+    expect(rejected?.message).toBe("Execution worker rejected command: invalid-event-routing");
+    expect(recover).toHaveBeenCalledTimes(1);
+    expect(recover).toHaveBeenCalledWith({ threadId: thread.id, turnId: request.turnId, executionId: request.turnExecutionId });
+    expect(container.resolve(TurnRuntimeController).snapshot(thread.id)).toMatchObject({
+      phase: "interrupted", turnExecutionId: request.turnExecutionId });
     expect(workerRuntime?.scheduler.depth().activeExecutions).toBe(0);
+    await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.interrupted"));
+    expect(canonicalPayloadTypes(thread.id).filter((type) => ["turn.completed", "turn.cancelled", "turn.errored", "turn.interrupted"].includes(type)))
+      .toEqual(["turn.interrupted"]);
+    expect(database?.query("SELECT status FROM canonical_agent_turns WHERE execution_id=?").get(request.turnExecutionId))
+      .toEqual({ status: "Interrupted" });
   });
 
   it("releases a crashed execution while a peer remains runnable", async () => {
@@ -517,13 +574,13 @@ async function submitCodexEvent(
   request: TurnRequest,
   sequence: number,
   event: AgentEvent,
-): Promise<void> {
+): Promise<WorkerOwnedProviderEventResult> {
   const route = runtime.providerEvents.resolve(request.turnExecutionId, "codex");
   if (route.kind !== "worker") throw new Error("Codex turn did not bind its worker route");
   const itemId = `codex:${request.turnExecutionId}:item:${sequence}`;
   const eventId = `codex:${request.turnExecutionId}:event:${sequence}`;
   const timestamp = new Date().toISOString();
-  await route.submit({ threadId: request.threadId, turnId: request.turnId,
+  return await route.submit({ threadId: request.threadId, turnId: request.turnId,
     executionId: request.turnExecutionId, phase: "running", deliveryAttempt: 1, batchId: eventId,
     events: [{ eventId, sourceProviderId: "codex", sourceIdentities: [], sourceSequence: sequence,
       providerTimestamp: timestamp,
