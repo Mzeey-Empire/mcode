@@ -143,7 +143,6 @@ In flight as of May 2026:
 | `CONTEXT.md` | Domain glossary. If you don't know what a "worktree" or "narration segment" means here, read this first. |
 | `ARCHITECTURE.md` | IPC flow, data model, directory layout. |
 | `DESIGN.md` | The complete visual and interaction contract: creative direction, tokens, typography, layout, components, states, accessibility, and motion. Read it before changing UI. |
-| `docs/specs/` | Formal product specs for individual features (markdown rendering, usage tracking, context window, sort order). |
 
 ## 10. The Product Test
 

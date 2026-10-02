@@ -62,20 +62,6 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0021: Thread control authority and lifecycle](adr/0021-thread-control-authority-and-lifecycle.md)
 - [0022: Server-owned streaming durability and provider-native recovery](adr/0022-server-owned-streaming-durability-and-provider-native-recovery.md)
 
-## Specs
-
-Dated pre-implementation design docs. Snapshots, not living documentation.
-
-- [2026-04-13: Markdown rendering and Mermaid visualizer](specs/2026-04-13-md-rendering-mermaid-design.md)
-- [2026-04-14: Usage tracking and quota display](specs/2026-04-14-usage-tracking-design.md)
-- [2026-04-22: Dynamic context window discovery and user override](specs/2026-04-22-dynamic-context-window-design.md)
-- [2026-05-01: Project sort order and draggable sidebar](specs/2026-05-01-project-sort-order-design.md)
-- [2026-06-16: Thread overview](specs/2026-06-16-thread-overview-design.md)
-- [2026-07-11: Pull request inbox and review worktrees](specs/2026-07-11-pull-request-inbox-and-review-worktrees.md)
-- [2026-07-20: Review files navigator](specs/2026-07-20-review-files-navigator.md)
-- [2026-07-22: Desktop title bar and navigation history](specs/2026-07-22-desktop-title-bar-navigation.md)
-- [2026-07-25: Agent thread control contract](specs/2026-07-25-agent-thread-control-contract.md)
-
 ## Agent runbooks
 
 Procedures for agents operating this repository.

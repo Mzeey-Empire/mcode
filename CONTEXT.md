@@ -2,8 +2,7 @@
 
 Domain terms used across this repo, resolved during design conversations.
 This file is a glossary only. No implementation details, no architecture, no
-specs. For those see `ARCHITECTURE.md`, `docs/specs/`, and
-`docs/internals/`.
+specs. For those see `ARCHITECTURE.md` and `docs/internals/`.
 
 ## Providers
 

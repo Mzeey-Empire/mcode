@@ -147,7 +147,6 @@ Most code changes do not need a documentation update. Agents can read the code. 
 - Keep a local implementation explanation in a nearby code comment. Use an internal doc when the reasoning crosses boundaries or needs context the code cannot carry. Link to the relevant source instead of copying it.
 - When a documented decision or constraint changes, rewrite or remove the affected text. Do not append a second account of the new behavior. A new internal page needs a distinct, durable reason to exist.
 - `docs/adr/` records point-in-time decisions. A new decision gets a new file with the next free number from the [index](docs/README.md). Do not renumber or rewrite existing ADRs.
-- `docs/specs/` holds dated pre-implementation design docs. They are snapshots. When shipped behavior drifts, update `docs/internals/` or write a new ADR, not the spec.
 - `docs/agents/` holds runbooks for agents operating this repo. `docs/user/` holds task-oriented docs in the product's voice, without implementation details.
 - `docs/research/`, `docs/plans/`, `docs/prototypes/`, `docs/design/`, and `docs/performance/` hold point-in-time working material. Do not maintain them after the fact; move durable knowledge into `docs/internals/` or an ADR.
 

@@ -39,7 +39,7 @@ Historical provenance does not change when a Thread later switches Provider.
 
 The normative wire shapes, bounds, error variants, defaults, authority matrix,
 and lifecycle behavior are defined in
-[the Agent Thread Control Contract](../specs/2026-07-25-agent-thread-control-contract.md).
+[the Agent Thread Control Contract](https://github.com/Mzeey-Empire/mcode/blob/f7b6c595a38f556e3a17d15bd1e227b6889369bc/docs/specs/2026-07-25-agent-thread-control-contract.md).
 
 ## Consequences
 
