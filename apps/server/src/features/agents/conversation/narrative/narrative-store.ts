@@ -15,7 +15,7 @@ import { NarrativeReadStore } from "./narrative-read-store.js";
  * `agentCallStack`, the open/closed thought segments, hook executions, and the
  * shared sort counter). This store adds SQLite persistence and applies emitted
  * data-only effects. The six narrative-pipeline traps documented in
- * `docs/internals/narrative-pipeline.md` are enforced here:
+ * `docs/internals/conversation/narrative-pipeline.md` are enforced here:
  *
  * - Trap 1: {@link bufferToolCall} prefers the SDK `parent_tool_use_id` and only
  *   falls back to {@link getCurrentParentToolCallId} when exactly one Agent on

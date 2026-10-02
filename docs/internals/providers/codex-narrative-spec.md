@@ -2,7 +2,7 @@
 
 This document states what “Codex in Mcode should feel like” in the chat narrative: thoughts, tools, sub-agents, and final reply. It is the product contract for server mapping, `agent-service`, and web narrative code.
 
-For pipeline traps and shared behavior with Claude, see [narrative-pipeline.md](./narrative-pipeline.md). For observed Codex app-server protocol evidence, see [codex-app-server-trace.md](./codex-app-server-trace.md).
+For pipeline traps and shared behavior with Claude, see [narrative-pipeline.md](../conversation/narrative-pipeline.md). For observed Codex app-server protocol evidence, see [codex-app-server-trace.md](./codex-app-server-trace.md).
 
 ---
 

@@ -7,7 +7,7 @@ Performance principles for building a fast, memory-efficient Electron + React ap
 ## Performance Change Workflow
 
 Before a performance investigation or implementation, load the repository's
-[`performance-engineer` skill](../../.codex/skills/performance-engineer/SKILL.md).
+[`performance-engineer` skill](../../../.agents/skills/performance-engineer/SKILL.md).
 Use this guide as the source of truth for Mcode budgets and verification.
 
 1. Name one user-visible or system-visible critical path and its behavior gates.

@@ -32,8 +32,6 @@ If the concept you need isn't in the glossary yet, that's a signal — either yo
 
 ## Flag ADR conflicts
 
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
-
-> _Contradicts ADR-0007 (event-sourced orders) — but worth reopening because…_
-
-`docs/adr/` doesn't exist yet; ADRs will appear as they get written by `/grill-with-docs` or by hand.
+If a proposed change revises a decision in an ADR, name the affected decision
+and explain why it needs revision. ADRs record point-in-time decisions. Check
+later ADRs and maintained architecture or internals guides for current behavior.
