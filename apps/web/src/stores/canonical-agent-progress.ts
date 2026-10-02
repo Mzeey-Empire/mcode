@@ -46,7 +46,8 @@ function accepted(current: CanonicalAgentReplica, frame: Extract<CanonicalAgentP
   if (retained.length > CANONICAL_AGENT_PROGRESS_RECOVERY_MAX) return gap(current);
   const reduced = reduceAgentEventBatch(current.state, fresh);
   if (reduced.outcome === "rejected") return gap(current);
-  return result({ ...current, state: reduced.state, progress: { ...progress, acceptedThrough: frame.through, retained }, recoveryRequired: false }, "applied", fresh);
+  // Live progress cannot repair a missing durable admission or revision.
+  return result({ ...current, state: reduced.state, progress: { ...progress, acceptedThrough: frame.through, retained } }, "applied", fresh);
 }
 
 function saved(current: CanonicalAgentReplica, frame: Extract<CanonicalAgentProgressFrame, { phase: "saved" }>): CanonicalProgressUpdate {
@@ -110,7 +111,8 @@ function recoveredProgress(current: CanonicalAgentReplica, frame: CanonicalAgent
 
 function confirmsRenderedProgress(current: CanonicalAgentReplica, frame: CanonicalAgentProgressRecovery): boolean {
   const progress = current.progress;
-  if (!progress || progress.epoch !== frame.epoch || frame.loss !== "none" || progress.acceptedThrough < frame.acceptedThrough) return false;
+  // A matching live suffix does not make an incomplete durable base safe to preserve.
+  if (current.recoveryRequired || !progress || progress.epoch !== frame.epoch || frame.loss !== "none" || progress.acceptedThrough < frame.acceptedThrough) return false;
   return frame.retained.every((event) =>
     event.progressPosition.sequence <= progress.savedThrough
     || progress.retained.some((accepted) => sameAcceptedEvent(accepted, event)));
