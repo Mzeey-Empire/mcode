@@ -4,6 +4,9 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import {
+  resolveCopilotTargetPackagePlan,
+} from "../desktop-packaging/target-inventory/target-inventory.mjs";
+import {
   claudeSdkPlatformPackageCandidates,
   claudeSdkPlatformParts,
   copyClaudeSdkCliNextTo,
@@ -110,10 +113,11 @@ describe("resolveClaudeSdkCliSources", () => {
 });
 
 describe("resolveCopilotSdkSources", () => {
-  it("uses the SDK store package when the target package has no resolvable export", async () => {
+  it("resolves the provider-owned SDK and target store when the target export is unavailable", async () => {
     const fixtureRoot = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "copilot-sdk-store-"));
-    const fixtureServerRoot = NodePath.join(fixtureRoot, "server");
-    const packageRoot = NodePath.join(fixtureServerRoot, "node_modules", "@github");
+    const fixtureServerRoot = NodePath.join(fixtureRoot, "apps", "server");
+    const providerRoot = NodePath.join(fixtureServerRoot, "node_modules", "@mcode", "providers");
+    const packageRoot = NodePath.join(providerRoot, "node_modules", "@github");
     const sdkRoot = NodePath.join(packageRoot, "copilot-sdk");
     const targetRoot = NodePath.join(packageRoot, "copilot-darwin-x64");
     const copilotRoot = NodePath.join(packageRoot, "copilot");
@@ -122,19 +126,31 @@ describe("resolveCopilotSdkSources", () => {
       await NodeFSPromises.mkdir(targetRoot, { recursive: true });
       await NodeFSPromises.mkdir(copilotRoot, { recursive: true });
       await NodeFSPromises.writeFile(NodePath.join(fixtureServerRoot, "package.json"), "{}\n");
+      await NodeFSPromises.writeFile(NodePath.join(providerRoot, "package.json"), '{"main":"index.js"}\n');
+      await NodeFSPromises.writeFile(NodePath.join(providerRoot, "index.js"), "");
       await NodeFSPromises.writeFile(
         NodePath.join(sdkRoot, "package.json"),
         '{"main":"dist/cjs/index.js"}\n',
       );
       await NodeFSPromises.writeFile(NodePath.join(sdkRoot, "dist", "cjs", "index.js"), "");
-      await NodeFSPromises.writeFile(NodePath.join(copilotRoot, "package.json"), "{}\n");
+      await NodeFSPromises.writeFile(NodePath.join(copilotRoot, "package.json"), '{"version":"1.0.25"}\n');
       await NodeFSPromises.writeFile(NodePath.join(targetRoot, "package.json"), '{"exports":{}}\n');
       await NodeFSPromises.writeFile(NodePath.join(targetRoot, "copilot"), "");
+      await NodeFSPromises.writeFile(
+        NodePath.join(fixtureRoot, "bun.lock"),
+        '"@github/copilot-darwin-x64": ["@github/copilot-darwin-x64@1.0.25", "", {}, "sha512-fixture"],\n',
+      );
 
       expect(resolveCopilotSdkSources(fixtureServerRoot, "darwin", "x64")).toEqual({
         platformPkg: "@github/copilot-darwin-x64",
         copilotPackageDir: copilotRoot,
         platformPackageDir: targetRoot,
+      });
+      expect(resolveCopilotTargetPackagePlan(fixtureServerRoot, "darwin", "x64")).toMatchObject({
+        packageName: "@github/copilot-darwin-x64",
+        version: "1.0.25",
+        destination: targetRoot,
+        integrity: "sha512-fixture",
       });
     } finally {
       await NodeFSPromises.rm(fixtureRoot, { recursive: true, force: true });
