@@ -4,7 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 /** Creates an isolated Playwright installation under the worktree runtime directory. */
-export function ensurePlaywright(repoRoot = process.cwd()) {
+export function ensurePlaywright(repoRoot = process.cwd(), { install = installPlaywright } = {}) {
   const root = NodePath.resolve(repoRoot);
   const scratchDir = NodePath.join(root, ".dev", "playwright-scratch");
   const packageFile = NodePath.join(scratchDir, "package.json");
@@ -13,8 +13,8 @@ export function ensurePlaywright(repoRoot = process.cwd()) {
   ensureScratchPackage(packageFile);
   const scratchRequire = NodeModule.createRequire(packageFile);
   if (isPlaywrightInstalled(scratchRequire, nodeModulesDir)) return nodeModulesDir;
-  installPlaywright(scratchDir);
-  if (waitForPlaywright(scratchRequire, nodeModulesDir)) return nodeModulesDir;
+  install(scratchDir);
+  if (verifyInstalledPlaywright(packageFile, nodeModulesDir)) return nodeModulesDir;
   throw new Error("Playwright was not installed inside the scratch package");
 }
 
@@ -59,13 +59,19 @@ function installPlaywright(scratchDir) {
   }
 }
 
-function waitForPlaywright(scratchRequire, nodeModulesDir) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    if (isPlaywrightInstalled(scratchRequire, nodeModulesDir)) return true;
-    // Bun can finish the child process before Windows exposes the installed files.
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+function verifyInstalledPlaywright(packageFile, nodeModulesDir) {
+  // Bun retains missing directory entries after installation. A fresh process owns a fresh resolver.
+  const script = "import { createRequire } from 'node:module'; process.stdout.write(createRequire(process.argv.at(-1)).resolve('playwright'));";
+  const resolution = NodeChildProcess.spawnSync(process.execPath, ["--input-type=module", "-e", script, packageFile], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 5000,
+  });
+  if (resolution.error) {
+    throw new Error(`Playwright installation verification could not finish: ${resolution.error.message}`);
   }
-  return false;
+  const entry = resolution.stdout.trim();
+  return resolution.status === 0 && isInside(nodeModulesDir, entry) && NodeFS.existsSync(entry);
 }
 
 /** Returns true when `candidate` resolves to a path strictly inside `parent`. */
