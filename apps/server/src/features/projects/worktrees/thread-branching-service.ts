@@ -41,7 +41,6 @@ export interface CreateBranchedThreadInput {
   parentThreadId: string;
   forkedFromMessageId?: string;
   title: string;
-  copilotAgent?: string;
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
@@ -239,7 +238,6 @@ function threadSettings(
     ...permissionModeSetting(input),
     ...contextWindowModeSetting(inherited),
     ...thinkingSetting(inherited),
-    ...copilotAgentSetting(input),
     ...codexFastModeSetting(input, inherited),
     ...devinModeSetting(input, inherited),
   };
@@ -269,9 +267,6 @@ function thinkingSetting(inherited: InheritedThreadSettings) {
   return inherited.thinking === undefined ? {} : { thinking: inherited.thinking };
 }
 
-function copilotAgentSetting(input: CreateBranchedThreadInput) {
-  return input.copilotAgent === undefined ? {} : { copilot_agent: input.copilotAgent };
-}
 
 function codexFastModeSetting(
   input: CreateBranchedThreadInput,
@@ -304,7 +299,6 @@ function configuredChildThread(
     permission_mode: input.permissionMode === "default" ? thread.permission_mode : input.permissionMode,
     context_window_mode: inherited.contextWindowMode ?? thread.context_window_mode,
     thinking: inherited.thinking ?? thread.thinking,
-    copilot_agent: input.copilotAgent ?? thread.copilot_agent,
     codex_fast_mode: configuredCodexFastMode(thread, input, inherited),
     devin_mode: configuredDevinMode(thread, input, inherited),
   };

@@ -12,8 +12,6 @@ export {
   ORCHESTRATION_MODES,
   DevinModeSchema,
   DEVIN_MODES,
-  CopilotSubagentSourceSchema,
-  COPILOT_SUBAGENT_SOURCES,
 } from "./models/enums.js";
 export type {
   ThreadStatus,
@@ -24,7 +22,6 @@ export type {
   InteractionMode,
   OrchestrationMode,
   DevinMode,
-  CopilotSubagentSource,
 } from "./models/enums.js";
 
 export {
@@ -1486,6 +1483,3 @@ export type {
   ProviderBillingMode,
   ProviderUsageInfo,
 } from "./providers/usage.js";
-
-export { CopilotSubagentSchema } from "./providers/copilot-agent.js";
-export type { CopilotSubagent } from "./providers/copilot-agent.js";

@@ -92,14 +92,3 @@ export const DEVIN_MODES = {
   BYPASS: "bypass" as const,
   PLAN: "plan" as const,
 } satisfies Record<string, DevinMode>;
-
-/** Discriminates where a Copilot sub-agent was discovered from. */
-export const CopilotSubagentSourceSchema = z.enum(["default", "user", "project"]);
-/** Copilot sub-agent source value. */
-export type CopilotSubagentSource = z.infer<typeof CopilotSubagentSourceSchema>;
-/** Constant lookup for Copilot sub-agent sources. */
-export const COPILOT_SUBAGENT_SOURCES = {
-  DEFAULT: "default" as const,
-  USER: "user" as const,
-  PROJECT: "project" as const,
-} satisfies Record<string, CopilotSubagentSource>;

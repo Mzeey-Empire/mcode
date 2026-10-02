@@ -64,8 +64,8 @@ export interface ProviderOptionsByProvider {
   claude: { contextWindowMode?: ContextWindowMode; thinking?: boolean };
   /** Codex: request the OpenAI fast service tier. */
   codex: { fastMode?: boolean };
-  /** Copilot: sub-agent name ("interactive" | "plan" | "autopilot" | custom YAML name). */
-  copilot: { agent?: string };
+  /** Copilot uses standard per-turn controls and native discovery. */
+  copilot: Record<string, never>;
   /** Devin: native session mode applied via `session/set_config_option`. */
   devin: { mode?: DevinMode };
   cursor: Record<string, never>;

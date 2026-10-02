@@ -9,7 +9,7 @@ import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable } from "@mcode/contracts";
-import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary } from "@mcode/providers";
+import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary, CopilotProviderBoundary } from "@mcode/providers";
 import type {
   Thread,
   IProviderRegistry,
@@ -115,7 +115,7 @@ interface WorkerOwnedTurn {
   terminalOutcome?: TurnOutcome;
   releaseStarted: boolean;
   deliveryFailed?: boolean;
-  deliveryFailureHandling?: boolean;
+  deliveryFailureHandling?: Promise<void>;
   stopInProgress?: boolean;
   stopRequested?: boolean;
 }
@@ -1040,18 +1040,25 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!active || active.execution.turnId !== routing.turnId
       || active.execution.executionId !== routing.executionId
       || active.deliveryAttempt !== routing.deliveryAttempt || active.deliveryFailureHandling) return;
+    // Stop intentionally closes this exact route before the provider's final callbacks settle.
+    if ((active.stopInProgress || active.stopRequested) && isRetiredWorkerDelivery(error)) return;
     active.deliveryFailed = true;
-    active.deliveryFailureHandling = true;
-    logger.error("Worker-owned canonical delivery failed", { threadId: routing.threadId,
-      executionId: routing.executionId, deliveryAttempt: routing.deliveryAttempt, error: error.message });
+    const handling = this.failWorkerDelivery(active, error);
+    active.deliveryFailureHandling = handling;
+    try { await handling; }
+    finally { if (active.deliveryFailureHandling === handling) active.deliveryFailureHandling = undefined; }
+  }
+
+  private async failWorkerDelivery(active: WorkerOwnedTurn, error: Error): Promise<void> {
+    const { execution, deliveryAttempt } = active;
+    logger.error("Worker-owned canonical delivery failed", { threadId: execution.threadId,
+      executionId: execution.executionId, deliveryAttempt, error: error.message });
     try {
       await this.failWorkerDispatch(active, error);
     } catch (failure) {
-      logger.error("Worker-owned canonical delivery recovery failed", { threadId: routing.threadId,
-        executionId: routing.executionId, error: failure instanceof Error ? failure.message : String(failure) });
+      logger.error("Worker-owned canonical delivery recovery failed", { threadId: execution.threadId,
+        executionId: execution.executionId, error: failure instanceof Error ? failure.message : String(failure) });
       await this.requireWorkerRuntime().recoverRejected(active.execution);
-    } finally {
-      active.deliveryFailureHandling = false;
     }
   }
 
@@ -1225,6 +1232,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!isRunningRuntime(prepared.runtime)) {
       await this.releaseWorkerTurn(active);
       return this.alreadyTerminal(prepared);
+    }
+    if (active.deliveryFailureHandling) {
+      await active.deliveryFailureHandling;
+      return this.alreadyTerminal({ ...prepared,
+        runtime: this.turnRuntime.snapshot(prepared.threadId) ?? prepared.runtime });
     }
     active.stopInProgress = true;
     this.requireWorkerFiles().fence(prepared.threadId, executionId, active.deliveryAttempt);
@@ -1888,6 +1900,16 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     });
 
     this.providerEventIngress.start(this.providerRegistry, this.turnEventPipeline);
+    for (const provider of this.providerRegistry.resolveAll()) {
+      if (!isCopilotBoundary(provider)) continue;
+      provider.setCanonicalTurnDeliveryFailureHandler(async (routing, error) => {
+        if (this.workerTurns.has(routing.threadId)) return this.handleWorkerDeliveryFailure(routing, error);
+        if (!this.turnRuntime.terminalize(routing.threadId, routing.executionId, "errored")) return;
+        await (this.finalizeTerminalTurn(routing.threadId, "errored", "canonical delivery failed") ?? Promise.resolve());
+        this.disarmTurnRetryWindow(routing.threadId);
+        this.trackSessionEnded(routing.threadId, routing.executionId);
+      });
+    }
   }
 
   private handleMemoryPressure(snapshot: MemoryPressureSnapshot): void {
@@ -2120,4 +2142,14 @@ function writerOwnedProviderExtension(extension: ProviderRuntimeEvent["extension
 
 function matchesWorkerEvent(event: AgentEvent, batch: WorkerOwnedProviderEventBatch): boolean {
   return event.threadId === batch.threadId && event.turnExecutionId === batch.executionId;
+}
+
+function isRetiredWorkerDelivery(error: Error): boolean {
+  return error.message === "Canonical event execution is no longer admitted"
+    || error.message === "Provider batch belongs to a retired execution attempt"
+    || error.message === "Prepared provider event lost its execution owner";
+}
+
+function isCopilotBoundary(provider: IAgentProvider): provider is CopilotProviderBoundary {
+  return provider.id === "copilot" && "setCanonicalTurnDeliveryFailureHandler" in provider && typeof provider.setCanonicalTurnDeliveryFailureHandler === "function";
 }

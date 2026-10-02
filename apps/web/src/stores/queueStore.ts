@@ -31,8 +31,6 @@ export interface QueuedMessage {
   orchestrationMode?: OrchestrationMode;
   /** Provider to use; undefined means inherit the thread's stored provider. */
   provider?: string;
-  /** Copilot sub-agent to use; undefined means inherit the thread's stored agent. */
-  copilotAgent?: string;
   /** Claude context window mode for this turn; undefined means inherit from thread/settings. */
   contextWindow?: ContextWindowMode;
   /** Haiku thinking toggle for this turn; undefined means inherit from thread/settings. */

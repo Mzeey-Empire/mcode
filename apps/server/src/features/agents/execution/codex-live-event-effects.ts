@@ -51,7 +51,7 @@ export class CodexLiveEventEffects {
   /** Prepare every parent write while retaining intents owned by other execution collaborators. */
   prepare(reduction: ReducedEvent, endedAt = new Date().toISOString()): PreparedCodexLiveEvent {
     this.requireExecution(reduction);
-    let effects: ParentLiveEffects = { text: { kind: "unchanged" } };
+    let effects: ParentLiveEffects = { text: { kind: "unchanged" }, ...(reduction.publication.event.type === "system" ? { systemIntents: [] } : {}) };
     const runtime: CodexLiveRuntimeIntent[] = [];
     let terminal: DataOnlyParentTerminalProjectionInput | undefined;
     for (const intent of reduction.writer) {

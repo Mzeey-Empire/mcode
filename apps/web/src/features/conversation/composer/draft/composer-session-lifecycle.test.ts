@@ -28,7 +28,6 @@ function entity(overrides: Partial<ThreadDraft> = {}): ThreadDraft {
       permissionMode: "full",
       orchestrationMode: ORCHESTRATION_MODES.PROACTIVE,
       approvalReviewMode: "automatic",
-      copilotAgent: "sub-agent",
       thinking: true,
     },
     target: {
@@ -126,7 +125,6 @@ describe("resolveComposerSessionForOwner", () => {
     expect(session.interactionMode).toBe(INTERACTION_MODES.PLAN);
     expect(session.orchestrationMode).toBe(ORCHESTRATION_MODES.PROACTIVE);
     expect(session.approvalReviewMode).toBe("automatic");
-    expect(session.copilotAgent).toBe("sub-agent");
     expect(session.thinking).toBe(true);
     expect(session.modelId).toBe("gpt-5.5");
     expect(session.provider).toBe("codex");

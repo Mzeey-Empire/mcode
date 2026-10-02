@@ -127,6 +127,8 @@ export interface ProviderFixtureManifest {
     cursorAcpTrace?: CursorAcpTraceFixture;
     /** Claude native structural envelopes; content fields contain only allowlisted tool shapes. */
     claudeNativeTrace?: ClaudeNativeTrace;
+    /** Allowlisted native Copilot SDK envelopes with fixed redaction placeholders. */
+    copilotNativeEvents?: readonly import("@github/copilot-sdk").SessionEvent[];
   };
   expected: FixtureExpectedSemantics;
 }

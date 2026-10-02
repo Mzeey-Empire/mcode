@@ -163,7 +163,6 @@ function createdThreadProviderSettings(
 ) {
   return {
     codex_fast_mode: createdCodexFastMode(thread, pending),
-    copilot_agent: createdCopilotAgent(thread, pending),
     devin_mode: createdDevinMode(thread, pending),
   };
 }
@@ -174,15 +173,6 @@ function createdCodexFastMode(
 ): boolean | null {
   return (pending?.provider === "codex" ? pending.codexFastMode ?? null : null)
     ?? thread.codex_fast_mode
-    ?? null;
-}
-
-function createdCopilotAgent(
-  thread: Omit<CreateAndSendResult, "runtimeSnapshot" | "warnings">,
-  pending: PendingThreadCreation | undefined,
-): string | null {
-  return (pending?.provider === "copilot" ? pending.copilotAgent ?? null : null)
-    ?? thread.copilot_agent
     ?? null;
 }
 
@@ -283,7 +273,6 @@ interface PendingThreadCreation {
   orchestrationMode?: OrchestrationMode;
   sourceThreadId?: string;
   forkedFromMessageId?: string;
-  copilotAgent?: string;
   contextWindow?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
@@ -321,7 +310,6 @@ interface BranchThreadParams {
   reasoningLevel?: ReasoningLevel;
   attachments?: AttachmentMeta[];
   interactionMode?: InteractionMode;
-  copilotAgent?: string;
   contextWindow?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
@@ -444,7 +432,6 @@ function placeholderWorktreeSettings(pending: PendingThreadCreation) {
 function placeholderProviderSettings(pending: PendingThreadCreation) {
   return {
     codexFastMode: pending.provider === "codex" ? (pending.codexFastMode ?? null) : null,
-    copilotAgent: pending.provider === "copilot" ? (pending.copilotAgent ?? null) : null,
     devinMode: pending.provider === "devin" ? (pending.devinMode ?? null) : null,
   };
 }
@@ -497,7 +484,6 @@ async function runCreateAndSend(pending: PendingThreadCreation): Promise<CreateA
     interactionMode: pending.interactionMode,
     parentThreadId: pending.sourceThreadId,
     forkedFromMessageId: pending.forkedFromMessageId,
-    copilotAgent: pending.copilotAgent,
     contextWindow: pending.contextWindow,
     thinking: pending.thinking,
     codexFastMode: pending.codexFastMode,
@@ -649,7 +635,6 @@ interface WorkspaceState {
     reasoningLevel?: ReasoningLevel,
     provider?: string,
     interactionMode?: InteractionMode,
-    copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
     codexFastMode?: boolean,
@@ -1458,7 +1443,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     reasoningLevel,
     provider,
     interactionMode,
-    copilotAgent,
     contextWindow,
     thinking,
     codexFastMode,
@@ -1501,7 +1485,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       provider,
       interactionMode,
       orchestrationMode,
-      copilotAgent,
       contextWindow,
       thinking,
       codexFastMode,
@@ -1535,7 +1518,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       orchestrationMode: params.orchestrationMode,
       sourceThreadId: params.sourceThreadId,
       forkedFromMessageId: params.forkedFromMessageId,
-      copilotAgent: params.copilotAgent,
       contextWindow: params.contextWindow,
       thinking: params.thinking,
       codexFastMode: params.codexFastMode,

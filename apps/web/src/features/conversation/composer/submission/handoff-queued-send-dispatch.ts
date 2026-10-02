@@ -38,7 +38,6 @@ function createHandoffQueuePayload(queued: HandoffQueuedSend) {
     reasoningLevel: selection.reasoning,
     orchestrationMode: queued.orchestrationMode,
     provider: selection.provider,
-    copilotAgent: selection.provider === "copilot" ? selection.copilotAgent ?? undefined : undefined,
     contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
     codexFastMode: selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined,

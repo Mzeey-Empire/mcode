@@ -18,6 +18,8 @@ export type {
   CursorProviderPorts,
   DevinProviderBoundary,
   DevinProviderPorts,
+  CopilotProviderPorts,
+  CopilotProviderBoundary,
   ProviderFactoryConfiguration,
   ProviderFactoryInput,
 } from "./factory-types.js";

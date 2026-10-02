@@ -11,7 +11,6 @@ const selection: ComposerAgentSelection = {
   permissionMode: "supervised",
   approvalReviewMode: "manual",
   orchestrationMode: "standard",
-  copilotAgent: null,
   contextWindow: null,
   thinking: null,
   codexFastMode: null,
@@ -36,6 +35,33 @@ function renderControls(overrides: Partial<React.ComponentProps<typeof ComposerA
 }
 
 describe("ComposerAccessControls", () => {
+  it("uses the shared permission picker for Copilot", () => {
+    const onSelectionChange = renderControls({
+      selection: { ...selection, provider: "copilot" },
+      approvalReviewSupported: false,
+    });
+
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /Access mode: Manual/ }));
+    expect(screen.queryByRole("button", { name: /^Auto/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Full access/ }));
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ permissionMode: "full", approvalReviewMode: "manual" });
+  });
+
+  it("honors permission locking for Copilot in the shared picker", () => {
+    renderControls({
+      selection: { ...selection, provider: "copilot", permissionMode: "full" },
+      permissionLocked: true,
+      approvalReviewSupported: false,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Access mode: Full access/ }));
+
+    expect(screen.getByRole("button", { name: /^Manual/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Full access/ })).toBeEnabled();
+  });
+
   it.each([
     ["Manual", { permissionMode: "supervised", approvalReviewMode: "manual" }],
     ["Auto", { permissionMode: "supervised", approvalReviewMode: "automatic" }],

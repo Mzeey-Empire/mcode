@@ -67,7 +67,6 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     context_window_mode: null,
     thinking: null,
     codex_fast_mode: null,
-    copilot_agent: null,
     devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: null,
@@ -383,7 +382,6 @@ export const mockTransport: McodeTransport = {
     providerId: "claude",
     quotaCategories: [],
   }),
-  listCopilotAgents: vi.fn().mockResolvedValue([]),
   getDiffSummary: vi.fn().mockResolvedValue(null),
   generateDiffSummary: vi.fn().mockResolvedValue({
     id: "mock-id",

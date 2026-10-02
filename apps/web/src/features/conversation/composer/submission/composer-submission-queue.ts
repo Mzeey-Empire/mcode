@@ -99,7 +99,6 @@ function createPersistentQueuePayload(
     reasoningLevel: selection.reasoning,
     orchestrationMode: selection.orchestrationMode,
     provider: selection.provider,
-    copilotAgent: optionalCopilotAgent(selection),
     contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
     codexFastMode: optionalCodexFastMode(selection),
@@ -112,11 +111,6 @@ function createPersistentQueuePayload(
 /** Returns mentions only when the queue entry has at least one. */
 function optionalMentions(mentions: MessageMention[]): MessageMention[] | undefined {
   return mentions.length > 0 ? mentions : undefined;
-}
-
-/** Keeps the Copilot choice scoped to Copilot submissions. */
-function optionalCopilotAgent(selection: ComposerAgentSelection): string | undefined {
-  return selection.provider === "copilot" ? selection.copilotAgent ?? undefined : undefined;
 }
 
 /** Keeps fast-mode metadata scoped to Codex submissions. */

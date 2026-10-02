@@ -1,6 +1,5 @@
-import "reflect-metadata";
 import { describe, expect, it } from "vitest";
-import { normalizeQuotaSnapshots } from "../copilot-provider.js";
+import { normalizeQuotaSnapshots } from "../copilot-helpers.js";
 
 describe("normalizeQuotaSnapshots", () => {
   it("preserves SDK reset dates on quota categories", () => {

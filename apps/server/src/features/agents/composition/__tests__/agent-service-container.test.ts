@@ -295,6 +295,103 @@ describe("AgentService container composition", () => {
     expect(workerRuntime?.scheduler.depth().activeExecutions).toBe(0);
   });
 
+  it("keeps explicit Stop ownership when its fenced Copilot delivery rejects after cancellation seals", async () => {
+    let sent: TurnRequest | undefined;
+    let reportFailure: ((routing: { threadId: string; turnId: string;
+      executionId: string; deliveryAttempt: number }, error: Error) => Promise<void>) | undefined;
+    const provider = Object.assign(fakeCodexProvider(async (request) => { sent = request; }), {
+      id: "copilot" as const, descriptor: { id: "copilot" as const, capabilities: [] },
+      setCanonicalTurnDeliveryFailureHandler: (handler: NonNullable<typeof reportFailure>) => { reportFailure = handler; },
+    });
+    registerFakeCodex(provider);
+    const service = container.resolve(AgentService);
+    const publication = container.resolve(AgentEventPublicationRegistry);
+    publication.bind(() => undefined); publication.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-stop-delivery", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Stop ownership", "direct", "main", true, "copilot");
+    await service.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "full", provider: "copilot", model: "gpt-4.1" });
+    const request = requireValue(sent, "Expected Copilot dispatch");
+    const failure = requireValue(reportFailure, "Expected Copilot delivery handler");
+    const runtime = requireValue(workerRuntime, "Expected owned runtime");
+    const recover = vi.spyOn(runtime, "recoverRejected");
+    const routing = { threadId: request.threadId, turnId: request.turnId,
+      executionId: request.turnExecutionId, deliveryAttempt: 1 };
+    await failure({ ...routing, deliveryAttempt: 2 }, new Error("stale failure"));
+    await failure({ ...routing, turnId: "stale-turn" }, new Error("stale failure"));
+    await failure({ ...routing, executionId: "stale-execution" }, new Error("stale failure"));
+    const files = container.resolve(ExecutionFileEvidenceCoordinator);
+    const seal = files.seal.bind(files);
+    let lateFailure: Promise<void> | undefined;
+    const sealing = vi.spyOn(files, "seal").mockImplementation((input) => {
+      const frozen = seal(input);
+      if (input.outcome === "cancelled" && input.executionId === request.turnExecutionId) {
+        expect(runtime.providerEvents.resolve(request.turnExecutionId, "copilot").kind).toBe("rejected");
+        lateFailure = failure(routing, new Error("Canonical event execution is no longer admitted"));
+      }
+      return frozen;
+    });
+    const result = await service.stopSession(thread.id);
+    await requireValue(lateFailure, "Expected post-fence delivery rejection");
+    expect(result).toMatchObject({ status: "cancelled", snapshot: {
+      threadId: thread.id, turnExecutionId: request.turnExecutionId, phase: "cancelled" } });
+    expect(sealing.mock.calls.map(([input]) => input.outcome)).toEqual(["cancelled"]);
+    expect(recover).not.toHaveBeenCalled();
+    expect(service.runtimeAccess().activeCount()).toBe(0);
+    expect(runtime.owner.current(thread.id)).toBeUndefined();
+    await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.cancelled"));
+    expect(database?.query("SELECT status FROM canonical_agent_turns WHERE execution_id=?").get(request.turnExecutionId)).toEqual({ status: "Cancelled" });
+    expect(canonicalPayloadTypes(thread.id).filter((type) => ["turn.completed", "turn.cancelled", "turn.errored", "turn.interrupted"].includes(type))).toEqual(["turn.cancelled"]);
+    await service.sendMessage({ threadId: thread.id, content: "follow-up", permissionMode: "full", provider: "copilot", model: "gpt-4.1" });
+    expect(runtime.owner.current(thread.id)?.execution.executionId).not.toBe(request.turnExecutionId);
+    expect(service.runtimeAccess().activeCount()).toBe(1);
+    expect((await service.stopSession(thread.id)).status).toBe("cancelled");
+    expect(recover).not.toHaveBeenCalled();
+  });
+
+  it("joins a genuine delivery failure admitted before Stop and preserves its errored outcome", async () => {
+    let sent: TurnRequest | undefined;
+    let reportFailure: ((routing: { threadId: string; turnId: string;
+      executionId: string; deliveryAttempt: number }, error: Error) => Promise<void>) | undefined;
+    const provider = Object.assign(fakeCodexProvider(async (request) => { sent = request; }), {
+      id: "copilot" as const, descriptor: { id: "copilot" as const, capabilities: [] },
+      setCanonicalTurnDeliveryFailureHandler: (handler: NonNullable<typeof reportFailure>) => { reportFailure = handler; },
+    });
+    registerFakeCodex(provider);
+    const service = container.resolve(AgentService);
+    const publication = container.resolve(AgentEventPublicationRegistry);
+    publication.bind(() => undefined); publication.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-failure-before-stop", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Failure ownership", "direct", "main", true, "copilot");
+    await service.sendMessage({ threadId: thread.id, content: "hello", permissionMode: "full", provider: "copilot", model: "gpt-4.1" });
+    const request = requireValue(sent, "Expected Copilot dispatch");
+    const failure = requireValue(reportFailure, "Expected Copilot delivery handler");
+    const runtime = requireValue(workerRuntime, "Expected owned runtime");
+    const fence = runtime.providerEvents.fence.bind(runtime.providerEvents);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(runtime.providerEvents, "fence").mockImplementationOnce(async (execution) => { await fence(execution); await held; });
+    const recover = vi.spyOn(runtime, "recoverRejected");
+    const stop = vi.spyOn(runtime.owner, "stop");
+    const files = container.resolve(ExecutionFileEvidenceCoordinator);
+    const sealing = vi.spyOn(files, "seal");
+    const failed = failure({ threadId: request.threadId, turnId: request.turnId,
+      executionId: request.turnExecutionId, deliveryAttempt: 1 }, new Error("Canonical event execution is no longer admitted"));
+    const stopped = service.stopSession(thread.id);
+    release();
+    await failed;
+    const result = await stopped;
+    expect(result).toMatchObject({ status: "already-terminal", snapshot: {
+      threadId: thread.id, turnExecutionId: request.turnExecutionId, phase: "errored" } });
+    expect(sealing.mock.calls.map(([input]) => input.outcome)).toEqual(["errored"]);
+    expect(stop).not.toHaveBeenCalled();
+    expect(recover).not.toHaveBeenCalled();
+    expect(service.runtimeAccess().activeCount()).toBe(0);
+    expect(runtime.owner.current(thread.id)).toBeUndefined();
+    await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.errored"));
+    expect(database?.query("SELECT status FROM canonical_agent_turns WHERE execution_id=?").get(request.turnExecutionId)).toEqual({ status: "Errored" });
+    expect(canonicalPayloadTypes(thread.id).filter((type) => ["turn.completed", "turn.cancelled", "turn.errored", "turn.interrupted"].includes(type))).toEqual(["turn.errored"]);
+  });
+
   it("admits seven concurrent owned turns and releases each terminal", async () => {
     const provider = fakeCodexProvider(async (request) => {
       await submitCodexEvent(workerRuntime!, request, 1, { type: "turnComplete",

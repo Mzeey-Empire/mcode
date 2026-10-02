@@ -67,15 +67,15 @@ describe("resolveCopilotCli", () => {
       platform: "win32",
       existsExtra: [configured],
       exec: withSdkHelp(
-        { [`${configured} --version`]: "GitHub Copilot CLI 1.0.24." },
+        { [`${configured} --version`]: "GitHub Copilot CLI 1.0.25." },
         [configured],
       ),
     });
     const res = resolveCopilotCli({ configuredPath: configured }, io);
-    expect(res).toMatchObject({ source: "configured", entry: configured, version: "1.0.24" });
+    expect(res).toMatchObject({ source: "configured", entry: configured, version: "1.0.25" });
   });
 
-  it("trusts the configured path when --version yields no semver", () => {
+  it("rejects configured versions that cannot substantiate the supported native contract", () => {
     const configured = "/usr/bin/copilot";
     const io = fakeIO({
       platform: "linux",
@@ -86,7 +86,7 @@ describe("resolveCopilotCli", () => {
       ),
     });
     const res = resolveCopilotCli({ configuredPath: configured }, io);
-    expect(res).toMatchObject({ source: "configured", entry: configured, version: null });
+    expect(res.source).toBe("not-found");
   });
 
   it("rejects configured paths with shell metacharacters", () => {
@@ -114,11 +114,11 @@ describe("resolveCopilotCli", () => {
     const io = fakeIO({
       platform: "linux",
       exec: withSdkHelp({ "npm root -g": "/global" }, [entry]),
-      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.24") },
+      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
     const res = resolveCopilotCli({ configuredPath: "/missing/copilot" }, io);
-    expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.24" });
+    expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.25" });
   });
 
   it("falls through when the configured path does not respond to --version", () => {
@@ -129,10 +129,10 @@ describe("resolveCopilotCli", () => {
       platform: "linux",
       existsExtra: [configured, entry],
       exec: withSdkHelp({ "npm root -g": "/global" }, [entry]),
-      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.24") },
+      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
     });
     const res = resolveCopilotCli({ configuredPath: configured }, io);
-    expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.24" });
+    expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.25" });
   });
 
   it("ignores a blank configured path and falls through", () => {
@@ -146,11 +146,11 @@ describe("resolveCopilotCli", () => {
     const io = fakeIO({
       platform: "linux",
       exec: withSdkHelp({ "npm root -g": "/global" }, [entry]),
-      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.24") },
+      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
     const res = resolveCopilotCli({}, io);
-    expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.24" });
+    expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.25" });
   });
 
   it("accepts 1.x when version qualifies even if --help only lists --acp", () => {
@@ -194,7 +194,7 @@ describe("resolveCopilotCli", () => {
     const io = fakeIO({
       platform: "linux",
       exec: { "npm root -g": "/global" },
-      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.24") },
+      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
     });
     expect(resolveCopilotCli({}, io).source).toBe("not-found");
   });
@@ -226,11 +226,11 @@ describe("resolveCopilotCli", () => {
         { "powershell -NoProfile -Command (Get-Command copilot).Source": shim },
         [entry],
       ),
-      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.24") },
+      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
     const res = resolveCopilotCli({}, io);
-    expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.24" });
+    expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.25" });
   });
 
   it("falls back to where.exe on win32 when PowerShell does not resolve copilot", () => {
@@ -241,11 +241,11 @@ describe("resolveCopilotCli", () => {
     const io = fakeIO({
       platform: "win32",
       exec: withSdkHelp({ "where copilot": shim }, [entry]),
-      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.24") },
+      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
     const res = resolveCopilotCli({}, io);
-    expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.24" });
+    expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.25" });
   });
 
   it("resolves via posix which, following to the adjacent package index.js", () => {
@@ -256,11 +256,11 @@ describe("resolveCopilotCli", () => {
     const io = fakeIO({
       platform: "linux",
       exec: withSdkHelp({ "which copilot": shim }, [entry]),
-      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.24") },
+      files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
     const res = resolveCopilotCli({}, io);
-    expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.24" });
+    expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.25" });
   });
 
   it("falls through when the shim has no adjacent package", () => {

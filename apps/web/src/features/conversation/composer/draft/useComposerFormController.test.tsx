@@ -153,7 +153,6 @@ function draftPayload(input: string): ThreadDraftPayload {
       permissionMode: PERMISSION_MODES.FULL,
       orchestrationMode: ORCHESTRATION_MODES.STANDARD,
       approvalReviewMode: "manual",
-      copilotAgent: null,
       thinking: null,
     },
     target: {

@@ -18,7 +18,6 @@ import type {
   Settings,
   GitCommit,
   ProviderModelInfo,
-  CopilotSubagent,
   GitRemoteUrl,
   TerminalPreferencesResult,
   TerminalProfileList,
@@ -1157,7 +1156,6 @@ export function createWsTransport(
         interactionMode: settings.interactionMode,
         orchestrationMode: settings.orchestrationMode,
         permissionMode: settings.permissionMode,
-        copilotAgent: settings.copilotAgent,
         contextWindow: settings.contextWindow,
         thinking: settings.thinking,
         codexFastMode: settings.codexFastMode,
@@ -1516,9 +1514,6 @@ export function createWsTransport(
       rpc<string[] | null>("provider.listModes", { providerId }),
     getProviderUsage: (providerId) =>
       rpc<ProviderUsageInfo>("provider.getUsage", { providerId }),
-    /** Fetches all available Copilot sub-agents for the given workspace (built-in + user + project). */
-    listCopilotAgents: (workspaceId) =>
-      rpc<CopilotSubagent[]>("provider.copilotAgents", { workspaceId }),
     listProviderAvailability: () =>
       rpc<ProviderAvailability[]>("providers.listAvailability", {}),
 

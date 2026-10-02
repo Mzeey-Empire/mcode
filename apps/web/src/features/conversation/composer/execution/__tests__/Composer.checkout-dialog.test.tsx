@@ -183,10 +183,6 @@ vi.mock("@/components/chat/ModelSelector", () => ({
   ModelSelector: () => <div />,
 }));
 
-vi.mock("@/components/chat/CopilotAgentSelector", () => ({
-  CopilotAgentSelector: () => <div />,
-}));
-
 vi.mock("@/components/chat/AttachmentPreview", () => ({
   AttachmentPreview: ({ attachments }: { attachments: Array<{ name: string; previewUrl: string }> }) => (
     <div data-testid="attachment-preview">
@@ -796,7 +792,6 @@ describe("Composer checkout confirmation", () => {
         permissionMode: PERMISSION_MODES.FULL,
         orchestrationMode: ORCHESTRATION_MODES.STANDARD,
         approvalReviewMode: "manual",
-        copilotAgent: null,
         thinking: null,
       },
       target: {

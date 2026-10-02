@@ -37,7 +37,7 @@ describe("resolveComposerCapabilities", () => {
       name: "Copilot",
       providerId: "copilot",
       modelId: "gpt-4.1",
-      expected: [],
+      expected: ["plan:Plan:/plan"],
     },
   ])("resolves $name capabilities from one provider/model matrix", ({ providerId, modelId, expected }) => {
     const capabilities = resolveComposerCapabilities({ providerId, modelId });

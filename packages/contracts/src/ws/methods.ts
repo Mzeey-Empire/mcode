@@ -113,7 +113,6 @@ import {
   ProviderCatalogRequestSchema,
   ProviderCatalogSnapshotSchema,
 } from "../providers/capability-catalog.js";
-import { CopilotSubagentSchema, CopilotAgentNameSchema } from "../providers/copilot-agent.js";
 import {
   PermissionDecisionSchema,
   PermissionRequestSchema,
@@ -322,8 +321,6 @@ export const SendMessageSchema = lazySchema(() => z.object({
     maxBudgetUsd: z.number().nonnegative().finite().optional(),
     /** Maximum agent turns. 0 or absent disables. */
     maxTurns: z.number().int().nonnegative().optional(),
-    /** Copilot sub-agent to activate for this message. Ignored by other providers. */
-    copilotAgent: CopilotAgentNameSchema.optional(),
     /** Context window tier ("200k" default, "1m" extended). Honored only by 1M-capable Claude models. */
     contextWindow: ContextWindowModeSchema.optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
@@ -389,8 +386,6 @@ export const CreateAndSendSchema = lazySchema(() =>
     maxBudgetUsd: z.number().nonnegative().finite().optional(),
     /** Maximum agent turns. 0 or absent disables. */
     maxTurns: z.number().int().nonnegative().optional(),
-    /** Copilot sub-agent to activate for this thread. Ignored by other providers. */
-    copilotAgent: CopilotAgentNameSchema.optional(),
     /** Context window tier ("200k" default, "1m" extended). Honored only by 1M-capable Claude models. */
     contextWindow: ContextWindowModeSchema.optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
@@ -782,8 +777,6 @@ export const WS_METHODS = lazySchema(() => ({
       interactionMode: InteractionModeSchema.optional(),
       orchestrationMode: OrchestrationModeSchema.optional(),
       permissionMode: PermissionModeSchema.optional(),
-      /** Copilot-specific: name of the selected sub-agent. Pass null to clear back to provider default. */
-      copilotAgent: CopilotAgentNameSchema.nullable().optional(),
       /** Context window tier persisted on the thread. Pass null to clear back to the global default. */
       contextWindow: ContextWindowModeSchema.nullable().optional(),
       /** Boolean thinking toggle persisted on the thread. Honored only for Haiku-class models. Pass null to clear. */
@@ -809,7 +802,6 @@ export const WS_METHODS = lazySchema(() => ({
         data.interactionMode !== undefined ||
         data.orchestrationMode !== undefined ||
         data.permissionMode !== undefined ||
-        data.copilotAgent !== undefined ||
         data.contextWindow !== undefined ||
         data.thinking !== undefined ||
         data.codexFastMode !== undefined ||
@@ -1482,12 +1474,6 @@ export const WS_METHODS = lazySchema(() => ({
   "memory.setBackground": {
     params: z.object({ background: z.boolean() }),
     result: z.void(),
-  },
-  "provider.copilotAgents": {
-    params: z.object({
-      workspaceId: z.string(),
-    }),
-    result: z.array(CopilotSubagentSchema()),
   },
   "providers.listAvailability": {
     params: z.object({}),

@@ -94,7 +94,6 @@ function resetState() {
         context_window_mode: null,
         thinking: null,
         codex_fast_mode: null,
-        copilot_agent: null,
     devin_mode: null,
         parent_thread_id: null,
         forked_from_message_id: null,

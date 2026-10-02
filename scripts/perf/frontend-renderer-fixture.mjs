@@ -896,7 +896,6 @@ async function installFixtureRuntime(page) {
       context_window_mode: null,
       thinking: null,
       codex_fast_mode: null,
-      copilot_agent: null,
       default_open_in_app: null,
       parent_thread_id: null,
       forked_from_message_id: null,

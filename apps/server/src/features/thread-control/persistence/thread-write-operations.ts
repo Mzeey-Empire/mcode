@@ -8,7 +8,7 @@ const settings = z.object({
   orchestration_mode: z.string().optional(), permission_mode: z.string().optional(),
   context_window_mode: ContextWindowModeSchema.nullable().optional(),
   thinking: z.boolean().nullable().optional(), codex_fast_mode: z.boolean().nullable().optional(),
-  copilot_agent: z.string().nullable().optional(), devin_mode: z.string().nullable().optional(),
+  devin_mode: z.string().nullable().optional(),
   default_open_in_app: z.string().nullable().optional(),
 });
 const deadlineUpdate = z.object({ id: z.string(), userCompletedAt: z.string(), scheduledDeletionAt: z.string().nullable(), nextScheduledDeletionAt: z.string().nullable() });

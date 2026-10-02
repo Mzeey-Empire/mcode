@@ -20,6 +20,56 @@ import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { createDevinAcpTurnState, mapDevinAcpSessionNotification } from "../../../../../../../packages/providers/src/private/devin/devin-acp-event-mapper.js";
 import { z } from "zod";
+import { createCopilotProvider, type CopilotProviderBoundary, type ProviderEventBatch, type ProviderHostPorts } from "@mcode/providers";
+import { ProviderRuntimeEventSchema, type TurnOutcome } from "@mcode/contracts";
+import type { SessionEvent } from "../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js";
+import { ThoughtSegmentStore } from "../../conversation/narrative/persistence/thought-segment-store.js";
+import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
+
+const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
+vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
+  approveAll: () => ({ kind: "approved" }),
+  CopilotClient: class {
+    start = async () => {};
+    stop = async () => [];
+    forceStop = async () => {};
+    createSession = async () => copilotSdk.session;
+    listModels = async () => [{ id: "model", name: "Model", capabilities: { supports: { reasoningEffort: false } } }];
+  },
+}));
+type CopilotNativeInput = { [K in SessionEvent["type"]]: Omit<Extract<SessionEvent, { type: K }>, "id" | "timestamp" | "parentId"> }[SessionEvent["type"]];
+class CopilotPersistenceSession {
+  readonly sessionId = "native-persistence-session";
+  readonly handlers = new Set<(event: SessionEvent) => void>();
+  sequence = 0;
+  on = (handler: (event: SessionEvent) => void) => { this.handlers.add(handler); return () => { this.handlers.delete(handler); }; };
+  rpc = { mode: { set: async () => {} } };
+  send = async () => "native-message";
+  disconnect = async () => {};
+  abort = async () => { this.emit({ type: "abort", data: { reason: "user initiated" } }); this.emit({ type: "session.idle", ephemeral: true, data: { aborted: true } }); };
+  emit(input: CopilotNativeInput, id?: string) {
+    const sequence = ++this.sequence;
+    const event: SessionEvent = { ...input, id: id ?? `native-${sequence}`, timestamp: "2026-10-02T10:00:00.000Z", parentId: sequence === 1 ? null : `native-${sequence - 1}` };
+    this.handlers.forEach((handler) => handler(event));
+  }
+}
+const copilotTerminalCases = {
+  snapshot: { status: "Completed", content: "Final answer", outcome: "completed", finalMessages: 1, delta: "Final ", snapshot: true },
+  "delta-only": { status: "Completed", content: "Final", outcome: "completed", finalMessages: 0, delta: "Final", snapshot: false },
+  abort: { status: "Interrupted", content: "Final answer", outcome: "interrupted", finalMessages: 0, delta: "Final ", snapshot: true },
+  error: { status: "Errored", content: "Final answer", outcome: "errored", finalMessages: 0, delta: "Final ", snapshot: true },
+};
+function copilotTerminalOutcome(event: AgentEvent): TurnOutcome | undefined {
+  if (event.type === "turnComplete") return "completed";
+  if (event.type === "error") return "errored";
+  if (event.type === "ended") return event.outcome === "cancelled" ? "interrupted" : event.outcome;
+  return undefined;
+}
+async function finishCopilotNativeTurn(provider: CopilotProviderBoundary, session: CopilotPersistenceSession, ending: keyof typeof copilotTerminalCases) {
+  if (ending === "abort") await provider.stopSession("mcode-session");
+  else if (ending === "error") session.emit({ type: "session.error", data: { errorType: "fixture", message: "Native failed" } });
+  else session.emit({ type: "session.idle", ephemeral: true, data: {} });
+}
 
 function acceptedMessage(event: Pick<AcceptedCanonicalAgentEventEnvelope, "payload">) {
   const payload = event.payload;
@@ -128,6 +178,76 @@ describe("accepted parent progress with the actual SQLite writer", () => {
   function frames(): CanonicalAgentProgressFrame[] {
     return pushes.frames.map((frame) => CanonicalAgentProgressFrameSchema().parse(frame));
   }
+
+  it.each(["snapshot", "delta-only", "abort", "error"] as const)("persists Copilot model loops and their %s terminal through the public factory", async (ending) => {
+    const expected = copilotTerminalCases[ending];
+    await send(1, start("copilot"));
+    let ordinal = 1;
+    const batches: ProviderEventBatch[] = [];
+    const submit: ProviderHostPorts["events"]["submit"] = async (batch) => {
+      batches.push(batch);
+      let accepted;
+      for (const value of batch.events) {
+        if (value.payload.type !== "item.recorded") throw new Error("Expected provider runtime draft");
+        const event = ProviderRuntimeEventSchema().parse(value.payload.item.payload.runtimeEvent).event;
+        const outcome = copilotTerminalOutcome(event);
+        const reply = await send(++ordinal, { kind: "event", phase: batch.phase, nativeCursor: batch.nativeCursor ?? null,
+          events: [value], ...(outcome ? { terminalInput: { ...execution, providerId: "copilot", providerIdentities: [], outcome,
+            projection: { kind: "writer-staged" } } } : {}) });
+        if (reply.result.kind !== "accepted") throw new Error(`Provider progress was not accepted: ${JSON.stringify(reply.result)}`);
+        accepted = reply.result;
+      }
+      if (!accepted) throw new Error("Empty provider progress batch");
+      return { commit: { outcome: "accepted", acceptedThrough: accepted.acceptedThrough,
+        eventCount: batch.events.length, progressPosition: accepted.progressPosition }, delivery: { ingress: "not-required" } };
+    };
+    const host: ProviderHostPorts = {
+      runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" }, environment: { snapshot: () => ({}) },
+      processes: { attach: () => {}, terminateTree: async () => {} }, grants: { consume: () => false },
+      browser: { stage: () => ({ leaseId: "lease", expiresAt: 1_000 }), releaseSession: () => 0, isConfigured: () => false,
+        issue: () => null, refresh: (leaseId) => ({ ok: false, leaseId, reason: "not-found" }),
+        release: (leaseId) => ({ leaseId, released: true }), revokeCredential: () => false },
+      threadControl: { bootstrap: async () => null, close: async () => {} }, events: { submit },
+    };
+    const session = new CopilotPersistenceSession(); copilotSdk.session = session;
+    const provider = createCopilotProvider({ configuration: { cliPath: "copilot", idleSessionTtlMs: 600_000 }, host,
+      copilot: { launch: { resolve: async () => ({ cliPath: "/copilot", env: {} }) } } });
+    try {
+      await provider.sendTurn({ threadId: execution.threadId, turnId: execution.turnId, turnExecutionId: execution.executionId,
+        sessionId: "mcode-session", workspaceId: "workspace", cwd: directory, message: "Task", model: "model",
+        permissionMode: "full", interactionMode: "build", approvalReviewMode: "manual", providerOptions: {} });
+      session.emit({ type: "assistant.turn_start", data: { turnId: "loop-1" } });
+      session.emit({ type: "assistant.message", data: { messageId: "commentary-1", content: "Looking up the result." } });
+      session.emit({ type: "assistant.turn_start", data: { turnId: "loop-2" } });
+      session.emit({ type: "assistant.message", data: { messageId: "commentary-2", content: "Waiting for native child." } });
+      session.emit({ type: "assistant.turn_start", data: { turnId: "loop-3" } });
+      session.emit({ type: "assistant.message_delta", ephemeral: true, data: { messageId: "answer", deltaContent: expected.delta } });
+      if (expected.snapshot) session.emit({ type: "assistant.message", data: { messageId: "answer", content: "Final answer" } }, "original-final-snapshot");
+      await finishCopilotNativeTurn(provider, session, ending);
+      const canonical = new CanonicalAgentBoundary(db, () => {});
+      await expect.poll(() => canonical.loadTurn(execution.turnId)?.status).toBe(expected.status);
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      const terminal = canonical.loadTerminalProjection(execution.turnId);
+      expect(terminal.message).toMatchObject({ id: deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`),
+        content: expected.content, is_internal: false, outcome: expected.outcome });
+      if (!terminal.message) throw new Error("Expected saved assistant response");
+      expect(new ThoughtSegmentStore(db).listByMessage(terminal.message.id)
+        .filter((item) => !item.is_final_response).map((item) => item.text)).toEqual(["Looking up the result.", "Waiting for native child."]);
+      const finalMessages = batches.flatMap((batch) => batch.events).filter((value) => value.payload.type === "item.recorded"
+        && ProviderRuntimeEventSchema().parse(value.payload.item.payload.runtimeEvent).event.type === "message");
+      expect(finalMessages).toHaveLength(expected.finalMessages);
+      if (ending === "snapshot") {
+        expect(finalMessages[0]?.eventId).toContain("original-final-snapshot");
+        expect(finalMessages[0]?.providerTimestamp).toBe("2026-10-02T10:00:00.000Z");
+        const body = terminal.message?.content;
+        const before = progress.recover(execution.threadId, { conversationRevision: 0, rosterRevision: 0 }).durable;
+        const changed = draft("copilot", 10_000, "message", { content: "Changed replay", tokens: null });
+        expect((await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null, events: [changed] })).result.kind).toBe("rejected");
+        expect(canonical.loadTerminalProjection(execution.turnId).message?.content).toBe(body);
+        expect(progress.recover(execution.threadId, { conversationRevision: 0, rosterRevision: 0 }).durable).toEqual(before);
+      }
+    } finally { await provider.shutdown(); }
+  });
 
   it("preserves the durable child roster revision across a parent follow-up and fresh recovery owner", async () => {
     await send(1, start("codex"));

@@ -200,7 +200,7 @@ export function useComposerAgentControlState({
     useToastStore.getState().show(
       "info",
       "Plan removed",
-      "The selected provider manages Plan through its own agent selector.",
+      "The selected provider does not support Plan.",
     );
   }, [detachPlan, interactionMode, planCapability]);
   useEffect(() => {

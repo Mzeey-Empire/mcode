@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentEventType, providerRuntimeEvent, type AgentEvent } from "@mcode/contracts";
-import type { ProviderEventBatch, ProviderEventSinkPort } from "@mcode/providers";
+import type { ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "@mcode/providers";
 import {
   ClaudeCanonicalEventPublisher,
   type ClaudeCanonicalEventRouting,
@@ -14,13 +14,14 @@ const routing: ClaudeCanonicalEventRouting = {
 };
 
 /** Builds the narrow host port needed to inspect Claude canonical submissions. */
-function createSink(submit: (batch: ProviderEventBatch) => Promise<void>): ProviderEventSinkPort {
-  return { submit: async (batch) => { await submit(batch); return { commit: { outcome: "committed", conversationRevision: 0, rosterRevision: 0, acceptedThrough: 0, durableThrough: 0, eventCount: batch.events.length }, delivery: { ingress: "queued" } }; } };
+function createSink(submit: ProviderEventSinkPort["submit"]): ProviderEventSinkPort {
+  return { submit };
 }
+const receipt: ProviderEventSubmissionReceipt = { commit: { outcome: "committed", acceptedThrough: 1, durableThrough: 1, conversationRevision: 1, rosterRevision: 0, eventCount: 1 }, delivery: { ingress: "queued" } };
 
 describe("ClaudeCanonicalEventPublisher", () => {
   it("submits a provider runtime event without a renderer publication claim", async () => {
-    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const publisher = new ClaudeCanonicalEventPublisher(createSink(submit));
     const terminal = {
       type: AgentEventType.TurnComplete,
@@ -57,6 +58,7 @@ describe("ClaudeCanonicalEventPublisher", () => {
             payload: {
               projection: "providerRuntimeEvent",
               runtimeEvent: { event: terminal },
+              provenance: "generated",
             },
           }),
         }),
@@ -65,7 +67,7 @@ describe("ClaudeCanonicalEventPublisher", () => {
   });
 
   it("keeps attempt-scoped ordering stable for duplicate and conflicting terminal evidence", async () => {
-    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const publisher = new ClaudeCanonicalEventPublisher(createSink(submit));
     const completed = {
       type: AgentEventType.TurnComplete,
@@ -97,7 +99,7 @@ describe("ClaudeCanonicalEventPublisher", () => {
   });
 
   it("checks a completed turn without resetting sequence for late SDK events", async () => {
-    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const publisher = new ClaudeCanonicalEventPublisher(createSink(submit));
     const event = providerRuntimeEvent({
       type: AgentEventType.System,
@@ -115,7 +117,7 @@ describe("ClaudeCanonicalEventPublisher", () => {
   });
 
   it("deduplicates known native replay and rejects a conflicting semantic event", async () => {
-    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const failure = vi.fn();
     const publisher = new ClaudeCanonicalEventPublisher(createSink(submit), failure);
     const event = providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "fixture" });
@@ -130,7 +132,7 @@ describe("ClaudeCanonicalEventPublisher", () => {
   });
 
   it.each([1_023, 1_024, 1_025])("fails queue overflow explicitly at %i pending events", async (count) => {
-    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const failure = vi.fn();
     const publisher = new ClaudeCanonicalEventPublisher(createSink(submit), failure);
     for (let i = 0; i < count; i++) publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "fixture" }), []);
@@ -142,5 +144,15 @@ describe("ClaudeCanonicalEventPublisher", () => {
       expect(submit).toHaveBeenCalledTimes(count);
       expect(failure).not.toHaveBeenCalled();
     }
+  });
+
+  it("retains a delivered execution failure after retirement for provider shutdown", async () => {
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockRejectedValue(new Error("Sink unavailable"));
+    const failure = vi.fn();
+    const publisher = new ClaudeCanonicalEventPublisher(createSink(submit), failure);
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "fixture" }), []);
+    await expect(publisher.waitForExecution(routing)).rejects.toThrow("Sink unavailable");
+    await expect(publisher.stopAdmissionAndDrain()).rejects.toThrow("Provider canonical event shutdown failed");
+    expect(failure).toHaveBeenCalledExactlyOnceWith(routing, expect.any(Error));
   });
 });

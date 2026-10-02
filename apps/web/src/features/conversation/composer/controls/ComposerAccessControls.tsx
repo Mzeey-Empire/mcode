@@ -1,7 +1,4 @@
-import { Eye, KeyRound, Lock, Pencil, ShieldCheck, Unlock } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { CopilotAgentSelector } from "@/components/chat/CopilotAgentSelector";
+import { Eye, KeyRound, Pencil, ShieldCheck } from "lucide-react";
 import {
   AccessModeSelector,
   InlineComposerOptions,
@@ -30,24 +27,9 @@ export interface ComposerAccessControlsProps {
   onSelectionTouched(): void;
 }
 
-function nextPermissionMode(permissionMode: PermissionMode): PermissionMode {
-  return permissionMode === PERMISSION_MODES.FULL
-    ? PERMISSION_MODES.SUPERVISED
-    : PERMISSION_MODES.FULL;
-}
-
 function persistPermissionMode(threadId: string | undefined, permissionMode: PermissionMode): void {
   if (!threadId) return;
   void useThreadStore.getState().setThreadSettings(threadId, { permissionMode });
-}
-
-function persistCopilotAgent(
-  threadId: string | undefined,
-  branchFromMessageId: string | undefined,
-  copilotAgent: ComposerAgentSelection["copilotAgent"],
-): void {
-  if (!threadId || branchFromMessageId) return;
-  void useThreadStore.getState().setThreadSettings(threadId, { copilotAgent });
 }
 
 function persistDevinMode(
@@ -109,55 +91,6 @@ function DevinAccessControls({
   );
 }
 
-function CopilotAccessControls({
-  threadId,
-  workspaceId,
-  branchFromMessageId,
-  selection,
-  isModelLocked,
-  onSelectionChange,
-  onSelectionTouched,
-}: Omit<ComposerAccessControlsProps, "permissionLocked" | "showInlineOptions">) {
-  const permissionMode = selection.permissionMode;
-  const permissionLabel = permissionMode === PERMISSION_MODES.FULL ? "Full access" : "Manual";
-  const permissionTooltip = permissionMode === PERMISSION_MODES.FULL ? "Full access mode" : "Manual mode";
-
-  return (
-    <>
-      <CopilotAgentSelector
-        selected={selection.copilotAgent}
-        workspaceId={workspaceId ?? ""}
-        disabled={isModelLocked}
-        onChange={(copilotAgent) => {
-          onSelectionChange({ copilotAgent });
-          persistCopilotAgent(threadId, branchFromMessageId, copilotAgent);
-        }}
-      />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                const nextMode = nextPermissionMode(permissionMode);
-                onSelectionChange({ permissionMode: nextMode });
-                onSelectionTouched();
-                persistPermissionMode(threadId, nextMode);
-              }}
-              className="gap-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-            >
-              {permissionMode === PERMISSION_MODES.FULL ? <Unlock size={14} /> : <Lock size={14} />}
-              <span className="text-sm">{permissionLabel}</span>
-            </Button>
-          }
-        />
-        <TooltipContent>{permissionTooltip}</TooltipContent>
-      </Tooltip>
-    </>
-  );
-}
-
 function ComposerPermissionControls({
   threadId,
   selection,
@@ -210,11 +143,8 @@ function ComposerPermissionControls({
   />;
 }
 
-/** Renders Copilot selection and the permission control for the current provider. */
+/** Renders the permission control for the current provider. */
 export function ComposerAccessControls(props: ComposerAccessControlsProps) {
-  if (props.selection.provider === "copilot") {
-    return <CopilotAccessControls {...props} />;
-  }
   if (props.selection.provider === "devin") {
     return <DevinAccessControls {...props} />;
   }

@@ -66,11 +66,12 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
   {
     providerId: "copilot",
     factory: createCopilotProvider,
-    requiredProfiles: ["core"],
-    fixtureFiles: [fixtureFile("copilot")],
+    requiredProfiles: ["core", "build", "plan", "completion", "permissions", "usage", "session-eviction", "clean-fork", "browser-access", "thread-control"],
+    fixtureFiles: [fixtureFile("copilot"), namedFixtureFile("copilot-core.captured.json")],
+    requiredFixtureProvenance: ["captured", "synthetic"],
     supportedVersions: [{
       component: "@github/copilot",
-      oldestSupported: "0.0.403",
+      oldestSupported: "1.0.25",
       currentTested: "1.0.25",
       source: "apps/server/src/features/providers/adapters/copilot/copilot-cli-resolver.ts and bun.lock",
     }],

@@ -132,7 +132,6 @@ export class TurnRecoveryService {
       provider: thread.provider as SendMessageCommand["provider"],
       interactionMode: this.optionalValue(thread.interaction_mode),
       orchestrationMode: this.optionalValue(thread.orchestration_mode),
-      copilotAgent: this.optionalValue(thread.copilot_agent),
       contextWindow: this.optionalValue(thread.context_window_mode),
       thinking: this.optionalValue(thread.thinking),
       codexFastMode: this.optionalValue(thread.codex_fast_mode),
