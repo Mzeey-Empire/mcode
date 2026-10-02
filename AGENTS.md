@@ -82,7 +82,7 @@ Before calling frontend or feature work done, verify all applicable dimensions:
 - **Providers**: Codex, Claude, Cursor each have an adapter in `packages/providers`. Provider-shaped features need a decision per adapter.
 - **Contracts**: Anything crossing the wire is typed in `packages/contracts`. Update schemas and call sites together using `lazySchema`.
 - **Reverse states**: If you add a way in, add the way out and the way to see it. Snooze needs unsnooze. Start needs cancel.
-- **Timeline**: Check that narrative indicators, typing state, and turn footers transition cleanly. See **[docs/internals/narrative-pipeline.md](docs/internals/narrative-pipeline.md)**.
+- **Timeline**: Check that narrative indicators, typing state, and turn footers transition cleanly. See **[docs/internals/conversation/narrative-pipeline.md](docs/internals/conversation/narrative-pipeline.md)**.
 - **Docs**: Check whether the change makes existing docs inaccurate. Apply the [documentation rules](#documentation) before adding anything.
 
 ## Dev servers & Runtime contract
@@ -123,10 +123,10 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 
 ## Subsystem guides
 
-- **Narrative Timeline & Event Traps:** [`docs/internals/narrative-pipeline.md`](docs/internals/narrative-pipeline.md)
-- **UI Component Registry & Rules:** [`docs/internals/ui-components.md`](docs/internals/ui-components.md)
-- **Provider Architecture:** [`docs/internals/provider-architecture.md`](docs/internals/provider-architecture.md)
-- **Database Migrations:** [`docs/internals/db-migrations.md`](docs/internals/db-migrations.md)
+- **Narrative Timeline & Event Traps:** [`docs/internals/conversation/narrative-pipeline.md`](docs/internals/conversation/narrative-pipeline.md)
+- **UI Component Registry & Rules:** [`docs/internals/renderer/ui-components.md`](docs/internals/renderer/ui-components.md)
+- **Provider Architecture:** [`docs/internals/providers/provider-architecture.md`](docs/internals/providers/provider-architecture.md)
+- **Database Migrations:** [`docs/internals/persistence/db-migrations.md`](docs/internals/persistence/db-migrations.md)
 - **Live Desktop Testing:** [`.agents/skills/electorn-live-testing/SKILL.md`](.agents/skills/electorn-live-testing/SKILL.md)
 
 ## Verifying

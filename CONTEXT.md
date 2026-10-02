@@ -571,7 +571,7 @@ banner copy.
 Off-band delivery sends a file pointer, short summary, and the user's first
 message. The child Reads the document under a one-shot Scoped pre-grant.
 Inline delivery must fit the child adapter's input limits, so it can omit part
-of the saved artifact. See the [handoff delivery constraints](docs/internals/chat-fork-handoff.md).
+of the saved artifact. See the [handoff delivery constraints](docs/internals/conversation/chat-fork-handoff.md).
 
 The former full/minimal selection and percentage-based section truncation are
 retired. `HandoffMeta.mode` remains the constant `"full"` for provenance

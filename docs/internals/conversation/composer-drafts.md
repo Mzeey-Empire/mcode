@@ -68,6 +68,6 @@ Deleting a draft releases its attachments. Consuming it for dispatch transfers
 them. Keep those operations distinct or submission can revoke resources still
 needed by the dispatched payload.
 
-See [composer overlays](../composer-overlays.md) for editor layout and the
-[narrative pipeline](../narrative-pipeline.md#renderer-ownership) for transcript
+See [composer overlays](composer-overlays.md) for editor layout and the
+[narrative pipeline](narrative-pipeline.md#renderer-ownership) for transcript
 residency, which has separate ownership from unsent composer state.

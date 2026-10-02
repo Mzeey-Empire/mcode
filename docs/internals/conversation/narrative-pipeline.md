@@ -4,7 +4,7 @@ The live status line uses the latest active root tool's description, file action
 Without an active tool, it shows a complete summary heading from the current open thought segment, or `Thinking...`.
 The status line shows the step count only when it is greater than zero.
 Completed tools and closed segments cannot keep an old activity label visible. The label stays on one line as its text changes.
-Providers supply these details through the existing canonical tool and non-final text events. See [Activity labels](provider-architecture.md#activity-labels).
+Providers supply these details through the existing canonical tool and non-final text events. See [Activity labels](../providers/provider-architecture.md#activity-labels).
 
 Hooks appear beside Copy and Fork on the final response, not beside the turn duration or as inline narrative rows.
 Hover, click, or use Tab to open the panel. Press Escape to close it.
@@ -48,10 +48,10 @@ If you are about to touch any of these files, **read this first**:
 - `apps/server/src/index.ts` (broadcast layer)
 - `apps/web/src/stores/threadStore.ts` (validated AgentEvent projection and
   client volatile state lifecycle)
-- [Conversation residency](../../apps/web/src/features/conversation/residency/conversation-residency.ts) (selected conversation
+- [Conversation residency](../../../apps/web/src/features/conversation/residency/conversation-residency.ts) (selected conversation
   residency, bounded retention, refresh, pagination, and prefetch routing)
-- [Narrative renderers](../../apps/web/src/features/conversation/narrative/)
-- [Virtual items](../../apps/web/src/features/conversation/messages/virtual-items.ts) (timeline insertion point)
+- [Narrative renderers](../../../apps/web/src/features/conversation/narrative)
+- [Virtual items](../../../apps/web/src/features/conversation/messages/virtual-items.ts) (timeline insertion point)
 
 ---
 
@@ -165,8 +165,8 @@ retains a complete operation before releasing any of its live events. Its
 identity, order, and write intent stay unchanged on retry. The SQLite writer
 acknowledges actual commits; only a contiguous acknowledged prefix can be
 discarded from retained progress. See
-[`CanonicalAcceptedProgress`](../../apps/server/src/features/agents/canonical/canonical-accepted-progress.ts)
-and the [progress frame contract](../../packages/contracts/src/models/canonical-agent-progress.ts).
+[`CanonicalAcceptedProgress`](../../../apps/server/src/features/agents/canonical/canonical-accepted-progress.ts)
+and the [progress frame contract](../../../packages/contracts/src/models/canonical-agent-progress.ts).
 
 Retention limits apply to unsaved work, not the whole tool history. Completion
 binds previously accepted narrative to the response and carries only changed
@@ -227,17 +227,17 @@ accepted suffix. The renderer projects the saved model and accepted progress
 into each resident Thread record. This split preserves the Turn layer through
 `turn.persisted`; persistence confirms durable data but does not end the timeline.
 
-[`useChatViewState`](../../apps/web/src/features/conversation/messages/chat-view/useChatViewState.ts)
+[`useChatViewState`](../../../apps/web/src/features/conversation/messages/chat-view/useChatViewState.ts)
 keeps up to five recently selected transcripts mounted.
-[`KeptAliveTranscript`](../../apps/web/src/features/conversation/messages/chat-view/ChatViewSurface.tsx)
+[`KeptAliveTranscript`](../../../apps/web/src/features/conversation/messages/chat-view/ChatViewSurface.tsx)
 hides inactive views with `visibility: hidden`, `inert`, and `aria-hidden`.
 Their viewports stay laid out because `display: none` would reduce their height
 to zero and cause the virtualizer to discard the rows. Switching back can
 therefore reveal the existing view.
 
 A mounted hidden transcript holds a display lease through
-[`ConversationResidency`](../../apps/web/src/features/conversation/residency/conversation-residency.ts).
-An open [canonical subagent detail view](../../apps/web/src/features/subagents/roster/SubagentsPanel.tsx)
+[`ConversationResidency`](../../../apps/web/src/features/conversation/residency/conversation-residency.ts).
+An open [canonical subagent detail view](../../../apps/web/src/features/subagents/roster/SubagentsPanel.tsx)
 uses the same lease mechanism. Leases are reference counted, so closing one
 view cannot release a conversation that another view still displays. Selection
 and display leases both protect resident content. A non-selected transcript can
@@ -248,7 +248,7 @@ other running threads. The deduplicated list is bounded by
 `MAX_THREAD_SUBSCRIPTIONS`. A display lease keeps a view eligible for updates
 without changing workspace selection.
 
-[`ThreadHydrator`](../../apps/web/src/features/conversation/hydration/thread-hydrator.ts)
+[`ThreadHydrator`](../../../apps/web/src/features/conversation/hydration/thread-hydrator.ts)
 restores or loads leased content without selecting it. Hydration commits require
 the current lease generation, load epoch, and invalidation generation. The final
 lease release invalidates pending work, caches the record, and removes the
@@ -504,7 +504,7 @@ sub-agent is one of the four steps, not a fifth.
 The labeling in `TurnFooter` reads correctly as "N steps, of which K were
 sub-agents." Don't try to "fix" this by subtracting Agent calls from
 `steps`. See the doc comment on
-[`NarrativeCounts.steps`](../../apps/web/src/features/conversation/narrative/types.ts)
+[`NarrativeCounts.steps`](../../../apps/web/src/features/conversation/narrative/types.ts)
 for the canonical semantics.
 
 ---
@@ -533,7 +533,7 @@ before reporting the change done:
   a fresh timeline.
 - **Browser console:** no `NotFoundError`, no React warnings.
 
-The [narrative unit suite](../../apps/web/src/features/conversation/narrative/__tests__/)
+The [narrative unit suite](../../../apps/web/src/features/conversation/narrative/__tests__)
 covers the count derivation but not the full event flow. Manual
 verification via the running app is required.
 

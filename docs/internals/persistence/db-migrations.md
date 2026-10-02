@@ -20,7 +20,7 @@ upgrade without manual steps.
 Applied migration records are historical evidence and must survive opening with
 older bundles or differently formatted SQL. Removing a record leaves its schema
 in place and makes a later startup replay DDL. The bounded
-[`migration-history-repair.ts`](../../apps/server/src/runtime/persistence/sqlite/migration-history-repair.ts)
+[`migration-history-repair.ts`](../../../apps/server/src/runtime/persistence/sqlite/migration-history-repair.ts)
 repairs the known lost 0061–0066 records only after certifying their complete
 reviewed DDL. Data migrations still run through Drizzle; schema presence cannot
 prove that a backfill ran.

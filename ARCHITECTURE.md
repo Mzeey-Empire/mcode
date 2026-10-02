@@ -138,7 +138,7 @@ Execution state and saving state are separate. A provider can finish while progr
 
 Recovery combines saved canonical state with the retained accepted suffix. The suffix can survive execution worker release or loss because the progress owner is separate. It cannot survive a server process crash. Recovery reports detected loss instead of inventing missing progress. Saved acknowledgements and recovery rebuild state without replaying provider commands or first-delivery renderer effects.
 
-The [accepted progress and saving constraints](docs/internals/narrative-pipeline.md#accepted-progress-and-saving) explain the ownership rules that span these stages.
+The [accepted progress and saving constraints](docs/internals/conversation/narrative-pipeline.md#accepted-progress-and-saving) explain the ownership rules that span these stages.
 
 ## Persistence and write outcomes
 
@@ -154,7 +154,7 @@ Migrations use the SQL files and journal in [`apps/server/drizzle`](apps/server/
 
 Global user settings live in `settings.json` under the data directory through [`SettingsService`](apps/server/src/features/settings/settings-service.ts).
 
-The [migration guide](docs/internals/db-migrations.md) defines the maintained schema-change workflow.
+The [migration guide](docs/internals/persistence/db-migrations.md) defines the maintained schema-change workflow.
 
 ## Provider boundaries
 
@@ -184,7 +184,7 @@ Providers implemented in `packages/providers` receive server authority through [
 
 Resume, stop, eviction, and recovery remain provider-specific. A healthy Codex process can remain warm after Stop. Cursor and Devin reject a failed persisted-session recovery rather than silently replacing the session. Shared interfaces do not establish identical recovery guarantees.
 
-The [provider architecture guide](docs/internals/provider-architecture.md) explains adapter rules and transport-specific constraints.
+The [provider architecture guide](docs/internals/providers/provider-architecture.md) explains adapter rules and transport-specific constraints.
 
 ## Renderer and native responsibilities
 
@@ -198,7 +198,7 @@ The application mounts browser and terminal hosts outside individual panel lifet
 
 The [desktop preview feature](apps/desktop/src/features/preview/index.ts) owns native adoption, navigation, permissions, capture, and automation checks. Generation-bound identities prevent stale page commands from controlling a replacement page. Guest security policy disables Node integration and uses context isolation, sandboxing, and controlled partitions.
 
-The [Browser security boundaries](docs/internals/browser-v2-rollout.md#security-boundaries) explain shared session state and the main-process checks that govern guest permissions.
+The [Browser security boundaries](docs/internals/runtime/browser-v2-rollout.md#security-boundaries) explain shared session state and the main-process checks that govern guest permissions.
 
 Electron main is a substantial native host. Its [preload bridge](apps/desktop/src/main/preload.ts) exposes native actions and push delivery. Desktop features own window lifecycle, application updates, clipboard and attachments, external application launch, and server recovery. Agent orchestration and durable conversation state remain in the server.
 
@@ -226,19 +226,19 @@ Threads can run directly in a workspace checkout, provision a new worktree, or a
 
 The [Project environment guide](docs/internals/projects/environment.md) explains Setup admission, shared-command approval, queued turn ownership, and Action shutdown barriers. The [composer draft guide](docs/internals/conversation/composer-drafts.md) explains how renderer input and attachments move from drafts to thread submissions.
 
-Worktree cleanup must account for every linked active thread. It must also distinguish managed worktrees from external checkouts and protected branches. The [cleanup guide](docs/internals/thread-cleanup.md) records those constraints.
+Worktree cleanup must account for every linked active thread. It must also distinguish managed worktrees from external checkouts and protected branches. The [cleanup guide](docs/internals/projects/thread-cleanup.md) records those constraints.
 
 Handoff orchestration separates provider-context acquisition, handoff artifact creation, and checkout changes. The [handoff pipeline](apps/server/src/features/handoff/orchestration/handoff-pipeline.ts) selects a supported generation strategy rather than requiring every provider to fork sessions identically. Provider-native session identity is distinct from the durable source thread and its saved history.
 
-Pull request review preparation resolves repository identity, a canonical review task, and a server-owned worktree candidate. Confirmation rechecks the checkout and observed pull request head. Creating a local review task performs no remote write. The [review worktree guide](docs/internals/pull-request-review-worktrees.md) explains its transaction and cleanup invariants.
+Pull request review preparation resolves repository identity, a canonical review task, and a server-owned worktree candidate. Confirmation rechecks the checkout and observed pull request head. Creating a local review task performs no remote write. The [review worktree guide](docs/internals/review/pull-request-review-worktrees.md) explains its transaction and cleanup invariants.
 
-Remote pull request mutations use a separate boundary. The server rereads permissions and pull request state before writing, checks the confirmed head, and preserves unknown outcomes across retries. The [mutation guide](docs/internals/pull-request-mutations.md) defines those guarantees.
+Remote pull request mutations use a separate boundary. The server rereads permissions and pull request state before writing, checks the confirmed head, and preserves unknown outcomes across retries. The [mutation guide](docs/internals/review/pull-request-mutations.md) defines those guarantees.
 
 ## Development and delivery context
 
 Bun workspaces build and test the shared packages and applications. Vitest configuration belongs to each workspace. Focused tests verify behavior and contracts, while architecture lint checks dependency boundaries.
 
-The [runtime runbook](docs/agents/runtime.md) defines worktree-local startup, authentication, fixture data, and runtime artifacts. The [agent workflow](docs/internals/agent-workflow.md) defines focused implementation checks. The [verification skill](.agents/skills/verify-mcode/SKILL.md) covers proof through the running application.
+The [runtime runbook](docs/agents/runtime.md) defines worktree-local startup, authentication, fixture data, and runtime artifacts. The [agent workflow](docs/internals/runtime/agent-workflow.md) defines focused implementation checks. The [verification skill](.agents/skills/verify-mcode/SKILL.md) covers proof through the running application.
 
 [Pull request CI](.github/workflows/ci.yml) runs repository checks and build validation. Release Please manages stable version and release changes. It does not publish a desktop release for every merge to the main branch.
 

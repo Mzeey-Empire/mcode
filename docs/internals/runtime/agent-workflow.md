@@ -23,7 +23,7 @@ surface.
 ## Implement
 
 1. Read the complete linked context in
-   [Implementation context](../agents/issue-tracker.md#implementation-context).
+   [Implementation context](../../agents/issue-tracker.md#implementation-context).
 2. Implement one atomic change.
 3. Add or update the nearest focused regression test.
 4. Run the focused checks for the changed behavior.
@@ -31,7 +31,7 @@ surface.
 
 Use `$electorn-live-testing` only when the user requests live proof or the
 change crosses an Electron-only boundary. Follow
-[Testing UI Changes](ui-components.md#testing-ui-changes) for UI work.
+[Testing UI Changes](../renderer/ui-components.md#testing-ui-changes) for UI work.
 
 ## Focused checks
 

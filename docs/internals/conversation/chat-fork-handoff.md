@@ -8,9 +8,9 @@ Clicking the fork icon on a message in a parent thread creates a child thread. T
 
 The document is produced either by the parent's provider (when the provider supports a side-channel query) or by a deterministic builder (when it does not). Either way the artifact is the same shape: a Markdown file with YAML frontmatter plus a JSON sidecar.
 
-The [pipeline](../../apps/server/src/features/handoff/orchestration/handoff-pipeline.ts)
+The [pipeline](../../../apps/server/src/features/handoff/orchestration/handoff-pipeline.ts)
 selects the generation path. The
-[coordinator](../../apps/server/src/features/handoff/orchestration/handoff-coordinator.ts)
+[coordinator](../../../apps/server/src/features/handoff/orchestration/handoff-coordinator.ts)
 persists the artifact and delivers it to the child.
 
 ## The B/D ladder
@@ -37,9 +37,9 @@ Generation fallback does not guarantee that later storage or delivery succeeds.
 
 ## Provider capabilities
 
-The [provider interface](../../packages/contracts/src/providers/interfaces.ts)
+The [provider interface](../../../packages/contracts/src/providers/interfaces.ts)
 declares the runtime fork flag and forker. The
-[`SessionForker` contract](../../packages/contracts/src/providers/session-forker.ts)
+[`SessionForker` contract](../../../packages/contracts/src/providers/session-forker.ts)
 defines the request and artifact. Concrete side-channel methods remain inside
 provider implementations; the pipeline dispatches through the forker after
 checking the flag and parent session ID.
@@ -72,7 +72,7 @@ are retired. `HandoffMeta.mode` and YAML frontmatter retain the constant
 
 The coordinator normally writes the document to an OS temp file. The child's
 first-turn prompt contains its path, a short fallback summary, and the user's
-message. A [scoped pre-grant](../../apps/server/src/features/agents/permissions/scoped-pre-grant.ts)
+message. A [scoped pre-grant](../../../apps/server/src/features/agents/permissions/scoped-pre-grant.ts)
 allows one `Read` of that exact file during the child's first turn. The grant
 is consumed once and cleared when the turn ends.
 
