@@ -1,4 +1,3 @@
-import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
@@ -12,9 +11,9 @@ vi.mock("@mcode/shared", async (importOriginal) => {
   };
 });
 
-import { ClaudeProvider } from "../claude-provider.js";
-import { stubEnvService } from "../../../../../runtime/environment/__tests__/stub-env-service.js";
-import { stubJobObject } from "../../../../../runtime/process/containment/__tests__/stub-job-object.js";
+import { ClaudeProvider } from "./helpers/provider-fixture.js";
+import { stubEnvService } from "./helpers/provider-fixture.js";
+import { stubJobObject } from "./helpers/provider-fixture.js";
 import { mockProviderHost, queryMethodStubs } from "./helpers/mock-sdk-query.js";
 import { AgentEventType, type ProviderRuntimeEvent } from "@mcode/contracts";
 
@@ -46,13 +45,16 @@ function mockSdkStream(results: Array<Record<string, unknown>>) {
 
 describe("ClaudeProvider result is_error handling (#293)", () => {
   let provider: ClaudeProvider;
+  let expectedShutdownFailure = false;
   beforeEach(() => {
     vi.clearAllMocks();
+    expectedShutdownFailure = false;
     provider = new ClaudeProvider(stubEnvService(), stubJobObject());
   });
 
-  afterEach(() => {
-    provider.shutdown();
+  afterEach(async () => {
+    if (expectedShutdownFailure) await expect(provider.shutdown()).rejects.toThrow("shutdown failed");
+    else await provider.shutdown();
   });
 
   it("emits Error event and NO TurnComplete when result.is_error is true", async () => {
@@ -293,6 +295,7 @@ describe("ClaudeProvider result is_error handling (#293)", () => {
   });
 
   it("reports canonical sink failure for the exact execution without direct event delivery", async () => {
+    expectedShutdownFailure = true;
     const failure = vi.fn(async () => undefined);
     const directEvents = vi.fn();
     provider = new ClaudeProvider(

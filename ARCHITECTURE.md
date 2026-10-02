@@ -162,10 +162,10 @@ The shared [`IAgentProvider` interface](packages/contracts/src/providers/interfa
 
 The registered runtime implementations are split between two locations:
 
-- Codex, Cursor, and Devin implementations live privately in [`packages/providers`](packages/providers/src/private) and enter the server through public factories.
-- Claude, Copilot, and OpenCode implementations remain in [`server-local adapters`](apps/server/src/features/providers/adapters).
+- Claude, Codex, Cursor, and Devin implementations live privately in [`packages/providers`](packages/providers/src/private) and enter the server through public factories.
+- Copilot and OpenCode implementations remain in [`server-local adapters`](apps/server/src/features/providers/adapters).
 
-Public factory names do not imply that every runtime implementation has moved into the provider package. Claude, Copilot, and OpenCode factories currently prepare descriptors rather than usable runtime adapters. Gemini is a coming-soon catalog entry.
+Public factory names do not imply that every runtime implementation has moved into the provider package. Copilot and OpenCode factories currently prepare descriptors rather than usable runtime adapters. Gemini is a coming-soon catalog entry.
 
 The six registered providers use different transports.
 

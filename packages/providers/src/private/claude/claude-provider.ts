@@ -4,9 +4,13 @@
  * Migrated from apps/desktop/src/main/sidecar/client.ts.
  */
 
-import { injectable, inject } from "tsyringe";
 import * as NodeEvents from "node:events";
 import * as NodeFSPromises from "node:fs/promises";
+import { z } from "zod";
+import * as NodePath from "node:path";
+import which from "which";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ClaudeOwnedProcess } from "./claude-process.js";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import type {
   Query,
@@ -26,7 +30,6 @@ import type {
   IGoalCapable,
   ISessionEvictable,
   TurnRequest,
-  ProviderId,
   ReasoningLevel,
   OrchestrationMode,
   ContextWindowMode,
@@ -50,11 +53,8 @@ import { readAnthropicOauthToken } from "@mcode/shared/usage";
 import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
 import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
 import { CompositeUsageSource } from "./usage/composite-usage-source.js";
-import { EnvService } from "../../../../runtime/environment/env-service.js";
-import { JobObject } from "../../../../runtime/process/containment/job-object.js";
-import { ScopedPreGrantService } from "../../../agents/permissions/scoped-pre-grant.js";
-import { SessionRuntime } from "../../runtime/session-runtime.js";
-import { InternalThreadControlMcpRuntime } from "../../../thread-control/index.js";
+import { SessionRuntime } from "../session-runtime.js";
+import type { ClaudeProviderPorts, ProviderFactoryConfiguration } from "../../factory-types.js";
 import {
   buildMcodeInstructionPlan,
   renderMcodeInstructions,
@@ -82,18 +82,15 @@ import type {
   ProtocolAdapter,
   SpawnArgs,
   SpawnResult,
-} from "../../runtime/session-runtime.js";
-import { listDirectChildren } from "../../../../runtime/process/containment/process-kill.js";
-import { CleanForker } from "../../../handoff/index.js";
+} from "../session-runtime.js";
 import {
-  browserAutomationPermissionCapability,
-  BrowserAutomationSessionLease,
-  type BrowserAutomationSessionLeaseGrant,
-  type BrowserAutomationSessionLeaseScope,
-  type BrowserAutomationSessionLeaseStage,
-} from "../../../browser-automation/index.js";
+  providerBrowserPermissionCapability,
+  type ProviderBrowserLeaseGrant as BrowserAutomationSessionLeaseGrant,
+  type ProviderBrowserLeaseRequest as BrowserAutomationSessionLeaseScope,
+  type ProviderBrowserLeaseHandle as BrowserAutomationSessionLeaseStage,
+} from "../../host-ports.js";
 import type { SessionForker } from "@mcode/contracts";
-import type { ProviderHostPorts } from "@mcode/providers";
+import type { ProviderHostPorts } from "../../host-ports.js";
 import type { ProviderIdentity } from "@mcode/contracts";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
 import {
@@ -104,6 +101,7 @@ import {
   ClaudeEventMapper,
   type ClaudeEventMapperCallbacks,
   type ClaudeUsageMetrics,
+  type ClaudeEventEvidence,
 } from "./claude-event-mapper.js";
 import {
   ClaudeCanonicalEventPublisher,
@@ -115,27 +113,7 @@ import {
  * Kept in one place so all paths stay in sync when upgrading the default.
  */
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5";
-
-/** Shallow snapshot of `process.env` for temporary Claude SDK subprocess alignment. */
-function snapshotProcessEnv(): Record<string, string | undefined> {
-  return { ...process.env };
-}
-
-/** Restores `process.env` after {@link snapshotProcessEnv}. */
-function restoreProcessEnv(backup: Record<string, string | undefined>): void {
-  for (const k of Object.keys(process.env)) {
-    if (!(k in backup)) {
-      delete process.env[k];
-    }
-  }
-  for (const [k, v] of Object.entries(backup)) {
-    if (v === undefined) {
-      delete process.env[k];
-    } else {
-      process.env[k] = v;
-    }
-  }
-}
+const claudeMcpServerSchema = z.instanceof(McpServer);
 
 /** Max queued messages before push() warns and drops. */
 const MAX_QUEUE_DEPTH = 20;
@@ -151,8 +129,7 @@ type ClaudeNativeGoalSupport = "unknown" | "supported" | "unsupported";
 /**
  * Per-session state owned by the {@link SessionRuntime}. Holds the live SDK
  * `query`, its prompt-queue handles, and the per-turn bookkeeping the stream
- * loop and eviction guard read. The runtime owns eviction timing and JobObject/
- * kill; `lastUsedAt` is retained here because the stream loop and
+ * loop and eviction guard read. The runtime owns the pool and idle eviction; `lastUsedAt` is retained here because the stream loop and
  * `resolvePermission` stamp it so SDK activity and user attention count.
  */
 interface ClaudeSessionState {
@@ -161,6 +138,9 @@ interface ClaudeSessionState {
   /** Working directory the SDK subprocess was spawned with. */
   cwd: string;
   query: Query;
+  ownedProcess?: ClaudeOwnedProcess;
+  spawnRouting: ClaudeCanonicalEventRouting;
+  executionRouting: ClaudeCanonicalEventRouting;
   pushMessage: (msg: SDKUserMessage, turnExecutionId?: string) => void;
   closeQueue: () => void;
   model: string;
@@ -469,6 +449,7 @@ interface ClaudeSpawnBrowserAccess {
 
 interface ClaudeStreamLoopState {
   currentTurnExecutionId: string;
+  currentRouting: ClaudeCanonicalEventRouting;
   pendingPromptExecutionIds: string[];
   sessionInitialized: boolean;
   awaitingResume: boolean;
@@ -478,7 +459,6 @@ interface ClaudeStreamLoopState {
 }
 
 /** Claude Agent SDK adapter implementing IAgentProvider with prompt queue pattern. */
-@injectable()
 export class ClaudeProvider
   extends NodeEvents.EventEmitter
   implements
@@ -487,16 +467,20 @@ export class ClaudeProvider
     ISessionEvictable,
     ProtocolAdapter<ClaudeSessionState>
 {
-  readonly id: ProviderId = "claude";
-  readonly descriptor = Object.freeze({ id: "claude" as const, capabilities: [] });
+  readonly id = "claude" as const;
+  readonly descriptor = Object.freeze({ id: "claude" as const, capabilities: [
+    ...(["build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control"] as const).map((name) => ({ name, support: "supported" as const })),
+    { name: "provider-continuation" as const, support: "unsupported" as const },
+    { name: "child-cancellation" as const, support: "unsupported" as const },
+  ] });
   /** Claude supports one-shot text completion via sdkQuery with maxTurns: 1. */
   readonly supportsCompletion = true;
   readonly sessionForkOnResume = "clean" as const;
   readonly maxInputCharactersPerTurn = 180_000;
   /** Path B (+ B-prime) forker; calls this provider's runSideChannelQuery. */
-  readonly forker: SessionForker = new CleanForker(this);
+  readonly forker: SessionForker;
 
-  /** Owns the session pool, idle eviction (with busy guard), and JobObject/kill. */
+  /** Owns the session pool and idle eviction with the adapter busy guard. */
   private readonly runtime: SessionRuntime<ClaudeSessionState>;
   /** Per-turn payload staged for `spawn` to run a fresh session's first turn. */
   private pendingSpawnTurns = new Map<string, PendingSpawnTurn>();
@@ -506,12 +490,12 @@ export class ClaudeProvider
   /** Canonical routing retained while the SDK keeps a pooled stream alive. */
   private canonicalRoutings:
     Map<string, ClaudeCanonicalEventRouting> | undefined;
-  /** Serializes canonical event submission when the adapter runs in the server composition. */
-  private readonly canonicalEventPublisher:
-    ClaudeCanonicalEventPublisher | undefined;
+  /** Serializes every live event through the mandatory canonical sink. */
+  private readonly canonicalEventPublisher: ClaudeCanonicalEventPublisher;
   private readonly streamTasks = new Set<Promise<void>>();
+  private shutdownTask: Promise<void> | undefined;
   private canonicalTurnDeliveryFailureHandler:
-    | ((routing: ClaudeCanonicalEventRouting, error: Error) => Promise<void>)
+    | ((routing: ClaudeCanonicalEventRouting, error: Error) => void | Promise<void>)
     | undefined;
   private readonly reportedCanonicalDeliveryFailures = new WeakSet<ClaudeCanonicalEventRouting>();
   /**
@@ -582,56 +566,36 @@ export class ClaudeProvider
   );
 
   constructor(
-    @inject(EnvService) private readonly envService: EnvService,
-    @inject("JobObject") private readonly jobObject: JobObject,
-    // Optional with a default so existing `new ClaudeProvider(env, job)` test
-    // call sites keep working; DI always supplies the shared singleton so the
-    // pipeline-issued handoff grants are visible here.
-    @inject(ScopedPreGrantService)
-    private readonly scopedPreGrant: ScopedPreGrantService = new ScopedPreGrantService(),
-    @inject(BrowserAutomationSessionLease)
-    private readonly browserAutomationSessionLease: BrowserAutomationSessionLease = new BrowserAutomationSessionLease(),
-    @inject(InternalThreadControlMcpRuntime)
-    private readonly threadControlMcp: InternalThreadControlMcpRuntime = undefined as never,
-    @inject("ProviderHostPorts")
-    private readonly host?: Pick<ProviderHostPorts, "runtime" | "events">,
+    private readonly host: ProviderHostPorts,
+    private readonly configuration: ProviderFactoryConfiguration,
+    ports: ClaudeProviderPorts,
   ) {
     super();
-    this.canonicalEventPublisher = this.host
-      ? new ClaudeCanonicalEventPublisher(this.host.events)
-      : undefined;
+    this.forker = ports.createForker({ id: "claude", runSideChannelQuery: this.runSideChannelQuery.bind(this) });
+    if (typeof this.forker?.fork !== "function") throw new TypeError("Claude handoff composition must return a SessionForker");
+    this.canonicalEventPublisher = new ClaudeCanonicalEventPublisher(this.host.events, (routing, error) => {
+      void this.reportCanonicalDeliveryFailure(routing, error).catch((failure: unknown) => {
+        logger.error("Claude canonical failure reporting failed", { executionId: routing.executionId, error: String(failure) });
+      });
+    });
     this.runtime = new SessionRuntime<ClaudeSessionState>(this, {
-      jobObject: this.jobObject,
-      envService: this.envService,
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
+      processes: host.processes,
+      envService: { getEnv: () => ({ ...host.environment.snapshot() }) },
+      idleTtlMs: configuration.idleSessionTtlMs,
     });
   }
 
   /** Reports canonical sink failure to the owner of the exact active turn. */
   setCanonicalTurnDeliveryFailureHandler(
-    handler: (routing: ClaudeCanonicalEventRouting, error: Error) => Promise<void>,
+    handler: (routing: ClaudeCanonicalEventRouting, error: Error) => void | Promise<void>,
   ): void {
     this.canonicalTurnDeliveryFailureHandler = handler;
   }
 
-  /**
-   * Merges {@link EnvService.getEnv} into `process.env` for the Claude SDK spawn window
-   * only, then restores the previous environment.
-   */
-  private withSdkSpawnEnv<T>(fn: () => T): T {
-    const backup = snapshotProcessEnv();
-    try {
-      const merged = this.envService.getEnv();
-      for (const [k, v] of Object.entries(merged)) {
-        process.env[k] = v;
-      }
-      return fn();
-    } finally {
-      restoreProcessEnv(backup);
-    }
-  }
-
   /** Start or continue a session by sending a message via the SDK. */
   async sendTurn(req: TurnRequest<"claude">): Promise<void> {
+    if (this.shutdownTask) throw new Error("Claude provider is shutting down");
     const routing = this.rememberCanonicalRouting(req);
     // Seed the resume id so doSendMessage's sdkSessionIds lookup resolves it.
     // `resumeFrom` defined ⇒ resume that SDK session; undefined ⇒ fresh.
@@ -644,20 +608,20 @@ export class ClaudeProvider
       mcodeSessionId: req.sessionId,
       threadId: req.threadId,
       workspaceId: req.workspaceId,
-      permissionCapability: browserAutomationPermissionCapability(
+      permissionCapability: providerBrowserPermissionCapability(
         req.permissionMode,
         req.interactionMode,
       ),
     };
     const previousBrowserAccess = this.pendingBrowserAccess.get(req.sessionId);
     if (previousBrowserAccess?.stage) {
-      this.browserAutomationSessionLease.release(
+      this.host.browser.release(
         previousBrowserAccess.stage.leaseId,
       );
     }
     this.pendingBrowserAccess.set(req.sessionId, {
       scope: browserScope,
-      stage: this.browserAutomationSessionLease.stage(browserScope),
+      stage: this.host.browser.stage(browserScope),
     });
     const params = {
       sessionId: req.sessionId,
@@ -684,21 +648,15 @@ export class ClaudeProvider
       });
       throw e;
     } finally {
-      const pendingBrowserAccess = this.pendingBrowserAccess.get(req.sessionId);
-      if (pendingBrowserAccess) {
-        if (pendingBrowserAccess.grant) {
-          this.browserAutomationSessionLease.release(
-            pendingBrowserAccess.grant.leaseId,
-          );
-        }
-        if (pendingBrowserAccess.stage) {
-          this.browserAutomationSessionLease.release(
-            pendingBrowserAccess.stage.leaseId,
-          );
-        }
-      }
-      this.pendingBrowserAccess.delete(req.sessionId);
+      this.releasePendingBrowserAccess(req.sessionId);
     }
+  }
+
+  private releasePendingBrowserAccess(sessionId: string): void {
+    const pending = this.pendingBrowserAccess.get(sessionId);
+    if (pending?.grant) this.host.browser.release(pending.grant.leaseId);
+    if (pending?.stage) this.host.browser.release(pending.stage.leaseId);
+    this.pendingBrowserAccess.delete(sessionId);
   }
 
   /**
@@ -712,24 +670,17 @@ export class ClaudeProvider
     cwd: string,
     options: CompletionOptions = {},
   ): Promise<string> {
-    const backup = snapshotProcessEnv();
+    const ownedProcess = this.createOwnedClaudeProcess("completion");
     try {
-      const merged = this.envService.getEnv();
-      for (const [k, v] of Object.entries(merged)) {
-        process.env[k] = v;
-      }
-
       const queue = createPromptQueue();
       const ephemeralId = `complete-${crypto.randomUUID()}`;
 
-      // Note: the Claude Agent SDK spawns a 'claude' CLI subprocess internally.
-      // That subprocess PID is not exposed by the SDK, so it cannot be added to
-      // the server's Job Object. On server crash, this subprocess may briefly
-      // outlive the server until the OS job-object kill propagates via inheritance.
-      // Track: expose subprocess PID from claude-agent-sdk for explicit assignment.
       const q = sdkQuery({
         prompt: queue.iterable,
         options: {
+          env: { ...this.host.environment.snapshot() },
+          pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
+          spawnClaudeCodeProcess: ownedProcess.spawn,
           cwd,
           model,
           maxTurns: 1,
@@ -752,13 +703,13 @@ export class ClaudeProvider
 
       return await collectCompletionText(q);
     } finally {
-      restoreProcessEnv(backup);
+      await ownedProcess.retire();
     }
   }
 
   /**
    * Run a one-shot query against a forked copy of the parent's session.
-   * Uses `resume: parentSdkSessionId` which creates a clean fork — the
+   * Uses `resume` with `forkSession: true` to create a clean fork. The
    * original session is not mutated. Only the text output is returned;
    * the forked session ID is discarded.
    *
@@ -802,8 +753,8 @@ export class ClaudeProvider
     }
 
     const model = parentSession?.model ?? DEFAULT_CLAUDE_MODEL;
+    const ownedProcess = this.createOwnedClaudeProcess("clean-fork");
 
-    const backup = snapshotProcessEnv();
     // Cap resume attempts so a hung subprocess does not consume the full
     // pipeline timeout before sessionless path B-prime can run.
     const resumeProbe = this.createSideChannelResumeProbe(
@@ -812,7 +763,6 @@ export class ClaudeProvider
     );
 
     try {
-      this.applySdkEnvironment();
 
       const queue = createPromptQueue();
       const ephemeralId = `side-channel-${crypto.randomUUID()}`;
@@ -824,6 +774,9 @@ export class ClaudeProvider
       const q = sdkQuery({
         prompt: queue.iterable,
         options: {
+          env: { ...this.host.environment.snapshot() },
+          pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
+          spawnClaudeCodeProcess: ownedProcess.spawn,
           cwd,
           model,
           // 2 turns so a thinking-block or compliance turn from the model
@@ -832,6 +785,7 @@ export class ClaudeProvider
           // emit a no-op turn during reasoning.
           maxTurns: 2,
           resume: parentSdkSessionId,
+          forkSession: true,
           tools: [],
           settingSources: [],
           permissionMode: "default" as const,
@@ -860,7 +814,7 @@ export class ClaudeProvider
       );
     } finally {
       resumeProbe.dispose();
-      restoreProcessEnv(backup);
+      await ownedProcess.retire();
     }
   }
 
@@ -884,9 +838,8 @@ export class ClaudeProvider
     // Use the same safe default as the main path's fallback.
     const model = DEFAULT_CLAUDE_MODEL;
 
-    const backup = snapshotProcessEnv();
+    const ownedProcess = this.createOwnedClaudeProcess("sessionless-fork");
     try {
-      this.applySdkEnvironment();
 
       const queue = createPromptQueue();
       const ephemeralId = `side-channel-sessionless-${crypto.randomUUID()}`;
@@ -896,6 +849,9 @@ export class ClaudeProvider
       const q = sdkQuery({
         prompt: queue.iterable,
         options: {
+          env: { ...this.host.environment.snapshot() },
+          pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
+          spawnClaudeCodeProcess: ownedProcess.spawn,
           cwd,
           model,
           // 2 turns, same rationale as the main side-channel method above.
@@ -920,13 +876,7 @@ export class ClaudeProvider
         this.sideChannelOutputOptions(parentThreadId, true),
       );
     } finally {
-      restoreProcessEnv(backup);
-    }
-  }
-
-  private applySdkEnvironment(): void {
-    for (const [key, value] of Object.entries(this.envService.getEnv())) {
-      process.env[key] = value;
+      await ownedProcess.retire();
     }
   }
 
@@ -1116,7 +1066,7 @@ export class ClaudeProvider
   ): ClaudeToolPermissionResult | undefined {
     if (toolName !== "Read" || typeof input.path !== "string") return undefined;
     if (
-      !this.scopedPreGrant.tryConsume({
+      !this.host.grants.consume({
         threadId,
         toolName: "Read",
         path: input.path,
@@ -1252,17 +1202,17 @@ export class ClaudeProvider
     }
     const previousLeaseId = existing.browserLease.leaseId;
     const refreshed =
-      this.browserAutomationSessionLease.refresh(previousLeaseId);
+      this.host.browser.refresh(previousLeaseId);
     existing.browserLease = undefined;
     if (refreshed.ok) {
       if (pendingBrowserAccess.stage)
-        this.browserAutomationSessionLease.release(
+        this.host.browser.release(
           pendingBrowserAccess.stage.leaseId,
         );
       pendingBrowserAccess.grant = refreshed.grant;
       pendingBrowserAccess.stage = undefined;
     } else {
-      this.browserAutomationSessionLease.release(previousLeaseId);
+      this.host.browser.release(previousLeaseId);
     }
     return { scope: pendingBrowserAccess.scope, leaseExpired };
   }
@@ -1329,7 +1279,7 @@ export class ClaudeProvider
     existing: ClaudeSessionState,
     browser: ClaudeBrowserReuseState,
   ): boolean {
-    if (!this.browserAutomationSessionLease.isConfigured() || !browser.scope)
+    if (!this.host.browser.isConfigured() || !browser.scope)
       return true;
     return (
       existing.workspaceId === browser.scope.workspaceId &&
@@ -1359,7 +1309,7 @@ export class ClaudeProvider
   private releasePendingBrowserStage(sessionId: string): void {
     const pendingBrowserAccess = this.pendingBrowserAccess.get(sessionId);
     if (!pendingBrowserAccess?.stage) return;
-    this.browserAutomationSessionLease.release(
+    this.host.browser.release(
       pendingBrowserAccess.stage.leaseId,
     );
     this.pendingBrowserAccess.delete(sessionId);
@@ -1489,13 +1439,12 @@ export class ClaudeProvider
     throw error;
   }
 
-  private createClaudeBaseOptions(
+  private async createClaudeBaseOptions(
     context: ClaudeTurnContext,
     permissionMode: "bypassPermissions" | "default",
-  ): Record<string, unknown> {
-    const internalMcpServer = this.threadControlMcp?.createClaudeServer(
-      context.params.sessionId,
-    );
+  ): Promise<Record<string, unknown>> {
+    const bootstrap = await this.host.threadControl.bootstrap({ providerId: this.id, sessionId: context.params.sessionId, threadId: context.threadId, protocol: "claude" });
+    const internalMcpServer = bootstrap == null ? null : claudeMcpServerSchema.parse(bootstrap);
     const autoCompactWindow = resolveAutoCompactWindow(
       context.params.contextWindowMode,
       context.model,
@@ -1550,7 +1499,9 @@ export class ClaudeProvider
   private createPostCompactHook(context: ClaudeTurnContext) {
     return async (input: unknown) => {
       const { compact_summary } = input as PostCompactHookInput;
-      this.publishTurnEvent(context.routing, context.params.sessionId, {
+      const current = this.runtime.get(context.params.sessionId);
+      if (!current || current.spawnRouting !== context.routing) return {};
+      this.publishTurnEvent(current.executionRouting, context.params.sessionId, {
         type: AgentEventType.CompactSummary,
         threadId: context.threadId,
         summary: compact_summary,
@@ -1761,10 +1712,16 @@ export class ClaudeProvider
       return await this.doSendMessage({ ...params, resume: false }, routing);
 
     const resumeId = this.sdkSessionIds.get(sessionId) ?? uuid;
-    const baseOptions = this.createClaudeBaseOptions(
+    const baseOptions = await this.createClaudeBaseOptions(
       context,
       sdkPermissionMode,
     );
+    if (this.pendingStops.delete(sessionId)) {
+      await this.host.threadControl.close(sessionId);
+      this.publishTurnEvent(routing, sessionId, { type: AgentEventType.Ended, threadId: tid, turnExecutionId: routing.executionId });
+      await this.waitForCanonicalExecution(routing);
+      return;
+    }
     await this.spawnClaudeTurn(context, baseOptions, resumeId);
   }
 
@@ -1783,10 +1740,10 @@ export class ClaudeProvider
     const grant =
       pending?.grant ??
       (pending?.stage
-        ? this.browserAutomationSessionLease.issue(pending.stage)
+        ? this.host.browser.issue(pending.stage)
         : null);
     if (pending?.grant && pending.stage)
-      this.browserAutomationSessionLease.release(pending.stage.leaseId);
+      this.host.browser.release(pending.stage.leaseId);
     return { pending, scope: pending?.scope, grant };
   }
 
@@ -1835,22 +1792,25 @@ export class ClaudeProvider
     ) as ClaudeSdkQueryOptions;
   }
 
-  private async captureClaudeChildPidsBeforeSpawn(): Promise<
-    Set<number> | undefined
-  > {
-    if (!this.jobObject.isWindowsJob) return undefined;
-    try {
-      return new Set(
-        (await listDirectChildren(process.pid, this.requireHostRuntime().platform)).map((child) => child.pid),
-      );
-    } catch {
-      return undefined;
-    }
+  private requireHostRuntime(): Pick<ProviderHostPorts, "runtime">["runtime"] {
+    return this.host.runtime;
   }
 
-  private requireHostRuntime(): Pick<ProviderHostPorts, "runtime">["runtime"] {
-    if (!this.host) throw new Error("Claude Provider host runtime is required");
-    return this.host.runtime;
+  private createOwnedClaudeProcess(description: string): ClaudeOwnedProcess {
+    let tail = "";
+    return new ClaudeOwnedProcess(this.host.processes, `Claude ${description}`, (chunk) => {
+      tail = (tail + chunk).slice(-STDERR_CAPTURE_LIMIT);
+      this.recentStderr.set(description, tail);
+    });
+  }
+
+  private resolveClaudeExecutable(): string | undefined {
+    // The SDK ships its own CLI for the default command. Custom commands must resolve lazily.
+    if (this.configuration.cliPath === "claude") return undefined;
+    if (NodePath.isAbsolute(this.configuration.cliPath)) return this.configuration.cliPath;
+    const executable = which.sync(this.configuration.cliPath, { nothrow: true });
+    if (!executable) throw new Error("Configured Claude executable is unavailable");
+    return executable;
   }
 
   private startClaudeSdkQuery(
@@ -1860,9 +1820,7 @@ export class ClaudeProvider
     browser: ClaudeSpawnBrowserAccess,
   ): Query {
     try {
-      return this.withSdkSpawnEnv(() =>
-        sdkQuery({ prompt: queue.iterable, options }),
-      );
+      return sdkQuery({ prompt: queue.iterable, options });
     } catch (error) {
       this.releaseFailedClaudeBrowserGrant(sessionId, browser);
       throw error;
@@ -1874,9 +1832,9 @@ export class ClaudeProvider
     browser: ClaudeSpawnBrowserAccess,
   ): void {
     if (browser.grant)
-      this.browserAutomationSessionLease.release(browser.grant.leaseId);
+      this.host.browser.release(browser.grant.leaseId);
     if (browser.pending?.stage)
-      this.browserAutomationSessionLease.release(browser.pending.stage.leaseId);
+      this.host.browser.release(browser.pending.stage.leaseId);
     this.pendingBrowserAccess.delete(sessionId);
   }
 
@@ -1885,23 +1843,9 @@ export class ClaudeProvider
     browser: ClaudeSpawnBrowserAccess,
   ): void {
     if (browser.pending?.grant && browser.pending.stage) {
-      this.browserAutomationSessionLease.release(browser.pending.stage.leaseId);
+      this.host.browser.release(browser.pending.stage.leaseId);
     }
     this.pendingBrowserAccess.delete(sessionId);
-  }
-
-  private async captureClaudeChildPidsAfterSpawn(
-    beforePids: Set<number> | undefined,
-  ): Promise<number[]> {
-    if (!beforePids) return [];
-    try {
-      const children = await listDirectChildren(process.pid, this.requireHostRuntime().platform);
-      return children
-        .filter((child) => !beforePids.has(child.pid))
-        .map((child) => child.pid);
-    } catch {
-      return [];
-    }
   }
 
   private createClaudeSessionState(
@@ -1911,10 +1855,14 @@ export class ClaudeProvider
     query: Query,
     browser: ClaudeSpawnBrowserAccess,
   ): ClaudeSessionState {
+    const routing = this.getCanonicalRoutings().get(staged.turnExecutionId);
+    if (!routing) throw new Error("Claude spawn execution routing is missing");
     return {
       sessionId: args.sessionId,
       cwd: args.cwd,
       query,
+      spawnRouting: routing,
+      executionRouting: routing,
       pushMessage: queue.push,
       closeQueue: queue.close,
       model: staged.resolvedModel,
@@ -1958,18 +1906,7 @@ export class ClaudeProvider
     queue.push(staged.prompt, routing.executionId);
   }
 
-  /**
-   * Spawns a fresh Claude SDK session for the staged turn: builds the prompt
-   * queue, launches `sdkQuery` inside the env snapshot window, surfaces any new
-   * child PID to the runtime (which attaches it to the Windows JobObject and
-   * hard-kills it on stop — Claude's converged taskkill), starts the stream
-   * loop, and pushes the first prompt.
-   *
-   * Returns the discovered child PIDs (Windows only; the Claude SDK does not
-   * expose the subprocess PID directly, so they are recovered by diffing the
-   * server's direct children across the spawn). On non-Windows the array is
-   * empty and JobObject/taskkill are no-ops.
-   */
+  /** Starts one lazy SDK query with process ownership captured by its spawn callback. */
   async spawn(args: SpawnArgs): Promise<SpawnResult<ClaudeSessionState>> {
     const { sessionId, cwd } = args;
     const staged = this.takePendingClaudeSpawn(sessionId);
@@ -1987,10 +1924,20 @@ export class ClaudeProvider
       resumeId: staged.resumeId,
       cwd,
     });
-    const beforePids = await this.captureClaudeChildPidsBeforeSpawn();
-    const query = this.startClaudeSdkQuery(sessionId, queue, options, browser);
+    const ownedProcess = this.createOwnedClaudeProcess(sessionId);
+    options.env = { ...args.env };
+    options.pathToClaudeCodeExecutable = this.resolveClaudeExecutable();
+    options.spawnClaudeCodeProcess = ownedProcess.spawn;
+    let query: Query;
+    try {
+      query = this.startClaudeSdkQuery(sessionId, queue, options, browser);
+    } catch (error) {
+      await ownedProcess.retire();
+      await this.host.threadControl.close(sessionId);
+      throw error;
+    }
     this.releaseStagedClaudeBrowserAccess(sessionId, browser);
-    const pids = await this.captureClaudeChildPidsAfterSpawn(beforePids);
+
     const state = this.createClaudeSessionState(
       args,
       staged,
@@ -1998,8 +1945,9 @@ export class ClaudeProvider
       query,
       browser,
     );
+    state.ownedProcess = ownedProcess;
     this.startClaudeStagedTurn(sessionId, query, staged, queue);
-    return { state, pids };
+    return { state, pids: [] };
   }
 
   /**
@@ -2031,11 +1979,14 @@ export class ClaudeProvider
 
   /** Provider teardown: close the SDK query handle. */
   async close(state: ClaudeSessionState): Promise<void> {
-    if (state.browserLease) {
-      this.browserAutomationSessionLease.release(state.browserLease.leaseId);
-    }
-    await this.threadControlMcp?.close(state.sessionId);
-    state.query.close();
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => { if (state.browserLease) this.host.browser.release(state.browserLease.leaseId); }),
+      Promise.resolve().then(() => this.host.threadControl.close(state.sessionId)),
+      Promise.resolve().then(() => state.query.close()),
+      Promise.resolve().then(() => state.ownedProcess?.retire()),
+    ]);
+    const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length) throw new AggregateError(failures, "Claude session cleanup failed");
   }
 
   /**
@@ -2066,7 +2017,7 @@ export class ClaudeProvider
       if (executionId && executionId !== state.currentTurnExecutionId)
         state.pendingPromptExecutionIds.push(executionId);
     });
-    const task = this.consumeClaudeStream(sessionId, q, routing, state)
+    const task = this.consumeClaudeStream(sessionId, q, state)
       .finally(() => { this.streamTasks.delete(task); });
     this.streamTasks.add(task);
     void task.catch((error: unknown) => {
@@ -2085,36 +2036,34 @@ export class ClaudeProvider
     const threadId = sessionId.startsWith("mcode-")
       ? sessionId.slice(6)
       : sessionId;
-    const state: ClaudeStreamLoopState = {
+    const state: Omit<ClaudeStreamLoopState, "mapper"> = {
       currentTurnExecutionId: routing.executionId,
+      currentRouting: routing,
       pendingPromptExecutionIds: [],
       sessionInitialized: false,
       awaitingResume: isResuming,
       resumedTurnStarted: false,
       suppressEnded: false,
-      mapper: undefined as never,
     };
-    state.mapper = new ClaudeEventMapper(
+    return Object.assign(state, { mapper: new ClaudeEventMapper(
       sessionId,
       threadId,
-      this.createClaudeMapperCallbacks(sessionId, threadId, state, routing),
-    );
-    return state;
+      this.createClaudeMapperCallbacks(sessionId, threadId, state),
+    ) });
   }
 
   private createClaudeMapperCallbacks(
     sessionId: string,
     threadId: string,
-    state: ClaudeStreamLoopState,
-    routing: ClaudeCanonicalEventRouting,
+    state: Omit<ClaudeStreamLoopState, "mapper">,
   ): ClaudeEventMapperCallbacks {
     return {
-      emit: (event) =>
+      emit: (event, evidence) =>
         this.publishTurnEvent(
-          this.getCanonicalRoutings().get(state.currentTurnExecutionId) ??
-            routing,
+          state.currentRouting,
           sessionId,
           event,
+          evidence,
         ),
       getSession: () => this.runtime.get(sessionId),
       captureSdkSessionId: (id) =>
@@ -2141,13 +2090,13 @@ export class ClaudeProvider
   private async consumeClaudeStream(
     sessionId: string,
     q: Query,
-    routing: ClaudeCanonicalEventRouting,
     state: ClaudeStreamLoopState,
   ): Promise<void> {
     try {
       for await (const raw of q) {
         const message = raw as Record<string, unknown>;
         const current = this.runtime.get(sessionId);
+        if (this.suppressEndedQueries.has(q) || this.isSupersededClaudeStream(current, q)) break;
         if (current) current.lastUsedAt = Date.now();
         if (!state.sessionInitialized && message.type !== "result") {
           state.sessionInitialized = true;
@@ -2158,28 +2107,27 @@ export class ClaudeProvider
           message,
           state.sessionInitialized,
         );
-        this.startClaudeResume(
+        await this.startClaudeResume(
           sessionId,
-          routing,
           state,
           message,
           isResumeFailure,
         );
         if (isResumeFailure) {
-          this.handleFailedClaudeResume(sessionId, routing, state);
+          this.handleFailedClaudeResume(sessionId, state);
           break;
         }
         const outcome = await state.mapper.map(message);
         if (outcome !== "none") {
-          await this.flushCanonicalExecution(state.currentTurnExecutionId);
+          await this.flushCanonicalExecution(state.currentRouting);
           state.awaitingResume = outcome === "turn_complete";
           state.resumedTurnStarted = false;
         }
       }
     } catch (error: unknown) {
-      this.publishClaudeStreamError(sessionId, q, routing, state, error);
+      this.publishClaudeStreamError(sessionId, q, state, error);
     } finally {
-      await this.finalizeClaudeStream(sessionId, q, routing, state);
+      await this.finalizeClaudeStream(sessionId, q, state);
     }
   }
 
@@ -2201,7 +2149,6 @@ export class ClaudeProvider
 
   private handleFailedClaudeResume(
     sessionId: string,
-    routing: ClaudeCanonicalEventRouting,
     state: ClaudeStreamLoopState,
   ): void {
     const threadId = sessionId.startsWith("mcode-")
@@ -2213,7 +2160,7 @@ export class ClaudeProvider
     );
     this.sdkSessionIds.delete(sessionId);
     this.publishTurnEvent(
-      this.getCanonicalRoutings().get(state.currentTurnExecutionId) ?? routing,
+      state.currentRouting,
       sessionId,
       {
         type: AgentEventType.System,
@@ -2225,13 +2172,12 @@ export class ClaudeProvider
     state.suppressEnded = true;
   }
 
-  private startClaudeResume(
+  private async startClaudeResume(
     sessionId: string,
-    routing: ClaudeCanonicalEventRouting,
     state: ClaudeStreamLoopState,
     message: Record<string, unknown>,
     isResumeFailure: boolean,
-  ): void {
+  ): Promise<void> {
     if (
       !state.awaitingResume ||
       message.type === "system" ||
@@ -2242,18 +2188,33 @@ export class ClaudeProvider
       return;
     const executionId = state.pendingPromptExecutionIds.shift();
     if (executionId) {
-      state.awaitingResume = false;
-      state.currentTurnExecutionId = executionId;
+      await this.advanceClaudeExecution(sessionId, state, executionId);
     } else if (state.resumedTurnStarted) return;
     state.resumedTurnStarted = true;
     const threadId = sessionId.startsWith("mcode-")
       ? sessionId.slice(6)
       : sessionId;
     this.publishTurnEvent(
-      this.getCanonicalRoutings().get(state.currentTurnExecutionId) ?? routing,
+      state.currentRouting,
       sessionId,
       { type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent,
     );
+  }
+
+  private async advanceClaudeExecution(
+    sessionId: string,
+    state: ClaudeStreamLoopState,
+    executionId: string,
+  ): Promise<void> {
+    const nextRouting = this.getCanonicalRoutings().get(executionId);
+    if (!nextRouting) throw new Error("Claude queued execution routing is missing");
+    await this.waitForCanonicalExecution(state.currentRouting);
+    state.currentRouting = nextRouting;
+    const currentSession = this.runtime.get(sessionId);
+    if (currentSession) currentSession.executionRouting = nextRouting;
+    state.awaitingResume = false;
+    state.currentTurnExecutionId = executionId;
+    state.mapper.resetExecution();
   }
 
   private captureClaudeSdkSessionId(
@@ -2283,7 +2244,6 @@ export class ClaudeProvider
   private publishClaudeStreamError(
     sessionId: string,
     q: Query,
-    routing: ClaudeCanonicalEventRouting,
     state: ClaudeStreamLoopState,
     error: unknown,
   ): void {
@@ -2300,7 +2260,7 @@ export class ClaudeProvider
       ...(tail ? { stderr: tail } : {}),
     });
     this.publishTurnEvent(
-      this.getCanonicalRoutings().get(state.currentTurnExecutionId) ?? routing,
+      state.currentRouting,
       sessionId,
       {
         type: AgentEventType.Error,
@@ -2332,7 +2292,6 @@ export class ClaudeProvider
   private async finalizeClaudeStream(
     sessionId: string,
     q: Query,
-    routing: ClaudeCanonicalEventRouting,
     state: ClaudeStreamLoopState,
   ): Promise<void> {
     this.recentStderr.delete(sessionId);
@@ -2353,7 +2312,7 @@ export class ClaudeProvider
     )
       return;
     this.publishTurnEvent(
-      this.getCanonicalRoutings().get(state.currentTurnExecutionId) ?? routing,
+      state.currentRouting,
       sessionId,
       {
         type: AgentEventType.Ended,
@@ -2361,7 +2320,7 @@ export class ClaudeProvider
         turnExecutionId: state.currentTurnExecutionId,
       } satisfies AgentEvent,
     );
-    await this.waitForCanonicalExecution(state.currentTurnExecutionId);
+    await this.waitForCanonicalExecution(state.currentRouting);
   }
 
   private canEmitClaudeEnded(
@@ -2396,19 +2355,20 @@ export class ClaudeProvider
     routing: ClaudeCanonicalEventRouting,
     sessionId: string,
     event: AgentEvent,
+    evidence?: ClaudeEventEvidence,
   ): void {
     const runtimeEvent = providerRuntimeEvent({
       ...event,
       turnExecutionId: routing.executionId,
     });
-    if (!this.canonicalEventPublisher) {
-      this.emit("event", runtimeEvent);
-      return;
-    }
+    if (evidence) runtimeEvent.parentEvidence = evidence.parent.kind === "native"
+      ? { kind: "native", identity: { providerId: this.id, scope: "parentItem", value: evidence.parent.id, provenance: "native" } }
+      : evidence.parent;
     this.canonicalEventPublisher.publish(
       routing,
       runtimeEvent,
-      this.claudeSessionIdentities(sessionId),
+      [...this.claudeSessionIdentities(sessionId), ...(evidence?.sourceIdentities ?? [])],
+      evidence?.nativeEventId,
     );
   }
 
@@ -2425,21 +2385,17 @@ export class ClaudeProvider
     ];
   }
 
-  private async waitForCanonicalExecution(executionId: string): Promise<void> {
-    const routing = this.getCanonicalRoutings().get(executionId);
-    if (!routing || !this.canonicalEventPublisher) return;
+  private async waitForCanonicalExecution(routing: ClaudeCanonicalEventRouting): Promise<void> {
     try {
       await this.canonicalEventPublisher.waitForExecution(routing);
     } catch (error: unknown) {
       await this.reportCanonicalDeliveryFailure(routing, error);
     } finally {
-      this.getCanonicalRoutings().delete(executionId);
+      if (this.getCanonicalRoutings().get(routing.executionId) === routing) this.getCanonicalRoutings().delete(routing.executionId);
     }
   }
 
-  private async flushCanonicalExecution(executionId: string): Promise<void> {
-    const routing = this.getCanonicalRoutings().get(executionId);
-    if (!routing || !this.canonicalEventPublisher) return;
+  private async flushCanonicalExecution(routing: ClaudeCanonicalEventRouting): Promise<void> {
     try {
       await this.canonicalEventPublisher.flushForExecution(routing);
     } catch (error: unknown) {
@@ -2745,14 +2701,13 @@ export class ClaudeProvider
     this.nativeGoalsBySession.delete(sessionId);
     const entry = this.runtime.get(sessionId);
     if (entry) {
-      // The runtime's stop runs interrupt (closeQueue) → close (query.close) →
-      // hard taskkill of the spawned PID.
       await this.runtime.stop(sessionId);
-    } else {
+    } else if (this.pendingBrowserAccess.has(sessionId) || this.pendingSpawnTurns.has(sessionId)) {
       // Session not yet created (sendMessage still in flight). Record the
       // stop so doSendMessage tears the session down immediately after
       // creation, preventing the agent from ever starting.
       this.pendingStops.add(sessionId);
+      await this.runtime.stop(sessionId);
       // Auto-expire after 10s in case the send never arrives (network
       // error, client disconnect, etc.) so the set doesn't leak.
       setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
@@ -2761,12 +2716,15 @@ export class ClaudeProvider
 
   /**
    * Force-discard the pooled session so the next sendTurn spawns fresh. Pure
-   * pool eviction via the runtime's `stop` (interrupt → close → hard kill); it
+   * pool eviction via the runtime's `stop`; it
    * deliberately leaves goals and pending permissions intact, since the caller
    * retries the same turn on a new session.
    */
   async discardSession(sessionId: string): Promise<void> {
-    if (this.runtime.get(sessionId) === undefined) return;
+    const state = this.runtime.get(sessionId);
+    if (!state) return;
+    state.suppressEnded = true;
+    this.suppressEndedQueries.add(state.query);
     await this.runtime.stop(sessionId);
   }
 
@@ -2801,7 +2759,7 @@ export class ClaudeProvider
         return;
       }
 
-      // Stop through the runtime (interrupt → close → taskkill). The interrupt
+      // Stop through the runtime. The interrupt
       // closes the prompt queue, ending the SDK iterator, so the stream loop's
       // finally emits `_streamDone`, which resolves the wait above.
       void this.runtime.stop(sessionId).catch((err: unknown) => {
@@ -2920,7 +2878,12 @@ export class ClaudeProvider
   }
 
   /** Tear down all sessions and release resources. */
-  async shutdown(): Promise<void> {
+  shutdown(): Promise<void> {
+    this.shutdownTask ??= this.performShutdown();
+    return this.shutdownTask;
+  }
+
+  private async performShutdown(): Promise<void> {
     // Drain all pending permission requests so their promises settle. Do this
     // before the runtime stops sessions so any in-flight canUseTool awaits
     // unblock and the SDK iterators can wind down cleanly.
@@ -2934,7 +2897,7 @@ export class ClaudeProvider
     }
     const results = await Promise.allSettled([this.runtime.shutdown()]);
     results.push(...await Promise.allSettled(this.streamTasks));
-    results.push(...await Promise.allSettled([this.canonicalEventPublisher?.stopAdmissionAndDrain()]));
+    results.push(...await Promise.allSettled([this.canonicalEventPublisher.stopAdmissionAndDrain()]));
     this.pendingSpawnTurns.clear();
     this.pendingBrowserAccess.clear();
     this.sdkSessionIds.clear();

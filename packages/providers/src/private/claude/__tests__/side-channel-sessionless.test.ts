@@ -8,13 +8,8 @@
  * subprocess at all, it should skip resume entirely and use sessionless path
  * B-prime on the first call.
  *
- * NOTE: ClaudeProvider injects EnvService via tsyringe DI and spawns real SDK
- * subprocesses; unit-testing it end-to-end requires mocking both the DI
- * container and the SDK `query()` call. The tests below mock `query` at the
- * module level and construct the provider with a minimal DI stub.
  */
 
-import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // vi.hoisted ensures the mock reference is initialized before vi.mock() runs
@@ -33,23 +28,14 @@ vi.mock("@mcode/shared", () => ({
   newHandoffUlid: vi.fn(() => "01ABCDEF"),
 }));
 
-import { ClaudeProvider } from "../claude-provider.js";
+import { fixtureHost, ClaudeProvider } from "./helpers/provider-fixture.js";
 
-/** Minimal EnvService stub used to avoid DI container setup. */
-function makeEnvService() {
-  return { getEnv: vi.fn(() => ({})) };
-}
-
-/** Minimal JobObject stub. */
-function makeJobObject() {
-  return { assign: vi.fn() };
-}
-
-/** Build a ClaudeProvider bypassing DI via Object.create + manual field assignment. */
+/** Build a ClaudeProvider bypassing the constructor via Object.create + manual field assignment. */
 function makeProvider() {
   const provider = Object.create(ClaudeProvider.prototype) as ClaudeProvider;
-  (provider as any).envService = makeEnvService();
-  (provider as any).jobObject = makeJobObject();
+  (provider as any).host = fixtureHost();
+  (provider as any).configuration = { cliPath: process.execPath, idleSessionTtlMs: 600_000 };
+  (provider as any).recentStderr = new Map();
   // The constructor is bypassed (Object.create) to avoid spawning. After the
   // SessionRuntime migration, runSideChannelQuery reads parent liveness via
   // this.runtime.get(...), so provide a Map-backed runtime stub. The

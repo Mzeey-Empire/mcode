@@ -1,4 +1,4 @@
 export {
   CanonicalLiveEventPublisher,
   type CanonicalLiveEventRouting,
-} from "@mcode/providers/server-compat/canonical-live-event-publisher";
+} from "../private/canonical-live-event-publisher.js";

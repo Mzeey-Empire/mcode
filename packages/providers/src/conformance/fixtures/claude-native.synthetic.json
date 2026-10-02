@@ -1,0 +1,203 @@
+{
+  "contractVersion": 1,
+  "providerId": "claude",
+  "cliVersion": "synthetic",
+  "protocolVersion": "claude-agent-sdk-0.3.212-structural",
+  "provenance": "synthetic",
+  "requiredProfiles": [
+    "core",
+    "build"
+  ],
+  "scenario": "synthetic native Claude parallel child identities and tool pairing",
+  "sourceHash": "40b9eb8aa81b063c71355738464acd39db7b02b9ce57da94368cb687a89f83c7",
+  "redaction": {
+    "reviewed": true,
+    "removedFields": [
+      "prompt",
+      "response",
+      "environment",
+      "tool output",
+      "absolute paths"
+    ]
+  },
+  "input": {
+    "events": [
+      {
+        "kind": "session",
+        "sequence": 1,
+        "nativeId": "SESSION_1",
+        "status": "started"
+      },
+      {
+        "kind": "turn",
+        "sequence": 2,
+        "nativeId": "TURN_1",
+        "status": "started"
+      },
+      {
+        "kind": "item",
+        "sequence": 3,
+        "nativeId": "ITEM_1",
+        "pairId": "PAIR_1",
+        "size": 12,
+        "status": "started"
+      },
+      {
+        "kind": "item",
+        "sequence": 4,
+        "nativeId": "ITEM_2",
+        "pairId": "PAIR_1",
+        "size": 24,
+        "status": "completed"
+      },
+      {
+        "kind": "terminal",
+        "sequence": 5,
+        "nativeId": "TURN_1",
+        "status": "completed"
+      }
+    ],
+    "claudeNativeTrace": {
+      "nativeMessages": [
+        {
+          "type": "assistant",
+          "uuid": "EVENT_A",
+          "session_id": "SESSION_1",
+          "parent_tool_use_id": "PARENT_A",
+          "message": {
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "CHILD_A",
+                "name": "Agent"
+              }
+            ]
+          }
+        },
+        {
+          "type": "assistant",
+          "uuid": "EVENT_B",
+          "session_id": "SESSION_1",
+          "parent_tool_use_id": "PARENT_B",
+          "message": {
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "CHILD_B",
+                "name": "Agent"
+              }
+            ]
+          }
+        },
+        {
+          "type": "tool_progress",
+          "uuid": "PROGRESS_A",
+          "session_id": "SESSION_1",
+          "tool_use_id": "CHILD_A",
+          "tool_name": "Agent"
+        },
+        {
+          "type": "assistant",
+          "uuid": "NESTED_C",
+          "session_id": "SESSION_1",
+          "parent_tool_use_id": "CHILD_A",
+          "message": {
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "CHILD_C",
+                "name": "Read"
+              }
+            ]
+          }
+        },
+        {
+          "type": "user",
+          "uuid": "RESULT_B",
+          "session_id": "SESSION_1",
+          "parent_tool_use_id": "PARENT_B",
+          "message": {
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "CHILD_B"
+              }
+            ]
+          }
+        },
+        {
+          "type": "user",
+          "uuid": "RESULT_A",
+          "session_id": "SESSION_1",
+          "message": {
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "CHILD_A"
+              }
+            ]
+          }
+        },
+        {
+          "type": "user",
+          "uuid": "RESULT_C",
+          "session_id": "SESSION_1",
+          "parent_tool_use_id": "CHILD_A",
+          "message": {
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "CHILD_C"
+              }
+            ]
+          }
+        },
+        {
+          "type": "result",
+          "uuid": "TERMINAL_1",
+          "session_id": "SESSION_1",
+          "parent_tool_use_id": null,
+          "is_error": false
+        }
+      ],
+      "expected": {
+        "toolStarts": [
+          [
+            "CHILD_A",
+            "PARENT_A"
+          ],
+          [
+            "CHILD_B",
+            "PARENT_B"
+          ],
+          [
+            "CHILD_C",
+            "CHILD_A"
+          ]
+        ],
+        "toolResults": [
+          "CHILD_B",
+          "CHILD_A",
+          "CHILD_C"
+        ],
+        "terminalCount": 1
+      }
+    }
+  },
+  "expected": {
+    "orderedKinds": [
+      "session",
+      "turn",
+      "item",
+      "item",
+      "terminal"
+    ],
+    "terminal": "completed",
+    "toolPairs": [
+      [
+        "PAIR_1",
+        "PAIR_1"
+      ]
+    ]
+  }
+}

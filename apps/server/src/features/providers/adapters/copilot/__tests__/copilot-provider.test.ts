@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import type { ProviderRuntimeEvent } from "@mcode/contracts";
-import type { ProviderEventBatch, ProviderHostPorts } from "@mcode/providers";
+import type { ProviderEventSinkPort, ProviderHostPorts } from "@mcode/providers";
 import { MCODE_BROWSER_GUIDE } from "@mcode/thread-orchestration";
 
 // ---------------------------------------------------------------------------
@@ -109,6 +109,7 @@ import { CopilotProvider as ProductionCopilotProvider } from "../copilot-provide
 import { stubEnvService } from "../../../../../runtime/environment/__tests__/stub-env-service.js";
 import { stubJobObject } from "../../../../../runtime/process/containment/__tests__/stub-job-object.js";
 import { BrowserAutomationSessionLease } from "../../../../browser-automation/index.js";
+import { mockShutdownHost } from "../../../composition/__tests__/helpers/mock-shutdown-host.js";
 
 const TEST_HOST_PORTS = {
   runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
@@ -707,12 +708,17 @@ describe("CopilotProvider canonical host delivery", () => {
   it("submits a terminal through the canonical host without direct EventEmitter delivery", async () => {
     vi.clearAllMocks();
     mockClient.getState.mockReturnValue("connected");
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: object, cb: (err: Error | null, result?: { stdout: string }) => void) => cb(null, { stdout: "" }),
+    );
     const session = makeMockSession();
     mockClient.createSession.mockResolvedValue(session);
     session.send.mockImplementation(async () => {
       session.fire("session.idle");
     });
-    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const host = mockShutdownHost(() => {});
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>(host.events.submit);
+    const executionId = "00000000-0000-4000-8000-000000000001";
     const provider = new CopilotProvider(
       makeSettingsService() as any,
       stubJobObject(),
@@ -720,16 +726,16 @@ describe("CopilotProvider canonical host delivery", () => {
       undefined,
       makeThreadControlMcp() as any,
       {
-        runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
+        ...host,
         events: { submit },
-      } as ProviderHostPorts,
+      },
     );
     const directEvents = vi.fn();
     provider.on("event", directEvents);
 
     await provider.sendTurn({
       turnId: "turn-canonical",
-      turnExecutionId: "test-execution",
+      turnExecutionId: executionId,
       sessionId: "mcode-canonical-copilot",
       workspaceId: "workspace-1",
       threadId: "canonical-copilot",
@@ -751,8 +757,9 @@ describe("CopilotProvider canonical host delivery", () => {
     expect(submittedEvents).toContainEqual(expect.objectContaining({
       type: "turnComplete",
       providerId: "copilot",
-      turnExecutionId: "test-execution",
+      turnExecutionId: executionId,
     }));
+    await provider.shutdown();
   });
 });
 

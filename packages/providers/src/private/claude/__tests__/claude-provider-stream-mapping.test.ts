@@ -1,4 +1,3 @@
-import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentEventType, type ProviderRuntimeEvent } from "@mcode/contracts";
 
@@ -9,9 +8,9 @@ vi.mock("@mcode/shared", async (importOriginal) => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
-import { ClaudeProvider } from "../claude-provider.js";
-import { stubEnvService } from "../../../../../runtime/environment/__tests__/stub-env-service.js";
-import { stubJobObject } from "../../../../../runtime/process/containment/__tests__/stub-job-object.js";
+import { ClaudeProvider } from "./helpers/provider-fixture.js";
+import { stubEnvService } from "./helpers/provider-fixture.js";
+import { stubJobObject } from "./helpers/provider-fixture.js";
 import { mockProviderHost, queryMethodStubs } from "./helpers/mock-sdk-query.js";
 
 function sdkStream(messages: Array<Record<string, unknown>>) {
@@ -76,6 +75,7 @@ function failingStream(message: string) {
 async function send(
   provider: ClaudeProvider,
   sessionId: string,
+  events: readonly ProviderRuntimeEvent[],
   resumeFrom?: string,
 ): Promise<void> {
   await provider.sendTurn({
@@ -90,7 +90,9 @@ async function send(
     providerOptions: {},
     ...(resumeFrom ? { resumeFrom } : {}),
   });
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await vi.waitFor(() =>
+    expect(events.filter(({ event }) => event.type === AgentEventType.Ended)).toHaveLength(1),
+  );
 }
 
 describe("ClaudeProvider stream mapping", () => {
@@ -125,7 +127,7 @@ describe("ClaudeProvider stream mapping", () => {
     const events: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
 
-    await send(provider, "mcode-parent-ids");
+    await send(provider, "mcode-parent-ids", events);
 
     expect(
       events
@@ -147,7 +149,7 @@ describe("ClaudeProvider stream mapping", () => {
     const events: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
 
-    await send(provider, `mcode-${failure.replaceAll(" ", "-")}`);
+    await send(provider, `mcode-${failure.replaceAll(" ", "-")}`, events);
 
     const errorIndex = events.findIndex(
       (event) => event.event.type === AgentEventType.Error,
@@ -180,7 +182,7 @@ describe("ClaudeProvider stream mapping", () => {
         mockProviderHost((event) => events.push(event)),
       );
 
-      await send(provider, `mcode-unsafe-${unsafeValue}`);
+      await send(provider, `mcode-unsafe-${unsafeValue}`, events);
 
       expect(
         events.filter((event) => event.event.type === AgentEventType.Error),
@@ -216,7 +218,7 @@ describe("ClaudeProvider stream mapping", () => {
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
     const priorQueryCalls = mockQuery.mock.calls.length;
 
-    await send(provider, "mcode-resume-order", "previous-sdk");
+    await send(provider, "mcode-resume-order", events, "previous-sdk");
     await vi.waitFor(() =>
       expect(mockQuery.mock.calls.length).toBeGreaterThanOrEqual(
         priorQueryCalls + 2,

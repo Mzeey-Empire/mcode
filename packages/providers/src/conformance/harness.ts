@@ -3,7 +3,8 @@ import {
   CanonicalAgentEventSchema,
   type CanonicalAgentEvent,
 } from "@mcode/agent-model";
-import type { AgentEvent } from "@mcode/contracts";
+import { AgentEventType, ProviderRuntimeEventSchema, type AgentEvent } from "@mcode/contracts";
+import type { ProviderBoundary } from "../factory-types.js";
 import type { RequestPermissionRequest, SessionNotification } from "@agentclientprotocol/sdk";
 import type { ProviderFactoryInput } from "../factory-types.js";
 import type { ProviderEventDraft, ProviderHostPorts } from "../host-ports.js";
@@ -98,6 +99,7 @@ export async function runFactoryCoreProfile(
   const boundary = registration.factory(createConformanceFactoryInput(registration.providerId, host));
   assertFactoryIdentity(registration, boundary);
   assertFactoryDidNotUseHost(registration, calls);
+  if (registration.providerId === "claude") return await runClaudeFactoryCore(boundary, sink, calls);
 
   const runtimeProfile = createConformanceSessionRuntime(host);
   await assertRuntimeSessionReuse(registration, runtimeProfile);
@@ -109,6 +111,38 @@ export async function runFactoryCoreProfile(
   await stopConformanceSessionRuntime(runtimeProfile);
   const terminalType = assertSinkTerminalEvent(registration, sink, drafts);
   return { providerId: registration.providerId, spawnCount: runtimeProfile.spawnCount(), terminalType };
+}
+
+async function runClaudeFactoryCore(
+  boundary: ProviderBoundary,
+  sink: DeterministicCanonicalSink,
+  calls: readonly string[],
+): Promise<FactoryCoreProfileResult> {
+  if (!("sendTurn" in boundary) || typeof boundary.sendTurn !== "function" || !("shutdown" in boundary) || typeof boundary.shutdown !== "function") {
+    throw new TypeError("Claude conformance requires the usable public factory");
+  }
+  const request = { turnId: "TURN_1", turnExecutionId: "00000000-0000-4000-8000-000000000001", sessionId: "mcode-THREAD_1", workspaceId: "WORKSPACE_1", threadId: "THREAD_1", message: "fixture", cwd: process.cwd(), model: "claude-sonnet-4-6", interactionMode: "build", permissionMode: "supervised", providerOptions: {} };
+  try {
+    await boundary.sendTurn(request);
+    await waitForClaudeCoreTerminals(sink, 1);
+    await boundary.sendTurn({ ...request, turnId: "TURN_2", turnExecutionId: "00000000-0000-4000-8000-000000000002" });
+    await waitForClaudeCoreTerminals(sink, 2);
+    const spawnCount = calls.filter((call) => call === "threadControl.bootstrap").length;
+    if (spawnCount !== 1) throw new Error("Claude core profile failed live queue reuse");
+    return { providerId: "claude", spawnCount, terminalType: "turn.completed" };
+  } finally { await boundary.shutdown(); }
+}
+
+async function waitForClaudeCoreTerminals(sink: DeterministicCanonicalSink, expected: number): Promise<void> {
+  const deadline = performance.now() + 2_000;
+  while (performance.now() < deadline) {
+    const count = sink.snapshot().events.filter(({ payload }) => payload.type === "item.recorded"
+      && payload.item.payload.projection === "providerRuntimeEvent"
+      && ProviderRuntimeEventSchema().parse(payload.item.payload.runtimeEvent).event.type === AgentEventType.TurnComplete).length;
+    if (count === expected) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Claude core profile did not observe the expected canonical terminals");
 }
 
 /** Validates enabled factory registration, profiles, fixtures, and version evidence. */
@@ -270,7 +304,8 @@ function createConformanceFactoryInput(
   providerId: ProviderConformanceRegistration["providerId"],
   host: ProviderHostPorts,
 ): ProviderFactoryInput {
-  const configuration = { cliPath: "conformance-provider", idleSessionTtlMs: 600_000 };
+  const configuration = { cliPath: providerId === "claude" ? process.execPath : "conformance-provider", idleSessionTtlMs: 600_000 };
+  if (providerId === "claude") return { configuration, host, claude: { createForker: () => ({ fork: async () => { throw new Error("Conformance handoff is not configured"); } }) } };
   if (providerId === "codex") return { configuration, host, codex: createFakeCodexPorts() };
   if (providerId === "cursor") return { configuration, host, cursor: createFakeCursorPorts() };
   return { configuration, host };

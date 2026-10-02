@@ -3,6 +3,7 @@ import { z } from "zod";
 import { TurnOutcomeSchema } from "../models/turn-outcome.js";
 import { AgentEventSchema, type AgentEvent } from "./agent-event.js";
 import { lazySchema } from "../utils/lazySchema.js";
+import { ProviderIdentitySchema } from "../compat/agent-model.js";
 
 /** Native Codex evidence used to route a private child interaction. */
 export const CodexChildEvidenceSchema = lazySchema(() => z
@@ -59,12 +60,23 @@ export const ProviderRuntimeExtensionSchema = lazySchema(() => z
     "A provider runtime extension must carry native evidence",
   ));
 
+/** Distinguishes absent evidence, an explicit root, and an exact native parent. */
+export const ProviderParentEvidenceSchema = lazySchema(() => z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("absent") }).strict(),
+  z.object({ kind: z.literal("root") }).strict(),
+  z.object({ kind: z.literal("native"), identity: ProviderIdentitySchema.extend({ scope: z.literal("parentItem"), provenance: z.literal("native") }) }).strict(),
+]));
+
+/** Exact source parent evidence retained until canonical attribution interprets it. */
+export type ProviderParentEvidence = z.infer<ReturnType<typeof ProviderParentEvidenceSchema>>;
+
 /** Provider-emitted event that keeps native evidence outside the renderer contract. */
 export const ProviderRuntimeEventSchema = lazySchema(() =>
   z.object({
     event: AgentEventSchema(),
     deliveryAttempt: z.number().int().positive().optional(),
     extension: ProviderRuntimeExtensionSchema().optional(),
+    parentEvidence: ProviderParentEvidenceSchema().optional(),
   }).strict(),
 );
 

@@ -62,8 +62,9 @@ export class DeterministicCanonicalSink implements ProviderEventSinkPort {
   private acceptEnvelope(draft: ProviderEventBatch["events"][number]): void {
     const acceptedSequence = this.accepted.length + 1;
     const timestamp = new Date(acceptedSequence * 1_000).toISOString();
+    const { ingestClass: _ingestClass, ...persisted } = draft;
     const envelope = CanonicalAgentEventEnvelopeSchema.parse({
-      ...draft,
+      ...persisted,
       acceptedSequence,
       durableRevision: acceptedSequence,
       serverTimestamps: { acceptedAt: timestamp, persistedAt: timestamp },

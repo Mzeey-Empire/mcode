@@ -44,10 +44,7 @@ export function buildReasoningOptions(
 
   // "none" / "minimal" are OpenAI Codex presets; Claude path normalizes them to "low" above.
   return {
-    // "xhigh" is valid for claude-opus-4-7; the SDK's EffortLevel union does not
-    // include "xhigh" yet, so we cast to any to avoid a compile-time rejection.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    effort: normalized as any,
+    effort: normalized === "none" || normalized === "minimal" ? "low" : normalized,
     thinking: { type: "adaptive" },
   };
 }

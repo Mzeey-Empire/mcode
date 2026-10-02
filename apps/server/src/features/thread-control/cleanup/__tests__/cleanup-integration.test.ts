@@ -15,7 +15,7 @@ import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { CleanupWorker } from "../cleanup-worker.js";
 import { HandoffStorage } from "../../../handoff/index.js";
 import { ThreadService } from "../../index.js";
-import type { ClaudeProvider } from "../../../providers/adapters/claude/claude-provider.js";
+import type { ClaudeProviderBoundary as ClaudeProvider } from "@mcode/providers";
 import type { GitExecutor } from "../../../projects/git/execution/index.js";
 import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import {

@@ -774,6 +774,7 @@ export {
   CodexCollaborationEvidenceSchema,
   CodexContinuationEvidenceSchema,
   ProviderRuntimeEventSchema,
+  ProviderParentEvidenceSchema,
   ProviderRuntimeExtensionSchema,
   providerRuntimeEvent,
 } from "./events/provider-runtime-event.js";
@@ -782,6 +783,7 @@ export type {
   CodexCollaborationEvidence,
   CodexContinuationEvidence,
   ProviderRuntimeEvent,
+  ProviderParentEvidence,
   ProviderRuntimeExtension,
 } from "./events/provider-runtime-event.js";
 

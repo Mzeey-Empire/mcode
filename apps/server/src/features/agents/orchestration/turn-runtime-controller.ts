@@ -9,7 +9,7 @@ import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable } from "@mcode/contracts";
-import type { CodexProviderBoundary } from "@mcode/providers";
+import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary } from "@mcode/providers";
 import type {
   Thread,
   IProviderRegistry,
@@ -869,7 +869,33 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const dispatch = this.createRetryDispatch(prepared);
     this.turnRetryDispatchByThread.set(prepared.lease.threadId, dispatch);
     this.retryingThreads.add(prepared.lease.threadId);
+    this.bindClaudeCanonicalDelivery(prepared.provider);
     await this.sendPreparedDispatch(prepared.lease.threadId, dispatch);
+  }
+
+  private bindClaudeCanonicalDelivery(provider: IAgentProvider): void {
+    if (!hasClaudeCanonicalDelivery(provider)) return;
+    provider.setCanonicalTurnDeliveryFailureHandler((routing, error) => this.handleClaudeDeliveryFailure(routing, error));
+  }
+
+  private async handleClaudeDeliveryFailure(routing: ClaudeCanonicalEventRouting, error: Error): Promise<void> {
+    const dispatch = this.turnRetryDispatchByThread.get(routing.threadId);
+    if (!dispatch || dispatch.effectiveProvider !== "claude"
+      || dispatch.turnRequest.turnId !== routing.turnId
+      || dispatch.turnRequest.turnExecutionId !== routing.executionId
+      || (dispatch.turnRequest.deliveryAttempt ?? 1) !== routing.deliveryAttempt) return;
+    const identity = this.retryDispatchIdentity(dispatch);
+    if (!this.getCurrentRetryDispatch(routing.threadId, identity)) return;
+    if (this.workerTurns.has(routing.threadId)) return this.handleWorkerDeliveryFailure(routing, error);
+
+    // The callback can run inside the SDK stream being stopped, so it must not await that stream's exit.
+    void Promise.resolve().then(() => dispatch.resolvedProvider.stopSession(dispatch.sessionName)).catch((stopError: unknown) => {
+      logger.error("Claude stop failed after canonical delivery failure", {
+        threadId: routing.threadId, executionId: routing.executionId,
+        error: stopError instanceof Error ? stopError.message : String(stopError),
+      });
+    });
+    await this.giveUpTransientTurnRetry(routing.threadId, error, identity);
   }
 
   /** Construct runtime-owned retry state from an immutable dispatch package. */
@@ -2074,6 +2100,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
 function isAcceptedWorkerResult(result: ExecutionWorkerResult): result is Extract<ExecutionWorkerResult, { kind: "committed" | "accepted" }> {
   return result.kind === "committed" || result.kind === "accepted";
+}
+
+function hasClaudeCanonicalDelivery(provider: IAgentProvider): provider is IAgentProvider & Pick<ClaudeProviderBoundary, "setCanonicalTurnDeliveryFailureHandler"> {
+  return provider.id === "claude" && "setCanonicalTurnDeliveryFailureHandler" in provider
+    && typeof provider.setCanonicalTurnDeliveryFailureHandler === "function";
 }
 
 function workerTerminalOutcome(event: AgentEvent): TurnOutcome | null {

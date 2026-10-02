@@ -1,15 +1,14 @@
-import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import { AgentEventType, type ProviderRuntimeEvent } from "@mcode/contracts";
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: mockQuery }));
 
-import { ClaudeProvider } from "../claude-provider.js";
+import { ClaudeProvider } from "./helpers/provider-fixture.js";
 import { AnthropicOAuthUsageSource } from "../usage/oauth-usage-source.js";
-import { stubEnvService } from "../../../../../runtime/environment/__tests__/stub-env-service.js";
-import { stubJobObject } from "../../../../../runtime/process/containment/__tests__/stub-job-object.js";
-import { mockShutdownHost } from "../../../composition/__tests__/helpers/mock-shutdown-host.js";
+import { stubEnvService } from "./helpers/provider-fixture.js";
+import { stubJobObject } from "./helpers/provider-fixture.js";
+import { mockShutdownHost } from "./helpers/mock-shutdown-host.js";
 
 function deferred() {
   let resolve!: () => void;

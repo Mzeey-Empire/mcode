@@ -3,6 +3,7 @@ import {
   type AgentEvent,
   type ContextWindowMode,
   type ProviderBillingMode,
+  type ProviderIdentity,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { clampContextWindowToMode } from "./context-window.js";
@@ -17,6 +18,16 @@ type Usage = {
   service_tier?: string;
 };
 
+/** Exact native parent evidence; absence never declares a root or active child. */
+export type ClaudeParentEvidence = { kind: "absent" } | { kind: "root" } | { kind: "native"; id: string };
+/** Native source identity travels with the semantic event produced from it. */
+export interface ClaudeEventEvidence {
+  parent: ClaudeParentEvidence;
+  sourceIdentities: readonly ProviderIdentity[];
+  nativeEventId?: string;
+}
+const MAX_TRACKED_TOOLS = 4_096;
+
 /** State read by the Claude SDK event mapper. */
 export interface ClaudeMappedSession {
   model: string;
@@ -28,7 +39,7 @@ export interface ClaudeMappedSession {
 
 /** Claude provider callbacks used by the stream event mapper. */
 export interface ClaudeEventMapperCallbacks {
-  emit(event: AgentEvent): void;
+  emit(event: AgentEvent, evidence: ClaudeEventEvidence): void;
   getSession(): ClaudeMappedSession | undefined;
   captureSdkSessionId(id: string): boolean;
   observeNativeGoalCommands(
@@ -71,6 +82,8 @@ export class ClaudeEventMapper {
   private lastContextWindow: number | undefined;
   private compacting = false;
   private readonly toolUseIds = new Set<string>();
+  private readonly toolParents = new Map<string, ClaudeParentEvidence>();
+  private nativeSource: Message = {};
   private readonly handlers: ReadonlyMap<
     string,
     (message: Message) => ClaudeMapOutcome | Promise<ClaudeMapOutcome>
@@ -94,6 +107,7 @@ export class ClaudeEventMapper {
       ["system", this.system.bind(this)],
       ["tool_use", this.standaloneToolUse.bind(this)],
       ["tool_result", this.toolResult.bind(this)],
+      ["user", this.user.bind(this)],
       ["stream_event", this.streamEvent.bind(this)],
       ["tool_progress", this.toolProgress.bind(this)],
       ["rate_limit_event", this.rateLimit.bind(this)],
@@ -111,14 +125,27 @@ export class ClaudeEventMapper {
 
   /** Captures a valid SDK session identity before lifecycle routing. */
   captureSessionIdentity(message: Message, sessionInitialized: boolean): void {
+    this.nativeSource = message;
+    readParentEvidence(message);
     this.captureSessionId(message, sessionInitialized);
   }
 
   /** Maps one message after the lifecycle has confirmed whether the session is live. */
   async map(message: Message): Promise<ClaudeMapOutcome> {
+    this.nativeSource = message;
+    readParentEvidence(message);
     const type = typeof message.type === "string" ? message.type : "";
     const handler = this.handlers.get(type);
     return handler ? await handler(message) : "none";
+  }
+
+  /** Resets only derived attribution when a new queued execution consumes its prompt. */
+  resetExecution(): void {
+    this.toolUseIds.clear();
+    this.toolParents.clear();
+    this.lastAssistantText = "";
+    this.lastInputTokens = undefined;
+    this.nativeSource = {};
   }
 
   private captureSessionId(message: Message, initialized: boolean): void {
@@ -164,6 +191,7 @@ export class ClaudeEventMapper {
     parentToolCallId: string | undefined,
   ): void {
     const toolCallId = stringValue(block.id);
+    this.rememberToolParent(toolCallId);
     if (toolCallId && this.toolUseIds.has(toolCallId)) return;
     if (toolCallId) this.registerToolUse(toolCallId);
     const toolName = stringOr(block.name, "unknown");
@@ -183,6 +211,8 @@ export class ClaudeEventMapper {
   }
 
   private registerToolUse(id: string): void {
+    if (!validIdentity(id)) throw new Error("Invalid Claude native tool identity");
+    if (this.toolUseIds.size >= MAX_TRACKED_TOOLS) throw new Error("Claude native tool identity bound exceeded");
     this.toolUseIds.add(id);
     const session = this.callbacks.getSession();
     if (!session) return;
@@ -413,6 +443,7 @@ export class ClaudeEventMapper {
 
   private standaloneToolUse(message: Message): ClaudeMapOutcome {
     const toolCallId = stringValue(message.id);
+    this.rememberToolParent(toolCallId);
     if (toolCallId && this.toolUseIds.has(toolCallId)) return "none";
     if (toolCallId) this.registerToolUse(toolCallId);
     const toolName = stringOr(
@@ -450,6 +481,16 @@ export class ClaudeEventMapper {
     });
     if (toolCallId)
       this.callbacks.getSession()?.pendingToolUses.delete(toolCallId);
+    return "none";
+  }
+  private user(message: Message): ClaudeMapOutcome {
+    const user = objectValue(message.message);
+    if (Array.isArray(user.content)) {
+      for (const raw of user.content) {
+        const block = objectValue(raw);
+        if (block.type === "tool_result") this.toolResult(block);
+      }
+    }
     return "none";
   }
   private streamEvent(message: Message): ClaudeMapOutcome {
@@ -543,8 +584,39 @@ export class ClaudeEventMapper {
     return "none";
   }
   private emit(event: AgentEvent): void {
-    this.callbacks.emit(event);
+    const toolId = "toolCallId" in event ? event.toolCallId : undefined;
+    const exactParent = readParentEvidence(this.nativeSource);
+    const parent = exactParent.kind === "absent" && toolId
+      ? this.toolParents.get(toolId) ?? exactParent : exactParent;
+    const sourceIdentities: ProviderIdentity[] = [];
+    const nativeEventId = validIdentity(this.nativeSource.uuid);
+    const nativeItemId = toolId || validIdentity(objectValue(this.nativeSource.message).id);
+    if (nativeItemId) sourceIdentities.push({ providerId: "claude", scope: "item", value: nativeItemId, provenance: "native" });
+    if (parent.kind === "native") sourceIdentities.push({ providerId: "claude", scope: "parentItem", value: parent.id, provenance: "native" });
+    this.callbacks.emit(event, { parent, sourceIdentities, ...(nativeEventId && { nativeEventId }) });
   }
+  private rememberToolParent(toolId: string): void {
+    if (!toolId) return;
+    const parent = readParentEvidence(this.nativeSource);
+    const existing = this.toolParents.get(toolId);
+    if (existing && parent.kind !== "absent" && JSON.stringify(existing) !== JSON.stringify(parent)) {
+      throw new Error(`Conflicting Claude native parent for tool ${toolId}`);
+    }
+    if (parent.kind === "absent") return;
+    if (!existing && this.toolParents.size >= MAX_TRACKED_TOOLS) throw new Error("Claude native tool identity bound exceeded");
+    this.toolParents.set(toolId, parent);
+  }
+}
+
+function validIdentity(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 512 ? value : undefined;
+}
+function readParentEvidence(message: Message): ClaudeParentEvidence {
+  if (!("parent_tool_use_id" in message)) return { kind: "absent" };
+  if (message.parent_tool_use_id === null) return { kind: "root" };
+  const id = validIdentity(message.parent_tool_use_id);
+  if (!id) throw new Error("Invalid Claude native parent identity");
+  return { kind: "native", id };
 }
 
 function stringValue(value: unknown): string {

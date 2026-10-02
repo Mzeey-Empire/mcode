@@ -1,9 +1,13 @@
 import type { Provider } from "@mcode/agent-model";
 import type {
   IAgentProvider,
+  IGoalCapable,
+  ISessionEvictable,
+  ICompletionCapable,
   Settings,
   SkillInfo,
   StoredAttachment,
+  SessionForker,
 } from "@mcode/contracts";
 import type { ProviderHostPorts } from "./host-ports.js";
 import type { CodexCanonicalEventRouting } from "./private/codex/codex-canonical-event-publisher.js";
@@ -21,7 +25,36 @@ export interface ProviderFactoryInput {
   codex?: CodexProviderPorts;
   cursor?: CursorProviderPorts;
   devin?: DevinProviderPorts;
+  claude?: ClaudeProviderPorts;
 }
+
+/** Narrow generation operation composed with the server's handoff policy. */
+export interface ClaudeSideChannelGenerator {
+  readonly id: "claude";
+  runSideChannelQuery(args: {
+    parentThreadId: string;
+    parentSdkSessionId: string;
+    prompt: string;
+    abortSignal?: AbortSignal;
+    conversationHistory?: string;
+    cwd: string;
+  }): Promise<string>;
+}
+
+/** Server-owned handoff composition required by the Claude factory. */
+export interface ClaudeProviderPorts {
+  createForker(generator: ClaudeSideChannelGenerator): SessionForker;
+}
+
+/** Exact canonical turn and delivery attempt that produced Claude events. */
+export type ClaudeCanonicalEventRouting = import("./private/canonical-live-event-publisher.js").CanonicalLiveEventRouting;
+
+/** Usable Claude provider with the narrow controls required by server callers. */
+export type ClaudeProviderBoundary = IGoalCapable & ISessionEvictable & ICompletionCapable & ProviderBoundary & ClaudeSideChannelGenerator & {
+  waitForSessionExit(sessionId: string, timeoutMs?: number): Promise<void>;
+  setPlanAnswerMode(threadId: string, enabled: boolean): void;
+  setCanonicalTurnDeliveryFailureHandler(handler: (routing: ClaudeCanonicalEventRouting, error: Error) => void | Promise<void>): void;
+};
 
 /** Server-owned authorities required by the Codex Provider. */
 export interface CodexProviderPorts {

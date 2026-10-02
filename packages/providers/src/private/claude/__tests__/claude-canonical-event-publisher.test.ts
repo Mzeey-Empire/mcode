@@ -1,4 +1,3 @@
-import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import { AgentEventType, providerRuntimeEvent, type AgentEvent } from "@mcode/contracts";
 import type { ProviderEventBatch, ProviderEventSinkPort } from "@mcode/providers";
@@ -16,7 +15,7 @@ const routing: ClaudeCanonicalEventRouting = {
 
 /** Builds the narrow host port needed to inspect Claude canonical submissions. */
 function createSink(submit: (batch: ProviderEventBatch) => Promise<void>): ProviderEventSinkPort {
-  return { submit };
+  return { submit: async (batch) => { await submit(batch); return { commit: { outcome: "committed", conversationRevision: 0, rosterRevision: 0, acceptedThrough: 0, durableThrough: 0, eventCount: batch.events.length }, delivery: { ingress: "queued" } }; } };
 }
 
 describe("ClaudeCanonicalEventPublisher", () => {
@@ -113,5 +112,35 @@ describe("ClaudeCanonicalEventPublisher", () => {
     await publisher.waitForExecution(routing);
 
     expect(submit.mock.calls.map(([batch]) => batch.events[0]?.sourceSequence)).toEqual([1, 2]);
+  });
+
+  it("deduplicates known native replay and rejects a conflicting semantic event", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const failure = vi.fn();
+    const publisher = new ClaudeCanonicalEventPublisher(createSink(submit), failure);
+    const event = providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "fixture" });
+    publisher.publish(routing, event, [], "NATIVE_EVENT_1");
+    await publisher.flushForExecution(routing);
+    publisher.publish(routing, event, [], "NATIVE_EVENT_1");
+    await publisher.flushForExecution(routing);
+    expect(submit).toHaveBeenCalledOnce();
+    publisher.publish(routing, { ...event, parentEvidence: { kind: "root" } }, [], "NATIVE_EVENT_1");
+    await expect(publisher.waitForExecution(routing)).rejects.toThrow("Conflicting provider replay identity");
+    expect(failure).toHaveBeenCalledExactlyOnceWith(routing, expect.any(Error));
+  });
+
+  it.each([1_023, 1_024, 1_025])("fails queue overflow explicitly at %i pending events", async (count) => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const failure = vi.fn();
+    const publisher = new ClaudeCanonicalEventPublisher(createSink(submit), failure);
+    for (let i = 0; i < count; i++) publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.System, threadId: routing.threadId, subtype: "fixture" }), []);
+    if (count > 1_024) {
+      expect(failure).toHaveBeenCalledOnce();
+      await expect(publisher.waitForExecution(routing)).rejects.toThrow("overflowed");
+    } else {
+      await publisher.waitForExecution(routing);
+      expect(submit).toHaveBeenCalledTimes(count);
+      expect(failure).not.toHaveBeenCalled();
+    }
   });
 });

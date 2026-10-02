@@ -1,0 +1,87 @@
+{
+  "providerId": "claude",
+  "cliVersion": "2.1.212",
+  "protocolVersion": "claude-agent-sdk-0.3.212",
+  "provenance": "captured",
+  "requiredProfiles": [
+    "core"
+  ],
+  "scenario": "Captured unauthenticated SDK initialization and rejection; no successful turn or child evidence",
+  "redaction": {
+    "reviewed": true,
+    "removedFields": [
+      "prompt",
+      "assistant text",
+      "error diagnostics",
+      "environment",
+      "absolute paths",
+      "init configuration",
+      "control responses",
+      "native IDs normalized"
+    ]
+  },
+  "input": {
+    "events": [
+      {
+        "kind": "session",
+        "sequence": 1,
+        "nativeId": "NATIVE_2",
+        "status": "started"
+      },
+      {
+        "kind": "item",
+        "sequence": 2,
+        "nativeId": "NATIVE_3"
+      },
+      {
+        "kind": "terminal",
+        "sequence": 3,
+        "status": "errored"
+      }
+    ],
+    "claudeNativeTrace": {
+      "nativeMessages": [
+        {
+          "uuid": "NATIVE_1",
+          "session_id": "NATIVE_2",
+          "type": "system",
+          "subtype": "init"
+        },
+        {
+          "uuid": "NATIVE_3",
+          "session_id": "NATIVE_2",
+          "parent_tool_use_id": null,
+          "type": "assistant",
+          "message": {
+            "content": []
+          }
+        },
+        {
+          "uuid": "NATIVE_4",
+          "session_id": "NATIVE_2",
+          "type": "result",
+          "is_error": true
+        }
+      ],
+      "sdkFailure": {
+        "kind": "authentication"
+      },
+      "expected": {
+        "toolStarts": [],
+        "toolResults": [],
+        "terminalCount": 1
+      }
+    }
+  },
+  "expected": {
+    "orderedKinds": [
+      "session",
+      "item",
+      "terminal"
+    ],
+    "terminal": "errored",
+    "toolPairs": []
+  },
+  "contractVersion": 1,
+  "sourceHash": "f670825319958cbdd196e271426a521d44f823a0669333e82f7dc6de4e229907"
+}

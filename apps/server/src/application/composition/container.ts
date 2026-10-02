@@ -13,6 +13,8 @@ import { openReadOnlyDatabase } from "../../runtime/persistence/sqlite/read-only
 import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
 import { CanonicalAgentWriterClient } from "../../features/agents/canonical/canonical-agent-writer-client.js";
 import { registerCodexProvider } from "../../features/providers/composition/codex-provider-registration.js";
+import { registerClaudeProvider } from "../../features/providers/composition/claude-provider-registration.js";
+import { CleanForker } from "../../features/handoff/index.js";
 import { registerCursorProvider } from "../../features/providers/composition/cursor-provider-registration.js";
 import { registerDevinProvider } from "../../features/providers/composition/devin-provider-registration.js";
 import { CursorAdminUsageSource } from "../../features/providers/adapters/cursor/usage/cursor-admin-usage-source.js";
@@ -244,6 +246,15 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
     { useClass: RecapService },
     { lifecycle: Lifecycle.Singleton },
   );
+
+  registerClaudeProvider(container, {
+    configuration: {
+      cliPath: container.resolve(SettingsService).get().provider.cli.claude || "claude",
+      idleSessionTtlMs: 10 * 60 * 1_000,
+    },
+    host: container.resolve("ProviderHostPorts"),
+    claude: { createForker: (generator) => new CleanForker(generator) },
+  });
 
   const codexProvider = registerCodexProvider(container, {
     configuration: {

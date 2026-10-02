@@ -11,7 +11,7 @@ import {
   SandboxWorktreeCleanupPolicy,
 } from "../../../projects/index.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
-import type { ClaudeProvider } from "../../../providers/adapters/claude/claude-provider.js";
+import type { ClaudeProviderBoundary as ClaudeProvider } from "@mcode/providers";
 import { ThreadDeletionTeardownService } from "../../lifecycle/thread-deletion-teardown-service.js";
 import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { ThreadControlMutationReservationService } from "../../index.js";

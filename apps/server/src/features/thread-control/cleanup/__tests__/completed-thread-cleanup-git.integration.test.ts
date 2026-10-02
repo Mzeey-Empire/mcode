@@ -20,7 +20,7 @@ import { RepositoryGitMutationLock } from "../../../projects/git/repository-git-
 import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
 import { getMcodeDir } from "@mcode/shared";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import type { ClaudeProvider } from "../../../providers/adapters/claude/claude-provider.js";
+import type { ClaudeProviderBoundary as ClaudeProvider } from "@mcode/providers";
 import type { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import type { HandoffStorage } from "../../../handoff/index.js";
 import type { ThreadDeletionTeardownService } from "../../lifecycle/thread-deletion-teardown-service.js";

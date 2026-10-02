@@ -1,7 +1,8 @@
 import "reflect-metadata";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Thread, IProviderRegistry, TurnRequest } from "@mcode/contracts";
+import type { ClaudeProviderBoundary } from "@mcode/providers";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { AgentService } from "../agent-service.js";
 import {
@@ -73,7 +74,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 /** Build an AgentService over a fake provider whose `sendTurn` the test scripts per attempt. */
 function buildService(): {
   service: AgentService;
-  sendTurn: ReturnType<typeof vi.fn>;
+  sendTurn: Mock<(request: TurnRequest) => Promise<void>>;
   discardSession: ReturnType<typeof vi.fn>;
   waitForSessionExit: ReturnType<typeof vi.fn>;
   threadControlMcp: { activate: ReturnType<typeof vi.fn> };
@@ -81,12 +82,18 @@ function buildService(): {
   messageRepo: MessageRepo;
   mutationReservations: ThreadControlMutationReservationService;
   threadRepo: ThreadRepo & { clearSdkSessionId: ReturnType<typeof vi.fn>; updateStatus: ReturnType<typeof vi.fn> };
+  stopSession: ReturnType<typeof vi.fn>;
+  canonicalDeliveryHandlers: Array<Parameters<ClaudeProviderBoundary["setCanonicalTurnDeliveryFailureHandler"]>[0]>;
 } {
   const thread = makeThread();
+  const canonicalDeliveryHandlers: Array<Parameters<ClaudeProviderBoundary["setCanonicalTurnDeliveryFailureHandler"]>[0]> = [];
   const providerEmitter = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
     id: "claude" as const,
+    setCanonicalTurnDeliveryFailureHandler: (handler: Parameters<ClaudeProviderBoundary["setCanonicalTurnDeliveryFailureHandler"]>[0]) => {
+      canonicalDeliveryHandlers.push(handler);
+    },
   }));
-  const sendTurn = vi.fn(() => Promise.resolve());
+  const sendTurn = vi.fn<(request: TurnRequest) => Promise<void>>(() => Promise.resolve());
   (providerEmitter as unknown as { sendTurn: typeof sendTurn }).sendTurn = sendTurn;
   const stopSession = vi.fn().mockResolvedValue(undefined);
   (providerEmitter as unknown as { stopSession: typeof stopSession }).stopSession = stopSession;
@@ -210,6 +217,8 @@ function buildService(): {
     threadRepo,
     threadControlMcp,
     mutationReservations,
+    stopSession,
+    canonicalDeliveryHandlers,
   };
 }
 
@@ -217,6 +226,90 @@ function synthesizedTurnCompleteEvents(events: Array<Record<string, unknown>>): 
   return events.filter((event) => event.type === "turnComplete"
     && (event.reason === "message_received" || event.reason === "provider_stream_exhausted"));
 }
+
+function canonicalFailureFor(fixture: ReturnType<typeof buildService>) {
+  const request = fixture.sendTurn.mock.calls.at(-1)?.[0];
+  const handler = fixture.canonicalDeliveryHandlers.at(-1);
+  if (!request || !handler) throw new Error("Claude dispatch did not install its canonical delivery handler");
+  return {
+    handler,
+    routing: {
+      threadId: request.threadId,
+      turnId: request.turnId,
+      executionId: request.turnExecutionId,
+      deliveryAttempt: request.deliveryAttempt ?? 1,
+    },
+  };
+}
+
+async function sendClaudeTurn(fixture: ReturnType<typeof buildService>): Promise<void> {
+  startAgentServiceIngressForTest(fixture.service);
+  await fixture.service.sendMessage({
+    threadId: THREAD_ID, content: "hello", permissionMode: "full",
+    model: "claude-sonnet-4-6", attachments: [], provider: "claude",
+  });
+}
+
+describe("Claude canonical delivery failure ownership", () => {
+  it("fails the matching legacy turn without retrying its provider work", async () => {
+    const fixture = buildService();
+    await sendClaudeTurn(fixture);
+    const { handler, routing } = canonicalFailureFor(fixture);
+    await handler(routing, new Error("canonical sink rejected"));
+    await waitForAgentServiceIngressForTest(fixture.service, THREAD_ID);
+
+    expect(fixture.service.runtimeAccess().runtimeSnapshots().find(snapshot => snapshot.threadId === THREAD_ID))
+      .toMatchObject({ phase: "errored", turnExecutionId: routing.executionId });
+    expect(fixture.service.runtimeAccess().activeCount()).toBe(0);
+    expect(fixture.sendTurn).toHaveBeenCalledTimes(1);
+    expect(fixture.stopSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
+    expect(fixture.threadRepo.updateStatus).toHaveBeenCalledWith(THREAD_ID, "errored");
+  });
+
+  it.each([
+    { threadId: "other-thread" },
+    { turnId: "other-turn" },
+    { executionId: "previous-execution" },
+    { deliveryAttempt: 2 },
+  ])("ignores a failure from another canonical identity %j", async stale => {
+    const fixture = buildService();
+    await sendClaudeTurn(fixture);
+    const { handler, routing } = canonicalFailureFor(fixture);
+    await handler({ ...routing, ...stale }, new Error("stale sink failure"));
+    expect(fixture.service.runtimeAccess().runtimeSnapshots().find(snapshot => snapshot.threadId === THREAD_ID))
+      .toMatchObject({ phase: "running", turnExecutionId: routing.executionId });
+    expect(fixture.service.runtimeAccess().activeCount()).toBe(1);
+    expect(fixture.stopSession).not.toHaveBeenCalled();
+
+    await handler(routing, new Error("current sink failure"));
+    await waitForAgentServiceIngressForTest(fixture.service, THREAD_ID);
+    expect(fixture.service.runtimeAccess().runtimeSnapshots().find(snapshot => snapshot.threadId === THREAD_ID)?.phase).toBe("errored");
+  });
+
+  it("preserves a completed user stop when a sink callback arrives late", async () => {
+    const fixture = buildService();
+    await sendClaudeTurn(fixture);
+    const { handler, routing } = canonicalFailureFor(fixture);
+    const stopped = await fixture.service.stopSession(THREAD_ID);
+    await handler(routing, new Error("late sink failure"));
+    expect(stopped).toMatchObject({ status: "cancelled", threadId: THREAD_ID, turnExecutionId: routing.executionId });
+    expect(fixture.service.runtimeAccess().runtimeSnapshots().find(snapshot => snapshot.threadId === THREAD_ID)?.phase).toBe("cancelled");
+    expect(fixture.service.runtimeAccess().activeCount()).toBe(0);
+    expect(fixture.stopSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles the failed turn while its SDK stream stop is still pending", async () => {
+    const fixture = buildService();
+    await sendClaudeTurn(fixture);
+    const { handler, routing } = canonicalFailureFor(fixture);
+    fixture.stopSession.mockReturnValue(new Promise<void>(() => {}));
+    await handler(routing, new Error("canonical sink rejected"));
+    await waitForAgentServiceIngressForTest(fixture.service, THREAD_ID);
+    expect(fixture.service.runtimeAccess().runtimeSnapshots().find(snapshot => snapshot.threadId === THREAD_ID)?.phase).toBe("errored");
+    expect(fixture.service.runtimeAccess().activeCount()).toBe(0);
+    expect(fixture.stopSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
+  });
+});
 
 afterEach(closeAgentStorageTestDatabases);
 

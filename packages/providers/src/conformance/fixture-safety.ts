@@ -8,6 +8,7 @@ import type {
   SanitizedTraceEvent,
 } from "./types.js";
 import { PROVIDER_CONFORMANCE_CONTRACT_VERSION } from "./types.js";
+import { ClaudeNativeTraceSchema } from "./claude-native-trace-schema.js";
 
 const PROVIDER_IDS = new Set(["claude", "codex", "copilot", "cursor", "opencode"]);
 const PROFILES = new Set([
@@ -67,8 +68,13 @@ export function loadProviderFixtureManifest(filePath: string): ProviderFixtureMa
 
 /** Rejects unsafe, incomplete, or stale Provider fixture manifests. */
 export function validateProviderFixtureManifest(value: unknown): ProviderFixtureManifest {
-  rejectForbiddenContent(value);
   const manifest = requireRecord(value, "fixture manifest");
+  const nativeInput = requireRecord(manifest.input, "input");
+  if (nativeInput.claudeNativeTrace !== undefined) {
+    if (manifest.providerId !== "claude") throw new TypeError("Claude native trace requires the Claude provider");
+    ClaudeNativeTraceSchema.parse(nativeInput.claudeNativeTrace);
+    rejectForbiddenContent({ ...manifest, input: { ...nativeInput, claudeNativeTrace: undefined } });
+  } else rejectForbiddenContent(value);
   requireExactKeys(manifest, [
     "contractVersion",
     "providerId",
@@ -84,7 +90,7 @@ export function validateProviderFixtureManifest(value: unknown): ProviderFixture
   ], "fixture manifest");
   const isCursor = validateManifestMetadata(manifest);
   validateManifestRedaction(manifest.redaction);
-  validateManifestInput(manifest.input, isCursor);
+  validateManifestInput(manifest.input, isCursor, manifest.providerId === "claude");
   validateManifestExpected(manifest.expected);
 
   const typed = manifest as unknown as ProviderFixtureManifest;
@@ -125,9 +131,9 @@ function validateManifestRedaction(value: unknown): void {
   requireStringArray(redaction.removedFields, "removedFields", 64);
 }
 
-function validateManifestInput(value: unknown, isCursor: boolean): void {
+function validateManifestInput(value: unknown, isCursor: boolean, isClaude: boolean): void {
   const input = requireRecord(value, "input");
-  requireExactKeys(input, isCursor ? ["events", "cursorAcpTrace"] : ["events"], "input");
+  requireExactKeys(input, isCursor ? ["events", "cursorAcpTrace"] : isClaude ? ["events", "claudeNativeTrace"] : ["events"], "input");
   if (!Array.isArray(input.events) || input.events.length === 0 || input.events.length > 10_000) {
     throw new TypeError("Provider fixture events are invalid");
   }
