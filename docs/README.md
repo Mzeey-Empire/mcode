@@ -94,6 +94,6 @@ adding pages.
 ## References and working material
 
 - [Settings reference](settings/reference.md): per-setting reference for `settings.json`
-- `design/`, `performance/`, `plans/`, `prototypes/`, `research/`, and
+- `design/`, `performance/`, `plans/`, `research/`, and
   `security/` hold point-in-time working material. They are not maintained
   documentation; move durable knowledge into `docs/internals/` or an ADR.
