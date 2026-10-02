@@ -1,4 +1,5 @@
 import type { StoredAttachment, ThoughtSegmentRecord, ToolCall } from "@/transport";
+import type { AgentEvent } from "@mcode/contracts";
 import type { ThoughtSegment } from "@/features/conversation/narrative/types";
 
 function looksLikeContinuation(previousText: string, nextText: string): boolean {
@@ -43,8 +44,17 @@ export function appendThoughtSegment(
   segments: ThoughtSegment[],
   text: string,
   isExplicitNonFinal: boolean,
+  textItemId?: string,
 ): ThoughtSegment[] {
   if (text.length === 0) return segments;
+  if (textItemId) {
+    const owned = segments.findIndex((segment) => segment.id === textItemId);
+    if (owned >= 0) return segments.map((segment, index) => index === owned && segment.endedAt === undefined
+      ? { ...segment, text: segment.text + text } : segment);
+    const now = Date.now();
+    return [...segments.map((segment) => segment.endedAt === undefined ? { ...segment, endedAt: now } : segment),
+      { ...newThoughtSegment(text, isExplicitNonFinal), id: textItemId }];
+  }
   const last = segments.at(-1);
   const reopen = shouldReopenThought(last, text);
   if (!last || (last.endedAt !== undefined && !reopen)) {
@@ -56,16 +66,21 @@ export function appendThoughtSegment(
   ];
 }
 
-/** Applies the authoritative assistant-message boundary to the open thought segment. */
+/** Applies an authoritative boundary to the exact open or closed item when identified. */
 export function projectAssistantMessageBoundary(
   segments: ThoughtSegment[],
-  isFinalResponse: boolean,
+  boundary: boolean | Extract<AgentEvent, { type: "assistantMessageBoundary" }>,
 ): ThoughtSegment[] | undefined {
-  const last = segments.at(-1);
-  if (!last || last.endedAt !== undefined) return undefined;
-  return isFinalResponse
-    ? segments.slice(0, -1)
-    : [...segments.slice(0, -1), { ...last, endedAt: Date.now() }];
+  const event = typeof boundary === "boolean" ? { isFinalResponse: boundary } : boundary;
+  const index = "textItemId" in event && event.textItemId
+    ? segments.findIndex((segment) => segment.id === event.textItemId)
+    : segments.length - 1;
+  const segment = segments[index];
+  if (!segment || (!("textItemId" in event && event.textItemId) && segment.endedAt !== undefined)) return undefined;
+  if (event.isFinalResponse) return segments.filter((_, candidateIndex) => candidateIndex !== index);
+  return segments.map((candidate, candidateIndex) => candidateIndex === index
+    ? { ...candidate, text: "content" in event && event.content !== undefined ? event.content : candidate.text,
+      endedAt: candidate.endedAt ?? Date.now() } : candidate);
 }
 
 /** Updates tool progress without notifying state subscribers when no call changed. */
@@ -103,6 +118,7 @@ export function persistedThoughtToSegment(record: ThoughtSegmentRecord): Thought
   const startedAt = Date.parse(record.started_at);
   const endedAt = record.ended_at ? Date.parse(record.ended_at) : NaN;
   return {
+    id: record.id,
     text: record.text,
     startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
     endedAt: Number.isFinite(endedAt) ? endedAt : undefined,

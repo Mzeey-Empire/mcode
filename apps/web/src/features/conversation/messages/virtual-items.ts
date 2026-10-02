@@ -138,6 +138,8 @@ export interface TranscriptProjectionInput {
   agentStartTime: number | undefined;
   /** Latest streamed assistant text. */
   streamingText: string | undefined;
+  /** Text openness does not describe the execution lifecycle. */
+  responseTextIsStreaming?: boolean;
   /** Permission requests for the active turn. */
   permissions?: Parameters<typeof buildVolatileItems>[4];
   /** Hook events for the active turn. */
@@ -198,6 +200,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       | "latestTurnWithChanges"
       | "currentTurn"
       | "agentDisplayState"
+      | "responseTextIsStreaming"
       | "persistedNarrativeByMessage"
       | "turnSummariesByMessageId"
     >
@@ -211,17 +214,11 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       latestTurnWithChanges: input.latestTurnWithChanges,
       currentTurn: input.currentTurn,
       agentDisplayState: input.agentDisplayState,
+      responseTextIsStreaming: input.responseTextIsStreaming,
       persistedNarrativeByMessage: input.persistedNarrativeByMessage,
       turnSummariesByMessageId: input.turnSummariesByMessageId,
     };
-    const stableItems = previousStableInput
-      && previousStableInput.messages === stableInput.messages
-      && previousStableInput.persistedFilesChanged === stableInput.persistedFilesChanged
-      && previousStableInput.latestTurnWithChanges === stableInput.latestTurnWithChanges
-      && previousStableInput.currentTurn === stableInput.currentTurn
-      && previousStableInput.agentDisplayState === stableInput.agentDisplayState
-      && previousStableInput.persistedNarrativeByMessage === stableInput.persistedNarrativeByMessage
-      && previousStableInput.turnSummariesByMessageId === stableInput.turnSummariesByMessageId
+    const stableItems = sameStableTranscriptInput(previousStableInput, stableInput)
       ? previousStableItems
       : buildStableItems(
         stableInput.messages,
@@ -231,6 +228,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
         stableInput.persistedNarrativeByMessage,
         stableInput.turnSummariesByMessageId,
         stableInput.agentDisplayState,
+        stableInput.responseTextIsStreaming,
       );
     previousStableInput = stableInput;
     previousStableItems = stableItems;
@@ -245,10 +243,26 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       input.thoughtSegments,
       input.currentTurn,
       input.committedAssistantBody,
+      input.responseTextIsStreaming,
     );
     const responseMessageId = input.messages.find((message) => message.role === "assistant" && isCurrentResponse(message, stableInput))?.id;
     return buildVirtual(stableItems, volatileItems, hasLiveNarrative(input), responseMessageId);
   };
+}
+
+type StableTranscriptInput = Pick<TranscriptProjectionInput,
+  "messages" | "persistedFilesChanged" | "latestTurnWithChanges" | "currentTurn" | "agentDisplayState"
+  | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId">;
+
+function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, current: StableTranscriptInput): boolean {
+  return previous !== undefined && previous.messages === current.messages
+    && previous.persistedFilesChanged === current.persistedFilesChanged
+    && previous.latestTurnWithChanges === current.latestTurnWithChanges
+    && previous.currentTurn === current.currentTurn
+    && previous.agentDisplayState === current.agentDisplayState
+    && previous.responseTextIsStreaming === current.responseTextIsStreaming
+    && previous.persistedNarrativeByMessage === current.persistedNarrativeByMessage
+    && previous.turnSummariesByMessageId === current.turnSummariesByMessageId;
 }
 
 function hasLiveNarrative(input: TranscriptProjectionInput): boolean {
@@ -262,6 +276,7 @@ export type ChatVirtualItem =
       type: "message";
       message: Message;
       agentDisplayState?: AgentDisplayState;
+      textIsStreaming?: boolean;
     }
   | { key: string; type: "active-tools"; toolCalls: readonly ToolCall[] }
   | {
@@ -357,9 +372,10 @@ export function buildStableItems(
   persistedNarrativeByMessage?: PersistedNarrativeRecordsByMessage,
   turnSummariesByMessageId?: Record<string, TurnFooterSummary>,
   currentAgentDisplayState?: AgentDisplayState,
+  responseTextIsStreaming?: boolean,
 ): ChatVirtualItem[] {
   return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
-    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState,
+    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming,
   }));
 }
 
@@ -370,6 +386,7 @@ interface StableItemInput {
   persistedNarrativeByMessage?: PersistedNarrativeRecordsByMessage;
   turnSummariesByMessageId?: Record<string, TurnFooterSummary>;
   currentAgentDisplayState?: AgentDisplayState;
+  responseTextIsStreaming?: boolean;
 };
 
 function hasPersistedNarrative(records: PersistedNarrativeRecordsByMessage[string] | undefined): boolean {
@@ -401,7 +418,7 @@ function messageVirtualItem(message: Message, input: StableItemInput): ChatVirtu
   const display = message.role === "assistant"
     ? currentResponseState(message, input) ?? agentDisplayStateFromOutcome(outcome)
     : undefined;
-  return { key: agentMessageItemKey(message, input.currentTurn), type: "message", message, ...(display ? { agentDisplayState: display } : {}) };
+  return { key: agentMessageItemKey(message, input.currentTurn), type: "message", message, ...(display ? { agentDisplayState: display, textIsStreaming: isCurrentResponse(message, input) && isAgentDisplayActive(display) ? input.responseTextIsStreaming : undefined } : {}) };
 }
 
 function footerSummary(message: Message, input: StableItemInput): TurnFooterSummary | undefined {
@@ -486,6 +503,7 @@ export function buildVolatileItems(
   thoughtSegments?: readonly ThoughtSegment[],
   currentTurn?: CurrentTurnResponseIdentity,
   committedAssistantBody?: string,
+  responseTextIsStreaming?: boolean,
 ): ChatVirtualItem[] {
   const isAgentRunning = isAgentDisplayActive(agentDisplayState);
   const resolvedHooks = hooks ?? EMPTY_HOOKS;
@@ -500,7 +518,7 @@ export function buildVolatileItems(
 
   return [
     narrativeFlowItem(toolCalls, resolvedHooks, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning, agentStartTime, committedAssistantBody),
-    liveResponseItem(liveText, currentTurn, agentDisplayState),
+    liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
     narrativeIndicatorItem(toolCalls, isAgentRunning, agentStartTime, resolvedThoughtSegments),
     ...permissionRequestItems(permissions),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
@@ -510,11 +528,11 @@ function narrativeFlowItem(toolCalls: readonly ToolCall[], hooks: readonly HookE
   return isAgentRunning || toolCalls.length > 0 ? { key: "narrative-flow", type: "narrative-flow", toolCalls, hooks, thoughtSegments: thoughts, streamingText: liveText.length > 0 ? "" : streamingText, isAgentRunning, startTime, committedAssistantBody } : undefined;
 }
 
-function liveResponseItem(liveText: string, currentTurn: CurrentTurnResponseIdentity | undefined, agentDisplayState: AgentDisplayState | undefined): ChatVirtualItem | undefined {
+function liveResponseItem(liveText: string, currentTurn: CurrentTurnResponseIdentity | undefined, agentDisplayState: AgentDisplayState | undefined, textIsStreaming?: boolean): ChatVirtualItem | undefined {
   if (liveText.length === 0) return undefined;
   const threadId = currentTurn?.threadId ?? "__active_thread__";
   const responseKey = liveFinalResponseItemKey(threadId, currentTurn?.responseKey);
-  return { key: responseKey, type: "message", message: { id: responseKey, thread_id: threadId, role: "assistant", content: liveText, tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: new Date(0).toISOString(), sequence: Number.MAX_SAFE_INTEGER, attachments: null }, agentDisplayState: agentDisplayState?.phase === "finalizing" ? { phase: "finalizing" } : { phase: "streaming" } };
+  return { key: responseKey, type: "message", message: { id: responseKey, thread_id: threadId, role: "assistant", content: liveText, tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: new Date(0).toISOString(), sequence: Number.MAX_SAFE_INTEGER, attachments: null }, textIsStreaming, agentDisplayState: agentDisplayState?.phase === "finalizing" ? { phase: "finalizing" } : { phase: "streaming" } };
 }
 
 function narrativeIndicatorItem(toolCalls: readonly ToolCall[], isAgentRunning: boolean, startTime: number | undefined, thoughts: readonly ThoughtSegment[]): ChatVirtualItem | undefined {
@@ -572,7 +590,7 @@ function sameMessage(left: Message, right: Message): boolean {
 }
 
 function sameMessageVirtualItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "message" && right.type === "message" && sameMessage(left.message, right.message) && sameAgentDisplayState(left.agentDisplayState, right.agentDisplayState);
+  return left.type === "message" && right.type === "message" && sameMessage(left.message, right.message) && left.textIsStreaming === right.textIsStreaming && sameAgentDisplayState(left.agentDisplayState, right.agentDisplayState);
 }
 
 function sameActiveToolsItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {

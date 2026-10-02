@@ -303,7 +303,7 @@ export class CodexLiveEventReducer {
       }
     }
     if (event.isFinalResponse === false) {
-      this.narrative.openOrExtendThought(event.threadId, event.delta);
+      this.narrative.openOrExtendThought(event.threadId, event.delta, event.textItemId);
       writer.push(this.recovery());
     } else {
       this.assistant.appendStreamingText(event.delta);
@@ -316,15 +316,15 @@ export class CodexLiveEventReducer {
 
   private boundary(event: Extract<AgentEvent, { type: "assistantMessageBoundary" }>): CodexLiveWriterIntent[] {
     const writer: CodexLiveWriterIntent[] = [];
+    const settlement = this.narrative.settleAssistantTextItem(event.threadId, event);
     if (event.isFinalResponse) {
-      const text = this.narrative.takeOpenThought(event.threadId);
+      const text = settlement.kind === "promoted" ? settlement.text : "";
       if (text) {
         this.assistant.appendStreamingText(text);
         writer.push({ kind: "assistant-text-promote", text });
       }
       this.unknownText = "";
     } else {
-      this.narrative.closeOpenThought(event.threadId);
       if (this.unknownText) {
         const staged = this.narrative.stageNarrationSegment(event.threadId, this.unknownText);
         if (staged) this.narrative.applyStagedNarrationSegment(event.threadId, staged);

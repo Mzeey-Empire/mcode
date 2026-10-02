@@ -23,6 +23,8 @@ export interface SubagentActivity {
  * Contiguous streamed reasoning text for one timeline row, bounded by tool use or turn end.
  */
 export interface ThoughtSegment {
+  /** Stable persisted record identity when supplied by the provider. */
+  id?: string;
   /** Accumulated textDelta content for this segment. */
   text: string;
   /** Epoch ms when the first textDelta for this segment arrived. */

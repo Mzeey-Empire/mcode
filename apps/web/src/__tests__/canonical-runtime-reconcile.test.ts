@@ -125,6 +125,66 @@ describe("canonical runtime reconciliation", () => {
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
+  it("restores partial final text and a closed full answer while its native turn remains active", () => {
+    const textSlot = (content: string, isStreaming: boolean) => ({ id: `assistant-response-text:${EXECUTION_ID}`,
+      threadId: THREAD_ID, turnId: TURN_ID, kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+      payload: { projection: "assistantText", content, isStreaming } } satisfies import("@mcode/contracts").AgentItem);
+    const prompt: Message = { id: "admitted-prompt", thread_id: THREAD_ID, role: "user", content: "Prompt",
+      timestamp: NOW, sequence: 1, attachments: null, cost_usd: null, tokens_used: null, tool_calls: null, files_changed: null };
+    const partial = [...promptAdmission(prompt), envelope("partial", 5, EXECUTION_ID, {
+      type: "item.recorded", item: textSlot("Partial answer", true) })];
+    const reduced = reduceAgentEventBatch(createAgentModelState(), partial);
+    if (reduced.outcome !== "applied") throw new Error("Invalid partial fixture");
+    seedRuntime("running", EXECUTION_ID, true);
+    useThreadStore.getState().applyCanonicalReconnectRecoveries([{ mode: "snapshot", threadId: THREAD_ID,
+      snapshot: { revision: { conversationRevision: 5, rosterRevision: 0 }, state: reduced.state } }]);
+    expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("Partial answer");
+    expect(readThreadField(THREAD_ID, (record) => record.responseTextIsStreaming)).toBe(true);
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(true);
+    const response: Message = { id: "closed-answer", thread_id: THREAD_ID, role: "assistant", content: "Authoritative answer",
+      timestamp: NOW, sequence: 2, attachments: null, cost_usd: null, tokens_used: null, tool_calls: null, files_changed: null };
+    const closed = [envelope("closed", 6, EXECUTION_ID, { type: "item.recorded", item: textSlot(response.content, false) }),
+      envelope("closed-message", 7, EXECUTION_ID, { type: "item.recorded", item: { id: "message:closed-answer",
+        threadId: THREAD_ID, turnId: TURN_ID, kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+        payload: { projection: "message", message: response } } })];
+    const boundary = closed[0]; const message = closed[1];
+    if (!boundary || !message) throw new Error("Missing closed fixture");
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [boundary]);
+    expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe(response.content);
+    expect(readThreadField(THREAD_ID, (record) => record.responseTextIsStreaming)).toBe(false);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [message]);
+    expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("");
+    expect(readThreadField(THREAD_ID, (record) => record.responseTextIsStreaming)).toBe(false);
+    expect(readThreadField(THREAD_ID, (record) => record.messages)).toContainEqual(response);
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(true);
+    const reopened = envelope("next-final", 8, EXECUTION_ID, { type: "item.recorded", item: textSlot("Next final item", true) });
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [reopened]);
+    expect(readThreadField(THREAD_ID, (record) => record.streaming)).toBe("Next final item");
+    expect(readThreadField(THREAD_ID, (record) => record.responseTextIsStreaming)).toBe(true);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [envelope("done", 9, EXECUTION_ID, { type: "turn.completed", endedAt: NOW })]);
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
+  });
+
+  it("clears the last discarded keyed narration from an owning snapshot without erasing unrelated tools", () => {
+    const id = `assistant-text:${"a".repeat(64)}`;
+    const events = [...turnEvents(EXECUTION_ID), envelope("discarded", 4, EXECUTION_ID, { type: "item.recorded", item: {
+      id: `narrationSegment:${id}`, threadId: THREAD_ID, turnId: TURN_ID, kind: "reasoning", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+      payload: { projection: "narrativeRecoveryDiscarded", narrative: { kind: "narrationSegment", record: {
+        id, message_id: "", text: "Final", started_at: NOW, ended_at: NOW, sort_order: 0, is_final_response: 0 } } },
+    } })];
+    const reduced = reduceAgentEventBatch(createAgentModelState(), events);
+    if (reduced.outcome !== "applied") throw new Error("Invalid discarded fixture");
+    seedRuntime("running", EXECUTION_ID, true);
+    useThreadStore.setState({ records: seedThreadRecord(THREAD_ID, {
+      thoughtSegments: [{ id, text: "Final", startedAt: 1, endedAt: 2 }],
+      toolCalls: [{ id: "unrelated-tool", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false }],
+    }) });
+    useThreadStore.getState().applyCanonicalReconnectRecoveries([{ mode: "snapshot", threadId: THREAD_ID,
+      snapshot: { revision: { conversationRevision: 4, rosterRevision: 0 }, state: reduced.state } }]);
+    expect(readThreadField(THREAD_ID, (record) => record.thoughtSegments)).toEqual([]);
+    expect(readThreadField(THREAD_ID, (record) => record.toolCalls)).toHaveLength(1);
+  });
+
   it("clears a stale running flag when the correlated canonical turn terminates", () => {
     seedRuntime("running", EXECUTION_ID, true);
 

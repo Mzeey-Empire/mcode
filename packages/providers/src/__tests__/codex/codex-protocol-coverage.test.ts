@@ -225,7 +225,7 @@ describe("Codex protocol coverage", () => {
     }
   }, GOLDEN_REPLAY_TIMEOUT_MS);
 
-  it("classifies Codex assistant text with assistantMessageBoundary, not final text deltas", () => {
+  it("streams known final answers and closes assistant text with assistantMessageBoundary", () => {
     const { events } = replay(notifications);
     const assistantDeltas = events.filter(
       (e) => e.type === AgentEventType.TextDelta && e.isFinalResponse === true,
@@ -245,7 +245,12 @@ describe("Codex protocol coverage", () => {
         ),
     );
 
-    expect(assistantDeltas).toHaveLength(0);
+    const hasKnownFinalPhase = notifications.some((notification) => {
+      const item = notification.params.item;
+      return typeof item === "object" && item !== null && "phase" in item && item.phase === "final_answer";
+    });
+    if (hasKnownFinalPhase) expect(assistantDeltas.length).toBeGreaterThan(0);
+    else expect(assistantDeltas).toHaveLength(0);
     if (hasAssistantText) {
       expect(boundaries.length).toBeGreaterThan(0);
       expect(messages.length).toBeGreaterThan(0);

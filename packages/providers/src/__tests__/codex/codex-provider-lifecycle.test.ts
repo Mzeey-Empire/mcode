@@ -129,6 +129,26 @@ describe("Codex provider lifecycle through native transport", () => {
     }
   });
 
+  it("settles process exit even when optional assistant boundary projection throws", async () => {
+    const { provider, child, starts, events } = createProvider();
+    let fault: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await provider.sendTurn(request);
+      await vi.waitFor(() => expect(starts()).toHaveLength(1));
+      fault = vi.spyOn(CodexEventMapper.prototype, "drainPendingAssistantBoundary")
+        .mockImplementationOnce(() => { throw new Error("optional boundary projection failed"); });
+      expect(() => child.emit("exit", 1, null)).not.toThrow();
+      await vi.waitFor(() => expect(events).toContainEqual({ deliveryAttempt: 1, event: {
+        type: AgentEventType.Ended, threadId: request.threadId,
+        turnExecutionId: request.turnExecutionId, outcome: "errored",
+      } }));
+      expect(events.filter(({ event }) => event.type === AgentEventType.Ended)).toHaveLength(1);
+    } finally {
+      fault?.mockRestore();
+      await provider.shutdown();
+    }
+  });
+
   it("consumes native completion even when its optional mapper throws", async () => {
     const { provider, complete, events } = createProvider();
     let mapperFault: ReturnType<typeof vi.spyOn> | undefined;

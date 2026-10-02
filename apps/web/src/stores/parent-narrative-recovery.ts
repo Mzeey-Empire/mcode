@@ -14,8 +14,32 @@ export function recoverParentNarrative(threadId: string, state: AgentModelState,
   if (items.length === 0 && !record) return {};
   const narrative = recoveredNarrative(turn, items);
   return {
-    ...(items.length > 0 ? narrative.patch : {}),
-    ...(narrative.terminal && record ? recoveredTerminalResponse(threadId, turn, state, record, narrative.streaming) : {}),
+    ...(items.length > 0 ? narrative.patch : emptyOwnedNarrativePatch(turn, state, record)),
+    ...recoveredAssistantText(turn, state),
+    ...(record ? recoveredResponse(threadId, turn, state, record, narrative.streaming, narrative.terminal) : {}),
+  };
+}
+
+function recoveredAssistantText(turn: AgentTurn, state: AgentModelState): Partial<ThreadRecord> {
+  const item = state.items[`assistant-response-text:${turn.executionId}`];
+  if (!item || item.turnId !== turn.id || item.payload.projection !== "assistantText") return {};
+  const content = typeof item.payload.content === "string" ? item.payload.content : "";
+  const active = turn.status === "Running";
+  const open = responseTextIsOpen(turn, state);
+  const hasBody = persistedAssistantMessage(state, turn) !== undefined;
+  const visible = active && (open || !hasBody) ? content : "";
+  return { streaming: visible, streamingPreview: visible.slice(-200), responseTextIsStreaming: open };
+}
+
+function emptyOwnedNarrativePatch(turn: AgentTurn, state: AgentModelState, record: ThreadRecord | undefined): Partial<ThreadRecord> {
+  if (!record || record.turnExecutionId !== turn.executionId) return {};
+  const discarded = Object.values(state.items).filter((item) => item.turnId === turn.id
+    && item.payload.projection === "narrativeRecoveryDiscarded")
+    .flatMap((item) => ParentNarrativeRecoveryItemSchema().parse(item.payload.narrative));
+  return {
+    ...(discarded.some((item) => item.kind === "narrationSegment") ? { thoughtSegments: [] } : {}),
+    ...(discarded.some((item) => item.kind === "toolCall") ? { toolCalls: [] } : {}),
+    ...(discarded.some((item) => item.kind === "hook") ? { hooks: [] } : {}),
   };
 }
 
@@ -56,32 +80,50 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
       return terminal ? { ...tool, isComplete: true } : tool;
     }),
     thoughtSegments: thoughts.filter((item) => item.record.is_final_response !== 1).map(({ record }) => ({
-      text: record.text, startedAt: Date.parse(record.started_at),
+      id: record.id, text: record.text, startedAt: Date.parse(record.started_at),
       ...(record.ended_at ? { endedAt: Date.parse(record.ended_at) } : {}),
       isExplicitNonFinal: record.is_final_response === 0 || record.ended_at !== null,
     })),
     hooks: hooks.map((item) => recordToHookExecution(item.record)),
     streaming: terminal ? "" : streaming, streamingPreview: terminal ? "" : streaming.slice(-200),
+    responseTextIsStreaming: !terminal && thoughts.some((item) => item.record.is_final_response === 1
+      && item.record.ended_at === null && item.record.text.length > 0),
     agentStartTime: Date.parse(turn.startedAt ?? turn.createdAt),
   };
   return { patch, terminal, streaming };
 }
 
-function recoveredTerminalResponse(threadId: string, turn: AgentTurn, state: AgentModelState, record: ThreadRecord, text: string): Partial<ThreadRecord> {
-  const persisted = Object.values(state.items).filter((item) => item.turnId === turn.id && item.payload.projection === "message")
-    .map((item) => MessageSchema().safeParse(item.payload.message)).find((parsed) => parsed.success && parsed.data.role === "assistant");
-  if (!persisted && text.length === 0) return {};
-  const id = persisted?.success ? persisted.data.id : record.currentTurnMessageId || `canonical-recovery:${turn.id}`;
+function recoveredResponse(threadId: string, turn: AgentTurn, state: AgentModelState, record: ThreadRecord, text: string, terminal: boolean): Partial<ThreadRecord> {
+  const persisted = persistedAssistantMessage(state, turn);
+  if (!persisted && (!terminal || text.length === 0)) return {};
+  const id = persisted?.id ?? (record.currentTurnMessageId || `canonical-recovery:${turn.id}`);
   const previous = record.messages.find((message) => message.id === id);
-  const message = persisted?.success ? persisted.data : terminalMessage(threadId, turn, record, text, id, previous);
+  const message = persisted ?? terminalMessage(threadId, turn, record, text, id, previous);
   const responseKey = `canonical-turn-response:${turn.id}`;
   const replaced = new Set([id, ...(record.pendingTurnPersistMessageIds.includes(record.currentTurnMessageId) ? [record.currentTurnMessageId] : [])]);
   return {
     messages: [...record.messages.filter((candidate) => !replaced.has(candidate.id)), message],
+    ...(responseTextIsOpen(turn, state)
+      ? {} : { responseTextIsStreaming: false }),
     currentTurnMessageId: id,
     pendingTurnPersistMessageIds: [...new Set([...record.pendingTurnPersistMessageIds.filter((pending) => !replaced.has(pending)), id])],
     assistantResponseKeys: { ...record.assistantResponseKeys, [id]: responseKey },
   };
+}
+
+function responseTextIsOpen(turn: AgentTurn, state: AgentModelState): boolean {
+  const item = state.items[`assistant-response-text:${turn.executionId}`];
+  return turn.status === "Running" && item?.turnId === turn.id
+    && item.payload.projection === "assistantText" && item.payload.isStreaming === true;
+}
+
+function persistedAssistantMessage(state: AgentModelState, turn: AgentTurn): Message | undefined {
+  for (const item of Object.values(state.items)) {
+    if (item.turnId !== turn.id || item.payload.projection !== "message") continue;
+    const parsed = MessageSchema().safeParse(item.payload.message);
+    if (parsed.success && parsed.data.role === "assistant") return parsed.data;
+  }
+  return undefined;
 }
 
 function terminalMessage(threadId: string, turn: AgentTurn, record: ThreadRecord, text: string, id: string, previous: Message | undefined): Message {

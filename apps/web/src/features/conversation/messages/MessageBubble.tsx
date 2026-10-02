@@ -306,6 +306,8 @@ interface MessageBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
   /** Lifecycle state that controls the visible treatment of this agent response. */
   agentDisplayState?: AgentDisplayState;
+  /** Whether the response text remains open independently of turn activity. */
+  textIsStreaming?: boolean;
   /** Whether a child prompt displays its parent-agent provenance label. */
   showParentAgentProvenance?: boolean;
 }
@@ -839,16 +841,18 @@ function AssistantResponseText({
   message,
   assistantContentEmpty,
   agentDisplayState,
+  textIsStreaming,
   isAgentResponseComplete,
 }: {
   message: Message;
   assistantContentEmpty: boolean;
   agentDisplayState?: AgentDisplayState;
+  textIsStreaming?: boolean;
   isAgentResponseComplete: boolean;
 }) {
   if (assistantContentEmpty) return null;
-  const isStreaming = agentDisplayState?.phase === "streaming";
-  const renderDelta = isStreaming || agentDisplayState?.phase === "finalizing";
+  const isStreaming = textIsStreaming ?? agentDisplayState?.phase === "streaming";
+  const renderDelta = textIsStreaming !== undefined || isStreaming || agentDisplayState?.phase === "finalizing";
   return (
     <div className="text-sm text-foreground" data-testid="assistant-response-text" data-selected-text-content data-selected-text-eligible={isAgentResponseComplete ? "true" : "false"}>
       {renderDelta ? (
@@ -945,6 +949,7 @@ function AssistantMessageContent({
   onBranch,
   onScrollToMessage,
   agentDisplayState,
+  textIsStreaming,
 }: MessageBubbleProps) {
   const [imagePreviewIndex, setImagePreviewIndex] = useState<number | null>(null);
   const { imageAttachments, fileAttachments, imageSlides } = useMessageAttachments(message);
@@ -977,6 +982,7 @@ function AssistantMessageContent({
         message={message}
         assistantContentEmpty={assistantContentEmpty}
         agentDisplayState={agentDisplayState}
+        textIsStreaming={textIsStreaming}
         isAgentResponseComplete={isAgentResponseComplete}
       />
       <AssistantMessageFooter
@@ -999,13 +1005,14 @@ function MessageRoleContent({
   onBranch,
   onScrollToMessage,
   agentDisplayState,
+  textIsStreaming,
   showParentAgentProvenance = true,
 }: MessageBubbleProps) {
   if (message.role === "system") return <SystemMessageContent message={message} />;
   if (message.role === "user") {
     return <UserMessageContent message={message} interactive={interactive} onBranch={onBranch} onScrollToMessage={onScrollToMessage} agentDisplayState={agentDisplayState} showParentAgentProvenance={showParentAgentProvenance} />;
   }
-  return <AssistantMessageContent message={message} interactive={interactive} onBranch={onBranch} onScrollToMessage={onScrollToMessage} agentDisplayState={agentDisplayState} showParentAgentProvenance={showParentAgentProvenance} />;
+  return <AssistantMessageContent textIsStreaming={textIsStreaming} message={message} interactive={interactive} onBranch={onBranch} onScrollToMessage={onScrollToMessage} agentDisplayState={agentDisplayState} showParentAgentProvenance={showParentAgentProvenance} />;
 }
 
 /** Renders a single chat message and preserves memoization across unchanged props. */

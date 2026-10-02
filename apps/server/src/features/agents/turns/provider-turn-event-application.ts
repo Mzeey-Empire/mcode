@@ -338,7 +338,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     if (event.isFinalResponse === true) {
       this.finalizer.appendStreamingText(event.threadId, event.delta);
     } else if (event.isFinalResponse === false) {
-      this.narrative.openOrExtendThought(event.threadId, event.delta);
+      this.narrative.openOrExtendThought(event.threadId, event.delta, event.textItemId);
     } else {
       this.recordUnclassifiedAssistantText(event);
       this.finalizer.appendStreamingText(event.threadId, event.delta);
@@ -369,8 +369,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private applyAssistantMessageBoundary(event: Extract<AgentEvent, { type: "assistantMessageBoundary" }>): boolean {
+    const settlement = this.narrative.settleAssistantTextItem(event.threadId, event);
     if (event.isFinalResponse === true) {
-      const finalText = this.narrative.takeOpenThought(event.threadId);
+      const finalText = settlement.kind === "promoted" ? settlement.text : "";
       if (finalText) this.finalizer.appendStreamingText(event.threadId, finalText);
       if (event.turnExecutionId) this.unclassifiedAssistantTextStartByExecution.delete(event.turnExecutionId);
       return true;

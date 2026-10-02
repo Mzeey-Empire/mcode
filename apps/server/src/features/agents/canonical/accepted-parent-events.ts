@@ -64,7 +64,39 @@ function liveEffectEvents(input: PreparationInput, effects: ParentLiveEffects | 
     const message = assistantMessage(input, effects.message.messageId, effects.message);
     events.push(messageEvent(input, message));
   }
+  events.push(...assistantTextEvents(input, effects));
   return events;
+}
+
+function assistantTextEvents(input: PreparationInput, effects: ParentLiveEffects): CanonicalAgentEventDraft[] {
+  const closed = input.operation.livePublication?.map((publication) => publication.event)
+    .find((event) => event.type === "assistantMessageBoundary" && event.isFinalResponse);
+  if (effects.text.kind === "unchanged" && !effects.message && !closed) return [];
+  const id = `assistant-response-text:${input.operation.execution.executionId}`;
+  const previous = input.items[id];
+  const item: AgentItem = {
+    id, threadId: input.thread.id, turnId: input.turn.id, kind: "message", providerIdentities: [],
+    payload: assistantTextPayload(previous, effects, closed),
+    createdAt: previous?.createdAt ?? input.acceptedAt, updatedAt: input.acceptedAt,
+  };
+  return [{ eventId: `${input.operation.operationId}:assistant-text`, routing: { ...input.operation.execution, itemId: id },
+    sourceProviderId: input.thread.providerId, sourceIdentities: [], payload: { type: "item.recorded", item } }];
+}
+
+function assistantTextPayload(previous: AgentItem | undefined, effects: ParentLiveEffects, closed: AgentEvent | undefined) {
+  const previousText = typeof previous?.payload.content === "string" ? previous.payload.content : "";
+  const boundaryContent = closed?.type === "assistantMessageBoundary" ? closed.content : undefined;
+  const content = effects.message?.content ?? boundaryContent ?? nextAssistantText(previousText, effects.text);
+  return { projection: "assistantText", content, isStreaming: !effects.message && !closed && content.length > 0 };
+}
+
+function nextAssistantText(previous: string, text: ParentLiveEffects["text"]): string {
+  switch (text.kind) {
+    case "unchanged": return previous;
+    case "append": return (text.inputs[0]?.sequence === 1 ? "" : previous) + text.inputs.map((input) => input.text).join("");
+    case "promote": return previous + text.input.text;
+    case "reclassify": return text.retainedText ?? "";
+  }
 }
 
 function recoveryEvents(

@@ -859,7 +859,7 @@ describe("CodexEventMapper", () => {
       params: { delta: "Done" },
     });
 
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       {
         type: "textDelta",
         threadId: "test-thread",
@@ -886,8 +886,8 @@ describe("CodexEventMapper", () => {
       params: { threadId: "t", turnId: "u", itemId: "i", delta: "!" },
     });
 
-    expect(e1.map((runtimeEvent) => runtimeEvent.event)).toEqual([{ type: "textDelta", threadId: "test-thread", delta: "Hello", isFinalResponse: false }]);
-    expect(e2.map((runtimeEvent) => runtimeEvent.event)).toEqual([{ type: "textDelta", threadId: "test-thread", delta: "!", isFinalResponse: false }]);
+    expect(e1.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "textDelta", threadId: "test-thread", delta: "Hello", isFinalResponse: false }]);
+    expect(e2.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "textDelta", threadId: "test-thread", delta: "!", isFinalResponse: false }]);
   });
 
   it("emits non-final textDelta for item/agentMessage/delta after tool completes", () => {
@@ -907,7 +907,7 @@ describe("CodexEventMapper", () => {
       method: "item/agentMessage/delta",
       params: { delta: "Done" },
     });
-    expect(evt.map((runtimeEvent) => runtimeEvent.event)).toEqual([{ type: "textDelta", threadId: "test-thread", delta: "Done", isFinalResponse: false }]);
+    expect(evt.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "textDelta", threadId: "test-thread", delta: "Done", isFinalResponse: false }]);
   });
 
   it("keeps pre-tool agentMessage delta as thought even while tools run", () => {
@@ -922,7 +922,7 @@ describe("CodexEventMapper", () => {
       method: "item/agentMessage/delta",
       params: { delta: "thinking..." },
     });
-    expect(mid.map((runtimeEvent) => runtimeEvent.event)).toEqual([{ type: "textDelta", threadId: "test-thread", delta: "thinking...", isFinalResponse: false }]);
+    expect(mid.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "textDelta", threadId: "test-thread", delta: "thinking...", isFinalResponse: false }]);
   });
 
   it("emits Message with full accumulated text on turn/completed after deltas", () => {
@@ -950,7 +950,7 @@ describe("CodexEventMapper", () => {
       jsonrpc: "2.0",
       method: "item/completed",
       params: { item: { type: "agentMessage", id: "msg-with-id" } },
-    })).toEqual([]);
+    }).map(({ event }) => event)).toMatchObject([{ type: "assistantMessageBoundary", isFinalResponse: false }]);
 
     const events = mapper.mapNotification({
       jsonrpc: "2.0",
@@ -970,26 +970,22 @@ describe("CodexEventMapper", () => {
       jsonrpc: "2.0",
       method: "item/agentMessage/delta",
       params: { itemId: "msg-1", delta: "First narration." },
-    }).map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    }).map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: "First narration.", isFinalResponse: false },
     ]);
     expect(mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/completed",
       params: { item: { type: "agentMessage", id: "msg-1" } },
-    })).toEqual([]);
+    }).map(({ event }) => event)).toMatchObject([{ type: "assistantMessageBoundary", isFinalResponse: false }]);
 
     const firstTool = mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/started",
       params: { item: { type: "commandExecution", id: "cmd-1" } },
     });
-    expect(firstTool[0]!.event).toEqual({
-      type: "assistantMessageBoundary",
-      threadId: "test-thread",
-      isFinalResponse: false,
-    });
-    expect(firstTool[1]!.event).toMatchObject({ type: "toolUse", toolCallId: "cmd-1" });
+    expect(firstTool).toHaveLength(1);
+    expect(firstTool[0]!.event).toMatchObject({ type: "toolUse", toolCallId: "cmd-1" });
     mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/completed",
@@ -1000,7 +996,7 @@ describe("CodexEventMapper", () => {
       jsonrpc: "2.0",
       method: "item/agentMessage/delta",
       params: { itemId: "msg-2", delta: "Middle narration." },
-    }).map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    }).map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: "Middle narration.", isFinalResponse: false },
     ]);
     mapper.mapNotification({
@@ -1014,12 +1010,8 @@ describe("CodexEventMapper", () => {
       method: "item/started",
       params: { item: { type: "commandExecution", id: "cmd-2" } },
     });
-    expect(secondTool[0]!.event).toEqual({
-      type: "assistantMessageBoundary",
-      threadId: "test-thread",
-      isFinalResponse: false,
-    });
-    expect(secondTool[1]!.event).toMatchObject({ type: "toolUse", toolCallId: "cmd-2" });
+    expect(secondTool).toHaveLength(1);
+    expect(secondTool[0]!.event).toMatchObject({ type: "toolUse", toolCallId: "cmd-2" });
     mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/completed",
@@ -1042,12 +1034,12 @@ describe("CodexEventMapper", () => {
       method: "turn/completed",
       params: { turn: { status: "completed" } },
     });
-    expect(completed[0]!.event).toEqual({
+    expect(completed[0]!.event).toMatchObject({
       type: "assistantMessageBoundary",
       threadId: "test-thread",
       isFinalResponse: true,
     });
-    expect(completed.find((event) => event.event.type === "message")?.event).toEqual({
+    expect(completed.find((event) => event.event.type === "message")?.event).toMatchObject({
       type: "message",
       threadId: "test-thread",
       content: "Final answer only.",
@@ -1098,8 +1090,7 @@ describe("CodexEventMapper", () => {
       params: { turn: { status: "failed", error: { message: "boom" } } },
     });
 
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([
-      { type: "assistantMessageBoundary", threadId: "test-thread", isFinalResponse: false },
+    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "error", threadId: "test-thread", error: "boom" },
     ]);
   });
@@ -1130,8 +1121,9 @@ describe("CodexEventMapper", () => {
       },
     });
 
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: "Hello", isFinalResponse: false },
+      { type: "assistantMessageBoundary", threadId: "test-thread", content: "Hello", isFinalResponse: false },
     ]);
   });
 
@@ -1147,12 +1139,13 @@ describe("CodexEventMapper", () => {
         },
       },
     });
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: "Hello from codex", isFinalResponse: false },
+      { type: "assistantMessageBoundary", threadId: "test-thread", content: "Hello from codex", isFinalResponse: false },
     ]);
   });
 
-  it("emits delta for new text in subsequent item/completed messages", () => {
+  it("keeps separate ID-less completed messages distinct", () => {
     mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/completed",
@@ -1169,8 +1162,9 @@ describe("CodexEventMapper", () => {
       },
     });
 
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([
-      { type: "textDelta", threadId: "test-thread", delta: " world", isFinalResponse: false },
+    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
+      { type: "textDelta", threadId: "test-thread", delta: "Hello world", isFinalResponse: false },
+      { type: "assistantMessageBoundary", threadId: "test-thread", content: "Hello world", isFinalResponse: false },
     ]);
   });
 
@@ -1179,7 +1173,7 @@ describe("CodexEventMapper", () => {
       jsonrpc: "2.0",
       method: "item/completed",
       params: {
-        item: { type: "message", content: [{ type: "output_text", text: "Hello" }] },
+        item: { type: "message", id: "same-item", content: [{ type: "output_text", text: "Hello" }] },
       },
     });
 
@@ -1187,14 +1181,14 @@ describe("CodexEventMapper", () => {
       jsonrpc: "2.0",
       method: "item/completed",
       params: {
-        item: { type: "message", content: [{ type: "output_text", text: "Hello" }] },
+        item: { type: "message", id: "same-item", content: [{ type: "output_text", text: "Hello" }] },
       },
     });
 
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([]);
+    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([]);
   });
 
-  it("returns empty array for item/completed message with no content parts", () => {
+  it("closes text for item/completed message with no content parts", () => {
     const events = mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/completed",
@@ -1202,7 +1196,7 @@ describe("CodexEventMapper", () => {
         item: { type: "message", content: [] },
       },
     });
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([]);
+    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "assistantMessageBoundary", content: "", isFinalResponse: false }]);
   });
 
   it("returns empty array for item/completed with no item", () => {
@@ -2983,7 +2977,7 @@ describe("CodexEventMapper", () => {
       params: { turn: { status: "completed" } },
     });
 
-    expect(finalText.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(finalText.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       {
         type: "textDelta",
         threadId: "test-thread",
@@ -2991,7 +2985,7 @@ describe("CodexEventMapper", () => {
         isFinalResponse: false,
       },
     ]);
-    expect(finalItem.map((runtimeEvent) => runtimeEvent.event)).toEqual([]);
+    expect(finalItem.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "assistantMessageBoundary", isFinalResponse: false }]);
     expect(events.find((event) => event.event.type === "toolResult" && event.event.toolCallId === "spawn-open")).toBeUndefined();
     expect(events[0]!.event).toMatchObject({ type: "assistantMessageBoundary", isFinalResponse: true });
     expect(events.find((event) => event.event.type === "message")?.event).toMatchObject({
@@ -3379,18 +3373,18 @@ describe("CodexEventMapper", () => {
     });
 
     expect(events).toHaveLength(3);
-    expect(events[0]!.event).toEqual({
+    expect(events[0]!.event).toMatchObject({
       type: "assistantMessageBoundary",
       threadId: "test-thread",
       isFinalResponse: true,
     });
-    expect(events[1]!.event).toEqual({
+    expect(events[1]!.event).toMatchObject({
       type: "message",
       threadId: "test-thread",
       content: "Hello world",
       tokens: null,
     });
-    expect(events[2]!.event).toEqual({
+    expect(events[2]!.event).toMatchObject({
       type: "turnComplete",
       threadId: "test-thread",
       reason: "end_turn",
@@ -3517,8 +3511,9 @@ describe("CodexEventMapper", () => {
     });
 
     // After reset the accumulator is empty, so "Hello" is emitted as a full delta
-    expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(events.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: "Hello", isFinalResponse: false },
+      { type: "assistantMessageBoundary", threadId: "test-thread", content: "Hello", isFinalResponse: false },
     ]);
   });
 
@@ -3616,7 +3611,7 @@ describe("CodexEventMapper", () => {
       params: { turn: { status: "completed" } },
     });
 
-    expect(delta.map((runtimeEvent) => runtimeEvent.event)).toEqual([{ type: "textDelta", threadId: "test-thread", delta: "main text", isFinalResponse: false }]);
+    expect(delta.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([{ type: "textDelta", threadId: "test-thread", delta: "main text", isFinalResponse: false }]);
     expect(completed[0]!.event).toMatchObject({ type: "assistantMessageBoundary", isFinalResponse: true });
     expect(completed.some((event) => event.event.type === "turnComplete")).toBe(true);
   });
@@ -3699,18 +3694,18 @@ describe("CodexEventMapper", () => {
       params: { threadId: "main-codex-thread", turn: { status: "completed" } },
     });
 
-    expect(childText.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(childText.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: "child ", isFinalResponse: false },
     ]);
-    expect(childTextSecond.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(childTextSecond.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: "private text", isFinalResponse: false },
     ]);
     expect((childText[0]!).extension).toMatchObject({
       child: { nativeThreadId: "child-thread", nativeTurnId: "child-turn", nativeItemId: "child-message", itemEventKey: "stream" },
     });
     expect((childText[0]!).extension.child.nativeEventId).not.toBe((childTextSecond[0]!).extension.child.nativeEventId);
-    expect(childReasoning.map((runtimeEvent) => runtimeEvent.event)).toEqual([]);
-    expect(mainText.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(childReasoning.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([]);
+    expect(mainText.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: "main final", isFinalResponse: false },
     ]);
     expect(completed[0]!.event).toMatchObject({ type: "assistantMessageBoundary", isFinalResponse: true });
@@ -3723,7 +3718,7 @@ describe("CodexEventMapper", () => {
       method: "item/agentMessage/delta",
       params: { threadId: "child-thread", itemId: "child-message", delta: " after parent completion" },
     });
-    expect(lateChildText.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(lateChildText.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: " after parent completion", isFinalResponse: false },
     ]);
     const childCompletedMessage = mapper.mapNotification({
@@ -3731,7 +3726,7 @@ describe("CodexEventMapper", () => {
       method: "item/completed",
       params: { threadId: "child-thread", item: { type: "agentMessage", id: "child-message", content: [{ type: "output_text", text: "child private text after parent completion" }] } },
     });
-    expect(childCompletedMessage.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(childCompletedMessage.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "message", threadId: "test-thread", content: "child private text after parent completion", tokens: null },
     ]);
     expect((childCompletedMessage[0]!).extension).toMatchObject({
@@ -3785,7 +3780,7 @@ describe("CodexEventMapper", () => {
       params: { threadId: "main-codex-thread", turn: { status: "completed" } },
     });
 
-    expect(childCompleted.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(childCompleted.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       {
         type: "toolResult",
         threadId: "test-thread",
@@ -3797,7 +3792,7 @@ describe("CodexEventMapper", () => {
     expect((childCompleted[0]!).extension).toMatchObject({
       collaboration: { kind: "spawnAgent", receiverThreadIds: ["child-thread"] },
     });
-    expect(mainText.map((runtimeEvent) => runtimeEvent.event)).toEqual([
+    expect(mainText.map((runtimeEvent) => runtimeEvent.event)).toMatchObject([
       { type: "textDelta", threadId: "test-thread", delta: "still streaming", isFinalResponse: false },
     ]);
     expect(mainCompleted[0]!.event).toMatchObject({ type: "assistantMessageBoundary", isFinalResponse: true });

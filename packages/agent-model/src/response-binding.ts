@@ -48,6 +48,7 @@ function settle(narrative: { kind: string; record: Record<string, unknown> }, in
 }
 
 function finalThought(value: Record<string, unknown>, finalText: string, lastThought: number): boolean {
+  if (typeof value.id === "string" && value.id.startsWith("assistant-text:")) return false;
   if (typeof value.text !== "string") return false;
   const text = value.text.trim();
   return finalText.length > 0 && text.length > 0 && (text === finalText

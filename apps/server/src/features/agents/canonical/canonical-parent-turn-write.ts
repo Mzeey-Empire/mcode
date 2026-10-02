@@ -681,7 +681,7 @@ function settleThought(
   lastThoughtOrder: number,
 ): ParentNarrativeRecoveryItem {
   const thoughtText = item.record.text.trim();
-  const isFinalResponse = finalText.length > 0 && thoughtText.length > 0
+  const isFinalResponse = !item.record.id.startsWith("assistant-text:") && finalText.length > 0 && thoughtText.length > 0
     && (thoughtText === finalText || (item.record.sort_order === lastThoughtOrder && finalText.endsWith(thoughtText)));
   return { kind: "narrationSegment", record: {
     ...item.record,

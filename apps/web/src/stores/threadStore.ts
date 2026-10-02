@@ -317,7 +317,9 @@ function batchTouchesParentNarrative(events: Parameters<typeof reduceAgentEventB
   return events.some((event) =>
     event.payload.type === "item.recorded"
     && (event.payload.item.payload.projection === "narrativeRecovery"
-      || event.payload.item.payload.projection === "narrativeRecoveryDiscarded"));
+      || event.payload.item.payload.projection === "narrativeRecoveryDiscarded"
+      || event.payload.item.payload.projection === "assistantText"
+      || event.payload.item.payload.projection === "message"));
 }
 
 /**
@@ -803,6 +805,7 @@ function resetTurnEphemeral(_rec: ThreadRecord): Partial<ThreadRecord> {
   return {
     streaming: "",
     streamingPreview: "",
+      responseTextIsStreaming: false,
     toolCalls: [],
     thoughtSegments: [],
     hooks: [],
@@ -1067,12 +1070,36 @@ function pruneAssistantResponseKeys(
 /** One coalesced `session.textDelta` span for rAF flushing; preserves missing `isFinalResponse` for legacy fallback behavior. */
 type PendingTextChunk = {
   delta: string;
+  textItemId?: string;
   isFinalResponse?: boolean;
   /** Background deltas retain the streaming buffer but defer narrative projection until activation. */
   deferNarrative?: boolean;
 };
 
 const MAX_DEFERRED_NARRATIVE_EVENTS = 2048;
+
+function projectPendingTextChunks(record: ThreadRecord, chunks: readonly PendingTextChunk[], textEncoder: TextEncoder,
+  previousBytes: number): { patch: Partial<ThreadRecord>; bytes: number } {
+  let streaming = record.streaming;
+  let responseTextIsStreaming = record.responseTextIsStreaming;
+  let segments = record.thoughtSegments;
+  let bytes = previousBytes;
+  for (const chunk of chunks) {
+    if (!chunk.delta) continue;
+    if (chunk.textItemId && chunk.isFinalResponse === false) {
+      if (!chunk.deferNarrative) segments = appendThoughtSegment(segments, chunk.delta, true, chunk.textItemId);
+      continue;
+    }
+    responseTextIsStreaming = chunk.isFinalResponse !== false || responseTextIsStreaming;
+    streaming += chunk.delta;
+    bytes += textEncoder.encode(chunk.delta).byteLength;
+    if (!chunk.deferNarrative && !chunk.isFinalResponse) {
+      segments = appendThoughtSegment(segments, chunk.delta, chunk.isFinalResponse === false);
+    }
+  }
+  return { patch: { streaming, streamingPreview: streaming.slice(-200), responseTextIsStreaming,
+    ...(segments !== record.thoughtSegments ? { thoughtSegments: segments } : {}) }, bytes };
+}
 
 /** Zustand store for thread-scoped messages, streaming session state, and agent event handling. */
 export const useThreadStore = create<ThreadState>((zustandSet, get) => {
@@ -1138,6 +1165,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     for (const [tid, chunks] of pendingTextDeltaByThread) {
       batch.set(tid, chunks.map((c) => ({
         delta: c.delta,
+        textItemId: c.textItemId,
         isFinalResponse: c.isFinalResponse,
         deferNarrative: c.deferNarrative,
       })));
@@ -1148,38 +1176,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       let records = state.records;
       for (const [tid, chunks] of batch) {
         const rec = getThreadRecord(records, tid);
-        let streaming = rec.streaming;
-        let streamingPreview = rec.streamingPreview;
-        let segments = rec.thoughtSegments;
-        let segmentsChanged = false;
-        let streamingTextBytes = streamingTextByteSizes.get(tid)
-          ?? textEncoder.encode(streaming).byteLength;
-        for (const chunk of chunks) {
-          const acc = chunk.delta;
-          if (!acc) continue;
-          const combined = streaming + acc;
-          streaming = combined;
-          streamingTextBytes += textEncoder.encode(acc).byteLength;
-          streamingPreview = combined.length > 200 ? combined.slice(-200) : combined;
-
-          if (chunk.deferNarrative || chunk.isFinalResponse) {
-            continue;
-          }
-
-          const isExplicitNonFinal = chunk.isFinalResponse === false;
-          segments = appendThoughtSegment(segments, acc, isExplicitNonFinal);
-          segmentsChanged = true;
-        }
-        const patch: Partial<ThreadRecord> = {
-          streaming,
-          streamingPreview,
-        };
-        if (segmentsChanged) {
-          patch.thoughtSegments = segments;
-        }
-        records = patchThreadRecord(records, tid, patch);
-        streamingTextByteSizes.set(tid, streamingTextBytes);
-        flushedTextByteSizes.set(tid, streamingTextBytes);
+        const projected = projectPendingTextChunks(rec, chunks, textEncoder,
+          streamingTextByteSizes.get(tid) ?? textEncoder.encode(rec.streaming).byteLength);
+        records = patchThreadRecord(records, tid, projected.patch);
+        streamingTextByteSizes.set(tid, projected.bytes);
+        flushedTextByteSizes.set(tid, projected.bytes);
       }
       return { records };
     });
@@ -1203,15 +1204,15 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
               record.thoughtSegments,
               delta,
               event.isFinalResponse === false,
+              event.textItemId,
             ),
           }),
         };
       });
     } else if (event.type === "assistantMessageBoundary") {
-      const isFinalResponse = event.isFinalResponse === true;
       set((state) => {
         const record = getThreadRecord(state.records, threadId);
-        const thoughtSegments = projectAssistantMessageBoundary(record.thoughtSegments, isFinalResponse);
+        const thoughtSegments = projectAssistantMessageBoundary(record.thoughtSegments, event);
         return thoughtSegments
           ? { records: patchThreadRecord(state.records, threadId, { thoughtSegments }) }
           : state;
@@ -1791,6 +1792,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       ...identity,
       streaming: "",
       streamingPreview: "",
+      responseTextIsStreaming: false,
       thoughtSegments: closeOpenThoughtSegment(record.thoughtSegments),
       messages,
       persistedToolCallCounts: transferred.persistedToolCallCounts,
@@ -1816,7 +1818,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const messageId = typeof event.messageId === "string" && event.messageId.length > 0
       ? event.messageId
       : undefined;
-    if (!content && attachments.length === 0 && !messageId) return;
+    if (!content && attachments.length === 0 && !messageId && !event.turnExecutionId) return;
     const normalizedEvent = messageId === event.messageId ? event : { ...event, messageId };
     const message = assistantMessageFromEvent(normalizedEvent, content, attachments, messageId);
     patchRec(event.threadId, (record) => projectAssistantMessage(record, normalizedEvent, message));
@@ -2140,11 +2142,12 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const chunks = pendingTextDeltaByThread.get(event.threadId) ?? [];
     const tail = chunks.at(-1);
     const sameProjection = tail
+      && tail.textItemId === event.textItemId
       && tail.isFinalResponse === isFinalResponse
       && tail.deferNarrative === deferNarrative;
     const next = sameProjection
       ? [...chunks.slice(0, -1), { ...tail, delta: tail.delta + delta }]
-      : [...chunks, { delta, isFinalResponse, deferNarrative }];
+      : [...chunks, { delta, textItemId: event.textItemId, isFinalResponse, deferNarrative }];
     pendingTextDeltaByThread.set(event.threadId, next);
     if (!runtime.isActiveThread) queueDeferredNarrativeEvent(event.threadId, normalizedEvent);
     scheduleTextDeltaFlush();
@@ -2159,12 +2162,16 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const normalizedEvent = event.isFinalResponse === isFinalResponse
       ? event
       : { ...event, isFinalResponse };
+    if (isFinalResponse) patchRec(event.threadId, {
+      responseTextIsStreaming: false,
+      ...(event.content !== undefined ? { streaming: event.content, streamingPreview: event.content.slice(-200) } : {}),
+    });
     if (!runtime.isActiveThread) {
       queueDeferredNarrativeEvent(event.threadId, normalizedEvent);
       return;
     }
     patchRec(event.threadId, (record) => {
-      const thoughtSegments = projectAssistantMessageBoundary(record.thoughtSegments, isFinalResponse);
+      const thoughtSegments = projectAssistantMessageBoundary(record.thoughtSegments, event);
       return thoughtSegments ? { thoughtSegments } : {};
     });
   };
@@ -2322,6 +2329,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): Partial<ThreadRecord> => ({
     streaming: "",
     streamingPreview: "",
+      responseTextIsStreaming: false,
     runtimePhase: phase,
     optimisticUserMessageId: null,
     toolCalls: completedToolCalls(record.toolCalls, phase),
@@ -2664,6 +2672,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         runtimePhase: "errored",
         streaming: "",
         streamingPreview: "",
+      responseTextIsStreaming: false,
         agentStartTime: undefined,
         currentTurnMessageId: "",
         currentTurnResponseKey: "",
@@ -3145,7 +3154,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           canonicalAgent: update.replica,
           ...((update.installedSnapshot
             || (recovery.mode === "delta" && batchTouchesParentNarrative(recovery.events)))
-            ? recoverParentNarrative(recovery.threadId, update.replica.state)
+            ? recoverParentNarrative(recovery.threadId, update.replica.state, { ...current, canonicalAgent: update.replica })
             : {}),
         });
         const reconciled = reconcileCanonicalRuntime(records, runningThreadIds, recovery.threadId);
@@ -3220,7 +3229,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const records = patchThreadRecord(state.records, threadId, {
         canonicalAgent: update.replica,
         ...(batchTouchesParentNarrative(events)
-          ? recoverParentNarrative(threadId, update.replica.state)
+          ? recoverParentNarrative(threadId, update.replica.state, { ...current, canonicalAgent: update.replica })
           : {}),
       });
       const reconciled = reconcileCanonicalRuntime(records, state.runningThreadIds, threadId);
@@ -3759,6 +3768,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           error: null,
           streaming: "",
           streamingPreview: "",
+      responseTextIsStreaming: false,
           toolCalls: [],
           currentTurnMessageId: "",
           pendingTurnPersistMessageIds: [],

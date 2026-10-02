@@ -16,6 +16,16 @@ import type { Message, ToolCall, HookExecution, ToolCallRecord, HookExecutionRec
 const STREAMING_AGENT = { phase: "streaming" } as const;
 const COMPLETED_AGENT = { phase: "completed" } as const;
 
+it("opens text only for the current active response and keeps historical messages settled", () => {
+  const historical = makeMessage({ id: "old" });
+  const current = makeMessage({ id: "current", sequence: 2 });
+  const items = buildStableItems([historical, current], undefined, undefined,
+    { threadId: "thread-1", messageId: "current", responseKey: "current-response" },
+    undefined, undefined, { phase: "streaming" }, true);
+  expect(items.find((item) => item.type === "message" && item.message.id === "old")).toMatchObject({ textIsStreaming: undefined });
+  expect(items.find((item) => item.type === "message" && item.message.id === "current")).toMatchObject({ textIsStreaming: true });
+});
+
 describe("activity heading row identity", () => {
   it("updates for heading changes and closure but preserves the row during body deltas", () => {
     const build = createVolatileItemsBuilder();
@@ -620,6 +630,17 @@ describe("buildVirtualItems (combined)", () => {
     expect(result[1]).toMatchObject({ type: "narrative-flow" });
     expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
     expect(result[3]).toMatchObject({ type: "narrative-indicator", isAgentRunning: false });
+  });
+
+  it.each(["Earlier narration", "Answer"])("places partial final text in the response beside closed owned commentary %j", (commentary) => {
+    const id = `assistant-text:${"a".repeat(64)}`;
+    const items = buildVolatileItems([], STREAMING_AGENT, undefined, "Answer", undefined, undefined,
+      [{ id, text: commentary, startedAt: 1, endedAt: 2, isExplicitNonFinal: true }],
+      { threadId: "thread-1", responseKey: "response" }, undefined, true);
+    const response = items.find((item) => item.type === "message");
+    expect(response).toMatchObject({ type: "message", textIsStreaming: true, message: { content: "Answer" } });
+    const narrative = items.find((item) => item.type === "narrative-flow");
+    expect(narrative).toMatchObject({ streamingText: "", thoughtSegments: [{ id, text: commentary }] });
   });
 
   it("streaming text with agent running emits narrative-flow and live assistant message items", () => {

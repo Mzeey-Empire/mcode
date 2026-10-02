@@ -262,6 +262,30 @@ describe("CanonicalParentTurnWrite", () => {
     expect(new MessageRepo(db).findByIdInThread(THREAD_ID, staged.id)).toMatchObject({ is_internal: false, outcome: "completed" });
   });
 
+  it("persists owned commentary equal to the answer across terminal finish and database reload", async () => {
+    writer.start(startInput());
+    const input = terminalProjectionInput();
+    const commentaryId = `assistant-text:${"a".repeat(64)}`;
+    const explicitFinalId = `assistant-text:${"b".repeat(64)}`;
+    input.narrative = [
+      { kind: "narrationSegment", record: { id: commentaryId, message_id: "", text: "Answer",
+        started_at: NOW, ended_at: NOW, sort_order: 1, is_final_response: 0 } },
+      { kind: "narrationSegment", record: { id: explicitFinalId, message_id: "", text: "Answer",
+        started_at: NOW, ended_at: NOW, sort_order: 2, is_final_response: 1 } },
+    ];
+    const staged = writer.stageTerminalProjection(input);
+    const message = staged.projection.message;
+    if (!message) throw new Error("Missing staged response");
+    expect((await writer.finish({ ...finishInput(message), projection: staged.projection })).outcome).toBe("committed");
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    expect(db.prepare("SELECT text, is_final_response FROM thought_segments WHERE id = ?").get(commentaryId))
+      .toEqual({ text: "Answer", is_final_response: 0 });
+    expect(db.prepare("SELECT text, is_final_response FROM thought_segments WHERE id = ?").get(explicitFinalId))
+      .toEqual({ text: "Answer", is_final_response: 1 });
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, message.id)?.content).toBe("Answer");
+  });
+
   it("stages cloneable terminal rows once and publishes only after finish", async () => {
     writer.start(startInput());
     const input = terminalProjectionInput();

@@ -179,6 +179,8 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       threadId: z.string(),
       /** Partial response text - append to accumulate the full response. */
       delta: z.string(),
+      /** Opaque identity for one assistant text item within an execution attempt. */
+      textItemId: z.string().regex(/^assistant-text:[a-f0-9]{64}$/).optional(),
       /**
        * Set to `true` when this delta belongs to the final user-facing response
        * for providers that can classify it while streaming. The client uses
@@ -343,6 +345,10 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
        */
       type: z.literal(AgentEventType.AssistantMessageBoundary),
       threadId: z.string(),
+      /** Identifies the exact open or closed narration item being classified. */
+      textItemId: z.string().regex(/^assistant-text:[a-f0-9]{64}$/).optional(),
+      /** Authoritative completed text, including corrections and shortening. */
+      content: z.string().optional(),
       isFinalResponse: z.boolean(),
     }),
     z.object({

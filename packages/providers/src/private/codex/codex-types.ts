@@ -391,6 +391,7 @@ export interface CompletedItem {
   id?: string;
 
   // agentMessage
+  phase?: unknown;
   role?: string;
   content?: Array<{ type: string; text?: string }>;
 

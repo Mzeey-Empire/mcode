@@ -1635,13 +1635,23 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     logger.error("CodexAppServer fatal", { sessionId: context.sessionId, error, breadcrumb: server.lastTransportBreadcrumb });
     const entry = this.runtime.get(context.sessionId);
     const executionId = entry?.activeParentTurnExecutionId ?? context.stagedExecutionId;
-    for (const event of mapper.drainPendingAssistantBoundary(false)) {
+    this.projectCodexAssistantBoundary(mapper, context.sessionId, (event) => {
       const runtimeEvent = providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event);
       this.emitRuntimeEvent(entry ? this.withCodexTurnAttempt(entry, runtimeEvent, executionId) : runtimeEvent);
-    }
+    });
     this.emitCodexTransportFailure(context.threadId, error, entry, executionId);
     if (this.runtime.get(context.sessionId)?.server === server) {
       void this.runtime.stop(context.sessionId);
+    }
+  }
+
+  private projectCodexAssistantBoundary(mapper: CodexEventMapper, sessionId: string, emit: (event: AgentEvent) => void): void {
+    try {
+      for (const event of mapper.drainPendingAssistantBoundary(false)) emit(event);
+    } catch (error) {
+      // Text projection is optional; terminal notification and process cleanup are independent.
+      logger.warn("Codex assistant boundary projection failed", { sessionId,
+        errorType: error instanceof Error ? error.name : typeof error });
     }
   }
 
@@ -2232,10 +2242,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** Graceful protocol interrupt of the in-flight turn (does not kill the process). */
   async interrupt(state: CodexSessionState): Promise<void> {
     const turnExecutionId = executionForDrain(state);
-    for (const event of state.mapper.drainPendingAssistantBoundary(false)) {
+    this.projectCodexAssistantBoundary(state.mapper, state.sessionId, (event) => {
       const runtimeEvent = providerRuntimeEvent(turnExecutionId ? { ...event, turnExecutionId } : event);
       this.emitRuntimeEvent(this.withCodexTurnAttempt(state, runtimeEvent, turnExecutionId));
-    }
+    });
     const nativeTurnId = state.currentNativeTurnId;
     if (nativeTurnId) {
       try {
@@ -2281,10 +2291,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (this.activeCodexServers.get(state.sessionId) === state.server) this.activeCodexServers.delete(state.sessionId);
     await this.host.threadControl.close(state.sessionId);
     const turnExecutionId = executionForDrain(state);
-    for (const event of state.mapper.drainPendingAssistantBoundary(false)) {
+    this.projectCodexAssistantBoundary(state.mapper, state.sessionId, (event) => {
       const runtimeEvent = providerRuntimeEvent(turnExecutionId ? { ...event, turnExecutionId } : event);
       this.emitRuntimeEvent(this.withCodexTurnAttempt(state, runtimeEvent, turnExecutionId));
-    }
+    });
     this.liveSessionIds.delete(state.sessionId);
     state.pendingTurnStartNotification = undefined;
     state.turnStartResponsePending = false;
@@ -2523,7 +2533,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const entry = this.runtime.get(sessionId);
     if (!entry) return undefined;
     this.emitCodexPendingAssistantBoundary(entry, turnExecutionId);
-    entry.mapper.prepareForTurn();
+    entry.mapper.prepareForTurn({ executionId: turnExecutionId, deliveryAttempt: entry.turnDiffRouting?.deliveryAttempt ?? 0 });
     const hadInflightTurn = entry.pendingTurnId !== null || entry.abortPendingTurnWait !== undefined;
     entry.currentTurnExecutionId = turnExecutionId;
     entry.currentNativeTurnId = undefined;
@@ -2542,7 +2552,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private emitCodexPendingAssistantBoundary(entry: CodexSessionState, turnExecutionId: string): void {
-    for (const event of entry.mapper.drainPendingAssistantBoundary(false)) this.emitCodexTurnEvent(entry, event, turnExecutionId);
+    this.projectCodexAssistantBoundary(entry.mapper, entry.sessionId, (event) => this.emitCodexTurnEvent(entry, event, turnExecutionId));
   }
 
   private emitCodexTurnEvent(entry: CodexSessionState, event: AgentEvent, turnExecutionId: string): void {

@@ -627,6 +627,16 @@ describe("buildPersistedNarrativeItems", () => {
     ]);
   });
 
+  it("keeps owned commentary identical to the body while hiding an explicit final record", () => {
+    const text = "Answer";
+    const id = `assistant-text:${"a".repeat(64)}`;
+    const items = buildPersistedNarrativeItems({ tools: [], hooks: [], messageContent: text,
+      thoughts: [makeThought({ id, text, sort_order: 1, is_final_response: 0 }),
+        makeThought({ id: `assistant-text:${"b".repeat(64)}`, text, sort_order: 2, is_final_response: 1 })] });
+    expect(items).toMatchObject([{ type: "thought", segment: { id, text } }]);
+    expect(items).toHaveLength(1);
+  });
+
   it("hides a thought that exactly matches messageContent even when sort_order is not last", () => {
     const dup = "ENTIRE ASSISTANT BODY";
     const items = buildPersistedNarrativeItems({

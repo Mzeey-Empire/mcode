@@ -98,6 +98,29 @@ describe("CodexLiveEventReducer", () => {
     ]);
   });
 
+  it.each([false, true])("keeps rejected closed-item correction isolated when final placement is %s", (isFinalResponse) => {
+    const textItemId = `assistant-text:${"a".repeat(64)}`;
+    let accepted = new ProviderExecutionEventState("codex", execution, { precedingMessageId: "user", planFeature: "none" });
+    accepted = prepareCandidate(accepted, event("turnStarted"), 1).candidate;
+    accepted = prepareCandidate(accepted, event("textDelta", { textItemId, delta: "Original", isFinalResponse: false }), 2).candidate;
+    accepted = prepareCandidate(accepted, event("assistantMessageBoundary", { textItemId, content: "Original", isFinalResponse: false }), 3).candidate;
+    const correction = prepareCandidate(accepted, event("assistantMessageBoundary", { textItemId, content: "Corrected", isFinalResponse }), 4);
+    const terminal = event("turnComplete", { reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+    const rejected = prepareCandidate(accepted, terminal, 5, true);
+    expect(rejected.prepared.terminal?.narrative).toMatchObject([
+      { kind: "narrationSegment", record: { id: textItemId, text: "Original", is_final_response: 0 } },
+    ]);
+    const installed = prepareCandidate(correction.candidate, terminal, 5, true);
+    if (isFinalResponse) {
+      expect(installed.prepared.terminal?.narrative).toEqual([]);
+      expect(installed.prepared.terminal?.assistant.content).toBe("Corrected");
+    } else {
+      expect(installed.prepared.terminal?.narrative).toMatchObject([
+        { kind: "narrationSegment", record: { id: textItemId, text: "Corrected", is_final_response: 0 } },
+      ]);
+    }
+  });
+
   it("returns only changed recovery items and retains the complete terminal snapshot", () => {
     const reducer = new CodexLiveEventReducer(execution);
     reduceEvent(reducer, "turnStarted");
@@ -135,6 +158,59 @@ describe("CodexLiveEventReducer", () => {
     expect(promoted.writer).toContainEqual({ kind: "assistant-text-promote", text: "Answer continues" });
     const repeated = reduceEvent(reducer, "assistantMessageBoundary", { isFinalResponse: true });
     expect(repeated.writer).toContainEqual({ kind: "narrative-recovery", items: [], discardedItemIds: [] });
+  });
+
+  it("promotes only the selected closed item when different items have identical text", () => {
+    const reducer = new CodexLiveEventReducer(execution);
+    const firstId = `assistant-text:${"1".repeat(64)}`;
+    const finalId = `assistant-text:${"2".repeat(64)}`;
+    reduceEvent(reducer, "turnStarted");
+    for (const textItemId of [firstId, finalId]) {
+      reduceEvent(reducer, "textDelta", { textItemId, delta: "Same", isFinalResponse: false });
+      reduceEvent(reducer, "assistantMessageBoundary", { textItemId, content: "Same", isFinalResponse: false });
+    }
+    const promotion = reduceEvent(reducer, "assistantMessageBoundary", { textItemId: finalId, content: "Corrected", isFinalResponse: true });
+    expect(promotion.writer).toContainEqual({ kind: "assistant-text-promote", text: "Corrected" });
+    expect(promotion.writer).toContainEqual({ kind: "narrative-recovery", items: [], discardedItemIds: [`narrationSegment:${finalId}`] });
+    const repeated = reduceEvent(reducer, "assistantMessageBoundary", { textItemId: finalId, content: "Corrected", isFinalResponse: true });
+    expect(repeated.writer.some((intent) => intent.kind === "assistant-text-promote")).toBe(false);
+    reduceEvent(reducer, "message", { content: "Same", tokens: null });
+    const terminal = reduceEvent(reducer, "turnComplete", { reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+    const narrative = terminal.writer.find((intent) => intent.kind === "terminal-projection")?.narrative;
+    expect(narrative).toMatchObject([{ kind: "narrationSegment", record: { id: firstId, text: "Same", is_final_response: 0 } }]);
+  });
+
+  it("reconciles shortened completed narration and does not reopen it from a late delta", () => {
+    const reducer = new CodexLiveEventReducer(execution);
+    const textItemId = `assistant-text:${"3".repeat(64)}`;
+    reduceEvent(reducer, "turnStarted");
+    reduceEvent(reducer, "textDelta", { textItemId, delta: "Long incorrect text", isFinalResponse: false });
+    const closed = reduceEvent(reducer, "assistantMessageBoundary", { textItemId, content: "Short", isFinalResponse: false });
+    expect(closed.writer).toContainEqual({ kind: "narrative-recovery", discardedItemIds: [], items: [
+      expect.objectContaining({ kind: "narrationSegment", record: expect.objectContaining({ id: textItemId, text: "Short", ended_at: expect.any(String) }) }),
+    ] });
+    const late = reduceEvent(reducer, "textDelta", { textItemId, delta: " late", isFinalResponse: false });
+    expect(late.writer).toContainEqual({ kind: "narrative-recovery", items: [], discardedItemIds: [] });
+  });
+
+  it("keeps execution nonterminal when native final item materializes a full body", () => {
+    const mapper = new CodexEventMapper(execution.threadId);
+    const reducer = new CodexLiveEventReducer(execution);
+    reduceEvent(reducer, "turnStarted");
+    const notifications = [
+      { method: "item/started", params: { item: { type: "agentMessage", id: "final", phase: "final_answer" } } },
+      { method: "item/agentMessage/delta", params: { itemId: "final", delta: "Answer" } },
+      { method: "item/completed", params: { item: { type: "agentMessage", id: "final", text: "Answer", phase: "final_answer" } } },
+    ];
+    const reductions = notifications.flatMap((notification) => mapper.mapNotification(notification)
+      .map(({ event: mapped }) => reducer.reduce(boundByProvider(mapped))));
+    const intents = reductions.flatMap((result) => result.kind === "reduced" ? result.writer : []);
+    expect(intents).toContainEqual(expect.objectContaining({ kind: "assistant-body", content: "Answer" }));
+    expect(intents.some((intent) => intent.kind === "terminal-projection")).toBe(false);
+    const terminal = reducer.reduce(boundByProvider(mapper.mapNotification({ method: "turn/completed", params: { turn: { status: "completed" } } }).at(-1)?.event ?? event("turnComplete", { reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 })));
+    expect(terminal.kind).toBe("reduced");
+    if (terminal.kind !== "reduced") throw new Error(terminal.reason);
+    expect(terminal.writer.some((intent) => intent.kind === "terminal-projection")).toBe(true);
   });
 
   it("carries parsed plan questions as data on the completing text event", () => {
@@ -207,7 +283,7 @@ describe("CodexLiveEventReducer", () => {
     const reduced = reductions.filter((result) => result.kind === "reduced");
     expect(reduced.map((result) => result.publication.event.type)).toEqual([
       "turnStarted", "textDelta", "assistantMessageBoundary", "toolUse", "toolResult",
-      "textDelta", "assistantMessageBoundary", "message", "turnComplete",
+      "textDelta", "assistantMessageBoundary", "assistantMessageBoundary", "message", "turnComplete",
     ]);
     const toolUse = reduced.find((result) => result.publication.event.type === "toolUse");
     expect(toolUse?.writer).toContainEqual(expect.objectContaining({ kind: "tool-use" }));
