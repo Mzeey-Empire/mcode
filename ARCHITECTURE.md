@@ -1,908 +1,239 @@
 # Architecture
 
-## 1. Overview
+## Overview
 
-Mcode is a desktop app for orchestrating AI coding agents. It manages multiple agent sessions across git repositories, with each thread optionally running in its own git worktree for branch isolation.
+Mcode is a local-first desktop application for running coding agents against local projects and Git worktrees. The Electron desktop app and browser app share one React client. A separate Bun server owns agent orchestration, durable conversation state, project operations, and terminal sessions.
 
-The codebase has a runtime-neutral **agent model**, transport **contracts**, shared runtime utilities, a standalone **server**, and a thin **desktop** shell. The React frontend connects to the server through WebSocket and uses Electron IPC only for native features such as file dialogs and clipboard access.
+Provider adapters translate external protocols into Mcode's canonical agent model. Execution workers process ordered observations. A separate progress owner publishes accepted progress and schedules persistence through one database writer. This separation lets the conversation update while saving continues, with explicit limits on what recovery can preserve.
 
-Key architectural rules:
-
-- `server` has zero Electron imports. It runs under Bun
-  when launched by the desktop shell or repository development scripts.
-- `desktop` has zero business logic. It cannot read the database or manage agents.
-- `web` never imports from `server` or `desktop`. It depends only on `contracts`.
-- `contracts` depends only on `agent-model` and Zod. It has no app or runtime implementation dependencies.
-
-## 2. Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Runtime | Bun (package manager + repository script runner) |
-| Monorepo | Turborepo |
-| Desktop | Electron 35, esbuild (main/preload) + Vite (renderer) |
-| Server | Bun, tsyringe (DI), bun:sqlite, Claude Agent SDK |
-| Frontend | Chromium renderer, React 19, Vite, shadcn/ui, Tailwind CSS 4, Zustand |
-| Contracts | Zod (schemas + type inference) |
-| Database | SQLite (WAL mode, bun:sqlite) |
-| Communication | WebSocket (JSON RPC + push events) |
-| Testing | Vitest and Testing Library |
-| CI/CD | GitHub Actions, release-please, electron-builder |
-
-## 3. Package Structure
-
-```text
-packages/
-  agent-model/                  Runtime-neutral canonical agent records and reducer
-  contracts/                    Transport schemas and compatibility projections
-  shared/                       Runtime utilities used across packages
-
-apps/
-  server/                       Bun HTTP + WebSocket backend
-  web/                          React SPA (connects via WebSocket)
-  desktop/                      Thin Electron shell (~500 lines)
-```
-
-### Package Dependency Graph
-
-```text
-agent-model (depends on Zod only)
-    |
-    +--> contracts (transport schemas and compatibility boundary)
-            |
-            +--> shared (depends on contracts)
-            |       |
-            |       +--> server (depends on contracts + shared)
-            |       +--> desktop (depends on contracts + shared)
-            |
-            +--> web (depends on contracts only)
-```
-
-### packages/agent-model
-
-Runtime-neutral authority for canonical agent identities, records, semantic event envelopes, reducer state, and Provider capability declarations. The package does not import Node, provider SDK, server, renderer, or database code.
-
-### packages/contracts
-
-Authority for transport schemas, renderer events, and provider-runtime events.
-It imports canonical agent types through `compat/agent-model.ts`. Renderer
-publications contain provider-neutral `AgentEvent` data. Provider-native
-evidence enters through a provider-runtime extension and can remain in opaque
-canonical records; renderers interpret the publications rather than that evidence.
-
-```text
-packages/contracts/src/
-  index.ts                    Barrel re-export
-  models/
-    workspace.ts              Workspace schema + type
-    thread.ts                 Thread schema + type
-    message.ts                Message schema + type
-    attachment.ts             AttachmentMeta, StoredAttachment
-    enums.ts                  ThreadStatus, ThreadMode, MessageRole, PermissionMode, InteractionMode
-  events/
-    agent-event.ts            AgentEvent discriminated union (Zod)
-    provider-runtime-event.ts ProviderRuntimeEvent and native extension schema
-  ws/
-    methods.ts                WS_METHODS: RPC method definitions (params + result schemas)
-    channels.ts               WS_CHANNELS: push channel definitions
-    protocol.ts               WebSocketRequest, WebSocketResponse, WsPush types
-  providers/
-    interfaces.ts             IAgentProvider, IProviderRegistry, ProviderId
-  git.ts                      GitBranch, WorktreeInfo schemas
-  github.ts                   PrInfo, PrDetail schemas
-  skills.ts                   SkillInfo schema
-```
-
-### Provider event path
-
-Providers emit `ProviderRuntimeEvent` values. Provider adapters project
-provider-neutral publications from native evidence for the admitted execution.
-One per-thread owner assigns stable event identities and order before publishing
-accepted progress on `agent.canonical`. Execution progress and completion do not
-wait for successful saves.
-
-A bounded, fair save queue sends those immutable operations to the shared
-application SQLite writer. Saved receipts confirm actual commits and advance the saved
-prefix. They cannot replay provider commands or renderer publication effects.
-Execution state and saving state are independent: a completed turn can still be
-saving. Durable turn admission waits for the preceding accepted suffix before
-changing the stored thread.
-
-Reconnect restores the saved model plus the retained accepted suffix. That
-suffix belongs to the server runtime, survives execution-worker release, and can
-be lost if the server crashes. Recovery reports detected loss rather than
-claiming the suffix was saved or rerunning provider tools. See the
-[narrative pipeline constraints](docs/internals/narrative-pipeline.md#accepted-progress-and-saving).
-
-### packages/shared
-
-Runtime utilities used by multiple packages:
-
-```text
-packages/shared/src/
-  logging/                    Rotating file logger (Winston + daily rotation)
-  paths/                      Mcode data directory resolution (from MCODE_DATA_DIR env)
-  git/                        Branch name sanitization, validation helpers
-```
-
-### apps/server
-
-Standalone backend process launched with Electron's Node.js runtime. Owns all
-business logic: database, AI providers, git operations, PTY management, and
-file serving.
-
-```text
-apps/server/src/
-  index.ts                    HTTP + WebSocket server entry point
-  container.ts                tsyringe composition root
-  services/
-    agent-service.ts          Agent session orchestration, event forwarding
-    workspace-service.ts      Workspace CRUD
-    thread-service.ts         Thread lifecycle, worktree provisioning
-    git-service.ts            Branch, worktree, checkout, fetch operations
-    pull-requests/
-      github-pull-request-client.ts GitHub CLI adapter and normalization boundary
-      pull-request-service.ts Provider-neutral PR reads and bounded task seed data
-      pull-request-mutation-service.ts Revalidated, idempotent remote PR writes
-      review-worktree-service.ts Review task mapping, provisioning, and linkage
-    github-service.ts         PR operations via gh CLI
-    file-service.ts           File listing (git ls-files), reading
-    config-service.ts         Claude config discovery (~/.claude/)
-    skill-service.ts          Skill scanning from filesystem
-    terminal-service.ts       PTY management (node-pty)
-    attachment-service.ts     Persist/read attachments
-  providers/
-    provider-registry.ts      Resolves provider by ID, injects all registered providers
-    claude/
-      claude-provider.ts      Claude Agent SDK adapter (prompt queue pattern)
-  repositories/
-    workspace-repo.ts         Workspace data access
-    thread-repo.ts            Thread data access
-    pull-request-review-link-repo.ts Durable PR to Review task linkage
-    message-repo.ts           Message data access
-  store/
-    database.ts               SQLite setup, WAL mode, forward-only migrations
-  transport/
-    ws-server.ts              HTTP + WebSocket server, auth token validation
-    ws-router.ts              Method string to service dispatch, Zod validation
-    push.ts                   Broadcast push events to all connected clients
-```
-
-### apps/web
-
-React SPA rendered by Chromium. All business logic calls go through the
-WebSocket transport. Native desktop features (dialogs, clipboard, editors) use
-`window.desktopBridge` when running inside Electron.
-
-```text
-apps/web/src/
-  transport/
-    index.ts                  Factory: resolves server URL, creates WS transport
-    ws-transport.ts           WebSocket RPC client + push event emitter + reconnection
-    ws-events.ts              Push channel listener setup (agent, terminal, file, thread events)
-    desktop-bridge.d.ts       Type declarations for window.desktopBridge
-    types.ts                  McodeTransport interface, shared frontend types
-  app/                        Routes and providers
-  components/                 UI components (sidebar, chat, terminal, diff, pull requests)
-  stores/                     Zustand state management, including Thread conversation residency
-  lib/                        Utilities and types
-```
-
-### apps/desktop
-
-Thin Electron shell. Spawns the server, creates the BrowserWindow, and bridges native OS features via IPC. No business logic.
-
-```text
-apps/desktop/src/main/
-  main.ts                     Window creation, server spawn, native IPC handlers, lifecycle
-  preload.ts                  contextBridge: desktopBridge + getPathForFile
-apps/desktop/src/features/server-runtime/process/
-  manager.ts                  Child process lifecycle (spawn, health poll, restart, shutdown)
-  binary-resolver.ts          Packaged and development server executable selection
-```
-
-## 4. Communication Flow
+The [domain glossary](CONTEXT.md) defines product terms. The architecture below describes ownership and data flow rather than every method or database field.
 
 ```mermaid
-graph TB
-    subgraph Desktop["Electron Main Process"]
-        SM["ServerManager"]
-        IPC["Native IPC Handlers<br/>(dialogs, clipboard, editors)"]
-        Proto["mcode-attachment://"]
-    end
+flowchart TD
+    Browser["Browser client"]
+    Renderer["Electron renderer<br/>shared React client"]
+    Desktop["Electron main + preload<br/>native host"]
+    Server["Bun server<br/>application + features + runtime"]
+    Adapters["Provider adapters"]
+    Backends["Installed provider backends<br/>SDK, CLI, ACP, HTTP"]
+    Workers["Execution workers"]
+    Writer["Database writer worker"]
+    DB[("SQLite")]
+    PTY["Separate Node PTY host"]
+    Shells["Shell processes"]
 
-    subgraph Server["Bun Backend Process"]
-        WS["WebSocket Server<br/>(RPC + push events)"]
-        HTTP["HTTP /health"]
-        Services["Service Layer<br/>(tsyringe DI)"]
-        DB["SQLite<br/>(bun:sqlite)"]
-        Providers["Provider Registry<br/>(Claude, future providers)"]
-        PTY["PTY Manager<br/>(node-pty)"]
-
-        WS --> Services
-        Services --> DB
-        Services --> Providers
-        Services --> PTY
-    end
-
-    subgraph Renderer["React Frontend"]
-        Transport["WS Transport"]
-        Bridge["desktopBridge"]
-        Stores["Zustand Stores"]
-        UI["shadcn/ui Components"]
-
-        Transport --> Stores
-        Bridge --> Stores
-        Stores --> UI
-    end
-
-    SM -->|"fork() child process"| Server
-    Transport <-->|"WebSocket JSON RPC"| WS
-    Bridge <-->|"ipcRenderer.invoke"| IPC
-    SM -->|"SIGTERM / SIGKILL"| Server
+    Desktop -->|"start or reuse detached server"| Server
+    Browser <-->|"authenticated RPC + push"| Server
+    Renderer <-->|"authenticated WebSocket RPC + push"| Server
+    Server -->|"local IPC push"| Desktop
+    Desktop <-->|"preload bridge"| Renderer
+    Server --> Adapters
+    Adapters <--> Backends
+    Server <--> Workers
+    Server --> Writer
+    Writer --> DB
+    Server -->|"read-only queries"| DB
+    Server <--> PTY
+    PTY <--> Shells
 ```
 
-### Startup Sequence
+## Package boundaries
+
+The packages separate the shared domain model from application services and external protocols.
+
+| Area | Ownership |
+|---|---|
+| [`packages/agent-model`](packages/agent-model/src/index.ts) | Provider-neutral identities, capabilities, events, records, and reducers. |
+| [`packages/contracts`](packages/contracts/src/index.ts) | Runtime schemas, RPC and push contracts, provider interfaces, and shared application types. |
+| [`packages/shared`](packages/shared/package.json) | Shared utilities with separate browser-safe and Node entry points. |
+| [`packages/thread-orchestration`](packages/thread-orchestration/src/index.ts) | Pure thread-control authorities, scopes, lineage, and instruction planning. |
+| [`packages/providers`](packages/providers/src/index.ts) | Provider factories, private transports, protocol mapping, and injected host ports. |
+| [`apps/server`](apps/server/src/index.ts) | Application composition, feature services, execution, persistence, and runtime ownership. |
+| [`apps/web`](apps/web/src/app/App.tsx) | Shared renderer, navigation, conversation projection, and browser and terminal presentation. |
+| [`apps/desktop`](apps/desktop/src/main/main.ts) | Native windows, preload IPC, server supervision, updates, browser security, and desktop integration. |
+
+`thread-orchestration` does not own the server's execution workers or database. Its pure rules support the application services that do.
+
+The renderer imports contracts and browser-safe shared code. It does not import server or desktop implementation. Contracts do not import applications or provider implementations. These boundaries are enforced in [`.dependency-cruiser.cjs`](.dependency-cruiser.cjs).
+
+`packages/browser-conformance` and `packages/oxlint-plugin` support verification and repository checks. They are tooling rather than application runtime layers.
+
+## Server ownership
+
+The server entry point leads to the [application bootstrap](apps/server/src/application/bootstrap/server-bootstrap.ts), which composes repositories, services, provider registrations, transports, and shutdown coordination.
+
+The source tree has three main responsibilities:
+
+- [`application`](apps/server/src/application) owns composition and shared RPC, HTTP, WebSocket, and IPC transport.
+- [`features`](apps/server/src/features) owns domain services and repositories, including agents, projects, thread control, providers, handoff, review, browser automation, and terminals.
+- [`runtime`](apps/server/src/runtime) owns SQLite infrastructure, environment handling, process containment, lifecycle, diagnostics, and memory policy.
+
+Feature transport handlers translate requests into service calls. Feature services coordinate domain work. Repositories read saved state and submit named write operations to the database owner.
+
+[`AgentService`](apps/server/src/features/agents/orchestration/agent-service.ts) is an entry point for agent commands. [`TurnRuntimeController`](apps/server/src/features/agents/orchestration/turn-runtime-controller.ts) owns active turn coordination. Neither should be treated as the entire event-processing or persistence system.
+
+The [memory pressure service](apps/server/src/runtime/memory/memory-pressure-service.ts) measures runtime memory against a soft budget and asks consumers to shed disposable state. Memory pressure does not block new turns.
+
+## Commands and client transport
+
+[`initTransport`](apps/web/src/transport/index.ts) creates the client transport and resolves the server connection. Electron supplies an authenticated connection through its preload bridge. A worktree runtime uses its runtime contract to keep the client paired with the correct server.
+
+Application commands use typed WebSocket RPC. The [router](apps/server/src/application/transport/ws-router.ts) validates the request envelope and method parameters before calling the registered handler. A successful `agent.send` acknowledges turn admission. It does not mean that the provider has completed the turn.
+
+Ordinary outgoing RPC results and push payloads use a [development validation adapter](apps/server/src/application/transport/payload-validation.ts). Production uses a pass-through adapter. In development, an invalid RPC result logs a warning, while an invalid ordinary push is withheld. This policy is separate from validation at untrusted input boundaries and canonical event processing.
+
+HTTP and WebSocket authentication use a token stored with the server's data directory, or an environment override. The [token extractor](apps/server/src/application/transport/auth.ts) accepts a Bearer header, a query token, or the `mcode-auth` cookie. Worktree instance pairing also checks the runtime's instance token and worktree identity.
+
+The [push layer](apps/server/src/application/transport/push.ts) scopes canonical progress, saving status, turn file effects, and turn diff updates to subscribed threads. Other channels have their own delivery rules.
+
+Electron can also receive push through a local named pipe or Unix socket. Desktop main relays that stream through preload to the renderer's common push emitter. The [IPC client](apps/web/src/transport/ipc-push-client.ts) suppresses duplicate WebSocket delivery for channels covered by IPC and restores WebSocket delivery if IPC disconnects. RPC still uses WebSocket.
+
+Terminal output has a binary WebSocket protocol. The alternate IPC path represents terminal bytes as base64. Renderer terminal callbacks use the [PTY data registry](apps/web/src/features/terminal/adapters/pty-data-registry.ts).
+
+The [WebSocket transport](apps/web/src/transport/ws-transport.ts) handles reconnection and half-open connection detection. Reconnection refreshes runtime state, restores subscriptions, and revalidates the selected conversation. Reconnecting transport does not itself recreate a provider turn.
+
+## Turn admission and progress
+
+Turn admission and provider observation have different owners.
+
+The [admission coordinator](apps/server/src/features/agents/turns/turn-admission-dispatch-coordinator.ts) checks the thread, provider, checkout, permissions, attachments, and command effects. It records the parent turn and user input before provider dispatch, with an exact thread, turn, and execution identity.
+
+User-dispatched executions use [`WorkerOwnedTurnRuntime`](apps/server/src/features/agents/execution/worker-owned-turn-runtime.ts) when the worker owner is bound. This path applies across providers. The runtime assigns an execution lease and mailbox to a worker in a bounded pool. Ownership checks prevent a stale worker or late observation from acting on a replacement execution.
+
+Provider-originated continuation can still enter the legacy provider ingress and turn pipeline. The worker-owned path must not be assumed to cover every adapter callback or recovery route.
 
 ```mermaid
-sequenceDiagram
-    participant E as Electron Main
-    participant SM as ServerManager
-    participant S as Server Process
-    participant W as BrowserWindow
+flowchart TD
+    Command["Validated turn command"]
+    Admission["Admission<br/>parent turn + user input"]
+    Owner["Exact execution owner<br/>identity + lease + mailbox"]
+    Provider["Provider dispatch"]
+    Observations["Ordered provider observations"]
+    Worker["Execution worker<br/>semantic operations"]
+    Progress["Per-thread accepted progress owner<br/>validate, retain, reduce"]
+    Client["Subscribed renderer<br/>agent.canonical"]
+    Fair["Fair save scheduler"]
+    Writer["One application database writer"]
+    Saved[("Saved canonical state<br/>operation receipts")]
+    Recovery["Recovery response<br/>saved state + retained suffix"]
 
-    E->>SM: start()
-    SM->>SM: findAvailablePort(19400-19500)
-    SM->>SM: generateAuthToken()
-    SM->>S: fork(server/src/index.ts)
-    SM->>S: poll GET /health (200ms intervals)
-    S-->>SM: 200 OK
-    SM-->>E: { port, authToken }
-    E->>W: createWindow()
-    E->>E: registerIpcHandlers()
-    W->>W: resolveServerUrl() via desktopBridge
-    W->>S: WebSocket connect (ws://localhost:PORT?token=TOKEN)
-    W->>W: startPushListeners()
+    Command --> Admission --> Owner --> Provider
+    Provider --> Observations --> Worker --> Progress
+    Owner -.->|"fences worker operations"| Worker
+    Progress -->|"publish accepted progress"| Client
+    Progress --> Fair --> Writer --> Saved
+    Saved -->|"committed receipt<br/>advance saved prefix"| Progress
+    Saved --> Recovery
+    Progress -->|"retained accepted suffix"| Recovery
+    Recovery --> Client
 ```
 
-### RPC Call Flow
-
-```mermaid
-sequenceDiagram
-    participant C as Component
-    participant S as Zustand Store
-    participant T as WS Transport
-    participant WS as WebSocket Server
-    participant R as WS Router
-    participant Svc as Service
-
-    C->>S: action (e.g. sendMessage)
-    S->>T: transport.sendMessage(...)
-    T->>WS: { id: "req_1", method: "agent.send", params: {...} }
-    WS->>R: routeMessage(raw, deps)
-    R->>R: validate params (Zod)
-    R->>Svc: agentService.sendMessage(...)
-    Svc-->>R: result
-    R->>R: validate result (Zod)
-    R-->>WS: { id: "req_1", result: ... }
-    WS-->>T: JSON response
-    T-->>S: resolves Promise
-
-    Note over WS,C: Push events (async)
-    Svc->>WS: broadcast("agent.canonical", acceptedFrame)
-    WS-->>T: { type: "push", channel: "agent.canonical", data: {...} }
-    T->>T: pushEmitter.emit(channel, data)
-    T-->>S: store update
-```
-
-## 5. Data Layer
-
-### 5.1 Schema
-
-```mermaid
-erDiagram
-    workspaces {
-        text id PK "UUID"
-        text name
-        text path "UNIQUE"
-        text provider_config "JSON, default '{}'"
-        text created_at
-        text updated_at
-    }
-
-    threads {
-        text id PK "UUID"
-        text workspace_id FK
-        text title
-        text status "active|paused|interrupted|errored|archived|completed|deleted"
-        text mode "direct|worktree"
-        text worktree_path "nullable"
-        text branch
-        integer worktree_managed "1 if app-provisioned, 0 if external"
-        integer issue_number "nullable"
-        integer pr_number "nullable"
-        text pr_status "nullable"
-        text sdk_session_id "nullable, for resuming SDK sessions"
-        text model "nullable"
-        text reasoning_level "nullable"
-        text interaction_mode "nullable"
-        text orchestration_mode "standard|proactive, nullable"
-        text permission_mode "nullable"
-        text created_at
-        text updated_at
-        text deleted_at "nullable, soft delete"
-    }
-
-    messages {
-        text id PK "UUID"
-        text thread_id FK
-        text role "user|assistant|system"
-        text content
-        text tool_calls "JSON, nullable"
-        text files_changed "JSON, nullable"
-        real cost_usd "nullable"
-        integer tokens_used "nullable"
-        text timestamp
-        integer sequence
-        text attachments "JSON, nullable"
-    }
-
-    pull_request_review_links {
-        text worktree_id PK "UUID"
-        text provider
-        text repository_node_id
-        integer pull_request_number
-        text pr_url
-        text pr_state
-        text workspace_id FK
-        text worktree_path
-        integer worktree_managed
-        text head_ref
-        text head_oid
-        text local_branch
-        text push_remote
-        text push_ref
-        text primary_thread_id FK "nullable, unique"
-    }
-
-    workspaces ||--o{ threads : "has"
-    threads ||--o{ messages : "has"
-    workspaces ||--o{ pull_request_review_links : "hosts"
-    threads |o--o| pull_request_review_links : "canonical Review task"
-```
-
-Canonical agent types are defined in `packages/agent-model`. Transport and persisted compatibility types remain in `packages/contracts`. Both packages infer TypeScript types from Zod schemas. The server validates data at the WebSocket boundary so the frontend receives typed, validated payloads.
-
-### 5.2 Migrations
-
-Forward-only migrations are applied on startup by `database.ts` using a `_migrations` tracking table. Current migrations:
-
-| Version | Change | Location |
-|---------|--------|----------|
-| V001 | Initial schema (workspaces, threads, messages, indexes) | Inline SQL in `database.ts` |
-| V002 | Add `model` column to threads | Inline |
-| V003 | Add `worktree_managed` column to threads | Inline |
-| V004 | Add `attachments` column to messages | Inline |
-| V005 | Add `sdk_session_id` column to threads | Inline |
-| V006 | Drop legacy `pid` and `session_name` columns from threads | Inline |
-
-### 5.3 Repository Pattern
-
-Repositories expose synchronous queries through a physically read-only runtime
-connection and asynchronous mutations through
-[`ApplicationDatabaseWriter`](apps/server/src/runtime/persistence/sqlite/application-database-writer.ts).
-After startup migrations, one worker per server process owns the writable
-connection. Ordinary feature commands and canonical saves share its bounded FIFO.
-Complete read/write transactions execute inside that worker; callers await
-committed results before performing dependent actions. Shutdown stops write
-producers before draining and closing the owner.
-
-A failed command does not poison later jobs. Canonical commands can resolve lost
-replies using durable receipts. An ordinary dispatched command whose reply is lost
-reports an unknown outcome and is not automatically replayed: repeating a claim,
-counter update or generated insertion could duplicate its effects. Separate server
-processes still contend through SQLite's WAL and busy timeout. See the
-[owner implementation](apps/server/src/runtime/persistence/sqlite/application-database-writer.ts)
-and [connection policy](apps/server/src/runtime/persistence/sqlite/sqlite-connection-policy.ts).
-
-## 6. WebSocket RPC Protocol
-
-### 6.1 Message Formats
-
-**Request (client to server):**
-
-```typescript
-{ id: "req_1", method: "thread.create", params: { workspaceId: "...", title: "...", mode: "direct", branch: "main" } }
-```
-
-**Response (success):**
-
-```typescript
-{ id: "req_1", result: { id: "...", title: "...", status: "active", ... } }
-```
-
-**Response (error):**
-
-```typescript
-{ id: "req_1", error: { code: "NOT_FOUND", message: "Workspace not found" } }
-```
-
-**Push (server to client, no request ID):**
-
-```typescript
-{ type: "push", channel: "agent.canonical", data: acceptedFrame }
-```
-
-### 6.2 RPC Methods
-
-All params and results are defined as Zod schemas in `packages/contracts/src/ws/methods.ts`. The router validates both directions at runtime.
-
-| Method | Description |
-|--------|-------------|
-| `workspace.list` | List all workspaces |
-| `workspace.create` | Create a workspace (name + path) |
-| `workspace.delete` | Delete a workspace by ID |
-| `thread.list` | List threads for a workspace |
-| `thread.create` | Create a thread (workspace, title, mode, branch) |
-| `thread.delete` | Delete a thread, optionally cleaning up its worktree |
-| `thread.updateTitle` | Rename a thread |
-| `thread.markViewed` | Clear the "completed" badge on a thread |
-| `git.listBranches` | List branches for a workspace |
-| `git.currentBranch` | Get the current branch |
-| `git.checkout` | Switch branches |
-| `git.listWorktrees` | List git worktrees |
-| `git.fetchBranch` | Fetch a branch (optionally for a PR) |
-| `agent.send` | Send a message to an existing thread's agent |
-| `agent.createAndSend` | Create a thread and send a message in one call |
-| `agent.stop` | Stop an active agent session |
-| `agent.activeCount` | Get the number of active agent sessions |
-| `agent.listRunning` | List thread IDs with live agent sessions. Called on WS (re)connect to hydrate `runningThreadIds`. |
-| `message.list` | Load messages for a thread |
-| `file.list` | List files in a workspace (uses `git ls-files`) |
-| `file.read` | Read a file by relative path |
-| `file.refresh` | One-shot `git status` check for a scope; emits `files.changed` when the dirty set moved |
-| `github.branchPr` | Get PR info for a branch |
-| `github.listOpenPrs` | List open PRs for a workspace |
-| `pullRequest.capabilities` | Resolve independently gated viewer permissions |
-| `pullRequest.list` | Load one bounded relationship inbox page |
-| `pullRequest.get` | Load one detail, checks, or comments page |
-| `pullRequest.timeline` | Load one bounded Timeline lane page |
-| `pullRequest.files` | Load one changed-file metadata page |
-| `pullRequest.patch` | Load one immutable-snapshot file patch |
-| `pullRequest.cancel` | Cancel one connection-owned read operation |
-| `pullRequest.createReviewTask` | Prepare, create, or explicitly reuse a linked Review worktree |
-| `pullRequest.reviewLink` | Restore the durable PR link for a canonical Review task |
-| `pullRequest.postComment` | Post one confirmed issue comment |
-| `pullRequest.submitReview` | Submit one confirmed review and its bounded drafts |
-| `pullRequest.setReadiness` | Confirm a draft or ready state change |
-| `pullRequest.close` | Confirm closing an open pull request |
-| `pullRequest.merge` | Merge with an expected-head guard and selected merge method |
-| `config.discover` | Discover Claude config for a workspace path |
-| `skill.list` | List available skills |
-| `terminal.create` | Create a PTY for a thread |
-| `terminal.write` | Write data to a PTY |
-| `terminal.resize` | Resize a PTY |
-| `terminal.kill` | Kill a PTY |
-| `terminal.killByThread` | Kill all PTYs for a thread |
-| `app.version` | Get the server version |
-
-### 6.3 Push Channels
-
-Push events are broadcast to all connected WebSocket clients. The server validates push data against channel schemas before sending.
-
-| Channel | Data | Description |
-|---------|------|-------------|
-| `agent.canonical` | `CanonicalAgentProgressFrame` | Accepted progress, actual saved acknowledgements, and subscription recovery |
-| `turn.savingStatus` | `TurnSavingStatus` | Saving state independent of execution state |
-| `terminal.data` | `{ ptyId, data }` | PTY output |
-| `terminal.exit` | `{ ptyId, code }` | PTY exited |
-| `thread.status` | `{ threadId, status }` | Thread status changed |
-| `files.changed` | `{ workspaceId, threadId? }` | Dirty-set delta detected by a `file.refresh` attention-boundary check |
-| `skills.changed` | `{}` | Skill list invalidated |
-
-**Note:** `thread.status` reports persistent DB states (`active` / `completed` / `errored`). Live-session state (agent is running right now) is conveyed via the `turnStarted` / `turnComplete` / `ended` AgentEvents and the `agent.listRunning` RPC, not via this channel.
-
-### 6.4 Authentication
-
-The server accepts a token via the WebSocket URL query parameter. The desktop shell generates a random UUID token on each launch and passes it to both the server (via env) and the renderer (via the `desktopBridge.getServerUrl()` IPC call).
-
-```
-ws://localhost:19432?token=<uuid>
-```
-
-Connections without a valid token are closed with code `4001 Unauthorized`.
-
-### 6.5 Agent Events
-
-Provider-neutral events appear inside canonical publication records on the
-`agent.canonical` channel. Their first accepted delivery applies live effects;
-saved acknowledgements and recovery rebuild data without replaying those effects.
-
-The send RPC acknowledges turn admission, while the event stream reports the
-execution's progress and completion. Holding the RPC open for the whole provider
-turn lets a request timeout report failure during a healthy long-running turn.
-Admission failures still reject the request; later failures belong to the exact
-execution's stream.
-
-| Event | Fields | Description |
-|-------|--------|-------------|
-| `message` | `threadId, content, tokens` | Complete assistant message |
-| `toolUse` | `threadId, toolCallId, toolName, toolInput` | Tool invocation |
-| `toolResult` | `threadId, toolCallId, output, isError` | Tool output |
-| `turnStarted` | `threadId` | Emitted at the start of a new turn before any other events. Mirrors `turnComplete` and `ended`. |
-| `turnComplete` | `threadId, reason, costUsd, tokensIn, tokensOut` | Turn finished with cost and token counts |
-| `error` | `threadId, error` | Agent error |
-| `ended` | `threadId` | Session fully terminated |
-| `system` | `threadId, subtype` | System-level notification |
-
-## 7. Service Layer and Dependency Injection
-
-### 7.1 Composition Root
-
-The server uses tsyringe for dependency injection. The
-[composition root](apps/server/src/application/composition/container.ts) registers
-the process-owned database writer and read-only reader, then the services,
-repositories and providers. Feature runtimes borrow the writer; they do not open
-or close competing application writers.
-
-### 7.2 Layer Responsibilities
-
-| Layer | Responsibility | Example |
-|-------|---------------|---------|
-| Transport | WebSocket RPC routing, Zod validation, push broadcasting | `ws-router.ts`, `push.ts` |
-| Service | Business logic, orchestration, session management | `AgentService`, `ThreadService` |
-| Repository | Data access, SQL queries, row-to-object mapping | `ThreadRepo`, `MessageRepo` |
-| Provider | External service adapters (AI, git, GitHub) | `ClaudeProvider`, `GitService` |
-| Store | SQLite schema, migrations, connection setup | `database.ts` |
-
-Services depend on repositories and providers via constructor injection. No service imports another service's implementation directly.
-
-### 7.3 Pull request Review worktree transaction
-
-`ReviewWorktreeService` owns the local continuation from a remote pull request to
-a Review task. Preparation returns an active canonical task, an opaque compatible
-worktree candidate, a bounded Workspace mapping error, or a server-owned managed
-destination. The renderer never supplies an arbitrary reuse path.
-
-Confirmed creation runs under an identity lock. `GitService` also serializes the
-repository-local remote and ref changes. It fetches the current head into a
-remote-tracking ref, verifies `FETCH_HEAD` against the captured OID, and protects
-that commit with a temporary `refs/mcode/pull-requests/...` ref. A new branch is
-created from that immutable ref. Existing branches are reusable only when the
-OID, upstream, and worktree ownership all match.
-
-The thread and `pull_request_review_links` row are written in one SQLite
-transaction after filesystem setup succeeds. The link retains the explicit push
-remote and ref, PR URL and state, head identity, and canonical thread. This lets
-Overview restore PR context after restart even when a fork Review branch has a
-different local name. `git.push` uses the linked target when a Review thread ID is
-present and rechecks the remote URL and ancestry before pushing.
-
-Failure cleanup removes only refs, branches, directories, and managed remotes
-created by that attempt. Reused worktrees remain unmanaged. Thread deletion also
-keeps a managed worktree while another active thread uses its path. See
-[`docs/internals/pull-request-review-worktrees.md`](docs/internals/pull-request-review-worktrees.md)
-for the operational invariants.
-
-### 7.4 Pull request remote data and mutation boundary
-
-`GithubPullRequestClient` converts hostile GitHub payloads into provider-neutral
-contracts without exposing credentials. Reads are split across inbox, detail,
-checks, comments, Timeline, changed files, and immutable patches. Each page is
-bounded. Active reads carry a connection-owned operation ID so stale selection
-work can be cancelled without affecting another client.
-
-`PullRequestMutationService` owns comments, reviews, readiness changes, closes,
-and merges. Each request carries the pull request identity, the state the user
-confirmed, and a UUID idempotency key. The service rereads viewer permission and
-remote state before dispatch. Merge also sends the current head OID as GitHub's
-atomic expected-head guard.
-
-The idempotency registry keys viewer, pull request, effect, and UUID. Matching
-in-flight calls share one promise. A successful or outcome-unknown result stays
-for ten minutes, with at most 512 entries. A definite no-effect failure removes
-the entry so a corrected retry can run. Reusing a UUID with another payload is a
-typed conflict.
-
-Review submission creates a pending provider review, adds at most 100 bounded
-inline comments or replies, then submits the selected review effect. A definite
-draft or submit failure deletes that pending review when GitHub confirms the
-cleanup. An unknown outcome remains unknown rather than reporting success.
-
-Successful mutations invalidate server read caches and the web inbox, detail,
-Timeline, checks, comments, files, and patch snapshots. The web store clears only
-draft IDs accepted by a successful review. See
-[`docs/internals/pull-request-mutations.md`](docs/internals/pull-request-mutations.md)
-for the operational contract.
-
-### 7.5 Request Validation
-
-The WebSocket router (`ws-router.ts`) performs three-phase validation for every RPC call:
-
-1. **Parse**: Validate the raw message against `WebSocketRequestSchema` (must have `id`, `method`, `params`)
-2. **Params**: Validate `params` against the method's Zod schema from `WS_METHODS`
-3. **Result**: Validate the service return value against the method's result schema (logs warnings on mismatch but does not block the response)
-
-## 8. Provider Registry
-
-### 8.1 Provider Interface
-
-The `IAgentProvider` interface in `packages/contracts` defines the contract for AI agent backends:
-
-```typescript
-type ProviderId = "claude" | "codex" | "gemini" | "copilot";
-
-interface IAgentProvider {
-  readonly id: ProviderId;
-  sendMessage(params: { sessionId, message, cwd, model, resume, permissionMode, attachments? }): void;
-  stopSession(sessionId: string): void;
-  setSdkSessionId(sessionId: string, sdkSessionId: string): void;
-  shutdown(): void;
-  on(event: "event", handler: (event: AgentEvent) => void): void;
-  on(event: "error", handler: (error: Error) => void): void;
-}
-```
-
-### 8.2 Registry Pattern
-
-`ProviderRegistry` collects all registered `IAgentProvider` tokens via tsyringe's `@injectAll` decorator, indexes them by `ProviderId`, and exposes `resolve(id)` and `resolveAll()`. Adding a new provider requires only registering its class in the DI container.
-
-### 8.3 Claude Provider (Session Architecture)
-
-The Claude provider preserves the prompt queue pattern:
-
-- `query()` is called once per session with an `AsyncIterable<SDKUserMessage>`
-- Messages pushed to the queue feed the existing subprocess without cold-starting
-- MCP servers, context, and session state persist across turns
-- Session pool with idle eviction (10-minute TTL)
-- Resume with `sdk_session_id` after app restart, fallback to fresh query on failure
-
-The server process is long-lived (spawned once by desktop, lives until app closes), so the session pool persists naturally.
-
-### 8.4 Codex Provider (Session Architecture)
-
-The Codex provider (`packages/providers/src/private/codex/`) uses one persistent `codex app-server` child process per session, communicating via JSON-RPC 2.0 over stdin/stdout (NDJSON):
-
-- `codex-provider.ts` - `IAgentProvider` implementation; manages `CodexAppServer` sessions
-- `codex-app-server.ts` - persistent child process lifecycle manager
-- `codex-rpc-client.ts` - JSON-RPC 2.0 NDJSON client (line buffering, request/response correlation)
-- `codex-event-mapper.ts` - maps Codex JSON-RPC notifications to `AgentEvent` objects
-- `codex-version.ts` - CLI version gate (rejects CLI < 0.37.0)
-- `codex-types.ts` - JSON-RPC protocol type definitions
-
-Lifecycle per session:
-
-1. **Handshake**: `initialize` → `initialized` → `model/list` (best-effort) → `thread/start` (or `thread/resume` with fresh-thread fallback)
-2. **Turn**: `turn/start` RPC, events stream via notifications, wait for `turn.completed` / `turn.failed`
-3. **Cancel**: `turn/interrupt` RPC, then `taskkill /T /F` on Windows (full tree kill)
-4. **Eviction**: sessions idle for 10 minutes have their child process killed
-
-On Windows, `shell: true` on spawn resolves `.cmd` shims. Process tree kill uses `taskkill /T /F /PID` because Node's `child.kill()` does not kill grandchildren.
-
-Child processes inherit an explicit `env` object from **`EnvService`**, which layers a short-TTL refresh of the user's shell or Windows registry configuration over the server's `process.env`, then applies **`ProtectedEnvStore`** so `MCODE_*`, `ELECTRON_*`, and `BETTER_SQLITE3_*` values from server startup are not overridden (see `docs/agents/runtime.md`).
-
-## 9. Desktop Shell
-
-### 9.1 ServerManager
-
-`ServerManager` in `apps/desktop/src/features/server-runtime/process/manager.ts` handles the server child process lifecycle:
-
-1. **Port discovery**: Scans ports 19400-19500 for an available TCP port
-2. **Spawn**: Forks the server entry point with `ELECTRON_RUN_AS_NODE=1` and passes port, auth token, data directory, and version via environment variables
-3. **Health polling**: Polls `GET /health` every 200ms until the server responds 200 (10s timeout)
-4. **Shutdown**: Sends SIGTERM, then SIGKILL after a 5-second grace period
-5. **Restart**: Kills the current process, waits 500ms for port release, then spawns a fresh instance
-
-### 9.2 Native IPC (desktopBridge)
-
-The preload script exposes `window.desktopBridge` for operations that require native Electron APIs. These are the only things that use Electron IPC:
-
-| Method | Purpose |
-|--------|---------|
-| `getServerUrl()` | Get the WebSocket URL with auth token |
-| `showOpenDialog(options)` | Native folder picker dialog |
-| `openExternalUrl(url)` | Open URL in default browser (https only) |
-| `listOpenInApps()` | List openable apps (editors, file manager) with detection status |
-| `openIn({ appId, target })` | Open a target in the app with `appId`; the registry dispatches to the matching adapter (editor launch or file-manager reveal) |
-| `readClipboardImage()` | Read image from clipboard, save as temp JPEG |
-| `getLogPath()` | Get the log directory path |
-| `getRecentLogs(lines)` | Read recent log lines |
-| `getPathForFile(file)` | Resolve native path for a drag-and-drop File object |
-
-### 9.3 Attachment Protocol
-
-The desktop shell registers a custom `mcode-attachment://` protocol for inline display of stored attachments. Requests are routed as `mcode-attachment://THREAD_ID/ATTACHMENT_ID.EXT` and served directly from the user data directory with immutable caching headers.
-
-### 9.4 Graceful Shutdown
-
-On close, the desktop shell checks the server's active agent count via the `/health` endpoint. If agents are running, a confirmation dialog warns the user. On confirmation (or if no agents are active), the shell sends SIGTERM to the server process.
-
-The server handles SIGTERM with a five-step shutdown sequence:
-
-1. Stop all active agent sessions
-2. Shut down all providers (closes SDK subprocesses)
-3. Mark active threads as "interrupted" in the database
-4. Shut down the terminal service (kills all PTYs)
-5. Close the database connection
-
-### 9.5 Browser surfaces
-
-One `BrowserSurfaceHost` exists in each renderer window. It owns live Browser
-pages independently of panel and thread component lifetimes. Electron surfaces
-use renderer-owned `<webview>` elements. Web surfaces use iframes.
-
-Electron main validates adoption, navigation, permissions, capture, and browser
-automation through typed generation-bound adapters. The renderer host owns page
-placement, visibility, semantic page state, and final DOM release. There is no
-runtime host switch or fallback.
-
-## 10. Web Transport Layer
-
-### 10.1 Transport Initialization
-
-The transport factory in `apps/web/src/transport/index.ts` resolves the server URL and creates a single WebSocket connection:
-
-1. In Electron: calls `window.desktopBridge.getServerUrl()` to get the authenticated URL
-2. In standalone/dev mode: falls back to `VITE_SERVER_URL` env var or `ws://localhost:3100`
-
-`initTransport()` is called once at app startup. `getTransport()` returns the instance synchronously for use in stores and components.
-
-### 10.2 WebSocket Transport
-
-`ws-transport.ts` implements the `McodeTransport` interface where every method maps to a single `rpc()` call matching the server's `WS_METHODS` names. Server push messages are forwarded to a shared `PushEmitter` instance.
-
-### 10.3 Reconnection
-
-The WebSocket transport includes automatic reconnection:
-
-- Exponential backoff: 1s, 2s, 4s, 8s, up to 30s max
-- All pending RPC calls are rejected with "WebSocket disconnected" on close
-- Push channel listeners persist across reconnects (they live on the `PushEmitter`, not the WebSocket)
-- Connection readiness is tracked with a resettable Promise that gates `rpc()` calls
-- After a reconnect refreshes the active workspace's thread list, the registered
-  Thread conversation residency forces one selected-conversation revalidation.
-  A failed refresh keeps its resident rows visible.
-
-### 10.4 Push Event Listeners
-
-`ws-events.ts` wires push channels to the appropriate Zustand stores:
-
-| Channel | Handler |
-|---------|---------|
-| `agent.canonical` | Reconciles the saved model and accepted suffix, applying first-delivery publication effects |
-| `turn.savingStatus` | Updates saving notices for active or completed executions |
-| `terminal.data` | Dispatches `mcode:pty-data` CustomEvent for xterm instances |
-| `terminal.exit` | Dispatches `mcode:pty-exit` CustomEvent, removes terminal after delay |
-| `thread.status` | Updates thread status in `workspaceStore` |
-| `files.changed` | Clears the file autocomplete cache for the workspace |
-| `skills.changed` | Reserved for future skill cache invalidation |
-
-The renderer has one conversation residency authority, registered by
-`threadStore`. `workspaceStore` owns sidebar selection and rows only. The
-residency owns selected activation, forced refresh, bounded inactive retention,
-pagination cache synchronization, and prefetch routing. `threadStore` projects
-validated canonical progress into resident Thread records. The server remains
-the durability authority for messages and persisted narrative metadata; an
-accepted position is not a promise that its data has reached SQLite.
-
-## 11. Session Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> Active : user sends message
-    Active --> Active : resume
-    Active --> Completed : clean exit
-    Active --> Errored : crash
-    Active --> Paused : user stops
-    Active --> Interrupted : app closes
-
-    Paused --> Active : resume
-    Interrupted --> Active : resume on relaunch
-    Errored --> Active : retry
-
-    Active --> Deleted : user deletes
-    Paused --> Deleted : user deletes
-    Errored --> Deleted : user deletes
-    Completed --> Deleted : user deletes
-
-    Completed --> [*]
-    Deleted --> [*]
-```
-
-## 12. Frontend Architecture
-
-| Concern | Technology |
-|---------|------------|
-| Components | shadcn/ui primitives + custom components |
-| Styling | Tailwind CSS 4 + CVA + tailwind-merge |
-| State | Zustand stores (workspaceStore, threadStore, settingsStore) |
-| Routing | TanStack Router |
-| Virtualization | @tanstack/react-virtual |
-| Icons | Lucide React |
-| Markdown | react-markdown + remark-gfm |
-
-## 13. Development Setup
-
-**Prerequisites:** Bun and Git. Install at least one supported provider CLI, or
-configure its executable path in Settings > Providers.
-
-```bash
-git clone <repo-url>
-cd mcode
-bun run setup
-bun install
-bun run doctor
-
-# Run the full Electron app (main + renderer)
-bun run dev:desktop
-
-# Run the frontend only (connects to localhost:3100 or VITE_SERVER_URL)
-bun run dev:web
-```
-
-## 14. Testing
-
-| Type | Command | Framework |
-|------|---------|-----------|
-| Unit, component, and integration | `bun run test` | Vitest and Testing Library |
-| Full regression gate | Hosted CI | Typecheck, lint, and maintained tests |
-| Pull request production performance | `cd apps/web && bun run perf:pull-requests` | Vite manifest, Vitest, and Playwright |
-
-Behavior changes are also exercised against the running app. Agents prefer browser use for web surfaces and computer use for Electron-only surfaces. Disposable verification scripts and artifacts belong under `.dev/verification/`.
-
-## 15. Performance Budgets
-
-| Metric | Target |
-|--------|--------|
-| App idle memory | < 150 MB |
-| Max concurrent agents | 5 (configurable) |
-| First 100 messages load | < 50 ms |
-| App startup to usable | < 2 seconds |
-| Frontend bundle size | < 2 MB gzipped |
-| Eager web chunk | <= 500 KiB gzipped |
-| Pull request virtual viewport | < 500 descendants at legal data bounds |
-| Pull request selector or store update p95 | < 2 ms |
-| Server memory budget | 512 MB soft RSS budget for pressure shedding (configurable via `server.memory.heapMb`) |
-
-## 16. CI/CD and Release
-
-### CI Jobs (on pull request)
-
-| Job | What it does |
-|-----|-------------|
-| `pr-title` | Validates conventional commit format |
-| `lint-desktop` | Typechecks `apps/desktop` |
-| `lint-frontend` | Runs ESLint + typecheck on `apps/web` |
-| `test-frontend` | Runs Vitest on `apps/web` |
-| `build-check` | Builds both packages |
-
-All CI jobs use `oven-sh/setup-bun@v2`, Bun 1.4.0, and `bun install --frozen-lockfile`.
-
-### Release Pipeline
-
-```mermaid
-flowchart LR
-    A["Merge to main"] --> B["release-please<br/>creates PR"]
-    B --> C["PR merged<br/>creates GitHub Release"]
-    C --> D["build-release.yml<br/>runs electron-builder"]
-    D --> E["Windows<br/>(NSIS + zip)"]
-    D --> F["macOS<br/>(DMG + zip)"]
-    D --> G["Linux<br/>(AppImage + deb)"]
-```
-
-All release channels use one target-package path: `desktop-package-target.yml`
-is called once for each Windows x64, Linux x64, macOS arm64, and macOS x64
-target. The final unpacked/staged target is validated for package shape, native
-inventory and load, packaged server startup, PTY host startup, signing
-evidence, hashes, and target metadata. Nightly and Stable are publication
-adapters over the same staged target evidence. Nightly uses unsigned targets;
-Stable requires production signing and notarization.
-
-Pull-request packaging uses a Linux x64 canary when desktop or packaging
-paths change. Release Please PRs and manual full-matrix dispatches run the
-complete four-target matrix. Nightly and stable release keep their existing
-matrices. An electron-builder failure is retryable only when its output
-identifies an Electron release download and EOF, ECONNRESET, ETIMEDOUT, or a
-temporary connection failure. Native rebuild, package validation, Terminal
-attestation, signing, and unknown failures remain deterministic failures and
-are not retried.
+[`CanonicalAcceptedProgress`](apps/server/src/features/agents/canonical/canonical-accepted-progress.ts) owns accepted progress independently of execution workers. It validates and retains immutable operations, reduces the canonical model, and publishes `agent.canonical` before those operations finish saving.
+
+Accepted progress means that the running server owns the operation and its replay data. It does not mean that SQLite has committed it.
+
+The [save scheduler](apps/server/src/features/agents/canonical/accepted-save-scheduler.ts) runs one ready batch per thread before returning to a busy thread. Saved receipts advance only the contiguous saved prefix. Failed or pending operations remain in the retained suffix rather than being reported as saved.
+
+Execution state and saving state are separate. A provider can finish while progress is still saving. Commands that require durable state must wait behind the retained suffix instead of overtaking it.
+
+Recovery combines saved canonical state with the retained accepted suffix. The suffix can survive execution worker release or loss because the progress owner is separate. It cannot survive a server process crash. Recovery reports detected loss instead of inventing missing progress. Saved acknowledgements and recovery rebuild state without replaying provider commands or first-delivery renderer effects.
+
+The [accepted progress and saving constraints](docs/internals/narrative-pipeline.md#accepted-progress-and-saving) explain the ownership rules that span these stages.
+
+## Persistence and write outcomes
+
+The [SQLite schema](apps/server/src/runtime/persistence/sqlite/schema.ts) stores workspace, thread, conversation, and feature records. Canonical agent tables represent threads, turns, items, events, checkpoints, and operation receipts. Compatibility projections support existing message and narrative readers.
+
+Runtime repositories use a [physically read-only SQLite connection](apps/server/src/runtime/persistence/sqlite/read-only-database.ts). The [`ApplicationDatabaseWriter`](apps/server/src/runtime/persistence/sqlite/application-database-writer.ts) owns the server process's writable runtime connection in a worker. Ordinary mutations and canonical writes share bounded admission. Write transactions execute in that worker.
+
+Canonical operations carry stable identities and persisted receipts. If a writer reply is lost, receipt-backed recovery can distinguish a committed operation from work that still needs application.
+
+An ordinary mutation whose worker disappears after dispatch has an unknown outcome. It may already have committed. The writer reports `DatabaseWriteOutcomeUnknown` and does not automatically replay the mutation. Callers must preserve that uncertainty.
+
+Migrations use the SQL files and journal in [`apps/server/drizzle`](apps/server/drizzle). [Database initialization](apps/server/src/runtime/persistence/sqlite/database.ts) also reconciles legacy migration history and applies compatibility repairs. Migration backup and restoration belong to startup initialization, not ordinary replacement-writer recovery.
+
+Global user settings live in `settings.json` under the data directory through [`SettingsService`](apps/server/src/features/settings/settings-service.ts).
+
+The [migration guide](docs/internals/db-migrations.md) defines the maintained schema-change workflow.
+
+## Provider boundaries
+
+The shared [`IAgentProvider` interface](packages/contracts/src/providers/interfaces.ts) accepts a `TurnRequest` through `sendTurn`. It exposes runtime events, stop and shutdown operations, model discovery, and capability-specific extensions. Provider descriptors let callers make explicit capability decisions before dispatch.
+
+The registered runtime implementations are split between two locations:
+
+- Codex, Cursor, and Devin implementations live privately in [`packages/providers`](packages/providers/src/private) and enter the server through public factories.
+- Claude, Copilot, and OpenCode implementations remain in [`server-local adapters`](apps/server/src/features/providers/adapters).
+
+Public factory names do not imply that every runtime implementation has moved into the provider package. Claude, Copilot, and OpenCode factories currently prepare descriptors rather than usable runtime adapters. Gemini is a coming-soon catalog entry.
+
+The six registered providers use different transports.
+
+| Provider | External transport |
+|---|---|
+| Claude | Claude Agent SDK query with a prompt queue. |
+| Codex | Persistent app-server process with NDJSON JSON-RPC. |
+| Copilot | Copilot SDK session callbacks and sends. |
+| Cursor | `agent acp` through the shared ACP implementation. |
+| Devin | `devin acp` through the shared ACP implementation. |
+| OpenCode | Pooled `opencode serve` processes with HTTP requests and SSE events. |
+
+Providers implemented in `packages/providers` receive server authority through [`ProviderHostPorts`](packages/providers/src/host-ports.ts). The [server host adapter](apps/server/src/features/providers/composition/provider-host-ports.ts) supplies environment, process containment, browser access, thread control, grants, and canonical event submission. Providers do not own the application database.
+
+`SessionRuntime` supplies pooling and lifecycle support for adapters that use it. It is not a universal transport design. OpenCode owns an `OpenCodeServerPool`, and process lifetime does not have a universal one-session-to-one-process relationship.
+
+Resume, stop, eviction, and recovery remain provider-specific. A healthy Codex process can remain warm after Stop. Cursor and Devin reject a failed persisted-session recovery rather than silently replacing the session. Shared interfaces do not establish identical recovery guarantees.
+
+The [provider architecture guide](docs/internals/provider-architecture.md) explains adapter rules and transport-specific constraints.
+
+## Renderer and native responsibilities
+
+The renderer owns interaction state and presentation. It uses React, Zustand, and virtualized conversation rendering. Primary navigation uses [`AppPrimarySurface` in `App.tsx`](apps/web/src/app/App.tsx) and navigation history state.
+
+[`threadStore`](apps/web/src/stores/threadStore.ts) projects validated canonical progress into conversation records. The [conversation residency owner](apps/web/src/features/conversation/residency/conversation-residency.ts) coordinates selected activation, revalidation, prefetch, pagination, and bounded inactive retention. Sidebar workspace state owns selection and summary rows. It is not a second conversation cache authority.
+
+The application mounts browser and terminal hosts outside individual panel lifetimes. Switching panels therefore does not inherently destroy the underlying page or terminal.
+
+[`BrowserSurfaceHost`](apps/web/src/features/preview/browser-surfaces/BrowserSurfaceHost.ts) owns renderer page placement, visibility, and semantic state. Electron pages use renderer-owned webviews. Browser clients use iframes. Browser automation has its own renderer host and server coordination.
+
+The [desktop preview feature](apps/desktop/src/features/preview/index.ts) owns native adoption, navigation, permissions, capture, and automation checks. Generation-bound identities prevent stale page commands from controlling a replacement page. Guest security policy disables Node integration and uses context isolation, sandboxing, and controlled partitions.
+
+Electron main is a substantial native host. Its [preload bridge](apps/desktop/src/main/preload.ts) exposes native actions and push delivery. Desktop features own window lifecycle, application updates, clipboard and attachments, external application launch, and server recovery. Agent orchestration and durable conversation state remain in the server.
+
+The [desktop server launcher](apps/desktop/src/features/server-runtime/process/child.ts) runs the server with Bun or the packaged Bun executable. Terminal sessions use a [separate PTY host](apps/server/src/features/terminal/host/pty-host-supervisor.ts). In desktop operation, that host uses Electron's Node runtime for native terminal support.
+
+## Thread, turn, and provider session lifetimes
+
+A thread is the durable conversation and checkout association. A turn is one user-to-agent cycle. An execution identifies the particular attempt that owns runtime work. A provider session is external conversational or transport state that Mcode may reuse across turns.
+
+These lifetimes do not end together. Turn completion can precede saving completion. A warm provider session can outlive its active turn. Session eviction does not delete saved thread history.
+
+Stop ends active work without deleting the conversation. A completed turn does not permanently close its thread. The user can send another turn later. Explicit human thread completion is recorded separately from a provider's terminal outcome.
+
+Startup recovery interrupts executions whose continued ownership cannot be proved. A replacement retry receives a fresh execution and provider session rather than pretending that the interrupted execution completed. Provider-native reattachment and same-turn recovery require adapter-specific support.
+
+Normal server shutdown stops admission, settles admitted work, stops producers and providers, and drains persistence and finalization before closing the database writer. Auxiliary push transports detach earlier in shutdown. HTTP and WebSocket close after the writer, followed by the read connection and process containment.
+
+Electron quit has a separate policy. Packaged desktop quit keeps the detached server available for relaunch. Development quit asynchronously stops it. An explicit server stop requests authenticated shutdown before any ownership-checked process-tree fallback.
+
+## Checkout, handoff, and review invariants
+
+Threads can run directly in a workspace checkout, provision a new worktree, or attach to an existing worktree. Multiple threads can share one worktree. A new worktree can remain branchless until the user creates a branch.
+
+Worktree cleanup must account for every linked active thread. It must also distinguish managed worktrees from external checkouts and protected branches. The [cleanup guide](docs/internals/thread-cleanup.md) records those constraints.
+
+Handoff orchestration separates provider-context acquisition, handoff artifact creation, and checkout changes. The [handoff pipeline](apps/server/src/features/handoff/orchestration/handoff-pipeline.ts) selects a supported generation strategy rather than requiring every provider to fork sessions identically. Provider-native session identity is distinct from the durable source thread and its saved history.
+
+Pull request review preparation resolves repository identity, a canonical review task, and a server-owned worktree candidate. Confirmation rechecks the checkout and observed pull request head. Creating a local review task performs no remote write. The [review worktree guide](docs/internals/pull-request-review-worktrees.md) explains its transaction and cleanup invariants.
+
+Remote pull request mutations use a separate boundary. The server rereads permissions and pull request state before writing, checks the confirmed head, and preserves unknown outcomes across retries. The [mutation guide](docs/internals/pull-request-mutations.md) defines those guarantees.
+
+## Development and delivery context
+
+Bun workspaces build and test the shared packages and applications. Vitest configuration belongs to each workspace. Focused tests verify behavior and contracts, while architecture lint checks dependency boundaries.
+
+The [runtime runbook](docs/agents/runtime.md) defines worktree-local startup, authentication, fixture data, and runtime artifacts. The [agent workflow](docs/internals/agent-workflow.md) defines focused implementation checks. The [verification skill](.agents/skills/verify-mcode/SKILL.md) covers proof through the running application.
+
+[Pull request CI](.github/workflows/ci.yml) runs repository checks and build validation. Release Please manages stable version and release changes. It does not publish a desktop release for every merge to the main branch.
+
+Stable, nightly, and packaging dry runs share the [desktop target packaging workflow](.github/workflows/desktop-package-target.yml). That workflow validates staged packages, native dependencies, server and PTY startup, and target evidence. Stable publication adds production signing requirements. The [stable release workflow](.github/workflows/build-release.yml) and [nightly workflow](.github/workflows/nightly-desktop.yml) own their respective publication policies.

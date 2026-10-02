@@ -1,6 +1,8 @@
 # Provider Architecture Convention
 
-All agent providers must use a **persistent process per session**, not per-turn spawning.
+Providers keep their transport warm across turns. Most adapters own a persistent
+process per Mcode session. OpenCode shares a pooled `opencode serve` process
+across sessions in the same working directory and uses HTTP and SSE.
 
 When all clients disconnect, a regular Mcode server waits for its shutdown grace
 period. Active agent turns defer shutdown. Open terminals and idle provider
@@ -14,28 +16,35 @@ owned server. Startup, heartbeat, and normal operation deadlines do not change.
 
 ## Shared lifecycle: SessionRuntime + ProtocolAdapter
 
-The uniform session lifecycle lives privately in `packages/providers`.
-Each Provider holds its own `SessionRuntime<TState>` and implements
-`ProtocolAdapter<TState>` (composition, not inheritance). The runtime owns the
-session pool, the lazy 60s idle-eviction timer with a `lastUsedAt + isBusy`
+The shared lifecycle for per-session process adapters lives privately in
+`packages/providers`. These adapters hold their own `SessionRuntime<TState>`
+and implement or supply `ProtocolAdapter<TState>` through composition.
+The runtime owns the session pool, the lazy 60s idle-eviction timer with a `lastUsedAt + isBusy`
 guard, Windows `JobObject` attachment, the `EnvService` env snapshot, and the
-graceful-interrupt-then-`taskkill /T /F` hard close — acting on the child PIDs
+graceful interruption and process retirement, acting on the child PIDs
 the adapter's `spawn` surfaces. The adapter supplies only `spawn`, `isBusy`,
 `interrupt`, `close`, and `isStale`.
 
-When adding a Provider, implement the `ProtocolAdapter` seam on the Provider
-class and construct a `SessionRuntime` in its constructor; the pool, eviction,
-JobObject, and hard-kill come for free. Do not hand-roll a session map or an
+For a per-session process adapter, supply the `ProtocolAdapter` operations and
+construct a `SessionRuntime`. The runtime handles pooling, eviction,
+JobObject attachment, and process retirement. Do not hand-roll a session map or an
 eviction timer. If the SDK hides the subprocess PID, return an empty `pids`
 array from `spawn` and the runtime's JobObject/taskkill become best-effort
-no-ops for that Provider (document it).
+no-ops for that Provider. Document that limitation.
+
+OpenCode uses
+[`OpenCodeServerPool`](../../apps/server/src/features/providers/adapters/opencode/opencode-server-pool.ts)
+instead. Its pool key includes the executable, working directory, and hostname.
+Sessions in one worktree share a server, while another worktree gets a separate
+server. Reference counting and idle eviction belong to that pool, so it does
+not also create a `SessionRuntime` for each session.
 
 Both the Claude and Codex providers were originally built with per-turn process spawning
 (via their respective SDKs). Both suffered the same reliability issues: stdin pipe timing
 failures on Windows, abort signal races, and opaque error messages from stderr status lines
 masking the real failure. Both were rewritten to use persistent processes.
 
-When adding a new provider:
+For a new per-session CLI adapter, follow these process rules:
 
 - Spawn one long-lived child process per session
 - Communicate via stdin/stdout (JSON-RPC, NDJSON, or equivalent streaming protocol)
