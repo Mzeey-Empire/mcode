@@ -223,9 +223,19 @@ export function finishProvider(run) {
   return { terminalReleased: true };
 }
 
+/** Releases a Codex turn after its final assistant item completed. Paused final turns honor Stop. */
+export function finishFinalProvider(run) {
+  if (run.provider !== 'codex' || !run.receipt.fixtureControl?.pauseAfterFinal || !readStamp(run, 'after-final')) throw new Error('No paused native Codex final item was observed');
+  if (readStamp(run, 'terminal')) throw new Error('Native Codex turn already ended');
+  const file = NodePath.join(run.directory, `${run.id}.finish-final`);
+  if (NodeFS.existsSync(file)) throw new Error('Measured final terminal gate was already released');
+  NodeFS.writeFileSync(file, 'finish\n');
+  return { terminalReleased: true };
+}
+
 /** Waits only for a fresh native stage, independently of server acceptance and saving. */
 export async function waitNative(run, phase, maxMs = 5000) {
-  if (!['prefix', 'tool', 'after-tool', 'terminal', 'cancelled', 'long-history', 'long-history-progress', 'child-prefix', 'child-completed', 'child-cancelled'].includes(phase) || maxMs > 15_000) throw new Error('Invalid bounded native wait');
+  if (!['prefix', 'tool', 'after-tool', 'after-final', 'terminal', 'cancelled', 'long-history', 'long-history-progress', 'child-prefix', 'child-completed', 'child-cancelled'].includes(phase) || maxMs > 15_000) throw new Error('Invalid bounded native wait');
   return waitFile(run, phase, maxMs);
 }
 
@@ -356,7 +366,7 @@ export async function observe(run, { phase = 'held', waitForTerminal = false } =
   const persisted = dbOperation(run, 'inspect');
   const screenshot = NodePath.join(run.directory, `${run.label}-${run.provider}-${run.id}-${phase}.png`);
   await run.page.screenshot({ path: screenshot });
-  const native = Object.fromEntries(['invocation', 'prefix', 'tool', 'after-tool', 'terminal', 'cancelled', 'expired', 'long-history-progress', 'long-history'].map((part) => [part, readStamp(run, part)]));
+  const native = Object.fromEntries(['invocation', 'prefix', 'tool', 'after-tool', 'after-final', 'terminal', 'cancelled', 'expired', 'long-history-progress', 'long-history'].map((part) => [part, readStamp(run, part)]));
   const phaseProtocol = run.pushes.some((push) => push.channel === 'agent.canonical' && push.data?.phase);
   const frames = phaseProtocol ? canonicalFrames(run.pushes, run.thread.id).map(frameSummary) : [];
   const stopButtonCount = await run.page.getByRole('button', { name: 'Stop agent', exact: true }).count();
@@ -438,8 +448,9 @@ function savingMatches(snapshot, savingModes) {
 /** Exercises the actual Stop button while a paused native turn and its saving tail remain live. */
 export async function stopComposer(run) {
   assertHeldLock(run);
-  if (!run.receipt.fixtureControl?.honorCancel || !run.receipt.fixtureControl?.pauseBeforeTerminal) throw new Error('Stop proof requires an honoring, paused fixture');
-  await waitFile(run, 'after-tool', 5000);
+  const control = run.receipt.fixtureControl;
+  if (!control?.honorCancel || !(control.pauseBeforeTerminal || control.pauseAfterFinal)) throw new Error('Stop proof requires an honoring, paused fixture');
+  await waitFile(run, control.pauseAfterFinal ? 'after-final' : 'after-tool', 5000);
   const startedAt = Date.now();
   await run.page.getByRole('button', { name: 'Stop agent', exact: true }).click({ timeout: 5000 });
   const snapshot = await waitRuntime(run, { terminal: true });
@@ -842,18 +853,20 @@ function invocationPrompt(run, options = {}) {
   const controls = fixtureOptions(options);
   requireLongTurnControls(controls.longToolPairs, controls.pairDelayMs);
   requireChildMode(run.provider, controls.childMode);
+  if (controls.pauseAfterFinal && run.provider !== 'codex') throw new Error('Paused final fixture requires Codex');
   run.receipt.fixtureControl = controls;
   return [`LIVE_DURABILITY_RUN=${run.id}`, ...promptControlLines(controls)].join('\n');
 }
-function fixtureOptions({ pauseBeforeTerminal = false, honorCancel = false, longToolPairs = 0, pairDelayMs = 10, childMode }) {
-  return { pauseBeforeTerminal, honorCancel, longToolPairs, pairDelayMs, childMode };
+function fixtureOptions({ pauseBeforeTerminal = false, pauseAfterFinal = false, honorCancel = false, longToolPairs = 0, pairDelayMs = 10, childMode }) {
+  return { pauseBeforeTerminal, pauseAfterFinal, honorCancel: honorCancel || pauseAfterFinal, longToolPairs, pairDelayMs, childMode };
 }
 function requireChildMode(provider, childMode) {
   if (childMode !== undefined && (provider !== 'codex' || !['completed', 'paused'].includes(childMode))) throw new Error('Native child fixture requires Codex and an explicit completed/paused mode');
 }
-function promptControlLines({ pauseBeforeTerminal, honorCancel, longToolPairs, pairDelayMs, childMode }) {
+function promptControlLines({ pauseBeforeTerminal, pauseAfterFinal, honorCancel, longToolPairs, pairDelayMs, childMode }) {
   const lines = [];
   if (pauseBeforeTerminal) lines.push('LIVE_DURABILITY_TERMINAL=pause');
+  if (pauseAfterFinal) lines.push('LIVE_DURABILITY_AFTER_FINAL=pause');
   if (honorCancel) lines.push('LIVE_DURABILITY_CANCEL=honor');
   if (longToolPairs) lines.push(`LIVE_DURABILITY_LONG_TOOLS=${longToolPairs}`, `LIVE_DURABILITY_PAIR_DELAY_MS=${pairDelayMs}`);
   if (childMode) lines.push('LIVE_DURABILITY_CHILD=' + childMode);
@@ -881,7 +894,7 @@ function readAudit(run) {
 }
 function beginInvocation(run, invocationPath) {
   if (run.receipt.invocation) throw new Error('Each native invocation requires a fresh connect() UUID');
-  if (['invocation', 'prefix', 'tool', 'terminal', 'expired'].some((part) => NodeFS.existsSync(controlPath(run, part))) || ['release', 'finish', 'audit.ndjson'].some((suffix) => NodeFS.existsSync(NodePath.join(run.directory, `${run.id}.${suffix}`)))) throw new Error('Stale fixture controls exist for this UUID');
+  if (['invocation', 'prefix', 'tool', 'after-final', 'terminal', 'expired'].some((part) => NodeFS.existsSync(controlPath(run, part))) || ['release', 'finish', 'finish-final', 'audit.ndjson'].some((suffix) => NodeFS.existsSync(NodePath.join(run.directory, `${run.id}.${suffix}`)))) throw new Error('Stale fixture controls exist for this UUID');
   run.receipt.invocation = { path: invocationPath, at: new Date().toISOString() };
   writeReceipt(run);
 }

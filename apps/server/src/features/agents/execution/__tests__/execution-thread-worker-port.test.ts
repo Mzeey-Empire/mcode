@@ -1,4 +1,5 @@
 import type { ProviderEventDraft } from "@mcode/providers";
+import { AgentEventSchema, type AgentEvent } from "@mcode/contracts";
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -19,7 +20,7 @@ import type {
   ExecutionWorkerResult,
   ExecutionWriteReceipt,
 } from "../execution-worker-handler.js";
-import { ProgressAdmissionError } from "../execution-writer-failure.js";
+import { ProgressAdmissionError, RejectedProviderObservationError } from "../execution-writer-failure.js";
 
 const EXECUTION: ExecutionIdentity = {
   threadId: "real-worker-thread",
@@ -113,6 +114,43 @@ function eventDraft(): ProviderEventDraft {
 }
 
 describe("ExecutionThreadWorkerPort", () => {
+  it("checkpoints a rejected observation across real worker IPC and still completes", async () => {
+    const writer = new AcknowledgingWriter();
+    let rejectNext = false;
+    const { scheduler, lease, lost } = fixture({ transact: async (operation) => {
+      if (rejectNext && operation.mutation.kind === "append-events") {
+        rejectNext = false;
+        throw new RejectedProviderObservationError(new Error("tool projection failed"));
+      }
+      return writer.transact(operation);
+    } });
+    const observation = (sequence: number, type: AgentEvent["type"], fields: Record<string, unknown> = {}): Extract<ExecutionWorkCommand, { kind: "event" }> => {
+      const event = AgentEventSchema().parse({ type, threadId: EXECUTION.threadId, turnExecutionId: EXECUTION.executionId, ...fields });
+      const itemId = `worker-item-${sequence}`;
+      const createdAt = "2026-09-24T12:00:00.000Z";
+      return { kind: "event", phase: "running", nativeCursor: null, events: [{ eventId: `worker-event-${sequence}`,
+        routing: { ...EXECUTION, itemId }, sourceProviderId: "codex", sourceSequence: sequence, sourceIdentities: [],
+        payload: { type: "item.recorded", item: { id: itemId, threadId: EXECUTION.threadId, turnId: EXECUTION.turnId,
+          kind: "system", providerIdentities: [], payload: { projection: "providerRuntimeEvent", runtimeEvent: { event } }, createdAt, updatedAt: createdAt } } }] };
+    };
+    try {
+      await submit(scheduler, lease, { kind: "start", providerId: "codex", parentLive: { planFeature: "none", precedingMessageId: "worker-user" },
+        input: { ...START_INPUT, userMessage: { kind: "create", messageId: "worker-user", content: "Test", sequence: 1 } } });
+      await submit(scheduler, lease, observation(1, "turnStarted"));
+      rejectNext = true;
+      await expect(submit(scheduler, lease, observation(2, "textDelta", { delta: "Discarded" })))
+        .resolves.toMatchObject({ kind: "reply", result: { kind: "dropped", reason: "acceptance-rejected" } });
+      await submit(scheduler, lease, observation(3, "textDelta", { delta: "Good answer", isFinalResponse: true }));
+      await expect(submit(scheduler, lease, { ...observation(4, "ended", { outcome: "completed" }),
+        terminalInput: { ...EXECUTION, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } }))
+        .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", parentEvent: { terminal: { outcome: "completed", assistant: { content: "Good answer" } } } } });
+      expect(writer.operations.map((operation) => operation.mutation.kind)).toEqual(["begin", "append-events", "checkpoint", "append-events", "finish-live-event"]);
+      expect(lost).toEqual([]);
+    } finally {
+      scheduler.shutdown();
+    }
+  }, 10_000);
+
   it("starts and closes the real Bun Worker", async () => {
     const port = new ExecutionThreadWorkerPort(new AcknowledgingWriter());
     try {

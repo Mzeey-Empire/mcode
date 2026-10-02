@@ -6,7 +6,7 @@ import {
   type ExecutionWriteReceipt,
 } from "./execution-worker-handler.js";
 import type { ExecutionWorkerInbound, ExecutionWorkerOutbound } from "./execution-worker-port.js";
-import type { ExecutionWriterFailure } from "./execution-writer-failure.js";
+import { restoreExecutionWriterFailure, type ExecutionWriterFailure } from "./execution-writer-failure.js";
 
 interface PendingWrite {
   readonly rpcId: number;
@@ -35,7 +35,8 @@ const writer: ExecutionSemanticWriter = {
         rpcId,
         operationId: operation.operationId,
         resolve,
-        reject: (failure) => reject(new ExecutionWriterRpcFailure(failure)),
+        reject: (failure) => reject(failure?.observationRejected
+          ? restoreExecutionWriterFailure(failure) : new ExecutionWriterRpcFailure(failure)),
       };
       post({ kind: "writer-request", rpcId, operation });
     });

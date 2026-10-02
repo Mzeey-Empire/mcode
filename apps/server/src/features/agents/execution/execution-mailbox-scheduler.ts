@@ -297,7 +297,7 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
   ): AdmissionDecision {
     if (!positiveInteger(bytes)) return { kind: "invalid-size" };
     const stop = command.kind === "stop";
-    const control = stop || CONTROL_KINDS.has(command.kind);
+    const control = isControlCommand(command);
     if (stop && assignment.stopping) return { kind: "stop-already-requested" };
     if (assignment.stopping && !control) return { kind: "stopping" };
     if (!this.hasCapacity(assignment, bytes, control)) return { kind: "overloaded" };
@@ -416,6 +416,11 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     slot.readyThreads.length = 0;
     for (const item of pending) this.settle(item, { kind });
   }
+}
+
+function isControlCommand(command: { readonly kind: string }): boolean {
+  if (command.kind === "stop" || CONTROL_KINDS.has(command.kind)) return true;
+  return command.kind === "event" && "terminalInput" in command && command.terminalInput !== undefined;
 }
 
 function validRecoveryReceipt(lease: ExecutionLease, receipt: ExecutionRecoveryReceipt): boolean {

@@ -91,12 +91,11 @@ That recovery timer does not supervise an active ACP prompt. A connected
 transport or a successful load does not prove that an active Cursor or Devin
 turn still makes progress.
 
-[Codex](../../../packages/providers/src/private/codex/codex-provider.ts) instead
-probes its app-server after five minutes of turn silence. Notifications and
-app-server activity reset the timer. A pending permission approval re-arms it
-without a probe. A responsive server also re-arms it; an unresponsive server
-fails the wait so the turn cannot remain busy forever. Five minutes is a probe
-interval, not a deadline for a healthy turn or proof of model progress.
+[Codex](../../../packages/providers/src/private/codex/codex-provider.ts) waits
+for the owning native turn's completion or an explicit process failure. It
+does not infer completion from silence or a responsive app-server. Client
+WebSocket heartbeats supervise the client connection separately from provider
+turn progress.
 
 ## Event boundary
 

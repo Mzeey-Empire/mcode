@@ -135,6 +135,9 @@ export interface ProviderEventBatch {
 
 /** Durable result for one provider event submission. */
 export type ProviderEventCommitReceipt = ProviderEventDurableReceipt | {
+  outcome: "dropped";
+  reason: string;
+} | {
   outcome: "accepted";
   acceptedThrough: number;
   eventCount: number;

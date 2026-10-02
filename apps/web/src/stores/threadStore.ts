@@ -113,7 +113,7 @@ import {
 } from "./thread-store/usage";
 export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
-import { getCanonicalRuntimeTurn, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
+import { getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
 
 function activeCanonicalExecutionId(turn: AgentTurn | undefined): string | undefined {
   if (!turn || (turn.status !== "Pending" && turn.status !== "Running")) return undefined;
@@ -717,11 +717,22 @@ export function isThreadExecuting(
   threadId: string,
   threadState: ThreadExecutionState = useThreadStore.getState(),
 ): boolean {
-  const phase = threadState.records.get(threadId)?.runtimePhase;
-  return (threadState.pendingStopCounts[threadId] ?? 0) > 0
-    || threadState.runningThreadIds.has(threadId)
-    || phase === "running"
-    || phase === "finalizing";
+  if ((threadState.pendingStopCounts[threadId] ?? 0) > 0) return true;
+  const record = threadState.records.get(threadId);
+  const canonicalPhase = record ? getCanonicalRuntimePhase(threadId, record) : null;
+  if (canonicalPhase !== null) return isExecutingPhase(canonicalPhase);
+  return threadState.runningThreadIds.has(threadId)
+    || isExecutingPhase(record?.runtimePhase);
+}
+
+function isExecutingPhase(phase: ThreadRecord["runtimePhase"] | undefined): boolean {
+  return phase === "running" || phase === "finalizing";
+}
+
+/** Active execution and pending Stop IDs, with canonical terminal state taking precedence. */
+export function getExecutingThreadIds(threadState: ThreadExecutionState): string[] {
+  const candidates = new Set([...threadState.runningThreadIds, ...Object.keys(threadState.pendingStopCounts)]);
+  return [...candidates].filter((threadId) => isThreadExecuting(threadId, threadState));
 }
 
 function canAutoDrainQueuedMessage(threadId: string): boolean {
@@ -2677,6 +2688,19 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     useToastStore.getState().show("error", "MCP server unavailable", `The turn will continue without it. ${event.name}: ${reason}`);
   };
 
+  const handleStopCommandFailure = (threadId: string, executionAtStop: string | null, error: unknown): void => {
+    const record = get().records.get(threadId);
+    if (!record || record.turnExecutionId !== executionAtStop) return;
+    // Command failure cannot undo newer lifecycle truth or become a provider error.
+    patchRec(threadId, { awaitingUserStopPersist: undefined });
+    const phase = getThreadRuntimePhase(threadId, record);
+    const canStillStop = isExecutingPhase(phase)
+      || (phase === "idle" && get().runningThreadIds.has(threadId));
+    if (!canStillStop || useWorkspaceStore.getState().activeThreadId !== threadId) return;
+    const reason = error instanceof Error ? error.message : String(error);
+    useToastStore.getState().show("error", "Couldn't stop this turn", `Try Stop again. ${reason}`);
+  };
+
   const ignoreAgentEvent = (): void => {};
 
   const agentEventHandlers: AgentEventHandlerTable = {
@@ -3545,7 +3569,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         [threadId]: (state.pendingStopCounts[threadId] ?? 0) + 1,
       },
     }));
-    const wasRunning = get().runningThreadIds.has(threadId);
+    const beforeStop = get().records.get(threadId);
+    const executionAtStop = beforeStop?.turnExecutionId ?? null;
     patchRec(threadId, { awaitingUserStopPersist: true, composerRecallFromStop: undefined });
     try {
       const result = await getTransport().stopAgent(threadId);
@@ -3561,14 +3586,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         patchRec(threadId, { composerRecallFromStop: { text: lastUserText } });
       }
     } catch (e) {
-      patchRec(threadId, () => ({
-        error: String(e),
-        awaitingUserStopPersist: undefined,
-        ...(wasRunning ? { runtimePhase: "running" as const } : {}),
-      }));
-      if (wasRunning && !get().runningThreadIds.has(threadId)) {
-        set((state) => ({ runningThreadIds: new Set([...state.runningThreadIds, threadId]) }));
-      }
+      handleStopCommandFailure(threadId, executionAtStop, e);
     }
     finally {
       set((state) => {

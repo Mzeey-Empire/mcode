@@ -455,7 +455,7 @@ const INITIALIZE_HANDSHAKE = {
 /**
  * Startup budget for establishing or resuming a Codex thread after the app-server
  * is initialized. Newer Codex builds can spend longer here while loading session
- * state, but turn execution remains governed by the separate turn watchdogs.
+ * state. Turn execution follows native completion and process failures.
  */
 const THREAD_HANDSHAKE_TIMEOUT_MS = 30_000;
 
@@ -917,7 +917,7 @@ export async function warmCodexAppServer(
  *
  * Emits:
  * - `notification(data: unknown)` - JSON-RPC notification forwarded from the RPC client
- * - `activity()` - a server-initiated request arrived (liveness signal for turn watchdogs)
+ * - `activity()` - a server-initiated request arrived
  * - `fatal(error: string)` - unrecoverable error from stderr, unexpected exit, or handshake failure
  * - `exit(code: number | null, signal: string | null)` - child process exit
  */
@@ -1298,22 +1298,6 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       {},
       10000,
     );
-  }
-
-  /**
-   * Cheap liveness probe: true when the app-server still answers RPCs.
-   * `model/list` is the lightest request the protocol guarantees post-init.
-   * Used by turn watchdogs to distinguish "long-running but healthy" from
-   * "wedged" before giving up on a silent turn.
-   */
-  async ping(timeoutMs = 10_000): Promise<boolean> {
-    if (!this._isAlive || !this.rpc) return false;
-    try {
-      await this.rpc.sendRequest("model/list", {}, timeoutMs);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   /**

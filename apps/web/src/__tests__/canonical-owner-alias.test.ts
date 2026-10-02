@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState,
   type CanonicalAgentProgressFrame, type CanonicalAgentProgressRecovery, type TurnSavingStatus } from "@mcode/contracts";
 import { createCanonicalAgentReplica } from "@/stores/canonical-agent-replica";
-import { useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { readThreadField, resetThreadStoreForTests, seedThreadRecord } from "@/stores/thread-store-test-utils";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
 import { mockTransport } from "./mocks/transport";
@@ -94,6 +94,22 @@ describe("parent-owned child progress aliases", () => {
     sessionStorage.removeItem(`mcode-agent-publication-v2:${OWNER}`);
     vi.clearAllMocks();
     seedTarget(CHILD);
+  });
+
+  it("keeps execution indicators settled after completion followed by Stop rejection", async () => {
+    let rejectStop!: (error: Error) => void;
+    vi.mocked(mockTransport.stopAgent).mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectStop = reject; }),
+    );
+    const stopping = useThreadStore.getState().stopAgent(CHILD);
+    useThreadStore.getState().handleCanonicalProgress(accepted([childTerminal(1)]));
+    rejectStop(new Error("WebSocket disconnected"));
+    await stopping;
+
+    const state = useThreadStore.getState();
+    expect(state.records.get(CHILD)?.canonicalAgent.state.turns[CHILD_TURN]?.status).toBe("Completed");
+    expect(state.runningThreadIds.has(CHILD)).toBe(false);
+    expect(isThreadExecuting(CHILD, state)).toBe(false);
   });
 
   it("renders a child-only accepted notice and saves against the owner stream", () => {

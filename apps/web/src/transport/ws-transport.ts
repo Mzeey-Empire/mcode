@@ -107,9 +107,11 @@ const TERMINAL_LATE_CREATE_CLEANUP_TIMEOUT_MS = 10_000;
 const MAX_PENDING_TERMINAL_CREATE_CLEANUPS = 8;
 
 /** Interval between liveness probes on an open socket. */
-const HEARTBEAT_INTERVAL_MS = 30_000;
-/** How long a heartbeat may go unanswered before the socket is treated as dead. */
-const HEARTBEAT_TIMEOUT_MS = 10_000;
+const HEARTBEAT_INTERVAL_MS = 5_000;
+/** Consecutive checks without a reply before reconnecting. */
+const HEARTBEAT_MAX_MISSED_CHECKS = 3;
+/** Bounds outstanding probes while the interval decides connection health. */
+const HEARTBEAT_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * HEARTBEAT_MAX_MISSED_CHECKS;
 /** Deadline for `agent.send` so a composer submit cannot park forever on a dead socket. */
 const SEND_MESSAGE_TIMEOUT_MS = 20_000;
 
@@ -393,7 +395,9 @@ export function createWsTransport(
   let reconnectDelay = MIN_RECONNECT_MS;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  let heartbeatInFlight = false;
+  let heartbeatGeneration = 0;
+  let heartbeatReceived = true;
+  let missedHeartbeatChecks = 0;
   let terminalSelectionPromise: Promise<TerminalBackendCapabilities> | null = null;
   // Track consecutive auth failures so we apply backoff after 3 immediate
   // retries, preventing a tight loop when the token is persistently wrong.
@@ -652,18 +656,30 @@ export function createWsTransport(
 
   // A half-open socket answers nothing and never fires `close`; without a
   // probe, reconnect and runtime resync wait forever while the UI shows stale
-  // streaming state. The probe is a cheap existing RPC bounded by timeoutMs;
-  // on timeout we close locally so onclose drives the recovery ladder.
+  // streaming state. Tolerate temporary stalls, then close locally so onclose
+  // drives recovery. A reply proves RPC responsiveness, not turn progress.
   function heartbeatTick(): void {
-    if (heartbeatInFlight || closed || ws.readyState !== WebSocket.OPEN) return;
-    heartbeatInFlight = true;
-    rpc<string>("app.version", {}, { timeoutMs: HEARTBEAT_TIMEOUT_MS })
-      .catch(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.close();
-      })
-      .finally(() => {
-        heartbeatInFlight = false;
-      });
+    if (closed || ws.readyState !== WebSocket.OPEN) return;
+    if (!heartbeatReceived && ++missedHeartbeatChecks >= HEARTBEAT_MAX_MISSED_CHECKS) {
+      ws.close();
+      return;
+    }
+    heartbeatReceived = false;
+    const socket = ws;
+    const generation = heartbeatGeneration;
+    void rpc<string>("app.version", {}, { timeoutMs: HEARTBEAT_TIMEOUT_MS }).then(
+      () => {
+        // A delayed reply from a previous connection must not clear its
+        // replacement's missed checks.
+        if (ws !== socket || generation !== heartbeatGeneration) return;
+        heartbeatReceived = true;
+        missedHeartbeatChecks = 0;
+      },
+      () => {
+        // A timeout or RPC error leaves the reply missing. The interval owns
+        // the failure threshold so one failed probe cannot force a reconnect.
+      },
+    );
   }
 
   function startHeartbeat(): void {
@@ -676,7 +692,9 @@ export function createWsTransport(
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
-    heartbeatInFlight = false;
+    heartbeatGeneration++;
+    heartbeatReceived = true;
+    missedHeartbeatChecks = 0;
   }
 
   function invalidateLiveTurnDiff(): void {

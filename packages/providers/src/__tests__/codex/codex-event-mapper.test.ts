@@ -3470,7 +3470,7 @@ describe("CodexEventMapper", () => {
   // error notification
   // ---------------------------------------------------------------------------
 
-  it("emits error event for error notification", () => {
+  it("keeps a standalone error diagnostic nonterminal until turn/completed", () => {
     const events = mapper.mapNotification({
       jsonrpc: "2.0",
       method: "error",
@@ -3478,7 +3478,7 @@ describe("CodexEventMapper", () => {
     });
 
     expect(events.map((runtimeEvent) => runtimeEvent.event)).toEqual([
-      { type: "error", threadId: "test-thread", error: "rate limit exceeded" },
+      { type: "system", threadId: "test-thread", subtype: "provider.notice.codex-error", message: "rate limit exceeded" },
     ]);
   });
 
@@ -3490,7 +3490,7 @@ describe("CodexEventMapper", () => {
     });
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.event).toMatchObject({ type: "error", threadId: "test-thread" });
+    expect(events[0]!.event).toMatchObject({ type: "system", threadId: "test-thread", subtype: "provider.notice.codex-error" });
   });
 
   // ---------------------------------------------------------------------------

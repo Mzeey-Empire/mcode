@@ -50,6 +50,7 @@ export class ExecutionThreadWorkerPort implements ExecutionWorkerPort<Command, E
   private inFlight: Request | undefined;
   private writerRpcPending = false;
   private writerCalled = false;
+  private rejectedObservationCheckpointAllowed = false;
 
   constructor(
     private readonly writer: ExecutionSemanticWriter,
@@ -74,6 +75,7 @@ export class ExecutionThreadWorkerPort implements ExecutionWorkerPort<Command, E
     if (this.inFlight) throw new Error("Execution worker already has an in-flight command");
     this.inFlight = request;
     this.writerCalled = false;
+    this.rejectedObservationCheckpointAllowed = false;
     if (this.state === "starting") this.queuedBeforeReady = request;
     else this.send({ kind: "command", request });
   }
@@ -131,20 +133,29 @@ export class ExecutionThreadWorkerPort implements ExecutionWorkerPort<Command, E
   }
 
   private async write(rpcId: number, operation: ExecutionSemanticOperation): Promise<void> {
-    if (this.state !== "ready" || this.writerRpcPending || this.writerCalled || !matchesOperation(this.inFlight, operation)) {
+    if (!this.canWrite(operation)) {
       this.fail(new ErrorEvent("error"));
       return;
     }
     this.writerRpcPending = true;
     this.writerCalled = true;
+    this.rejectedObservationCheckpointAllowed = false;
     try {
       const receipt = await this.writer.transact(operation);
       if (this.state === "ready") this.send({ kind: "writer-receipt", rpcId, receipt });
     } catch (error) {
-      if (this.state === "ready") this.send({ kind: "writer-failure", rpcId, failure: executionWriterFailure(error) });
+      const failure = executionWriterFailure(error);
+      // Only a proven pre-acceptance rejection may consume this same ordinal with an empty checkpoint.
+      this.rejectedObservationCheckpointAllowed = operation.mutation.kind === "append-events" && failure.observationRejected === true;
+      if (this.state === "ready") this.send({ kind: "writer-failure", rpcId, failure });
     } finally {
       this.writerRpcPending = false;
     }
+  }
+
+  private canWrite(operation: ExecutionSemanticOperation): boolean {
+    return this.state === "ready" && !this.writerRpcPending && matchesOperation(this.inFlight, operation)
+      && (!this.writerCalled || this.rejectedObservationCheckpointAllowed && operation.mutation.kind === "checkpoint");
   }
 
   private reply(reply: Reply): void {

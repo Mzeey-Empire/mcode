@@ -126,10 +126,27 @@ for (const provider of ['devin', 'codex']) {
   const completions = history.filter((message) => provider === 'devin' ? message.params.update.sessionUpdate === 'tool_call_update' && message.params.update.status === 'completed' : message.method === 'item/completed' && message.params.item.status === 'completed');
   if (starts.length !== 1000 || completions.length !== 1000 || starts.some((message, index) => historyId(message) !== `${longId}-history-${index}` || historyId(completions[index]) !== historyId(message))) throw new Error('Native long-turn pairs lost exact count/order/identities');
   if (NodeFS.readFileSync(NodePath.join(scratch, longId + '.audit.ndjson'), 'utf8').trim().split('\n').length !== 1) throw new Error('Long-turn provider invocation was duplicated');
+  if (provider === 'codex') {
+    const finalId = NodeCrypto.randomUUID();
+    send({ id: 7, method: 'turn/start', params: { threadId: 'test-thread', input: [{ type: 'text', text: `LIVE_DURABILITY_RUN=${finalId}\nLIVE_DURABILITY_AFTER_FINAL=pause` }] } });
+    await until(() => NodeFS.existsSync(NodePath.join(scratch, finalId + '.prefix.json')));
+    NodeFS.writeFileSync(NodePath.join(scratch, finalId + '.release'), 'release');
+    await until(() => received.some((message) => message.method === 'item/completed' && message.params.item.id === finalId + '-final') && NodeFS.existsSync(NodePath.join(scratch, finalId + '.after-final.json')));
+    const finalTurnId = received.find((message) => message.id === 7).result.turn.id;
+    const finalMessages = received.filter((message) => message.params?.item?.id === finalId + '-final' || message.params?.itemId === finalId + '-final');
+    if (JSON.stringify(finalMessages.map((message) => message.method)) !== JSON.stringify(['item/started', 'item/agentMessage/delta', 'item/completed']) || finalMessages[2].params.item.phase !== 'final_answer') throw new Error('Native final assistant item lifecycle was incomplete');
+    NodeFS.writeFileSync(NodePath.join(scratch, finalId + '.finish'), 'finish');
+    send({ id: 8, method: 'model/list', params: {} });
+    await until(() => received.some((message) => message.id === 8));
+    if (received.some((message) => message.method === 'turn/completed' && message.params.turn.id === finalTurnId) || NodeFS.existsSync(NodePath.join(scratch, finalId + '.terminal.json'))) throw new Error('Final item completion or the earlier gate ended the native turn');
+    NodeFS.writeFileSync(NodePath.join(scratch, finalId + '.finish-final'), 'finish');
+    await until(() => received.some((message) => message.method === 'turn/completed' && message.params.turn.id === finalTurnId && message.params.turn.status === 'completed') && NodeFS.existsSync(NodePath.join(scratch, finalId + '.terminal.json')));
+    if (NodeFS.readFileSync(NodePath.join(scratch, finalId + '.audit.ndjson'), 'utf8').trim().split('\n').length !== 1) throw new Error('Final gate reinvoked the provider');
+  }
   child.kill();
   await new Promise((resolve) => child.once('exit', resolve));
 }
-console.log(JSON.stringify({ ok: true, scopedTriggerRejectedOwnedTool: true, scopedTerminalRejectedExactExecution: true, otherTerminalWritesAccepted: true, peerWriteAccepted: true, nonRecoveryWriteAccepted: true, releaseAccepted: true, readonlyPrefixWhileWriterHeld: true, immutableSemanticIdentityChecks: true, acpGateAndTerminal: true, codexGateAndTerminal: true, acpAndCodexHonoredStop: true, acpAndCodex1000NativePairs: true, scratch }));
+console.log(JSON.stringify({ ok: true, scopedTriggerRejectedOwnedTool: true, scopedTerminalRejectedExactExecution: true, otherTerminalWritesAccepted: true, peerWriteAccepted: true, nonRecoveryWriteAccepted: true, releaseAccepted: true, readonlyPrefixWhileWriterHeld: true, immutableSemanticIdentityChecks: true, acpGateAndTerminal: true, codexGateAndTerminal: true, acpAndCodexHonoredStop: true, acpAndCodex1000NativePairs: true, codexCompletedFinalBeforeNativeTerminal: true, scratch }));
 } finally {
   db?.close();
   for (const child of children) if (child.exitCode === null) child.kill();

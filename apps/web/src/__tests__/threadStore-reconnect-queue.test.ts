@@ -1,10 +1,11 @@
 import type { AgentEvent, AgentStopResult } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useQueueStore } from "@/stores/queueStore";
+import { useToastStore } from "@/stores/toastStore";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
-import { useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createMockThread, mockTransport } from "./mocks/transport";
 
@@ -33,6 +34,7 @@ function queueMessage(content: string, browserCaptureSpillPaths?: string[]): boo
 describe("threadStore reconnect and queued follow-ups", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    for (const toast of useToastStore.getState().toasts) useToastStore.getState().dismiss(toast.id);
     resetThreadStoreForTests({ currentThreadId: THREAD_ID });
     useQueueStore.setState({
       queues: {},
@@ -51,6 +53,7 @@ describe("threadStore reconnect and queued follow-ups", () => {
   });
 
   afterEach(() => {
+    for (const toast of useToastStore.getState().toasts) useToastStore.getState().dismiss(toast.id);
     vi.useRealTimers();
   });
 
@@ -482,6 +485,77 @@ describe("threadStore reconnect and queued follow-ups", () => {
       dispatchState: "dispatched",
     });
     await stopping;
+  });
+
+  it("keeps a completed turn terminal when its pending Stop request rejects", async () => {
+    let rejectStop!: (error: Error) => void;
+    vi.mocked(mockTransport.stopAgent).mockImplementationOnce(
+      () => new Promise<AgentStopResult>((_resolve, reject) => { rejectStop = reject; }),
+    );
+    useThreadStore.setState({
+      records: new Map([[THREAD_ID, {
+        ...createEmptyThreadRecord(),
+        runtimePhase: "running",
+        turnExecutionId: "execution-1",
+      }]]),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    const stopping = useThreadStore.getState().stopAgent(THREAD_ID);
+    useThreadStore.getState().applyThreadRuntimeSnapshot({
+      threadId: THREAD_ID,
+      turnExecutionId: "execution-1",
+      phase: "completed",
+    });
+    rejectStop(new Error("WebSocket disconnected"));
+    await stopping;
+
+    const state = useThreadStore.getState();
+    expect(state.records.get(THREAD_ID)?.runtimePhase).toBe("completed");
+    expect(state.runningThreadIds.has(THREAD_ID)).toBe(false);
+    expect(isThreadExecuting(THREAD_ID, state)).toBe(false);
+    expect(state.records.get(THREAD_ID)?.error).toBeNull();
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+  });
+
+  it("does not attach a delayed Stop failure to a newer execution", async () => {
+    let rejectStop!: (error: Error) => void;
+    vi.mocked(mockTransport.stopAgent).mockImplementationOnce(
+      () => new Promise<AgentStopResult>((_resolve, reject) => { rejectStop = reject; }),
+    );
+    useThreadStore.getState().applyThreadRuntimeSnapshot({
+      threadId: THREAD_ID, turnExecutionId: "execution-1", phase: "running",
+    });
+    const stopping = useThreadStore.getState().stopAgent(THREAD_ID);
+    useThreadStore.getState().applyThreadRuntimeSnapshot({
+      threadId: THREAD_ID, turnExecutionId: "execution-2", phase: "running",
+    });
+    rejectStop(new Error("Old Stop failure"));
+    await stopping;
+    const record = useThreadStore.getState().records.get(THREAD_ID);
+    expect(record).toMatchObject({ turnExecutionId: "execution-2", runtimePhase: "running", error: null });
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+  });
+
+  it.each([
+    { location: "foreground", activeThreadId: THREAD_ID, toastCount: 1 },
+    { location: "background", activeThreadId: "another-thread", toastCount: 0 },
+  ])("uses the shared toast for a $location Stop failure without changing lifecycle", async ({ activeThreadId, toastCount }) => {
+    vi.useFakeTimers();
+    useWorkspaceStore.setState({ activeThreadId });
+    useThreadStore.getState().applyThreadRuntimeSnapshot({
+      threadId: THREAD_ID, turnExecutionId: "execution-1", phase: "running",
+    });
+    vi.mocked(mockTransport.stopAgent).mockRejectedValueOnce(new Error("Connection unavailable"));
+    await useThreadStore.getState().stopAgent(THREAD_ID);
+    expect(useThreadStore.getState().records.get(THREAD_ID)).toMatchObject({ runtimePhase: "running", error: null });
+    expect(useThreadStore.getState().pendingStopCounts[THREAD_ID]).toBeUndefined();
+    expect(useToastStore.getState().toasts).toHaveLength(toastCount);
+    if (toastCount) expect(useToastStore.getState().toasts[0]).toMatchObject({
+      level: "error", title: "Couldn't stop this turn", message: "Try Stop again. Connection unavailable",
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(useToastStore.getState().toasts).toHaveLength(0);
   });
 
   it("cancels a scheduled drain when a Stop snapshot arrives first", async () => {

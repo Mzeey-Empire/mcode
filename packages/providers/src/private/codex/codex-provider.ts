@@ -88,17 +88,6 @@ export {
   mergeCodexUsageInfo,
 } from "./codex-input-mapper.js";
 
-/**
- * Liveness-probe interval for a silent turn, not a turn deadline. The timer
- * resets on every notification (including swallowed lifecycle traffic and
- * inbound approval requests, via the app-server `activity` event). When a
- * turn stays fully silent for this long, the watchdog pings the app-server
- * with a cheap RPC: responsive → re-arm (a healthy turn can run forever);
- * unresponsive → end the turn so the session does not stay `isBusy` (exempt
- * from idle eviction) with the UI stuck "thinking" indefinitely. While a
- * permission approval awaits the user, the watchdog re-arms without probing.
- */
-const TURN_TIMEOUT_MS = 5 * 60 * 1000;
 const SIDE_CHANNEL_TIMEOUT_MS = 120_000;
 const USAGE_WARMUP_TIMEOUT_MS = 10_000;
 const CODEX_MCP_STARTUP_TIMEOUT_MS = 10_000;
@@ -220,16 +209,6 @@ class CodexTurnSupersededError extends Error {
   constructor() {
     super("Codex turn superseded");
     this.name = "CodexTurnSupersededError";
-  }
-}
-
-/** Internal: silent turn AND the app-server failed a liveness probe; ends the turn without a user error. */
-class CodexTurnIdleTimeoutError extends Error {
-  constructor() {
-    super(
-      `Codex turn abandoned: no notifications for ${TURN_TIMEOUT_MS / 1000}s and the app-server failed a liveness probe`,
-    );
-    this.name = "CodexTurnIdleTimeoutError";
   }
 }
 
@@ -1554,7 +1533,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       if (this.activeCodexServers.get(context.sessionId) !== server) return;
       for (const event of mapper.mapNotification(undefined)) this.emitRuntimeEvent(event);
     });
-    server.on("notification", (notification: CodexNotification) => this.handleCodexServerNotification(context, server, mapper, notification));
+    server.on("notification", (notification: CodexNotification) => {
+      try {
+        this.handleCodexServerNotification(context, server, mapper, notification);
+      } catch (error) {
+        // Native lifecycle listeners must still receive this notification when
+        // optional mapping or narration fails.
+        logger.warn("Codex notification projection failed", { sessionId: context.sessionId,
+          method: notification.method, errorType: error instanceof Error ? error.name : "unknown" });
+      }
+    });
     server.on("fatal", (error: string) => this.handleCodexServerFatal(context, server, mapper, error));
     this.attachFatalDrain(context.sessionId, server);
     server.on("exit", () => {
@@ -1651,10 +1639,20 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       const runtimeEvent = providerRuntimeEvent(executionId ? { ...event, turnExecutionId: executionId } : event);
       this.emitRuntimeEvent(entry ? this.withCodexTurnAttempt(entry, runtimeEvent, executionId) : runtimeEvent);
     }
-    this.emitTurnFailure(context.threadId, error, undefined, true, executionId);
+    this.emitCodexTransportFailure(context.threadId, error, entry, executionId);
     if (this.runtime.get(context.sessionId)?.server === server) {
       void this.runtime.stop(context.sessionId);
     }
+  }
+
+  private emitCodexTransportFailure(threadId: string, error: string, entry: CodexSessionState | undefined, executionId: string | undefined): void {
+    if (!entry || !executionId) {
+      this.emitTurnFailure(threadId, error, "errored", true, executionId);
+      return;
+    }
+    // Confirmed process failure must retain the active attempt's terminal routing.
+    this.emitCodexTurnEvent(entry, { type: AgentEventType.Error, threadId, error }, executionId);
+    this.emitCodexTurnEvent(entry, { type: AgentEventType.Ended, threadId, turnExecutionId: executionId, outcome: "errored" }, executionId);
   }
 
   private async startCodexAppServer(
@@ -2513,9 +2511,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       earlyCompletionTurnId: undefined,
     };
     try {
-      await this.waitForCodexTurn(run, server, input, turnOptions, sessionId, turnExecutionId, completion);
+      await this.waitForCodexTurn(run, server, input, turnOptions, turnExecutionId, completion);
     } catch (error) {
-      if (this.handleCodexTurnWaitError(error, run, server, sessionId, threadId, turnExecutionId, completion)) return;
+      if (this.handleCodexTurnWaitError(error, run, sessionId, threadId, turnExecutionId, completion)) return;
     } finally {
       this.finalizeCodexTurnRun(run, completion, threadId, turnExecutionId);
     }
@@ -2562,30 +2560,20 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     server: CodexAppServer,
     input: string | TurnInputPart[],
     turnOptions: CodexTurnOptions | undefined,
-    sessionId: string,
     turnExecutionId: string,
     completion: CodexTurnCompletionState,
   ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      let activityTimer: ReturnType<typeof setTimeout> | undefined;
       let settled = false;
       const cleanup = () => {
         if (settled) return;
         settled = true;
-        if (activityTimer) clearTimeout(activityTimer);
         server.removeListener("notification", onNotification);
-        server.removeListener("activity", onActivity);
         server.removeListener("fatal", onFatal);
         if (run.entry.abortPendingTurnWait === abortThis) run.entry.abortPendingTurnWait = undefined;
       };
-      const armTimer = () => {
-        if (activityTimer) clearTimeout(activityTimer);
-        activityTimer = setTimeout(() => this.watchCodexTurnSilence(sessionId, server, () => settled, armTimer, cleanup, reject), TURN_TIMEOUT_MS);
-      };
-      const onActivity = () => armTimer();
       const abortThis = () => { cleanup(); reject(new CodexTurnSupersededError()); };
       const onNotification = (notification: unknown) => {
-        armTimer();
         if (this.handleCodexTurnCompletionNotification(notification, server, run, turnExecutionId, completion)) {
           cleanup();
           resolve();
@@ -2593,32 +2581,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       };
       const onFatal = () => { cleanup(); completion.serverDied = true; reject(new Error("Codex app-server died during turn")); };
       run.entry.abortPendingTurnWait = abortThis;
-      armTimer();
       server.on("notification", onNotification);
-      server.on("activity", onActivity);
       server.once("fatal", onFatal);
       run.entry.turnStartPromise = this.sendCodexTurnStart(run, server, input, turnOptions, turnExecutionId, completion, cleanup, resolve, reject);
-    });
-  }
-
-  private watchCodexTurnSilence(
-    sessionId: string,
-    server: CodexAppServer,
-    isSettled: () => boolean,
-    rearm: () => void,
-    cleanup: () => void,
-    reject: (error: Error) => void,
-  ): void {
-    if (this.hasPendingApprovalFor(sessionId)) { rearm(); return; }
-    void server.ping().then((alive) => {
-      if (isSettled()) return;
-      if (alive) {
-        logger.debug("Codex turn silent but server responsive; watchdog re-armed", { sessionId, silenceMs: TURN_TIMEOUT_MS });
-        rearm();
-        return;
-      }
-      cleanup();
-      reject(new CodexTurnIdleTimeoutError());
     });
   }
 
@@ -2736,21 +2701,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private handleCodexTurnWaitError(
     error: unknown,
     run: CodexTurnRun,
-    server: CodexAppServer,
     sessionId: string,
     threadId: string,
     turnExecutionId: string,
     completion: CodexTurnCompletionState,
   ): boolean {
     if (error instanceof CodexTurnSupersededError) return true;
-    if (error instanceof CodexTurnIdleTimeoutError) {
-      completion.endedOutcome = "errored";
-      logger.warn("Codex turn idle timeout (suppressed from UI)", { sessionId, timeoutMs: TURN_TIMEOUT_MS });
-      this.emitCodexPendingAssistantBoundary(run.entry, turnExecutionId);
-      this.resetIdleCodexTurn(run.entry);
-      void server.interruptTurn();
-      return true;
-    }
     if (!completion.serverDied && run.seq === run.entry.runTurnSeq) {
       completion.endedOutcome = "errored";
       const message = error instanceof Error ? error.message : String(error);
@@ -2759,17 +2715,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       completion.deferredEnded = this.emitTurnFailure(threadId, message, completion.endedOutcome, false, turnExecutionId);
     }
     return false;
-  }
-
-  private resetIdleCodexTurn(entry: CodexSessionState): void {
-    entry.pendingTurnStartNotification = undefined;
-    entry.turnStartResponsePending = false;
-    entry.turnBindingPhase = "idle";
-    entry.currentNativeTurnId = undefined;
-    entry.pendingTurnId = null;
-    entry.childExecutionGenerations.clear();
-    entry.nativeThreadExecutionIds.clear();
-    entry.pendingChildEvents = [];
   }
 
   private finalizeCodexTurnRun(
@@ -2909,14 +2854,6 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     server.on("fatal", () => {
       this.drainPending((e) => e.sessionId === sessionId);
     });
-  }
-
-  /** True when at least one permission approval is awaiting the user for this session. */
-  private hasPendingApprovalFor(sessionId: string): boolean {
-    for (const entry of this.pendingPermissions.values()) {
-      if (entry.sessionId === sessionId) return true;
-    }
-    return false;
   }
 
   /**

@@ -3,6 +3,7 @@ import { render, screen, act, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
 import type { Thread } from "@/transport/types";
+import { createEmptyThreadRecord } from "@/stores/thread-record";
 
 const sortableMockState = vi.hoisted(() => ({
   transform: null as {
@@ -85,6 +86,7 @@ vi.mock("@/features/conversation", async (importOriginal) => ({
 const threadStoreOverrides: {
   permissionsByThread?: Record<string, Array<{ settled: boolean }>>;
   runningThreadIds?: Set<string>;
+  pendingStopCounts?: Record<string, number>;
   runtimeByThread?: Record<string, { runtimePhase: string; turnExecutionId: string | null }>;
 } = {};
 
@@ -109,6 +111,7 @@ function buildMockThreadStoreState() {
   for (const id of recordIds) {
     const runtime = threadStoreOverrides.runtimeByThread?.[id];
     records.set(id, {
+      ...createEmptyThreadRecord(),
       permissions: threadStoreOverrides.permissionsByThread?.[id] ?? [],
       ...runtime,
     });
@@ -117,7 +120,7 @@ function buildMockThreadStoreState() {
     records,
     runningThreadIds:
       threadStoreOverrides.runningThreadIds ?? EMPTY_RUNNING_THREAD_IDS,
-    pendingStopCounts: {},
+    pendingStopCounts: threadStoreOverrides.pendingStopCounts ?? {},
     currentThreadId: null,
   };
 }
@@ -1440,7 +1443,7 @@ describe("ProjectTree thread interactions", () => {
 describe("ProjectTree action-required indicator", () => {
   // Holder the tests mutate before calling installWorkspaceMock so they can
   // swap the rendered thread (e.g. attach a pr_number) and the CI check map.
-  let currentThread: Thread;
+  let currentThread: TestWorkspaceThread;
   // Shape matches ChecksStatus just enough for sidebar CI aggregation,
   // while keeping the action-required ring tests focused on row state.
   let currentChecks: Record<string, { aggregate: string; runs: unknown[] }>;
@@ -1491,6 +1494,7 @@ describe("ProjectTree action-required indicator", () => {
   beforeEach(() => {
     threadStoreOverrides.permissionsByThread = undefined;
     threadStoreOverrides.runningThreadIds = undefined;
+    threadStoreOverrides.pendingStopCounts = undefined;
     threadStoreOverrides.runtimeByThread = undefined;
     useRecoveryIncidentStore.setState({
       incident: null,
@@ -1842,6 +1846,20 @@ describe("ProjectTree action-required indicator", () => {
       "group-hover/ws:opacity-0",
       "group-focus-within/ws:opacity-0",
     );
+  });
+
+  it("keeps project activity visible while Stop is pending", () => {
+    threadStoreOverrides.pendingStopCounts = { "thread-pending": 1 };
+    installWorkspaceMock();
+    render(<ProjectTree />);
+    expect(screen.getByTestId("project-row-ws-1").querySelector(".status-pulse")).not.toBeNull();
+  });
+
+  it("shows project activity while a thread is being created", () => {
+    currentThread = { ...currentThread, clientPreparing: true };
+    installWorkspaceMock();
+    render(<ProjectTree />);
+    expect(screen.getByTestId("project-row-ws-1").querySelector(".status-pulse")).not.toBeNull();
   });
 
   it("does not dim row chrome when the thread row is a client scaffold", () => {

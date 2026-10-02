@@ -2082,7 +2082,9 @@ export class CodexEventMapper {
     const params = notification.params as { error?: { message?: string }; willRetry?: boolean };
     const error = params.error?.message ?? "Unknown error from codex app-server";
     logger.debug("Codex error notification", { error, willRetry: params.willRetry ?? false });
-    const event = params.willRetry ? { type: AgentEventType.ApiRetry, threadId: this.threadId, reason: error } : { type: AgentEventType.Error, threadId: this.threadId, error };
+    const event = params.willRetry
+      ? { type: AgentEventType.ApiRetry, threadId: this.threadId, reason: error }
+      : { type: AgentEventType.System, threadId: this.threadId, subtype: "provider.notice.codex-error", message: error };
     return [...this.drainPendingAssistantBoundary(false), event];
   }
 

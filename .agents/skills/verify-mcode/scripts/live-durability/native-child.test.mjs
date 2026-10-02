@@ -7,11 +7,14 @@ import * as NodePath from 'node:path';
 import * as NodeURL from 'node:url';
 import * as NodeCrypto from 'node:crypto';
 import * as NodeChildProcess from 'node:child_process';
+import { finishFinalProvider, start as startProvider, waitNative } from './proof.mjs';
 
-async function fixture(t, provider = 'codex') {
+async function fixture(t, provider = 'codex', { expireAfterFinal = false } = {}) {
   const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'mcode-native-child-'));
   const script = NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), 'provider-fixture.mjs');
-  const child = NodeChildProcess.spawn(process.execPath, [script, provider, scratch, provider === 'codex' ? 'app-server' : 'acp'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const bootstrap = `import * as fs from 'node:fs'; const now = Date.now; Date.now = () => now() + (fs.readdirSync(${JSON.stringify(scratch)}).some(file => file.endsWith('.after-final.json')) ? 180001 : 0); await import(${JSON.stringify(NodeURL.pathToFileURL(script).href)});`;
+  const args = expireAfterFinal ? ['--input-type=module', '-e', bootstrap, script, provider, scratch, 'app-server'] : [script, provider, scratch, provider === 'codex' ? 'app-server' : 'acp'];
+  const child = NodeChildProcess.spawn(process.execPath, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const received = [];
   let buffered = '';
   child.stdout.on('data', chunk => {
@@ -32,7 +35,7 @@ async function fixture(t, provider = 'codex') {
     const end = Date.now() + 5000;
     while (!predicate()) { if (Date.now() >= end) throw new Error('Raw native fixture stage timed out'); await new Promise(resolve => setTimeout(resolve, 10)); }
   };
-  return { scratch, received, send, wait };
+  return { scratch, received, send, wait, child };
 }
 
 async function start(f, childMode) {
@@ -107,5 +110,69 @@ for (const provider of ['devin', 'codex']) {
     NodeAssertStrict.equal(NodeFS.existsSync(NodePath.join(f.scratch, runId + '.long-history.json')), false);
     NodeAssertStrict.equal(NodeFS.existsSync(NodePath.join(f.scratch, runId + '.expired.json')), false);
     NodeAssertStrict.equal(NodeFS.readFileSync(NodePath.join(f.scratch, runId + '.audit.ndjson'), 'utf8').trim().split('\n').length, 1);
+  });
+}
+
+async function startPausedFinal(f) {
+  const runId = NodeCrypto.randomUUID();
+  const run = { id: runId, provider: 'codex', label: 'offline-final', directory: f.scratch, configured: true, thread: { id: 'owned-parent' }, receipt: {}, socket: {
+    sendWithoutResponse: async (method, params) => {
+      NodeAssertStrict.equal(method, 'agent.send');
+      f.send({ id: 1, method: 'turn/start', params: { threadId: params.threadId, input: [{ type: 'text', text: params.content }] } });
+    },
+    rpc: async (method) => {
+      NodeAssertStrict.equal(method, 'agent.listRunning');
+      return [{ threadId: 'owned-parent', turnExecutionId: 'offline-execution' }];
+    },
+  } };
+  await startProvider(run, { pauseAfterFinal: true });
+  NodeFS.writeFileSync(NodePath.join(f.scratch, runId + '.release'), 'release');
+  const afterFinal = await waitNative(run, 'after-final');
+  await f.wait(() => f.received.some(message => message.method === 'item/completed' && message.params.item.id === afterFinal.itemId));
+  NodeAssertStrict.equal(afterFinal.turnId, f.received.find(message => message.id === 1).result.turn.id);
+  const messages = f.received.filter(message => message.params?.item?.id === afterFinal.itemId || message.params?.itemId === afterFinal.itemId);
+  NodeAssertStrict.deepEqual(messages.map(message => message.method), ['item/started', 'item/agentMessage/delta', 'item/completed']);
+  NodeAssertStrict.equal(messages[0].params.item.phase, 'final_answer');
+  NodeAssertStrict.equal(messages[2].params.item.phase, 'final_answer');
+  NodeAssertStrict.equal(messages[2].params.item.text, `LIVE_DURABILITY ${runId} COMPLETE`);
+  return { run, afterFinal };
+}
+
+NodeTest.test('completes the final assistant item while keeping the Codex turn active until its own gate opens', async (t) => {
+  const f = await fixture(t);
+  const { run, afterFinal } = await startPausedFinal(f);
+  NodeFS.writeFileSync(NodePath.join(f.scratch, run.id + '.finish'), 'finish');
+  f.send({ id: 2, method: 'model/list', params: {} });
+  await f.wait(() => f.received.some(message => message.id === 2));
+  NodeAssertStrict.equal(f.received.some(message => message.method === 'turn/completed' && message.params.turn.id === afterFinal.turnId), false);
+  NodeAssertStrict.equal(NodeFS.existsSync(NodePath.join(f.scratch, run.id + '.terminal.json')), false);
+  NodeAssertStrict.deepEqual(finishFinalProvider(run), { terminalReleased: true });
+  NodeAssertStrict.throws(() => finishFinalProvider(run), /already released|already ended/);
+  await f.wait(() => f.received.some(message => message.method === 'turn/completed' && message.params.turn.id === afterFinal.turnId));
+  const terminal = f.received.filter(message => message.method === 'turn/completed' && message.params.turn.id === afterFinal.turnId);
+  NodeAssertStrict.equal(terminal.length, 1);
+  NodeAssertStrict.equal(terminal[0].params.turn.status, 'completed');
+  NodeAssertStrict.ok(f.received.indexOf(terminal[0]) > f.received.findIndex(message => message.method === 'item/completed' && message.params.item.id === afterFinal.itemId));
+  NodeAssertStrict.equal(NodeFS.readFileSync(NodePath.join(f.scratch, run.id + '.audit.ndjson'), 'utf8').trim().split('\n').length, 1);
+  f.child.stdin.end();
+  await f.wait(() => f.child.exitCode !== null);
+  NodeAssertStrict.equal(f.child.exitCode, 0);
+});
+
+for (const expired of [false, true]) {
+  NodeTest.test(`ends the paused final Codex turn exactly once after ${expired ? 'gate expiry' : 'cancellation'} without retaining a wait`, async (t) => {
+    const f = await fixture(t, 'codex', { expireAfterFinal: expired });
+    const { run, afterFinal } = await startPausedFinal(f);
+    if (!expired) f.send({ id: 2, method: 'turn/interrupt', params: { threadId: 'owned-parent', turnId: afterFinal.turnId } });
+    await f.wait(() => f.received.some(message => message.method === 'turn/completed' && message.params.turn.id === afterFinal.turnId) && NodeFS.existsSync(NodePath.join(f.scratch, run.id + '.terminal.json')));
+    const terminal = f.received.filter(message => message.method === 'turn/completed' && message.params.turn.id === afterFinal.turnId);
+    NodeAssertStrict.equal(terminal.length, 1);
+    NodeAssertStrict.equal(terminal[0].params.turn.status, 'interrupted');
+    NodeAssertStrict.equal(NodeFS.existsSync(NodePath.join(f.scratch, run.id + '.cancelled.json')), true);
+    NodeAssertStrict.equal(NodeFS.existsSync(NodePath.join(f.scratch, run.id + '.expired.json')), expired);
+    NodeAssertStrict.throws(() => finishFinalProvider(run), /already ended/);
+    f.child.stdin.end();
+    await f.wait(() => f.child.exitCode !== null);
+    NodeAssertStrict.equal(f.child.exitCode, 0);
   });
 }
