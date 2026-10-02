@@ -198,9 +198,13 @@ The application mounts browser and terminal hosts outside individual panel lifet
 
 The [desktop preview feature](apps/desktop/src/features/preview/index.ts) owns native adoption, navigation, permissions, capture, and automation checks. Generation-bound identities prevent stale page commands from controlling a replacement page. Guest security policy disables Node integration and uses context isolation, sandboxing, and controlled partitions.
 
+The [Browser security boundaries](docs/internals/browser-v2-rollout.md#security-boundaries) explain shared session state and the main-process checks that govern guest permissions.
+
 Electron main is a substantial native host. Its [preload bridge](apps/desktop/src/main/preload.ts) exposes native actions and push delivery. Desktop features own window lifecycle, application updates, clipboard and attachments, external application launch, and server recovery. Agent orchestration and durable conversation state remain in the server.
 
 The [desktop server launcher](apps/desktop/src/features/server-runtime/process/child.ts) runs the server with Bun or the packaged Bun executable. Terminal sessions use a [separate PTY host](apps/server/src/features/terminal/host/pty-host-supervisor.ts). In desktop operation, that host uses Electron's Node runtime for native terminal support.
+
+The [terminal lifecycle guide](docs/internals/runtime/terminal-lifecycle.md) distinguishes view reattachment from shell and host failure, including backend-specific input recovery and packaging constraints.
 
 ## Thread, turn, and provider session lifetimes
 
@@ -214,11 +218,13 @@ Startup recovery interrupts executions whose continued ownership cannot be prove
 
 Normal server shutdown stops admission, settles admitted work, stops producers and providers, and drains persistence and finalization before closing the database writer. Auxiliary push transports detach earlier in shutdown. HTTP and WebSocket close after the writer, followed by the read connection and process containment.
 
-Electron quit has a separate policy. Packaged desktop quit keeps the detached server available for relaunch. Development quit asynchronously stops it. An explicit server stop requests authenticated shutdown before any ownership-checked process-tree fallback.
+Electron quit has a separate policy. Ordinary packaged desktop quit keeps the detached server available for relaunch. When a downloaded update is set to install on quit, the [update installation lifecycle](apps/desktop/src/features/application-updates/lifecycle/installation.ts) stops the server before quitting and blocks installation if that stop fails. Development quit asynchronously stops the server. An explicit server stop requests authenticated shutdown before any ownership-checked process-tree fallback.
 
 ## Checkout, handoff, and review invariants
 
 Threads can run directly in a workspace checkout, provision a new worktree, or attach to an existing worktree. Multiple threads can share one worktree. A new worktree can remain branchless until the user creates a branch.
+
+The [Project environment guide](docs/internals/projects/environment.md) explains Setup admission, shared-command approval, queued turn ownership, and Action shutdown barriers. The [composer draft guide](docs/internals/conversation/composer-drafts.md) explains how renderer input and attachments move from drafts to thread submissions.
 
 Worktree cleanup must account for every linked active thread. It must also distinguish managed worktrees from external checkouts and protected branches. The [cleanup guide](docs/internals/thread-cleanup.md) records those constraints.
 

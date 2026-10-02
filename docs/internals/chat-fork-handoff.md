@@ -8,27 +8,41 @@ Clicking the fork icon on a message in a parent thread creates a child thread. T
 
 The document is produced either by the parent's provider (when the provider supports a side-channel query) or by a deterministic builder (when it does not). Either way the artifact is the same shape: a Markdown file with YAML frontmatter plus a JSON sidecar.
 
-The pipeline lives in `apps/server/src/features/handoff/orchestration/`.
+The [pipeline](../../apps/server/src/features/handoff/orchestration/handoff-pipeline.ts)
+selects the generation path. The
+[coordinator](../../apps/server/src/features/handoff/orchestration/handoff-coordinator.ts)
+persists the artifact and delivers it to the child.
 
 ## The B/D ladder
 
-Two paths are tried in order. The result of the first path that succeeds becomes the handoff artifact.
+The pipeline attempts path B when eligible, then falls back to path D if the
+provider attempt fails. Ineligible parents go directly to D.
 
-**Path B -- clean-fork providers (Claude, Cursor, Codex, Copilot).** The pipeline calls `runSideChannelQuery` on the parent provider. This issues a new query against a forked copy of the provider's existing session without mutating it, so the parent thread's conversation state is unchanged. Path B requires a live `sdk_session_id` on the parent thread because the side-channel must resume the correct provider conversation.
+**Path B: clean-fork providers.** The pipeline calls the parent's
+`forker.fork(request)` only when `sessionForkOnResume` is `"clean"` and the
+parent has an `sdk_session_id`. The forker owns the isolated provider query,
+which leaves the parent conversation unchanged. A stored session ID permits
+the attempt; it does not guarantee that the provider can still recover it.
 
-**Path D -- deterministic fallback.** Always available. Builds the handoff by walking the message list up to the fork point and rendering a structured Markdown summary. No provider call is made. Path D fires when the parent provider does not support forking at all (`sessionForkOnResume === "unsupported"`), when the parent has no `sdk_session_id` and the provider is clean-resume, or when path B throws an error that error-classification routes as quota, auth, context-overflow, or fatal (errors for which retrying would hit the same wall).
+**Path D: deterministic fallback.** The local builder uses stored parent
+context up to the fork point without a provider call. Unsupported providers,
+unresolved providers, and parents without a session ID go directly to D.
+This includes Devin: its unused history-replay side channel and descriptor
+capability do not override its `"unsupported"` runtime flag. A clean provider
+with no session ID also goes to D rather than a sessionless B-prime query.
 
-Transient errors (network blips, 5xx, AbortController timeout at 120 seconds) also route to path D so forks always succeed.
+Any path-B error falls back to D. The artifact records the error
+classification, including transient errors and the 120-second abort timeout.
+Generation fallback does not guarantee that later storage or delivery succeeds.
 
 ## Provider capabilities
 
-Provider fork capability is declared in `packages/contracts/src/providers/interfaces.ts`.
-
-`sessionForkOnResume: "clean" | "unsupported"` -- declares whether the provider supports side-channel queries (`"clean"`) or not (`"unsupported"`).
-
-`forker: SessionForker` -- produces the handoff artifact. Clean providers use `CleanForker`; unsupported providers use `DeterministicForker`.
-
-Implement `runSideChannelQuery` on path-B providers. It receives an `AbortSignal` that fires after 120 seconds.
+The [provider interface](../../packages/contracts/src/providers/interfaces.ts)
+declares the runtime fork flag and forker. The
+[`SessionForker` contract](../../packages/contracts/src/providers/session-forker.ts)
+defines the request and artifact. Concrete side-channel methods remain inside
+provider implementations; the pipeline dispatches through the forker after
+checking the flag and parent session ID.
 
 ## Storage layout
 
@@ -49,21 +63,38 @@ Attachments copied from parent messages land at:
 <MCODE_DATA_DIR>/threads/<threadId>/attachments/<id>.<ext>
 ```
 
-## Full vs minimal mode
+## Delivery and document size
 
-When the child provider's per-turn input cap is below 8000 characters, the handoff prompt switches to minimal mode (3 sections instead of 8). This keeps the inlined handoff within the child's first-turn budget.
+Full-versus-minimal selection and the 115% section-boundary truncation guard
+are retired. `HandoffMeta.mode` and YAML frontmatter retain the constant
+`"full"` for provenance compatibility. The provider's
+`maxInputCharactersPerTurn` no longer selects a document mode or body budget.
 
-The mode is recorded in `HandoffMeta.mode` (`"full"` or `"minimal"`) and in the YAML frontmatter.
+The coordinator normally writes the document to an OS temp file. The child's
+first-turn prompt contains its path, a short fallback summary, and the user's
+message. A [scoped pre-grant](../../apps/server/src/features/agents/permissions/scoped-pre-grant.ts)
+allows one `Read` of that exact file during the child's first turn. The grant
+is consumed once and cleared when the turn ends.
+
+Adapters without that read path receive bounded inline delivery. Currently
+the coordinator selects this path for Codex: the document plus user message
+is capped at 14,000 characters, with truncation notices when needed. If the
+combined prompt exceeds the cap, the user message receives up to 4,000
+characters and the document uses the remaining space. The full artifact
+remains stored. This delivery limit does not change the artifact's mode.
+
+If the temp-file write fails, the coordinator falls back to the document
+inline. That fallback does not apply the Codex delivery cap.
 
 ## Robustness
 
 The pipeline includes several guards to avoid blocking or corrupting the fork flow:
 
-- **120-second timeout.** An `AbortController` wraps every provider call. If the controller fires, the pipeline catches the abort and falls to path D with `reason: "transient"`.
+- **120-second abort signal.** The pipeline supplies a timed `AbortSignal` to the provider forker. The forker must respect it. An aborted provider call falls to path D with `reason: "transient"`.
 - **Fork history budget.** Parent history is read in newest-first pages under a byte budget. The handoff records when older history was elided.
 - **25 MB attachment size cap.** `HandoffStorage.copyAttachments` skips any attachment larger than 25 MB and records a sentinel `sha256: "<skipped>"` in the manifest.
-- **Budget truncation at section boundaries.** When a provider returns more than 115% of the computed character budget, `applyBudgetGuard` truncates at the nearest H2 heading boundary and appends a notice so the child agent knows the doc was cut.
-- **Abandoned-child cleanup.** Before writing the artifact, `AgentService` re-fetches the child thread. If it has been hard-deleted between orchestration start and the write, the artifact is dropped and the fork fails cleanly rather than writing orphaned files.
+- **Abandoned-child cleanup.** Before writing the artifact, the coordinator re-fetches the child thread. A missing or deleted child aborts delivery before an artifact is written.
+- **Anchor persistence.** Delivery waits for the child's handoff message to be saved. An unknown anchor commit outcome fails delivery rather than attempting a second anchor through legacy replay.
 
 ## Settings
 
@@ -71,12 +102,14 @@ The pipeline includes several guards to avoid blocking or corrupting the fork fl
 
 ## Adding a new provider
 
-1. Decide which path the provider supports based on its session model. Providers that can fork a session (resuming a session id into a throwaway connection branches the conversation rather than mutating it) use `"clean"`. Providers with no forkable session concept use `"unsupported"`.
+1. Verify whether an isolated query can resume the parent session without mutating it. Use `"clean"` only when the adapter supports that behavior. Otherwise use `"unsupported"`, which sends the public pipeline directly to D.
 
-2. Set `sessionForkOnResume` to the chosen value and `maxInputCharactersPerTurn` to the provider's documented limit (or a conservative estimate like `16_000` if unknown).
+2. Set the runtime flag and supply a forker that implements the linked `SessionForker` contract. Keep provider-specific side-channel operations inside the adapter or its forker. Respect the request's abort signal and retire any throwaway resources.
 
-3. If `"clean"`: implement `runSideChannelQuery({ parentThreadId, parentSdkSessionId, prompt, abortSignal })`. The method must return a Markdown string. It must respect `abortSignal` and throw (or let the signal reject the underlying fetch) when it fires.
+3. Verify the child's delivery path in the coordinator. Use file delivery only when the adapter can read the artifact under the scoped grant; otherwise provide bounded inline delivery.
 
-4. Run `(cd apps/server && npx vitest run src/features/handoff)` to verify the existing tests still pass with the new provider registered.
+4. Add focused behavior coverage for the supported path, provider failure, and missing parent session ID. Run the relevant workspace tests through its configured runner, for example:
 
-5. Add a test case in `apps/server/src/features/handoff/orchestration/__tests__/handoff-pipeline.test.ts` covering the happy path and at least one failure mode for the new provider.
+   ```sh
+   bun run --cwd apps/server test -- src/features/handoff/orchestration/__tests__/handoff-pipeline.test.ts
+   ```

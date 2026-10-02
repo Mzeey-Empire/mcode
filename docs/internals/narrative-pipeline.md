@@ -48,10 +48,10 @@ If you are about to touch any of these files, **read this first**:
 - `apps/server/src/index.ts` (broadcast layer)
 - `apps/web/src/stores/threadStore.ts` (validated AgentEvent projection and
   client volatile state lifecycle)
-- `apps/web/src/stores/conversation-residency.ts` (selected conversation
+- [Conversation residency](../../apps/web/src/features/conversation/residency/conversation-residency.ts) (selected conversation
   residency, bounded retention, refresh, pagination, and prefetch routing)
-- `apps/web/src/components/chat/narrative/*` (renderers)
-- `apps/web/src/components/chat/virtual-items.ts` (timeline insertion point)
+- [Narrative renderers](../../apps/web/src/features/conversation/narrative/)
+- [Virtual items](../../apps/web/src/features/conversation/messages/virtual-items.ts) (timeline insertion point)
 
 ---
 
@@ -226,6 +226,35 @@ The server owns durable messages, persisted narrative metadata, and the retained
 accepted suffix. The renderer projects the saved model and accepted progress
 into each resident Thread record. This split preserves the Turn layer through
 `turn.persisted`; persistence confirms durable data but does not end the timeline.
+
+[`useChatViewState`](../../apps/web/src/features/conversation/messages/chat-view/useChatViewState.ts)
+keeps up to five recently selected transcripts mounted.
+[`KeptAliveTranscript`](../../apps/web/src/features/conversation/messages/chat-view/ChatViewSurface.tsx)
+hides inactive views with `visibility: hidden`, `inert`, and `aria-hidden`.
+Their viewports stay laid out because `display: none` would reduce their height
+to zero and cause the virtualizer to discard the rows. Switching back can
+therefore reveal the existing view.
+
+A mounted hidden transcript holds a display lease through
+[`ConversationResidency`](../../apps/web/src/features/conversation/residency/conversation-residency.ts).
+An open [canonical subagent detail view](../../apps/web/src/features/subagents/roster/SubagentsPanel.tsx)
+uses the same lease mechanism. Leases are reference counted, so closing one
+view cannot release a conversation that another view still displays. Selection
+and display leases both protect resident content. A non-selected transcript can
+still have a mounted view.
+
+Subscriptions prioritize the selected thread, then leased conversations, then
+other running threads. The deduplicated list is bounded by
+`MAX_THREAD_SUBSCRIPTIONS`. A display lease keeps a view eligible for updates
+without changing workspace selection.
+
+[`ThreadHydrator`](../../apps/web/src/features/conversation/hydration/thread-hydrator.ts)
+restores or loads leased content without selecting it. Hydration commits require
+the current lease generation, load epoch, and invalidation generation. The final
+lease release invalidates pending work, caches the record, and removes the
+unselected resident record. A selected thread or a newer lease prevents that
+release from removing its content. Late responses from a released lease cannot
+restore the retired record.
 
 ### Residency certification
 
@@ -474,9 +503,9 @@ sub-agent is one of the four steps, not a fifth.
 
 The labeling in `TurnFooter` reads correctly as "N steps, of which K were
 sub-agents." Don't try to "fix" this by subtracting Agent calls from
-`steps`. See the doc comment on `NarrativeCounts.steps`
-(`apps/web/src/components/chat/narrative/types.ts`) for the canonical
-semantics.
+`steps`. See the doc comment on
+[`NarrativeCounts.steps`](../../apps/web/src/features/conversation/narrative/types.ts)
+for the canonical semantics.
 
 ---
 
@@ -504,7 +533,7 @@ before reporting the change done:
   a fresh timeline.
 - **Browser console:** no `NotFoundError`, no React warnings.
 
-The unit suite at `apps/web/src/components/chat/narrative/__tests__/`
+The [narrative unit suite](../../apps/web/src/features/conversation/narrative/__tests__/)
 covers the count derivation but not the full event flow. Manual
 verification via the running app is required.
 

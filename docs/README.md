@@ -10,27 +10,47 @@ Most code changes do not need a documentation update. Follow the
 Architectural decisions and their reasons, cross-component constraints, and
 implementation traps that are hard to discover from the source.
 
-- [Agent workflow](internals/agent-workflow.md): implementation and focused-check workflow
+Related pages can use shallow topic subfolders. This index remains the entry
+point for both existing pages and grouped material.
+
+### Execution and providers
+
 - [Narrative pipeline](internals/narrative-pipeline.md): timeline derivation and event traps
 - [Provider architecture](internals/provider-architecture.md): adapter contract and SessionRuntime convention
 - [Codex app-server trace](internals/codex-app-server-trace.md): observed Codex protocol evidence
 - [Codex narrative spec](internals/codex-narrative-spec.md): Codex event-to-narrative mapping
-- [Cursor SDK migration handoff](internals/cursor-sdk-migration.md)
+- [Cursor SDK migration handoff](internals/cursor-sdk-migration.md): deferred migration context
 - [Chat fork handoff](internals/chat-fork-handoff.md)
-- [Composer overlays](internals/composer-overlays.md)
-- [UI component registry](internals/ui-components.md): component rules and live verification
-- [Database migrations](internals/db-migrations.md)
-- [Settings schema conventions](internals/settings-schema.md)
+- [Mcode runtime agent instructions](internals/mcode-agent-instructions.md)
+
+### Projects and review
+
+- [Project environments](internals/projects/environment.md): Setup admission, command approval, and Action lifecycle
+- [Completed-thread worktree cleanup](internals/thread-cleanup.md)
 - [Pull request mutations](internals/pull-request-mutations.md)
 - [Pull request review worktrees](internals/pull-request-review-worktrees.md)
 - [Last turn changes](internals/turn-diff-review.md)
-- [Completed-thread worktree cleanup](internals/thread-cleanup.md)
-- [Browser v2 operations](internals/browser-v2-rollout.md)
-- [Mcode runtime agent instructions](internals/mcode-agent-instructions.md)
-- [Performance audit checklist](internals/performance-audit.md)
-- [SQLite performance profile](internals/sqlite-performance-profile.md)
+
+### Renderer and composer
+
+- [Composer drafts](internals/conversation/composer-drafts.md): draft ownership, attachment transfer, and dispatch restoration
+- [Composer overlays](internals/composer-overlays.md)
+- [UI component registry](internals/ui-components.md): component rules and live verification
 - [Shiki in the web worker](internals/shiki-worker.md)
+
+### Runtime and performance
+
+- [Terminal lifecycle](internals/runtime/terminal-lifecycle.md): shell ownership, host recovery, and packaged runtime constraints
+- [Browser v2 operations](internals/browser-v2-rollout.md): automation lifecycle and guest security boundaries
+- [Agent workflow](internals/agent-workflow.md): implementation and focused-check workflow
+- [Performance audit checklist](internals/performance-audit.md)
 - [Terminal workload corpus](internals/terminal-workload-corpus.md)
+
+### Persistence and settings
+
+- [Database migrations](internals/db-migrations.md)
+- [Settings schema conventions](internals/settings-schema.md)
+- [SQLite performance profile](internals/sqlite-performance-profile.md)
 
 ## Architecture decision records
 

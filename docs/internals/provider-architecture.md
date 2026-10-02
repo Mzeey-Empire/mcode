@@ -65,6 +65,39 @@ never leave a thread parked in the "stopping" reservation, because that
 reservation suppresses every later terminal event. A wedged stop was how a
 finished turn kept the composer and thread list running.
 
+## Session recovery and active-turn liveness
+
+Persisted-session recovery and active-turn liveness have different bounds.
+The shared
+[`AcpSessionRuntime`](../../packages/providers/src/private/protocols/acp/acp-session-runtime.ts)
+prefers advertised `session/resume` support, then `session/load`. Its recovery
+timer measures inactivity, and matching session updates reset it. Updates for
+other sessions do not enter the recovery callback. Cursor allows 20 seconds of
+recovery inactivity; Devin uses the shared 10-second default. Continuous replay
+can therefore take longer than those intervals.
+
+The generic runtime defaults to `fallback-to-new` after failed recovery.
+[Cursor](../../packages/providers/src/private/cursor/runtime/cursor-acp-process-spawner.ts)
+and [Devin](../../packages/providers/src/private/devin/devin-provider.ts) choose
+`fail-without-replacement`: a failed or unavailable recovery closes the
+transport and fails the turn rather than silently creating a new logical
+session. Replay visibility remains adapter-specific. Devin absorbs loaded
+history without publishing it as live output. The
+[Cursor bridge](../../packages/providers/src/private/cursor/acp/cursor-acp-client-bridge.ts)
+maps matching replay into a separate replay state and publishes those mapped
+events, while withholding native turn diffs until recovery completes.
+
+That recovery timer does not supervise an active ACP prompt. A connected
+transport or a successful load does not prove that an active Cursor or Devin
+turn still makes progress.
+
+[Codex](../../packages/providers/src/private/codex/codex-provider.ts) instead
+probes its app-server after five minutes of turn silence. Notifications and
+app-server activity reset the timer. A pending permission approval re-arms it
+without a probe. A responsive server also re-arms it; an unresponsive server
+fails the wait so the turn cannot remain busy forever. Five minutes is a probe
+interval, not a deadline for a healthy turn or proof of model progress.
+
 ## Event boundary
 
 ### Activity labels
@@ -171,8 +204,11 @@ covers off-PATH installs.
 - **Resume without forking.** `session/load` resumes across eviction and
   restart (`threads.sdk_session_id` is the cursor); there is no
   `session/resume`/`session/close`, and teardown is `session/cancel` plus
-  process kill. Handoff uses the history-replay side channel (path B-prime),
-  not a session fork.
+  process kill. The public [handoff pipeline](chat-fork-handoff.md) goes
+  directly to path D because Devin declares `sessionForkOnResume:
+  "unsupported"`. Its adapter has a throwaway history-replay side channel,
+  but the pipeline does not call it. The descriptor's `clean-fork` capability
+  does not override this gate.
 - **Permissions pass through verbatim.** `session/request_permission` options
   (allow once / allow for session / always allow in project / switch to
   bypass / reject) render as real option buttons; `allow_always_global` is

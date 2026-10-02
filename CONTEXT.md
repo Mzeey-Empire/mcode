@@ -518,14 +518,11 @@ small explicit allowlist, not a heuristic.
 
 ### Handoff
 A markdown document summarizing the parent thread so a forked child picks up
-with the parent's context, replacing a verbose transcript replay. Delivered
-**off-band by default**: the full document is written to a stable OS temp path,
-and the child's first-Turn inline prompt carries only a small payload (a pointer
-to that file, a 2-3 sentence graceful-degradation summary, and the child's first
-user message). The child Reads the full document on its first Turn under a
-one-shot Scoped pre-grant, so Handoff quality is no longer capped by the child
-Provider's per-Turn input budget. The full document is retained at the temp path
-until garbage collection so the user can inspect it later.
+with the parent's context, replacing a verbose transcript replay. Delivery
+depends on the child provider. An off-band delivery gives the child a file
+pointer and short summary, with a one-shot Scoped pre-grant to Read the full
+document. A provider without that read path receives a bounded inline handoff.
+The saved artifact remains available for inspection independently of delivery.
 
 ### Scoped pre-grant
 A pipeline-issued permission bypass authorising the child to `Read` exactly one
@@ -551,13 +548,13 @@ typically use a separate SDK process.
 ### Path B (clean side-channel)
 Resumes the parent provider's session in a forked SDK process to generate
 the handoff. The original session is untouched. Used when the provider
-declares `sessionForkOnResume: "clean"` (Claude, Cursor, Codex, Copilot).
+declares `sessionForkOnResume: "clean"` and the parent has a saved session ID.
 
 ### Path B-prime (sessionless side-channel)
-Variant of path B that runs without `resume:` when the parent's session
-isn't available (e.g. after a server restart). Provides the conversation
-history as text in the prompt instead. Same artifact ladder step ("B") from
-the caller's perspective.
+A history-replay variant of path B that supplies conversation text instead of
+resuming a session. It uses the same artifact ladder label ("B"). Adapter
+side-channel implementations can support this variant, but the ordinary fork
+pipeline selects path D when the parent has no saved session ID.
 
 ### Path D (deterministic)
 Local builder that produces the handoff from message rows without invoking
@@ -571,42 +568,32 @@ banner copy.
 
 ## Handoff delivery
 
-Handoffs are delivered **off-band by default**: the full document lives at a
-stable OS temp path and the child Reads it on its first Turn under a one-shot
-Scoped pre-grant (see the `Handoff` and `Scoped pre-grant` terms above). Because
-the document body never has to fit inside the child's per-Turn input window, the
-legacy sizing concepts are retired:
+Off-band delivery sends a file pointer, short summary, and the user's first
+message. The child Reads the document under a one-shot Scoped pre-grant.
+Inline delivery must fit the child adapter's input limits, so it can omit part
+of the saved artifact. See the [handoff delivery constraints](docs/internals/chat-fork-handoff.md).
 
-- **Full / Minimal mode** — removed. There is no per-budget mode switch; the
-  document is always the complete handoff. (`HandoffMeta.mode` is retained as the
-  constant `"full"` for back-compat with older `handoff.json` provenance.)
-- **Character budget** — removed as a handoff doc-body sizing driver. The inline
-  first-Turn payload (pointer + short summary + user message) is small by
-  construction.
-- **Overflow** — removed. The off-band temp file *is* the document, not a spill
-  of whatever exceeded an inline budget.
-
-`maxInputCharactersPerTurn` remains declared per Provider but is **decorative**
-for Handoff purposes after this change.
+The former full/minimal selection and percentage-based section truncation are
+retired. `HandoffMeta.mode` remains the constant `"full"` for provenance
+compatibility. That label does not guarantee that inline delivery contains
+every character of the artifact.
 
 ## Provider capabilities
 
 ### Session fork behavior
-Declared per provider as `"clean" | "unsupported"`. **Metadata only** since
-each Provider now carries a `forker: SessionForker` that the pipeline
-dispatches through (`provider.forker.fork(req)`); this label is used for
-`handoff.json` provenance and the fallback banner copy, and historically
-mapped to ladder paths as:
+Declared per provider as `"clean" | "unsupported"`. Together with a saved
+parent session ID, this flag controls eligibility for provider-generated
+handoff path B. The pipeline invokes the eligible provider's `SessionForker`.
 
-- **clean**: `resume:` spawns a fork without mutating the original (Claude,
-  Cursor, Codex, Copilot)
-- **unsupported**: provider can't fork sessions; pipeline goes directly to
-  path D
+- **clean**: the provider can generate a handoff without mutating the source
+  session. Without a saved session ID, the pipeline still selects path D.
+- **unsupported**: the pipeline goes directly to path D.
 
 ### Per-turn input cap
 The maximum input characters a provider accepts per turn. Declared as
-`maxInputCharactersPerTurn`. Decorative for Handoff purposes since Handoff
-delivery went off-band (see `Handoff delivery`); retained as Provider metadata.
+`maxInputCharactersPerTurn`. The handoff pipeline does not use this metadata
+to select full/minimal mode. Adapters can impose separate inline delivery
+limits (see `Handoff delivery`).
 
 ### Goal support
 The ability to set, inspect, and clear a standing **goal**: a thread-scoped
@@ -841,15 +828,13 @@ that runs while the user is already watching the thread.
 ## Right panel
 
 ### Right panel
-The workspace-level surface docked to the right of the chat, hosting a set
-of typed tabs (Browser, Terminal, Review, Plan, and later Files). The
-panel itself, its visibility, width, and active tab, is **workspace-global**
-and persists with no thread open. Each tab type sets its own availability:
-some (Browser, Terminal) run against the **workspace root** when no thread
-exists; others (Plan) require a thread. This replaces the former model
-where the entire panel was thread-scoped and could not render without a
-thread. (Per-tab *content* scope — e.g. whether a thread keeps its own
-Browser tabs — is defined on each tab type below, not here.)
+The surface docked to the right of the chat, hosting typed tabs such as Browser,
+Terminal, Review, Plan, and Files. Visibility, width, active tab, and open-tab
+order belong to the thread. A thread without its own saved panel state inherits
+the workspace fallback and gets its own record when it changes the panel.
+The fallback also owns the panel when no thread is active. Each tab type sets
+its content scope and availability. Browser and Terminal can use the workspace
+root without a thread; Plan requires a thread.
 
 ### Tab availability
 The rule set governing which tab types a user can create at a given moment.
