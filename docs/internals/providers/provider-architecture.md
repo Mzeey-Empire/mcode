@@ -229,9 +229,9 @@ covers off-PATH installs.
   stopped" rather than a silent completion. `session/load` replays the full
   history before resolving, so updates absorbed while `sessionId` is still
   unset are kept out of the live transcript instead of duplicating it.
-- **Bounded cancel.** Devin ignores `session/cancel` while a turn is blocked
-  inside a tool call, so `stopSession` gives the prompt a bounded window to
-  settle, then kills the child and warms a replacement `devin acp` process in
-  the background. The next turn reuses it and reloads the session via
-  `session/load`, which keeps Stop a guaranteed escape instead of waiting on a
-  wedged prompt forever.
+- **Cancellation deadline.** After the `session/cancel` write settles,
+  `stopSession` gives the prompt a bounded window to settle. On expiry it
+  kills the child and warms a replacement `devin acp` process in the background.
+  The next turn reloads the session via `session/load`. The cancel write is
+  outside this window and can block teardown, so this is not an end-to-end
+  cancellation deadline. See [the adapter](../../../packages/providers/src/private/devin/devin-provider.ts).

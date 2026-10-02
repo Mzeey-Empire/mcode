@@ -32,7 +32,7 @@ Codex models come from the app-server `model/list` catalog. The model picker and
 | Element | Expected behavior |
 |--------|-------------------|
 | Thought rows | Dimmed / “thinking” style blocks built from non-final `TextDelta` events. |
-| Final reply | Full-weight prose from the assistant item promoted by `AssistantMessageBoundary`, then committed message on turn end. |
+| Final reply | Full-weight prose as soon as an assistant item's `final_answer` phase is known. Item closure settles its text independently of turn completion. Phase-less traffic selects the last eligible assistant item at successful native turn completion. |
 | Agent / sub-agent row | `ToolUse` with `toolName: "Agent"`; label may reflect Codex collab kind (e.g. spawn). |
 | Child tools | Nested under the correct Agent row; expandable like today’s narrative. |
 | Turn footer | Step / sub-agent counts and duration reflect nested tools and Agent rows (existing narrative rules). |
@@ -46,7 +46,9 @@ Codex models come from the app-server `model/list` catalog. The model picker and
 - **Thought stream**: Any Codex notification that represents non-final model text must map to `AgentEventType.TextDelta` with `isFinalResponse: false`.
   Known sources today: `item/reasoning/textDelta`, `item/reasoning/summaryTextDelta`, `item/completed` with `type: "reasoning"`, and experimental `item/plan/delta` when the app-server uses it for live planning text. Completed `plan` items stay silent.
 
-- **Assistant stream**: `item/agentMessage/delta` and equivalent completed shapes map to non-final `TextDelta` events while the turn is running. At main turn completion, the mapper emits `AssistantMessageBoundary` with `isFinalResponse: true` for the last assistant item and persists that item as the final reply.
+- **Assistant stream**: Track text by its native item ID. The `final_answer` phase selects the response bubble; `commentary` stays in narration. `item/completed` emits `AssistantMessageBoundary` to close that item's text without ending the turn. When phase is absent, the matching successful native turn completion promotes the last eligible assistant item. Distinct items remain distinct even when their text is identical.
+
+- **Turn completion**: Closing an assistant item does not clear Stop or the running indicators. The owning execution's terminal state clears activity. Final text rendering must not delay that lifecycle transition.
 
 - **Sub-agent scope**: Child `ToolUse` events must include `parentToolCallId` set to the Codex collab item id when the work is under that sub-agent.
 
@@ -120,6 +122,10 @@ session discard still close the app-server.
 Normal turn completion also keeps the app-server available. Stop during settings
 or input preparation cancels that request before dispatch, including on a reused
 session. An interrupt timeout rejects Stop without an unhandled promise rejection.
+
+A failed Stop notifies the user only while the same execution remains stoppable
+in the active thread. A delayed failure cannot restore captured running state
+after the owning turn completes or a newer execution starts.
 
 Late events from a previous main turn cannot reset the next turn's mapper.
 
