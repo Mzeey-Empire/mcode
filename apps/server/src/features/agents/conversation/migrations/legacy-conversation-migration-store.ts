@@ -118,10 +118,11 @@ function messageFromLegacyRow(row: LegacyMessageRow): Message {
 export class LegacyConversationMigrationStore {
   constructor(private readonly db: Database) {}
 
-  /** Process one bounded source row and commit its migration provenance atomically. */
+  /** Atomically repair one converted execution key or classify one bounded source row. */
   runBatch(
     hooks: LegacyConversationMigrationFailureHooks = {},
   ): LegacyConversationMigrationBatchResult {
+    if (this.repairLegacyExecution(hooks)) return this.currentResult(0, false);
     const row = this.nextUnclassifiedMessage();
     if (!row) return this.completeMigration();
 
@@ -145,6 +146,65 @@ export class LegacyConversationMigrationStore {
     const prepared = this.preparePairResult(pair);
     if ("reason" in prepared) return this.recordAmbiguousPair(candidatePair, prepared.reason, hooks);
     return this.persistPreparedPair(prepared.value, hooks);
+  }
+
+  private repairLegacyExecution(hooks: LegacyConversationMigrationFailureHooks): boolean {
+    const pending = this.db.query<{ execution_id: string }, []>(`
+      SELECT execution_id FROM canonical_agent_turns WHERE execution_id GLOB 'legacy-execution:*'
+      UNION
+      SELECT execution_id FROM canonical_agent_ingest_checkpoints WHERE execution_id GLOB 'legacy-execution:*'
+      ORDER BY execution_id LIMIT 1
+    `).get();
+    if (!pending) return false;
+    const sourceId = pending.execution_id.slice("legacy-execution:".length);
+    const executionId = legacyExecutionId(sourceId);
+    this.db.transaction(() => {
+      this.assertLegacyRepairOwner(pending.execution_id, sourceId);
+      this.assertLegacyRepairReferences(pending.execution_id, executionId);
+      this.db.query("UPDATE canonical_agent_turns SET execution_id = ? WHERE execution_id = ?")
+        .run(executionId, pending.execution_id);
+      this.db.query("UPDATE canonical_agent_ingest_checkpoints SET execution_id = ? WHERE execution_id = ?")
+        .run(executionId, pending.execution_id);
+      hooks.beforeCheckpoint?.();
+    }).immediate();
+    hooks.afterCheckpoint?.();
+    return true;
+  }
+
+  private assertLegacyRepairOwner(executionId: string, sourceId: string): void {
+    // Message items and provenance can be remapped to later turns; the original converter turn/checkpoint own this key.
+    const owner = this.db.query<{ valid: number }, [string, string, string]>(`
+      SELECT 1 AS valid FROM canonical_agent_turns t
+      JOIN messages m ON m.id = ? AND m.thread_id = t.thread_id AND m.role = 'user'
+      JOIN canonical_agent_ingest_checkpoints c ON c.execution_id = t.execution_id
+        AND c.thread_id = t.thread_id AND c.turn_id = t.id
+        AND c.phase = 'legacy_migrated' AND c.terminal_outcome = 'completed'
+        AND c.last_accepted_sequence = 0 AND c.last_durable_sequence = 0
+        AND c.native_cursor_json IS NULL AND c.error IS NULL AND c.recovery_incident_id IS NULL
+      WHERE t.execution_id = ? AND t.id = ? AND t.status = 'Completed'
+        AND t.ended_at IS NOT NULL AND json_extract(t.trigger_json, '$.kind') = 'user'
+    `).get(sourceId, executionId, `legacy-turn:${sourceId}`);
+    if (!sourceId || !owner) throw new Error("Legacy execution repair requires proven completed converter ownership");
+  }
+
+  private assertLegacyRepairReferences(previous: string, replacement: string): void {
+    const collision = this.db.query(`
+      SELECT 1 FROM canonical_agent_turns WHERE execution_id = ?1
+      UNION ALL SELECT 1 FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?1
+      LIMIT 1
+    `).get(replacement);
+    if (collision) throw new Error("Legacy execution repair identity collision");
+    // The converter never writes these runtime references, so only converter-owned keys can be repaired.
+    const runtimeOwner = this.db.query(`
+      SELECT 1 FROM canonical_agent_events WHERE execution_id IN (?1, ?2)
+      UNION ALL SELECT 1 FROM canonical_writer_operation_receipts WHERE execution_id IN (?1, ?2)
+      UNION ALL SELECT 1 FROM canonical_writer_thread_operation_receipts WHERE execution_id IN (?1, ?2)
+      UNION ALL SELECT 1 FROM parent_assistant_text_checkpoints WHERE execution_id IN (?1, ?2)
+      UNION ALL SELECT 1 FROM parent_assistant_text_checkpoint_chunks WHERE execution_id IN (?1, ?2)
+      UNION ALL SELECT 1 FROM messages WHERE outcome_execution_id IN (?1, ?2)
+      LIMIT 1
+    `).get(previous, replacement);
+    if (runtimeOwner) throw new Error("Legacy execution repair cannot change runtime-owned references");
   }
 
   private completeMigration(): LegacyConversationMigrationBatchResult {
@@ -225,7 +285,7 @@ export class LegacyConversationMigrationStore {
     hooks.afterCheckpoint?.();
   }
 
-  /** Continue from durable provenance checkpoints until no parent message remains. */
+  /** Resume conversion and converted-key repair from their durable checkpoints. */
   async runToCompletion(): Promise<LegacyConversationMigrationBatchResult> {
     let result = this.runBatch();
     while (!result.completed) {
@@ -718,6 +778,7 @@ export class LegacyConversationMigrationStore {
       ) VALUES (?, 'completed', 0, 0, ?, ?)
       ON CONFLICT(version) DO UPDATE SET
         status = 'completed', updated_at = excluded.updated_at, completed_at = excluded.completed_at
+      WHERE canonical_legacy_migration_checkpoints.status <> 'completed'
     `).run(LEGACY_CONVERSATION_MIGRATION_VERSION, now, now);
   }
 
