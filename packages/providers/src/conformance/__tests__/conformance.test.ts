@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
   let turn = 0;
-  const stream = (async function* () { for await (const _input of prompt) { turn++; yield { type: "result", uuid: `RESULT_${turn}`, is_error: false }; } })();
+  const stream = (async function* () {
+    for await (const _input of prompt) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      turn++;
+      yield { type: "result", uuid: `RESULT_${turn}`, is_error: false };
+    }
+  })();
   return Object.assign(stream, { close: () => undefined, setModel: async () => undefined });
 } }));
 import * as NodeFS from "node:fs";

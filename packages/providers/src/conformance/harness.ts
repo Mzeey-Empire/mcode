@@ -134,12 +134,13 @@ async function runClaudeFactoryCore(
 }
 
 async function waitForClaudeCoreTerminals(sink: DeterministicCanonicalSink, expected: number): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  const deadline = performance.now() + 2_000;
+  while (performance.now() < deadline) {
     const count = sink.snapshot().events.filter(({ payload }) => payload.type === "item.recorded"
       && payload.item.payload.projection === "providerRuntimeEvent"
       && ProviderRuntimeEventSchema().parse(payload.item.payload.runtimeEvent).event.type === AgentEventType.TurnComplete).length;
     if (count === expected) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("Claude core profile did not observe the expected canonical terminals");
 }
