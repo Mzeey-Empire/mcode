@@ -28,7 +28,7 @@ layers below application overlay primitives:
 |-------|--------:|----------|
 | Composer base | 10 | Local composer surface |
 | Composer status | 20 | Local queued-send toast |
-| Provider notice | 30 | `ComposerProviderNoticeSurface`, `NoticePrototypeComposer` |
+| Provider notice | 30 | `ComposerProviderNoticeSurface` |
 | Composer menu | 40 | Slash commands, mentions, and Add to composer |
 | Application overlay primitive | 50 | Dialogs, popovers, tooltips, dropdowns, and toasts |
 | Desktop title-bar root | 60 | Desktop title bar and its descendants |
