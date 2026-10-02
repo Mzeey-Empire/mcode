@@ -101,7 +101,8 @@ vi.mock("@/features/projects/state/workspaceStore", () => ({
   ),
 }));
 
-vi.mock("@/stores/threadStore", () => {
+vi.mock("@/stores/threadStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/stores/threadStore")>();
   const useThreadStore = Object.assign(
     vi.fn((selector: (s: unknown) => unknown) => {
       if (!chatViewThreadMockRef.current) {
@@ -114,7 +115,7 @@ vi.mock("@/stores/threadStore", () => {
       getState: () => chatViewThreadMockRef.current,
     },
   );
-  return { useThreadStore };
+  return { ...actual, useThreadStore };
 });
 
 vi.mock("@/stores/connectionStore", () => ({
@@ -161,7 +162,8 @@ vi.mock("@/transport", () => ({
   getTransport: chatViewGetTransportMock,
 }));
 
-vi.mock("@/features/conversation/residency/conversation-residency", () => ({
+vi.mock("@/features/conversation/residency/conversation-residency", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/features/conversation/residency/conversation-residency")>(),
   getConversationResidency: () => chatViewResidencyMock,
   tryGetConversationResidency: () => chatViewResidencyMock,
 }));
@@ -400,6 +402,7 @@ function defaultThreadState(overrides: Partial<{
     records: overrides.records ?? new Map(),
     currentThreadId: overrides.currentThreadId ?? "thread-1",
     runningThreadIds: overrides.runningThreadIds ?? new Set<string>(),
+    pendingStopCounts: {},
     activeRecord: overrides.activeRecord ?? createEmptyThreadRecord(),
     applyCanonicalReconnectRecoveries: chatViewApplyCanonicalRecoveriesMock,
     beginCanonicalRecovery: vi.fn(() => Symbol("recovery")),

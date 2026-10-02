@@ -1099,6 +1099,7 @@ describe("MessageList thread switch", () => {
 
 
   it("virtualizes expanded tool children and restores them after scrolling and thread switches", async () => {
+    vi.useFakeTimers();
     messagesValue = [{ id: "answer", sequence: 1, role: "assistant", content: "Finished commands" }];
     const tools = Array.from({ length: 180 }, (_, index) => ({
       id: `command-${index}`, message_id: "answer", tool_name: "Bash",
@@ -1138,7 +1139,13 @@ describe("MessageList thread switch", () => {
     expect(screen.getByRole("button", { name: visibleCommandGroup })).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(screen.getByRole("button", { name: visibleCommandGroup }));
     expect(screen.getByRole("button", { name: visibleCommandGroup })).toHaveAttribute("aria-expanded", "false");
-    await waitFor(() => expect(container.querySelectorAll("li")).toHaveLength(0));
+    await act(async () => vi.advanceTimersByTimeAsync(249));
+    expect(container.querySelectorAll("li").length).toBeGreaterThan(0);
+    for (const child of container.querySelectorAll("li")) {
+      expect(child.closest('[aria-hidden="true"][inert]')).not.toBeNull();
+    }
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(container.querySelectorAll("li")).toHaveLength(0);
     expect(viewport.scrollTop).toBe(0);
   });
 
