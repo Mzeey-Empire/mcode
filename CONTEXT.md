@@ -27,14 +27,15 @@ handoffs route through the originating thread's own provider via the B/D
 pipeline.
 
 ### Session runtime
-The per-Provider service that owns the uniform persistent-CLI-session
+The per-Provider service for adapters with a persistent process per session. It owns the
 lifecycle: the session pool, the lazy idle-eviction timer (60s sweep, 10min
 default TTL) with a `lastUsedAt + isBusy` guard, Windows `JobObject`
-attachment, the env snapshot, lazy spawn, resume-then-fallback, and the
+attachment, the env snapshot, lazy spawn, provider protocol hooks, and the
 graceful-interrupt-then-hard-kill (`taskkill /T /F` on Windows) close. It
-treats per-session state as opaque (`SessionRuntime<TState>`) so the same
-lifecycle serves every Provider. Each Provider holds its own instance; the
-runtime is not shared, keeping per-session state type-isolated.
+treats per-session state as opaque (`SessionRuntime<TState>`). Each adapter using
+this lifecycle holds its own instance, keeping its state type-isolated.
+OpenCode instead uses a server pool shared across sessions in one working
+directory.
 
 ### Provider reattachment
 Restoring observation and control of the same still-running Provider thread
