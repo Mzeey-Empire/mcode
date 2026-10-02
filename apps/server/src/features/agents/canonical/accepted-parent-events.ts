@@ -76,7 +76,8 @@ function recoveryEvents(
     throw new Error("Accepted narrative recovery belongs to another execution");
   }
   return prepareParentNarrativeRecoveryEvents({ recovery, thread: input.thread, turn: input.turn,
-    findItem: (id) => input.items[id] });
+    findItem: (id) => input.items[id] }).map((event) => ({ ...event,
+      eventId: `narrative:${fingerprint([input.operation.operationId, event.eventId])}` }));
 }
 
 function terminalEvents(
