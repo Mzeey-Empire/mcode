@@ -1,4 +1,3 @@
-import "reflect-metadata";
 import { describe, it, expect, afterEach } from "vitest";
 import { createPromptQueue } from "../claude-provider.js";
 
@@ -72,9 +71,9 @@ vi.mock("@mcode/shared", async (importOriginal) => {
   };
 });
 
-import { ClaudeProvider } from "../claude-provider.js";
-import { stubEnvService } from "../../../../../runtime/environment/__tests__/stub-env-service.js";
-import { stubJobObject } from "../../../../../runtime/process/containment/__tests__/stub-job-object.js";
+import { ClaudeProvider } from "./helpers/provider-fixture.js";
+import { stubEnvService } from "./helpers/provider-fixture.js";
+import { stubJobObject } from "./helpers/provider-fixture.js";
 import { queryMethodStubs } from "./helpers/mock-sdk-query.js";
 
 describe("ClaudeProvider sendMessage on closed queue (#292)", () => {

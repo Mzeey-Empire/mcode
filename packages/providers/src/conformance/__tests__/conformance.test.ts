@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+  let turn = 0;
+  const stream = (async function* () { for await (const _input of prompt) { turn++; yield { type: "result", uuid: `RESULT_${turn}`, is_error: false }; } })();
+  return Object.assign(stream, { close: () => undefined, setModel: async () => undefined });
+} }));
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -19,7 +24,7 @@ import {
 } from "../index.js";
 
 describe("Provider conformance registry", () => {
-  it("covers every enabled factory with core fixtures and supported versions", async () => {
+  it("covers every enabled factory with core fixtures and supported versions", () => {
     const fixtures = validateProviderConformanceRegistry(ENABLED_PROVIDER_CONFORMANCE);
     const codex = ENABLED_PROVIDER_CONFORMANCE.find(({ providerId }) => providerId === "codex")!;
     expect(codex.requiredProfiles).toEqual([
@@ -46,6 +51,9 @@ describe("Provider conformance registry", () => {
       "cursor",
       "opencode",
     ]);
+  });
+
+  it("exercises offline public factory core behavior", async () => {
     await expect(Promise.all(ENABLED_PROVIDER_CONFORMANCE.map(runFactoryCoreProfile))).resolves.toEqual([
       { providerId: "claude", spawnCount: 1, terminalType: "turn.completed" },
       { providerId: "codex", spawnCount: 1, terminalType: "turn.completed" },
@@ -56,7 +64,7 @@ describe("Provider conformance registry", () => {
   });
 
   it("fails when a Provider loses manifests, profile coverage, or version evidence", () => {
-    const registration = ENABLED_PROVIDER_CONFORMANCE[0]!;
+    const registration = ENABLED_PROVIDER_CONFORMANCE.find(({ providerId }) => providerId === "codex")!;
 
     expect(() => validateProviderConformanceRegistry([
       { ...registration, fixtureFiles: [] },

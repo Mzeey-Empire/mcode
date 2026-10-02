@@ -1,4 +1,3 @@
-import "reflect-metadata";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AgentEventType, type ProviderRuntimeEvent } from "@mcode/contracts";
 
@@ -16,7 +15,7 @@ vi.mock("@mcode/shared", async (importOriginal) => {
   };
 });
 
-import { ClaudeProvider } from "../claude-provider.js";
+import { ClaudeProvider } from "./helpers/provider-fixture.js";
 
 function provider(): ClaudeProvider {
   return new ClaudeProvider(

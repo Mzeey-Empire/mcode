@@ -1,4 +1,3 @@
-import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
@@ -95,9 +94,9 @@ vi.mock("@mcode/shared", () => ({
   supportsThinkingToggle: vi.fn(() => false),
 }));
 
-import { ClaudeProvider } from "../claude-provider.js";
-import { stubEnvService } from "../../../../../runtime/environment/__tests__/stub-env-service.js";
-import { stubJobObject } from "../../../../../runtime/process/containment/__tests__/stub-job-object.js";
+import { ClaudeProvider } from "./helpers/provider-fixture.js";
+import { stubEnvService } from "./helpers/provider-fixture.js";
+import { stubJobObject } from "./helpers/provider-fixture.js";
 
 describe("ClaudeProvider.complete()", () => {
   let provider: ClaudeProvider;

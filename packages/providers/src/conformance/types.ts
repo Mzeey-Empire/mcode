@@ -4,6 +4,7 @@ import type {
 } from "@mcode/agent-model";
 import type { ProviderBoundary, ProviderFactoryInput } from "../factory-types.js";
 import type { ProviderEventDraft } from "../host-ports.js";
+import type { ClaudeNativeTrace } from "./claude-native-trace-schema.js";
 
 /** Current version of the committed Provider conformance fixture contract. */
 export const PROVIDER_CONFORMANCE_CONTRACT_VERSION = 1 as const;
@@ -124,6 +125,8 @@ export interface ProviderFixtureManifest {
     events: readonly SanitizedTraceEvent[];
     /** Cursor-only ACP envelopes. Generic ACP fixtures remain private. */
     cursorAcpTrace?: CursorAcpTraceFixture;
+    /** Claude native structural envelopes; content fields contain only allowlisted tool shapes. */
+    claudeNativeTrace?: ClaudeNativeTrace;
   };
   expected: FixtureExpectedSemantics;
 }

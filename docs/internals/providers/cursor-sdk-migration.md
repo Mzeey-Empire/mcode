@@ -100,7 +100,7 @@ cursor-provider.ts uses it, the workaround infrastructure can be retired.
   - `maxInputCharactersPerTurn` stays at 4000 unless the SDK exposes a
     different per-turn cap.
 - Implement `runSideChannelQuery` (mirror the Claude implementation; see
-  `apps/server/src/features/providers/adapters/claude/claude-provider.ts` lines 409 to 520 for
+  `packages/providers/src/private/claude/claude-provider.ts` for
   the side-channel and sessionless-fallback pattern, including the
   ETIMEDOUT classification for unresumable sessions and the conversation
   history fallback prompt).
@@ -154,7 +154,7 @@ acceptable on reads from old artifacts. New artifacts only ever get
 - `apps/server/src/features/providers/adapters/cursor/__tests__/` mocks the `cursor-agent`
   subprocess and the JSON-RPC frame parsing. After the migration these tests
   rewrite to mock `@cursor/sdk` directly. Pattern to follow:
-  `apps/server/src/features/providers/adapters/claude/__tests__/` already mocks
+  `packages/providers/src/private/claude/__tests__/` already mocks
   `@anthropic-ai/claude-agent-sdk` via `vi.mock`.
 - The handoff-pipeline tests that explicitly exercise path A (search
   `runHiddenTurn` in `apps/server/src/features/handoff/orchestration/__tests__/`) will
@@ -214,7 +214,7 @@ changes during the migration window.
 1. Read `CONTEXT.md` (this repo) end to end. Understand the B/A/D ladder
    and what "path A" is.
 2. Read the existing Claude side-channel implementation at
-   `apps/server/src/features/providers/adapters/claude/claude-provider.ts` lines 409 to 660
+   `packages/providers/src/private/claude/claude-provider.ts`
    (the `runSideChannelQuery` and `runSideChannelQuerySessionless` methods
    plus the abort-controller forwarding pattern). The Cursor SDK
    implementation should mirror it.
@@ -256,7 +256,7 @@ References, not duplicated content:
   guards that this migration would delete live in `cursor-provider.ts`
   and `handoff-pipeline.ts`; read them there instead.
 - `CONTEXT.md`. Glossary of all the relevant vocabulary.
-- `apps/server/src/features/providers/adapters/claude/claude-provider.ts`. The implementation
+- `packages/providers/src/private/claude/claude-provider.ts`. The implementation
   pattern Cursor will follow post-migration.
 - `apps/server/src/features/providers/adapters/cursor/cursor-provider.ts`. The current
   implementation. Reads as a JSON-RPC ACP subprocess wrapper plus the

@@ -1,4 +1,3 @@
-import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentEventType, type ProviderRuntimeEvent } from "@mcode/contracts";
 
@@ -9,9 +8,9 @@ vi.mock("@mcode/shared", async (importOriginal) => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
-import { ClaudeProvider } from "../claude-provider.js";
-import { stubEnvService } from "../../../../../runtime/environment/__tests__/stub-env-service.js";
-import { stubJobObject } from "../../../../../runtime/process/containment/__tests__/stub-job-object.js";
+import { ClaudeProvider } from "./helpers/provider-fixture.js";
+import { stubEnvService } from "./helpers/provider-fixture.js";
+import { stubJobObject } from "./helpers/provider-fixture.js";
 import { mockProviderHost, queryMethodStubs } from "./helpers/mock-sdk-query.js";
 
 function sdkStream(messages: Array<Record<string, unknown>>) {

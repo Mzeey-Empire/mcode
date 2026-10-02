@@ -12,7 +12,7 @@ import type { Thread } from "@mcode/contracts";
 import { CleanupJobRepo } from "./persistence/cleanup-job-repo.js";
 import type { CleanupJob } from "./persistence/cleanup-job-repo.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";
-import { ClaudeProvider } from "../../providers/adapters/claude/claude-provider.js";
+import type { ClaudeProviderBoundary } from "@mcode/providers";
 import {
   GitWorktreeService,
   RepositoryGitMutationLock,
@@ -72,7 +72,7 @@ export class CleanupWorker {
   constructor(
     @inject(CleanupJobRepo) private readonly cleanupJobRepo: CleanupJobRepo,
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
-    @inject(ClaudeProvider) private readonly claudeProvider: ClaudeProvider,
+    @inject("ClaudeProvider") private readonly claudeProvider: Pick<ClaudeProviderBoundary, "waitForSessionExit">,
     @inject(GitWorktreeService) private readonly gitWorktrees: GitWorktreeService,
     @inject(SandboxWorktreeCleanupPolicy) private readonly cleanupPolicy: SandboxWorktreeCleanupPolicy,
     @inject(RepositoryGitMutationLock) private readonly repositoryMutationLock: RepositoryGitMutationLock,

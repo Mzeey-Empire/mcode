@@ -1,4 +1,3 @@
-import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
@@ -15,7 +14,7 @@ vi.mock("@mcode/shared", async (importOriginal) => {
   };
 });
 
-import { ClaudeProvider } from "../claude-provider.js";
+import { ClaudeProvider } from "./helpers/provider-fixture.js";
 
 function provider(): ClaudeProvider {
   return new ClaudeProvider(

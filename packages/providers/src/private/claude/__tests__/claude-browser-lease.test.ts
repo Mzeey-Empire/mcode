@@ -1,11 +1,10 @@
-import "reflect-metadata";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MCODE_BROWSER_GUIDE } from "@mcode/thread-orchestration";
 import {
   BrowserAutomationSessionLease,
   type BrowserAutomationSessionLeaseScope,
-} from "../../../../browser-automation/index.js";
-import { ClaudeProvider } from "../claude-provider.js";
+} from "./helpers/provider-fixture.js";
+import { fixtureHost, ClaudeProvider } from "./helpers/provider-fixture.js";
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 
@@ -77,7 +76,8 @@ function makeProvider(lease: BrowserAutomationSessionLease) {
     suppressSessionStartHooks: new Set(),
     planAnswerThreads: new Set(),
     pendingPermissions: new Map(),
-    browserAutomationSessionLease: lease,
+    host: fixtureHost({ browser: lease }),
+    configuration: { cliPath: process.execPath, idleSessionTtlMs: 600_000 },
     scopedPreGrant: { tryConsume: () => false },
     envService: { getEnv: () => ({}) },
     jobObject: { isWindowsJob: false },
@@ -146,7 +146,7 @@ describe("ClaudeProvider browser session lease lifecycle", () => {
     const token = options.mcpServers["mcode-browser"].headers.Authorization.slice("Bearer ".length);
     expect(lease.credentials.authenticate(oldGrant.token)).toBeNull();
     expect(lease.credentials.authenticate(token)).not.toBeNull();
-    expect((provider as any).browserAutomationSessionLease.status()).toEqual({ active: 1, pending: 0 });
+    expect((provider as any).host.browser.status()).toEqual({ active: 1, pending: 0 });
     const spawnedState = harness.spawnedState;
     expect(spawnedState).toBeDefined();
     await (provider as any).close(spawnedState);

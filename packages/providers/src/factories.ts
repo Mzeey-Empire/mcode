@@ -1,5 +1,6 @@
 import type {
   CodexProviderBoundary,
+  ClaudeProviderBoundary,
   CursorProviderBoundary,
   DevinProviderBoundary,
   ProviderBoundary,
@@ -8,10 +9,16 @@ import type {
 import { createProviderBoundary } from "./private/factory.js";
 import { createCursorAcpProvider, createDevinAcpProvider } from "./private/protocols/acp.js";
 import { CodexProvider } from "./private/codex/codex-provider.js";
+import { ClaudeProvider } from "./private/claude/claude-provider.js";
 
 /** Prepares the Claude Provider boundary without inspecting or spawning its CLI. */
-export function createClaudeProvider(input: ProviderFactoryInput): ProviderBoundary {
-  return createProviderBoundary("claude", [], input);
+export function createClaudeProvider(input: ProviderFactoryInput): ClaudeProviderBoundary {
+  createProviderBoundary("claude", [], input);
+  if (typeof input.claude?.createForker !== "function") throw new TypeError("Claude Provider createForker port is required");
+  for (const method of ["isConfigured", "issue", "refresh", "release", "revokeCredential"] as const) {
+    if (typeof input.host.browser[method] !== "function") throw new TypeError(`Claude browser ${method} port is required`);
+  }
+  return new ClaudeProvider(input.host, input.configuration, input.claude);
 }
 
 /** Prepares the Codex Provider boundary without inspecting or spawning its CLI. */

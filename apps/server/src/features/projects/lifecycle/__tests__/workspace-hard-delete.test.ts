@@ -16,7 +16,7 @@ import { AttachmentService } from "../../../attachments/storage/attachment-servi
 import { CleanupWorker } from "../../../thread-control/cleanup/cleanup-worker.js";
 import { HandoffStorage } from "../../../handoff/index.js";
 import type { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
-import type { ClaudeProvider } from "../../../providers/adapters/claude/claude-provider.js";
+import type { ClaudeProviderBoundary as ClaudeProvider } from "@mcode/providers";
 import { killDescendantsByName } from "../../../../runtime/process/containment/process-kill.js";
 import type { GitExecutor } from "../../git/execution/index.js";
 
