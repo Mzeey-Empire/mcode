@@ -22,7 +22,7 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
     providerId: "claude",
     factory: createClaudeProvider,
     requiredProfiles: ["core", "build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "clean-fork", "orchestration", "browser-access", "thread-control"],
-    fixtureFiles: [fixtureFile("claude"), namedFixtureFile("claude-native.synthetic.json")],
+    fixtureFiles: [fixtureFile("claude"), namedFixtureFile("claude-native.synthetic.json"), namedFixtureFile("claude-startup-error.captured.json")],
     requiredFixtureProvenance: ["captured", "synthetic"],
     supportedVersions: [{
       component: "@anthropic-ai/claude-agent-sdk",

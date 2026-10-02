@@ -294,6 +294,38 @@ describe("Claude public factory core and capabilities", () => {
     expect(() => validateProviderFixtureManifest(unsafe)).toThrow();
   });
 
+  it("replays captured SDK failure through error delivery and stream teardown", async () => {
+    const manifest = loadProviderFixtureManifest(NodeURL.fileURLToPath(new URL("../conformance/fixtures/claude-startup-error.captured.json", import.meta.url)));
+    const trace = manifest.input.claudeNativeTrace;
+    assert(trace);
+    expect(manifest.provenance).toBe("captured");
+    expect(manifest.requiredProfiles).toEqual(["core"]);
+    expect(manifest.expected.terminal).toBe("errored");
+    expect(trace.sdkFailure).toEqual({ kind: "authentication" });
+    sdkQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+      const stream = (async function* () {
+        for await (const _input of prompt) {
+          yield* trace.nativeMessages;
+          throw new Error("Not logged in");
+        }
+      })();
+      return Object.assign(stream, queryMethodStubs(), { close: vi.fn(() => { void stream.return(); }) });
+    });
+    const { provider, events, drafts } = fixture();
+    await provider.sendTurn(request());
+    await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.Ended)).toHaveLength(trace.expected.terminalCount));
+    expect(events().filter(({ event }) => event.type === AgentEventType.Error || event.type === AgentEventType.Ended || event.type === AgentEventType.TurnComplete).map(({ event }) => event.type)).toEqual([AgentEventType.Error, AgentEventType.Error, AgentEventType.Ended]);
+    expect(events().filter(({ event }) => event.type === AgentEventType.ToolUse)).toEqual(trace.expected.toolStarts);
+    expect(events().filter(({ event }) => event.type === AgentEventType.ToolResult)).toEqual(trace.expected.toolResults);
+    const errorDraft = drafts.find((draft) => draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent" && draft.payload.item.payload.runtimeEvent.event.type === AgentEventType.Error);
+    expect(errorDraft?.sourceIdentities).toEqual([
+      { providerId: "claude", scope: "session", value: "NATIVE_2", provenance: "native" },
+    ]);
+    const unsafe = JSON.parse(JSON.stringify(manifest));
+    unsafe.input.claudeNativeTrace.nativeMessages[1].message.content = [{ type: "text", text: "private response" }];
+    expect(() => validateProviderFixtureManifest(unsafe)).toThrow();
+  });
+
   it("validates absent, root and native parent evidence without accepting derived or non-parent identities", () => {
     const schema = ProviderParentEvidenceSchema();
     expect(schema.parse({ kind: "absent" })).toEqual({ kind: "absent" });

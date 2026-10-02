@@ -86,6 +86,11 @@ describe("Provider conformance registry", () => {
     expect(() => validateProviderConformanceRegistry([
       { ...cursor, fixtureFiles: cursor.fixtureFiles.filter((file) => !file.endsWith("captured.json")) },
     ])).toThrow("lacks captured fixture coverage");
+
+    const claude = ENABLED_PROVIDER_CONFORMANCE.find(({ providerId }) => providerId === "claude")!;
+    expect(() => validateProviderConformanceRegistry([
+      { ...claude, fixtureFiles: claude.fixtureFiles.filter((file) => !file.endsWith("captured.json")) },
+    ])).toThrow("lacks captured fixture coverage");
   });
 
   it("covers each declared Cursor capability with captured and synthetic ACP trace envelopes", async () => {
