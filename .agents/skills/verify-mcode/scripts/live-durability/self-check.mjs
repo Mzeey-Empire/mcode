@@ -128,13 +128,15 @@ for (const provider of ['devin', 'codex']) {
   if (NodeFS.readFileSync(NodePath.join(scratch, longId + '.audit.ndjson'), 'utf8').trim().split('\n').length !== 1) throw new Error('Long-turn provider invocation was duplicated');
   if (provider === 'codex') {
     const finalId = NodeCrypto.randomUUID();
-    send({ id: 7, method: 'turn/start', params: { threadId: 'test-thread', input: [{ type: 'text', text: `LIVE_DURABILITY_RUN=${finalId}\nLIVE_DURABILITY_AFTER_FINAL=pause` }] } });
+    send({ id: 7, method: 'turn/start', params: { threadId: 'test-thread', input: [{ type: 'text', text: `LIVE_DURABILITY_RUN=${finalId}\nLIVE_DURABILITY_AFTER_FINAL=pause\nLIVE_DURABILITY_LEGACY_IDENTICAL_TEXT=true` }] } });
     await until(() => NodeFS.existsSync(NodePath.join(scratch, finalId + '.prefix.json')));
     NodeFS.writeFileSync(NodePath.join(scratch, finalId + '.release'), 'release');
     await until(() => received.some((message) => message.method === 'item/completed' && message.params.item.id === finalId + '-final') && NodeFS.existsSync(NodePath.join(scratch, finalId + '.after-final.json')));
     const finalTurnId = received.find((message) => message.id === 7).result.turn.id;
     const finalMessages = received.filter((message) => message.params?.item?.id === finalId + '-final' || message.params?.itemId === finalId + '-final');
-    if (JSON.stringify(finalMessages.map((message) => message.method)) !== JSON.stringify(['item/started', 'item/agentMessage/delta', 'item/completed']) || finalMessages[2].params.item.phase !== 'final_answer') throw new Error('Native final assistant item lifecycle was incomplete');
+    if (JSON.stringify(finalMessages.map((message) => message.method)) !== JSON.stringify(['item/started', 'item/agentMessage/delta', 'item/completed']) || Object.hasOwn(finalMessages[0].params.item, 'phase') || Object.hasOwn(finalMessages[2].params.item, 'phase')) throw new Error('Native phase-less final assistant item lifecycle was incomplete');
+    const prefixMessage = received.find((message) => message.method === 'item/completed' && message.params.item.id === finalId + '-prefix');
+    if (prefixMessage.params.item.phase !== 'commentary' || prefixMessage.params.item.id === finalMessages[2].params.item.id || prefixMessage.params.item.text !== `LIVE_DURABILITY ${finalId} IDENTICAL_LEGACY_TEXT` || finalMessages[2].params.item.text !== prefixMessage.params.item.text) throw new Error('Legacy identical text lost its separate native item identities');
     NodeFS.writeFileSync(NodePath.join(scratch, finalId + '.finish'), 'finish');
     send({ id: 8, method: 'model/list', params: {} });
     await until(() => received.some((message) => message.id === 8));
@@ -142,11 +144,30 @@ for (const provider of ['devin', 'codex']) {
     NodeFS.writeFileSync(NodePath.join(scratch, finalId + '.finish-final'), 'finish');
     await until(() => received.some((message) => message.method === 'turn/completed' && message.params.turn.id === finalTurnId && message.params.turn.status === 'completed') && NodeFS.existsSync(NodePath.join(scratch, finalId + '.terminal.json')));
     if (NodeFS.readFileSync(NodePath.join(scratch, finalId + '.audit.ndjson'), 'utf8').trim().split('\n').length !== 1) throw new Error('Final gate reinvoked the provider');
+    const partialId = NodeCrypto.randomUUID();
+    send({ id: 9, method: 'turn/start', params: { threadId: 'test-thread', input: [{ type: 'text', text: `LIVE_DURABILITY_RUN=${partialId}\nLIVE_DURABILITY_DURING_FINAL=pause\nLIVE_DURABILITY_AFTER_FINAL=pause` }] } });
+    await until(() => NodeFS.existsSync(NodePath.join(scratch, partialId + '.prefix.json')));
+    NodeFS.writeFileSync(NodePath.join(scratch, partialId + '.release'), 'release');
+    await until(() => NodeFS.existsSync(NodePath.join(scratch, partialId + '.partial-final.json')) && received.some((message) => message.method === 'item/agentMessage/delta' && message.params.itemId === partialId + '-final'));
+    const partial = JSON.parse(NodeFS.readFileSync(NodePath.join(scratch, partialId + '.partial-final.json'), 'utf8'));
+    const partialTurnId = received.find((message) => message.id === 9).result.turn.id;
+    const partialItemMessages = () => received.filter((message) => message.params?.item?.id === partial.itemId || message.params?.itemId === partial.itemId);
+    if (partial.turnId !== partialTurnId || partial.textMarker !== `LIVE_DURABILITY ${partialId} PARTIAL_FINAL` || partial.fullTextMarker !== partial.textMarker + ' COMPLETE' || JSON.stringify(partialItemMessages().map((message) => message.method)) !== JSON.stringify(['item/started', 'item/agentMessage/delta'])) throw new Error('Partial native final gate did not retain one open item');
+    NodeFS.writeFileSync(NodePath.join(scratch, partialId + '.continue-final'), 'continue');
+    await until(() => NodeFS.existsSync(NodePath.join(scratch, partialId + '.after-final.json')) && partialItemMessages().some((message) => message.method === 'item/completed'));
+    const continued = partialItemMessages();
+    if (JSON.stringify(continued.map((message) => message.method)) !== JSON.stringify(['item/started', 'item/agentMessage/delta', 'item/agentMessage/delta', 'item/completed']) || continued[1].params.delta + continued[2].params.delta !== partial.fullTextMarker || continued[3].params.item.text !== partial.fullTextMarker || continued[3].params.item.phase !== 'final_answer') throw new Error('Partial native final item lost its text or closing order');
+    send({ id: 10, method: 'model/list', params: {} });
+    await until(() => received.some((message) => message.id === 10));
+    if (received.some((message) => message.method === 'turn/completed' && message.params.turn.id === partialTurnId)) throw new Error('Partial final item closure ended the held native turn');
+    NodeFS.writeFileSync(NodePath.join(scratch, partialId + '.finish-final'), 'finish');
+    await until(() => received.some((message) => message.method === 'turn/completed' && message.params.turn.id === partialTurnId && message.params.turn.status === 'completed') && NodeFS.existsSync(NodePath.join(scratch, partialId + '.terminal.json')));
+    if (received.filter((message) => message.method === 'turn/completed' && message.params.turn.id === partialTurnId).length !== 1 || NodeFS.readFileSync(NodePath.join(scratch, partialId + '.audit.ndjson'), 'utf8').trim().split('\n').length !== 1) throw new Error('Partial final gate duplicated the native terminal or invocation');
   }
   child.kill();
   await new Promise((resolve) => child.once('exit', resolve));
 }
-console.log(JSON.stringify({ ok: true, scopedTriggerRejectedOwnedTool: true, scopedTerminalRejectedExactExecution: true, otherTerminalWritesAccepted: true, peerWriteAccepted: true, nonRecoveryWriteAccepted: true, releaseAccepted: true, readonlyPrefixWhileWriterHeld: true, immutableSemanticIdentityChecks: true, acpGateAndTerminal: true, codexGateAndTerminal: true, acpAndCodexHonoredStop: true, acpAndCodex1000NativePairs: true, codexCompletedFinalBeforeNativeTerminal: true, scratch }));
+console.log(JSON.stringify({ ok: true, scopedTriggerRejectedOwnedTool: true, scopedTerminalRejectedExactExecution: true, otherTerminalWritesAccepted: true, peerWriteAccepted: true, nonRecoveryWriteAccepted: true, releaseAccepted: true, readonlyPrefixWhileWriterHeld: true, immutableSemanticIdentityChecks: true, acpGateAndTerminal: true, codexGateAndTerminal: true, acpAndCodexHonoredStop: true, acpAndCodex1000NativePairs: true, codexCompletedFinalBeforeNativeTerminal: true, codexLegacyIdenticalText: true, codexPartialFinalBeforeItemAndTurnClosure: true, scratch }));
 } finally {
   db?.close();
   for (const child of children) if (child.exitCode === null) child.kill();
