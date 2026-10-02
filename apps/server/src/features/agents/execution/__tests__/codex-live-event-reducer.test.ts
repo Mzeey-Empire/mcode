@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { AgentEventSchema, type AgentEvent } from "@mcode/contracts";
+import type { ProviderEventDraft } from "@mcode/providers";
 import { CodexEventMapper } from "../../../../../../../packages/providers/src/private/codex/codex-event-mapper.js";
 import { CodexLiveEventReducer } from "../codex-live-event-reducer.js";
+import { ProviderExecutionEventState } from "../provider-execution-event-state.js";
 
 const execution = {
   threadId: "test-thread",
@@ -23,7 +25,79 @@ function reduceEvent(reducer: CodexLiveEventReducer, type: AgentEvent["type"], f
   return reduction;
 }
 
+function runtimeDraft(input: AgentEvent, sequence: number): ProviderEventDraft {
+  const timestamp = "2026-09-30T10:00:00.000Z";
+  const itemId = `runtime:${sequence}`;
+  return { eventId: `provider:${sequence}`, routing: { ...execution, itemId },
+    sourceProviderId: "codex", sourceIdentities: [], sourceSequence: sequence,
+    payload: { type: "item.recorded", item: {
+      id: itemId, threadId: execution.threadId, turnId: execution.turnId,
+      kind: "system", providerIdentities: [], payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: input } },
+      createdAt: timestamp, updatedAt: timestamp,
+    } } };
+}
+
+function prepareCandidate(accepted: ProviderExecutionEventState, input: AgentEvent, sequence: number, terminal = false) {
+  const candidate = accepted.fork();
+  const prepared = candidate.prepare([runtimeDraft(input, sequence)], terminal);
+  if (prepared.kind !== "parent") throw new Error(`Expected parent preparation, received ${prepared.kind}`);
+  return { candidate, prepared: prepared.prepared };
+}
+
 describe("CodexLiveEventReducer", () => {
+  it("prepares more than 1000 completed tools through the public parent path and retains full terminal history", () => {
+    let accepted = new ProviderExecutionEventState("codex", execution, { precedingMessageId: "user", planFeature: "none" });
+    const start = prepareCandidate(accepted, event("turnStarted"), 1);
+    accepted = start.candidate;
+    const count = 1100;
+    for (let index = 0; index < count; index += 1) {
+      const toolCallId = `tool-${index}`;
+      const use = prepareCandidate(accepted, event("toolUse", { toolCallId, toolName: "Read",
+        toolInput: { file_path: `${toolCallId}.txt` } }), index * 2 + 2);
+      expect(use.prepared.effects.narrative?.items.map((item) => item.record.id)).toEqual([toolCallId]);
+      accepted = use.candidate;
+      const result = prepareCandidate(accepted, event("toolResult", { toolCallId, output: `output-${index}`, isError: false }), index * 2 + 3);
+      expect(result.prepared.effects.narrative?.items).toMatchObject([
+        { kind: "toolCall", record: { id: toolCallId, status: "completed", output_summary: `output-${index}` } },
+      ]);
+      expect(result.prepared.effects.narrative?.discardedItemIds).toEqual([]);
+      accepted = result.candidate;
+    }
+    const thought = prepareCandidate(accepted, event("textDelta", { delta: "After the tools", isFinalResponse: false }), count * 2 + 2);
+    expect(thought.prepared.effects.narrative?.items).toMatchObject([
+      { kind: "narrationSegment", record: { text: "After the tools" } },
+    ]);
+    accepted = thought.candidate;
+    const terminal = prepareCandidate(accepted, event("turnComplete", { reason: "completed", costUsd: null,
+      tokensIn: 0, tokensOut: 0 }), count * 2 + 3, true);
+    const history = terminal.prepared.terminal?.narrative;
+    expect(history).toHaveLength(count + 1);
+    expect(history?.filter((item) => item.kind === "toolCall").map((item) => item.record.id))
+      .toEqual(Array.from({ length: count }, (_, index) => `tool-${index}`));
+    expect(history?.filter((item) => item.kind === "toolCall").every((item) => item.record.status === "completed")).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(history), "utf8")).toBeGreaterThan(256 * 1024);
+  }, 30_000);
+
+  it("does not install rejected tool completion or thought removal into accepted parent state", () => {
+    let accepted = new ProviderExecutionEventState("codex", execution, { precedingMessageId: "user", planFeature: "none" });
+    accepted = prepareCandidate(accepted, event("turnStarted"), 1).candidate;
+    accepted = prepareCandidate(accepted, event("toolUse", { toolCallId: "tool", toolName: "Read", toolInput: { file_path: "a.txt" } }), 2).candidate;
+    const rejected = prepareCandidate(accepted, event("toolResult", { toolCallId: "tool", output: "rejected", isError: false }), 3);
+    expect(rejected.prepared.effects.narrative?.items[0]?.record).toMatchObject({ status: "completed", output_summary: "rejected" });
+    const terminal = prepareCandidate(accepted, event("turnComplete", { reason: "completed", costUsd: null,
+      tokensIn: 0, tokensOut: 0 }), 4, true);
+    expect(terminal.prepared.terminal?.narrative[0]?.record).toMatchObject({ status: "running", output_summary: "" });
+    const thought = prepareCandidate(accepted, event("textDelta", { delta: "Keep this", isFinalResponse: false }), 5);
+    accepted = thought.candidate;
+    const thoughtId = thought.prepared.effects.narrative?.items[0]?.record.id;
+    const removed = prepareCandidate(accepted, event("assistantMessageBoundary", { isFinalResponse: true }), 6);
+    expect(removed.prepared.effects.narrative?.discardedItemIds).toEqual([`narrationSegment:${thoughtId}`]);
+    const retry = prepareCandidate(accepted, event("textDelta", { delta: " too", isFinalResponse: false }), 7);
+    expect(retry.prepared.effects.narrative?.items).toMatchObject([
+      { kind: "narrationSegment", record: { id: thoughtId, text: "Keep this too" } },
+    ]);
+  });
+
   it("returns only changed recovery items and retains the complete terminal snapshot", () => {
     const reducer = new CodexLiveEventReducer(execution);
     reduceEvent(reducer, "turnStarted");

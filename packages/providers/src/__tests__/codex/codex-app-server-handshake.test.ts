@@ -407,7 +407,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "taskkill",
       ["/T", "/F", "/PID", "4321"],
-      { windowsHide: true },
+      { windowsHide: true, timeout: 5_000 },
     );
     expect(server.isAlive).toBe(false);
   }, 10_000);

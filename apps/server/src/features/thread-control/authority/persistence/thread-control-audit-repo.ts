@@ -1,28 +1,14 @@
-import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
-import type { Database } from "bun:sqlite";
-import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { threadControlAudit } from "../../../../runtime/persistence/sqlite/schema.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import type { ThreadControlAuditStore } from "./thread-control-audit-store.js";
+import { threadControlAuditWriteOperations } from "./thread-control-audit-write-operations.js";
 
-/** Writes bounded, content-free thread-control audit events. */
+/** Read-only queries and committed mutations for ThreadControlAuditRepo. */
 @injectable()
 export class ThreadControlAuditRepo {
-  private readonly orm: BunSQLiteDatabase;
+  constructor(@inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {}
 
-  constructor(@inject("Database") db: Database) {
-    this.orm = drizzle(db);
-  }
-
-  /** Persist one operation outcome without prompt, credential, or path data. */
-  write(input: { callerId: string; sourceThreadId?: string; workspaceId?: string; threadId?: string; operation: string; outcome: string }): void {
-    this.orm.insert(threadControlAudit).values({
-      id: NodeCrypto.randomUUID(),
-      callerId: input.callerId,
-      sourceThreadId: input.sourceThreadId ?? null,
-      workspaceId: input.workspaceId ?? null,
-      threadId: input.threadId ?? null,
-      operation: input.operation,
-      outcome: input.outcome,
-    }).run();
+  write(input: Parameters<ThreadControlAuditStore["write"]>[0]): Promise<ReturnType<ThreadControlAuditStore["write"]>> {
+    return this.writer.execute(threadControlAuditWriteOperations.write, [input]);
   }
 }

@@ -1,4 +1,5 @@
 import { instanceCachingFactory, Lifecycle, type DependencyContainer } from "tsyringe";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadStartupRepo } from "../persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../thread-startup-service.js";
 
@@ -11,7 +12,10 @@ export function registerThreadStartupServices(container: DependencyContainer): v
   );
   container.register(ThreadStartupService, {
     useFactory: instanceCachingFactory(
-      (childContainer) => new ThreadStartupService(childContainer.resolve(ThreadStartupRepo)),
+      (childContainer) => new ThreadStartupService(
+        childContainer.resolve(ThreadStartupRepo),
+        childContainer.resolve(ApplicationDatabaseWriter),
+      ),
     ),
   });
 }

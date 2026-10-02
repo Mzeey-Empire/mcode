@@ -35,7 +35,7 @@ const threadStartupHandlers: ThreadStartupHandlerMap = {
   "thread.startup.get": (deps, params) => deps.threadStartupService.get(params.startupId),
   "thread.startup.list": (deps, params) => ({ records: deps.threadStartupService.list(params.workspaceId) }),
   "thread.startup.cancel": async (deps, params) => {
-    const startup = deps.threadStartupService.cancel(params.startupId);
+    const startup = await deps.threadStartupService.cancel(params.startupId);
     if (
       startup.kind !== "managed-worktree"
       || !startup.threadId

@@ -3,7 +3,12 @@ import { buildNarrativeItems } from "../narrative/build-narrative";
 import { buildPersistedNarrativeItems, recordToToolCall } from "../narrative/build-persisted-narrative";
 import type { NarrativeItem } from "../narrative/types";
 import type { ToolCallTransition } from "./useToolCallTransitions";
-import { type ChatVirtualItem, type CurrentTurnResponseIdentity, type PersistedNarrativeRecordsByMessage } from "./virtual-items";
+import { type ChatVirtualItem, type CurrentTurnResponseIdentity, type PersistedNarrativeRecords, type PersistedNarrativeRecordsByMessage } from "./virtual-items";
+
+const PERSISTED_NARRATIVE_VISIBLE_TOOL_LIMIT = 32;
+
+type PersistedNarrativeRecordSet = NonNullable<PersistedNarrativeRecords>;
+type PersistedToolRecord = PersistedNarrativeRecordSet["tools"][number];
 
 /** One independently measured narrative row in the transcript's scroll window. */
 export interface TranscriptNarrativeItem {
@@ -55,6 +60,38 @@ function rowIdentity(item: NarrativeItem): string {
   }
 }
 
+
+function includePersistedToolWithParents(
+  record: PersistedToolRecord,
+  byId: ReadonlyMap<string, PersistedToolRecord>,
+  selected: Set<string>,
+): void {
+  if (selected.has(record.id)) return;
+  selected.add(record.id);
+  const parent = record.parent_tool_call_id ? byId.get(record.parent_tool_call_id) : undefined;
+  if (parent) includePersistedToolWithParents(parent, byId, selected);
+}
+
+function visiblePersistedTools(
+  tools: PersistedNarrativeRecordSet["tools"],
+): PersistedNarrativeRecordSet["tools"] {
+  if (tools.length <= PERSISTED_NARRATIVE_VISIBLE_TOOL_LIMIT) return tools;
+  const byId = new Map(tools.map((tool) => [tool.id, tool]));
+  const ordered = [...tools].sort((left, right) => left.sort_order - right.sort_order || left.id.localeCompare(right.id));
+  const selected = new Set<string>();
+  for (let index = ordered.length - 1; index >= 0 && selected.size < PERSISTED_NARRATIVE_VISIBLE_TOOL_LIMIT; index -= 1) {
+    includePersistedToolWithParents(ordered[index]!, byId, selected);
+  }
+  return tools.filter((tool) => selected.has(tool.id));
+}
+
+function visiblePersistedRecords(
+  records: PersistedNarrativeRecordSet,
+): PersistedNarrativeRecordSet {
+  const tools = visiblePersistedTools(records.tools);
+  return tools === records.tools ? records : { ...records, tools };
+}
+
 function narrativeRows(
   prefix: string,
   items: readonly NarrativeItem[],
@@ -93,12 +130,13 @@ export function expandTranscriptNarrative(
     if (item.type !== "persisted-narrative") return [item];
     const records = recordsByMessage[item.messageId];
     if (!records) return [];
+    const visibleRecords = visiblePersistedRecords(records);
     const message = messages.get(item.messageId);
     const prefix = message?.outcomeExecutionId ?? item.messageId;
     return narrativeRows(
       prefix,
-      buildPersistedNarrativeItems({ ...records, messageContent: item.messageContent }),
-      records.tools.map(recordToToolCall),
+      buildPersistedNarrativeItems({ ...visibleRecords, messageContent: item.messageContent }),
+      visibleRecords.tools.map(recordToToolCall),
       item.messageId,
     );
   });

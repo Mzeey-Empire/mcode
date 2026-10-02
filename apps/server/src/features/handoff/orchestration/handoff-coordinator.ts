@@ -83,6 +83,7 @@ function buildOffBandHandoffPrompt(tempPath: string, markdown: string, userMessa
 }
 
 const CODEX_INLINE_HANDOFF_MAX_CHARS = 14_000;
+class HandoffAnchorPersistenceError extends Error {}
 const CODEX_INLINE_MAX_USER_CHARS = 4_000;
 const CODEX_HANDOFF_TRUNCATION_NOTICE =
   "\n\n[Inline Codex handoff shortened to fit the first-turn input limit. Full handoff remains stored in mcode.]\n\n";
@@ -226,6 +227,7 @@ export class HandoffCoordinator {
     try {
       return { providerWireOverride: await this.deliverPipelineHandoff(input) };
     } catch (error) {
+      if (error instanceof HandoffAnchorPersistenceError) throw error.cause;
       return { providerWireOverride: await this.deliverLegacyHandoff(input, error) };
     }
   }
@@ -244,13 +246,13 @@ export class HandoffCoordinator {
     await this.copyForkAttachments(input, artifact);
     this.requireChildForArtifact(input.childThreadId);
     await this.handoffStorage.write(input.childThreadId, artifact);
+    await this.persistHandoffAnchor(input.childThreadId, artifact.markdown);
     broadcast("thread.handoff", {
       threadId: input.childThreadId,
       status: artifact.meta.ladderStep === "D" ? "fallback" : "ready",
       ladderStep: artifact.meta.ladderStep,
       providerErrorOnGenerate: artifact.meta.providerErrorOnGenerate,
     });
-    this.persistHandoffAnchor(input.childThreadId, artifact.markdown);
     return this.createProviderWireOverride(input, artifact);
   }
 
@@ -294,11 +296,16 @@ export class HandoffCoordinator {
     }
   }
 
-  private persistHandoffAnchor(childThreadId: string, markdown: string): void {
-    this.messageRepo.create(
-      childThreadId, "system", markdown, 1,
-      undefined, undefined, undefined, undefined, /* isInternal */ true,
-    );
+  private async persistHandoffAnchor(childThreadId: string, markdown: string): Promise<void> {
+    try {
+      await this.messageRepo.create(
+        childThreadId, "system", markdown, 1,
+        undefined, undefined, undefined, undefined, true,
+      );
+    } catch (cause) {
+      // A missing commit reply cannot safely trigger a second anchor write through the fallback path.
+      throw new HandoffAnchorPersistenceError("Handoff anchor could not be saved", { cause });
+    }
   }
 
   private async createProviderWireOverride(
@@ -332,7 +339,7 @@ export class HandoffCoordinator {
     const errorClass = classifyProviderError(pipelineError);
     this.publishLegacyFallback(input, pipelineError, errorClass);
     const handoffContent = this.buildLegacyHandoffContent(input);
-    this.persistHandoffAnchor(input.childThreadId, handoffContent);
+    await this.persistHandoffAnchor(input.childThreadId, handoffContent);
     const replay = this.buildLegacyReplay(input, handoffContent);
     const artifact = this.buildLegacyArtifact(input, replay.markdown, errorClass);
     await this.persistLegacyArtifact(input.childThreadId, artifact);

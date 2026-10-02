@@ -1,8 +1,8 @@
 import "reflect-metadata";
 import { AgentEventType, type AgentEvent } from "@mcode/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openAgentStorageTestDatabase as openMemoryDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ProviderRegistry } from "../../../providers/composition/provider-registry.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
@@ -16,15 +16,17 @@ import { PlanTurnService } from "../plan-turn-service.js";
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
 import { broadcast } from "../../../../application/transport/push.js";
 
+afterEach(closeAgentStorageTestDatabases);
+
 describe("PlanTurnService output", () => {
-  it("publishes parsed questions and persists the plan at its assistant message", () => {
+  it("publishes parsed questions and persists the plan at its assistant message", async () => {
     const db = openMemoryDatabase();
-    const workspace = new WorkspaceRepo(db).create("plans", process.cwd(), false);
-    const threads = new ThreadRepo(db);
-    const thread = threads.create(workspace.id, "plan", "direct", "main", false, "codex");
-    const messages = new MessageRepo(db);
-    const plans = new PlanRepo(db);
-    const questions = new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db));
+    const workspace = await new WorkspaceRepo(db, agentStorageTestWriter(db)).create("plans", process.cwd(), false);
+    const threads = new ThreadRepo(db, agentStorageTestWriter(db));
+    const thread = await threads.create(workspace.id, "plan", "direct", "main", false, "codex");
+    const messages = new MessageRepo(db, agentStorageTestWriter(db));
+    const plans = new PlanRepo(db, agentStorageTestWriter(db));
+    const questions = new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db, agentStorageTestWriter(db)));
     const service = new PlanTurnService(
       threads,
       new ProviderRegistry([]),
@@ -49,13 +51,13 @@ describe("PlanTurnService output", () => {
     const block = `\`\`\`plan-output\n${JSON.stringify(output)}\n\`\`\``;
     service.onTextDelta(thread.id, block.slice(0, 24));
     service.onTextDelta(thread.id, block.slice(24));
-    const assistant = messages.create(thread.id, "assistant", "Plan response", 1);
+    const assistant = await messages.create(thread.id, "assistant", "Plan response", 1);
     const event: Extract<AgentEvent, { type: "message" }> = {
       type: AgentEventType.Message, threadId: thread.id, messageId: assistant.id, content: assistant.content, tokens: null,
     };
 
     expect(service.needsAssistantMaterialization(event)).toBe(true);
-    service.persistAssistantMessage(event);
+    await service.persistAssistantMessage(event);
     expect(plans.getLatestForThread(thread.id)).toMatchObject({
       messageId: assistant.id,
       title: "Login plan",

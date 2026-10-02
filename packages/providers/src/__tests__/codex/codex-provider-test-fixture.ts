@@ -180,6 +180,7 @@ export class CodexProvider extends PackageCodexProvider {
         releaseSession: (providerId, sessionId) => browser.releaseSession(providerId, sessionId),
         isConfigured: () => browser.isConfigured(),
         issue: (stage) => browser.issue(stage),
+        refresh: () => { throw new Error("Unexpected browser credential refresh in Codex fixture"); },
         release: (leaseId) => browser.release(leaseId),
         revokeCredential: (credentialId) => browser.revokeCredential(credentialId),
       },
@@ -188,7 +189,7 @@ export class CodexProvider extends PackageCodexProvider {
         close: (sessionId) => threadControl?.close?.(sessionId) ?? Promise.resolve(),
       },
       grants: { consume: () => false },
-      events: eventSink ?? { submit: async () => undefined },
+      events: eventSink ?? { submit: async () => { throw new Error("Canonical event sink is not configured for this fixture"); } },
     };
     const codexPorts: CodexProviderPorts = {
       settings: {

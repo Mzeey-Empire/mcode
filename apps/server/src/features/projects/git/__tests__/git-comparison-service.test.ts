@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import type { Database } from "bun:sqlite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../testing/owned-test-database.js";
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import { FakeGitExecutor } from "../execution/fake-git-executor.js";
 import { GitComparisonService } from "../git-comparison-service.js";
@@ -21,19 +22,22 @@ const PATCH = [
 
 describe("GitComparisonService unified output", () => {
   let db: Database;
+  let owned: OwnedTestDatabase;
   let workspaceRepo: WorkspaceRepo;
   let workspaceId: string;
   let fake: FakeGitExecutor;
   let service: GitComparisonService;
 
-  beforeAll(() => {
-    db = openMemoryDatabase();
-    workspaceRepo = new WorkspaceRepo(db);
-    workspaceId = workspaceRepo.create("Patch test", "/repo").id;
+  beforeAll(async () => {
+    owned = createOwnedTestDatabase();
+    db = openReadOnlyDatabase(owned.db.filename);
+    workspaceRepo = new WorkspaceRepo(db, owned.writer);
+    workspaceId = (await workspaceRepo.create("Patch test", "/repo")).id;
   });
 
-  afterAll(() => {
-    db.close();
+  afterAll(async () => {
+    db.close(true);
+    await owned.close();
   });
 
   beforeEach(() => {

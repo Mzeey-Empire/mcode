@@ -2,8 +2,9 @@ import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import type { ParentNarrativeRecoveryCommit } from "./parent-turn-durability.js";
 import { assertActiveTurnRecoveryRetention } from "./active-turn-recovery-retention-policy.js";
+import type { NarrativeRecoveryChanges } from "../conversation/narrative/narrative-turn-state.js";
 
-/** One full-snapshot difference awaiting confirmation of its durable write. */
+/** One narrative difference awaiting acknowledgement by its persistence or acceptance owner. */
 export interface PreparedNarrativeRecoveryDelta {
   readonly items: readonly ParentNarrativeRecoveryItem[];
   readonly discardedItemIds: readonly string[];
@@ -16,6 +17,16 @@ export class NarrativeRecoveryDelta {
   private retainedBytes = 0;
   private retainedRecords = 0;
   private revision = 0;
+
+  /** Share fingerprints until acknowledgement replaces the map; saving belongs to the progress owner. */
+  fork(): NarrativeRecoveryDelta {
+    const copy = new NarrativeRecoveryDelta();
+    copy.fingerprints = this.fingerprints;
+    copy.retainedBytes = this.retainedBytes;
+    copy.retainedRecords = this.retainedRecords;
+    copy.revision = this.revision;
+    return copy;
+  }
 
   /** Compare a complete snapshot to the last acknowledged one. */
   prepare(snapshot: readonly ParentNarrativeRecoveryItem[]): PreparedNarrativeRecoveryDelta | null {
@@ -68,11 +79,56 @@ export class NarrativeRecoveryDelta {
       items: [item], discardedItemIds: [],
       acknowledge: () => {
         if (this.revision !== preparedAt) throw new Error("Narrative recovery delta was already superseded");
+        this.fingerprints = new Map(this.fingerprints);
         this.fingerprints.set(id, fingerprint);
         this.retainedBytes = retainedBytes;
         this.revision += 1;
       },
     };
+  }
+
+  /** Compare only an event's changed records; accepted history is not unsaved retention. */
+  prepareChanges(changes: NarrativeRecoveryChanges): PreparedNarrativeRecoveryDelta | null {
+    const updates = new Map<string, string>();
+    const items = changes.items.filter((item) => {
+      const id = `${item.kind}:${item.record.id}`;
+      const fingerprint = JSON.stringify(item);
+      if (Buffer.byteLength(fingerprint, "utf8") > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes) {
+        throw new Error("Parent narrative recovery item exceeds the active-turn byte limit");
+      }
+      updates.set(id, fingerprint);
+      return this.fingerprints.get(id) !== fingerprint;
+    });
+    const discardedItemIds = changes.discardedItemIds.filter((id) => this.fingerprints.has(id));
+    if (discardedItemIds.some((id) => updates.has(id))) throw new Error("Narrative recovery cannot update and discard the same item");
+    if (items.length === 0 && discardedItemIds.length === 0) return null;
+    const changedBytes = items.reduce((bytes, item) => bytes + Buffer.byteLength(JSON.stringify(item), "utf8"), 0)
+      + discardedItemIds.reduce((bytes, id) => bytes + Buffer.byteLength(id, "utf8"), 0);
+    assertActiveTurnRecoveryRetention(items.length + discardedItemIds.length, changedBytes);
+    const preparedAt = this.revision;
+    return { items, discardedItemIds, acknowledge: () => {
+      if (this.revision !== preparedAt) throw new Error("Narrative recovery delta was already superseded");
+      this.acknowledgeChanges(updates, discardedItemIds);
+    } };
+  }
+
+  private acknowledgeChanges(updates: ReadonlyMap<string, string>, discardedItemIds: readonly string[]): void {
+    const next = new Map(this.fingerprints);
+    for (const id of discardedItemIds) {
+      const previous = next.get(id);
+      if (previous === undefined) continue;
+      this.retainedBytes -= Buffer.byteLength(previous, "utf8");
+      this.retainedRecords -= 1;
+      next.delete(id);
+    }
+    for (const [id, fingerprint] of updates) {
+      const previous = next.get(id);
+      this.retainedBytes += Buffer.byteLength(fingerprint, "utf8") - Buffer.byteLength(previous ?? "", "utf8");
+      if (previous === undefined) this.retainedRecords += 1;
+      next.set(id, fingerprint);
+    }
+    this.fingerprints = next;
+    this.revision += 1;
   }
 }
 

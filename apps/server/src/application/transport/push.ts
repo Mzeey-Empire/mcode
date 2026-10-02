@@ -93,6 +93,11 @@ export function clientCount(): number {
   return clients.size;
 }
 
+/** Return only connected clients' explicitly requested targets for bounded owner-stream alias delivery. */
+export function subscribedThreadIds(): ReadonlySet<string> {
+  return new Set([...threadSubscriptions.values()].flatMap((subscriptions) => [...subscriptions]));
+}
+
 /**
  * Returns the maximum ws.bufferedAmount across all currently-open clients.
  * Used by the socket coordinator to drive server-side flow control.

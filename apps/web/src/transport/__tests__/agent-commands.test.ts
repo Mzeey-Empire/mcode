@@ -33,6 +33,13 @@ class MockWebSocket {
 
 let mockWs: MockWebSocket;
 
+function parseRequest(raw: string) {
+  const value: unknown = JSON.parse(raw);
+  if (value === null || typeof value !== "object" || !("id" in value) || typeof value.id !== "string"
+    || !("method" in value) || typeof value.method !== "string" || !("params" in value)) throw new Error("invalid RPC request");
+  return { id: value.id, method: value.method, params: value.params };
+}
+
 beforeEach(() => {
   useSettingsStore.setState({ loaded: false });
   vi.stubGlobal(
@@ -51,6 +58,23 @@ afterEach(() => {
 });
 
 describe("agent command transport", () => {
+  it.each([false, true])("retries only saving work for the exact thread, retried=%s", async (retried) => {
+    const transport = createWsTransport("ws://localhost:1234");
+    mockWs.simulateOpen();
+    const response = transport.retrySave("thread-with-failed-save");
+    await vi.waitFor(() => expect(mockWs.sent.some((row) => parseRequest(row).method === "agent.retrySave")).toBe(true));
+    const requests = mockWs.sent.map(parseRequest);
+    const request = requests.find((candidate) => candidate.method === "agent.retrySave");
+    if (!request) throw new Error("missing retry-save request");
+    expect(request.params).toEqual({ threadId: "thread-with-failed-save" });
+    expect(requests.filter((candidate) => candidate.method === "agent.retrySave")).toHaveLength(1);
+    expect(requests.map((candidate) => candidate.method)).not.toContain("agent.send");
+    expect(requests.map((candidate) => candidate.method)).not.toContain("agent.retry");
+    mockWs.respond(request.id, { retried });
+    await expect(response).resolves.toEqual({ retried });
+    transport.close();
+  });
+
   it("requests settled diffs after reconnect and admits Live only after a fresh push for that thread", async () => {
     const transport = createWsTransport("ws://localhost:1234");
     mockWs.simulateOpen();

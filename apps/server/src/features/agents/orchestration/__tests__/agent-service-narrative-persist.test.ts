@@ -1,18 +1,16 @@
 import "reflect-metadata";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType, CanonicalAgentProgressFrameSchema, ProviderRuntimeEventSchema } from "@mcode/contracts";
 import type {
   AgentEvent,
   IProviderRegistry,
-  Message,
   ProviderRuntimeEvent,
   ProviderRuntimeExtension,
-  Thread,
 } from "@mcode/contracts";
 import { AgentService } from "../agent-service.js";
 import {
@@ -24,7 +22,7 @@ import {
   startAgentServiceIngressForTest,
   startProviderTurnForTest,
   streamAgentReliabilityTextForTest,
-  waitForAgentServiceIngressForTest,
+  waitForAgentServiceIngressForTest as waitForCoreIngress,
 } from "./agent-service-test-harness.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
@@ -34,25 +32,28 @@ import {
   PARENT_ASSISTANT_TEXT_RETAINED_LIMITS,
 } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
+import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
+import { MessageStore } from "../../conversation/persistence/message-store.js";
+import { TaskStore } from "../persistence/task-store.js";
 import { broadcast } from "../../../../application/transport/push.js";
 import { isTurnScopedEvent } from "../../turns/turn-runtime.js";
-import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
-import type { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import type { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { MessageRepo as SqliteMessageRepo } from "../../conversation/persistence/message-repo.js";
 import type { GitService } from "../../../projects/index.js";
 import type { AttachmentService } from "../../../attachments/storage/attachment-service.js";
-import type {
+import {
   ToolCallRecordRepo,
-  CreateToolCallRecordInput,
+  type CreateToolCallRecordInput,
 } from "../../tools/persistence/tool-call-record-repo.js";
-import type { ThoughtSegmentRepo, CreateThoughtSegmentInput } from "../../conversation/narrative/persistence/thought-segment-repo.js";
-import type { HookExecutionRepo, CreateHookExecutionInput } from "../../events/persistence/hook-execution-repo.js";
-import type { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
+import { ThoughtSegmentRepo, type CreateThoughtSegmentInput } from "../../conversation/narrative/persistence/thought-segment-repo.js";
+import { HookExecutionRepo, type CreateHookExecutionInput } from "../../events/persistence/hook-execution-repo.js";
+import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import type { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import type { MemoryPressureService } from "../../../../runtime/memory/memory-pressure-service.js";
-import type { TaskRepo } from "../persistence/task-repo.js";
+import { TaskRepo } from "../persistence/task-repo.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
 import type { ThreadService } from "../../../thread-control/index.js";
 import type { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
@@ -76,22 +77,46 @@ function providerRuntimeEventForNarrativeTest(eventName: string, event: unknown)
   if (eventName !== "event" || !event || typeof event !== "object" || "event" in event) return event;
   return runtimeProviderEvent(event as AgentEvent);
 }
-import type { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
-import { CodexCollaborationEventAdapter } from "../../collaboration/adapters/codex-collaboration-event-adapter.js";
 import { ProviderEventIngress } from "../../../providers/composition/provider-event-ingress.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
-vi.mock("fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs")>();
-  return {
-    ...actual,
-    existsSync: vi.fn(() => true),
-    statSync: vi.fn(() => ({ isDirectory: () => true })),
-  };
-});
 
 const THREAD_ID = "t-narr";
 const MSG_ID = "msg-narr";
+function openMemoryDatabase(): Database { return openAgentStorageTestDatabase(); }
+
+const providerCommits = new Map<AgentService, () => Promise<void>>();
+
+afterEach(async () => {
+  for (const [service, committed] of providerCommits) {
+    await committed();
+    await waitForCoreIngress(service, THREAD_ID);
+  }
+  providerCommits.clear();
+  await closeAgentStorageTestDatabases();
+});
+
+function defaultNarrativeDatabase(): Database {
+  const db = openMemoryDatabase();
+  const now = new Date().toISOString();
+  db.run("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)", ["ws-1", "Workspace", "/workspace", now, now]);
+  db.run("INSERT INTO threads (id, workspace_id, title, branch, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [THREAD_ID, "ws-1", "Parent", "main", "claude", "claude-sonnet-4-6", now, now]);
+  new MessageStore(db).create(THREAD_ID, "assistant", "", 2, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { type: "composer" }, MSG_ID);
+  new MessageStore(db).create(THREAD_ID, "user", "Start", 1, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { type: "composer" }, "user-narr");
+  new TaskStore(db).upsert(THREAD_ID, [{ id: "1", content: "Original task", status: "pending", group: "Tasks" }, { id: "3", content: "Removable task", status: "pending", group: "Tasks" }]);
+  return db;
+}
+
+async function waitForSavedNarrativeTurn(service: AgentService): Promise<void> {
+  await waitForAgentServiceIngressForTest(service, THREAD_ID);
+  await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({ threadId: THREAD_ID })));
+  await finalizerForAgentServiceTest(service).drain();
+}
+
+async function waitForAgentServiceIngressForTest(service: AgentService, threadId: string): Promise<void> {
+  await providerCommits.get(service)?.();
+  await waitForCoreIngress(service, threadId);
+}
 
 function narrativeExecutionId(service: AgentService): string {
   const executionId = service.runtimeAccess().runtimeSnapshots()
@@ -114,32 +139,31 @@ function codexRuntimeEvent(
   };
 }
 
-function makeThread(overrides: Partial<Thread> = {}): Thread {
-  return {
-    id: THREAD_ID,
-    workspace_id: "ws-1",
-    title: "x",
-    status: "idle",
-    mode: "direct",
-    branch: "main",
-    worktree_path: null,
-    model: "claude-sonnet-4-6",
-    provider: "claude",
-    sdk_session_id: null,
-    last_context_tokens: null,
-    context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    permission_mode: null,
-    copilot_agent: null,
-    last_compact_summary: null,
-    parent_thread_id: null,
-    forked_from_message_id: null,
-    deleted_at: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    ...overrides,
-  } as Thread;
+async function commitNativeProjection(canonical: CanonicalAgentBoundary, db: Database, executionId: string, sequence: number, runtimeEvent: ProviderRuntimeEvent) {
+  const reader = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), () => undefined);
+  const turn = reader.loadTurnByExecution(executionId);
+  if (!turn) throw new Error("Native provider fixture has no canonical parent turn");
+  const itemId = `native-narrative-${sequence}`;
+  const now = new Date().toISOString();
+  const stampedRuntimeEvent = ProviderRuntimeEventSchema().parse({
+    ...runtimeEvent,
+    event: { ...runtimeEvent.event, turnExecutionId: executionId },
+  });
+  return canonical.commit({
+    threadId: THREAD_ID, turnId: turn.id, executionId, phase: "running",
+    events: [{ eventId: `${executionId}:${itemId}`, routing: { threadId: THREAD_ID, turnId: turn.id, executionId, itemId },
+      sourceProviderId: "codex", sourceIdentities: [], sourceSequence: sequence,
+      payload: { type: "item.recorded", item: { id: itemId, threadId: THREAD_ID, turnId: turn.id,
+        kind: "system", providerIdentities: [], createdAt: now, updatedAt: now,
+        payload: { projection: "providerRuntimeEvent", runtimeEvent: stampedRuntimeEvent },
+      } },
+    }],
+  });
+}
+
+function routingDiagnostics(db: Database): unknown[] {
+  return db.query<{ payload_json: string }, [string]>("SELECT payload_json FROM canonical_agent_items WHERE thread_id = ? AND kind = 'error'")
+    .all(THREAD_ID).map((row) => JSON.parse(row.payload_json));
 }
 
 interface Built {
@@ -158,46 +182,24 @@ interface Built {
   narrativeStore: NarrativeStore;
 }
 
-function build(options: {
+async function build(options: {
   db?: Database;
   canonicalSink?: CanonicalAgentBoundary;
   messageRepo?: MessageRepo;
   parentAssistantTextCheckpoints?: ParentAssistantTextCheckpointService;
   onProviderEvent?: (event: AgentEvent) => void;
-} = {}): Built {
-  const thread = makeThread();
+} = {}): Promise<Built> {
+  const db = options.db ?? defaultNarrativeDatabase();
+  const writer = agentStorageTestWriter(db);
   const providerEmitter = Object.assign(new NodeEvents.EventEmitter(), {
     id: "codex" as const,
   });
   (providerEmitter as any).sendTurn = vi.fn(() => Promise.resolve());
   (providerEmitter as any).stopSession = vi.fn(() => Promise.resolve());
 
-  const threadRepo = {
-    findById: vi.fn(() => thread),
-    updateStatus: vi.fn(),
-    updateModel: vi.fn(),
-    updateProvider: vi.fn(),
-    updateSettings: vi.fn(),
-    updateContextUsage: vi.fn(),
-    updateSdkSessionId: vi.fn(),
-    updateCompactSummary: vi.fn(),
-  } as unknown as ThreadRepo;
-  const workspaceRepo = {
-    findById: vi.fn(() => ({ id: "ws-1", path: "/workspace" })),
-  } as unknown as WorkspaceRepo;
-  let latestSequence = 2;
-  const fixtureMessageRepo = {
-    listByThread: vi.fn(() => ({ messages: [{ id: MSG_ID, role: "assistant", sequence: 2 }] })),
-    getLatestSequenceIncludingInternal: vi.fn(() => latestSequence),
-    create: vi.fn((_threadId: string, _role: string, _content: string, sequence: number) => {
-      latestSequence = Math.max(latestSequence, sequence);
-      return { id: MSG_ID, sequence };
-    }),
-    findByIdInThread: vi.fn(),
-    listByThreadUpToSequence: vi.fn(() => []),
-    setAssistantOutcome: vi.fn(),
-  } as unknown as MessageRepo;
-  const messageRepo = options.messageRepo ?? fixtureMessageRepo;
+  const threadRepo = new ThreadRepo(db, writer);
+  const workspaceRepo = new WorkspaceRepo(db, writer);
+  const messageRepo = options.messageRepo ?? new SqliteMessageRepo(db, writer);
   const gitService = {
     resolveWorkingDir: vi.fn(() => "/workspace"),
     listWorktrees: vi.fn(() => []),
@@ -211,25 +213,13 @@ function build(options: {
     shutdown: vi.fn(),
   } as unknown as IProviderRegistry;
   const threadService = { create: vi.fn() } as unknown as ThreadService;
-  const toolBulk = vi.fn();
-  const toolCallRecordRepo = {
-    bulkCreate: toolBulk,
-    bulkCreateBatched: toolBulk,
-  } as unknown as ToolCallRecordRepo;
-  const thoughtBulk = vi.fn();
-  const thoughtSegmentRepo = {
-    bulkCreate: thoughtBulk,
-    bulkCreateBatched: thoughtBulk,
-  } as unknown as ThoughtSegmentRepo;
-  const hookBulk = vi.fn();
-  const hookExecutionRepo = {
-    bulkCreate: hookBulk,
-    bulkCreateBatched: hookBulk,
-  } as unknown as HookExecutionRepo;
-  const turnSnapshotRepo = {
-    listByThread: vi.fn(() => []),
-    create: vi.fn(),
-  } as unknown as TurnSnapshotRepo;
+  const toolCallRecordRepo = new ToolCallRecordRepo(db, writer);
+  const toolBulk = vi.spyOn(toolCallRecordRepo, "bulkCreateBatched");
+  const thoughtSegmentRepo = new ThoughtSegmentRepo(db, writer);
+  const thoughtBulk = vi.spyOn(thoughtSegmentRepo, "bulkCreateBatched");
+  const hookExecutionRepo = new HookExecutionRepo(db, writer);
+  const hookBulk = vi.spyOn(hookExecutionRepo, "bulkCreateBatched");
+  const turnSnapshotRepo = new TurnSnapshotRepo(db, writer);
   const snapshotService = {
     captureRef: vi.fn(() => Promise.resolve("abc")),
     getFilesChanged: vi.fn(() => Promise.resolve([])),
@@ -239,18 +229,11 @@ function build(options: {
     markIdle: vi.fn(),
     onPressureChange: vi.fn(),
   } as unknown as MemoryPressureService;
-  const taskAppend = vi.fn();
-  const taskUpsertGroup = vi.fn();
-  const taskUpdate = vi.fn(() => true);
-  const taskRemove = vi.fn();
-  const taskRepo = {
-    get: vi.fn(() => []),
-    upsert: vi.fn(),
-    upsertGroup: taskUpsertGroup,
-    appendTask: taskAppend,
-    updateTask: taskUpdate,
-    removeTask: taskRemove,
-  } as unknown as TaskRepo;
+  const taskRepo = new TaskRepo(db, writer);
+  const taskAppend = vi.spyOn(taskRepo, "appendTask");
+  const taskUpsertGroup = vi.spyOn(taskRepo, "upsertGroup");
+  const taskUpdate = vi.spyOn(taskRepo, "updateTask");
+  const taskRemove = vi.spyOn(taskRepo, "removeTask");
   const settingsService = {
     get: vi.fn(() => ({
       model: { defaults: { fallbackId: undefined } },
@@ -260,22 +243,12 @@ function build(options: {
     on: vi.fn(),
   } as unknown as SettingsService;
   const availability = { assertUsable: vi.fn() } as unknown as ProviderAvailabilityService;
-  const planQuestionAnswersRepo = {
-    markAnswered: vi.fn(),
-    isAnswered: vi.fn(() => false),
-    listAnsweredForThread: vi.fn(() => []),
-  } as unknown as PlanQuestionAnswersRepo;
-  const db = options.db ?? ({
-    filename: ":memory:",
-    transaction: vi.fn((fn: Function) => fn),
-    prepare: vi.fn(() => ({ run: vi.fn() })),
-  } as unknown as Database);
   const canonicalSink = options.canonicalSink ?? createCanonicalAgentBoundaryStub(db);
+  const providerIngress = new ProviderEventIngress();
   const parentAssistantTextCheckpoints = options.parentAssistantTextCheckpoints
-    ?? new ParentAssistantTextCheckpointService(db);
+    ?? new ParentAssistantTextCheckpointService(db, agentStorageTestWriter(db));
 
-  // The narrative write seam lives in NarrativeStore; build it from the same
-  // repo mocks so the bulkCreate spies observe what AgentService delegates.
+  // Observe real facade calls while the owner commits the resulting narrative.
   const narrativeStore = new NarrativeStore(
     messageRepo,
     toolCallRecordRepo,
@@ -291,14 +264,12 @@ function build(options: {
     attachmentService,
     providerRegistry,
     threadService,
-    hookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,
     db,
     memoryPressureService,
     settingsService,
     availability,
-    planQuestionAnswersRepo,
       { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       narrativeStore,
@@ -308,10 +279,7 @@ function build(options: {
       undefined,
       canonicalSink,
       undefined,
-      new ProviderEventIngress(
-        undefined,
-        new CodexCollaborationEventAdapter(canonicalSink),
-      ),
+      providerIngress,
       undefined,
       undefined,
       undefined,
@@ -322,6 +290,16 @@ function build(options: {
   // identity. Keep this fixture aligned with that production boundary while
   // leaving each test focused on the narrative payload it emits.
   const turnExecutionId = startProviderTurnForTest(service, THREAD_ID);
+  if (!options.canonicalSink) {
+    await canonicalSink.startParentTurn({
+      thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: new Date().toISOString() },
+      turnId: "fixture-narrative-turn", executionId: turnExecutionId, permissionMode: "supervised", providerIdentities: [],
+      userMessage: { kind: "existing", messageId: "user-narr" },
+    });
+  }
+  let nativeSequence = 0;
+  let nativeCommits = Promise.resolve();
+  providerCommits.set(service, () => nativeCommits);
   const emit = providerEmitter.emit.bind(providerEmitter);
   providerEmitter.emit = ((eventName: string, event?: unknown, ...args: unknown[]) => {
     if (eventName === "event" && event && typeof event === "object") {
@@ -330,11 +308,19 @@ function build(options: {
         event = { ...(event as Record<string, unknown>), turnExecutionId };
       }
     }
-    return emit(
-      eventName,
-      providerRuntimeEventForNarrativeTest(eventName, event),
-      ...args,
-    );
+    const runtimeEvent = providerRuntimeEventForNarrativeTest(eventName, event);
+    const parsed = eventName === "event" ? ProviderRuntimeEventSchema().safeParse(runtimeEvent) : undefined;
+    if (parsed?.success && parsed.data.extension) {
+      nativeSequence += 1;
+      const sequence = nativeSequence;
+      nativeCommits = nativeCommits.then(async () => {
+        const receipt = await commitNativeProjection(canonicalSink, db, turnExecutionId, sequence, parsed.data);
+        providerIngress.acceptLegacyProjected(receipt.providerProjection.events);
+      });
+      void nativeCommits.catch(() => undefined);
+      return true;
+    }
+    return emit(eventName, runtimeEvent, ...args);
   }) as typeof providerEmitter.emit;
   // Prime per-thread state without running sendMessage's full path. The buffers
   // now live in NarrativeStore; seed them via the same public entry points
@@ -372,22 +358,22 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const published: AgentEvent[] = [];
-    const { providerEmitter, service } = build({
+    const { providerEmitter, service } = await build({
       db,
       canonicalSink,
       onProviderEvent: (event) => published.push(event),
     });
     const executionId = narrativeExecutionId(service);
-    const messages = new SqliteMessageRepo(db);
-    canonicalSink.startParentTurn({
+
+    await canonicalSink.startParentTurn({
       thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
       turnId: "turn-durable-text",
       executionId,
       permissionMode: "supervised",
       providerIdentities: [],
-      projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+      userMessage: { kind: "create", content: "start", sequence: 1 },
     });
 
     vi.useFakeTimers();
@@ -422,14 +408,14 @@ describe("AgentService narrative persistence", () => {
         .filter((event) => event.type === AgentEventType.TextDelta)
         .map((event) => event.delta))
         .toEqual(["durable ", "text"]);
-      expect(db.prepare(`
+      await vi.waitFor(() => expect(db.prepare(`
         SELECT first_sequence, last_sequence, text
         FROM parent_assistant_text_checkpoint_chunks
         WHERE execution_id = ?
-      `).all(executionId)).toEqual([]);
+      `).all(executionId)).toEqual([]));
     } finally {
       vi.useRealTimers();
-      db.close();
+
     }
   });
 
@@ -442,22 +428,22 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const published: AgentEvent[] = [];
-    const { providerEmitter, service } = build({
+    const { providerEmitter, service } = await build({
       db,
       canonicalSink,
       onProviderEvent: (event) => published.push(event),
     });
     const executionId = narrativeExecutionId(service);
-    const messages = new SqliteMessageRepo(db);
-    canonicalSink.startParentTurn({
+
+    await canonicalSink.startParentTurn({
       thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
       turnId: "turn-multiple-narration-segments",
       executionId,
       permissionMode: "supervised",
       providerIdentities: [],
-      projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+      userMessage: { kind: "create", content: "start", sequence: 1 },
     });
     const firstSegment = Array.from({ length: 10 }, () => "a".repeat(14 * 1024));
     const secondSegment = Array.from({ length: 10 }, () => "b".repeat(14 * 1024));
@@ -488,11 +474,11 @@ describe("AgentService narrative persistence", () => {
       expect(published.filter((event) => event.type === AgentEventType.AssistantMessageBoundary))
         .toHaveLength(2);
     } finally {
-      db.close();
+
     }
   });
 
-  it("holds a semantic boundary until delayed text reaches SQLite, then publishes both in provider order", async () => {
+  it("publishes a semantic boundary while its text save is delayed, then saves both in provider order", async () => {
     const db = openMemoryDatabase();
     const now = "2026-08-24T10:00:00.000Z";
     db.prepare(
@@ -501,32 +487,31 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const published: AgentEvent[] = [];
     let sqliteAvailable = false;
     const appendChunk = ParentAssistantTextCheckpointService.prototype.appendChunk;
     const appendSpy = vi.spyOn(ParentAssistantTextCheckpointService.prototype, "appendChunk")
-      .mockImplementation(function (inputs) {
+      .mockImplementation(function (this: ParentAssistantTextCheckpointService, inputs) {
         if (!sqliteAvailable) throw Object.assign(new Error("database locked"), { code: "SQLITE_BUSY" });
         return appendChunk.call(this, inputs);
       });
 
-    vi.useFakeTimers();
     try {
-      const { providerEmitter, service } = build({
+      const { providerEmitter, service } = await build({
         db,
         canonicalSink,
         onProviderEvent: (event) => published.push(event),
       });
       const executionId = narrativeExecutionId(service);
-      const messages = new SqliteMessageRepo(db);
-      canonicalSink.startParentTurn({
+
+      await canonicalSink.startParentTurn({
         thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
         turnId: "turn-delayed-semantic-boundary",
         executionId,
         permissionMode: "supervised",
         providerIdentities: [],
-        projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+        userMessage: { kind: "create", content: "start", sequence: 1 },
       });
 
       providerEmitter.emit("event", {
@@ -543,20 +528,24 @@ describe("AgentService narrative persistence", () => {
       });
       await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
-      expect(published).toEqual([]);
-
-      sqliteAvailable = true;
-      await vi.advanceTimersByTimeAsync(250);
-
       expect(published.map((event) => event.type)).toEqual([
         AgentEventType.TextDelta,
         AgentEventType.AssistantMessageBoundary,
       ]);
-      expect(appendSpy).toHaveBeenCalledTimes(3);
+      expect(canonicalSink.loadParentNarrativeRecovery("turn-delayed-semantic-boundary")).toEqual([]);
+      await vi.waitFor(() => expect(appendSpy).toHaveBeenCalled());
+
+      sqliteAvailable = true;
+      await vi.waitFor(() => expect(JSON.stringify(
+        canonicalSink.loadParentNarrativeRecovery("turn-delayed-semantic-boundary"),
+      )).toContain("delayed text"), { timeout: 3_000 });
+      expect(db.query("SELECT text FROM parent_assistant_text_checkpoint_chunks WHERE execution_id = ?")
+        .all(executionId)).toEqual([]);
+      expect(published).toHaveLength(2);
     } finally {
       appendSpy.mockRestore();
       vi.useRealTimers();
-      db.close();
+
     }
   });
 
@@ -569,33 +558,33 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const published: AgentEvent[] = [];
     const restoreChunks = ParentAssistantTextCheckpointService.prototype.restoreChunks;
     const restoreChunksSpy = vi.spyOn(ParentAssistantTextCheckpointService.prototype, "restoreChunks")
       .mockImplementationOnce(() => {
         throw Object.assign(new Error("database locked"), { code: "SQLITE_BUSY" });
       })
-      .mockImplementation(function (executionId) {
+      .mockImplementation(function (this: ParentAssistantTextCheckpointService, executionId) {
         return restoreChunks.call(this, executionId);
       });
 
     vi.useFakeTimers();
     try {
-      const { providerEmitter, service } = build({
+      const { providerEmitter, service } = await build({
         db,
         canonicalSink,
         onProviderEvent: (event) => published.push(event),
       });
       const executionId = narrativeExecutionId(service);
-      const messages = new SqliteMessageRepo(db);
-      canonicalSink.startParentTurn({
+
+      await canonicalSink.startParentTurn({
         thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
         turnId: "turn-delayed-baseline",
         executionId,
         permissionMode: "supervised",
         providerIdentities: [],
-        projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+        userMessage: { kind: "create", content: "start", sequence: 1 },
       });
 
       providerEmitter.emit("event", {
@@ -622,7 +611,7 @@ describe("AgentService narrative persistence", () => {
     } finally {
       restoreChunksSpy.mockRestore();
       vi.useRealTimers();
-      db.close();
+
     }
   });
 
@@ -635,7 +624,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const restoreChunksSpy = vi.spyOn(ParentAssistantTextCheckpointService.prototype, "restoreChunks")
       .mockImplementation(() => {
         throw Object.assign(new Error("database locked"), { code: "SQLITE_BUSY" });
@@ -643,16 +632,16 @@ describe("AgentService narrative persistence", () => {
 
     vi.useFakeTimers();
     try {
-      const { providerEmitter, service } = build({ db, canonicalSink, onProviderEvent: vi.fn() });
+      const { providerEmitter, service } = await build({ db, canonicalSink, onProviderEvent: vi.fn() });
       const executionId = narrativeExecutionId(service);
-      const messages = new SqliteMessageRepo(db);
-      canonicalSink.startParentTurn({
+
+      await canonicalSink.startParentTurn({
         thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
         turnId: "turn-oversized-event",
         executionId,
         permissionMode: "supervised",
         providerIdentities: [],
-        projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+        userMessage: { kind: "create", content: "start", sequence: 1 },
       });
 
       providerEmitter.emit("event", {
@@ -684,7 +673,7 @@ describe("AgentService narrative persistence", () => {
     } finally {
       restoreChunksSpy.mockRestore();
       vi.useRealTimers();
-      db.close();
+
     }
   });
 
@@ -697,7 +686,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const restoreChunksSpy = vi.spyOn(ParentAssistantTextCheckpointService.prototype, "restoreChunks")
       .mockImplementation(() => {
         throw Object.assign(new Error("database locked"), { code: "SQLITE_BUSY" });
@@ -712,16 +701,16 @@ describe("AgentService narrative persistence", () => {
 
     vi.useFakeTimers();
     try {
-      const { providerEmitter, service } = build({ db, canonicalSink, onProviderEvent: vi.fn() });
+      const { providerEmitter, service } = await build({ db, canonicalSink, onProviderEvent: vi.fn() });
       const executionId = narrativeExecutionId(service);
-      const messages = new SqliteMessageRepo(db);
-      canonicalSink.startParentTurn({
+
+      await canonicalSink.startParentTurn({
         thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
         turnId: "turn-deep-event",
         executionId,
         permissionMode: "supervised",
         providerIdentities: [],
-        projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+        userMessage: { kind: "create", content: "start", sequence: 1 },
       });
 
       providerEmitter.emit("event", {
@@ -750,61 +739,51 @@ describe("AgentService narrative persistence", () => {
     } finally {
       restoreChunksSpy.mockRestore();
       vi.useRealTimers();
-      db.close();
+
     }
   });
 
-  it("resumes a journal-blocked boundary after SQLite recovers without another provider event", async () => {
+  it("saves an already visible journal-backed boundary after SQLite recovers without another provider event", async () => {
     const db = openMemoryDatabase();
     const now = "2026-08-24T10:00:00.000Z";
     const journalDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-journal-"));
-    const filesystem = await vi.importActual<typeof import("node:fs")>("node:fs");
-    vi.mocked(NodeFS.existsSync).mockImplementation(filesystem.existsSync);
-    vi.mocked(NodeFS.statSync).mockImplementation(filesystem.statSync);
     db.prepare(
       "INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     ).run("ws-1", "Workspace", "/workspace", now, now);
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const journalService = new ParentAssistantTextCheckpointService(
       db,
-      undefined,
+      agentStorageTestWriter(db),
       { directory: journalDirectory },
     );
     const published: AgentEvent[] = [];
     let sqliteAvailable = false;
     const appendChunk = journalService.appendChunk.bind(journalService);
-    const appendRecoveredChunk = journalService.appendRecoveredChunk.bind(journalService);
     const appendChunkSpy = vi.spyOn(journalService, "appendChunk")
       .mockImplementation((inputs) => {
         if (!sqliteAvailable) throw Object.assign(new Error("database locked"), { code: "SQLITE_BUSY" });
         return appendChunk(inputs);
       });
-    const appendRecoveredChunkSpy = vi.spyOn(journalService, "appendRecoveredChunk")
-      .mockImplementation((input) => {
-        if (!sqliteAvailable) throw Object.assign(new Error("database locked"), { code: "SQLITE_BUSY" });
-        return appendRecoveredChunk(input);
-      });
 
-    vi.useFakeTimers();
     try {
-      const { providerEmitter, service } = build({
+      const { providerEmitter, service } = await build({
         db,
         canonicalSink,
         parentAssistantTextCheckpoints: journalService,
         onProviderEvent: (event) => published.push(event),
       });
       const executionId = narrativeExecutionId(service);
-      const messages = new SqliteMessageRepo(db);
-      canonicalSink.startParentTurn({
+
+      await canonicalSink.startParentTurn({
         thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
         turnId: "turn-journal-boundary",
         executionId,
         permissionMode: "supervised",
         providerIdentities: [],
-        projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+        userMessage: { kind: "create", content: "start", sequence: 1 },
       });
 
       providerEmitter.emit("event", {
@@ -821,23 +800,27 @@ describe("AgentService narrative persistence", () => {
       });
       await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
-      expect(published.map((event) => event.type)).toEqual([AgentEventType.TextDelta]);
+      expect(published.map((event) => event.type)).toEqual([
+        AgentEventType.TextDelta,
+        AgentEventType.AssistantMessageBoundary,
+      ]);
+      expect(canonicalSink.loadParentNarrativeRecovery("turn-journal-boundary")).toEqual([]);
+      await vi.waitFor(() => expect(NodeFS.readdirSync(journalDirectory).length).toBeGreaterThan(0));
 
       sqliteAvailable = true;
-      await vi.advanceTimersByTimeAsync(250);
-      await Promise.resolve();
+      await vi.waitFor(() => expect(JSON.stringify(
+        canonicalSink.loadParentNarrativeRecovery("turn-journal-boundary"),
+      )).toContain("journaled text"), { timeout: 3_000 });
 
       expect(published.map((event) => event.type)).toEqual([
         AgentEventType.TextDelta,
         AgentEventType.AssistantMessageBoundary,
       ]);
+      expect(NodeFS.readdirSync(journalDirectory)).toEqual([]);
     } finally {
       appendChunkSpy.mockRestore();
-      appendRecoveredChunkSpy.mockRestore();
-      vi.mocked(NodeFS.existsSync).mockImplementation(() => true);
-      vi.mocked(NodeFS.statSync).mockImplementation(() => ({ isDirectory: () => true }) as ReturnType<typeof NodeFS.statSync>);
       vi.useRealTimers();
-      db.close();
+
       NodeFS.rmSync(journalDirectory, { recursive: true, force: true });
     }
   });
@@ -851,7 +834,7 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const published: AgentEvent[] = [];
     const appendSpy = vi.spyOn(ParentAssistantTextCheckpointService.prototype, "appendChunk")
       .mockImplementation(() => {
@@ -859,20 +842,20 @@ describe("AgentService narrative persistence", () => {
       });
 
     try {
-      const { providerEmitter, service, narrativeStore } = build({
+      const { providerEmitter, service, narrativeStore } = await build({
         db,
         canonicalSink,
         onProviderEvent: (event) => published.push(event),
       });
       const executionId = narrativeExecutionId(service);
-      const messages = new SqliteMessageRepo(db);
-      canonicalSink.startParentTurn({
+
+      await canonicalSink.startParentTurn({
         thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
         turnId: "turn-unsaved-narration",
         executionId,
         permissionMode: "supervised",
         providerIdentities: [],
-        projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+        userMessage: { kind: "create", content: "start", sequence: 1 },
       });
 
       providerEmitter.emit("event", {
@@ -881,6 +864,9 @@ describe("AgentService narrative persistence", () => {
         turnExecutionId: executionId,
         delta: "visible but unsaved",
       });
+      await waitForAgentServiceIngressForTest(service, THREAD_ID);
+      await vi.waitFor(() => expect(appendSpy).toHaveBeenCalled());
+      continueAgentTurnWithoutSavingForTest(service, executionId);
       providerEmitter.emit("event", {
         type: AgentEventType.AssistantMessageBoundary,
         threadId: THREAD_ID,
@@ -888,12 +874,6 @@ describe("AgentService narrative persistence", () => {
         isFinalResponse: false,
       });
       await waitForAgentServiceIngressForTest(service, THREAD_ID);
-
-      expect(published).toEqual([]);
-
-      continueAgentTurnWithoutSavingForTest(service, executionId);
-      await Promise.resolve();
-
       expect(published.map((event) => event.type)).toEqual([
         AgentEventType.TextDelta,
         AgentEventType.AssistantMessageBoundary,
@@ -907,11 +887,11 @@ describe("AgentService narrative persistence", () => {
       expect(canonicalSink.loadParentNarrativeRecovery("turn-unsaved-narration")).toEqual([]);
     } finally {
       appendSpy.mockRestore();
-      db.close();
+
     }
   });
 
-  it("retains provisional text and withholds the boundary when narration recovery fails", async () => {
+  it("retains provisional text while the visible boundary waits for narration recovery", async () => {
     const db = openMemoryDatabase();
     const now = "2026-08-24T10:00:00.000Z";
     db.prepare(
@@ -920,22 +900,22 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const published: AgentEvent[] = [];
-    const { providerEmitter, service, thoughtBulk, narrativeStore } = build({
+    const { providerEmitter, service, thoughtBulk, narrativeStore } = await build({
       db,
       canonicalSink,
       onProviderEvent: (event) => published.push(event),
     });
     const executionId = narrativeExecutionId(service);
-    const messages = new SqliteMessageRepo(db);
-    canonicalSink.startParentTurn({
+
+    await canonicalSink.startParentTurn({
       thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
       turnId: "turn-rejected-narration",
       executionId,
       permissionMode: "supervised",
       providerIdentities: [],
-      projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+      userMessage: { kind: "create", content: "start", sequence: 1 },
     });
 
     vi.useFakeTimers();
@@ -947,7 +927,9 @@ describe("AgentService narrative persistence", () => {
         delta: "provisional text",
       });
       await waitForAgentServiceIngressForTest(service, THREAD_ID);
-      vi.advanceTimersByTime(250);
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(db.query("SELECT text FROM parent_assistant_text_checkpoint_chunks WHERE execution_id = ?")
+        .all(executionId)).toEqual([{ text: "provisional text" }]));
       expect(published).toHaveLength(1);
       published.length = 0;
       db.exec(`
@@ -967,21 +949,29 @@ describe("AgentService narrative persistence", () => {
       });
       await waitForAgentServiceIngressForTest(service, THREAD_ID);
 
-      expect(published).toEqual([]);
+      expect(published).toEqual([
+        expect.objectContaining({ type: AgentEventType.AssistantMessageBoundary, isFinalResponse: false }),
+      ]);
       expect(db.prepare(`
         SELECT text FROM parent_assistant_text_checkpoint_chunks
         WHERE execution_id = ?
       `).all(executionId)).toEqual([{ text: "provisional text" }]);
       expect(canonicalSink.loadParentNarrativeRecovery("turn-rejected-narration")).toEqual([]);
-      expect(narrativeStore.recoverySnapshot(THREAD_ID)).toEqual([]);
+      expect(narrativeStore.recoverySnapshot(THREAD_ID)).toEqual([
+        expect.objectContaining({ kind: "narrationSegment", record: expect.objectContaining({ text: "provisional text" }) }),
+      ]);
       expect(thoughtBulk).not.toHaveBeenCalled();
+      db.exec("DROP TRIGGER reject_narration_recovery");
+      await vi.waitFor(() => expect(JSON.stringify(
+        canonicalSink.loadParentNarrativeRecovery("turn-rejected-narration"),
+      )).toContain("provisional text"), { timeout: 3_000 });
     } finally {
+      db.exec("DROP TRIGGER IF EXISTS reject_narration_recovery");
       vi.useRealTimers();
-      db.close();
     }
   });
 
-  it("commits narration classification before it publishes the covered text delta", async () => {
+  it("publishes narration classification before saving its covered text delta", async () => {
     const db = openMemoryDatabase();
     const now = "2026-08-24T10:00:00.000Z";
     db.prepare(
@@ -990,9 +980,9 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const observed: Array<{ type: string; persisted: string | undefined }> = [];
-    const { providerEmitter, service } = build({
+    const { providerEmitter, service } = await build({
       db,
       canonicalSink,
       onProviderEvent: (event) => {
@@ -1006,14 +996,14 @@ describe("AgentService narrative persistence", () => {
       },
     });
     const executionId = narrativeExecutionId(service);
-    const messages = new SqliteMessageRepo(db);
-    canonicalSink.startParentTurn({
+
+    await canonicalSink.startParentTurn({
       thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
       turnId: "turn-narration-before-publish",
       executionId,
       permissionMode: "supervised",
       providerIdentities: [],
-      projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+      userMessage: { kind: "create", content: "start", sequence: 1 },
     });
 
     providerEmitter.emit("event", {
@@ -1032,13 +1022,17 @@ describe("AgentService narrative persistence", () => {
 
     expect(observed.at(-1)).toMatchObject({
       type: AgentEventType.AssistantMessageBoundary,
-      persisted: expect.stringContaining("I will inspect the child."),
+      persisted: undefined,
     });
-    expect(observed.at(-1)?.persisted).not.toContain("turnExecutionId");
-    db.close();
+    await vi.waitFor(() => expect(JSON.stringify(
+      canonicalSink.loadParentNarrativeRecovery("turn-narration-before-publish"),
+    )).toContain("I will inspect the child."));
+    expect(JSON.stringify(canonicalSink.loadParentNarrativeRecovery("turn-narration-before-publish")))
+      .not.toContain("turnExecutionId");
+
   });
 
-  it("commits and publishes the private unfinished reliability prefix", () => {
+  it("commits and publishes the private unfinished reliability prefix", async () => {
     const db = openMemoryDatabase();
     const now = "2026-08-24T10:00:00.000Z";
     db.prepare(
@@ -1047,10 +1041,10 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const published: AgentEvent[] = [];
-    const messageRepo = new SqliteMessageRepo(db);
-    const { service } = build({
+    const messageRepo = new SqliteMessageRepo(db, agentStorageTestWriter(db));
+    const { service } = await build({
       db,
       canonicalSink,
       messageRepo,
@@ -1058,7 +1052,7 @@ describe("AgentService narrative persistence", () => {
     });
 
     try {
-      const stream = streamAgentReliabilityTextForTest(service, THREAD_ID);
+      const stream = await streamAgentReliabilityTextForTest(service, THREAD_ID);
 
       expect(stream).toMatchObject({
         threadId: THREAD_ID,
@@ -1071,6 +1065,8 @@ describe("AgentService narrative persistence", () => {
         delta: stream.text,
         isFinalResponse: true,
       }]);
+      await vi.waitFor(() => expect(db.query("SELECT text FROM parent_assistant_text_checkpoint_chunks WHERE execution_id = ?")
+        .all(stream.executionId)).toEqual([{ text: stream.text }]));
       expect(db.prepare(`
         SELECT first_sequence, last_sequence, text
         FROM parent_assistant_text_checkpoint_chunks
@@ -1081,12 +1077,12 @@ describe("AgentService narrative persistence", () => {
         text: stream.text,
       }]);
     } finally {
-      db.close();
+
     }
   });
 
   it("persists TaskCreate at result time keyed by the harness-assigned id", async () => {
-    const { service, providerEmitter, taskAppend } = build();
+    const { service, providerEmitter, taskAppend } = await build();
 
     // The harness assigns the task id only in the result, so the create must be
     // buffered on ToolUse and persisted on ToolResult.
@@ -1121,8 +1117,8 @@ describe("AgentService narrative persistence", () => {
     });
   });
 
-  it("does not persist a TaskCreate whose result errored", () => {
-    const { providerEmitter, taskAppend } = build();
+  it("does not persist a TaskCreate whose result errored", async () => {
+    const { providerEmitter, taskAppend } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.ToolUse,
@@ -1143,7 +1139,7 @@ describe("AgentService narrative persistence", () => {
   });
 
   it("persists a shell exit code from its tool result", async () => {
-    const { providerEmitter, toolBulk } = build();
+    const { service, providerEmitter, toolBulk } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.ToolUse,
@@ -1168,8 +1164,7 @@ describe("AgentService narrative persistence", () => {
       contextWindow: 0,
     });
 
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await waitForSavedNarrativeTurn(service);
 
     expect(toolBulk).toHaveBeenCalledOnce();
     const toolCalls: CreateToolCallRecordInput[] = toolBulk.mock.calls[0][0];
@@ -1177,7 +1172,7 @@ describe("AgentService narrative persistence", () => {
   });
 
   it("persists privileged Browser evaluation without source, result, or artifacts", async () => {
-    const { providerEmitter, toolBulk } = build();
+    const { service, providerEmitter, toolBulk } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.ToolUse,
@@ -1205,8 +1200,7 @@ describe("AgentService narrative persistence", () => {
       contextWindow: 0,
     });
 
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await waitForSavedNarrativeTurn(service);
 
     expect(toolBulk).toHaveBeenCalledOnce();
     const toolCalls: CreateToolCallRecordInput[] = toolBulk.mock.calls[0][0];
@@ -1222,7 +1216,7 @@ describe("AgentService narrative persistence", () => {
   });
 
   it("persists Browser actions as content-free narrative receipts", async () => {
-    const { providerEmitter, toolBulk } = build();
+    const { service, providerEmitter, toolBulk } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.ToolUse,
@@ -1259,8 +1253,7 @@ describe("AgentService narrative persistence", () => {
       contextWindow: 0,
     });
 
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await waitForSavedNarrativeTurn(service);
 
     expect(toolBulk).toHaveBeenCalledOnce();
     const toolCalls: CreateToolCallRecordInput[] = toolBulk.mock.calls[0][0];
@@ -1274,7 +1267,7 @@ describe("AgentService narrative persistence", () => {
   });
 
   it("applies a TaskUpdate status transition to the persisted task by harness id", async () => {
-    const { service, providerEmitter, taskUpdate } = build();
+    const { service, providerEmitter, taskUpdate } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.ToolUse,
@@ -1294,7 +1287,7 @@ describe("AgentService narrative persistence", () => {
   });
 
   it("removes the persisted task when a TaskUpdate sets status deleted", async () => {
-    const { service, providerEmitter, taskRemove, taskUpdate } = build();
+    const { service, providerEmitter, taskRemove, taskUpdate } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.ToolUse,
@@ -1310,7 +1303,7 @@ describe("AgentService narrative persistence", () => {
   });
 
   it("patches subject and activeForm via TaskUpdate without a status change", async () => {
-    const { service, providerEmitter, taskUpdate } = build();
+    const { service, providerEmitter, taskUpdate } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.ToolUse,
@@ -1330,7 +1323,7 @@ describe("AgentService narrative persistence", () => {
   });
 
   it("persists Codex update_plan tool calls for Scope hydration", async () => {
-    const { service, providerEmitter, taskUpsertGroup } = build();
+    const { service, providerEmitter, taskUpsertGroup } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.ToolUse,
@@ -1367,7 +1360,7 @@ describe("AgentService narrative persistence", () => {
   });
 
   it("segments thoughts split by tool calls with strictly-ordered sortOrder", async () => {
-    const { providerEmitter, thoughtBulk, toolBulk } = build();
+    const { service, providerEmitter, thoughtBulk, toolBulk } = await build();
 
     providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "I will ", isFinalResponse: false });
     providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "read.", isFinalResponse: false });
@@ -1388,8 +1381,7 @@ describe("AgentService narrative persistence", () => {
     });
 
     // Wait for the persistTurn promise chain to settle.
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await waitForSavedNarrativeTurn(service);
 
     expect(toolBulk).toHaveBeenCalledOnce();
     expect(thoughtBulk).toHaveBeenCalledOnce();
@@ -1399,14 +1391,16 @@ describe("AgentService narrative persistence", () => {
     expect(thoughts[0].sortOrder).toBe(0);
     expect(thoughts[1].text).toBe("Now respond.");
     expect(thoughts[1].sortOrder).toBe(2);
-    expect(thoughts.every((t) => t.messageId === MSG_ID)).toBe(true);
+    const savedMessage = messageRepoForAgentServiceTest(service).listByThread(THREAD_ID, 1).messages[0];
+    expect(savedMessage?.role).toBe("assistant");
+    expect(thoughts.every((t) => t.messageId === savedMessage?.id)).toBe(true);
 
     const toolCalls = toolBulk.mock.calls[0][0];
     expect(toolCalls[0].sortOrder).toBe(1);
   });
 
   it("records a hook execution between two tool calls with didBlock round-trip", async () => {
-    const { providerEmitter, hookBulk } = build();
+    const { service, providerEmitter, hookBulk } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.ToolUse,
@@ -1445,8 +1439,7 @@ describe("AgentService narrative persistence", () => {
       contextWindow: 0,
     });
 
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await waitForSavedNarrativeTurn(service);
 
     await vi.waitFor(() => expect(hookBulk).toHaveBeenCalledOnce());
     const hooks: CreateHookExecutionInput[] = hookBulk.mock.calls[0][0];
@@ -1457,140 +1450,12 @@ describe("AgentService narrative persistence", () => {
     expect(hooks[0].durationMs).toBe(17);
     // Tool#1 took sortOrder 0; hook 1; tool#2 2.
     expect(hooks[0].sortOrder).toBe(1);
-    expect(hooks[0].messageId).toBe(MSG_ID);
+    const savedMessage = messageRepoForAgentServiceTest(service).listByThread(THREAD_ID, 1).messages[0];
+    expect(savedMessage?.role).toBe("assistant");
+    expect(hooks[0].messageId).toBe(savedMessage?.id);
   });
 
-  it("persists late hooks (arriving after persistTurn) attached to the last message id", async () => {
-    const { service, providerEmitter, hookBulk } = build();
-
-    // The turn must have substance so TurnFinalizer materializes an assistant
-    // row to attach the late hook to (#578: empty turns leave no row). A streamed
-    // body satisfies the TurnSubstance predicate.
-    providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "Done." });
-    // Emit TurnComplete to simulate the SDK result arriving before hooks.
-    providerEmitter.emit("event", {
-      type: AgentEventType.TurnComplete,
-      threadId: THREAD_ID,
-      tokensIn: 0,
-      tokensOut: 0,
-      contextWindow: 0,
-    });
-
-    // Let persistTurn settle so lastPersistedMessageIdByThread is populated.
-    await waitForAgentServiceIngressForTest(service, THREAD_ID);
-    await vi.waitFor(() => {
-      expect(finalizerForAgentServiceTest(service).getLastPersistedMessageId(THREAD_ID)).toBe(MSG_ID);
-    });
-
-    // Now emit Stop hook events (as the SDK would after the result).
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookStarted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      hookType: "stop",
-    });
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookCompleted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      exitCode: 0,
-      durationMs: 42,
-      didBlock: false,
-    });
-    await waitForAgentServiceIngressForTest(service, THREAD_ID);
-
-    // bulkCreate should have been called twice: once for mid-turn (empty array
-    // skipped) and once for the late hook flush.
-    // persistTurn's bulkCreate call is skipped because hooks list was empty.
-    // The late hook flush calls bulkCreate with one item.
-    expect(hookBulk).toHaveBeenCalledOnce();
-    const lateHooks: CreateHookExecutionInput[] = hookBulk.mock.calls[0][0];
-    expect(lateHooks).toHaveLength(1);
-    expect(lateHooks[0].hookName).toBe("Stop");
-    expect(lateHooks[0].messageId).toBe(MSG_ID);
-    expect(lateHooks[0].phase).toBe("stop");
-    expect(lateHooks[0].durationMs).toBe(42);
-  });
-
-  it("publishes each late hook once after the terminal projection is durable", async () => {
-    const published: AgentEvent[] = [];
-    const publicationOrder: string[] = [];
-    vi.mocked(broadcast).mockReset();
-    const { service, providerEmitter, hookBulk } = build({
-      onProviderEvent: (event) => {
-        published.push(event);
-        if (event.type === AgentEventType.HookStarted || event.type === AgentEventType.HookCompleted) {
-          publicationOrder.push(`provider:${event.type}`);
-        }
-      },
-    });
-    const finalizer = finalizerForAgentServiceTest(service);
-    let completeFinalization!: () => void;
-    vi.spyOn(finalizer, "finalize").mockReturnValue(new Promise<void>((resolve) => {
-      completeFinalization = resolve;
-    }));
-    vi.spyOn(finalizer, "getLastPersistedMessageId").mockReturnValue(MSG_ID);
-    vi.mocked(broadcast).mockImplementation(((channel: string, payload: unknown) => {
-      if (channel === "agent.event"
-        && typeof payload === "object"
-        && payload !== null
-        && (payload as { type?: string }).type === AgentEventType.HookCompleted) {
-        publicationOrder.push("broadcast:hookCompleted");
-      }
-    }) as typeof broadcast);
-
-    providerEmitter.emit("event", {
-      type: AgentEventType.TurnComplete,
-      threadId: THREAD_ID,
-      tokensIn: 0,
-      tokensOut: 0,
-      contextWindow: 0,
-    });
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookStarted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      hookType: "stop",
-    });
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookCompleted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      exitCode: 0,
-      durationMs: 42,
-      didBlock: false,
-    });
-    await waitForAgentServiceIngressForTest(service, THREAD_ID);
-
-    expect(published.filter((event) => (
-      event.type === AgentEventType.HookStarted || event.type === AgentEventType.HookCompleted
-    ))).toEqual([]);
-    expect(hookBulk).not.toHaveBeenCalled();
-
-    completeFinalization();
-
-    await vi.waitFor(() => {
-      expect(hookBulk).toHaveBeenCalledOnce();
-      expect(publicationOrder).toEqual([
-        "provider:hookStarted",
-        "broadcast:hookCompleted",
-      ]);
-    });
-    expect(published.filter((event) => event.type === AgentEventType.HookCompleted)).toEqual([]);
-    const completedBroadcasts = vi.mocked(broadcast).mock.calls.filter(([channel, payload]) => (
-      channel === "agent.event"
-      && typeof payload === "object"
-      && payload !== null
-      && (payload as { type?: string }).type === AgentEventType.HookCompleted
-    ));
-    expect(completedBroadcasts).toHaveLength(1);
-    expect(completedBroadcasts[0]?.[1]).toMatchObject({
-      persistedMessageId: MSG_ID,
-      persistedHookId: expect.any(String),
-    });
-  });
-
-  it("retains an owned completed late hook when terminal finalization fails", async () => {
+  it("retains completed hook narrative when terminal finalization fails", async () => {
     const db = openMemoryDatabase();
     const now = "2026-08-24T10:00:00.000Z";
     db.prepare(
@@ -1599,34 +1464,25 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "claude", "active", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
     const published: AgentEvent[] = [];
-    const { service, providerEmitter, hookBulk, narrativeStore } = build({
+    const { service, providerEmitter, hookBulk, narrativeStore } = await build({
       db,
       canonicalSink,
       onProviderEvent: (event) => published.push(event),
     });
     const executionId = narrativeExecutionId(service);
-    const messages = new SqliteMessageRepo(db);
-    canonicalSink.startParentTurn({
+
+    await canonicalSink.startParentTurn({
       thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "claude", createdAt: now },
       turnId: "turn-late-hook-failure",
       executionId,
       permissionMode: "supervised",
       providerIdentities: [],
-      projectUserMessage: () => messages.create(THREAD_ID, "user", "start", 1),
+      userMessage: { kind: "create", content: "start", sequence: 1 },
     });
     const finalizer = finalizerForAgentServiceTest(service);
     vi.spyOn(finalizer, "finalize").mockRejectedValue(new Error("forced terminal failure"));
-
-    providerEmitter.emit("event", {
-      type: AgentEventType.TurnComplete,
-      threadId: THREAD_ID,
-      turnExecutionId: executionId,
-      tokensIn: 0,
-      tokensOut: 0,
-      contextWindow: 0,
-    });
     providerEmitter.emit("event", {
       type: AgentEventType.HookStarted,
       threadId: THREAD_ID,
@@ -1643,7 +1499,17 @@ describe("AgentService narrative persistence", () => {
       durationMs: 42,
       didBlock: false,
     });
-
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      turnExecutionId: executionId,
+      tokensIn: 0,
+      tokensOut: 0,
+      contextWindow: 0,
+    });
+    await vi.waitFor(() => expect(finalizer.finalize).toHaveBeenCalledOnce());
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     await vi.waitFor(() => {
       expect(canonicalSink.loadParentNarrativeRecovery("turn-late-hook-failure")).toEqual([
         expect.objectContaining({
@@ -1662,14 +1528,17 @@ describe("AgentService narrative persistence", () => {
     expect(hookBulk).not.toHaveBeenCalled();
     expect(published.filter((event) => (
       event.type === AgentEventType.HookStarted || event.type === AgentEventType.HookCompleted
-    ))).toEqual([]);
-    db.close();
+    ))).toEqual([
+      expect.objectContaining({ type: AgentEventType.HookStarted, hookName: "Stop", turnExecutionId: executionId }),
+      expect.objectContaining({ type: AgentEventType.HookCompleted, hookName: "Stop", turnExecutionId: executionId, durationMs: 42 }),
+    ]);
+
   });
 
   it("publishes an unmatched late completion through the normal event publisher", async () => {
     const published: AgentEvent[] = [];
     vi.mocked(broadcast).mockReset();
-    const { service, providerEmitter } = build({ onProviderEvent: (event) => published.push(event) });
+    const { service, providerEmitter } = await build({ onProviderEvent: (event) => published.push(event) });
     const finalizer = finalizerForAgentServiceTest(service);
     let completeFinalization!: () => void;
     vi.spyOn(finalizer, "finalize").mockReturnValue(new Promise<void>((resolve) => {
@@ -1706,73 +1575,21 @@ describe("AgentService narrative persistence", () => {
     expect("persistedHookId" in published.find((event) => (
       event.type === AgentEventType.HookCompleted
     ))!).toBe(false);
-    expect(vi.mocked(broadcast).mock.calls.filter(([channel, payload]) => (
-      channel === "agent.event"
-      && typeof payload === "object"
-      && payload !== null
-      && (payload as { type?: string }).type === AgentEventType.HookCompleted
-    ))).toHaveLength(0);
-  });
-
-  it("discards a late hook when the turn produced no recordable activity (no row to attach)", async () => {
-    const { providerEmitter, hookBulk } = build();
-
-    // A fully empty turn: no body, tool call, narration, or hook before finalize.
-    // The TurnSubstance predicate is false, so no assistant row is materialized
-    // (#578) and the finalizer records no last-persisted message id.
-    providerEmitter.emit("event", {
-      type: AgentEventType.TurnComplete,
-      threadId: THREAD_ID,
-      tokensIn: 0,
-      tokensOut: 0,
-      contextWindow: 0,
+    const acceptedHooks = vi.mocked(broadcast).mock.calls.flatMap(([channel, payload]) => {
+      if (channel !== "agent.canonical") return [];
+      const frame = CanonicalAgentProgressFrameSchema().parse(payload);
+      if (frame.phase !== "accepted") return [];
+      return frame.events.filter((event) => event.payload.type === "publication.recorded"
+        && event.payload.event.type === AgentEventType.HookCompleted);
     });
-
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-
-    // A late Stop hook now arrives but has nothing to attach to, so it is dropped.
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookStarted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      hookType: "stop",
-    });
-    providerEmitter.emit("event", {
-      type: AgentEventType.HookCompleted,
-      threadId: THREAD_ID,
-      hookName: "Stop",
-      exitCode: 0,
-      durationMs: 42,
-      didBlock: false,
-    });
-
-    expect(hookBulk).not.toHaveBeenCalled();
+    expect(acceptedHooks).toHaveLength(0);
   });
 
   it("marks a non-final thought as isFinalResponse when its text equals the assistant message body", async () => {
-    const { providerEmitter, thoughtBulk, service } = build();
+    const { providerEmitter, thoughtBulk, service } = await build();
     const body = "FULL USER-FACING REPLY";
-    const mockMsg: Message = {
-      id: MSG_ID,
-      thread_id: THREAD_ID,
-      role: "assistant",
-      content: body,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
-      sequence: 2,
-      attachments: null,
-      is_internal: false,
-    };
-    messageRepoForAgentServiceTest(service).listByThread = vi.fn(() => ({
-      messages: [mockMsg],
-      hasMore: false,
-    }));
-
     providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: body, isFinalResponse: false });
+    providerEmitter.emit("event", { type: AgentEventType.Message, threadId: THREAD_ID, content: body, tokens: null });
     providerEmitter.emit("event", {
       type: AgentEventType.TurnComplete,
       threadId: THREAD_ID,
@@ -1781,8 +1598,7 @@ describe("AgentService narrative persistence", () => {
       contextWindow: 0,
     });
 
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await waitForSavedNarrativeTurn(service);
 
     expect(thoughtBulk).toHaveBeenCalledOnce();
     const thoughts: CreateThoughtSegmentInput[] = thoughtBulk.mock.calls[0][0];
@@ -1792,7 +1608,7 @@ describe("AgentService narrative persistence", () => {
   });
 
   it("drops the open thought when AssistantMessageBoundary reports isFinalResponse=true", async () => {
-    const { providerEmitter, thoughtBulk } = build();
+    const { service, providerEmitter, thoughtBulk } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.TextDelta,
@@ -1812,47 +1628,16 @@ describe("AgentService narrative persistence", () => {
       contextWindow: 0,
     });
 
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await waitForSavedNarrativeTurn(service);
 
     expect(thoughtBulk).not.toHaveBeenCalled();
   });
 
   it("transfers boundary-final text to the assistant body owner when Message is absent", async () => {
-    const { providerEmitter, thoughtBulk, service } = build();
+    const { providerEmitter, thoughtBulk, service } = await build();
     const body = "Tool-free final answer";
-    const userMsg: Message = {
-      id: "user-anchor",
-      thread_id: THREAD_ID,
-      role: "user",
-      content: "go",
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
-      sequence: 1,
-      attachments: null,
-      is_internal: false,
-    };
-    const assistantMsg: Message = {
-      id: MSG_ID,
-      thread_id: THREAD_ID,
-      role: "assistant",
-      content: body,
-      tool_calls: null,
-      files_changed: null,
-      cost_usd: null,
-      tokens_used: null,
-      timestamp: new Date().toISOString(),
-      sequence: 2,
-      attachments: null,
-      is_internal: false,
-    };
-    const messageRepo = messageRepoForAgentServiceTest(service) as MessageRepo
-      & { createAssistantIdempotent: ReturnType<typeof vi.fn> };
-    messageRepo.listByThread = vi.fn(() => ({ messages: [userMsg], hasMore: false }));
-    messageRepo.createAssistantIdempotent = vi.fn(() => assistantMsg);
+    const messageRepo = messageRepoForAgentServiceTest(service);
+    const createAssistant = vi.spyOn(messageRepo, "createAssistantIdempotent");
 
     providerEmitter.emit("event", {
       type: AgentEventType.TextDelta,
@@ -1872,17 +1657,19 @@ describe("AgentService narrative persistence", () => {
       contextWindow: 0,
     });
 
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await waitForSavedNarrativeTurn(service);
 
-    expect(messageRepo.createAssistantIdempotent).toHaveBeenCalledWith(
+    expect(createAssistant).toHaveBeenCalledWith(
       expect.objectContaining({ content: body }),
     );
+    expect(messageRepo.listByThread(THREAD_ID, 1).messages).toEqual([
+      expect.objectContaining({ role: "assistant", content: body }),
+    ]);
     expect(thoughtBulk).not.toHaveBeenCalled();
   });
 
   it("persists preamble thought when AssistantMessageBoundary reports isFinalResponse=false", async () => {
-    const { providerEmitter, thoughtBulk } = build();
+    const { service, providerEmitter, thoughtBulk } = await build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.TextDelta,
@@ -1910,8 +1697,7 @@ describe("AgentService narrative persistence", () => {
       contextWindow: 0,
     });
 
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await waitForSavedNarrativeTurn(service);
 
     expect(thoughtBulk).toHaveBeenCalledOnce();
     const thoughts: CreateThoughtSegmentInput[] = thoughtBulk.mock.calls[0][0];
@@ -1930,18 +1716,18 @@ describe("AgentService narrative persistence", () => {
       "INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-1", "Parent", "main", "codex", now, now);
     const published = vi.fn();
-    const canonicalSink = new CanonicalAgentBoundary(db, published);
-    const { providerEmitter, service, narrativeStore } = build({ db, canonicalSink });
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), published);
+    const { providerEmitter, service, narrativeStore } = await build({ db, canonicalSink });
     const executionId = narrativeExecutionId(service);
-    const messages = new SqliteMessageRepo(db);
-    const userMessage = messages.create(THREAD_ID, "user", "delegate", 1);
-    canonicalSink.startParentTurn({
+    const messages = new SqliteMessageRepo(db, agentStorageTestWriter(db));
+    const userMessage = await messages.create(THREAD_ID, "user", "delegate", 1);
+    await canonicalSink.startParentTurn({
       thread: { id: THREAD_ID, workspaceId: "ws-1", providerId: "codex", createdAt: now },
       turnId: "turn-provider-parent",
       executionId,
       permissionMode: "supervised",
       providerIdentities: [],
-      projectUserMessage: () => userMessage,
+      userMessage: { kind: "existing", messageId: userMessage.id },
     });
 
     providerEmitter.emit("event", codexRuntimeEvent({
@@ -1958,6 +1744,7 @@ describe("AgentService narrative persistence", () => {
         receiverThreadIds: ["provider-child-thread"],
       },
     }));
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     await waitForAgentServiceIngressForTest(service, THREAD_ID);
     const provisional = canonicalSink.loadCodexChildDelegation(
       THREAD_ID,
@@ -2020,15 +1807,15 @@ describe("AgentService narrative persistence", () => {
       THREAD_ID,
       "toolCall:spawn-from-provider",
     )!;
-    const parentMessage = messages.create(THREAD_ID, "assistant", "parent answer", 2);
-    canonicalSink.finishParentTurn({
+    const parentMessage = await messages.create(THREAD_ID, "assistant", "parent answer", 2);
+    await canonicalSink.finishParentTurnBatched({
       threadId: THREAD_ID,
       turnId: "turn-provider-parent",
       executionId,
       providerId: "codex",
       providerIdentities: [],
       outcome: "completed",
-      projectTurn: () => ({
+      projection: {
         message: parentMessage,
         narrative: [
           {
@@ -2040,11 +1827,13 @@ describe("AgentService narrative persistence", () => {
               message_id: parentMessage.id,
               parent_tool_call_id: null,
               tool_name: "Agent",
-              tool_input: { codexCollabKind: "spawnAgent" },
+              input_summary: JSON.stringify({ codexCollabKind: "spawnAgent" }),
+              output_summary: "",
+              sort_order: 0,
               started_at: now,
               completed_at: now,
               status: "completed",
-            } as never,
+            },
           },
           {
             kind: "toolCall",
@@ -2064,15 +1853,23 @@ describe("AgentService narrative persistence", () => {
             },
           },
         ],
-      }),
+      },
     });
 
     const childRows = db.prepare(
       "SELECT payload_json FROM canonical_agent_items WHERE thread_id = ?",
     ).all(child.childThread.id) as Array<{ payload_json: string }>;
     const parentRows = db.prepare(
-      "SELECT payload_json FROM canonical_agent_items WHERE thread_id = ?",
+      "SELECT payload_json FROM canonical_agent_items WHERE thread_id = ? AND COALESCE(json_extract(payload_json, '$.projection'), '') <> 'providerRuntimeEvent'",
     ).all(THREAD_ID) as Array<{ payload_json: string }>;
+    const rawParentRows = db.query<{ thread_id: string; turn_id: string; payload_json: string }, [string]>(
+      "SELECT thread_id, turn_id, payload_json FROM canonical_agent_items WHERE thread_id = ? AND json_extract(payload_json, '$.projection') = 'providerRuntimeEvent'",
+    ).all(THREAD_ID);
+    const parentConversation = {
+      messages: messages.listByThread(THREAD_ID, 10).messages,
+      tools: new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage(parentMessage.id),
+      thoughts: new ThoughtSegmentRepo(db, agentStorageTestWriter(db)).listByMessage(parentMessage.id),
+    };
     expect(JSON.stringify(childRows)).toContain("secret-child-output");
     expect(JSON.stringify(childRows)).toContain("secret-child-message");
     expect(JSON.stringify(childRows)).toContain("secret-child-narration");
@@ -2081,10 +1878,17 @@ describe("AgentService narrative persistence", () => {
     expect(JSON.stringify(parentRows)).not.toContain("secret-child-message");
     expect(JSON.stringify(parentRows)).not.toContain("secret-child-narration");
     expect(JSON.stringify(parentRows)).not.toContain("secret child prompt");
+    for (const marker of ["secret-child-output", "secret-child-message", "secret-child-narration", "secret child prompt"]) {
+      expect(JSON.stringify(parentConversation)).not.toContain(marker);
+      expect(JSON.stringify(rawParentRows)).toContain(marker);
+    }
+    // Transport journals retain the original parent routing so worker replay can reproduce child ownership.
+    expect(rawParentRows.every((row) => row.thread_id === THREAD_ID && row.turn_id === "turn-provider-parent"))
+      .toBe(true);
     expect(canonicalSink.loadTurn(child.collaborationAction.target.turnId!)?.status).toBe("Interrupted");
   });
 
-  it("registers a nested Codex child under its emitting canonical child and binds its native turn", () => {
+  it("registers a nested Codex child under its emitting canonical child and binds its native turn", async () => {
     const db = openMemoryDatabase();
     const now = new Date().toISOString();
     db.prepare(
@@ -2093,18 +1897,18 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-nested", "Parent", "main", "codex", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
-    const { providerEmitter, service } = build({ db, canonicalSink });
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
+    const { providerEmitter, service } = await build({ db, canonicalSink });
     const executionId = narrativeExecutionId(service);
-    const messages = new SqliteMessageRepo(db);
-    const userMessage = messages.create(THREAD_ID, "user", "delegate", 1);
-    canonicalSink.startParentTurn({
+    const messages = new SqliteMessageRepo(db, agentStorageTestWriter(db));
+    const userMessage = await messages.create(THREAD_ID, "user", "delegate", 1);
+    await canonicalSink.startParentTurn({
       thread: { id: THREAD_ID, workspaceId: "ws-nested", providerId: "codex", createdAt: now },
       turnId: "turn-nested-parent",
       executionId,
       permissionMode: "supervised",
       providerIdentities: [],
-      projectUserMessage: () => userMessage,
+      userMessage: { kind: "existing", messageId: userMessage.id },
     });
 
     providerEmitter.emit("event", codexRuntimeEvent({
@@ -2129,6 +1933,7 @@ describe("AgentService narrative persistence", () => {
         parentCollaborationItemId: "root-spawn",
     } }));
 
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     const directChild = canonicalSink.loadThreadByProviderIdentity({
       providerId: "codex",
       scope: "thread",
@@ -2251,6 +2056,7 @@ describe("AgentService narrative persistence", () => {
         itemEventKey: "completed",
     } }));
 
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     const directItems = db.prepare(
       "SELECT payload_json FROM canonical_agent_items WHERE thread_id = ? AND kind = 'tool-call'",
     ).all(directChild!.id) as Array<{ payload_json: string }>;
@@ -2321,7 +2127,7 @@ describe("AgentService narrative persistence", () => {
       expect.objectContaining(nestedSpawnResult),
     );
 
-    const roster = canonicalSink.loadSubagentRoster({ owningParentThreadId: THREAD_ID });
+    const roster = canonicalSink.loadSubagentRoster({ owningParentThreadId: THREAD_ID, limit: 50 });
     const rosterRows = [...roster.active, ...roster.done];
     const nestedRow = rosterRows.find((row) => row.id === nestedChild!.id);
     expect(nestedRow).toMatchObject({
@@ -2343,7 +2149,7 @@ describe("AgentService narrative persistence", () => {
     ))).toHaveLength(0);
   });
 
-  it("persists an actionable parent failure record when child persistence fails", () => {
+  it("persists an actionable parent failure record when child persistence fails", async () => {
     const db = openMemoryDatabase();
     const now = new Date().toISOString();
     db.prepare(
@@ -2352,18 +2158,18 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-failure", "Parent", "main", "codex", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
-    const { providerEmitter, service } = build({ db, canonicalSink });
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
+    const { providerEmitter, service } = await build({ db, canonicalSink });
     const executionId = narrativeExecutionId(service);
-    const messages = new SqliteMessageRepo(db);
-    const userMessage = messages.create(THREAD_ID, "user", "delegate", 1);
-    canonicalSink.startParentTurn({
+    const messages = new SqliteMessageRepo(db, agentStorageTestWriter(db));
+    const userMessage = await messages.create(THREAD_ID, "user", "delegate", 1);
+    await canonicalSink.startParentTurn({
       thread: { id: THREAD_ID, workspaceId: "ws-failure", providerId: "codex", createdAt: now },
       turnId: "turn-provider-failure",
       executionId,
       permissionMode: "supervised",
       providerIdentities: [],
-      projectUserMessage: () => userMessage,
+      userMessage: { kind: "existing", messageId: userMessage.id },
     });
     providerEmitter.emit("event", codexRuntimeEvent({
       type: AgentEventType.ToolUse,
@@ -2373,6 +2179,7 @@ describe("AgentService narrative persistence", () => {
       toolName: "Agent",
       toolInput: {},
     }, { collaboration: { kind: "spawnAgent", receiverThreadIds: ["native-failure-child"] } }));
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     const provisional = canonicalSink.loadCodexChildDelegation(
       THREAD_ID,
       "toolCall:spawn-failure",
@@ -2386,11 +2193,8 @@ describe("AgentService narrative persistence", () => {
         nativeTurnId: "native-failure-turn",
         parentCollaborationItemId: "spawn-failure",
     } }));
-    (canonicalSink as unknown as {
-      recordCodexChildItem: (...args: unknown[]) => never;
-    }).recordCodexChildItem = vi.fn(() => {
-      throw new Error("injected child persistence failure");
-    });
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
+    db.run("CREATE TRIGGER reject_child_item BEFORE INSERT ON canonical_agent_items WHEN NEW.thread_id != 't-narr' AND NEW.kind = 'tool-call' BEGIN SELECT RAISE(ABORT, 'injected child persistence failure'); END");
     providerEmitter.emit("event", codexRuntimeEvent({
       type: AgentEventType.ToolUse,
       threadId: THREAD_ID,
@@ -2406,6 +2210,7 @@ describe("AgentService narrative persistence", () => {
         itemEventKey: "started",
     } }));
 
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     const parentFailure = db.prepare(`
       SELECT payload_json
       FROM canonical_agent_items
@@ -2423,7 +2228,7 @@ describe("AgentService narrative persistence", () => {
     ).get(provisional.childThread.id)).toEqual({ count: 0 });
   });
 
-  it("persists a parent collaboration ToolUse and acknowledges its matching ToolResult", () => {
+  it("persists a parent collaboration ToolUse and acknowledges its matching ToolResult", async () => {
     const db = openMemoryDatabase();
     const now = new Date().toISOString();
     db.prepare(
@@ -2432,18 +2237,18 @@ describe("AgentService narrative persistence", () => {
     db.prepare(
       "INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ).run(THREAD_ID, "ws-action", "Parent", "main", "codex", now, now);
-    const canonicalSink = new CanonicalAgentBoundary(db, vi.fn());
-    const { providerEmitter, service } = build({ db, canonicalSink });
+    const canonicalSink = new CanonicalAgentBoundary(db, agentStorageTestWriter(db), new CanonicalAgentWriterClient(agentStorageTestWriter(db)), vi.fn());
+    const { providerEmitter, service } = await build({ db, canonicalSink });
     const executionId = narrativeExecutionId(service);
-    const messages = new SqliteMessageRepo(db);
-    const userMessage = messages.create(THREAD_ID, "user", "delegate", 1);
-    canonicalSink.startParentTurn({
+    const messages = new SqliteMessageRepo(db, agentStorageTestWriter(db));
+    const userMessage = await messages.create(THREAD_ID, "user", "delegate", 1);
+    await canonicalSink.startParentTurn({
       thread: { id: THREAD_ID, workspaceId: "ws-action", providerId: "codex", createdAt: now },
       turnId: "turn-provider-action",
       executionId,
       permissionMode: "supervised",
       providerIdentities: [],
-      projectUserMessage: () => userMessage,
+      userMessage: { kind: "existing", messageId: userMessage.id },
     });
 
     providerEmitter.emit("event", codexRuntimeEvent({
@@ -2470,7 +2275,8 @@ describe("AgentService narrative persistence", () => {
         agentName: "Mendel",
         receiverThreadIds: ["native-action-child"],
     } }));
-    expect(canonicalSink.loadSubagentRoster({ owningParentThreadId: THREAD_ID }).active[0]?.identity)
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
+    expect(canonicalSink.loadSubagentRoster({ owningParentThreadId: THREAD_ID, limit: 50 }).active[0]?.identity)
       .toBe("Mendel");
     providerEmitter.emit("event", codexRuntimeEvent({
       type: AgentEventType.TurnStarted,
@@ -2494,6 +2300,7 @@ describe("AgentService narrative persistence", () => {
         prompt: "Inspect this case.",
     } }));
 
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     const dispatched = db.prepare(`
       SELECT id, source_item_id, status, target_turn_id
       FROM canonical_collaboration_actions
@@ -2517,7 +2324,6 @@ describe("AgentService narrative persistence", () => {
       threadId: THREAD_ID,
       turnExecutionId: executionId,
       toolCallId: "parent-message-child",
-      toolName: "sendInput",
       toolInput: {},
       output: "delivered",
       isError: false,
@@ -2526,172 +2332,79 @@ describe("AgentService narrative persistence", () => {
         receiverThreadIds: ["native-action-child"],
     } }));
 
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     expect(db.prepare("SELECT status FROM canonical_collaboration_actions WHERE id = ?")
       .get(dispatched!.id)).toEqual({ status: "Acknowledged" });
     expect(db.prepare("SELECT target_turn_id FROM canonical_collaboration_actions WHERE id = ?")
       .get(dispatched!.id)).toEqual({ target_turn_id: dispatched!.target_turn_id });
   });
 
-  it("rejects provider continuation evidence targeting another canonical thread", () => {
-    const { service: _service, canonicalSink } = build();
-    const sink = canonicalSink as unknown as {
-      loadThreadByProviderIdentity: ReturnType<typeof vi.fn>;
-      loadTurnByProviderIdentity: ReturnType<typeof vi.fn>;
-      loadCollaborationActionBySourceProviderIdentity: ReturnType<typeof vi.fn>;
-      loadExecutionIdForTurn: ReturnType<typeof vi.fn>;
-      loadThread: ReturnType<typeof vi.fn>;
-      startProviderContinuation: ReturnType<typeof vi.fn>;
-    };
-    sink.loadThreadByProviderIdentity = vi.fn((identity: { value: string }) => (
-      identity.value === "native-source-child"
-        ? { id: "source-child" }
-        : { id: "another-parent" }
-    ));
-    sink.loadTurnByProviderIdentity = vi.fn(() => ({
-      id: "source-child-turn",
-      threadId: "source-child",
-    }));
-    sink.loadCollaborationActionBySourceProviderIdentity = vi.fn();
-    sink.loadExecutionIdForTurn = vi.fn(() => "00000000-0000-4000-8000-000000000098");
-    sink.loadThread = vi.fn(() => ({ id: THREAD_ID }));
-    sink.startProviderContinuation = vi.fn();
-    sink.recordCodexChildRoutingDiagnostic = vi.fn(() => true);
-
-    const projection = new CodexCollaborationEventAdapter(canonicalSink).project({
-      providerId: "codex",
-      sourceKind: "provider-runtime",
-      event: {
-        type: AgentEventType.TurnStarted,
-        threadId: THREAD_ID,
-        turnExecutionId: "00000000-0000-4000-8000-000000000099",
-      },
-      runtimeExtension: {
-        providerId: "codex",
-        kind: "codex-collaboration",
-        continuation: {
-        sourceNativeThreadId: "native-source-child",
-        sourceNativeTurnId: "native-source-turn",
-        sourceNativeItemId: "native-return-parent",
-        targetNativeThreadId: "native-wrong-parent",
-        },
-      },
-    });
-
-    expect(projection.status).toBe("rejected");
-    expect(sink.loadCollaborationActionBySourceProviderIdentity).toHaveBeenCalled();
-    expect(sink.startProviderContinuation).not.toHaveBeenCalled();
-    expect(sink.recordCodexChildRoutingDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
-      reason: "continuation-evidence-not-found",
-      threadId: "source-child",
-      executionId: "00000000-0000-4000-8000-000000000098",
+  it("rejects unsupported provider continuation evidence without starting a turn", async () => {
+    const { service, canonicalSink, db } = await build();
+    const executionId = narrativeExecutionId(service);
+    const startParentTurn = vi.spyOn(canonicalSink, "startParentTurn");
+    const projection = await commitNativeProjection(canonicalSink, db, executionId, 1, codexRuntimeEvent({
+      type: AgentEventType.TurnStarted, threadId: THREAD_ID,
+      turnExecutionId: "00000000-0000-4000-8000-000000000099",
+    }, { continuation: {
+      sourceNativeThreadId: "native-source-child", sourceNativeTurnId: "native-source-turn",
+      sourceNativeItemId: "native-return-parent", targetNativeThreadId: "native-wrong-parent",
+    } }));
+    expect(projection.providerProjection.events).toEqual([]);
+    expect(startParentTurn).not.toHaveBeenCalled();
+    expect(routingDiagnostics(db)).toContainEqual(expect.objectContaining({
+      projection: "codexChildRoutingFailure", reason: "continuation-evidence-not-found",
     }));
   });
 
-  it("records a failure signal when attributed child routing lacks parent execution context", () => {
-    const { service: _service, canonicalSink } = build();
-    const diagnostic = vi.fn(() => true);
-    (canonicalSink as unknown as {
-      recordCodexChildRoutingDiagnostic: typeof diagnostic;
-    }).recordCodexChildRoutingDiagnostic = diagnostic;
-
-    const projection = new CodexCollaborationEventAdapter(canonicalSink).project({
-      providerId: "codex",
-      sourceKind: "provider-runtime",
-      event: {
-        type: AgentEventType.ToolUse,
-        threadId: THREAD_ID,
-        toolCallId: "child-failure",
-        toolName: "Read",
-        toolInput: {},
-      },
-      runtimeExtension: {
-        providerId: "codex",
-        kind: "codex-collaboration",
-        child: {
-        nativeThreadId: "child-native",
-        nativeTurnId: "child-turn",
-        parentCollaborationItemId: "missing-parent-item",
-        },
-      },
-    });
-
-    expect(projection.status).toBe("rejected");
-    expect(diagnostic).toHaveBeenCalledWith(expect.objectContaining({
-      reason: "missing-parent-execution",
-      threadId: THREAD_ID,
+  it("records a failure signal when attributed child routing lacks a delegation", async () => {
+    const { service, canonicalSink, db } = await build();
+    const projection = await commitNativeProjection(canonicalSink, db, narrativeExecutionId(service), 1, codexRuntimeEvent({
+      type: AgentEventType.ToolUse, threadId: THREAD_ID, toolCallId: "child-failure", toolName: "Read", toolInput: {},
+    }, { child: { nativeThreadId: "child-native", nativeTurnId: "child-turn", parentCollaborationItemId: "missing-parent-item" } }));
+    expect(projection.providerProjection.events).toEqual([]);
+    expect(routingDiagnostics(db)).toContainEqual(expect.objectContaining({
+      projection: "codexChildRoutingFailure", reason: "delegation-not-found",
     }));
   });
 
-  it("consumes every child projection kind before parent narrative persistence", () => {
-    const { service: _service, canonicalSink, thoughtBulk, hookBulk, toolBulk } = build();
-    (canonicalSink as unknown as {
-      recordCodexChildRoutingDiagnostic: () => boolean;
-    }).recordCodexChildRoutingDiagnostic = vi.fn(() => true);
-    const adapter = new CodexCollaborationEventAdapter(canonicalSink);
-    const evidence = {
-      nativeThreadId: "child-boundary-thread",
-      nativeTurnId: "child-boundary-turn",
-      parentCollaborationItemId: "boundary-parent-item",
-    };
-    const events = [
-      { type: AgentEventType.Message, content: "child message", tokens: null },
-      { type: AgentEventType.TextDelta, delta: "child reasoning", isFinalResponse: false },
-      { type: AgentEventType.ToolUse, toolCallId: "child-boundary-tool", toolName: "Read", toolInput: {} },
-      { type: AgentEventType.ToolResult, toolCallId: "child-boundary-tool", output: "child result", isError: false },
-      { type: AgentEventType.Error, error: "child error" },
-      { type: AgentEventType.TurnComplete, reason: "completed", costUsd: null, tokensIn: 0, tokensOut: 0 },
+  it("consumes every child projection kind before parent narrative persistence", async () => {
+    const { service, canonicalSink, db, thoughtBulk, hookBulk, toolBulk } = await build();
+    const evidence = { nativeThreadId: "child-boundary-thread", nativeTurnId: "child-boundary-turn", parentCollaborationItemId: "boundary-parent-item" };
+    const events: AgentEvent[] = [
+      { type: AgentEventType.Message, threadId: THREAD_ID, content: "child message", tokens: null },
+      { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "child reasoning", isFinalResponse: false },
+      { type: AgentEventType.ToolUse, threadId: THREAD_ID, toolCallId: "child-boundary-tool", toolName: "Read", toolInput: {} },
+      { type: AgentEventType.ToolResult, threadId: THREAD_ID, toolCallId: "child-boundary-tool", output: "child result", isError: false },
+      { type: AgentEventType.Error, threadId: THREAD_ID, error: "child error" },
+      { type: AgentEventType.TurnComplete, threadId: THREAD_ID, reason: "completed", costUsd: null, tokensIn: 0, tokensOut: 0 },
     ];
-    for (const event of events) {
-      expect(adapter.project({
-        providerId: "codex",
-        sourceKind: "provider-runtime",
-        event: { threadId: THREAD_ID, ...event } as AgentEvent,
-        runtimeExtension: {
-          providerId: "codex",
-          kind: "codex-collaboration",
-          child: evidence,
-        },
-      }).status).toBe("rejected");
+    for (let index = 0; index < events.length; index += 1) {
+      const projection = await commitNativeProjection(canonicalSink, db, narrativeExecutionId(service), index + 1,
+        codexRuntimeEvent(events[index], { child: evidence }));
+      expect(projection.providerProjection.events).toEqual([]);
     }
     expect(toolBulk).not.toHaveBeenCalled();
     expect(thoughtBulk).not.toHaveBeenCalled();
     expect(hookBulk).not.toHaveBeenCalled();
+    expect(new SqliteMessageRepo(db, agentStorageTestWriter(db)).listByThread(THREAD_ID, 10).messages
+      .some((message) => message.content === "child message")).toBe(false);
   });
 
-  it("fails closed when an attributed child event has no canonical owner", () => {
-    const { service: _service, canonicalSink } = build();
-    const diagnostic = vi.fn(() => false);
-    (canonicalSink as unknown as {
-      recordCodexChildRoutingDiagnostic: typeof diagnostic;
-    }).recordCodexChildRoutingDiagnostic = diagnostic;
-    const adapter = new CodexCollaborationEventAdapter(canonicalSink);
-
-    expect(adapter.project({
-      providerId: "codex",
-      sourceKind: "provider-runtime",
-      event: {
-        type: AgentEventType.ToolUse,
-        threadId: THREAD_ID,
-        toolCallId: "child-unowned",
-        toolName: "Read",
-        toolInput: {},
-      },
-      runtimeExtension: {
-        providerId: "codex",
-        kind: "codex-collaboration",
-        child: {
-        nativeThreadId: "child-unowned-thread",
-        nativeTurnId: "child-unowned-turn",
-        parentCollaborationItemId: "missing-parent-item",
-        },
-      },
-    }).status).toBe("rejected");
-    expect(diagnostic).toHaveBeenCalledTimes(1);
+  it("fails closed when an attributed child event has no canonical owner and its diagnostic cannot save", async () => {
+    const { service, canonicalSink, db } = await build();
+    db.run("CREATE TRIGGER reject_child_diagnostic BEFORE INSERT ON canonical_agent_items WHEN NEW.kind = 'error' BEGIN SELECT RAISE(ABORT, 'child diagnostic failed'); END");
+    await expect(commitNativeProjection(canonicalSink, db, narrativeExecutionId(service), 1, codexRuntimeEvent({
+      type: AgentEventType.ToolUse, threadId: THREAD_ID, toolCallId: "child-unowned", toolName: "Read", toolInput: {},
+    }, { child: { nativeThreadId: "child-unowned-thread", nativeTurnId: "child-unowned-turn", parentCollaborationItemId: "missing-parent-item" } })))
+      .rejects.toThrow("child diagnostic failed");
+    expect(routingDiagnostics(db)).toEqual([]);
+    expect(db.query("SELECT status FROM canonical_agent_turns WHERE id = 'fixture-narrative-turn'").get()).toEqual({ status: "Running" });
   });
 
   it("withholds terminal provider publication when final durability fails", async () => {
     const published: AgentEvent[] = [];
-    const { service, providerEmitter } = build({ onProviderEvent: (event) => published.push(event) });
+    const { service, providerEmitter } = await build({ onProviderEvent: (event) => published.push(event) });
     vi.spyOn(finalizerForAgentServiceTest(service), "finalize")
       .mockRejectedValue(new Error("terminal write failed"));
 

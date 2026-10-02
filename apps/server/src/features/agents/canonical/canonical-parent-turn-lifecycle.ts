@@ -10,10 +10,8 @@ import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
 import type {
   AgentThread,
   AgentTurn,
-  CollaborationAction,
   Message,
   ParentNarrativeRecoveryItem,
-  ProviderIdentity,
 } from "@mcode/contracts";
 import type {
   ParentTurnFinishInput as CanonicalParentTurnFinishInput,
@@ -25,9 +23,7 @@ import type {
   CanonicalAgentCheckpoint,
   CanonicalAgentCommitInput,
   CanonicalAgentCommitResult,
-  CanonicalAgentEventDraft,
-  CanonicalProviderContinuationInput,
-} from "./canonical-agent-boundary.js";
+  CanonicalAgentEventDraft,} from "./canonical-agent-boundary.js";
 
 /** Canonical alias for the parent-turn start durability input. */
 export type CanonicalParentTurnStartInput = ParentTurnStartInput;
@@ -50,18 +46,6 @@ export interface CanonicalParentTurnLifecycleOperations {
   ): CanonicalAgentEventDraft[];
   cacheExecution(executionId: string, turnId: string): void;
   loadTurn(turnId: string): AgentTurn | null;
-  loadCollaborationAction(actionId: string): CollaborationAction | null;
-  uniqueProviderIdentities(identities: readonly ProviderIdentity[]): ProviderIdentity[];
-  executionIdForTurn(turnId: string): string;
-  actionAcknowledgementDraft(
-    executionId: string,
-    thread: AgentThread,
-    action: CollaborationAction,
-  ): CanonicalAgentEventDraft;
-  commitContinuation(input: {
-    source: CanonicalAgentCommitInput;
-    parent: CanonicalAgentCommitInput;
-  }): { source: CanonicalAgentCommitResult; parent: CanonicalAgentCommitResult };
   loadCheckpoint(executionId: string): CanonicalAgentCheckpoint | null;
   loadTurnByExecution(executionId: string): AgentTurn | null;
   loadThread(threadId: string): AgentThread | null;
@@ -138,7 +122,7 @@ export class CanonicalParentTurnLifecycle {
   interrupt(input: CanonicalParentTurnInterruptionInput): CanonicalAgentCommitResult {
     const context = this.unfinishedContext(input.executionId);
     this.assertStagedAssistant(input.stagedAssistant, context.checkpoint, input.executionId);
-    const endedAt = new Date().toISOString();
+    const endedAt = input.endedAt ?? new Date().toISOString();
     const recoveryProjection = this.recoveryProjection(
       input.stagedAssistant ?? this.operations.loadTerminalProjection(context.checkpoint.turnId).message,
       input.executionId,
@@ -187,140 +171,6 @@ export class CanonicalParentTurnLifecycle {
         throw new Error(`Interrupted narrative was not committed: ${context.checkpoint.executionId}`);
       }
     }
-  }
-
-  /** Starts a parent execution that a child provider explicitly continued. */
-  continue(input: CanonicalProviderContinuationInput): AgentTurn {
-    const context = this.continuationContext(input);
-    const existing = this.operations.loadTurnByExecution(input.executionId);
-    if (existing) return existing;
-    const started = this.continuationTurn(input, context);
-    const committed = this.operations.commitContinuation(this.continuationCommit(input, context, started));
-    const duplicate = committed.parent.outcome === "duplicate" ? this.operations.loadTurn(input.turnId) : null;
-    if (duplicate) return duplicate;
-    this.operations.cacheExecution(input.executionId, input.turnId);
-    const persisted = this.operations.loadTurn(input.turnId);
-    if (!persisted) throw new Error(`Provider continuation turn was not persisted: ${input.turnId}`);
-    return persisted;
-  }
-
-  private continuationContext(input: CanonicalProviderContinuationInput): {
-    parentThread: AgentThread;
-    sourceThread: AgentThread;
-    action: CollaborationAction;
-    sourceIdentities: ProviderIdentity[];
-    startedAt: string;
-  } {
-    const parentThread = this.operations.loadThread(input.parentThreadId);
-    if (!parentThread) throw new Error(`Canonical parent thread not found: ${input.parentThreadId}`);
-    const action = this.operations.loadCollaborationAction(input.triggerActionId);
-    if (!action || action.target.threadId !== parentThread.id) {
-      throw new Error(`Provider continuation action does not target parent: ${input.triggerActionId}`);
-    }
-    const sourceTurn = this.operations.loadTurn(action.source.turnId);
-    if (!sourceTurn || sourceTurn.threadId !== action.source.threadId) {
-      throw new Error(`Provider continuation source turn is not canonical: ${action.source.turnId}`);
-    }
-    const sourceThread = this.operations.loadThread(action.source.threadId);
-    if (!sourceThread) throw new Error(`Provider continuation source thread not found: ${action.source.threadId}`);
-    const sourceIdentities = input.providerIdentities.length > 0
-      ? this.operations.uniqueProviderIdentities(input.providerIdentities)
-      : parentThread.providerIdentities;
-    return { parentThread, sourceThread, action, sourceIdentities, startedAt: new Date().toISOString() };
-  }
-
-  private continuationTurn(
-    input: CanonicalProviderContinuationInput,
-    context: { action: CollaborationAction; parentThread: AgentThread; sourceIdentities: ProviderIdentity[]; startedAt: string },
-  ): AgentTurn {
-    return {
-      id: input.turnId,
-      threadId: context.parentThread.id,
-      status: "Pending",
-      trigger: {
-        kind: "child",
-        sourceThreadId: context.action.source.threadId,
-        sourceTurnId: context.action.source.turnId,
-        sourceItemId: context.action.source.itemId,
-      },
-      permissionMode: input.permissionMode,
-      approvalReviewMode: "manual",
-      approvalReviewReason: "manual-requested",
-      providerIdentities: context.sourceIdentities,
-      startedAt: null,
-      endedAt: null,
-      createdAt: context.startedAt,
-      updatedAt: context.startedAt,
-    };
-  }
-
-  private continuationCommit(
-    input: CanonicalProviderContinuationInput,
-    context: {
-      parentThread: AgentThread;
-      sourceThread: AgentThread;
-      action: CollaborationAction;
-      sourceIdentities: ProviderIdentity[];
-      startedAt: string;
-    },
-    turn: AgentTurn,
-  ): { source: CanonicalAgentCommitInput; parent: CanonicalAgentCommitInput } {
-    const acknowledgedAction: CollaborationAction = {
-      ...context.action,
-      target: { threadId: context.parentThread.id, turnId: turn.id },
-      status: "Acknowledged",
-      updatedAt: context.startedAt,
-    };
-    const parent = {
-      ...context.parentThread,
-      activityState: "Active" as const,
-      providerIdentities: context.sourceIdentities,
-      updatedAt: context.startedAt,
-    };
-    const routing = { threadId: parent.id, turnId: turn.id, executionId: input.executionId };
-    return {
-      source: {
-        threadId: context.sourceThread.id,
-        turnId: context.action.source.turnId,
-        executionId: this.operations.executionIdForTurn(context.action.source.turnId),
-        phase: "running",
-        events: [this.operations.actionAcknowledgementDraft(
-          this.operations.executionIdForTurn(context.action.source.turnId),
-          context.sourceThread,
-          acknowledgedAction,
-        )],
-      },
-      parent: {
-        threadId: parent.id,
-        turnId: turn.id,
-        executionId: input.executionId,
-        phase: "running",
-        replayGuard: "execution-started",
-        events: [
-          {
-            eventId: `${input.executionId}:thread`,
-            routing: { threadId: parent.id, executionId: input.executionId },
-            sourceProviderId: parent.providerId,
-            sourceIdentities: context.sourceIdentities,
-            payload: { type: "thread.recorded", thread: parent },
-          },
-          {
-            eventId: `${input.executionId}:turn-created`,
-            routing,
-            sourceProviderId: parent.providerId,
-            sourceIdentities: context.sourceIdentities,
-            payload: { type: "turn.created", turn },
-          },
-          {
-            eventId: `${input.executionId}:turn-started`,
-            routing,
-            sourceProviderId: parent.providerId,
-            sourceIdentities: context.sourceIdentities,
-            payload: { type: "turn.started", startedAt: context.startedAt },
-          },
-        ],
-      },
-    };
   }
 
   private unfinishedContext(executionId: string): {

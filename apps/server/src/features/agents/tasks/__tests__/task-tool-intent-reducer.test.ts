@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
+import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -20,6 +21,7 @@ import {
 
 describe("TaskToolIntentReducer", () => {
   let db: Database;
+  let setup: Database;
   let tasks: TaskRepo;
   let narrative: NarrativeStore;
   let service: TaskPersistenceService;
@@ -28,19 +30,20 @@ describe("TaskToolIntentReducer", () => {
   let execution: ExecutionIdentity;
   let reducer: TaskToolIntentReducer;
 
-  beforeEach(() => {
-    db = openMemoryDatabase();
-    const workspace = new WorkspaceRepo(db).create("task-tool-reducer", `${process.cwd()}#task-tool-reducer`, false);
-    const threads = new ThreadRepo(db);
-    liveThread = threads.create(workspace.id, "live", "direct", "main").id;
-    intentThread = threads.create(workspace.id, "intents", "direct", "main").id;
-    tasks = new TaskRepo(db);
+  beforeEach(async () => {
+    setup = openAgentStorageTestDatabase();
+    db = openReadOnlyDatabase(setup.filename);
+    const writer = agentStorageTestWriter(setup);
+    const workspace = await new WorkspaceRepo(db, writer).create("task-tool-reducer", `${process.cwd()}#task-tool-reducer`, false);
+    const threads = new ThreadRepo(db, writer);
+    liveThread = (await threads.create(workspace.id, "live", "direct", "main")).id;
+    intentThread = (await threads.create(workspace.id, "intents", "direct", "main")).id;
+    tasks = new TaskRepo(db, writer);
     narrative = new NarrativeStore(
-      new MessageRepo(db),
-      new ToolCallRecordRepo(db),
-      new ThoughtSegmentRepo(db),
-      new HookExecutionRepo(db),
-      db,
+      new MessageRepo(db, writer),
+      new ToolCallRecordRepo(db, writer),
+      new ThoughtSegmentRepo(db, writer),
+      new HookExecutionRepo(db, writer),
     );
     narrative.beginTurn(liveThread);
     service = new TaskPersistenceService(tasks, narrative);
@@ -48,36 +51,36 @@ describe("TaskToolIntentReducer", () => {
     reducer = new TaskToolIntentReducer(execution);
   });
 
-  afterEach(() => db.close());
+  afterEach(async () => { db.close(true); await closeAgentStorageTestDatabases(); });
 
-  function applyToIntentThread(intents: readonly TaskToolWriteIntent[]): void {
+  async function applyToIntentThread(intents: readonly TaskToolWriteIntent[]): Promise<void> {
     for (const intent of intents) {
       switch (intent.kind) {
-        case "upsert-group": tasks.upsertGroup(intentThread, intent.group, intent.tasks); break;
-        case "append-task": tasks.appendTask(intentThread, intent.task); break;
-        case "update-task": tasks.updateTask(intentThread, intent.id, intent.patch, intent.group); break;
-        case "remove-task": tasks.removeTask(intentThread, intent.id, intent.group); break;
+        case "upsert-group": await tasks.upsertGroup(intentThread, intent.group, intent.tasks); break;
+        case "append-task": await tasks.appendTask(intentThread, intent.task); break;
+        case "update-task": await tasks.updateTask(intentThread, intent.id, intent.patch, intent.group); break;
+        case "remove-task": await tasks.removeTask(intentThread, intent.id, intent.group); break;
       }
     }
   }
 
-  function compare(command: TaskToolCommand, applyLive: () => void): TaskToolWriteIntent[] {
+  async function compare(command: TaskToolCommand, applyLive: () => Promise<void>): Promise<TaskToolWriteIntent[]> {
     const reduction = reducer.reduce(execution, command);
     expect(reduction.kind).toBe("intents");
     if (reduction.kind !== "intents") throw new Error("Expected task intents");
     expect(structuredClone(reduction)).toEqual(reduction);
-    applyToIntentThread(reduction.intents);
-    applyLive();
+    await applyToIntentThread(reduction.intents);
+    await applyLive();
     expect(tasks.get(liveThread)).toEqual(tasks.get(intentThread));
     return reduction.intents;
   }
 
-  function toolUse(
+  async function toolUse(
     toolCallId: string,
     toolName: string,
     toolInput: Record<string, unknown>,
     parentToolCallId?: string,
-  ): TaskToolWriteIntent[] {
+  ): Promise<TaskToolWriteIntent[]> {
     const attributedParent = narrative.bufferToolCall(liveThread, {
       toolCallId, toolName, toolInput, parentToolCallId,
     });
@@ -88,15 +91,15 @@ describe("TaskToolIntentReducer", () => {
     }, () => service.onToolUse(liveThread, { toolName, toolInput, parentToolCallId: attributedParent }));
   }
 
-  function toolResult(toolCallId: string, output: string, isError = false): TaskToolWriteIntent[] {
+  async function toolResult(toolCallId: string, output: string, isError = false): Promise<TaskToolWriteIntent[]> {
     return compare({
       kind: "tool-result", toolCallId, output, isError,
       bufferedCalls: narrative.getBufferedToolCalls(liveThread),
     }, () => service.onToolResult(liveThread, toolCallId, output, isError));
   }
 
-  it("matches live rows for grouped TodoWrite, update_plan, and status normalization", () => {
-    expect(toolUse("todos-main", "TodoWrite", {
+  it("matches live rows for grouped TodoWrite, update_plan, and status normalization", async () => {
+    expect(await toolUse("todos-main", "TodoWrite", {
       todos: [
         { content: "main pending", status: "unknown" },
         { content: "main active", status: "in-progress" },
@@ -110,15 +113,15 @@ describe("TaskToolIntentReducer", () => {
       ],
     }]);
 
-    toolUse("agent", "Agent", { description: "  Build sub feature  " });
-    expect(toolUse("todos-sub", "TodoWrite", {
+    await toolUse("agent", "Agent", { description: "  Build sub feature  " });
+    expect(await toolUse("todos-sub", "TodoWrite", {
       todos: [{ content: "sub cancelled", status: "canceled" }],
     }, "agent")).toEqual([{
       kind: "upsert-group", group: "Build sub feature",
       tasks: [{ content: "sub cancelled", status: "cancelled", group: "Build sub feature" }],
     }]);
     narrative.clearAgentStackOnMessage(liveThread);
-    expect(toolUse("plan", "update_plan", {
+    expect(await toolUse("plan", "update_plan", {
       tasks: ["first step", { title: "second step", status: "inProgress" }, { description: " " }],
     })).toEqual([{
       kind: "upsert-group", group: "Tasks",
@@ -134,19 +137,19 @@ describe("TaskToolIntentReducer", () => {
     ]);
   });
 
-  it("matches live rows for TaskCreate result IDs, updates, and deletion", () => {
-    toolUse("agent", "Agent", { prompt: "  Inspect files  " });
-    expect(toolUse("create", "TaskCreate", {
+  it("matches live rows for TaskCreate result IDs, updates, and deletion", async () => {
+    await toolUse("agent", "Agent", { prompt: "  Inspect files  " });
+    expect(await toolUse("create", "TaskCreate", {
       subject: "  Write tests  ", description: "  Cover edge cases  ", activeForm: "  Writing tests  ",
     }, "agent")).toEqual([]);
-    expect(toolResult("create", "Created task #27 successfully")).toEqual([{
+    expect(await toolResult("create", "Created task #27 successfully")).toEqual([{
       kind: "append-task",
       task: {
         id: "27", content: "Write tests - Cover edge cases", status: "pending",
         activeForm: "Writing tests", group: "Inspect files",
       },
     }]);
-    expect(toolUse("update", "TaskUpdate", {
+    expect(await toolUse("update", "TaskUpdate", {
       taskId: 27, status: "inProgress", subject: "  Test updates  ", activeForm: "  Checking  ",
     }, "agent")).toEqual([{
       kind: "update-task", id: "27", group: "Inspect files",
@@ -156,19 +159,19 @@ describe("TaskToolIntentReducer", () => {
       id: "27", content: "Test updates", status: "in_progress",
       activeForm: "Checking", group: "Inspect files",
     }]);
-    expect(toolUse("delete", "TaskUpdate", { taskId: "27", status: "deleted" }, "agent"))
+    expect(await toolUse("delete", "TaskUpdate", { taskId: "27", status: "deleted" }, "agent"))
       .toEqual([{ kind: "remove-task", id: "27", group: "Inspect files" }]);
     expect(tasks.get(liveThread)).toEqual([]);
   });
 
-  it("emits no writes for malformed and unsuccessful tool effects", () => {
-    expect(toolUse("bad-todos", "TodoWrite", { todos: [null, { content: " " }] })).toEqual([]);
-    expect(toolUse("bad-plan", "update_plan", { plan: [], tasks: [{ title: "ignored" }] })).toEqual([]);
-    expect(toolUse("bad-update", "TaskUpdate", { taskId: "", status: "completed" })).toEqual([]);
-    toolUse("create", "TaskCreate", { title: "Valid title" });
-    expect(toolResult("create", "Created task #1", true)).toEqual([]);
-    expect(toolResult("create", "Created task without an id")).toEqual([]);
-    expect(toolResult("missing", "Created task #1")).toEqual([]);
+  it("emits no writes for malformed and unsuccessful tool effects", async () => {
+    expect(await toolUse("bad-todos", "TodoWrite", { todos: [null, { content: " " }] })).toEqual([]);
+    expect(await toolUse("bad-plan", "update_plan", { plan: [], tasks: [{ title: "ignored" }] })).toEqual([]);
+    expect(await toolUse("bad-update", "TaskUpdate", { taskId: "", status: "completed" })).toEqual([]);
+    await toolUse("create", "TaskCreate", { title: "Valid title" });
+    expect(await toolResult("create", "Created task #1", true)).toEqual([]);
+    expect(await toolResult("create", "Created task without an id")).toEqual([]);
+    expect(await toolResult("missing", "Created task #1")).toEqual([]);
     expect(tasks.get(liveThread)).toBeNull();
   });
 
@@ -187,25 +190,25 @@ describe("TaskToolIntentReducer", () => {
     });
   });
 
-  it("keeps colliding harness IDs scoped to their agent group", () => {
-    toolUse("agent-a", "Agent", { description: "Agent A" });
-    toolUse("agent-b", "Agent", { description: "Agent B" });
-    toolUse("create-a", "TaskCreate", { subject: "A task" }, "agent-a");
-    toolUse("create-b", "TaskCreate", { subject: "B task" }, "agent-b");
-    toolResult("create-a", "Created #1");
-    toolResult("create-b", "Created #1");
-    toolUse("ambiguous", "TaskUpdate", { taskId: "1", status: "completed" }, "missing-parent");
+  it("keeps colliding harness IDs scoped to their agent group", async () => {
+    await toolUse("agent-a", "Agent", { description: "Agent A" });
+    await toolUse("agent-b", "Agent", { description: "Agent B" });
+    await toolUse("create-a", "TaskCreate", { subject: "A task" }, "agent-a");
+    await toolUse("create-b", "TaskCreate", { subject: "B task" }, "agent-b");
+    await toolResult("create-a", "Created #1");
+    await toolResult("create-b", "Created #1");
+    await toolUse("ambiguous", "TaskUpdate", { taskId: "1", status: "completed" }, "missing-parent");
     expect(tasks.get(liveThread)).toEqual([
       { id: "1", content: "A task", status: "pending", group: "Agent A" },
       { id: "1", content: "B task", status: "pending", group: "Agent B" },
     ]);
-    toolUse("scoped", "TaskUpdate", { taskId: "1", status: "completed" }, "agent-a");
+    await toolUse("scoped", "TaskUpdate", { taskId: "1", status: "completed" }, "agent-a");
     expect(tasks.get(liveThread)).toEqual([
       { id: "1", content: "A task", status: "completed", group: "Agent A" },
       { id: "1", content: "B task", status: "pending", group: "Agent B" },
     ]);
-    toolUse("remove-b", "TaskUpdate", { taskId: "1", status: "deleted" }, "agent-b");
-    toolUse("sole-match", "TaskUpdate", { taskId: "1", status: "cancelled" }, "missing-parent");
+    await toolUse("remove-b", "TaskUpdate", { taskId: "1", status: "deleted" }, "agent-b");
+    await toolUse("sole-match", "TaskUpdate", { taskId: "1", status: "cancelled" }, "missing-parent");
     expect(tasks.get(liveThread)).toEqual([
       { id: "1", content: "A task", status: "cancelled", group: "Agent A" },
     ]);

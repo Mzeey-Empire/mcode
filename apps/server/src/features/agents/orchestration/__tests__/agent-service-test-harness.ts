@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { agentStorageTestWriter, registerAgentStorageTestProducer } from "../../__tests__/agent-storage-fixture.js";
 import { TurnDiffService } from "../../turns/turn-diff-service.js";
 import { TurnDiffRepo } from "../../turns/persistence/turn-diff-repo.js";
 import { container, Lifecycle } from "tsyringe";
@@ -24,10 +26,8 @@ import { ThreadStartupService } from "../../../thread-startup/thread-startup-ser
 import { MemoryPressureService } from "../../../../runtime/memory/memory-pressure-service.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { HookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
 import { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../../planning/plan-turn-service.js";
-import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { ScopedPreGrantService } from "../../permissions/scoped-pre-grant.js";
 import { TaskPersistenceService } from "../../tasks/task-persistence-service.js";
 import { SubagentLifecycleService } from "../../collaboration/subagent-lifecycle-service.js";
@@ -69,6 +69,8 @@ const testMessageRepos = new WeakMap<AgentService, MessageRepo>();
 const testTrackers = new WeakMap<AgentService, TurnFileTracker>();
 const testTurnDiffs = new WeakMap<AgentService, TurnDiffService>();
 const testProviderEventIngresses = new WeakMap<AgentService, ProviderEventIngress>();
+const testProviderApplications = new WeakMap<AgentService, ProviderTurnEventApplication>();
+const testPersistenceDrains = new WeakMap<AgentService, Promise<void>>();
 
 /** Read the real native evidence service wired through the test runtime and ingress. */
 export function turnDiffsForAgentServiceTest(service: AgentService): TurnDiffService {
@@ -114,11 +116,29 @@ export async function waitForAgentServiceIngressForTest(service: AgentService, t
   await ingress.waitForThread(threadId);
 }
 
+/** Stop fixture providers and drain their admitted events and effects before their database closes. */
+export function drainAgentServicePersistenceForTest(service: AgentService): Promise<void> {
+  const existing = testPersistenceDrains.get(service);
+  if (existing) return existing;
+  const ingress = testProviderEventIngresses.get(service);
+  const application = testProviderApplications.get(service);
+  const finalizer = testFinalizers.get(service);
+  if (!ingress || !application || !finalizer) throw new Error("Agent service was not created by this harness");
+  const drain = (async () => {
+    await service.stopAll();
+    await ingress.stopAdmissionAndDrain();
+    await application.drainPersistence();
+    await finalizer.drain();
+  })();
+  testPersistenceDrains.set(service, drain);
+  return drain;
+}
+
 /** Stream deterministic assistant text through the test-owned reliability port. */
 export function streamAgentReliabilityTextForTest(
   service: AgentService,
   threadId: string,
-): { threadId: string; executionId: string; text: string } {
+): Promise<{ threadId: string; executionId: string; text: string }> {
   const reliability = testReliabilityPorts.get(service);
   if (!reliability) throw new Error("AgentService test reliability port is unavailable");
   return reliability.streamAssistantText(threadId);
@@ -175,19 +195,17 @@ export function createAgentServiceForTest(
   attachmentService: AttachmentService,
   providerRegistry: IProviderRegistry,
   threadService: ThreadService,
-  hookExecutionRepo: HookExecutionRepo,
   turnSnapshotRepo: TurnSnapshotPersistence,
   snapshotService: SnapshotService,
   db: Database,
   memoryPressureService: MemoryPressureService,
   settingsService: SettingsService,
   availability: ProviderAvailabilityService,
-  planQuestionAnswers: PlanQuestionAnswersRepo,
   _handoff: unknown,
   scopedPreGrant: ScopedPreGrantService,
   narrativeStore: NarrativeStore,
   parentAssistantTextCheckpoints: ParentAssistantTextCheckpointService,
-  fileService?: ConstructorParameters<typeof TurnAdmissionDispatchCoordinator>[13],
+  fileService?: ConstructorParameters<typeof TurnAdmissionDispatchCoordinator>[12],
   threadControlMcp?: InternalThreadControlMcpRuntime,
   mutationReservations?: ThreadControlMutationReservationService,
   parentDurability?: ParentTurnDurability,
@@ -200,9 +218,10 @@ export function createAgentServiceForTest(
   threadBranching?: ThreadBranchingService,
   eventPublication?: AgentEventPublicationRegistry,
   threadStartups?: ThreadStartupService,
+  writer: ApplicationDatabaseWriter = agentStorageTestWriter(db),
 ): AgentService {
   if (!parentDurability) throw new Error("Parent turn durability is required by the test harness");
-  const turnDiffs = new TurnDiffService(new TurnDiffRepo(db));
+  const turnDiffs = new TurnDiffService(new TurnDiffRepo(db, writer));
   const tracker = new TurnFileTracker(
     (cwd, ref, path) => snapshotService.getFileAtRef(cwd, ref, path),
     () => undefined,
@@ -214,7 +233,7 @@ export function createAgentServiceForTest(
     narrativeStore,
     snapshotService,
     turnSnapshotRepo,
-    db,
+    writer,
     tracker,
     parentDurability,
     parentAssistantTextCheckpoints,
@@ -229,30 +248,9 @@ export function createAgentServiceForTest(
     finalizer,
   );
   const runtimeCommands = new AgentRuntimeCommandPort();
-  const resolvedPlans = planTurns ?? Object.assign(Object.create(PlanTurnService.prototype), {
-    beginOutputGeneration: () => undefined,
-    beginQuestionGeneration: () => undefined,
-    buildQuestionPrompt: (content: string) => content,
-    buildPlanOutputInstructions: () => "",
-    onTextDelta: () => undefined,
-    needsAssistantMaterialization: () => false,
-    persistAssistantMessage: () => undefined,
-    clearTurn: () => undefined,
-  }) as PlanTurnService;
-  const resolvedGoals = goals ?? new GoalLifecycleService(
-    threadRepo,
-    providerRegistry,
-    messageRepo,
-    db,
-    runtimeCommands,
-    parentDurability,
-  );
-  const featureEffects = new TurnFeatureEffects(
-    resolvedPlans,
-    resolvedGoals,
-    subagents ?? ({ stopDescendants: () => undefined } as unknown as SubagentLifecycleService),
-    taskPersistence ?? ({ onToolUse: () => undefined, onToolResult: () => undefined } as unknown as TaskPersistenceService),
-  );
+  const { plans: resolvedPlans, goals: resolvedGoals, effects: featureEffects } = createTestFeatureEffects({
+    threadRepo, providerRegistry, writer, runtimeCommands, parentDurability, planTurns, goals, subagents, taskPersistence,
+  });
   const admissions = new TurnAdmissionDispatchCoordinator(
     threadRepo,
     workspaceRepo,
@@ -261,7 +259,6 @@ export function createAgentServiceForTest(
     attachmentService,
     providerRegistry,
     availability,
-    planQuestionAnswers,
     parentDurability,
     settingsService,
     resolvedPlans,
@@ -275,6 +272,7 @@ export function createAgentServiceForTest(
     messageRepo,
     finalizer,
     parentDurability,
+    writer,
   );
   const publication = eventPublication ?? new AgentEventPublicationRegistry();
   const reliability = new AgentReliabilityPort();
@@ -292,7 +290,7 @@ export function createAgentServiceForTest(
   testContainer.registerInstance(TURN_FILE_EFFECTS, fileEffects);
   testContainer.registerInstance(TURN_ADMISSION_DISPATCH_COORDINATOR, admissions);
   testContainer.registerInstance(TurnConversationProjectionService, conversationProjection);
-  testContainer.registerInstance(PostTerminalHookCompletionEffect, new PostTerminalHookCompletionEffect(hookExecutionRepo, finalizer, parentDurability));
+  testContainer.registerInstance(PostTerminalHookCompletionEffect, new PostTerminalHookCompletionEffect());
   testContainer.registerInstance(ProviderSessionCursorPersistence, new ProviderSessionCursorPersistence(runtimePersistence, parentDurability));
   testContainer.registerInstance(ThreadCreationCoordinator, new ThreadCreationCoordinator(
     threadRepo,
@@ -322,6 +320,7 @@ export function createAgentServiceForTest(
   testContainer.registerInstance(NarrativeStore, narrativeStore);
   testContainer.registerInstance(ParentAssistantTextCheckpointService, parentAssistantTextCheckpoints);
   testContainer.registerInstance("Database", db);
+  testContainer.registerInstance(ApplicationDatabaseWriter, writer);
   testContainer.registerInstance(TurnDiffService, turnDiffs);
   testContainer.register<TurnRuntimeEventControl>(TURN_RUNTIME_EVENT_CONTROL, {
     useFactory: (c) => c.resolve(TurnRuntimeController),
@@ -340,6 +339,39 @@ export function createAgentServiceForTest(
   testTrackers.set(service, tracker);
   testTurnDiffs.set(service, turnDiffs);
   testProviderEventIngresses.set(service, eventIngress);
+  testProviderApplications.set(service, testContainer.resolve(ProviderTurnEventApplication));
   testGoalLifecycles.set(service, resolvedGoals);
+  registerAgentStorageTestProducer(db, () => drainAgentServicePersistenceForTest(service));
   return service;
+}
+
+function createTestFeatureEffects({ threadRepo, providerRegistry, writer, runtimeCommands, parentDurability, planTurns, goals, subagents, taskPersistence }: {
+  threadRepo: ThreadRepo; providerRegistry: IProviderRegistry; writer: ApplicationDatabaseWriter;
+  runtimeCommands: AgentRuntimeCommandPort; parentDurability: ParentTurnDurability;
+  planTurns?: PlanTurnService; goals?: GoalLifecycleService; subagents?: SubagentLifecycleService; taskPersistence?: TaskPersistenceService;
+}) {
+  const resolvedPlans = planTurns ?? Object.assign(Object.create(PlanTurnService.prototype), {
+    beginOutputGeneration: () => undefined,
+    beginQuestionGeneration: () => undefined,
+    buildQuestionPrompt: (content: string) => content,
+    buildPlanOutputInstructions: () => "",
+    onTextDelta: () => undefined,
+    needsAssistantMaterialization: () => false,
+    persistAssistantMessage: () => undefined,
+    clearTurn: () => undefined,
+  }) as PlanTurnService;
+  const resolvedGoals = goals ?? new GoalLifecycleService(
+    threadRepo,
+    providerRegistry,
+    writer,
+    runtimeCommands,
+    parentDurability,
+  );
+  const featureEffects = new TurnFeatureEffects(
+    resolvedPlans,
+    resolvedGoals,
+    subagents ?? ({ stopDescendants: () => undefined } as unknown as SubagentLifecycleService),
+    taskPersistence ?? ({ onToolUse: () => undefined, onToolResult: () => undefined } as unknown as TaskPersistenceService),
+  );
+  return { plans: resolvedPlans, goals: resolvedGoals, effects: featureEffects };
 }

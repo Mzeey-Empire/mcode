@@ -13,10 +13,10 @@ export class TaskPersistenceService {
   ) {}
 
   /** Persist task state from one tool-use event after narrative attribution. */
-  onToolUse(
+  async onToolUse(
     threadId: string,
     event: { toolName: string; toolInput: Record<string, unknown>; parentToolCallId?: string },
-  ): void {
+  ): Promise<void> {
     const intents = taskToolWriteIntents({
       kind: "tool-use",
       ...event,
@@ -24,11 +24,11 @@ export class TaskPersistenceService {
     });
     const label = event.toolName === "TodoWrite" ? "TodoWrite tasks"
       : event.toolName === "update_plan" ? "update_plan tasks" : "TaskUpdate";
-    this.applyIntents(threadId, intents, label);
+    await this.applyIntents(threadId, intents, label);
   }
 
   /** Persist one TaskCreate after its result supplies the stable harness identity. */
-  onToolResult(threadId: string, toolCallId: string, output: string, isError: boolean): void {
+  async onToolResult(threadId: string, toolCallId: string, output: string, isError: boolean): Promise<void> {
     if (isError) return;
     const intents = taskToolWriteIntents({
       kind: "tool-result",
@@ -37,35 +37,35 @@ export class TaskPersistenceService {
       isError,
       bufferedCalls: this.narrative.getBufferedToolCalls(threadId),
     });
-    this.applyIntents(threadId, intents, "TaskCreate task");
+    await this.applyIntents(threadId, intents, "TaskCreate task");
   }
 
-  private applyIntents(threadId: string, intents: readonly TaskToolWriteIntent[], label: string): void {
+  private async applyIntents(threadId: string, intents: readonly TaskToolWriteIntent[], label: string): Promise<void> {
     for (const intent of intents) {
-      this.tryPersist(label, threadId, () => this.applyIntent(threadId, intent));
+      await this.tryPersist(label, threadId, () => this.applyIntent(threadId, intent));
     }
   }
 
-  private applyIntent(threadId: string, intent: TaskToolWriteIntent): void {
+  private async applyIntent(threadId: string, intent: TaskToolWriteIntent): Promise<void> {
     switch (intent.kind) {
       case "upsert-group":
-        this.tasks.upsertGroup(threadId, intent.group, intent.tasks);
+        await this.tasks.upsertGroup(threadId, intent.group, intent.tasks);
         return;
       case "append-task":
-        this.tasks.appendTask(threadId, intent.task);
+        await this.tasks.appendTask(threadId, intent.task);
         return;
       case "update-task":
-        this.tasks.updateTask(threadId, intent.id, intent.patch, intent.group);
+        await this.tasks.updateTask(threadId, intent.id, intent.patch, intent.group);
         return;
       case "remove-task":
-        this.tasks.removeTask(threadId, intent.id, intent.group);
+        await this.tasks.removeTask(threadId, intent.id, intent.group);
         return;
     }
   }
 
-  private tryPersist(label: string, threadId: string, persist: () => void): void {
+  private async tryPersist(label: string, threadId: string, persist: () => Promise<void>): Promise<void> {
     try {
-      persist();
+      await persist();
     } catch (error) {
       logger.warn(`${label} not persisted`, {
         threadId,

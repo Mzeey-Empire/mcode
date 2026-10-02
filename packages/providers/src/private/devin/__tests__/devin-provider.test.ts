@@ -192,6 +192,39 @@ describe("DevinProvider", () => {
     return provider;
   }
 
+  it("cancels teardown-waiting requests beyond ten seconds and starts the next distinct turn once", async () => {
+    const host = createHost();
+    const first = createFakeRuntime("devin-acp-first", 101);
+    const next = createFakeRuntime("devin-acp-next", 102);
+    starts.push(mockAcpStart([first, next]));
+    const p = createProvider(host);
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
+    vi.mocked(first.runtime.close).mockImplementationOnce(async () => { await closeGate; });
+    try {
+      await p.sendTurn(turn({ turnExecutionId: "seed-execution" }));
+      const teardown = p.discardSession("mcode-thread-1");
+      await vi.waitFor(() => expect(first.runtime.close).toHaveBeenCalledOnce());
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const cancelled = p.sendTurn(turn({ turnExecutionId: "cancelled-execution", message: "cancel me" }));
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(next.runtime.initialize).not.toHaveBeenCalled();
+      await p.stopSession("mcode-thread-1");
+      await cancelled;
+      const cancelledEvents = submittedRuntimeEvents(host).filter((event) => event.turnExecutionId === "cancelled-execution");
+      expect(cancelledEvents).toEqual([expect.objectContaining({ type: "ended", outcome: "cancelled" })]);
+      const following = p.sendTurn(turn({ turnId: "next-turn", turnExecutionId: "next-execution", message: "next" }));
+      releaseClose();
+      await Promise.all([teardown, following]);
+      expect(first.runtime.prompt).toHaveBeenCalledOnce();
+      expect(next.runtime.prompt).toHaveBeenCalledOnce();
+      expect(submittedRuntimeEvents(host).some((event) => event.type === "error")).toBe(false);
+    } finally {
+      releaseClose();
+      vi.useRealTimers();
+    }
+  });
+
   it("authenticates the ACP host with windsurf-api-key and _meta.api_key", async () => {
     const host = createHost();
     const fake = createFakeRuntime("devin-acp-1", 101);
@@ -234,6 +267,33 @@ describe("DevinProvider", () => {
       expect.objectContaining({ type: "turnComplete", tokensIn: 3, tokensOut: 5 }),
       expect.objectContaining({ type: "ended", turnExecutionId: "execution-1" }),
     ]));
+  });
+
+  it("publishes exactly routed empty completion batches and waits for live acceptance", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-empty", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+    await provider!.sendTurn(turn());
+    const batches = vi.mocked(host.events.submit).mock.calls.map(([batch]) => batch);
+    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "turnComplete", reason: "end_turn" }),
+      expect.objectContaining({ type: "ended", turnExecutionId: "execution-1" }),
+    ]));
+    for (const batch of batches) {
+      expect(batch).toMatchObject({ batchId: batch.events[0]?.eventId, deliveryAttempt: 1,
+        threadId: "thread-1", turnId: "turn-1", executionId: "execution-1" });
+    }
+    expect(new Set(batches.map((batch) => batch.batchId)).size).toBe(batches.length);
+  });
+
+  it("propagates an original canonical admission failure instead of returning a successful prompt", async () => {
+    const host = createHost();
+    const error = new Error("Canonical worker batch does not match execution ownership");
+    vi.mocked(host.events.submit).mockRejectedValue(error);
+    starts.push(mockAcpStart([createFakeRuntime("devin-rejected", 101)]));
+    createProvider(host);
+    await expect(provider!.sendTurn(turn())).rejects.toBe(error);
   });
 
   it("resumes through session/load when resumeFrom carries an ACP session id", async () => {

@@ -1,93 +1,35 @@
+import { inject, injectable } from "tsyringe";
 import type { Database } from "bun:sqlite";
-import { and, eq, sql } from "drizzle-orm";
-import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import type { WorkspaceEnvironmentStorageMode } from "@mcode/contracts";
-import {
-  workspaceEnvironmentCommandApprovals,
-  workspaceEnvironmentStorageSettings,
-} from "../../../../runtime/persistence/sqlite/schema.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { WorkspaceEnvironmentConfigurationStore } from "./workspace-environment-configuration-store.js";
+import { workspaceEnvironmentConfigurationWriteOperations } from "./workspace-environment-configuration-write-operations.js";
 
-/** Persists one Project's active environment location and shared-command approvals. */
+/** Read-only queries and committed mutations for WorkspaceEnvironmentConfigurationRepo. */
+@injectable()
 export class WorkspaceEnvironmentConfigurationRepo {
-  private readonly orm: BunSQLiteDatabase;
+  private readonly reader: WorkspaceEnvironmentConfigurationStore;
 
-  constructor(db: Database) {
-    this.orm = drizzle(db);
+  constructor(@inject("Database") db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
+    this.reader = new WorkspaceEnvironmentConfigurationStore(db);
   }
 
-  /** Returns the explicit storage choice, if this Project has one. */
-  storageMode(workspaceId: string): WorkspaceEnvironmentStorageMode | null {
-    const row = this.orm
-      .select({ storageMode: workspaceEnvironmentStorageSettings.storageMode })
-      .from(workspaceEnvironmentStorageSettings)
-      .where(eq(workspaceEnvironmentStorageSettings.workspaceId, workspaceId))
-      .get();
-    return row?.storageMode === "shared" || row?.storageMode === "system" ? row.storageMode : null;
+  storageMode(workspaceId: Parameters<WorkspaceEnvironmentConfigurationStore["storageMode"]>[0]): ReturnType<WorkspaceEnvironmentConfigurationStore["storageMode"]> {
+    return this.reader.storageMode(workspaceId);
   }
 
-  /** Stores the exclusive environment location for one Project. */
-  setStorageMode(workspaceId: string, storageMode: WorkspaceEnvironmentStorageMode): void {
-    this.orm
-      .insert(workspaceEnvironmentStorageSettings)
-      .values({
-        workspaceId,
-        storageMode,
-        updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-      })
-      .onConflictDoUpdate({
-        target: workspaceEnvironmentStorageSettings.workspaceId,
-        set: {
-          storageMode,
-          updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-        },
-      })
-      .run();
+  setStorageMode(workspaceId: Parameters<WorkspaceEnvironmentConfigurationStore["setStorageMode"]>[0], storageMode: Parameters<WorkspaceEnvironmentConfigurationStore["setStorageMode"]>[1]): Promise<ReturnType<WorkspaceEnvironmentConfigurationStore["setStorageMode"]>> {
+    return this.writer.execute(workspaceEnvironmentConfigurationWriteOperations.setStorageMode, [workspaceId, storageMode]);
   }
 
-  /** Reports whether this Project command has approval for the exact fingerprint. */
-  hasApproval(workspaceId: string, commandId: string, fingerprint: string): boolean {
-    const row = this.orm
-      .select({ approved: sql<number>`1` })
-      .from(workspaceEnvironmentCommandApprovals)
-      .where(
-        and(
-          eq(workspaceEnvironmentCommandApprovals.workspaceId, workspaceId),
-          eq(workspaceEnvironmentCommandApprovals.commandId, commandId),
-          eq(workspaceEnvironmentCommandApprovals.fingerprint, fingerprint),
-        ),
-      )
-      .get();
-    return row?.approved === 1;
+  hasApproval(workspaceId: Parameters<WorkspaceEnvironmentConfigurationStore["hasApproval"]>[0], commandId: Parameters<WorkspaceEnvironmentConfigurationStore["hasApproval"]>[1], fingerprint: Parameters<WorkspaceEnvironmentConfigurationStore["hasApproval"]>[2]): ReturnType<WorkspaceEnvironmentConfigurationStore["hasApproval"]> {
+    return this.reader.hasApproval(workspaceId, commandId, fingerprint);
   }
 
-  /** Replaces the approval for one stable Project command. */
-  approve(workspaceId: string, commandId: string, fingerprint: string): void {
-    this.orm
-      .insert(workspaceEnvironmentCommandApprovals)
-      .values({
-        workspaceId,
-        commandId,
-        fingerprint,
-        approvedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-      })
-      .onConflictDoUpdate({
-        target: [
-          workspaceEnvironmentCommandApprovals.workspaceId,
-          workspaceEnvironmentCommandApprovals.commandId,
-        ],
-        set: {
-          fingerprint,
-          approvedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-        },
-      })
-      .run();
+  approve(workspaceId: Parameters<WorkspaceEnvironmentConfigurationStore["approve"]>[0], commandId: Parameters<WorkspaceEnvironmentConfigurationStore["approve"]>[1], fingerprint: Parameters<WorkspaceEnvironmentConfigurationStore["approve"]>[2]): Promise<ReturnType<WorkspaceEnvironmentConfigurationStore["approve"]>> {
+    return this.writer.execute(workspaceEnvironmentConfigurationWriteOperations.approve, [workspaceId, commandId, fingerprint]);
   }
 
-  /** Removes every stored command approval for one Project. */
-  clearApprovals(workspaceId: string): void {
-    this.orm
-      .delete(workspaceEnvironmentCommandApprovals)
-      .where(eq(workspaceEnvironmentCommandApprovals.workspaceId, workspaceId))
-      .run();
+  clearApprovals(workspaceId: Parameters<WorkspaceEnvironmentConfigurationStore["clearApprovals"]>[0]): Promise<ReturnType<WorkspaceEnvironmentConfigurationStore["clearApprovals"]>> {
+    return this.writer.execute(workspaceEnvironmentConfigurationWriteOperations.clearApprovals, [workspaceId]);
   }
 }

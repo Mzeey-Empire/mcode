@@ -1,18 +1,17 @@
 import type { Database } from "bun:sqlite";
-import * as NodeUtil from "node:util";
 import { ProviderIdSchema, type AgentEvent, type ProviderId } from "@mcode/contracts";
 
-import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import { MessageRepo } from "../conversation/persistence/message-repo.js";
+import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
+import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import type { CodexLiveReduction, CodexLiveWriterIntent } from "../execution/codex-live-event-reducer.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
 import type { DataOnlyParentTerminalProjectionInput } from "./canonical-parent-turn-write.js";
-import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
+import { matchesCodexSystemIntents, type CodexSystemWriterIntent } from "./codex-system-intents.js";
+export type { CodexSystemWriterIntent } from "./codex-system-intents.js";
 
 type Reduced = Extract<CodexLiveReduction, { kind: "reduced" }>;
 type SystemEvent = Extract<AgentEvent, { type: "system" }>;
-/** System intents accepted by the execution-bound live writer. */
-export type CodexSystemWriterIntent = Extract<CodexLiveWriterIntent, { kind: "notice-session" | "system-notice" | "session-cursor" }>;
 type ErrorTerminalIntent = Extract<CodexLiveWriterIntent, { kind: "terminal-projection" }>;
 
 function errorTerminalIntent(reduction: Reduced, event: Extract<AgentEvent, { type: "error" }>): ErrorTerminalIntent {
@@ -31,22 +30,6 @@ export type CanonicalCodexSystemErrorResult =
   | { readonly kind: "error-terminal"; readonly event: Extract<AgentEvent, { type: "error" }>; readonly after: "terminal"; readonly input: DataOnlyParentTerminalProjectionInput };
 
 type SystemProjectionResult = { readonly kind: "system"; readonly event: SystemEvent; readonly after: "writer" | "terminal" };
-
-function expectedSystemIntentKind(event: SystemEvent): CodexSystemWriterIntent["kind"] | null {
-  if (event.subtype === "provider.session.started") return "notice-session";
-  if (event.subtype.startsWith("provider.notice.") && event.message) return "system-notice";
-  if (event.subtype.startsWith("sdk_session_id:") || event.subtype === "sdk_session_invalidated") return "session-cursor";
-  return null;
-}
-
-/** Check that a bound system event carries exactly its reducer-owned projection intent. */
-export function matchesCodexSystemIntents(event: SystemEvent, intents: readonly CodexSystemWriterIntent[]): boolean {
-  const expected = expectedSystemIntentKind(event);
-  if (!Array.isArray(intents) || intents.length !== (expected ? 1 : 0)) return false;
-  if (!expected) return true;
-  return intents[0]?.kind === expected && NodeUtil.isDeepStrictEqual(intents[0].event, event)
-    && (expected !== "system-notice" || !event.messageId);
-}
 
 function isSystemWriterIntent(intent: CodexLiveWriterIntent): intent is CodexSystemWriterIntent {
   return intent.kind === "notice-session" || intent.kind === "system-notice" || intent.kind === "session-cursor";
@@ -94,9 +77,6 @@ export class CanonicalCodexSystemErrorProjection {
       throw new Error("Codex system intents do not match the event");
     }
     const provider = ProviderIdSchema.parse(providerId);
-    if (provider !== "codex" && provider !== "claude" && provider !== "cursor") {
-      throw new Error(`Provider ${provider} has no execution-bound system projection`);
-    }
     return this.db.transaction(() => {
       let published: SystemEvent = { ...event };
       for (const intent of intents) {

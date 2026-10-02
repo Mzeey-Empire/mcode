@@ -22,6 +22,7 @@ import type { ThoughtSegmentRepo } from "../conversation/narrative/persistence/t
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import type { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js";
 import type { AgentService } from "../orchestration/agent-service.js";
+import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordinator.js";
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 import type { AgentTurnContinuationPort } from "../orchestration/agent-runtime-internal-ports.js";
 import type { TaskRepo } from "../orchestration/persistence/task-repo.js";
@@ -39,6 +40,7 @@ type AgentRpcMethod =
   | "agent.continueWithoutSaving"
   | "agent.createAndSend"
   | "agent.stop"
+  | "agent.retrySave"
   | "agent.activeCount"
   | "agent.listRunning"
   | "agent.answerQuestions"
@@ -69,6 +71,8 @@ type AgentRpcParams<Method extends AgentRpcMethod> = Method extends "canonicalAg
 
 /** Defines the services required to route validated Agent RPC calls. */
 export interface AgentRouterDeps {
+  canonicalProgress?: Pick<import("../canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
+    "retry" | "listPlans" | "getTasks" | "updatePlanStatus">;
   agentService: Pick<
     AgentService,
     "sendMessage" | "createAndSend" | "stopSession" | "runtimeAccess"
@@ -111,7 +115,7 @@ const agentHandlers: AgentRpcHandlerMap = {
   "agent.send": async (deps, params) => {
     const started = serverWorkTrace ? NodePerfHooks.performance.now() : 0;
     try {
-      await deps.agentService.sendMessage({
+      await sendAdmittedTurn(deps.agentService, {
         ...params,
         content: appendPreviewAnnotations(params.content, params.previewAnnotations),
         displayContent: params.displayContent ?? params.content,
@@ -123,7 +127,7 @@ const agentHandlers: AgentRpcHandlerMap = {
   "agent.recoveryIncident": (deps) => deps.turnRecoveryService.currentRecoveryIncident(),
   "agent.retry": async (deps, params) => {
     await deps.turnRecoveryService.retry(params.executionId, (command) =>
-      deps.agentService.sendMessage({
+      sendAdmittedTurn(deps.agentService, {
         ...command,
         content: appendPreviewAnnotations(command.content, command.previewAnnotations),
         displayContent: command.content,
@@ -143,6 +147,7 @@ const agentHandlers: AgentRpcHandlerMap = {
     return thread;
   },
   "agent.stop": (deps, params) => deps.agentService.stopSession(params.threadId),
+  "agent.retrySave": (deps, params) => ({ retried: deps.canonicalProgress?.retry(params.threadId) ?? false }),
   "agent.activeCount": (deps) => deps.agentService.runtimeAccess().activeCount(),
   // The runtime registry is the reconnect snapshot authority: startup recovery
   // interrupts every unfinished canonical checkpoint, so registry entries are
@@ -163,10 +168,11 @@ const agentHandlers: AgentRpcHandlerMap = {
   },
   "agent.child.stop": (deps, params) => deps.subagentLifecycleService.stop(params),
   "canonicalAgent.roster": (deps, params) => deps.subagentLifecycleService.loadRoster(params),
-  "plan.updateStatus": (deps, params) => {
-    deps.planRepo.updateStatus(params.planId, params.status);
+  "plan.updateStatus": async (deps, params) => {
+    if (deps.canonicalProgress?.updatePlanStatus(params.planId, params.status)) return;
+    await deps.planRepo.updateStatus(params.planId, params.status);
   },
-  "plan.list": (deps, params) => deps.planRepo.listByThread(params.threadId),
+  "plan.list": (deps, params) => deps.canonicalProgress?.listPlans(params.threadId) ?? deps.planRepo.listByThread(params.threadId),
   "message.list": (deps, params) => ({
     ...deps.messageRepo.listByThread(params.threadId, params.limit, params.before),
     answeredPlanMessageIds: deps.planQuestionAnswersRepo.listAnsweredForThread(params.threadId),
@@ -184,7 +190,7 @@ const agentHandlers: AgentRpcHandlerMap = {
     thoughts: deps.thoughtSegmentRepo.listByMessage(params.messageId),
     hooks: deps.hookExecutionRepo.listByMessage(params.messageId),
   }),
-  "thread.getTasks": (deps, params) => deps.taskRepo.get(params.threadId),
+  "thread.getTasks": (deps, params) => deps.canonicalProgress?.getTasks(params.threadId) ?? deps.taskRepo.get(params.threadId),
   "permission.respond": async (deps, params) => {
     if (await deps.threadControlService.respondToApproval(params.requestId, params.decision)) return;
     deps.agentPermissionService.respondToPermission(params.requestId, params.decision, params.answers, params.optionId);
@@ -195,6 +201,31 @@ const agentHandlers: AgentRpcHandlerMap = {
   ],
   "recap.generate": (deps, params) => deps.recapService.generate(params),
 };
+
+async function sendAdmittedTurn(
+  service: AgentRouterDeps["agentService"],
+  command: SendMessageCommand,
+): Promise<void> {
+  let admitted = false;
+  let resolveAdmission!: () => void;
+  const admission = new Promise<void>((resolve) => { resolveAdmission = resolve; });
+  const dispatch = service.sendMessage({
+    ...command,
+    onTurnStarted: (snapshot) => {
+      admitted = true;
+      command.onTurnStarted?.(snapshot);
+      resolveAdmission();
+    },
+  });
+  void dispatch.catch((error: unknown) => {
+    if (!admitted) return;
+    logger.error("Admitted turn dispatch failed", { threadId: command.threadId,
+      error: error instanceof Error ? error.message : String(error) });
+  });
+  // Completion arrives through the execution stream. Keeping this RPC open
+  // would let its timeout undo a healthy turn that is still running.
+  await Promise.race([admission, dispatch]);
+}
 
 /** Checks whether a WebSocket method belongs to the Agent RPC family. */
 export function isAgentRpcMethod(method: WsMethodName): method is AgentRpcMethod {

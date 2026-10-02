@@ -8,7 +8,6 @@ import type {
   AgentEvent,
   CodexChildEvidence,
   CodexCollaborationEvidence,
-  CodexContinuationEvidence,
   GoalState,
   ProviderFileMutationStart,
   ProviderRuntimeEvent,
@@ -28,7 +27,6 @@ import type {
 
 type CodexMappedEvent = AgentEvent & {
   codexChild?: CodexChildEvidence;
-  codexContinuation?: CodexContinuationEvidence;
 };
 type ToolResultAgentEvent = Extract<CodexMappedEvent, { type: typeof AgentEventType.ToolResult }>;
 type ChildNotificationContext = {
@@ -578,6 +576,7 @@ export class CodexEventMapper {
     if (notice) return this.withChildNotificationEvidence(notice, context, undefined, "notice");
     const handlers: Record<string, () => CodexMappedEvent[]> = {
       "turn/started": () => this.mapChildTurnStarted(context),
+      "mcpServer/startupStatus/updated": () => this.mapChildMcpStartupStatus(notification, context),
       "thread/tokenUsage/updated": () => [],
       "item/commandExecution/outputDelta": () => this.mapChildCommandOutputDelta(notification),
       "item/agentMessage/delta": () => this.mapChildAssistantDelta(notification, context),
@@ -605,6 +604,18 @@ export class CodexEventMapper {
       parentCollaborationItemId: childThreadId ? this.collabReceiverThreadToCollabId.get(childThreadId) : undefined,
       nativeTurnId: this.bufferedChildTurnId(childThreadId) ?? this.nativeTurnId(notification),
     };
+  }
+
+  private mapChildMcpStartupStatus(notification: CodexNotification, context: ChildNotificationContext): CodexMappedEvent[] {
+    const events = this.mapMcpStartupStatus(notification);
+    const { childThreadId, parentCollaborationItemId, nativeTurnId } = context;
+    if (!childThreadId || !parentCollaborationItemId) return events;
+    const evidence = { nativeThreadId: childThreadId, parentCollaborationItemId,
+      ...(nativeTurnId ? { nativeTurnId } : {}) };
+    // Distinct servers and startup states must survive child-event deduplication.
+    const nativeEventId = this.childNativeEventId(AgentEventType.McpServerStartupStatus,
+      { ...evidence, itemEventKey: JSON.stringify(events) });
+    return this.withChildEvidence(events, { ...evidence, nativeEventId });
   }
 
   private rememberChildTurnId(notification: CodexNotification, childThreadId: string | undefined): void {
@@ -1604,12 +1615,11 @@ export class CodexEventMapper {
 
   private runtimeExtension(event: CodexMappedEvent): ProviderRuntimeEvent["extension"] {
     const collaboration = this.collaborationEvidence(event);
-    if (!event.codexChild && !event.codexContinuation && !collaboration) return undefined;
+    if (!event.codexChild && !collaboration) return undefined;
     return {
       providerId: "codex",
       kind: "codex-collaboration",
       ...(event.codexChild ? { child: event.codexChild } : {}),
-      ...(event.codexContinuation ? { continuation: event.codexContinuation } : {}),
       ...(collaboration ? { collaboration } : {}),
     };
   }
@@ -1636,7 +1646,7 @@ export class CodexEventMapper {
   }
 
   private rendererEvent(event: CodexMappedEvent): AgentEvent {
-    const { codexChild: _child, codexContinuation: _continuation, ...genericEvent } = event;
+    const { codexChild: _child, ...genericEvent } = event;
     if (genericEvent.type !== AgentEventType.ToolUse && genericEvent.type !== AgentEventType.ToolResult) {
       return genericEvent;
     }

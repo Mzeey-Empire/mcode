@@ -20,10 +20,8 @@
 import { logger } from "@mcode/shared";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent, StoredAttachment } from "@mcode/contracts";
-import type { Database } from "bun:sqlite";
-import { and, eq } from "drizzle-orm";
-import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
-import { threads } from "../../../runtime/persistence/sqlite/schema.js";
+import { ApplicationDatabaseWriter, DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { persistTurnSnapshot } from "./persistence/turn-finalization-write-operations.js";
 import { broadcast } from "../../../application/transport/push.js";
 import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
@@ -54,6 +52,8 @@ interface MaterializedAssistantRow {
   attachments: StoredAttachment[];
 }
 
+type AssistantMaterializationAnchor = ReturnType<MessageRepo["listByThread"]>["messages"][number] | null;
+
 interface CanonicalProjection {
   materialized: MaterializedAssistantRow | null;
   toolCallCount: number;
@@ -78,7 +78,6 @@ export class TurnFinalizer {
   private readonly lastPersistedMessageIdByThread = new Map<string, string>();
   /** One assistant decision state per active thread execution. */
   private readonly assistantStateByThread = new Map<string, AssistantExecutionState>();
-  private readonly orm: BunSQLiteDatabase;
   /** Serializes finalize calls per thread so a slow git snapshot cannot drop a later turn. */
   private readonly finalizeChainByThread = new Map<string, Promise<void>>();
   private readonly pendingDiffSettlement = new Map<string, { executionId: string | undefined; settle: SettleTurnDiff }>();
@@ -89,14 +88,12 @@ export class TurnFinalizer {
     private readonly narrativeStore: NarrativeStore,
     private readonly snapshotService: SnapshotService,
     private readonly turnSnapshotRepo: TurnSnapshotPersistence,
-    private readonly db: Database,
+    private readonly writer: ApplicationDatabaseWriter,
     private readonly turnFileTracker?: TurnFileTracker,
     private readonly canonicalSink?: ParentTurnDurability,
     private readonly parentAssistantTextCheckpoints?: ParentAssistantTextCheckpointService,
     private readonly turnDiffs?: TurnDiffService,
-  ) {
-    this.orm = drizzle(db);
-  }
+  ) {}
 
   /** Append a streaming assistant-text delta for the current turn. */
   appendStreamingText(threadId: string, delta: string): void {
@@ -219,13 +216,17 @@ export class TurnFinalizer {
     executionId?: string,
   ): Promise<void> {
     const turnRef = this.turnRefBefore.get(threadId);
+    const anchor = executionId
+      ? this.canonicalSink?.loadParentTurnUserMessage(executionId) ?? this.assistantMaterializationAnchor(threadId)
+      : this.assistantMaterializationAnchor(threadId);
     const settleDiff = this.prepareDiffSettlement(threadId, executionId, outcome);
     const tail = this.finalizeChainByThread.get(threadId) ?? Promise.resolve();
-    const next = tail.then(async () => {
+    const finalizeNext = async () => {
       await prerequisite;
-      await this.runFinalizeOnce(threadId, executionId, outcome, turnRef, settleDiff);
+      await this.runFinalizeOnce(threadId, executionId, outcome, turnRef, settleDiff, anchor);
       if (this.pendingDiffSettlement.get(threadId)?.settle === settleDiff) this.pendingDiffSettlement.delete(threadId);
-    });
+    };
+    const next = tail.then(finalizeNext, finalizeNext);
     this.finalizeChainByThread.set(threadId, next);
     try {
       await next;
@@ -234,6 +235,11 @@ export class TurnFinalizer {
         this.finalizeChainByThread.delete(threadId);
       }
     }
+  }
+
+  /** Wait for terminal work after ingress and turn admission have stopped. */
+  async drain(): Promise<void> {
+    await Promise.all(this.finalizeChainByThread.values());
   }
 
   private prepareDiffSettlement(threadId: string, executionId: string | undefined, outcome: TurnOutcome): SettleTurnDiff | undefined {
@@ -251,16 +257,17 @@ export class TurnFinalizer {
     outcome: TurnOutcome,
     turnRef: TurnRef | undefined,
     settleDiff: SettleTurnDiff | undefined,
+    anchor: AssistantMaterializationAnchor,
   ): Promise<void> {
     if (this.persistingThreads.has(threadId)) return;
     this.persistingThreads.add(threadId);
     try {
       const canonicalTurnId = this.canonicalTurnId(executionId);
       if (canonicalTurnId && executionId) {
-        await this.runCanonicalFinalize(threadId, executionId, canonicalTurnId, outcome, turnRef, settleDiff);
+        await this.runCanonicalFinalize(threadId, executionId, canonicalTurnId, outcome, turnRef, settleDiff, anchor);
         return;
       }
-      await this.runCompatibilityFinalize(threadId, executionId, outcome, turnRef, settleDiff);
+      await this.runCompatibilityFinalize(threadId, executionId, outcome, turnRef, settleDiff, anchor);
     } finally {
       this.persistingThreads.delete(threadId);
     }
@@ -276,12 +283,13 @@ export class TurnFinalizer {
     outcome: TurnOutcome,
     turnRef: TurnRef | undefined,
     settleDiff: SettleTurnDiff | undefined,
+    anchor: AssistantMaterializationAnchor,
   ): Promise<void> {
     if (!this.hasRecordableActivity(threadId)) {
       this.discardUnmaterializedTurn(threadId, turnRef);
       return;
     }
-    const materialized = this.materializeAssistantRow(threadId);
+    const materialized = await this.materializeAssistantRow(threadId, true, false, false, anchor);
     if (!materialized) {
       this.discardUnmaterializedTurn(threadId, turnRef);
       return;
@@ -302,7 +310,7 @@ export class TurnFinalizer {
     materialized: MaterializedAssistantRow,
     settleDiff: SettleTurnDiff | undefined,
   ): Promise<void> {
-    this.messageRepo.setAssistantOutcome(materialized.id, outcome, executionId);
+    await this.messageRepo.setAssistantOutcome(materialized.id, outcome, executionId);
     this.lastPersistedMessageIdByThread.set(threadId, materialized.id);
     const { toolCallCount } = await this.narrativeStore.persistNarrativeBatched(
       threadId,
@@ -312,7 +320,7 @@ export class TurnFinalizer {
     );
     const fileEffects = await this.finalizeFileEffects(threadId, turnRef);
     const filesChanged = await this.captureSnapshot(threadId, materialized.id, turnRef, fileEffects);
-    settleDiff?.(materialized.id, fileEffects, await this.reconstructionPatch(threadId, turnRef));
+    await settleDiff?.(materialized.id, fileEffects, await this.reconstructionPatch(threadId, turnRef));
     broadcast("turn.persisted", {
       threadId,
       turnId: turnRef?.fileTrackerGeneration !== undefined ? String(turnRef.fileTrackerGeneration) : null,
@@ -347,9 +355,10 @@ export class TurnFinalizer {
     outcome: TurnOutcome,
     turnRef: TurnRef | undefined,
     settleDiff: SettleTurnDiff | undefined,
+    anchor: AssistantMaterializationAnchor,
   ): Promise<void> {
     const canonical = this.requireCanonicalThread(threadId, executionId);
-    const projection = await this.createCanonicalProjection(threadId, executionId, outcome);
+    const projection = await this.createCanonicalProjection(threadId, executionId, outcome, anchor);
     const commitResult = await canonical.sink.finishParentTurnBatched({
       threadId,
       turnId,
@@ -357,8 +366,7 @@ export class TurnFinalizer {
       providerId: canonical.thread.providerId,
       providerIdentities: this.providerIdentities(threadId, canonical.thread),
       outcome,
-      projectTurn: () => this.projectCanonicalTurn(threadId, executionId, outcome, projection),
-      finalizeCompatibility: () => this.finalizeCanonicalCompatibility(executionId, outcome, projection),
+      projection: this.projectCanonicalTurn(threadId, executionId, outcome, projection),
     });
 
     const verifiedTerminal = canonical.sink.loadCheckpoint(executionId);
@@ -368,7 +376,7 @@ export class TurnFinalizer {
 
     const materialized = this.recoverCanonicalProjection(canonical.sink, turnId, projection, commitResult);
     if (!materialized) {
-      this.discardCanonicalProjection(threadId, executionId, turnRef);
+      await this.discardCanonicalProjection(threadId, executionId, turnRef);
       return;
     }
     await this.completeCanonicalFinalize(
@@ -400,12 +408,13 @@ export class TurnFinalizer {
     threadId: string,
     executionId: string,
     outcome: TurnOutcome,
+    anchor: AssistantMaterializationAnchor,
   ): Promise<CanonicalProjection> {
     const projection: CanonicalProjection = { materialized: null, toolCallCount: 0, narrative: [] };
     if (this.canonicalSink?.loadCheckpoint(executionId)?.terminalOutcome != null || !this.hasRecordableActivity(threadId)) {
       return projection;
     }
-    const materialized = this.materializeAssistantRow(threadId, false, true, true);
+    const materialized = await this.materializeAssistantRow(threadId, false, true, true, anchor);
     if (!materialized) throw new Error(`Assistant compatibility projection failed for ${threadId}`);
     projection.materialized = materialized;
     // Recovery rows are visible on the prompt while an assistant is staged.
@@ -445,16 +454,6 @@ export class TurnFinalizer {
     };
   }
 
-  private finalizeCanonicalCompatibility(
-    executionId: string,
-    outcome: TurnOutcome,
-    projection: CanonicalProjection,
-  ): void {
-    if (!projection.materialized) return;
-    this.messageRepo.setAssistantOutcome(projection.materialized.id, outcome, executionId);
-    this.messageRepo.publishAssistant(projection.materialized.id);
-  }
-
   private recoverCanonicalProjection(
     sink: ParentTurnDurability,
     turnId: string,
@@ -473,9 +472,9 @@ export class TurnFinalizer {
     };
   }
 
-  private discardCanonicalProjection(threadId: string, executionId: string, turnRef: TurnRef | undefined): void {
+  private async discardCanonicalProjection(threadId: string, executionId: string, turnRef: TurnRef | undefined): Promise<void> {
     this.lastPersistedMessageIdByThread.delete(threadId);
-    this.parentAssistantTextCheckpoints?.retire(executionId);
+    await this.parentAssistantTextCheckpoints?.retire(executionId);
     this.clearTurn(threadId, turnRef);
   }
 
@@ -490,13 +489,13 @@ export class TurnFinalizer {
     replayedTerminal: boolean,
     settleDiff: SettleTurnDiff | undefined,
   ): Promise<void> {
-    this.parentAssistantTextCheckpoints?.retire(executionId);
+    await this.parentAssistantTextCheckpoints?.retire(executionId);
     this.commitAssistantMaterialization(threadId);
     this.lastPersistedMessageIdByThread.set(threadId, materialized.id);
     this.broadcastMaterializedAssistant(threadId, materialized);
     const fileEffects = await this.finalizeFileEffects(threadId, turnRef);
     const filesChanged = await this.captureSnapshot(threadId, materialized.id, turnRef, fileEffects, replayedTerminal);
-    settleDiff?.(materialized.id, fileEffects, await this.reconstructionPatch(threadId, turnRef));
+    await settleDiff?.(materialized.id, fileEffects, await this.reconstructionPatch(threadId, turnRef));
     broadcast("turn.persisted", {
       threadId,
       turnId,
@@ -582,37 +581,31 @@ export class TurnFinalizer {
     return (fileEffects?.fileCount ?? 0) === 0 && (!refBefore || !refAfter);
   }
 
-  private writeTurnSnapshot(
+  private async writeTurnSnapshot(
     threadId: string,
     messageId: string,
     refData: TurnRef,
     refAfter: string | null,
     fileEffects: TurnFileEffectSummary | undefined,
     filesChanged: string[],
-  ): string[] {
+  ): Promise<string[]> {
     const hasFileEffects = (fileEffects?.fileCount ?? 0) > 0;
     try {
-      const writeTurn = this.db.transaction((files: string[]) => {
-        this.turnSnapshotRepo.create({
+      await this.writer.execute(persistTurnSnapshot, {
+        snapshot: {
           messageId,
           threadId,
           refBefore: refData.ref ?? "",
           refAfter: refAfter ?? "",
-          filesChanged: files,
+          filesChanged,
           ...(fileEffects ? { fileEffects } : {}),
           worktreePath: null,
-        });
-        if (hasFileEffects || files.length > 0) {
-          this.orm
-            .update(threads)
-            .set({ hasFileChanges: 1 })
-            .where(and(eq(threads.id, threadId), eq(threads.hasFileChanges, 0)))
-            .run();
-        }
+        },
+        markFilesChanged: hasFileEffects || filesChanged.length > 0,
       });
-      writeTurn(filesChanged);
       return filesChanged;
     } catch (err) {
+      if (err instanceof DatabaseWriteOutcomeUnknown) throw err;
       logger.warn("Failed to capture turn snapshot", {
         threadId,
         error: err instanceof Error ? err.message : String(err),
@@ -637,41 +630,45 @@ export class TurnFinalizer {
    * body path needs no broadcast because the `Message` event already carried
    * this id to the client. Returns null only when the write throws.
    */
-  materializeAssistantRow(
+  async materializeAssistantRow(
     threadId: string,
     broadcastFallback = true,
     deferVolatileCommit = false,
     stageInternal = false,
-  ): MaterializedAssistantRow | null {
-    const { messages } = this.messageRepo.listByThread(threadId, 1);
-    const last = messages.length > 0 ? messages[messages.length - 1] : null;
-    if (last?.role === "assistant") return this.reuseAssistantRow(threadId, last, deferVolatileCommit);
-    return this.createAssistantRow(threadId, last, broadcastFallback, deferVolatileCommit, stageInternal);
+    anchor = this.assistantMaterializationAnchor(threadId),
+  ): Promise<MaterializedAssistantRow | null> {
+    if (anchor?.role === "assistant") return this.reuseAssistantRow(threadId, anchor, deferVolatileCommit);
+    return this.createAssistantRow(threadId, anchor, broadcastFallback, deferVolatileCommit, stageInternal);
   }
 
-  private reuseAssistantRow(
+  private assistantMaterializationAnchor(threadId: string): AssistantMaterializationAnchor {
+    const { messages } = this.messageRepo.listByThread(threadId, 1);
+    return messages[messages.length - 1] ?? null;
+  }
+
+  private async reuseAssistantRow(
     threadId: string,
     last: { id: string; content: string | null; },
     deferVolatileCommit: boolean,
-  ): MaterializedAssistantRow {
+  ): Promise<MaterializedAssistantRow> {
     const attachments = this.getBufferedAssistantAttachments(threadId);
-    if (attachments.length > 0) this.messageRepo.appendAttachments(last.id, attachments);
+    if (attachments.length > 0) await this.messageRepo.appendAttachments(last.id, attachments);
     if (!deferVolatileCommit) this.commitAssistantMaterialization(threadId);
     return { id: last.id, content: last.content ?? "", shouldBroadcast: false, attachments };
   }
 
-  private createAssistantRow(
+  private async createAssistantRow(
     threadId: string,
     last: { id: string } | null,
     broadcastFallback: boolean,
     deferVolatileCommit: boolean,
     stageInternal: boolean,
-  ): MaterializedAssistantRow | null {
+  ): Promise<MaterializedAssistantRow | null> {
     const input = this.assistantMaterializationInput(threadId);
     const nextSeq = this.messageRepo.getLatestSequenceIncludingInternal(threadId) + 1;
     const anchorId = last ? last.id : `seq:${nextSeq}`;
     try {
-      const msg = this.messageRepo.createAssistantIdempotent({
+      const msg = await this.messageRepo.createAssistantIdempotent({
         id: deriveTurnAssistantMessageId(threadId, anchorId),
         threadId,
         content: input.content,
@@ -690,6 +687,7 @@ export class TurnFinalizer {
       if (broadcastFallback) this.broadcastMaterializedAssistant(threadId, materialized);
       return materialized;
     } catch (err) {
+      if (err instanceof DatabaseWriteOutcomeUnknown) throw err;
       logger.error("Failed to materialize assistant message", {
         threadId,
         error: err instanceof Error ? err.message : String(err),

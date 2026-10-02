@@ -52,6 +52,9 @@ export class ModelCacheService {
 
   /** In-flight refresh promises to coalesce concurrent fetches. */
   private inflight = new Map<string, Promise<ProviderModelInfo[]>>();
+  private readonly activeRefreshes = new Set<Promise<ProviderModelInfo[]>>();
+  private closing = false;
+  private closeTask: Promise<void> | undefined;
 
   /**
    * Increments when `invalidate` runs so a refresh that started earlier cannot
@@ -104,7 +107,7 @@ export class ModelCacheService {
     const age = Date.now() - lastFetch;
 
     if (cached) {
-      if (age > CACHE_FRESH_MS) {
+      if (!this.closing && age > CACHE_FRESH_MS) {
         // Fire-and-forget: caller gets stale data immediately, fresh data
         // lands on next call.
         void this.refreshProvider(providerId).catch((err) => {
@@ -123,16 +126,30 @@ export class ModelCacheService {
     return this.memoryCache.get(providerId);
   }
 
+  /** Stop new provider fetches and await every existing fetch and its committed save. */
+  close(): Promise<void> {
+    this.closing = true;
+    this.closeTask ??= this.drainRefreshes();
+    return this.closeTask;
+  }
+
+  private async drainRefreshes(): Promise<void> {
+    const outcomes = await Promise.allSettled(this.activeRefreshes);
+    const failures = outcomes.filter((outcome) => outcome.status === "rejected").map((outcome) => outcome.reason);
+    if (failures.length > 0) throw new AggregateError(failures, "Model refreshes failed during shutdown");
+  }
+
   /**
    * Drops persisted and in-memory entries for a provider so the next model list
    * fetch runs against the live CLI or SDK again.
    */
-  invalidate(providerId: string): void {
+  async invalidate(providerId: string): Promise<void> {
+    if (this.closing) throw new Error("Model cache closed");
     this.generation.set(providerId, (this.generation.get(providerId) ?? 0) + 1);
     this.inflight.delete(providerId);
     this.memoryCache.delete(providerId);
     this.fetchedAt.delete(providerId);
-    this.repo.delete(providerId);
+    await this.repo.delete(providerId);
   }
 
   /**
@@ -141,16 +158,19 @@ export class ModelCacheService {
    * duplicate requests in flight.
    */
   async refreshProvider(providerId: string): Promise<ProviderModelInfo[]> {
+    if (this.closing) throw new Error("Model cache closed");
     const existing = this.inflight.get(providerId);
     if (existing) return existing;
 
     const promise = this.doRefresh(providerId);
     this.inflight.set(providerId, promise);
+    this.activeRefreshes.add(promise);
 
     try {
       return await promise;
     } finally {
-      this.inflight.delete(providerId);
+      if (this.inflight.get(providerId) === promise) this.inflight.delete(providerId);
+      this.activeRefreshes.delete(promise);
     }
   }
 
@@ -182,7 +202,8 @@ export class ModelCacheService {
     this.fetchedAt.set(providerId, now);
 
     if (changed) {
-      this.repo.upsert(providerId, models);
+      await this.repo.upsert(providerId, models);
+      if ((this.generation.get(providerId) ?? 0) !== genAtStart) return models;
       // Push the diff to clients so pickers converge without polling; the TTL
       // refetch stays as a fallback for missed pushes.
       broadcast("provider.modelsChanged", { providerId, models });

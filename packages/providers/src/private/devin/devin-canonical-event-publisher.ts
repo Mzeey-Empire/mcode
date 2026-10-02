@@ -1,3 +1,4 @@
+import { logger } from "@mcode/shared";
 import { AgentEventType } from "@mcode/contracts";
 import type { ProviderRuntimeEvent } from "@mcode/contracts";
 import type { ProviderIdentity } from "@mcode/agent-model";
@@ -23,15 +24,25 @@ interface DevinExecutionQueue {
 /** Serializes Devin live events into canonical item drafts for one execution. */
 export class DevinCanonicalEventPublisher {
   private readonly queues = new Map<string, DevinExecutionQueue>();
+  private admissionStopped = false;
+  private shutdownTask: Promise<void> | undefined;
+  private lateEventReported = false;
 
   constructor(private readonly sink: ProviderEventSinkPort) {}
 
-  /** Queues one Devin runtime event for durable canonical delivery. */
+  /** Queue one exactly routed observation for live acceptance. */
   publish(
     routing: DevinCanonicalEventRouting,
     runtimeEvent: ProviderRuntimeEvent,
     sourceIdentities: readonly ProviderIdentity[],
   ): void {
+    if (this.admissionStopped) {
+      if (!this.lateEventReported) {
+        this.lateEventReported = true;
+        logger.warn("Devin canonical event rejected after shutdown", { executionId: routing.executionId });
+      }
+      return;
+    }
     const queue = this.queueFor(routing);
     if (queue.failure) return;
     if (queue.pendingEventCount >= MAX_PENDING_EVENTS_PER_EXECUTION) {
@@ -46,13 +57,18 @@ export class DevinCanonicalEventPublisher {
     queue.tail = queue.tail
       .then(async () => {
         if (queue.failure) return;
-        await this.sink.submit({
+        const receipt = await this.sink.submit({
           threadId: routing.threadId,
           turnId: routing.turnId,
           executionId: routing.executionId,
+          batchId: draft.eventId,
+          deliveryAttempt: routing.deliveryAttempt,
           phase: "running",
           events: [draft],
         });
+        if (receipt.commit.outcome === "conflict" || receipt.commit.outcome === "ingest-overflow") {
+          throw new Error(`Devin canonical event ${draft.eventId} was ${receipt.commit.outcome}`);
+        }
       })
       .catch((error: unknown) => {
         queue.failure ??= toError(error);
@@ -70,6 +86,20 @@ export class DevinCanonicalEventPublisher {
     await queue.tail;
     this.queues.delete(key);
     if (queue.failure) throw queue.failure;
+  }
+
+  /** Fences late callbacks and drains every event admitted before provider shutdown. */
+  stopAdmissionAndDrain(): Promise<void> {
+    this.admissionStopped = true;
+    this.shutdownTask ??= this.drainAcceptedQueues([...this.queues.values()]);
+    return this.shutdownTask;
+  }
+
+  private async drainAcceptedQueues(queues: readonly DevinExecutionQueue[]): Promise<void> {
+    await Promise.all(queues.map((queue) => queue.tail));
+    this.queues.clear();
+    const failures = queues.flatMap((queue) => queue.failure ? [queue.failure] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "Devin canonical event shutdown failed");
   }
 
   private queueFor(routing: DevinCanonicalEventRouting): DevinExecutionQueue {

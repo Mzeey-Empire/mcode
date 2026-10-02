@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 import { setupContainer } from "../../../../application/composition/container.js";
 import { AgentService } from "../../../agents/index.js";
@@ -30,12 +31,12 @@ describe("Terminal diagnostics container wiring", () => {
   const previousBackend = process.env.MCODE_TERMINAL_BACKEND;
   const previousDatabasePath = process.env.MCODE_DB_PATH;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     container.reset();
     temporaryDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-terminal-diagnostics-"));
     process.env.MCODE_TERMINAL_BACKEND = "modern";
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
-    setupContainer(temporaryDirectory);
+    await setupContainer(temporaryDirectory);
     database = container.resolve<Database>("Database");
 
     modernDiagnostics = new TerminalDiagnosticsService({
@@ -61,11 +62,14 @@ describe("Terminal diagnostics container wiring", () => {
     container.register("ModernTerminalBackend", { useValue: modernBackend });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (!database && container.isRegistered("Database")) {
       database = container.resolve<Database>("Database");
     }
-    database?.close();
+    if (container.isRegistered(ApplicationDatabaseWriter)) {
+      await container.resolve(ApplicationDatabaseWriter).close();
+    }
+    database?.close(true);
     database = undefined;
     container.reset();
     if (previousBackend === undefined) delete process.env.MCODE_TERMINAL_BACKEND;

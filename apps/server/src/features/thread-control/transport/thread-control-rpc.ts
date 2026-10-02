@@ -27,26 +27,26 @@ const threadControlHandlers: Record<
   "thread.control.read": (deps, params) => deps.threadControlService.threadControlRead(params),
   "thread.control.send": (deps, params) => deps.threadControlService.threadControlSend(params),
   "thread.control.stop": (deps, params) => deps.threadControlService.threadControlStop(params),
-  "threadControl.pairing.create": (deps, params) => {
+  "threadControl.pairing.create": async (deps, params) => {
     const pairings = requirePairings(deps);
-    const pairing = pairings.create(params);
+    const pairing = await pairings.create(params);
     return {
       ...pairing,
       externalMcpEndpoint: deps.externalThreadControlMcpRuntime?.endpoint() ?? pairing.externalMcpEndpoint,
     };
   },
-  "threadControl.pairing.revoke": (deps, params) => {
+  "threadControl.pairing.revoke": async (deps, params) => {
     const pairings = requirePairings(deps);
-    const pairing = pairings.revoke(params.pairingId);
+    const pairing = await pairings.revoke(params.pairingId);
     return {
       ...pairing,
       externalMcpEndpoint: deps.externalThreadControlMcpRuntime?.endpoint() ?? "/mcp/external-thread-control",
     };
   },
-  "threadControl.pairing.replace": (deps, params) => {
+  "threadControl.pairing.replace": async (deps, params) => {
     const pairings = requirePairings(deps);
     const { pairingId, ...input } = params;
-    const pairing = pairings.replace(pairingId, input);
+    const pairing = await pairings.replace(pairingId, input);
     return {
       ...pairing,
       externalMcpEndpoint: deps.externalThreadControlMcpRuntime?.endpoint() ?? pairing.externalMcpEndpoint,

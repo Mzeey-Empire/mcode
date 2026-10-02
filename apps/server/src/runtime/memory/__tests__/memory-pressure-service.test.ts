@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { gc } from "bun";
 import { getDefaultSettings } from "@mcode/contracts";
 import { MemoryPressureService } from "../memory-pressure-service.js";
+import type { Database } from "bun:sqlite";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../features/projects/testing/owned-test-database.js";
+import { openReadOnlyDatabase } from "../../persistence/sqlite/read-only-database.js";
 import type { RuntimeMemoryMeasurement } from "../runtime-memory-sampler.js";
 
 vi.mock("bun", async (importOriginal) => ({
@@ -10,13 +13,11 @@ vi.mock("bun", async (importOriginal) => ({
   gc: vi.fn(),
 }));
 
-const db = { run: vi.fn() } as unknown as import("bun:sqlite").Database;
-
 function settingsWithHeapBudget(getHeapMb: () => number) {
   return {
     get: () => ({
       ...getDefaultSettings(),
-      server: { memory: { heapMb: getHeapMb() } },
+      server: { ...getDefaultSettings().server, memory: { heapMb: getHeapMb() } },
     }),
   };
 }
@@ -27,17 +28,25 @@ function v8Measurement(usedBytes: number, budgetBytes: number): RuntimeMemoryMea
 
 describe("MemoryPressureService", () => {
   let service: MemoryPressureService;
+  let database: OwnedTestDatabase;
+  let db: Database;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    database = createOwnedTestDatabase();
+    await database.writer.whenReady();
+    db = openReadOnlyDatabase(database.db.filename);
     vi.useFakeTimers();
     vi.clearAllMocks();
-    service = new MemoryPressureService(db, settingsWithHeapBudget(() => 512));
+    vi.spyOn(db, "run");
+    service = new MemoryPressureService(db, settingsWithHeapBudget(() => 512), database.writer);
   });
 
-  afterEach(() => {
-    service.dispose();
+  afterEach(async () => {
+    await service.dispose();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    db.close(true);
+    await database.close();
   });
 
   it("emits warning and critical pressure levels from V8 heap ratios", () => {
@@ -127,8 +136,8 @@ describe("MemoryPressureService", () => {
     let heapMb = 256;
     const initialBudgetBytes = heapMb * 1024 * 1024;
     let rss = Math.floor(initialBudgetBytes * 0.8);
-    service.dispose();
-    service = new MemoryPressureService(db, settingsWithHeapBudget(() => heapMb));
+    await service.dispose();
+    service = new MemoryPressureService(db, settingsWithHeapBudget(() => heapMb), database.writer);
     const levels: string[] = [];
     service.onPressureChange((snapshot) => {
       levels.push(snapshot.level);
@@ -164,12 +173,19 @@ describe("MemoryPressureService", () => {
   });
 
   it("runs warm-idle reclamation after all turns finish", async () => {
+    database.db.run("CREATE TABLE maintenance_fixture (value INTEGER)");
+    database.db.run("CREATE INDEX maintenance_fixture_value ON maintenance_fixture (value)");
+    const insert = database.db.prepare("INSERT INTO maintenance_fixture VALUES (?)");
+    database.db.transaction(() => { for (let i = 0; i < 1000; i++) insert.run(i); })();
     service.markActive("thread-1");
     service.markIdle("thread-1");
 
     await vi.advanceTimersByTimeAsync(30_000);
 
-    expect(db.run).toHaveBeenCalledWith("PRAGMA optimize = 0x10002");
+    await service.dispose();
+    expect(db.query("SELECT stat FROM sqlite_stat1 WHERE idx = ?").get("maintenance_fixture_value"))
+      .toEqual({ stat: "1000 1" });
+    expect(db.run).not.toHaveBeenCalledWith("PRAGMA optimize = 0x10002");
     expect(db.run).toHaveBeenCalledWith("PRAGMA shrink_memory");
   });
 
@@ -183,5 +199,30 @@ describe("MemoryPressureService", () => {
 
     service.markForeground();
     expect(db.run).toHaveBeenCalledWith("PRAGMA cache_size = -2048");
+  });
+
+  it("waits for held maintenance on disposal and rejects later idle callbacks", async () => {
+    database.db.run("BEGIN IMMEDIATE");
+    try {
+      service.markIdle();
+      await vi.advanceTimersByTimeAsync(30_000);
+      let disposed = false;
+      const disposal = service.dispose().then(() => { disposed = true; });
+      await Promise.resolve();
+      expect(disposed).toBe(false);
+      expect(db.query("SELECT COUNT(*) AS count FROM workspaces").get()).toEqual({ count: 0 });
+      database.db.run("COMMIT");
+      await disposal;
+    } finally {
+      if (database.db.inTransaction) database.db.run("ROLLBACK");
+    }
+    await database.writer.close();
+    vi.mocked(db.run).mockClear();
+    service.markActive("late-turn");
+    service.markIdle("late-turn");
+    service.markBackground();
+    service.markForeground();
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(db.run).not.toHaveBeenCalled();
   });
 });

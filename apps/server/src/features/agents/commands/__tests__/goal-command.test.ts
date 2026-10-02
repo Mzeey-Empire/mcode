@@ -4,7 +4,8 @@ import type { Database } from "bun:sqlite";
 import type { IAgentProvider, AgentEvent, GoalState } from "@mcode/contracts";
 import { AgentEventType } from "@mcode/contracts";
 import * as NodeEvents from "node:events";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createThreadPersistenceTestRuntime } from "../../../thread-control/testing/thread-persistence-test-runtime.js";
+import type { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { GoalCommand } from "../goal-command.js";
 import type { CommandContext } from "../command-router.js";
@@ -63,20 +64,23 @@ function fakeNonGoalProvider() {
 
 describe("GoalCommand", () => {
   let db: Database;
+  let writer: ApplicationDatabaseWriter;
   let messageRepo: MessageRepo;
-  let broadcast: ReturnType<typeof vi.fn>;
+  let broadcast: ReturnType<typeof vi.fn<(channel: "agent.event", event: AgentEvent) => void>>;
   const threadId = "thread-1";
 
   beforeEach(() => {
-    db = openMemoryDatabase();
+    const runtime = createThreadPersistenceTestRuntime();
+    db = runtime.database;
+    writer = runtime.writer;
     seedThread(db);
-    messageRepo = new MessageRepo(db);
-    broadcast = vi.fn();
+    messageRepo = new MessageRepo(runtime.reader, writer);
+    broadcast = vi.fn<(channel: "agent.event", event: AgentEvent) => void>();
   });
 
   function build() {
     return new GoalCommand(
-      { messageRepo, db },
+      { writer },
       (_threadId, events) => events.forEach((event) => broadcast("agent.event", event)),
     );
   }
@@ -152,7 +156,7 @@ describe("GoalCommand", () => {
   function broadcastEvents(): AgentEvent[] {
     return broadcast.mock.calls
       .filter(([channel]) => channel === "agent.event")
-      .map(([, payload]) => payload as AgentEvent);
+      .map(([, payload]) => payload);
   }
 
   describe("SHOW form", () => {
@@ -289,5 +293,31 @@ describe("GoalCommand", () => {
       expect(events.some((e) => e.type === AgentEventType.GoalCleared)).toBe(true);
       expect(events.some((e) => e.type === AgentEventType.Ended)).toBe(false);
     });
+  });
+
+  it("rolls back both control rows and publishes no confirmation when assistant persistence fails", async () => {
+    const cmd = build();
+    db.run("CREATE TRIGGER reject_goal_reply BEFORE INSERT ON messages WHEN NEW.role = 'assistant' BEGIN SELECT RAISE(ABORT, 'goal reply rejected'); END");
+
+    await expect(cmd.handle(ctx("/goal show", fakeGoalCapableProvider()))).rejects.toThrow("goal reply rejected");
+    expect(messageRepo.listByThread(threadId, 100).messages).toHaveLength(0);
+    expect(broadcast).not.toHaveBeenCalled();
+
+    db.run("DROP TRIGGER reject_goal_reply");
+    expect(await cmd.handle(ctx("/goal show", fakeGoalCapableProvider()))).toEqual({ kind: "handled" });
+    expect(messageRepo.listByThread(threadId, 100).messages).toHaveLength(2);
+    expect(broadcastEvents().filter((event) => event.type === AgentEventType.Message)).toHaveLength(1);
+  });
+
+  it("allocates concurrent control reply sequences inside the shared writer and publishes committed ids", async () => {
+    const cmd = build();
+    const provider = fakeGoalCapableProvider();
+    await Promise.all([cmd.handle(ctx("/goal", provider)), cmd.handle(ctx("/goal show", provider))]);
+
+    const messages = messageRepo.listByThread(threadId, 100).messages;
+    expect(messages.map((message) => message.sequence)).toEqual([1, 2, 3, 4]);
+    const confirmations = broadcastEvents().filter((event) => event.type === AgentEventType.Message);
+    expect(confirmations.map((event) => event.messageId)).toEqual(messages.filter((message) => message.role === "assistant").map((message) => message.id));
+    expect(broadcastEvents().some((event) => event.type === AgentEventType.Ended)).toBe(false);
   });
 });

@@ -2,6 +2,7 @@ import { createAgentModelState, type AgentItem, type AgentTurn, type Message } f
 import { describe, expect, it } from "vitest";
 import { projectCanonicalMessageList } from "../canonical-message-projection";
 import { createTranscriptItemProjector } from "../virtual-items";
+import { expandTranscriptNarrative } from "../transcript-narrative-items";
 
 const THREAD_ID = "canonical-child";
 const TURN_ID = "canonical-turn";
@@ -298,7 +299,7 @@ describe("projectCanonicalMessageList", () => {
     expect(projection?.turnSummariesByMessageId["child-answer"]?.approvalReview).toBeUndefined();
   });
 
-  it("projects an active child answer as live assistant text without summarizing its turn", () => {
+  it("projects an active child answer as the current assistant row without summarizing its turn", () => {
     const state = createAgentModelState();
     state.turns[TURN_ID] = turn("Running");
     const answer = message({
@@ -324,8 +325,8 @@ describe("projectCanonicalMessageList", () => {
     });
 
     expect(projection).toMatchObject({
-      messages: [expect.objectContaining({ id: "child-prompt" })],
-      streamingText: "Still working",
+      messages: [expect.objectContaining({ id: "child-prompt" }), expect.objectContaining({ id: "child-answer" })],
+      streamingText: undefined,
       agentDisplayState: { phase: "streaming" },
     });
     const timeline = createTranscriptItemProjector()({
@@ -346,6 +347,61 @@ describe("projectCanonicalMessageList", () => {
     expect(timeline.filter((row) => row.type === "message").map((row) => row.message.content))
       .toEqual(["Inspect README.md", "Still working"]);
     expect(projection?.turnSummariesByMessageId).toEqual({});
+  });
+
+  it("renders accepted child text once across running tools, hydration, and completion", () => {
+    const state = createAgentModelState();
+    state.turns[TURN_ID] = turn("Running");
+    const prompt = message();
+    const answer = message({
+      id: "child-answer", role: "assistant", content: "CHILD_PREFIX", sequence: 1,
+      timestamp: "2026-08-18T12:00:03.000Z",
+    });
+    state.items.prompt = item("prompt", "message", { projection: "message", message: prompt }, STARTED_AT);
+    state.items.answer = item("answer", "message", { projection: "message", message: answer }, answer.timestamp);
+    state.items.reasoning = item("reasoning", "reasoning", {
+      projection: "codexChildReasoning", content: "Reading the file",
+    }, "2026-08-18T12:00:01.000Z");
+    state.items.call = item("call", "tool-call", {
+      projection: "codexChildToolCall", nativeItemId: "native-read", toolName: "Read",
+      toolInput: { path: "README.md" },
+    }, "2026-08-18T12:00:02.000Z");
+
+    for (const hydratedMessages of [[], [prompt, answer]]) {
+      const projection = projectCanonicalMessageList({
+        threadId: THREAD_ID, state, messages: hydratedMessages, toolCalls: [], thoughtSegments: [],
+      });
+      if (!projection) throw new Error("Expected the accepted child projection");
+      const timeline = createTranscriptItemProjector()({
+        ...projection,
+        agentStartTime: projection.agentStartTime,
+        currentTurn: {
+          threadId: THREAD_ID, messageId: projection.currentTurnMessageId,
+          responseKey: projection.currentTurnResponseKey,
+          responseKeysByMessageId: projection.assistantResponseKeys,
+        },
+      });
+      const rows = expandTranscriptNarrative(timeline, {});
+      expect(rows.map((row) => {
+        if (row.type === "message") return `message:${row.message.content}`;
+        if (row.type === "narrative-row") return row.item.type;
+        return row.type;
+      })).toEqual([
+        "message:Inspect README.md", "thought", "active-tool", "message:CHILD_PREFIX", "narrative-indicator",
+      ]);
+      expect(rows.filter((row) => row.type === "message" && row.message.content === "CHILD_PREFIX"))
+        .toHaveLength(1);
+      expect(projection.turnSummariesByMessageId).toEqual({});
+    }
+
+    state.turns[TURN_ID] = turn("Completed", "2026-08-18T12:00:04.000Z");
+    const completed = projectCanonicalMessageList({
+      threadId: THREAD_ID, state, messages: [prompt, answer], toolCalls: [], thoughtSegments: [],
+    });
+    expect(completed?.messages.filter((entry) => entry.content === "CHILD_PREFIX")).toHaveLength(1);
+    expect(completed?.turnSummariesByMessageId[answer.id]).toMatchObject({
+      counts: { steps: 1, thoughts: 1, subagents: 0 }, durationMs: 4_000,
+    });
   });
 
   it("summarizes structured activity for every completed child turn", () => {
@@ -449,5 +505,55 @@ describe("projectCanonicalMessageList", () => {
         approvalReview: { mode: "manual", reason: "manual-requested" },
       },
     });
+  });
+
+  it("keeps full canonical activity in summaries while bounding visible tool projection", () => {
+    const state = createAgentModelState();
+    state.turns[TURN_ID] = turn("Completed", "2026-08-18T12:03:00.000Z");
+    const answer = message({
+      id: "child-answer",
+      role: "assistant",
+      content: "Done",
+      sequence: 1,
+      timestamp: "2026-08-18T12:02:59.000Z",
+    });
+    state.items.answer = item(
+      "answer",
+      "message",
+      { projection: "message", message: answer },
+      answer.timestamp,
+    );
+
+    for (let index = 0; index < 170; index += 1) {
+      const nativeItemId = `tool-${String(index).padStart(3, "0")}`;
+      const callTime = new Date(Date.parse(STARTED_AT) + index * 1_000).toISOString();
+      const resultTime = new Date(Date.parse(STARTED_AT) + index * 1_000 + 500).toISOString();
+      state.items[`call-${index}`] = item(
+        `call-${index}`,
+        "tool-call",
+        { projection: "codexChildToolCall", nativeItemId, toolName: "Read" },
+        callTime,
+      );
+      state.items[`result-${index}`] = item(
+        `result-${index}`,
+        "tool-result",
+        { projection: "codexChildToolResult", nativeItemId, output: "ok" },
+        resultTime,
+      );
+    }
+
+    const projection = projectCanonicalMessageList({
+      threadId: THREAD_ID,
+      state,
+      messages: [message(), answer],
+      toolCalls: [],
+      thoughtSegments: [],
+    });
+
+    const visibleIds = projection?.toolCalls.map((call) => call.id);
+    expect(visibleIds).toHaveLength(32);
+    expect(visibleIds?.[0]).toBe("tool-138");
+    expect(visibleIds?.at(-1)).toBe("tool-169");
+    expect(projection?.turnSummariesByMessageId["child-answer"]?.counts.steps).toBe(170);
   });
 });

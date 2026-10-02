@@ -5,13 +5,15 @@ import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
-import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "../../canonical/canonical-agent-store.js";
+import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
 import {
   ParentAssistantTextCheckpointQueue,
-  ParentAssistantTextCheckpointService,
+  ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService,
   type ParentAssistantTextCheckpointQueueScheduler,
-} from "../parent-assistant-text-checkpoint-service.js";
+  type ParentAssistantTextRecoveryJournalChunk,
+  type ParentAssistantTextCheckpointInput,
+} from "../parent-assistant-text-checkpoint-store.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000001522";
 const THREAD_ID = "thread-1522";
@@ -115,7 +117,7 @@ describe("ParentAssistantTextCheckpointService", () => {
   it("resets an unfinished retry even when its checkpoint rows are already absent", () => {
     const journalDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-parent-text-retry-"));
     const retryService = new ParentAssistantTextCheckpointService(db, undefined, { directory: journalDirectory });
-    const recovered = [];
+    const recovered: ParentAssistantTextRecoveryJournalChunk[] = [];
     try {
       retryService.recoveryJournal.append([input(1, "journaled")]);
 
@@ -132,7 +134,7 @@ describe("ParentAssistantTextCheckpointService", () => {
   it("removes a recovery journal after its equivalent canonical projection commits", () => {
     const journalDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-parent-text-retire-"));
     const journalService = new ParentAssistantTextCheckpointService(db, undefined, { directory: journalDirectory });
-    const recovered = [];
+    const recovered: ParentAssistantTextRecoveryJournalChunk[] = [];
     try {
       journalService.recoveryJournal.append([input(1, "journaled")]);
       journalService.discardRecoveryJournal(EXECUTION_ID);
@@ -147,7 +149,7 @@ describe("ParentAssistantTextCheckpointService", () => {
   it("removes journal-only provisional text after the canonical execution is terminal", () => {
     const journalDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-parent-text-terminal-journal-"));
     const journalService = new ParentAssistantTextCheckpointService(db, undefined, { directory: journalDirectory });
-    const recovered = [];
+    const recovered: ParentAssistantTextRecoveryJournalChunk[] = [];
     try {
       journalService.recoveryJournal.append([input(1, "journaled")]);
       db.prepare(`
@@ -172,7 +174,7 @@ describe("ParentAssistantTextCheckpointService", () => {
       { maxBytes: 4, maxChunks: 4 },
       { directory: journalDirectory },
     );
-    const recovered = [];
+    const recovered: ParentAssistantTextRecoveryJournalChunk[] = [];
     try {
       expect(journalService.appendChunk([input(1, "full")]).outcome).toBe("committed");
       journalService.recoveryJournal.append([input(2, "tail")]);
@@ -197,7 +199,7 @@ describe("ParentAssistantTextCheckpointService", () => {
     try {
       NodeFS.writeFileSync(journalPath, "{\"version\":1", "utf8");
 
-      expect(() => journalService.recoveryJournal.drain(EXECUTION_ID, expect.unreachable))
+      expect(() => journalService.recoveryJournal.drain(EXECUTION_ID, () => expect.unreachable()))
         .toThrow("Assistant text recovery journal has an incomplete final record");
       expect(NodeFS.existsSync(journalPath)).toBe(true);
     } finally {
@@ -432,7 +434,7 @@ describe("ParentAssistantTextCheckpointQueue", () => {
       },
       recoveryJournal: {
         isAvailable: () => journalAvailable,
-        append: (entries) => journaled.push(...entries.map((entry) => entry.text)),
+        append: (entries: readonly ParentAssistantTextCheckpointInput[]) => journaled.push(...entries.map((entry) => entry.text)),
       },
     } as unknown as ParentAssistantTextCheckpointService, {
       maxChunkBytes: 32,

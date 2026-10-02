@@ -477,6 +477,13 @@
       "when": 1790286163932,
       "tag": "0066_fat_amazoness",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1790872211595,
+      "tag": "0067_cooing_tomorrow_man",
+      "breakpoints": true
     }
   ]
 }

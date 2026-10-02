@@ -1,8 +1,7 @@
-import * as NodePath from "node:path";
-import type { Database } from "bun:sqlite";
 import { Lifecycle, instanceCachingFactory, type DependencyContainer } from "tsyringe";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import { broadcast } from "../../../application/transport/push.js";
+import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 import {
   AgentPermissionService,
@@ -15,14 +14,9 @@ import {
 import { LegacyConversationMigration } from "../conversation/migrations/legacy-conversation-migration.js";
 import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { PlanQuestionService } from "../planning/plan-question-service.js";
-import { PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-repo.js";
 import { TurnSnapshotRepo } from "../turns/persistence/turn-snapshot-repo.js";
 import { TurnDiffService } from "../turns/turn-diff-service.js";
 import { TurnDiffRepo } from "../turns/persistence/turn-diff-repo.js";
-import {
-  CODEX_COLLABORATION_DURABILITY,
-  type CodexCollaborationDurability,
-} from "../collaboration/codex-collaboration-durability.js";
 import {
   SUBAGENT_LIFECYCLE_DURABILITY,
 } from "../collaboration/subagent-lifecycle-durability.js";
@@ -80,6 +74,7 @@ import {
   type TurnRuntimePersistence,
 } from "../turns/turn-runtime-persistence.js";
 import { TurnConversationProjectionService } from "../turns/turn-conversation-projection-service.js";
+import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import { PostTerminalHookCompletionEffect } from "../turns/post-terminal-hook-completion-effect.js";
 import { ThreadCreationCoordinator } from "../turns/thread-creation-coordinator.js";
 import { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
@@ -95,18 +90,18 @@ import { TurnRuntimeController } from "../orchestration/turn-runtime-controller.
 export function registerAgentServices(container: DependencyContainer): void {
   container.register(WorkerOwnedTurnRuntime, {
     useFactory: instanceCachingFactory((c) => {
-      const dbPath = c.resolve<Database>("Database").filename;
-      if (!dbPath || dbPath === ":memory:") {
-        throw new Error("Execution workers require a file-backed database");
-      }
-      return new WorkerOwnedTurnRuntime(NodePath.resolve(dbPath), c.resolve(AgentEventPublicationRegistry));
+      return new WorkerOwnedTurnRuntime(c.resolve(CanonicalAgentWriterClient), c.resolve(AgentEventPublicationRegistry), c.resolve(CanonicalAgentBoundary));
     }),
   });
   container.register("WorkerOwnedTurnRuntime", {
     useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime),
   });
-  container.register(CanonicalAgentWriterClient, {
-    useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).writer,
+  container.register(CanonicalAcceptedProgress, {
+    useFactory: (c) => {
+      const progress = c.resolve(WorkerOwnedTurnRuntime).progress;
+      if (!progress) throw new Error("Thread notice projection requires the production progress owner");
+      return progress;
+    },
   });
   container.register(CanonicalExecutionWriterPort, {
     useFactory: (c) => c.resolve(WorkerOwnedTurnRuntime).writerPort,
@@ -125,7 +120,7 @@ export function registerAgentServices(container: DependencyContainer): void {
   });
   container.register(TurnDiffService, {
     useFactory: instanceCachingFactory((c) => new TurnDiffService(
-      new TurnDiffRepo(c.resolve("Database")),
+      new TurnDiffRepo(c.resolve("Database"), c.resolve(ApplicationDatabaseWriter)),
       (threadId) => broadcast("turn.diffChanged", { threadId }),
     )),
   });
@@ -145,9 +140,6 @@ export function registerAgentServices(container: DependencyContainer): void {
     { useClass: CanonicalAgentBoundary },
     { lifecycle: Lifecycle.Singleton },
   );
-  container.register<CodexCollaborationDurability>(CODEX_COLLABORATION_DURABILITY, {
-    useFactory: (c) => c.resolve(CanonicalAgentBoundary),
-  });
   container.register(PARENT_TURN_DURABILITY, {
     useFactory: (c) => c.resolve(CanonicalAgentBoundary),
   });
@@ -176,9 +168,6 @@ export function registerAgentServices(container: DependencyContainer): void {
   );
   container.register("PlanQuestionService", {
     useFactory: (c) => c.resolve(PlanQuestionService),
-  });
-  container.register("PlanAnswerMarker", {
-    useFactory: (c) => c.resolve(PlanQuestionAnswersRepo),
   });
   container.register("TurnSnapshotPersistence", {
     useFactory: (c) => c.resolve(TurnSnapshotRepo),
@@ -238,7 +227,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(NarrativeStore),
       c.resolve(SnapshotService),
       c.resolve("TurnSnapshotPersistence"),
-      c.resolve("Database"),
+      c.resolve(ApplicationDatabaseWriter),
       c.resolve<TurnFileTracker>(TURN_FILE_TRACKER),
       c.resolve(PARENT_TURN_DURABILITY),
       c.resolve(ParentAssistantTextCheckpointService),
@@ -264,7 +253,6 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(AttachmentService),
       c.resolve("IProviderRegistry"),
       c.resolve(ProviderAvailabilityService),
-      c.resolve("PlanAnswerMarker"),
       c.resolve(PARENT_TURN_DURABILITY),
       c.resolve(SettingsService),
       c.resolve(PlanTurnService),

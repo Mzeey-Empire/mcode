@@ -21,6 +21,16 @@ export class AssistantExecutionState {
   private bufferedAttachments: StoredAttachment[] = [];
   private materialized = false;
 
+  /** Prepare against a detached candidate until the complete batch reserves retention. */
+  fork(): AssistantExecutionState {
+    const copy = new AssistantExecutionState();
+    copy.streamingText = this.streamingText;
+    copy.bufferedBody = structuredClone(this.bufferedBody);
+    copy.bufferedAttachments = structuredClone(this.bufferedAttachments);
+    copy.materialized = this.materialized;
+    return copy;
+  }
+
   appendStreamingText(delta: string): void {
     this.streamingText += delta;
   }
@@ -31,6 +41,13 @@ export class AssistantExecutionState {
 
   resetStreamingText(): void {
     this.streamingText = "";
+  }
+
+  /** Remove only the provisional suffix while retaining earlier closed final segments. */
+  removeStreamingSuffix(suffix: string): string {
+    if (!suffix || !this.streamingText.endsWith(suffix)) throw new Error("Assistant narration suffix does not match its body");
+    this.streamingText = this.streamingText.slice(0, -suffix.length);
+    return this.streamingText;
   }
 
   bufferBody(content: string, model: string | null, attachments = this.bufferedAttachments): void {

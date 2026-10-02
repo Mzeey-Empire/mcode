@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openMemoryDatabase } from "../../database.js";
 import {
@@ -9,6 +12,8 @@ import {
   parseSQLiteProfileBaseline,
   parseSQLiteProfileCliOptions,
   runSQLiteCheckpointPolicyProfile,
+  runSQLiteProfileWorkload,
+  openSQLiteProfileDatabase,
   summarizeSQLiteProfileSamples,
   type SQLiteProfileAggregate,
   type SQLiteQueryPlan,
@@ -207,6 +212,29 @@ describe("conversation history query plans", () => {
 });
 
 describe("runSQLiteProfile", () => {
+  it("measures active-turn batches through the real owner and counts the owner's changed rows", async () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-sqlite-profile-"));
+    try {
+      for (let index = 1; index <= 3; index++) {
+        const database = openSQLiteProfileDatabase(NodePath.join(directory, `active-turn-writes-${index}.sqlite`));
+        try {
+          const sample = await runSQLiteProfileWorkload(database, "active-turn-writes", index);
+          expect(sample.activeTurnWrite?.rowsChanged).toBeGreaterThan(67);
+          expect(sample.activeTurnWrite?.batches).toBeGreaterThanOrEqual(4);
+          expect(sample.activeTurnWrite?.boundedRows).toBeGreaterThanOrEqual(67);
+          expect(database.db.query("SELECT role, sequence, is_internal FROM messages WHERE id = ?").get("active-assistant"))
+            .toEqual({ role: "assistant", sequence: 2, is_internal: 0 });
+          expect(database.db.query("SELECT COUNT(*) AS count FROM tool_call_records WHERE message_id = ?").get("active-assistant"))
+            .toEqual({ count: 65 });
+        } finally {
+          database.db.close(true);
+        }
+      }
+    } finally {
+      await NodeFS.promises.rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    }
+  }, 30_000);
+
   it("records the finite active-turn statement set and transaction limits", () => {
     expect(ACTIVE_TURN_WRITE_POLICY).toEqual({
       retainedStatements: [

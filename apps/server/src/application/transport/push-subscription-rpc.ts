@@ -1,6 +1,7 @@
-import type { WsMethodName } from "@mcode/contracts";
+import type { WsMethodName, SetThreadSubscriptionsInput, CanonicalAgentProgressRecovery } from "@mcode/contracts";
 import type { WebSocket } from "ws";
 import type { CanonicalAgentBoundary } from "../../features/agents/index.js";
+import type { CanonicalAcceptedProgress } from "../../features/agents/canonical/canonical-accepted-progress.js";
 import {
   setClientThreadSubscriptions,
   subscribeClientToThread,
@@ -15,6 +16,7 @@ type PushSubscriptionMethod =
 /** Defines dependencies required to route connection-owned push subscription RPC calls. */
 export interface PushSubscriptionRouterDeps {
   canonicalSink: CanonicalAgentBoundary;
+  canonicalProgress?: Pick<CanonicalAcceptedProgress, "recover">;
 }
 
 const pushSubscriptionHandlers: Record<
@@ -30,15 +32,19 @@ const pushSubscriptionHandlers: Record<
   "push.setThreadSubscriptions": (deps, params, client) => {
     if (!client) return { canonicalRecoveries: [] };
     setClientThreadSubscriptions(client, params.threadIds);
-    const canonicalRecoveries = params.revisions
-      ? params.threadIds.flatMap((threadId: string) => {
-          const revision = params.revisions?.[threadId];
-          return revision ? [deps.canonicalSink.recoverThread(threadId, revision)] : [];
-        })
-      : [];
+    const canonicalRecoveries = recoverSubscriptions(deps, params);
     return { canonicalRecoveries };
   },
 };
+
+function recoverSubscriptions(deps: PushSubscriptionRouterDeps, params: SetThreadSubscriptionsInput): CanonicalAgentProgressRecovery[] {
+  return params.threadIds.map((threadId) => {
+    const revision = params.revisions?.[threadId] ?? { conversationRevision: 0, rosterRevision: 0 };
+    if (deps.canonicalProgress) return deps.canonicalProgress.recover(threadId, revision, params.progressCursors?.[threadId]);
+    return { phase: "recovery", threadId, epoch: `durable:${threadId}`, acceptedThrough: 0, savedThrough: 0,
+      durable: deps.canonicalSink.recoverThread(threadId, revision), retained: [], loss: "none" };
+  });
+}
 
 /** Checks whether a method belongs to the connection-owned push subscription RPC family. */
 export function isPushSubscriptionRpcMethod(method: WsMethodName): method is PushSubscriptionMethod {

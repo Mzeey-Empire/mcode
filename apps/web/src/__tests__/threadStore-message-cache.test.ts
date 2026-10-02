@@ -172,7 +172,7 @@ await activateTestConversation("t1");
     expect(mockTransport.loadTurn).toHaveBeenCalledTimes(1);
     expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(false);
 
-    await useThreadStore.getState().loadNarrativeForMessage(assistant.id, "t1");
+    await useThreadStore.getState().loadNarrativeForMessage(assistant.id, "t1", { continue: true });
 
     expect(mockTransport.loadTurn).toHaveBeenLastCalledWith("t1", {
       limit: 1,
@@ -193,7 +193,7 @@ await activateTestConversation("t1");
       .toEqual(Array.from({ length: 101 }, (_, index) => `tool-retry-${index}`));
   });
 
-  it("lets the render caused by a full detail window request its continuation", async () => {
+  it("does not let the render caused by a full detail window request its continuation by default", async () => {
     const assistant = createMockMessage({
       id: "assistant-effect-continuation",
       thread_id: "t1",
@@ -223,15 +223,7 @@ await activateTestConversation("t1");
       messages: [assistant], hasMore: false, narrativeByMessage: {},
     });
     (mockTransport.loadTurn as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce(firstWindow)
-      .mockResolvedValueOnce([
-        {
-          kind: "toolCall",
-          sequence: assistant.sequence,
-          sortOrder: 100,
-          record: { ...command, id: "effect-tool-100", sort_order: 100 },
-        },
-      ] satisfies NarrativeEntry[]);
+      .mockResolvedValueOnce(firstWindow);
 
     await activateTestConversation("t1");
     let continuation: Promise<void> | undefined;
@@ -247,11 +239,11 @@ await activateTestConversation("t1");
     await continuation;
     unsubscribe();
 
-    expect(mockTransport.loadTurn).toHaveBeenCalledTimes(2);
-    expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(true);
+    expect(mockTransport.loadTurn).toHaveBeenCalledTimes(1);
+    expect(useThreadStore.getState().isNarrativeLoaded("t1", assistant.id)).toBe(false);
     expect(getThreadRecord(useThreadStore.getState().records, "t1")
       .narrativeByMessage[assistant.id]?.tools.map((record) => record.id))
-      .toEqual(Array.from({ length: 101 }, (_, index) => `effect-tool-${index}`));
+      .toEqual(Array.from({ length: 100 }, (_, index) => `effect-tool-${index}`));
   });
 
   it("keeps an earlier detail window when a later window would exceed the resident budget", async () => {
@@ -301,8 +293,8 @@ await activateTestConversation("t1");
       .mockResolvedValueOnce(tooLargeWindow);
 
     await activateTestConversation("t1");
-    // The activation prefetch consumed the first window; this requests the next.
-    await useThreadStore.getState().loadNarrativeForMessage(assistant.id, "t1");
+    // The activation prefetch consumed the first window; this explicitly requests the next.
+    await useThreadStore.getState().loadNarrativeForMessage(assistant.id, "t1", { continue: true });
 
     const record = getThreadRecord(useThreadStore.getState().records, "t1");
     const retained = record.narrativeByMessage[assistant.id];

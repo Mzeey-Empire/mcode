@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 
-import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
-import { MessageRepo } from "../conversation/persistence/message-repo.js";
+import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
+import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
 import type { ProjectedCommittedProviderEvent } from "../execution/execution-worker-handler.js";
 
 /** Applies Codex context and compaction effects on the canonical writer connection. */

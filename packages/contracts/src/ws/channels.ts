@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CanonicalAgentEventEnvelopeSchema } from "../compat/agent-model.js";
+import { CanonicalAgentProgressFrameSchema } from "../models/canonical-agent-progress.js";
 import { ThreadStatusSchema } from "../models/enums.js";
 import { ThreadSchema } from "../models/thread.js";
 import { ProviderIdSchema, SettingsSchema } from "../models/settings.js";
@@ -68,11 +68,8 @@ export const WS_CHANNELS = {
       reason: z.enum(["credential-revoked", "provider-session-ended"]),
     })
     .strict(),
-  /** Canonical semantic batches published only after their durable transaction commits. */
-  "agent.canonical": z.object({
-    threadId: z.string().min(1),
-    events: z.array(CanonicalAgentEventEnvelopeSchema).min(1).max(CANONICAL_AGENT_EVENT_BATCH_MAX),
-  }).strict(),
+  /** Accepted progress and acknowledged saved state share one ordered identity stream. */
+  "agent.canonical": CanonicalAgentProgressFrameSchema(),
   ...LegacyTerminalChannels(),
   "thread.status": z.object({
     threadId: z.string(),

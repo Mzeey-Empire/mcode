@@ -7,7 +7,8 @@ import { AgentEventType, type AgentEvent, type ProviderRuntimeExtension } from "
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
 import { ExecutionMailboxScheduler } from "../../execution/execution-mailbox-scheduler.js";
 import type { ExecutionLease } from "../../execution/execution-mailbox-protocol.js";
@@ -19,6 +20,8 @@ import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 
 const NOW = "2026-09-24T10:00:00.000Z";
+import type { DataOnlyParentTerminalProjectionInput, DataOnlyParentTurnFinishInput } from "../canonical-parent-turn-write.js";
+
 const THREAD_ID = "semantic-worker-thread";
 const TURN_ID = "semantic-worker-turn";
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000177";
@@ -60,12 +63,37 @@ function runtimeDraft(
   };
 }
 
+function terminalPublication(input: Pick<DataOnlyParentTurnFinishInput, "threadId" | "executionId" | "outcome">) {
+  return [{ after: "terminal" as const, event: { type: "ended" as const, threadId: input.threadId,
+    turnExecutionId: input.executionId, outcome: input.outcome === "cancelled" ? "interrupted" as const : input.outcome } }];
+}
+
+function compoundFinish(input: DataOnlyParentTurnFinishInput, projection?: DataOnlyParentTerminalProjectionInput):
+  Extract<ExecutionWorkCommand, { kind: "finish-live-event" }> {
+  const terminal = projection ?? terminalProjection(input);
+  return { kind: "finish-live-event", outcome: input.outcome, projection: terminal,
+    livePublication: terminalPublication(input),
+    input: { ...input, projection: { kind: "writer-staged", messageId: terminal.assistant.messageId } } };
+}
+
+function terminalProjection(input: DataOnlyParentTurnFinishInput): DataOnlyParentTerminalProjectionInput {
+  if ("kind" in input.projection) throw new Error("Terminal fixture requires its projection");
+  const { message, narrative } = input.projection;
+  return { threadId: input.threadId, executionId: input.executionId, outcome: input.outcome, endedAt: NOW,
+    assistant: message ? { content: message.content, model: message.model ?? null,
+      attachments: message.attachments ?? [], messageId: message.id } : { content: "", model: null, attachments: [] },
+    narrative: narrative.filter(item => item.kind !== "assistantMessage") };
+}
+
 describe("execution semantic writer transport", () => {
   let directory: string;
   let db: Database;
   let writer: CanonicalAgentWriterClient | undefined;
+  let owner: ApplicationDatabaseWriter | undefined;
 
   beforeEach(() => {
+    writer = undefined;
+    owner = undefined;
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-execution-writer-"));
     db = openDatabase({ dbPath: NodePath.join(directory, "app.sqlite") });
     db.prepare("INSERT INTO workspaces (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
@@ -75,13 +103,19 @@ describe("execution semantic writer transport", () => {
   });
 
   afterEach(async () => {
-    await writer?.close();
+    await owner?.close();
     db.close(true);
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
 
+  function createWriter(createWorker?: () => Worker): CanonicalAgentWriterClient {
+    if (owner) throw new Error("Writer fixture already owns the database");
+    owner = new ApplicationDatabaseWriter(NodePath.join(directory, "app.sqlite"), createWorker);
+    return new CanonicalAgentWriterClient(owner);
+  }
+
   it("releases live receipts in order after their writer and terminal barriers", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const published: AgentEvent[] = [];
     registry.bind((event) => published.push(event));
@@ -113,19 +147,21 @@ describe("execution semantic writer transport", () => {
     expect((await port.transact(append)).kind).toBe("committed");
     expect(published).toHaveLength(3);
 
-    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2,
-      undefined, undefined, undefined, "model", true);
+    const staged = new MessageRepo(db).createAssistantIdempotent({
+      id: deriveTurnAssistantMessageId(THREAD_ID, 'execution:' + EXECUTION_ID), threadId: THREAD_ID,
+      content: "Answer", sequence: 2, model: "model", attachments: [], isInternal: true,
+    });
     const ended: AgentEvent = { type: AgentEventType.Ended, threadId: THREAD_ID,
       turnExecutionId: EXECUTION_ID, outcome: "completed" };
     const finish: ExecutionSemanticOperation = {
       operationId: `${lease.leaseId}:3`, execution, lease, ordinal: 3,
-      mutation: { kind: "finish", outcome: "completed", input: {
+      mutation: compoundFinish({
         threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
         providerIdentities: [], outcome: "completed", projection: { message: staged, narrative: [] },
-      } },
+      }),
       livePublication: [{ after: "terminal", event: ended }],
     };
-    db.run("CREATE TRIGGER fail_live_release BEFORE UPDATE OF kind ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:finish' BEGIN SELECT RAISE(ABORT, 'finish unavailable'); END");
+    db.run("CREATE TRIGGER fail_live_release BEFORE UPDATE OF kind ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:finish-live-event' BEGIN SELECT RAISE(ABORT, 'finish unavailable'); END");
     await expect(port.transact(finish)).rejects.toThrow("Canonical writer write-failed");
     expect(published).toHaveLength(3);
     expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
@@ -140,7 +176,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("carries a live publication from the execution worker to the bound host publisher", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const published: AgentEvent[] = [];
     registry.bind((event) => published.push(event));
@@ -181,7 +217,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("releases a compound live event after its single writer receipt", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const published: AgentEvent[] = [];
     registry.bind((event) => published.push(event));
@@ -201,7 +237,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("replays a committed live receipt when the public publisher becomes available", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const release = new ExecutionLivePublicationRelease(registry);
     const port = new CanonicalExecutionWriterPort(writer, () => {}, release);
@@ -222,7 +258,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("replays the same public identity when publication succeeds before the host loses its reply", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const registry = new AgentEventPublicationRegistry();
     const published: AgentEvent[] = [];
     let loseReply = true;
@@ -297,7 +333,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("commits and replays a semantic start through the dedicated SQLite worker", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -318,7 +354,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("delivers a large committed event batch in bounded publication pages", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const pageSizes: number[] = [];
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
@@ -350,7 +386,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("does not acknowledge a failed database write and accepts a clean retry", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const port = new CanonicalExecutionWriterPort(writer, () => {});
     db.run(`CREATE TRIGGER reject_semantic_start BEFORE INSERT ON canonical_agent_events
       BEGIN SELECT RAISE(FAIL, 'injected write failure'); END`);
@@ -366,7 +402,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("commits and replays worker-loss interruption through the SQLite writer worker", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -415,7 +451,7 @@ describe("execution semantic writer transport", () => {
         },
       });
     };
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"), createWorker);
+    writer = createWriter(createWorker);
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -429,59 +465,53 @@ describe("execution semantic writer transport", () => {
       .toEqual({ count: 1 });
   });
 
-  it("stages and finalizes assistant rows without a main-connection projection write", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+  it("stages and finalizes assistant rows in one writer operation", async () => {
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
     });
     const op = (ordinal: number, mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation => ({
       operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation,
+      ...(mutation.kind === "finish-live-event" ? { livePublication: terminalPublication(mutation.input) } : {}),
     });
     expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
     const terminalInput = {
       threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed" as const, endedAt: NOW,
       assistant: { content: "Answer", model: "fixture", attachments: [] }, narrative: [],
     };
-    expect(await port.transact(op(2, { kind: "provider-outcome", outcome: "completed" })))
-      .toMatchObject({ kind: "committed" });
-    const staged = op(3, { kind: "stage-terminal", input: terminalInput });
-    expect(await port.transact(staged)).toMatchObject({ kind: "committed" });
-    expect(db.prepare("SELECT content, is_internal FROM messages WHERE role = 'assistant'").get())
-      .toEqual({ content: "Answer", is_internal: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant'").get())
+      .toEqual({ count: 0 });
     const stagedId = deriveTurnAssistantMessageId(THREAD_ID, `execution:${EXECUTION_ID}`);
-    expect(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, stagedId))
-      .toMatchObject({ content: "Answer", is_internal: true });
     expect(published).not.toContain(`${EXECUTION_ID}:turn.completed`);
 
-    const finish = op(4, { kind: "finish", outcome: "completed", input: {
+    const finish = op(2, compoundFinish({
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
       providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" },
-    } });
+    }, terminalInput));
     expect(await port.transact(finish)).toMatchObject({ kind: "committed" });
     expect(db.prepare("SELECT content, is_internal, outcome FROM messages WHERE role = 'assistant'").get())
       .toEqual({ content: "Answer", is_internal: 0, outcome: "completed" });
     expect(published).toContain(`${EXECUTION_ID}:turn.completed`);
-    expect(await port.transact(staged)).toMatchObject({ kind: "committed" });
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, stagedId))
+      .toMatchObject({ content: "Answer", is_internal: false });
     expect(await port.transact(finish)).toMatchObject({ kind: "committed" });
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant'").get())
       .toEqual({ count: 1 });
   });
 
-  it("rolls back a failed semantic terminal stage and retries at the same ordinal", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+  it("rolls back failed compound terminal preparation and retries at the same ordinal", async () => {
+    writer = createWriter();
     const port = new CanonicalExecutionWriterPort(writer, () => {});
     expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
-    expect(await port.transact({
-      operationId: `${lease.leaseId}:2`, execution, lease, ordinal: 2,
-      mutation: { kind: "provider-outcome", outcome: "completed" },
-    })).toMatchObject({ kind: "committed" });
     const stage: ExecutionSemanticOperation = {
-      operationId: `${lease.leaseId}:3`, execution, lease, ordinal: 3,
-      mutation: { kind: "stage-terminal", input: {
+      operationId: `${lease.leaseId}:2`, execution, lease, ordinal: 2,
+      livePublication: terminalPublication({ ...execution, outcome: "completed" }),
+      mutation: compoundFinish({ ...execution, providerId: "codex", providerIdentities: [],
+        outcome: "completed", projection: { kind: "writer-staged" } }, {
         threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
         assistant: { content: "Answer", model: null, attachments: [] }, narrative: [],
-      } },
+      }),
     };
     db.run(`CREATE TRIGGER reject_terminal_stage BEFORE INSERT ON messages
       WHEN NEW.role = 'assistant' BEGIN SELECT RAISE(FAIL, 'injected terminal failure'); END`);
@@ -493,15 +523,16 @@ describe("execution semantic writer transport", () => {
 
     db.run("DROP TRIGGER reject_terminal_stage");
     expect(await port.transact(stage)).toMatchObject({ kind: "committed", operationId: stage.operationId });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant' AND is_internal = 1").get())
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant' AND is_internal = 0").get())
       .toEqual({ count: 1 });
   });
 
   it("fences a stopped execution to a cancelled durable outcome", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const port = new CanonicalExecutionWriterPort(writer, () => {});
     const op = (ordinal: number, mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation => ({
       operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation,
+      ...(mutation.kind === "finish-live-event" ? { livePublication: terminalPublication(mutation.input) } : {}),
     });
     expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
     expect(await port.transact(op(2, {
@@ -514,22 +545,18 @@ describe("execution semantic writer transport", () => {
       .get(EXECUTION_ID)).toEqual({ phase: "stopping", native_cursor_json: JSON.stringify(nativeCursor) });
     expect(await port.transact(op(4, { kind: "provider-outcome", outcome: "completed" })))
       .toEqual({ kind: "conflict", operationId: `${lease.leaseId}:4` });
-    expect(await port.transact(op(4, { kind: "provider-outcome", outcome: "cancelled" })))
-      .toMatchObject({ kind: "committed" });
-    expect(await port.transact(op(5, { kind: "stage-terminal", input: {
-      threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "cancelled", endedAt: NOW,
-      assistant: { content: "Partial answer", model: null, attachments: [] }, narrative: [],
-    } }))).toMatchObject({ kind: "committed" });
-    expect(await port.transact(op(6, { kind: "finish", outcome: "cancelled", input: {
+    expect(await port.transact(op(4, compoundFinish({
       threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
       providerIdentities: [], outcome: "cancelled", projection: { kind: "writer-staged" },
-    } }))).toMatchObject({ kind: "committed" });
+    }, { threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "cancelled", endedAt: NOW,
+      assistant: { content: "Partial answer", model: null, attachments: [] }, narrative: [],
+    })))).toMatchObject({ kind: "committed" });
     expect(db.prepare("SELECT outcome FROM messages WHERE role = 'assistant'").get())
       .toEqual({ outcome: "cancelled" });
   });
 
   it("runs a complete assistant turn through an execution worker and the sole writer worker", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -572,16 +599,12 @@ describe("execution semantic writer transport", () => {
       });
       expect(db.prepare("SELECT native_cursor_json FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
         .get(EXECUTION_ID)).toEqual({ native_cursor_json: JSON.stringify(nativeCursor) });
-      await expect(send(claim.lease, { kind: "provider-outcome", outcome: "completed" }))
-        .resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
-      await expect(send(claim.lease, { kind: "stage-terminal", input: {
-        threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
-        assistant: { content: "Worker answer", model: null, attachments: [] }, narrative: [],
-      } })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
-      await expect(send(claim.lease, { kind: "finalize", outcome: "completed", input: {
+      await expect(send(claim.lease, compoundFinish({
         threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
         providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" },
-      } })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      }, { threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
+        assistant: { content: "Worker answer", model: null, attachments: [] }, narrative: [],
+      }))).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
       await expect(send(claim.lease, { kind: "release" }))
         .resolves.toEqual({ kind: "reply", result: { kind: "released" } });
       expect(scheduler.release(execution, claim.lease)).toBe(true);
@@ -602,7 +625,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("stages a partial assistant after Stop before the cancelled terminal commit", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const port = new CanonicalExecutionWriterPort(writer, () => {});
     const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
       workerCount: 1,
@@ -626,15 +649,12 @@ describe("execution semantic writer transport", () => {
       if (start.kind !== "begin") throw new Error("Unexpected begin operation");
       expect((await send({ kind: "start", providerId: "codex", input: start.input })).kind).toBe("reply");
       expect((await send({ kind: "stop", requestId: "stop-partial" })).kind).toBe("reply");
-      expect((await send({ kind: "provider-outcome", outcome: "cancelled" })).kind).toBe("reply");
-      expect((await send({ kind: "stage-terminal", input: {
-        threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "cancelled", endedAt: NOW,
-        assistant: { content: "Partial answer", model: null, attachments: [] }, narrative: [],
-      } })).kind).toBe("reply");
-      await expect(send({ kind: "finalize", outcome: "cancelled", input: {
+      await expect(send(compoundFinish({
         threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
         providerIdentities: [], outcome: "cancelled", projection: { kind: "writer-staged" },
-      } })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      }, { threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "cancelled", endedAt: NOW,
+        assistant: { content: "Partial answer", model: null, attachments: [] }, narrative: [],
+      }))).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
       expect(db.prepare("SELECT content, outcome FROM messages WHERE role = 'assistant' AND is_internal = 0").get())
         .toEqual({ content: "Partial answer", outcome: "cancelled" });
     } finally {
@@ -643,7 +663,7 @@ describe("execution semantic writer transport", () => {
   });
 
   it("projects Codex parent and child events on the writer and replays without repeating child writes", async () => {
-    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    writer = createWriter();
     const published: string[] = [];
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
@@ -697,8 +717,9 @@ describe("execution semantic writer transport", () => {
       expect(replayedParent).toMatchObject({ kind: "committed", providerEvents: [{
         event: { toolInput: {}, subagentPresentation: { detail: { kind: "canonical-child" } } },
       }] });
-      expect(replayedParent).toMatchObject(db.prepare("SELECT last_durable_sequence AS durableRevision FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
-        .get(EXECUTION_ID));
+      if (replayedParent.kind !== "committed") throw new Error("Parent operation did not commit");
+      expect(db.prepare("SELECT last_durable_sequence AS durableRevision FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+        .get(EXECUTION_ID)).toEqual({ durableRevision: replayedParent.durableRevision });
       expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_collaboration_actions WHERE source_item_id = ?")
         .get("toolCall:spawn-1")).toEqual({ count: 1 });
 

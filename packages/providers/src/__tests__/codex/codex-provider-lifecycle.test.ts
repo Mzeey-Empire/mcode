@@ -62,7 +62,7 @@ class NativeProcess extends NodeEvents.EventEmitter {
 const request: TurnRequest<"codex"> = {
   turnId: "turn-1", turnExecutionId: "execution-1", sessionId: "mcode-lifecycle",
   threadId: "lifecycle", workspaceId: "fixture", cwd: process.cwd(), message: "hello",
-  model: "gpt-5.4", permissionMode: "auto", interactionMode: "build", providerOptions: {},
+  model: "gpt-5.4", permissionMode: "supervised", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
   threadControlEligible: false,
 };
 
@@ -98,6 +98,23 @@ function createProvider() {
 afterEach(() => vi.clearAllMocks());
 
 describe("Codex provider lifecycle through native transport", () => {
+  it("maps pooled session IDs to live thread protection before memory eviction", async () => {
+    const { provider, child, complete } = createProvider();
+    const isThreadProtected = vi.fn((threadId: string) => threadId === request.threadId);
+    try {
+      await provider.sendTurn(request);
+      await complete(1, request.turnExecutionId);
+      await provider.shedMemoryPressure("critical", isThreadProtected);
+      expect(isThreadProtected).toHaveBeenCalledExactlyOnceWith(request.threadId);
+      expect(child.kill).not.toHaveBeenCalled();
+      isThreadProtected.mockReturnValue(false);
+      await provider.shedMemoryPressure("critical", isThreadProtected);
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
   it("interrupts an active turn and waits for process exit during shutdown", async () => {
     const { provider, child, starts } = createProvider();
     child.kill.mockImplementation(() => true);

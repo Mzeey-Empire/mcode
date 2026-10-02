@@ -9,22 +9,26 @@
 import "reflect-metadata";
 import { describe, it, expect, afterEach } from "vitest";
 import { container } from "tsyringe";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ModelCacheRepo } from "../persistence/model-cache-repo.js";
 import { ModelCacheService } from "../model-cache-service.js";
 import type { Database } from "bun:sqlite";
 
 describe("ModelCacheService DI integration", () => {
   let db: Database | undefined;
+  let owned: OwnedTestDatabase | undefined;
 
-  afterEach(() => {
-    db?.close();
+  afterEach(async () => {
+    await owned?.close();
     db = undefined;
     container.clearInstances();
   });
 
   it("resolves ModelCacheService from the container", () => {
-    db = openMemoryDatabase();
+    owned = createOwnedTestDatabase();
+    db = owned.db;
+    container.register(ApplicationDatabaseWriter, { useValue: owned.writer });
 
     container.register("Database", { useValue: db });
     container.registerSingleton(ModelCacheRepo);
@@ -42,7 +46,9 @@ describe("ModelCacheService DI integration", () => {
   });
 
   it("resolves ModelCacheRepo as a singleton", () => {
-    db = openMemoryDatabase();
+    owned = createOwnedTestDatabase();
+    db = owned.db;
+    container.register(ApplicationDatabaseWriter, { useValue: owned.writer });
     container.register("Database", { useValue: db });
     container.registerSingleton(ModelCacheRepo);
 

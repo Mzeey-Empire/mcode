@@ -1,10 +1,13 @@
 import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
-import type { AgentEvent, CanonicalAgentEventEnvelope, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, NarrativeDetailCursor, NarrativeEntry, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
+import type { AgentEvent, AgentModelState, AgentTurn, CanonicalAgentEventEnvelope, CanonicalAgentProgressFrame, CanonicalAgentProgressRecovery, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, NarrativeDetailCursor, NarrativeEntry, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
+import type { reduceAgentEventBatch } from "@mcode/contracts";
 import type { DevinMode, PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { recoverParentNarrative } from "./parent-narrative-recovery";
 import {
   AgentEventSchema,
+  CANONICAL_AGENT_PROGRESS_BATCH_MAX,
+  MessageSchema,
   PERMISSION_MODES,
   INTERACTION_MODES,
   ProviderIdSchema,
@@ -72,6 +75,10 @@ import {
   applyCanonicalPushEvents,
   applyCanonicalReconnectRecovery,
 } from "./canonical-agent-replica";
+import { applyCanonicalProgressFrame, type CanonicalProgressUpdate } from "./canonical-agent-progress";
+import { CanonicalProgressBuffer } from "./canonical-progress-buffer";
+import { acceptsCanonicalPublicationRoute } from "./canonical-publication-routing";
+import { mergeTurnSavingStatus, reconcileSavedTurnStatuses, savingSnapshotPatch } from "./turn-saving-status";
 import {
   dispatchAgentEvent,
   hasAgentEventHandler,
@@ -79,6 +86,7 @@ import {
   type AgentEventHandlerTable,
 } from "./thread-store/agent-event-preflight";
 import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";
+import type { CanonicalPublicationIdentity } from "./thread-store/stable-agent-event-publications";
 import {
   hydrateRunningThreads as hydrateRunningThreadRecords,
   transferThreadRuntime as transferOptimisticThreadRuntime,
@@ -107,6 +115,11 @@ export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
 import { getCanonicalRuntimeTurn, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
 
+function activeCanonicalExecutionId(turn: AgentTurn | undefined): string | undefined {
+  if (!turn || (turn.status !== "Pending" && turn.status !== "Running")) return undefined;
+  return turn.executionId;
+}
+
 function deriveRunningThreadIds(records: Map<string, ThreadRecord>): Set<string> {
   return new Set(
     [...records]
@@ -115,8 +128,192 @@ function deriveRunningThreadIds(records: Map<string, ThreadRecord>): Set<string>
   );
 }
 
+type PendingCanonicalPublication = {
+  readonly event: AgentEvent;
+  readonly canonical: CanonicalPublicationIdentity;
+};
+
+const CANONICAL_PUBLICATION_INLINE_MAX = 32;
+const CANONICAL_PUBLICATION_FRAME_MAX = 32;
+const CANONICAL_PUBLICATION_BURST_WINDOW_MS = 1000;
+const CANONICAL_PROGRESS_INLINE_MAX = 16;
+const CANONICAL_PROGRESS_FRAME_MAX = 1;
+const CANONICAL_PROGRESS_MERGE_EVENT_MAX = 64;
+let canonicalPublicationFlushRaf: number | null = null;
+let canonicalProgressFlushRaf: number | null = null;
+let flushingCanonicalProgress = false;
+const pendingCanonicalPublications: PendingCanonicalPublication[] = [];
+const pendingCanonicalProgressFrames: CanonicalAgentProgressFrame[] = [];
+const canonicalPublicationBurstByThread = new Map<string, { readonly startedAt: number; readonly count: number }>();
+const canonicalProgressBurstByThread = new Map<string, { readonly startedAt: number; readonly count: number }>();
+
+function cancelCanonicalPublicationFlush(): void {
+  if (canonicalPublicationFlushRaf == null) return;
+  cancelAnimationFrame(canonicalPublicationFlushRaf);
+  canonicalPublicationFlushRaf = null;
+}
+
+function flushPendingCanonicalPublications(limit = Number.POSITIVE_INFINITY): void {
+  cancelCanonicalPublicationFlush();
+  let remaining = limit;
+  while (remaining > 0 && pendingCanonicalPublications.length > 0) {
+    remaining -= 1;
+    const publication = pendingCanonicalPublications.shift();
+    if (!publication) continue;
+    const state = useThreadStore.getState();
+    if (!state.records.has(publication.event.threadId) && state.currentThreadId !== publication.event.threadId) {
+      continue;
+    }
+    state.handleAgentEvent(publication.event, publication.canonical);
+  }
+  if (pendingCanonicalPublications.length > 0) scheduleCanonicalPublicationFlush();
+}
+
+function cancelCanonicalProgressFlush(): void {
+  if (canonicalProgressFlushRaf == null) return;
+  cancelAnimationFrame(canonicalProgressFlushRaf);
+  canonicalProgressFlushRaf = null;
+}
+
+function flushPendingCanonicalProgress(limit = Number.POSITIVE_INFINITY): void {
+  cancelCanonicalProgressFlush();
+  let remaining = limit;
+  flushingCanonicalProgress = true;
+  try {
+    while (remaining > 0 && pendingCanonicalProgressFrames.length > 0) {
+      remaining -= 1;
+      const frame = shiftMergedCanonicalProgressFrame();
+      if (frame) useThreadStore.getState().handleCanonicalProgress(frame);
+    }
+  } finally {
+    flushingCanonicalProgress = false;
+  }
+  if (pendingCanonicalProgressFrames.length > 0) {
+    scheduleCanonicalProgressFlush();
+    return;
+  }
+  canonicalProgressBurstByThread.clear();
+}
+
+function shiftMergedCanonicalProgressFrame(): CanonicalAgentProgressFrame | undefined {
+  const first = pendingCanonicalProgressFrames.shift();
+  if (!first || first.phase !== "accepted") return first;
+  let merged = first;
+  while (pendingCanonicalProgressFrames.length > 0) {
+    const next = pendingCanonicalProgressFrames[0];
+    if (!next || next.phase !== "accepted" || !canMergeAcceptedProgress(merged, next)) break;
+    pendingCanonicalProgressFrames.shift();
+    merged = { ...merged, through: next.through, events: [...merged.events, ...next.events] };
+  }
+  return merged;
+}
+
+function canMergeAcceptedProgress(
+  left: Extract<CanonicalAgentProgressFrame, { phase: "accepted" }>,
+  right: CanonicalAgentProgressFrame,
+): right is Extract<CanonicalAgentProgressFrame, { phase: "accepted" }> {
+  return right.phase === "accepted"
+    && left.threadId === right.threadId
+    && left.ownerThreadId === right.ownerThreadId
+    && left.epoch === right.epoch
+    && left.through === right.from
+    && left.events.length + right.events.length <= Math.min(CANONICAL_AGENT_PROGRESS_BATCH_MAX, CANONICAL_PROGRESS_MERGE_EVENT_MAX);
+}
+
+function scheduleCanonicalPublicationFlush(): void {
+  if (canonicalPublicationFlushRaf != null) return;
+  canonicalPublicationFlushRaf = requestAnimationFrame(() => {
+    canonicalPublicationFlushRaf = null;
+    flushPendingCanonicalPublications(CANONICAL_PUBLICATION_FRAME_MAX);
+  });
+}
+
+function scheduleCanonicalProgressFlush(): void {
+  if (canonicalProgressFlushRaf != null) return;
+  canonicalProgressFlushRaf = requestAnimationFrame(() => {
+    canonicalProgressFlushRaf = null;
+    flushPendingCanonicalProgress(CANONICAL_PROGRESS_FRAME_MAX);
+  });
+}
+
+function dispatchCanonicalPublicationEvent(event: AgentEvent, canonical: CanonicalPublicationIdentity, forceYield = false): void {
+  const shouldYield = forceYield || pendingCanonicalPublications.length > 0 || shouldYieldCanonicalPublication(event.threadId);
+  if (shouldYield && hasCanonicalToolProjection(event)) {
+    stableAgentEventPublications.acceptCanonical(event, canonical);
+    return;
+  }
+  if (!shouldYield) {
+    useThreadStore.getState().handleAgentEvent(event, canonical);
+    return;
+  }
+  pendingCanonicalPublications.push({ event, canonical });
+  scheduleCanonicalPublicationFlush();
+}
+
+function queueCanonicalPublicationEvent(event: AgentEvent, canonical: CanonicalPublicationIdentity): void {
+  dispatchCanonicalPublicationEvent(event, canonical, true);
+}
+
+function shouldYieldCanonicalPublication(threadId: string): boolean {
+  const recentCount = rememberCanonicalPublication(threadId);
+  const projectedToolCount = useThreadStore.getState().records.get(threadId)?.toolCalls.length ?? 0;
+  return recentCount > CANONICAL_PUBLICATION_INLINE_MAX && projectedToolCount >= CANONICAL_PUBLICATION_INLINE_MAX / 2;
+}
+
+function rememberCanonicalPublication(threadId: string): number {
+  const now = Date.now();
+  const current = canonicalPublicationBurstByThread.get(threadId);
+  if (!current || now - current.startedAt > CANONICAL_PUBLICATION_BURST_WINDOW_MS) {
+    canonicalPublicationBurstByThread.set(threadId, { startedAt: now, count: 1 });
+    return 1;
+  }
+  const next = { startedAt: current.startedAt, count: current.count + 1 };
+  canonicalPublicationBurstByThread.set(threadId, next);
+  return next.count;
+}
+
+function shouldQueueCanonicalProgress(frame: CanonicalAgentProgressFrame): boolean {
+  if (frame.phase !== "accepted") return false;
+  if (pendingCanonicalProgressFrames.length > 0) return true;
+  const recentCount = rememberCanonicalProgress(frame.threadId);
+  return recentCount > CANONICAL_PROGRESS_INLINE_MAX;
+}
+
+function rememberCanonicalProgress(threadId: string): number {
+  const now = Date.now();
+  const current = canonicalProgressBurstByThread.get(threadId);
+  if (!current || now - current.startedAt > CANONICAL_PUBLICATION_BURST_WINDOW_MS) {
+    canonicalProgressBurstByThread.set(threadId, { startedAt: now, count: 1 });
+    return 1;
+  }
+  const next = { startedAt: current.startedAt, count: current.count + 1 };
+  canonicalProgressBurstByThread.set(threadId, next);
+  return next.count;
+}
+
+function hasCanonicalToolProjection(event: AgentEvent): boolean {
+  if (event.type !== "toolUse" && event.type !== "toolResult") return false;
+  const toolCallId = event.toolCallId;
+  if (!toolCallId) return false;
+  const record = useThreadStore.getState().records.get(event.threadId);
+  if (!record) return false;
+  return Object.values(record.canonicalAgent.state.items).some((item) =>
+    item.threadId === event.threadId && canonicalItemMatchesToolCall(item, toolCallId));
+}
+
+function canonicalItemMatchesToolCall(
+  item: AgentModelState["items"][string],
+  toolCallId: string,
+): boolean {
+  const payload = item.payload as Record<string, unknown>;
+  const record = payload.record;
+  return item.id === toolCallId
+    || payload.nativeItemId === toolCallId
+    || (!!record && typeof record === "object" && (record as { id?: unknown }).id === toolCallId);
+}
+
 /** True when a canonical batch mutates a parent narrative recovery item. */
-function batchTouchesParentNarrative(events: readonly CanonicalAgentEventEnvelope[]): boolean {
+function batchTouchesParentNarrative(events: Parameters<typeof reduceAgentEventBatch>[1]): boolean {
   return events.some((event) =>
     event.payload.type === "item.recorded"
     && (event.payload.item.payload.projection === "narrativeRecovery"
@@ -127,13 +324,66 @@ function batchTouchesParentNarrative(events: readonly CanonicalAgentEventEnvelop
  * Canonical envelopes carrying numbered renderer-facing publications feed the shared
  * agent-event projection; the publication cursor drops duplicates across replays.
  */
-function dispatchCanonicalPublications(events: readonly CanonicalAgentEventEnvelope[]): void {
-  const handle = useThreadStore.getState().handleAgentEvent;
+function dispatchCanonicalPublications(events: Parameters<typeof reduceAgentEventBatch>[1], canonical?: { epoch: string; state: AgentModelState }): void {
+  const parsedEvents: PendingCanonicalPublication[] = [];
   for (const envelope of events) {
-    if (envelope.payload.type !== "publication.recorded") continue;
-    const parsed = AgentEventSchema().safeParse(envelope.payload.event);
-    if (!parsed.success) continue;
-    handle({ ...parsed.data, publicationId: envelope.payload.publicationId });
+    const event = canonicalPublicationEvent(envelope, canonical?.state);
+    if (!event) continue;
+    if (!canonical) {
+      useThreadStore.getState().handleAgentEvent(event);
+      continue;
+    }
+    parsedEvents.push({ event, canonical: { epoch: canonical.epoch, eventId: envelope.eventId, ownerThreadId: envelope.routing.threadId } });
+  }
+  dispatchParsedCanonicalPublications(parsedEvents);
+}
+
+function canonicalPublicationEvent(
+  envelope: Parameters<typeof reduceAgentEventBatch>[1][number],
+  state?: AgentModelState,
+): AgentEvent | null {
+  if (envelope.payload.type !== "publication.recorded") return null;
+  const parsed = AgentEventSchema().safeParse(envelope.payload.event);
+  if (!parsed.success || !acceptsCanonicalPublicationRoute(parsed.data, envelope, state)) return null;
+  return { ...parsed.data, publicationId: envelope.payload.publicationId };
+}
+
+function dispatchParsedCanonicalPublications(parsedEvents: readonly PendingCanonicalPublication[]): void {
+  const inline = parsedEvents.length <= CANONICAL_PUBLICATION_INLINE_MAX && pendingCanonicalPublications.length === 0;
+  for (const publication of parsedEvents) {
+    if (inline) dispatchCanonicalPublicationEvent(publication.event, publication.canonical);
+    else queueCanonicalPublicationEvent(publication.event, publication.canonical);
+  }
+}
+
+function shouldBufferCanonicalProgress(
+  buffer: CanonicalProgressBuffer,
+  frame: CanonicalAgentProgressFrame,
+): boolean {
+  return frame.phase !== "recovery" && buffer.buffer(frame);
+}
+
+function shouldDeferCanonicalProgress(frame: CanonicalAgentProgressFrame): boolean {
+  if (flushingCanonicalProgress) return false;
+  return frame.phase !== "accepted" && pendingCanonicalProgressFrames.length > 0 || shouldQueueCanonicalProgress(frame);
+}
+
+function queueCanonicalProgressFrame(frame: CanonicalAgentProgressFrame): void {
+  pendingCanonicalProgressFrames.push(frame);
+  scheduleCanonicalProgressFlush();
+}
+
+function canReceiveCanonicalProgress(
+  state: ThreadState,
+  threadId: string,
+  isDisplayConversationLeased: (threadId: string) => boolean,
+): boolean {
+  return state.records.has(threadId) || state.currentThreadId === threadId || isDisplayConversationLeased(threadId);
+}
+
+function flushCanonicalPublicationOrderFor(frame: CanonicalAgentProgressFrame): void {
+  if (frame.phase === "recovery") {
+    flushPendingCanonicalPublications();
   }
 }
 
@@ -238,10 +488,16 @@ interface ThreadState {
   addPermissionRequest: (request: PermissionRequest) => void;
   /** Mark a permission request as settled with its decision. */
   resolvePermissionRequest: (requestId: string, decision: PermissionDecision, optionLabel?: string) => void;
-  handleAgentEvent: (event: AgentEvent) => void;
+  handleAgentEvent: (event: AgentEvent, canonicalPublication?: CanonicalPublicationIdentity) => void;
+  /** Shared web and Electron progress receiver. */
+  handleCanonicalProgress: (frame: CanonicalAgentProgressFrame) => void;
+  /** Fence concurrent pushes until subscription recovery is installed. */
+  beginCanonicalRecovery: (threadIds: readonly string[]) => symbol;
+  /** Release the recovery fence and then apply buffered pushes. */
+  finishCanonicalRecovery: (token: symbol) => void;
   /** Install ordered canonical reconnect results before later push revisions. */
   applyCanonicalReconnectRecoveries: (
-    recoveries: readonly CanonicalAgentReconnectRecovery[],
+    recoveries: readonly (CanonicalAgentReconnectRecovery | CanonicalAgentProgressRecovery)[],
   ) => void;
   /** Apply one committed canonical push batch to its thread replica. */
   handleCanonicalAgentEvents: (
@@ -254,7 +510,7 @@ interface ThreadState {
   clearThreadGoal: (threadId: string) => Promise<GoalLookupResult>;
 
   /** Fetch one bounded persisted-detail window for a rendered assistant message. */
-  loadNarrativeForMessage: (messageId: string, threadId?: string) => Promise<void>;
+  loadNarrativeForMessage: (messageId: string, threadId?: string, options?: { continue?: boolean }) => Promise<void>;
   /** Return whether a complete narrative payload has been loaded for a message. */
   isNarrativeLoaded: (threadId: string, messageId: string) => boolean;
   /** Drop the cached narrative for a message and revoke any pending detail window. */
@@ -547,6 +803,46 @@ function resetTurnEphemeral(_rec: ThreadRecord): Partial<ThreadRecord> {
   };
 }
 
+function shouldFlushCanonicalText(frame: CanonicalAgentProgressFrame, state: AgentModelState): boolean {
+  return frame.phase === "recovery" || Object.values(state.turns).some((turn) =>
+    turn.threadId === frame.threadId && turn.status !== "Pending" && turn.status !== "Running");
+}
+
+function canonicalProgressNeedsProjection(previous: AgentModelState, update: CanonicalProgressUpdate): boolean {
+  // First live effects can arrive after the same events were installed from saved history.
+  return update.replica.state !== previous || update.publications.length > 0;
+}
+
+function shouldSkipNarrativeLoad(cacheKey: string, hasDetail: boolean, options?: { continue?: boolean }): boolean {
+  return hasDetail && !options?.continue || narrativeLoaded.has(cacheKey) && hasDetail;
+}
+
+function discardLostProgress(record: ThreadRecord): Partial<ThreadRecord> {
+  const volatileMessageIds = new Set([...record.pendingTurnPersistMessageIds, record.currentTurnMessageId]
+    .filter((id) => id.length > 0 && !record.serverMessageIds[id]));
+  return {
+    ...resetTurnEphemeral(record), runtimePhase: "interrupted", savingStatus: null, savingStatuses: [], permissions: [],
+    messages: record.messages.filter((message) => !volatileMessageIds.has(message.id)),
+    pendingTurnPersistMessageIds: [],
+  };
+}
+
+function canonicalSavedMessageIds(record: ThreadRecord): Record<string, string> {
+  const ids: Record<string, string> = {};
+  for (const item of Object.values(record.canonicalAgent.durableState.items)) {
+    if (item.payload.projection !== "message") continue;
+    const parsed = MessageSchema().safeParse(item.payload.message);
+    if (parsed.success) ids[parsed.data.id] = parsed.data.id;
+  }
+  return ids;
+}
+
+function drainedSavingEpoch(frame: CanonicalAgentProgressFrame, previous: ThreadRecord): string | undefined {
+  const previousEpoch = previous.canonicalAgent.progress?.epoch;
+  // A loss-free generation replacement follows the server's durable barrier.
+  return frame.phase === "recovery" && frame.loss === "none" && previousEpoch !== frame.epoch ? previousEpoch : undefined;
+}
+
 /**
  * Resolve the client-side message id that should receive a `turn.persisted`
  * payload. Never uses {@link ThreadRecord.currentTurnMessageId} alone because
@@ -771,6 +1067,7 @@ const MAX_DEFERRED_NARRATIVE_EVENTS = 2048;
 
 /** Zustand store for thread-scoped messages, streaming session state, and agent event handling. */
 export const useThreadStore = create<ThreadState>((zustandSet, get) => {
+  const canonicalProgressBuffer = new CanonicalProgressBuffer();
   const set = ((updater: Parameters<typeof zustandSet>[0]) => zustandSet((state) => {
     const next = typeof updater === "function" ? updater(state) : updater;
     if (!next || Object.keys(next).length === 0) return next;
@@ -1413,6 +1710,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     patchRec(event.threadId, (current) => ({
       agentStartTime: Date.now(),
       turnExecutionId: runtime.incomingExecutionId ?? current.turnExecutionId,
+      optimisticUserMessageId: null,
       runtimePhase: "running",
       fileEffectSummary: { revision: 0, fileCount: 0, additions: 0, deletions: 0, effects: [] },
       ...resetTurnEphemeral(current),
@@ -1488,7 +1786,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       messages,
       persistedToolCallCounts: transferred.persistedToolCallCounts,
       persistedFilesChanged: transferred.persistedFilesChanged,
-      serverMessageIds: event.messageId
+      serverMessageIds: event.messageId && (!record.canonicalAgent.progress || canonicalSavedMessageIds(record)[message.id])
         ? { ...transferred.serverMessageIds, [message.id]: event.messageId }
         : transferred.serverMessageIds,
       narrativeByMessage: transferred.narrativeByMessage,
@@ -2002,8 +2300,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return reason ? createSystemMessage(event.threadId, `Agent stopped: ${reason}`) : null;
   };
 
-  const completedToolCalls = (toolCalls: ToolCall[]): ToolCall[] => {
-    return toolCalls.map((toolCall) => toolCall.isComplete ? toolCall : { ...toolCall, isComplete: true });
+  const completedToolCalls = (toolCalls: ToolCall[], phase: ThreadRecord["runtimePhase"]): ToolCall[] => {
+    return toolCalls.map((toolCall) => toolCall.isComplete ? toolCall : { ...toolCall, isComplete: true,
+      isError: toolCall.isError || phase === "errored" || phase === "interrupted",
+      ...(phase === "cancelled" ? { isCancelled: true } : {}),
+    });
   };
 
   const terminalRuntimePatch = (
@@ -2013,7 +2314,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     streaming: "",
     streamingPreview: "",
     runtimePhase: phase,
-    toolCalls: completedToolCalls(record.toolCalls),
+    optimisticUserMessageId: null,
+    toolCalls: completedToolCalls(record.toolCalls, phase),
+    thoughtSegments: closeOpenThoughtSegment(record.thoughtSegments),
     permissions: [],
     rateLimit: undefined,
   });
@@ -2688,7 +2991,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           ...sendSettingsPatch(state.getThreadSettings(threadId), reasoningLevel, orchestrationMode, contextWindow, thinking, codexFastMode),
           ...optimisticMessageWindowPatch(state, threadId, message),
           agentStartTime: Date.now(), fileEffectSummary: { revision: 0, fileCount: 0, additions: 0, deletions: 0, effects: [] },
-          currentTurnResponseKey: responseKey, ...(isControlCommand ? {} : { turnExecutionId: null }),
+          currentTurnResponseKey: responseKey, ...(isControlCommand ? {} : { turnExecutionId: null, optimisticUserMessageId: message.id }),
           lastFallback: undefined, rateLimit: undefined, apiRetry: undefined, error: null,
           runtimePhase: isControlCommand ? record.runtimePhase : "running",
         }),
@@ -2717,12 +3020,17 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (planAction === "revise") usePlanStore.getState().setGenerating(threadId, false);
     const message = String(error);
     const activeSessionConflict = !isControlCommand && message.includes("already has an active agent session");
+    let invalidateFailedPrompt = false;
     set((state) => {
       const record = getThreadRecord(state.records, threadId);
+      // RPC failures may arrive after canonical admission or a newer prompt.
+      if (!isControlCommand && record.optimisticUserMessageId !== userMessageId) return {};
+      invalidateFailedPrompt = !isControlCommand && !activeSessionConflict;
       const ownsRuntime = ownsOptimisticRuntime(record, isControlCommand, activeSessionConflict, responseKey, executionId);
       return {
         records: patchThreadRecord(state.records, threadId, (current) => ({
           error: message,
+          ...(current.optimisticUserMessageId === userMessageId ? { optimisticUserMessageId: null } : {}),
           ...(activeSessionConflict && state.currentThreadId === threadId ? { messages: current.messages.filter((item) => item.id !== userMessageId) } : {}),
           ...(ownsRuntime ? { agentStartTime: undefined, runtimePhase: "errored" as const } : {}),
         })),
@@ -2731,7 +3039,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (isControlCommand && runningBeforeControl?.has(threadId) && !get().runningThreadIds.has(threadId)) {
       set((state) => ({ runningThreadIds: new Set([...state.runningThreadIds, threadId]) }));
     }
-    if (!activeSessionConflict && !isControlCommand) invalidateDeferredNarrativeEvents(threadId);
+    if (invalidateFailedPrompt) invalidateDeferredNarrativeEvents(threadId);
     return false;
   };
 
@@ -2745,21 +3053,21 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   ): { records: Map<string, ThreadRecord>; runningThreadIds: Set<string> } => {
     const record = getThreadRecord(records, threadId);
     const turn = getCanonicalRuntimeTurn(threadId, record);
-    if (!turn) return { records, runningThreadIds };
-    const phase = phaseForTurnStatus(turn.status);
+    const phase = turn ? phaseForTurnStatus(turn.status) : record.runtimePhase;
+    const running = phase === "running" || phase === "finalizing";
     let nextRecords = records;
     const patch: Partial<ThreadRecord> = {};
     if (record.runtimePhase !== phase) patch.runtimePhase = phase;
     // Stamp the execution identity on live claims so later reconciles and the
     // child lifecycle gate can keep correlating this turn to the record.
-    if (record.turnExecutionId === null && turn.executionId
-      && (turn.status === "Pending" || turn.status === "Running")) {
-      patch.turnExecutionId = turn.executionId;
+    const executionId = activeCanonicalExecutionId(turn);
+    if (record.turnExecutionId === null && executionId) {
+      patch.turnExecutionId = executionId;
+      patch.optimisticUserMessageId = null;
     }
     if (Object.keys(patch).length > 0) {
       nextRecords = patchThreadRecord(records, threadId, patch);
     }
-    const running = phase === "running";
     if (runningThreadIds.has(threadId) === running) {
       return { records: nextRecords, runningThreadIds };
     }
@@ -2767,6 +3075,27 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (running) nextRunning.add(threadId);
     else nextRunning.delete(threadId);
     return { records: nextRecords, runningThreadIds: nextRunning };
+  };
+
+  const terminalCanonicalProjection = (threadId: string, record: ThreadRecord): Partial<ThreadRecord> => {
+    const turn = getCanonicalRuntimeTurn(threadId, record);
+    if (!turn || turn.status === "Pending" || turn.status === "Running") return {};
+    const executionId = turn.executionId ?? record.turnExecutionId;
+    if (!executionId) return {};
+    const streaming = appendTerminalMessages(record, { type: "ended", threadId, turnExecutionId: executionId, reason: "canonical-terminal" }, phaseForTurnStatus(turn.status), null);
+    return { ...streaming, turnExecutionId: executionId, ...recoverParentNarrative(threadId, record.canonicalAgent.state, { ...record, ...streaming }) };
+  };
+
+  const canonicalProgressProjection = (frame: CanonicalAgentProgressFrame, record: ThreadRecord): Partial<ThreadRecord> => {
+    if (frame.phase !== "recovery") return terminalCanonicalProjection(frame.threadId, record);
+    if (frame.loss === "runtime-restarted") {
+      const cleared = discardLostProgress(record);
+      return { ...cleared, ...recoverParentNarrative(frame.threadId, record.canonicalAgent.state, { ...record, ...cleared }) };
+    }
+    return {
+      ...terminalCanonicalProjection(frame.threadId, record),
+      ...recoverParentNarrative(frame.threadId, record.canonicalAgent.state, record),
+    };
   };
 
   return {
@@ -2780,11 +3109,15 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   applyCanonicalReconnectRecoveries: (recoveries) => {
     flushPendingTextDeltas();
+    for (const recovery of recoveries) {
+      if ("phase" in recovery) get().handleCanonicalProgress(recovery);
+    }
     set((state) => {
       let records = state.records;
       let runningThreadIds = state.runningThreadIds;
       let changed = false;
       for (const recovery of recoveries) {
+        if ("phase" in recovery) continue;
         const current = getThreadRecord(records, recovery.threadId);
         const update = applyCanonicalReconnectRecovery(current.canonicalAgent, recovery);
         if (update.replica === current.canonicalAgent) continue;
@@ -2805,9 +3138,51 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         ? { records, ...(runningThreadIds === state.runningThreadIds ? {} : { runningThreadIds }) }
         : {};
     });
-    for (const recovery of recoveries) {
-      if (recovery.mode === "delta") dispatchCanonicalPublications(recovery.events);
+  },
+
+  beginCanonicalRecovery: (threadIds) => canonicalProgressBuffer.begin(threadIds),
+
+  finishCanonicalRecovery: (token) => {
+    for (const pending of canonicalProgressBuffer.finish(token)) {
+      if (pending.overflowed) {
+        set((state) => ({ records: patchThreadRecord(state.records, pending.threadId, (record) => ({
+          canonicalAgent: { ...record.canonicalAgent, recoveryRequired: true },
+        })) }));
+        continue;
+      }
+      for (const frame of pending.frames) get().handleCanonicalProgress(frame);
     }
+  },
+
+  handleCanonicalProgress: (frame) => {
+    flushCanonicalPublicationOrderFor(frame);
+    if (shouldBufferCanonicalProgress(canonicalProgressBuffer, frame)) return;
+    if (shouldDeferCanonicalProgress(frame)) {
+      queueCanonicalProgressFrame(frame);
+      return;
+    }
+    const current = get();
+    if (!canReceiveCanonicalProgress(current, frame.threadId, (threadId) => conversationResidency.isDisplayConversationLeased(threadId))) return;
+    const previous = getThreadRecord(current.records, frame.threadId);
+    const update = applyCanonicalProgressFrame(previous.canonicalAgent, frame);
+    if (update.replica === previous.canonicalAgent) return;
+    set((state) => ({ records: patchThreadRecord(state.records, frame.threadId, { canonicalAgent: update.replica }) }));
+    if (update.outcome !== "applied") return;
+    const visibleChanged = canonicalProgressNeedsProjection(previous.canonicalAgent.state, update);
+    // First publication effects run in event order before terminal canonical truth clears Running.
+    dispatchCanonicalPublications(update.publications, { epoch: frame.epoch, state: update.replica.state });
+    if (visibleChanged && shouldFlushCanonicalText(frame, update.replica.state)) flushPendingTextDeltas();
+    set((state) => {
+      const record = getThreadRecord(state.records, frame.threadId);
+      const projection = visibleChanged ? canonicalProgressProjection(frame, record) : {};
+      const projected = { ...record, ...projection };
+      const records = patchThreadRecord(state.records, frame.threadId, {
+        ...projection,
+        ...reconcileSavedTurnStatuses(projected, drainedSavingEpoch(frame, previous)),
+        serverMessageIds: { ...projected.serverMessageIds, ...canonicalSavedMessageIds(projected) },
+      });
+      return visibleChanged ? reconcileCanonicalRuntime(records, state.runningThreadIds, frame.threadId) : { records };
+    });
   },
 
   handleCanonicalAgentEvents: (threadId, events) => {
@@ -2822,7 +3197,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const current = getThreadRecord(state.records, threadId);
       const update = applyCanonicalPushEvents(current.canonicalAgent, threadId, events);
       if (update.replica === current.canonicalAgent) return {};
-      accepted = true;
+      accepted = update.outcome === "applied";
       const records = patchThreadRecord(state.records, threadId, {
         canonicalAgent: update.replica,
         ...(batchTouchesParentNarrative(events)
@@ -2842,7 +3217,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     ) {
       void conversationResidency.refreshVisibleConversation(threadId);
     }
-    dispatchCanonicalPublications(events);
+    if (accepted) dispatchCanonicalPublications(events);
   },
 
   cacheToolCallRecords: (key, records) => {
@@ -3217,12 +3592,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   setTurnSavingStatus: (status) => {
     set((state) => ({
-      records: patchThreadRecord(state.records, status.threadId, (rec) => {
-        if (rec.turnExecutionId !== status.executionId) return rec;
-        return {
-          savingStatus: status,
-        };
-      }),
+      records: patchThreadRecord(state.records, status.threadId, (rec) => mergeTurnSavingStatus(rec, status)),
     }));
   },
 
@@ -3239,6 +3609,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           ...(running ? {} : terminalSnapshotReset(rec, snapshot)),
           turnExecutionId: snapshot.turnExecutionId,
           runtimePhase: snapshot.phase,
+          ...savingSnapshotPatch(rec, snapshot),
           awaitingUserStopPersist: undefined,
           rateLimit: undefined,
           apiRetry: undefined,
@@ -3315,16 +3686,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     set((state) => {
       let records = state.records;
       for (const snapshot of acceptedSnapshots) {
+        const record = getThreadRecord(records, snapshot.threadId);
         records = patchThreadRecord(records, snapshot.threadId, {
           turnExecutionId: snapshot.turnExecutionId,
           runtimePhase: snapshot.phase,
-          savingStatus: snapshot.turnExecutionId && snapshot.savingStatus
-            ? {
-              threadId: snapshot.threadId,
-              executionId: snapshot.turnExecutionId,
-              mode: snapshot.savingStatus,
-            }
-            : null,
+          ...savingSnapshotPatch(record, snapshot),
           ...((snapshot.phase === "running" || snapshot.phase === "finalizing") && {
             agentStartTime: getThreadRecord(records, snapshot.threadId).agentStartTime ?? Date.now(),
           }),
@@ -3444,6 +3810,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   },
 
   clearThreadState: (threadId) => {
+    const retainedOwners = new Set([...get().records].filter(([id]) => id !== threadId)
+      .flatMap(([, record]) => record.canonicalAgent.ownerThreadId ? [record.canonicalAgent.ownerThreadId] : []));
+    stableAgentEventPublications.forgetThread(threadId, retainedOwners);
     conversationResidency.invalidateConversation(threadId);
     clearNarrativeLoadState(threadId);
     clearDequeueTimer(threadId);
@@ -3740,13 +4109,13 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return lookup;
   },
 
-  loadNarrativeForMessage: async (messageId, explicitThreadId) => {
+  loadNarrativeForMessage: async (messageId, explicitThreadId, options) => {
     const currentId = explicitThreadId ?? get().currentThreadId;
     if (!currentId) return;
     const context = resolveNarrativeLoadContext(get().records, currentId, messageId);
     if (!context) return;
     const { cacheKey, message, generation, detailAfter, hasDetail } = context;
-    if (narrativeLoaded.has(cacheKey) && hasDetail) return;
+    if (shouldSkipNarrativeLoad(cacheKey, hasDetail, options)) return;
     const existing = narrativeInflight.get(cacheKey);
     if (existing) return existing;
     const p = getTransport()
@@ -3815,10 +4184,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
    * On turn completion, commits any buffered streaming content as a
    * message and schedules tool call fade-out animations.
    */
-  handleAgentEvent: (event) => {
+  handleAgentEvent: (event, canonicalPublication) => {
     if (!hasAgentEventHandler(agentEventHandlers, event)) return;
+    if (canonicalPublication && event.type === "turnStarted" && Object.values(getRec(event.threadId).canonicalAgent.state.turns)
+      .some((turn) => turn.executionId === event.turnExecutionId && turn.status !== "Pending" && turn.status !== "Running")) return;
     const runtime = prepareAgentEvent({
-      acceptPublication: (incoming) => stableAgentEventPublications.accept(incoming),
+      acceptPublication: (incoming) => canonicalPublication
+        ? stableAgentEventPublications.acceptCanonical(incoming, canonicalPublication)
+        : stableAgentEventPublications.accept(incoming, getRec(incoming.threadId).canonicalAgent.progress?.epoch),
       clearApiRetry: (id) => patchRec(id, { apiRetry: undefined }),
       flushPendingTextDeltas,
       getCurrentThreadId: () => get().currentThreadId,

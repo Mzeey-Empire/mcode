@@ -31,10 +31,22 @@ export interface PreparedCodexLiveEvent {
  */
 export class CodexLiveEventEffects {
   private sequence = 0;
-  private readonly calls = new Map<string, TaskToolCall>();
+  private calls = new Map<string, TaskToolCall>();
+  private sharedCalls = false;
   private assignedMessageId: string | undefined;
 
   constructor(private readonly execution: ExecutionIdentity, private readonly precedingMessageId: string) {}
+
+  /** Copy effect cursors so rejected admission never consumes a text sequence or message ID. */
+  fork(): CodexLiveEventEffects {
+    const copy = new CodexLiveEventEffects(this.execution, this.precedingMessageId);
+    copy.sequence = this.sequence;
+    copy.calls = this.calls;
+    copy.sharedCalls = true;
+    this.sharedCalls = true;
+    copy.assignedMessageId = this.assignedMessageId;
+    return copy;
+  }
 
   /** Prepare every parent write while retaining intents owned by other execution collaborators. */
   prepare(reduction: ReducedEvent, endedAt = new Date().toISOString()): PreparedCodexLiveEvent {
@@ -72,8 +84,9 @@ export class CodexLiveEventEffects {
       case "assistant-text-promote":
         return { ...effects, text: { kind: "promote", input: this.checkpoint(intent.text) } };
       case "assistant-text-reclassify":
-        this.sequence = 0;
-        return { ...effects, text: { kind: "reclassify", expectedText: intent.text } };
+        this.sequence = intent.retainedText ? 1 : 0;
+        return { ...effects, text: { kind: "reclassify", expectedText: intent.text,
+          ...(intent.retainedText ? { retainedText: intent.retainedText } : {}) } };
       default: return this.applyNonTextIntent(intent, effects, runtime);
     }
   }
@@ -97,6 +110,7 @@ export class CodexLiveEventEffects {
   }
 
   private checkpoint(text: string): ParentAssistantTextCheckpointInput {
+    this.assignedMessageId ??= deriveTurnAssistantMessageId(this.execution.threadId, this.precedingMessageId);
     return { ...this.execution, sequence: ++this.sequence, text };
   }
 
@@ -136,6 +150,7 @@ export class CodexLiveEventEffects {
   private runtimeEffects(intent: CodexLiveRuntimeIntent, effects: ParentLiveEffects, runtime: CodexLiveRuntimeIntent[]): ParentLiveEffects {
     if (intent.kind === "tool-use") {
       const event = intent.event;
+      if (this.sharedCalls) { this.calls = new Map(this.calls); this.sharedCalls = false; }
       this.calls.set(event.toolCallId, { toolCallId: event.toolCallId, toolName: event.toolName,
         parentToolCallId: event.parentToolCallId, _rawToolInput: event.toolInput });
     }

@@ -6,11 +6,10 @@
  */
 
 import { injectable, inject } from "tsyringe";
-import type { Database } from "bun:sqlite";
 import { logger } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type { Thread } from "@mcode/contracts";
-import { CleanupJobRepo, MAX_CLEANUP_ATTEMPTS } from "./persistence/cleanup-job-repo.js";
+import { CleanupJobRepo } from "./persistence/cleanup-job-repo.js";
 import type { CleanupJob } from "./persistence/cleanup-job-repo.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { ClaudeProvider } from "../../providers/adapters/claude/claude-provider.js";
@@ -27,6 +26,7 @@ import { HandoffStorage } from "../../handoff/index.js";
 import { pruneStaleToolOutputArtifacts } from "@mcode/providers";
 import { ThreadControlMutationReservationService } from "../index.js";
 import { ThreadDeletionTeardownService } from "../lifecycle/thread-deletion-teardown-service.js";
+import { DATABASE_WRITER_MAX_PENDING, DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 /** How often to check for due cleanup jobs (ms). */
 const POLL_INTERVAL_MS = 5_000;
@@ -67,9 +67,9 @@ export class CleanupWorker {
   private pollPromise: Promise<void> | null = null;
   private workspacePath: string | undefined;
   private readonly mutationReservations: ThreadControlMutationReservationService;
+  private readonly uncertainJobIds = new Set<string>();
 
   constructor(
-    @inject("Database") private readonly db: Database,
     @inject(CleanupJobRepo) private readonly cleanupJobRepo: CleanupJobRepo,
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(ClaudeProvider) private readonly claudeProvider: ClaudeProvider,
@@ -159,17 +159,19 @@ export class CleanupWorker {
     // that arrives during the async job execution sees running=true.
     this.running = true;
     try {
-      const retentionJobsEnqueued = this.cleanupJobRepo.enqueueExpiredCompleted(
+      this.assertQuarantineBudget();
+      const retentionJobsEnqueued = await this.cleanupJobRepo.enqueueExpiredCompleted(
         new Date().toISOString(), undefined, this.workspacePath,
       );
       const nowMs = Date.now();
-      const jobs = this.cleanupJobRepo.findDue(nowMs, undefined, this.workspacePath);
+      const jobs = this.cleanupJobRepo.findDue(nowMs, undefined, this.workspacePath, [...this.uncertainJobIds]);
       if (jobs.length > 0 || retentionJobsEnqueued > 0) {
-        const dueCounts = this.cleanupJobRepo.getDueCounts(nowMs, this.workspacePath);
+        const dueCounts = this.cleanupJobRepo.getDueCounts(nowMs, this.workspacePath, [...this.uncertainJobIds]);
         const selectedExplicitJobs = jobs.filter((job) => job.kind === "explicit").length;
         const selectedRetentionJobs = jobs.length - selectedExplicitJobs;
         logger.info("CleanupWorker batch selected", {
           retentionJobsEnqueued,
+          quarantinedJobs: this.uncertainJobIds.size,
           selectedExplicitJobs,
           selectedRetentionJobs,
           backlogExplicitJobs: Math.max(0, dueCounts.explicit - selectedExplicitJobs),
@@ -178,7 +180,12 @@ export class CleanupWorker {
       }
       for (const job of jobs) {
         if (this.stopped) break;
-        await this.executeJob(job);
+        this.assertQuarantineBudget();
+        try {
+          await this.executeJob(job);
+        } catch (error) {
+          if (!(error instanceof DatabaseWriteOutcomeUnknown)) throw error;
+        }
       }
     } finally {
       this.running = false;
@@ -192,9 +199,22 @@ export class CleanupWorker {
     try {
       await this.executeReservedJob(job);
     } catch (error) {
-      this.recordJobFailure(job, error);
+      if (error instanceof DatabaseWriteOutcomeUnknown) {
+        this.uncertainJobIds.add(job.id);
+        logger.error("Cleanup job storage outcome is unknown; automatic retry paused", {
+          jobId: job.id, threadId: job.thread_id, kind: job.kind, error: error.message,
+        });
+        throw error;
+      }
+      await this.recordJobFailure(job, error);
     } finally {
       if (context.mutationToken) this.mutationReservations.release(job.thread_id, context.mutationToken);
+    }
+  }
+
+  private assertQuarantineBudget(): void {
+    if (this.uncertainJobIds.size >= DATABASE_WRITER_MAX_PENDING) {
+      throw new Error("Cleanup uncertainty budget is full; reconcile quarantined jobs before admitting more cleanup");
     }
   }
 
@@ -222,11 +242,11 @@ export class CleanupWorker {
   }
 
   private async executeReservedJob(job: CleanupJob): Promise<void> {
-    const retentionThread = this.claimRetentionCleanup(job);
+    const retentionThread = await this.claimRetentionCleanup(job);
     if (job.kind === "retention" && !retentionThread) return;
     const thread = this.threadRepo.findById(job.thread_id);
     if (!thread && job.kind === "explicit") {
-      this.cleanupJobRepo.delete(job.id);
+      await this.cleanupJobRepo.delete(job.id);
       return;
     }
     if (!await this.matchesJobWorktree(thread, job)) {
@@ -248,14 +268,10 @@ export class CleanupWorker {
     return this.cleanupPolicy.isSameSandboxPath(job.worktree_path, thread.worktree_path);
   }
 
-  private claimRetentionCleanup(job: CleanupJob): ReturnType<ThreadRepo["claimRetentionCleanup"]> | undefined {
+  private async claimRetentionCleanup(job: CleanupJob): Promise<Awaited<ReturnType<ThreadRepo["claimRetentionCleanup"]>> | undefined> {
     if (job.kind !== "retention") return undefined;
-    const thread = this.threadRepo.claimRetentionCleanup(job.thread_id, new Date().toISOString());
+    const thread = await this.cleanupJobRepo.claimRetentionJob(job.id, job.thread_id, new Date().toISOString());
     if (thread) return thread;
-    this.db.transaction(() => {
-      this.cleanupJobRepo.delete(job.id);
-      this.threadRepo.releaseRetentionCleanup(job.thread_id);
-    })();
     logger.info("CleanupWorker job cancelled", {
       jobId: job.id,
       threadId: job.thread_id,
@@ -369,17 +385,13 @@ export class CleanupWorker {
 
   private async completeThreads(job: CleanupJob, threadIds: readonly string[]): Promise<void> {
     const ids = [...new Set(threadIds)];
-    for (const threadId of ids) {
-      this.attachmentService.removeForThread(threadId);
-      await this.handoffStorage.deleteThreadFiles(threadId);
-    }
-    this.db.transaction(() => {
+    await this.threadDeletionTeardownService.deletePersistentData(ids, async () => {
       for (const threadId of ids) {
-        this.cleanupJobRepo.deleteByThreadId(threadId);
-        this.threadRepo.hardDelete(threadId, { preserveActiveDescendants: true });
+        this.attachmentService.removeForThread(threadId);
+        await this.handoffStorage.deleteThreadFiles(threadId);
       }
-      this.cleanupJobRepo.delete(job.id);
-    })();
+      await this.cleanupJobRepo.completeThreads(job.id, ids);
+    });
     for (const threadId of ids) broadcast("thread.deleted", { threadId });
     logger.info("CleanupWorker job completed", {
       jobId: job.id,
@@ -389,9 +401,9 @@ export class CleanupWorker {
     });
   }
 
-  private recordJobFailure(job: CleanupJob, failure: unknown): void {
+  private async recordJobFailure(job: CleanupJob, failure: unknown): Promise<void> {
     const error = failure instanceof Error ? failure.message : String(failure);
-    const failed = this.cleanupJobRepo.recordFailure(job.id, error);
+    const { failed, thread } = await this.cleanupJobRepo.recordFailureWithRetention(job.id, job.thread_id, job.kind, error);
     logger.warn("CleanupWorker job failed, scheduled for retry", {
       jobId: job.id,
       threadId: job.thread_id,
@@ -400,20 +412,6 @@ export class CleanupWorker {
       nextRetryAt: failed?.next_retry_at ?? null,
       error,
     });
-    if (job.kind === "retention" && failed) this.updateFailedRetentionJob(job, failed.attempts, error);
-  }
-
-  private updateFailedRetentionJob(job: CleanupJob, attempts: number, error: string): void {
-    const exhausted = attempts >= MAX_CLEANUP_ATTEMPTS;
-    const reason = exhausted
-      ? `Cleanup failed after ${MAX_CLEANUP_ATTEMPTS} attempts. Last error: ${error.slice(-200)}`
-      : "Cleanup failed. Mcode will retry.";
-    const thread = exhausted
-      ? this.db.transaction(() => {
-          this.cleanupJobRepo.delete(job.id);
-          return this.threadRepo.blockRetentionCleanup(job.thread_id, reason);
-        })()
-      : this.threadRepo.retryRetentionCleanup(job.thread_id, reason);
     if (thread) broadcast("thread.lifecycleChanged", { thread });
   }
 
@@ -434,7 +432,7 @@ export class CleanupWorker {
    * hard-deletes it immediately.
    */
   async reconcileOnStartup(): Promise<void> {
-    const requeued = this.cleanupJobRepo.requeueExhaustedJobs(this.workspacePath);
+    const requeued = await this.cleanupJobRepo.requeueExhaustedJobs(this.workspacePath);
     if (requeued > 0) {
       logger.info("Requeued exhausted cleanup jobs", { requeued });
     }
@@ -447,7 +445,7 @@ export class CleanupWorker {
 
       if (threads.length === 0) {
         // No threads remain - just hard-delete the workspace
-        this.workspaceRepo.hardDelete(ws.id);
+        await this.workspaceRepo.hardDelete(ws.id);
         logger.info("Reconciled orphaned workspace (no threads)", { workspaceId: ws.id });
         continue;
       }
@@ -459,7 +457,7 @@ export class CleanupWorker {
       );
 
       if (missingJobs.length > 0) {
-        this.cleanupJobRepo.insertBatch(
+        await this.cleanupJobRepo.insertBatch(
           missingJobs.map((t) => ({
             thread_id: t.id,
             workspace_path: ws.path,
@@ -477,12 +475,14 @@ export class CleanupWorker {
       // clean up attachments, hard-delete them, and hard-delete the workspace now
       const pendingJobs = this.cleanupJobRepo.countByWorkspacePath(ws.path);
       if (pendingJobs === 0) {
-        for (const t of threads) {
-          this.attachmentService.removeForThread(t.id);
-          await this.handoffStorage.deleteThreadFiles(t.id);
-          this.threadRepo.hardDelete(t.id);
-        }
-        this.workspaceRepo.hardDelete(ws.id);
+        await this.threadDeletionTeardownService.deletePersistentData(threads.map((thread) => thread.id), async () => {
+          for (const thread of threads) {
+            this.attachmentService.removeForThread(thread.id);
+            await this.handoffStorage.deleteThreadFiles(thread.id);
+            await this.threadRepo.hardDelete(thread.id);
+          }
+          await this.workspaceRepo.hardDelete(ws.id);
+        });
         logger.info("Reconciled workspace with no pending cleanup", { workspaceId: ws.id });
       }
     }
@@ -498,12 +498,13 @@ export class CleanupWorker {
       // Clean up any remaining threads (e.g. crash-orphaned soft-deleted direct threads)
       // before FK cascade removes them without attachment file cleanup.
       const remainingThreads = this.threadRepo.listAllByWorkspace(workspace.id);
-      for (const thread of remainingThreads) {
-        this.attachmentService.removeForThread(thread.id);
-        await this.handoffStorage.deleteThreadFiles(thread.id);
-      }
-
-      this.workspaceRepo.hardDelete(workspace.id);
+      await this.threadDeletionTeardownService.deletePersistentData(remainingThreads.map((thread) => thread.id), async () => {
+        for (const thread of remainingThreads) {
+          this.attachmentService.removeForThread(thread.id);
+          await this.handoffStorage.deleteThreadFiles(thread.id);
+        }
+        await this.workspaceRepo.hardDelete(workspace.id);
+      });
       broadcast("workspace.deleted", { workspaceId: workspace.id });
       logger.info("Workspace hard-deleted after final cleanup job", {
         workspaceId: workspace.id,
@@ -540,7 +541,8 @@ export class CleanupWorker {
 
   /** Process a single due cleanup job. Returns true if a job was processed. Exported for testing. */
   async processOneJob(): Promise<boolean> {
-    const jobs = this.cleanupJobRepo.findDue(Date.now(), undefined, this.workspacePath);
+    this.assertQuarantineBudget();
+    const jobs = this.cleanupJobRepo.findDue(Date.now(), undefined, this.workspacePath, [...this.uncertainJobIds]);
     if (jobs.length === 0) return false;
     await this.executeJob(jobs[0]);
     return true;

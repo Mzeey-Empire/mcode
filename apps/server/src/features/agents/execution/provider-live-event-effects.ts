@@ -7,7 +7,7 @@ import { CodexLiveEventReducer, type CodexPlanFeature, type CodexLiveReduction, 
 import type { ExecutionLivePublicationIntent, ParentLiveEffects } from "./execution-worker-handler.js";
 
 /** Providers whose AgentEvents use the shared parent turn projection. */
-export type OtherLiveProviderId = "claude" | "cursor";
+export type OtherLiveProviderId = string;
 
 /** Runtime work retained after the event and its parent effects are durable. */
 export type OtherProviderRuntimeIntent = CodexLiveRuntimeIntent | {
@@ -40,8 +40,8 @@ export type OtherProviderLivePreparation =
  * Keep one instance per execution and discard it after any failed writer commit.
  */
 export class OtherProviderLiveEventEffects {
-  private readonly reducer: CodexLiveEventReducer;
-  private readonly effects: CodexLiveEventEffects;
+  private reducer: CodexLiveEventReducer;
+  private effects: CodexLiveEventEffects;
 
   constructor(
     readonly providerId: OtherLiveProviderId,
@@ -51,6 +51,14 @@ export class OtherProviderLiveEventEffects {
   ) {
     this.reducer = new CodexLiveEventReducer(execution, planFeature);
     this.effects = new CodexLiveEventEffects(execution, precedingMessageId);
+  }
+
+  /** Fork normalized provider state until the full semantic batch is admitted. */
+  fork(): OtherProviderLiveEventEffects {
+    const copy = new OtherProviderLiveEventEffects(this.providerId, this.execution, "");
+    copy.reducer = this.reducer.fork();
+    copy.effects = this.effects.fork();
+    return copy;
   }
 
   /** Reduce exactly one event; unsupported input never yields a publication. */

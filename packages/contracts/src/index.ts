@@ -148,10 +148,25 @@ export {
   TurnExecutionIdSchema,
   TurnRuntimePhaseSchema,
   TurnRuntimeSnapshotSchema,
+  TurnSavingModeSchema,
   TurnSavingStatusSchema,
   AgentStopDispatchStateSchema,
   AgentStopResultSchema,
 } from "./models/turn-runtime.js";
+
+export {
+  CanonicalAgentProgressFrameSchema,
+  CanonicalAgentProgressRecoverySchema,
+  CANONICAL_AGENT_PROGRESS_BATCH_MAX,
+  CANONICAL_AGENT_PROGRESS_RECOVERY_MAX,
+} from "./models/canonical-agent-progress.js";
+export type { CanonicalAgentProgressFrame, CanonicalAgentProgressRecovery } from "./models/canonical-agent-progress.js";
+export {
+  AcceptedCanonicalAgentEventEnvelopeSchema,
+  AgentProgressPositionSchema,
+  CanonicalAgentSemanticEnvelopeSchema,
+} from "./compat/agent-model.js";
+export type { AcceptedCanonicalAgentEventEnvelope, AgentProgressPosition } from "./compat/agent-model.js";
 
 export {
   CANONICAL_AGENT_RECONNECT_DELTA_MAX_EVENTS,
@@ -795,6 +810,7 @@ export {
   COLLABORATION_ACTION_MESSAGE_MAX_LENGTH,
   CollaborationActionSchema,
   CollaborationActionStatusSchema,
+  CollaborationObservationChangeSchema,
   CollaborationSourceSchema,
   CollaborationTargetSchema,
   IdentityProvenanceSchema,
@@ -832,6 +848,7 @@ export type {
   CollaborationActionId,
   CollaborationActionKind,
   CollaborationActionStatus,
+  CollaborationObservationChange,
   CollaborationSource,
   CollaborationTarget,
   IdentityProvenance,

@@ -1,11 +1,12 @@
 import { inject, injectable } from "tsyringe";
 import { sanitizeBranchForFolder, validateBranchName, logger } from "@mcode/shared";
 import type { Thread } from "@mcode/contracts";
-import { CleanupJobRepo } from "../../thread-control/cleanup/persistence/cleanup-job-repo.js";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import { GitWorktreeService } from "../git/git-worktree-service.js";
 import { SandboxWorktreeCleanupPolicy } from "./sandbox-worktree-cleanup-policy.js";
+import { ApplicationDatabaseWriter, DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { projectLifecycleWriteOperations } from "../lifecycle/project-lifecycle-write-operations.js";
 
 function managedWorktreeName(ref: string, threadId: string): string {
   return `${sanitizeBranchForFolder(ref).slice(0, 91)}-${threadId.slice(0, 8)}`;
@@ -17,9 +18,9 @@ export class ProjectWorktreeService {
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
-    @inject(CleanupJobRepo) private readonly cleanupJobRepo: CleanupJobRepo,
-    @inject(GitWorktreeService) private readonly gitWorktrees: GitWorktreeService,
-    @inject(SandboxWorktreeCleanupPolicy) private readonly cleanupPolicy: SandboxWorktreeCleanupPolicy,
+    @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter,
+    @inject(GitWorktreeService) private readonly gitWorktrees: Pick<GitWorktreeService, "createWorktree" | "removeWorktree">,
+    @inject(SandboxWorktreeCleanupPolicy) private readonly cleanupPolicy: Pick<SandboxWorktreeCleanupPolicy, "decide">,
   ) {}
 
   /** Provision a worktree for a newly-created thread and persist its path. */
@@ -40,39 +41,9 @@ export class ProjectWorktreeService {
       { branchless: options.branchless },
     );
 
-    this.threadRepo.updateStatus(thread.id, "active");
-    const updated = this.threadRepo.updateWorktreePath(thread.id, info.path);
-    if (!updated) {
-      try {
-        const rollbackOptions = info.createdBranch
-          ? { branchName: branch }
-          : { deleteBranch: false };
-        const cleaned = await this.gitWorktrees.removeWorktree(
-          workspace.path,
-          worktreeName,
-          rollbackOptions,
-        );
-        if (!cleaned) {
-          logger.warn("Rollback worktree cleanup returned false during thread creation", {
-            threadId: thread.id,
-            worktreeName,
-            workspacePath: workspace.path,
-          });
-        }
-      } catch (err) {
-        logger.warn("Rollback worktree cleanup failed during thread creation", {
-          threadId: thread.id,
-          worktreeName,
-          workspacePath: workspace.path,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-      throw new Error(`Failed to persist worktree path for thread ${thread.id}`);
-    }
-
+    const committed = await this.persistProvisionedWorktree(thread, workspace.path, { info, name: worktreeName, ref: branch });
     return {
-      ...thread,
-      worktree_path: info.path,
+      ...committed,
       warnings: info.warnings.length > 0 ? info.warnings : undefined,
     };
   }
@@ -87,11 +58,9 @@ export class ProjectWorktreeService {
     const workspace = this.requireWorkspace(workspaceId);
     validateWorktreePlacement(placement);
     const provisioned = await this.createDelegatedWorktree(thread, workspace.path, placement);
-    await this.persistDelegatedWorktree(thread, workspace.path, provisioned);
-    this.threadRepo.updateStatus(thread.id, "active");
+    const committed = await this.persistProvisionedWorktree(thread, workspace.path, provisioned);
     return {
-      ...thread,
-      worktree_path: provisioned.info.path,
+      ...committed,
       warnings: provisioned.info.warnings.length > 0 ? provisioned.info.warnings : undefined,
     };
   }
@@ -142,14 +111,10 @@ export class ProjectWorktreeService {
       checkoutState: current.checkout_state,
     });
     if (currentDecision.action === "retain") return false;
-    this.cleanupJobRepo.insert({
-      thread_id: threadId,
-      workspace_path: workspace.path,
-      worktree_path: current.worktree_path,
-      branch: currentDecision.branch,
-    });
-    logger.info("Worktree cleanup job enqueued", { threadId, worktreePath: current.worktree_path });
-    return this.threadRepo.softDelete(threadId);
+    const committed = await this.writer.execute(projectLifecycleWriteOperations.scheduleWorktreeCleanup,
+      [threadId, current.workspace_id, workspace.path, current.worktree_path, currentDecision.branch]);
+    if (committed) logger.info("Worktree cleanup job enqueued", { threadId, worktreePath: current.worktree_path });
+    return committed;
   }
 
   private requireProvisionableThread(threadId: string, workspaceId: string): Thread {
@@ -183,14 +148,37 @@ export class ProjectWorktreeService {
     return { info, name, ref };
   }
 
-  private async persistDelegatedWorktree(
+  private async persistProvisionedWorktree(
     thread: Thread,
     workspacePath: string,
     provisioned: { info: Awaited<ReturnType<GitWorktreeService["createWorktree"]>>; name: string; ref: string },
+  ): Promise<Thread> {
+    try {
+      const committed = await this.writer.execute(projectLifecycleWriteOperations.persistProvisionedWorktree,
+        [thread.id, thread.workspace_id, provisioned.info.path]);
+      if (!committed) throw new Error(`Failed to persist worktree path for thread ${thread.id}`);
+      return committed;
+    } catch (error) {
+      // A lost acknowledgment may follow a commit; deleting that checkout would corrupt durable state.
+      if (error instanceof DatabaseWriteOutcomeUnknown) throw error;
+      await this.rollbackProvisionedWorktree(thread.id, workspacePath, provisioned);
+      throw error;
+    }
+  }
+
+  private async rollbackProvisionedWorktree(
+    threadId: string, workspacePath: string,
+    provisioned: { info: { createdBranch: boolean }; name: string; ref: string },
   ): Promise<void> {
-    if (this.threadRepo.updateWorktreePath(thread.id, provisioned.info.path)) return;
-    await this.gitWorktrees.removeWorktree(workspacePath, provisioned.name, rollbackOptions(provisioned));
-    throw new Error(`Failed to persist worktree path for thread ${thread.id}`);
+    try {
+      const cleaned = await this.gitWorktrees.removeWorktree(workspacePath, provisioned.name, rollbackOptions(provisioned));
+      if (!cleaned) logger.warn("Rollback worktree cleanup returned false during thread creation", { threadId, worktreeName: provisioned.name, workspacePath });
+    } catch (error) {
+      logger.warn("Rollback worktree cleanup failed during thread creation", {
+        threadId, worktreeName: provisioned.name, workspacePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private getWorktreeCleanupCandidate(threadId: string): Thread | null {

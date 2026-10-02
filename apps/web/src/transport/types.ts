@@ -421,6 +421,8 @@ export interface McodeTransport {
   cancelThreadStartup(startupId: string): Promise<ThreadStartup>;
   createAndSendMessage(input: CreateAndSendInput): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<AgentStopResult>;
+  /** Retry retained saving work without starting another provider execution. */
+  retrySave(threadId: string): Promise<{ retried: boolean }>;
   /** Continue an active turn after the user accepts that its remaining text will not be saved. */
   continueWithoutSaving(executionId: string): Promise<void>;
   /** Respond to a tool permission request from the agent. */

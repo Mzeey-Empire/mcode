@@ -96,6 +96,8 @@ const RETAINED_ACP_TOOL_RESULT_TRUNCATION_MARKER = "\n[ACP progress output trunc
  */
 export interface CursorAcpTurnState {
   accumulator: CursorStreamAccumulator;
+  /** Open message text must be settled before a different narrative classification. */
+  textClassification: "unknown" | "final" | null;
   /** Tool call IDs whose data arrives via ext methods, not session updates. */
   suppressedToolCallIds: Set<string>;
   /** Task/subagent tool_call ids awaiting `cursor/task` + completion (see cursor-acp-task.ts). */
@@ -119,6 +121,7 @@ export interface CursorAcpTurnState {
 /** Creates a fresh per-turn state bundle (wraps shared stream accumulator shape). */
 export function createCursorAcpTurnState(): CursorAcpTurnState {
   return {
+    textClassification: null,
     accumulator: {
       assistantText: "",
       assistantFinalText: "",
@@ -152,11 +155,11 @@ export function mapCursorAcpSessionNotification(
   const acc = state.accumulator;
 
   if (IGNORED_ACP_SESSION_UPDATES.has(update.sessionUpdate)) return [];
-  if (update.sessionUpdate === "agent_message_chunk") return mapAgentLanguageChunk(threadId, acc, update);
-  if (update.sessionUpdate === "agent_thought_chunk") return mapAgentThoughtChunk(threadId, update);
+  if (update.sessionUpdate === "agent_message_chunk") return mapAgentLanguageChunk(threadId, state, update);
+  if (update.sessionUpdate === "agent_thought_chunk") return mapAgentThoughtChunk(threadId, state, update);
   if (update.sessionUpdate === "plan") return mapAcpPlanUpdate(update, threadId, todoSnapshot);
   if (update.sessionUpdate === "tool_call") {
-    return mapAcpToolCallStarted(update, threadId, state, acc, todoSnapshot);
+    return [...closeAssistantText(threadId, state), ...mapAcpToolCallStarted(update, threadId, state, acc, todoSnapshot)];
   }
   if (update.sessionUpdate === "tool_call_update") return mapAcpToolCallUpdated(update, threadId, state, acc);
   return [];
@@ -168,18 +171,23 @@ export function mapCursorAcpSessionNotification(
 
 function mapAgentLanguageChunk(
   threadId: string,
-  acc: CursorStreamAccumulator,
+  state: CursorAcpTurnState,
   update: import("@agentclientprotocol/sdk").ContentChunk & {
     sessionUpdate: "agent_message_chunk";
   },
 ): AgentEvent[] {
   if (update.content.type !== "text" || !update.content.text) return [];
   const text = update.content.text;
+  const acc = state.accumulator;
   acc.assistantText += text;
   // Tag as final-response when all tools have resolved and at least one fired.
   const isFinalResponse = acc.pendingToolCalls.size === 0 && acc.hasFiredToolThisTurn;
+  const classification = isFinalResponse ? "final" : "unknown";
+  const boundary = state.textClassification !== null && state.textClassification !== classification
+    ? closeAssistantText(threadId, state) : [];
+  state.textClassification = classification;
   if (isFinalResponse) acc.assistantFinalText += text;
-  return [{
+  return [...boundary, {
     type: AgentEventType.TextDelta,
     threadId,
     delta: text,
@@ -194,17 +202,25 @@ function mapAgentLanguageChunk(
  */
 function mapAgentThoughtChunk(
   threadId: string,
+  state: CursorAcpTurnState,
   update: import("@agentclientprotocol/sdk").ContentChunk & {
     sessionUpdate: "agent_thought_chunk";
   },
 ): AgentEvent[] {
   if (update.content.type !== "text" || !update.content.text) return [];
-  return [{
+  return [...closeAssistantText(threadId, state), {
     type: AgentEventType.TextDelta,
     threadId,
     delta: update.content.text,
     isFinalResponse: false,
   }];
+}
+
+function closeAssistantText(threadId: string, state: CursorAcpTurnState): AgentEvent[] {
+  const classification = state.textClassification;
+  if (classification === null) return [];
+  state.textClassification = null;
+  return [{ type: AgentEventType.AssistantMessageBoundary, threadId, isFinalResponse: classification === "final" }];
 }
 
 // ---------------------------------------------------------------------------

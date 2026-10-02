@@ -12,7 +12,7 @@ export async function reapPtyHostCleanupRecords(
   const results = await Promise.allSettled(
     records.map(async (record) => {
       await reap(record);
-      ledger.remove(record.sessionId, record.hostGeneration);
+      await ledger.remove(record.sessionId, record.hostGeneration);
     }),
   );
   return results.flatMap((result) =>

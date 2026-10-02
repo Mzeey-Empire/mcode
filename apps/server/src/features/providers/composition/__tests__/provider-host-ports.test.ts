@@ -131,11 +131,15 @@ describe("createProviderHostPorts", () => {
     });
   });
 
-  it("hands a committed canonical batch directly to ingress after durable acceptance", async () => {
+  it("waits for the worker projection receipt before handing legacy events to ingress", async () => {
     const events = [committedRuntimeEnvelope()];
+    const projected = workerCommit(ownedBatch("cursor", 1, 1), 1).providerEvents;
+    let acknowledge: (() => void) | undefined;
+    const pendingCommit = new Promise<void>((resolve) => { acknowledge = resolve; });
     const deliveryOrder: string[] = [];
-    const commit = vi.fn(() => {
+    const commit = vi.fn(async () => {
       deliveryOrder.push("commit");
+      await pendingCommit;
       return {
         outcome: "committed" as const,
         conversationRevision: 1,
@@ -143,9 +147,10 @@ describe("createProviderHostPorts", () => {
         acceptedThrough: 1,
         durableThrough: 1,
         events,
+        providerProjection: { events: projected, publications: events },
       };
     });
-    const acceptCommitted = vi.fn(() => deliveryOrder.push("ingress"));
+    const acceptLegacyProjected = vi.fn(() => deliveryOrder.push("ingress"));
     const ports = createProviderHostPorts({
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
       envService: { getEnv: () => ({ PATH: "test" }) },
@@ -154,11 +159,14 @@ describe("createProviderHostPorts", () => {
       threadControl: {},
       grants: {},
       events: { commit },
-      ingress: { acceptCommitted },
+      ingress: { acceptLegacyProjected },
     } as never);
     const batch = { threadId: "thread-1", turnId: "turn-1", executionId: EXECUTION_ID, phase: "streaming", events: [] };
 
-    await expect(ports.events.submit(batch)).resolves.toEqual({
+    const submitted = ports.events.submit(batch);
+    expect(acceptLegacyProjected).not.toHaveBeenCalled();
+    acknowledge?.();
+    await expect(submitted).resolves.toEqual({
       commit: {
         outcome: "committed",
         conversationRevision: 1,
@@ -170,13 +178,13 @@ describe("createProviderHostPorts", () => {
       delivery: { ingress: "queued" },
     });
     expect(commit).toHaveBeenCalledWith({ ...batch, nativeCursor: undefined });
-    expect(acceptCommitted).toHaveBeenCalledWith(events);
+    expect(acceptLegacyProjected).toHaveBeenCalledWith(projected);
     expect(deliveryOrder).toEqual(["commit", "ingress"]);
   });
 
   it("does not hand duplicate or failed commits to ingress", async () => {
     const events = [committedRuntimeEnvelope()];
-    const acceptCommitted = vi.fn();
+    const acceptLegacyProjected = vi.fn();
     const commit = vi
       .fn()
       .mockReturnValueOnce({
@@ -186,6 +194,7 @@ describe("createProviderHostPorts", () => {
         acceptedThrough: 1,
         durableThrough: 1,
         events,
+        providerProjection: { events: [], publications: [] },
       })
       .mockImplementationOnce(() => { throw new Error("commit failed"); });
     const ports = createProviderHostPorts({
@@ -196,7 +205,7 @@ describe("createProviderHostPorts", () => {
       threadControl: {},
       grants: {},
       events: { commit },
-      ingress: { acceptCommitted },
+      ingress: { acceptLegacyProjected },
     } as never);
     const batch = { threadId: "thread-1", turnId: "turn-1", executionId: EXECUTION_ID, phase: "streaming", events: [] };
 
@@ -205,7 +214,7 @@ describe("createProviderHostPorts", () => {
       delivery: { ingress: "not-required" },
     });
     await expect(ports.events.submit(batch)).rejects.toThrow("commit failed");
-    expect(acceptCommitted).not.toHaveBeenCalled();
+    expect(acceptLegacyProjected).not.toHaveBeenCalled();
   });
 
   it.each(["claude", "cursor"] as const)("delivers %s worker batches only after ordered commit replies", async (providerId) => {

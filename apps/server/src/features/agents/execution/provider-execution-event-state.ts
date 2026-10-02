@@ -8,7 +8,7 @@ import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 import { OtherProviderLiveEventEffects, type OtherProviderRuntimeIntent } from "./provider-live-event-effects.js";
 
 /** Providers whose parent event effects have an execution worker implementation. */
-export type ExecutionLiveProviderId = "codex" | "claude" | "cursor";
+export type ExecutionLiveProviderId = string;
 
 /** Immutable reducer setup supplied with the same durable parent start. */
 export interface ExecutionParentStartContext {
@@ -29,10 +29,19 @@ export type PreparedExecutionParentEvent =
 
 /** Owns the volatile parent reducer; the execution must be poisoned after a failed write. */
 export class ProviderExecutionEventState {
-  private readonly parent: ParentReducer;
+  private parent: ParentReducer;
 
-  constructor(private readonly providerId: ExecutionLiveProviderId, private readonly execution: ExecutionIdentity, context: ExecutionParentStartContext) {
+  constructor(private readonly providerId: ExecutionLiveProviderId, private readonly execution: ExecutionIdentity, private readonly context: ExecutionParentStartContext) {
     this.parent = createParentReducer(providerId, execution, context);
+  }
+
+  /** Return a preparation candidate; install it only after bounded owner admission succeeds. */
+  fork(): ProviderExecutionEventState {
+    const copy = new ProviderExecutionEventState(this.providerId, this.execution, this.context);
+    copy.parent = this.parent.kind === "codex"
+      ? { kind: "codex", reducer: this.parent.reducer.fork(), effects: this.parent.effects.fork() }
+      : { kind: "generic", effects: this.parent.effects.fork() };
+    return copy;
   }
 
   /** Validate the whole draft before any reducer state changes. Child evidence stays writer-owned. */
@@ -52,14 +61,13 @@ export class ProviderExecutionEventState {
 
   /** Synthesize terminal projection from this execution's buffers without host-side reconstruction. */
   finishFromState(input: SyntheticTerminalInput): PreparedExecutionParentEvent {
-    switch (this.parent.providerId) {
+    switch (this.parent.kind) {
       case "codex": {
         const reduction = this.parent.reducer.finishFromState(input);
         return reduction.kind === "reduced"
           ? { kind: "parent", prepared: this.parent.effects.prepare(reduction) } : { kind: "rejected" };
       }
-      case "claude": return preparedOtherResult(this.parent.effects.finishFromState(input));
-      case "cursor": return preparedOtherResult(this.parent.effects.finishFromState(input));
+      case "generic": return preparedOtherResult(this.parent.effects.finishFromState(input));
     }
   }
 
@@ -71,14 +79,13 @@ export class ProviderExecutionEventState {
 
   private reduceParent(event: AgentEvent, allowTerminal: boolean): PreparedExecutionParentEvent {
     if (!allowTerminal && isTerminalEvent(event)) return { kind: "rejected" };
-    switch (this.parent.providerId) {
+    switch (this.parent.kind) {
       case "codex": {
         const reduction = this.parent.reducer.reduce(event);
         return reduction.kind === "reduced"
           ? { kind: "parent", prepared: this.parent.effects.prepare(reduction) } : { kind: "rejected" };
       }
-      case "claude": return prepareOtherParent(this.parent.effects, event);
-      case "cursor": return prepareOtherParent(this.parent.effects, event);
+      case "generic": return prepareOtherParent(this.parent.effects, event);
     }
   }
 
@@ -118,16 +125,11 @@ export class ProviderExecutionEventState {
 }
 
 type ParentReducer =
-  | { readonly providerId: "codex"; readonly reducer: CodexLiveEventReducer; readonly effects: CodexLiveEventEffects }
-  | { readonly providerId: "claude" | "cursor"; readonly effects: OtherProviderLiveEventEffects };
+  | { readonly kind: "codex"; readonly reducer: CodexLiveEventReducer; readonly effects: CodexLiveEventEffects }
+  | { readonly kind: "generic"; readonly effects: OtherProviderLiveEventEffects };
 
 function createParentReducer(providerId: ExecutionLiveProviderId, execution: ExecutionIdentity, context: ExecutionParentStartContext): ParentReducer {
-  switch (providerId) {
-    case "codex": return { providerId, reducer: new CodexLiveEventReducer(execution, context.planFeature),
-      effects: new CodexLiveEventEffects(execution, context.precedingMessageId) };
-    case "claude": return { providerId, effects: new OtherProviderLiveEventEffects("claude", execution, context.precedingMessageId, context.planFeature) };
-    case "cursor": return { providerId, effects: new OtherProviderLiveEventEffects("cursor", execution, context.precedingMessageId, context.planFeature) };
-  }
+  return providerId === "codex" ? { kind: "codex", reducer: new CodexLiveEventReducer(execution, context.planFeature), effects: new CodexLiveEventEffects(execution, context.precedingMessageId) } : { kind: "generic", effects: new OtherProviderLiveEventEffects(providerId, execution, context.precedingMessageId, context.planFeature) };
 }
 
 function prepareOtherParent(effects: OtherProviderLiveEventEffects, event: AgentEvent): PreparedExecutionParentEvent {
@@ -145,5 +147,5 @@ function isTerminalEvent(event: AgentEvent): boolean {
 
 function hasWriterOwnedExtension(runtime: ProviderRuntimeEvent): boolean {
   const extension = runtime.extension;
-  return Boolean(extension?.child || extension?.collaboration || extension?.continuation);
+  return Boolean(extension?.child || extension?.continuation);
 }

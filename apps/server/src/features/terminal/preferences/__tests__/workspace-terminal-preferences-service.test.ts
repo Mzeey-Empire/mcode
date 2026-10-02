@@ -1,19 +1,19 @@
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "bun:sqlite";
-import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { WorkspaceStore } from "../../../projects/persistence/workspace-store.js";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { WorkspaceTerminalPreferencesService } from "../workspace-terminal-preferences-service.js";
+import { WorkspaceTerminalPreferencesStore } from "../workspace-terminal-preferences-store.js";
 
-describe("WorkspaceTerminalPreferencesService", () => {
+describe("WorkspaceTerminalPreferencesStore", () => {
   let db: Database;
-  let workspaces: WorkspaceRepo;
-  let service: WorkspaceTerminalPreferencesService;
+  let workspaces: WorkspaceStore;
+  let service: WorkspaceTerminalPreferencesStore;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    workspaces = new WorkspaceRepo(db);
-    service = new WorkspaceTerminalPreferencesService(db);
+    workspaces = new WorkspaceStore(db);
+    service = new WorkspaceTerminalPreferencesStore(db);
   });
 
   afterEach(() => db.close());

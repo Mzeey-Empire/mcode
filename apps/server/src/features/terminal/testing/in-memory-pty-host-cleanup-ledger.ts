@@ -10,12 +10,12 @@ export class InMemoryPtyHostCleanupLedger
   private readonly records = new Map<string, PtyHostCleanupRecord>();
 
   /** Adds or replaces one test process identity. */
-  record(record: PtyHostCleanupRecord): void {
+  async record(record: PtyHostCleanupRecord): Promise<void> {
     this.records.set(record.sessionId, { ...record });
   }
 
   /** Removes one matching test process identity. */
-  remove(sessionId: string, hostGeneration: string): boolean {
+  async remove(sessionId: string, hostGeneration: string): Promise<boolean> {
     const record = this.records.get(sessionId);
     if (!record || record.hostGeneration !== hostGeneration) return false;
     return this.records.delete(sessionId);

@@ -14,6 +14,7 @@ import {
   ThoughtSegmentRecordSchema,
   ToolCallRecordSchema,
   AgentEventType,
+  AcceptedCanonicalAgentEventEnvelopeSchema,
   createAgentModelState,
   reduceAgentEventBatch,
   type ParentNarrativeRecoveryItem,
@@ -23,18 +24,17 @@ import {
   type ProviderRuntimeExtension,
 } from "@mcode/contracts";
 import { openDatabase, openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
+import { ThreadStore as ThreadRepo } from "../../../thread-control/persistence/thread-store.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import {
   CANONICAL_AGENT_CONTROL_EVENT_RESERVE,
-  CANONICAL_SYNTHESIZED_EXECUTION_ID,
-  CanonicalAgentBoundary,
+  CanonicalAgentStore as CanonicalAgentBoundary,
   type CanonicalAgentEventDraft,
-} from "../canonical-agent-boundary.js";
+} from "../canonical-agent-store.js";
 import { CodexCollaborationEventAdapter } from "../../collaboration/adapters/codex-collaboration-event-adapter.js";
-import type { CodexCollaborationDurability } from "../../collaboration/codex-collaboration-durability.js";
+import { syntheticThreadExecutionId } from "../canonical-thread-execution.js";
 
 const THREAD_ID = "thread-1";
 const TURN_ID = "turn-1";
@@ -2506,7 +2506,7 @@ describe("CanonicalAgentBoundary", () => {
       .get(delegation.childThread.id)).toEqual({ count: 1 });
   });
 
-  it("starts a parent assistant turn only from a recorded child continuation action", () => {
+  it("restores source actions by exact native identity and rejects ambiguous matches", () => {
     startCanonicalParent(sink, db);
     const delegationInput = {
       parentThreadId: THREAD_ID,
@@ -2580,94 +2580,6 @@ describe("CanonicalAgentBoundary", () => {
         provenance: "native",
       },
     )).toThrow("ambiguous");
-    published.mockClear();
-
-    const continuation = sink.startProviderContinuation({
-      parentThreadId: THREAD_ID,
-      turnId: "turn:provider-continuation",
-      executionId: "00000000-0000-4000-8000-000000000002",
-      permissionMode: "full",
-      providerIdentities: [],
-      triggerActionId: action.id,
-    });
-
-    expect(continuation.threadId).toBe(THREAD_ID);
-    expect(continuation.trigger).toEqual({
-      kind: "child",
-      sourceThreadId: delegation.childThread.id,
-      sourceTurnId: childTurn.id,
-      sourceItemId: "item:child-return-parent",
-    });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE thread_id = ? AND kind = 'message'")
-      .get(THREAD_ID)).toEqual({ count: 1 });
-    expect(sink.loadCollaborationAction(action.id)?.target).toEqual({
-      threadId: THREAD_ID,
-      turnId: continuation.id,
-    });
-    expect(published).toHaveBeenCalledTimes(2);
-    expect(published.mock.calls[0]![0].every((event) => (
-      event.routing.threadId === delegation.childThread.id
-    ))).toBe(true);
-    expect(published.mock.calls[1]![0].every((event) => (
-      event.routing.threadId === THREAD_ID
-    ))).toBe(true);
-  });
-
-  it("rolls back continuation acknowledgement when parent turn creation fails", () => {
-    startCanonicalParent(sink, db);
-    const delegationInput = {
-      parentThreadId: THREAD_ID,
-      parentTurnId: TURN_ID,
-      parentExecutionId: EXECUTION_ID,
-      parentItemId: "toolCall:spawn-parent-continuation-rollback",
-      receiverThreadIds: ["native-child-parent-continuation-rollback"],
-      providerIdentities: [] as ProviderIdentity[],
-    };
-    const delegation = sink.startCodexChildDelegation(delegationInput);
-    const childTurn = sink.startCodexChildTurn({
-      ...delegationInput,
-      nativeThreadId: "native-child-parent-continuation-rollback",
-      nativeTurnId: "native-child-turn-parent-continuation-rollback",
-    });
-    const action = sink.recordCollaborationAction({
-      actionId: "collaboration:child-return-parent-rollback",
-      kind: "return-result",
-      sourceThreadId: delegation.childThread.id,
-      sourceTurnId: childTurn.id,
-      sourceExecutionId: sink.loadExecutionIdForTurn(childTurn.id),
-      sourceItemId: "item:child-return-parent-rollback",
-      targetThreadId: THREAD_ID,
-      status: "Dispatched",
-      providerIdentities: [],
-      payload: { projection: "codexCollaboration" },
-    });
-    published.mockClear();
-    db.exec(`
-      CREATE TRIGGER reject_provider_continuation_turn
-      BEFORE INSERT ON canonical_agent_turns
-      WHEN NEW.id = 'turn:provider-continuation-rollback'
-      BEGIN
-        SELECT RAISE(ABORT, 'forced provider continuation failure');
-      END;
-    `);
-
-    expect(() => sink.startProviderContinuation({
-      parentThreadId: THREAD_ID,
-      turnId: "turn:provider-continuation-rollback",
-      executionId: "00000000-0000-4000-8000-000000000003",
-      permissionMode: "full",
-      providerIdentities: [],
-      triggerActionId: action.id,
-    })).toThrow("forced provider continuation failure");
-
-    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_turns WHERE id = ?")
-      .get("turn:provider-continuation-rollback")).toEqual({ count: 0 });
-    expect(sink.loadCollaborationAction(action.id)?.target).toEqual({
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-    });
-    expect(sink.loadCollaborationAction(action.id)?.status).toBe("Dispatched");
-    expect(published).not.toHaveBeenCalled();
   });
 
   it("retains a bounded diagnostic when attributed child routing cannot persist", () => {
@@ -2797,23 +2709,7 @@ describe("CanonicalAgentBoundary", () => {
       nativeThreadId: "native-child-adapter-stream",
       nativeTurnId: "native-turn-adapter-stream",
     });
-    const durability = {
-      loadCodexChildDelegationByReceiverThreadId: () => delegation,
-      loadThread: (threadId: string) => sink.loadThread(threadId),
-      loadTurn: (turnId: string) => sink.loadTurn(turnId),
-      loadTurnByExecution: (executionId: string) => sink.loadTurnByExecution(executionId),
-      loadExecutionIdForTurn: () => EXECUTION_ID,
-      registerCodexReceiverThreadIds: (value: Parameters<typeof sink.registerCodexReceiverThreadIds>[0]) => (
-        sink.registerCodexReceiverThreadIds(value)
-      ),
-      bindCodexChildIdentity: (value: Parameters<typeof sink.bindCodexChildIdentity>[0]) => (
-        sink.bindCodexChildIdentity(value)
-      ),
-      recordCodexChildItem: (value: Parameters<typeof sink.recordCodexChildItem>[0]) => (
-        sink.recordCodexChildItem(value)
-      ),
-    } as CodexCollaborationDurability;
-    const adapter = new CodexCollaborationEventAdapter(durability);
+    const adapter = new CodexCollaborationEventAdapter(sink);
     const extension: ProviderRuntimeExtension = {
       providerId: "codex",
       kind: "codex-collaboration",
@@ -3319,6 +3215,28 @@ describe("CanonicalAgentBoundary", () => {
       .get(delegation.childThread.id)).toMatchObject({ deleted_at: null });
   });
 
+  it("stores supplied accepted identities and rejects reassigned duplicate positions", () => {
+    startCanonicalParent(sink, db);
+    const checkpoint = sink.loadCheckpoint(EXECUTION_ID);
+    if (!checkpoint) throw new Error("Fixture execution was not started");
+    const accepted = AcceptedCanonicalAgentEventEnvelopeSchema.parse({
+      ...appendItemDraft("accepted-event", "accepted-item"), acceptedSequence: checkpoint.lastAcceptedSequence + 1,
+      progressPosition: { epoch: "live-epoch", sequence: 1 }, serverTimestamps: { acceptedAt: NOW },
+    });
+    const input = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: [accepted] };
+    const appended = db.transaction(() => sink.appendAcceptedInsideTransaction(input))();
+    expect(appended.events[0]).toMatchObject({ eventId: "accepted-event", acceptedSequence: accepted.acceptedSequence,
+      progressPosition: accepted.progressPosition, serverTimestamps: { acceptedAt: NOW } });
+    expect(db.transaction(() => sink.appendAcceptedInsideTransaction(input))().outcome).toBe("duplicate");
+    expect(() => db.transaction(() => sink.appendAcceptedInsideTransaction({ ...input,
+      events: [{ ...accepted, acceptedSequence: accepted.acceptedSequence + 1 }] }))())
+      .toThrow("another assigned position");
+    expect(() => db.transaction(() => sink.appendAcceptedInsideTransaction({ ...input,
+      events: [{ ...accepted, progressPosition: { epoch: "other-epoch", sequence: 1 } }] }))())
+      .toThrow("another assigned position");
+    expect(sink.loadCheckpoint(EXECUTION_ID)?.lastAcceptedSequence).toBe(accepted.acceptedSequence);
+  });
+
   it("records synthesized publications on the shared per-thread sequence and replays them", () => {
     startCanonicalParent(sink, db);
 
@@ -3346,11 +3264,48 @@ describe("CanonicalAgentBoundary", () => {
 
     // Synthesized commits hold no execution checkpoint; their events still replay through
     // the thread-scoped delta channel a reconnecting client consumes.
-    expect(sink.loadCheckpoint(CANONICAL_SYNTHESIZED_EXECUTION_ID)).toBeNull();
+    expect(sink.loadCheckpoint(syntheticThreadExecutionId(THREAD_ID))).toBeNull();
     const recovery = sink.recoverThread(THREAD_ID, { conversationRevision: 0, rosterRevision: 0 });
     const recovered = recovery.mode === "delta" ? recovery.events : [];
     expect(recovered.filter((envelope) => envelope.payload.type === "publication.recorded"))
       .toHaveLength(2);
     expect(published).toHaveBeenCalled();
+  });
+
+  it("keeps synthesized sequence and execution identities separate across threads after reopening", () => {
+    startCanonicalParent(sink, db);
+    const otherThreadId = "other-synthesized-thread";
+    db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(otherThreadId, "workspace-1", "Other thread", "main", "codex", NOW, NOW);
+    db.prepare(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, root_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(otherThreadId, "workspace-1", otherThreadId, "codex", "Idle", NOW, NOW);
+
+    const first = sink.recordSynthesizedPublications(THREAD_ID, [{ type: "goalUpdated", threadId: THREAD_ID }]);
+    const other = sink.recordSynthesizedPublications(otherThreadId, [{ type: "goalUpdated", threadId: otherThreadId }]);
+    expect(first).toHaveLength(1);
+    expect(other).toHaveLength(1);
+    expect(first[0]).toMatchObject({ acceptedSequence: 1,
+      routing: { threadId: THREAD_ID, executionId: syntheticThreadExecutionId(THREAD_ID) } });
+    expect(other[0]).toMatchObject({ acceptedSequence: 1,
+      routing: { threadId: otherThreadId, executionId: syntheticThreadExecutionId(otherThreadId) } });
+    expect(syntheticThreadExecutionId(THREAD_ID)).not.toBe(syntheticThreadExecutionId(otherThreadId));
+    expect(first[0]?.routing).not.toHaveProperty("turnId");
+    expect(other[0]?.routing).not.toHaveProperty("turnId");
+
+    const reopened = new CanonicalAgentBoundary(db, published);
+    const next = reopened.recordSynthesizedPublications(otherThreadId, [{ type: "goalCleared", threadId: otherThreadId }]);
+    expect(next[0]).toMatchObject({ acceptedSequence: 2,
+      routing: { threadId: otherThreadId, executionId: syntheticThreadExecutionId(otherThreadId) },
+      payload: { type: "publication.recorded", publicationId: "2" } });
+    expect(reopened.loadCheckpoint(syntheticThreadExecutionId(THREAD_ID))).toBeNull();
+    expect(reopened.loadCheckpoint(syntheticThreadExecutionId(otherThreadId))).toBeNull();
+    expect(reopened.loadTurnByExecution(syntheticThreadExecutionId(THREAD_ID))).toBeNull();
+    expect(reopened.loadTurnByExecution(syntheticThreadExecutionId(otherThreadId))).toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?")
+      .get(syntheticThreadExecutionId(THREAD_ID))).toEqual({ count: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE execution_id = ?")
+      .get(syntheticThreadExecutionId(otherThreadId))).toEqual({ count: 2 });
   });
 });

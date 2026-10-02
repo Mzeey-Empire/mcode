@@ -253,13 +253,13 @@ export class TerminalProfileService {
     profileId: TerminalProfileReference,
   ): Promise<TerminalProfileReference> {
     const validated = await this.validateProfileReference(profileId);
-    this.workspacePreferences.update(workspaceId, validated);
+    await this.workspacePreferences.update(workspaceId, validated);
     return validated;
   }
 
   /** Deletes an explicit workspace override so it inherits the global default. */
-  resetWorkspaceDefault(workspaceId: string): void {
-    this.workspacePreferences.reset(workspaceId);
+  async resetWorkspaceDefault(workspaceId: string): Promise<void> {
+    await this.workspacePreferences.reset(workspaceId);
   }
 
   /** Resolves one-time, workspace, global, then Automatic profile selection. */

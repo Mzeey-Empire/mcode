@@ -7,9 +7,6 @@ import type {
   TurnOutcome,
 } from "@mcode/contracts";
 
-/** Injection token for the narrow Codex-native collaboration durability boundary. */
-export const CODEX_COLLABORATION_DURABILITY = Symbol("CodexCollaborationDurability");
-
 /** The durable state created for one Codex provider-native child delegation. */
 export interface CodexChildDelegation {
   childThread: AgentThread;
@@ -107,17 +104,7 @@ export interface CodexCollaborationActionInput {
   payload: Record<string, unknown>;
 }
 
-/** The input that starts a parent turn after Codex proves a continuation action. */
-export interface CodexProviderContinuationInput {
-  parentThreadId: string;
-  turnId: string;
-  executionId: string;
-  permissionMode: AgentTurn["permissionMode"];
-  providerIdentities: readonly ProviderIdentity[];
-  triggerActionId: string;
-}
-
-/** Durable Codex-native collaboration operations that a future adapter can receive by construction. */
+/** Synchronous collaboration state used inside writer transactions or by the retained accepted owner. */
 export interface CodexCollaborationDurability {
   loadThread(threadId: string): AgentThread | null;
   loadThreadByProviderIdentity(identity: ProviderIdentity): AgentThread | null;
@@ -126,15 +113,12 @@ export interface CodexCollaborationDurability {
   loadTurnByProviderIdentity(threadId: string, identity: ProviderIdentity): AgentTurn | null;
   loadLatestTurn(threadId: string): AgentTurn | null;
   loadExecutionIdForTurn(turnId: string): string;
-  loadLatestPermissionMode(threadId: string): AgentTurn["permissionMode"] | null;
   loadCollaborationActionBySourceProviderIdentity(
     sourceThreadId: string,
     sourceTurnId: string,
     identity: ProviderIdentity,
   ): CollaborationAction | null;
   recordCollaborationAction(input: CodexCollaborationActionInput): CollaborationAction;
-  startProviderContinuation(input: CodexProviderContinuationInput): AgentTurn;
-  activateProviderContinuation(threadId: string): void;
   loadCodexChildDelegation(parentThreadId: string, parentItemId: string): CodexChildDelegation | null;
   loadCodexChildDelegationByReceiverThreadId(nativeThreadId: string): CodexChildDelegation | null;
   startCodexChildDelegation(input: CodexChildDelegationInput): CodexChildDelegation;

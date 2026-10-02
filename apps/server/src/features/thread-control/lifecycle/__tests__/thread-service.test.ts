@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
+let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import { HandoffStorage } from "../../../handoff/index.js";
 import {
@@ -23,12 +24,13 @@ describe("ThreadService.delete", () => {
   let cleanupPolicy: SandboxWorktreeCleanupPolicy;
   let threadService: ThreadService;
   let teardownThread: ReturnType<typeof vi.fn>;
+  let deletePersistentData: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    database = openMemoryDatabase();
-    threads = new ThreadRepo(database);
-    workspaces = new WorkspaceRepo(database);
-    cleanupJobs = new CleanupJobRepo(database);
+    database = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
+    threads = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    workspaces = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    cleanupJobs = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     cleanupPolicy = {
       decide: vi.fn(async ({ worktreePath }) => ({
         action: "remove",
@@ -41,12 +43,13 @@ describe("ThreadService.delete", () => {
       removeWorktree: vi.fn().mockResolvedValue(true),
     } as unknown as GitWorktreeService;
     teardownThread = vi.fn().mockResolvedValue(undefined);
+    deletePersistentData = vi.fn(async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove());
     threadService = new ThreadService(
       threads,
-      new ProjectWorktreeService(threads, workspaces, cleanupJobs, worktrees, cleanupPolicy),
+      new ProjectWorktreeService(threads, workspaces, persistenceRuntime.writer, worktrees, cleanupPolicy),
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
-      { teardownThread } as unknown as ThreadDeletionTeardownService,
+      { teardownThread, deletePersistentData, bindAcceptedProgress: vi.fn() } as unknown as ThreadDeletionTeardownService,
     );
   });
 
@@ -67,7 +70,7 @@ describe("ThreadService.delete", () => {
   }
 
   it("queues every sandbox worktree, even when legacy metadata says it is unmanaged", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     addWorktreeThread(
       workspace.id,
       "thread-1",
@@ -90,7 +93,7 @@ describe("ThreadService.delete", () => {
     ["outside-sandbox" as const, "C:\\source\\shared-worktree"],
     ["primary-branch" as const, "C:\\Users\\user\\.mcode\\worktrees\\repo\\main"],
   ])("keeps a %s checkout and deletes only its thread", async (reason, path) => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     addWorktreeThread(workspace.id, "thread-2", path, "main");
     vi.mocked(cleanupPolicy.decide).mockResolvedValue({ action: "retain", reason });
 
@@ -101,7 +104,7 @@ describe("ThreadService.delete", () => {
   });
 
   it("hard-deletes directly when worktree cleanup is not requested", async () => {
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
     addWorktreeThread(workspace.id, "thread-3", "C:\\Users\\user\\.mcode\\worktrees\\repo\\feature", "feature/delete");
 
     await threadService.delete("thread-3", false);
@@ -111,10 +114,28 @@ describe("ThreadService.delete", () => {
     expect(teardownThread).toHaveBeenCalledExactlyOnceWith("thread-3");
   });
 
+  it("rejects provider-owned alias deletion before teardown and leaves managed child deletion available", async () => {
+    const workspace = (await workspaces.create("Project", "/repo"));
+    const parent = (await threads.create(workspace.id, "Parent", "direct", "main"));
+    const alias = (await threads.create(workspace.id, "Alias", "direct", "main"));
+    const managed = (await threads.create(workspace.id, "Managed", "direct", "main", true, "claude", { parentThreadId: parent.id, forkedFromMessageId: "origin-message" }));
+    threadService.bindAcceptedProgress({
+      assertThreadDeletionSupported: (threadId) => { if (threadId === alias.id) throw new Error("Provider-owned child conversations support Stop"); },
+      discardThreads: async () => {}, finishThreadDeletion: () => {},
+    });
+    await expect(threadService.delete(alias.id, false)).rejects.toThrow("Provider-owned child");
+    expect(teardownThread).not.toHaveBeenCalled();
+    expect(threads.findById(alias.id)).not.toBeNull();
+    expect(await threadService.delete(managed.id, false)).toBe(true);
+    expect(teardownThread).toHaveBeenCalledExactlyOnceWith(managed.id);
+    expect(deletePersistentData).toHaveBeenCalledExactlyOnceWith([managed.id], expect.any(Function));
+    expect(threads.findById(parent.id)).not.toBeNull();
+  });
+
   it("detaches an active handoff descendant when deleting its parent directly", async () => {
-    const workspace = workspaces.create("Project", "/repo");
-    const parent = threads.create(workspace.id, "Parent", "direct", "main");
-    const descendant = threads.create(
+    const workspace = (await workspaces.create("Project", "/repo"));
+    const parent = (await threads.create(workspace.id, "Parent", "direct", "main"));
+    const descendant = (await threads.create(
       workspace.id,
       "Active handoff",
       "direct",
@@ -122,7 +143,7 @@ describe("ThreadService.delete", () => {
       true,
       "claude",
       { parentThreadId: parent.id, forkedFromMessageId: "message-1" },
-    );
+    ));
 
     await threadService.delete(parent.id, false);
 
@@ -137,9 +158,9 @@ describe("ThreadService.delete", () => {
 
 describe("ThreadService.create", () => {
   it("persists the selected provider on the inserted row", async () => {
-    const database = openMemoryDatabase();
-    const threads = new ThreadRepo(database);
-    const workspaces = new WorkspaceRepo(database);
+    persistenceRuntime = createThreadPersistenceTestRuntime();
+    const threads = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    const workspaces = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     const service = new ThreadService(
       threads,
       {} as ProjectWorktreeService,
@@ -147,7 +168,7 @@ describe("ThreadService.create", () => {
       {} as HandoffStorage,
       {} as ThreadDeletionTeardownService,
     );
-    const workspace = workspaces.create("Project", "/repo");
+    const workspace = (await workspaces.create("Project", "/repo"));
 
     const thread = await service.create(workspace.id, "Devin work", "direct", "main", { provider: "devin" });
     expect(thread.provider).toBe("devin");
@@ -155,6 +176,5 @@ describe("ThreadService.create", () => {
 
     const fallback = await service.create(workspace.id, "Other", "direct", "main");
     expect(fallback.provider).toBe("claude");
-    database.close();
   });
 });

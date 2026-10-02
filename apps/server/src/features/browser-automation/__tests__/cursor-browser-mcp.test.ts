@@ -51,7 +51,11 @@ function createCursorProviderFixture(): any {
   provider.pendingAcpRuntimes = new Map();
   provider.turnRoutingByState = new WeakMap();
   provider.pendingTurnRoutings = new Map();
-  provider.canonicalEventPublisher = { waitForExecution: vi.fn(async () => undefined) };
+  provider.turnTasks = new Set();
+  provider.canonicalEventPublisher = {
+    waitForExecution: vi.fn(async () => undefined),
+    stopAdmissionAndDrain: vi.fn(async () => undefined),
+  };
   provider.threadControlMcp = { close: vi.fn(async () => undefined) };
   return provider;
 }
@@ -403,6 +407,7 @@ describe("Cursor browser MCP configuration", () => {
       mcodeSessionId: "mcode-a",
       threadId: "thread-a",
       cwd: ".",
+      acpSessionId: undefined,
       supportsHttpMcp: true,
       threadControlMcpEnabled: true,
       acpRuntime: { openSession },
@@ -639,7 +644,7 @@ describe("Cursor browser MCP configuration", () => {
     expect(lease.credentials.authenticate(previousGrant.token)).toBeNull();
   });
 
-  it("releases staged and refreshed leases during shutdown", () => {
+  it("releases staged and refreshed leases during shutdown", async () => {
     const lease = configuredLease();
     const staged = lease.stage(browserScope());
     const grant = lease.issue(browserScope({ mcodeSessionId: "mcode-b", providerSessionId: "provider-b" }))!;
@@ -648,7 +653,7 @@ describe("Cursor browser MCP configuration", () => {
       mcodeSessionId: "mcode-other",
       providerSessionId: "provider-other",
     }))!;
-    const provider = Object.create(CursorProvider.prototype) as any;
+    const provider = createCursorProviderFixture();
     provider.id = "cursor";
     provider.browserAutomationLease = lease;
     provider.pendingPermissions = new Map();
@@ -661,7 +666,7 @@ describe("Cursor browser MCP configuration", () => {
     provider.liveSessionIds = new Set(["mcode-b"]);
     provider.runtime = { shutdown: vi.fn().mockResolvedValue(undefined) };
 
-    provider.shutdown();
+    await provider.shutdown();
 
     expect(lease.credentials.authenticate(grant.token)).toBeNull();
     expect(lease.credentials.authenticate(unrelatedGrant.token)?.providerId).toBe("claude");

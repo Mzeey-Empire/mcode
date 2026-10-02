@@ -80,9 +80,15 @@ export interface BufferToolCallEvent {
 
 /** Complete narrative rows prepared for one terminal persistence pass. */
 export interface PreparedNarrativePersistence {
-  toolCalls: BufferedToolCall[];
+  toolCalls: CreateToolCallRecordInput[];
   thoughts: CreateThoughtSegmentInput[];
   hooks: CreateHookExecutionInput[];
+}
+
+/** Records changed by one execution event, excluding its unchanged narrative history. */
+export interface NarrativeRecoveryChanges {
+  readonly items: readonly ParentNarrativeRecoveryItem[];
+  readonly discardedItemIds: readonly string[];
 }
 
 /** Bounds persisted shell commands while retaining enough text for readable expansion. */
@@ -164,6 +170,8 @@ export class NarrativeTurnState {
   private turnHooks: CreateHookExecutionInput[] = [];
   private readonly effectSink: ((effect: NarrativeTurnStateEffect) => void) | undefined;
   private readonly pendingEffects: NarrativeTurnStateEffect[] = [];
+  private recoveryChanges = new Map<string, ParentNarrativeRecoveryItem>();
+  private recoveryDiscards = new Set<string>();
   readonly threadId: string;
   readonly execution: ExecutionIdentity | undefined;
 
@@ -174,6 +182,23 @@ export class NarrativeTurnState {
     this.threadId = typeof owner === "string" ? owner : owner.threadId;
     this.execution = typeof owner === "string" ? undefined : { ...owner };
     this.effectSink = effectSink;
+  }
+
+  /** Share historical records and detach mutations so rejected preparation cannot change accepted state. */
+  fork(): NarrativeTurnState {
+    if (this.effectSink) throw new Error("A narrative with external effects cannot be forked");
+    const copy = new NarrativeTurnState(this.execution ?? this.threadId);
+    copy.turnToolCalls = [...this.turnToolCalls];
+    copy.agentCallStack = [...this.agentCallStack];
+    copy.turnSortCounters = this.turnSortCounters;
+    copy.turnOpenThought = structuredClone(this.turnOpenThought);
+    copy.turnThoughts = [...this.turnThoughts];
+    copy.turnOpenHooks = new Map(this.turnOpenHooks);
+    copy.turnHooks = [...this.turnHooks];
+    copy.pendingEffects.push(...structuredClone(this.pendingEffects));
+    copy.recoveryChanges = new Map(this.recoveryChanges);
+    copy.recoveryDiscards = new Set(this.recoveryDiscards);
+    return copy;
   }
 
   /** Fence a worker command to the exact turn attempt bound to this state. */
@@ -215,6 +240,8 @@ export class NarrativeTurnState {
     this.turnThoughts = [];
     this.turnOpenHooks = new Map();
     this.turnHooks = [];
+    this.recoveryChanges.clear();
+    this.recoveryDiscards.clear();
   }
 
   /**
@@ -257,6 +284,8 @@ export class NarrativeTurnState {
     } else {
       open.text += delta;
     }
+    const updated = this.turnOpenThought;
+    if (updated) this.recordRecoveryChange(this.openThoughtRecoveryItem(updated));
   }
 
   /**
@@ -269,16 +298,18 @@ export class NarrativeTurnState {
     const open = this.turnOpenThought;
     if (!open) return;
     const list = this.turnThoughts;
-    list.push({
+    const thought: CreateThoughtSegmentInput = {
       id: open.id,
       messageId: "",
       text: open.text,
       startedAt: open.startedAt,
       endedAt: new Date().toISOString(),
       sortOrder: open.sortOrder,
-    });
+    };
+    list.push(thought);
     this.turnThoughts = list;
     this.turnOpenThought = null;
+    this.recordRecoveryChange(this.thoughtRecoveryItem(thought));
   }
 
   /**
@@ -291,6 +322,7 @@ export class NarrativeTurnState {
    */
   dropOpenThought(threadId: string): void {
     this.assertThread(threadId);
+    if (this.turnOpenThought) this.recordRecoveryDiscard(`narrationSegment:${this.turnOpenThought.id}`);
     this.turnOpenThought = null;
   }
 
@@ -304,6 +336,7 @@ export class NarrativeTurnState {
   takeOpenThought(threadId: string): string {
     this.assertThread(threadId);
     const open = this.turnOpenThought;
+    if (open) this.recordRecoveryDiscard(`narrationSegment:${open.id}`);
     this.turnOpenThought = null;
     return open?.text ?? "";
   }
@@ -357,9 +390,11 @@ export class NarrativeTurnState {
     const stack = this.agentCallStack;
     const parentToolCallId = this.resolveParentToolCallId(threadId, event);
     this.logParentToolCallAttribution(threadId, event, parentToolCallId, stack.length);
-    const existing = buffer.find((tc) => tc.toolCallId === event.toolCallId);
+    const existing = this.mutableBufferedToolCall(threadId, event.toolCallId);
     if (existing) {
-      return this.updateExistingBufferedToolCall(existing, event, parentToolCallId);
+      const parent = this.updateExistingBufferedToolCall(existing, event, parentToolCallId);
+      this.recordRecoveryChange(this.toolCallRecoveryItem(existing));
+      return parent;
     }
     return this.addBufferedToolCall(
       threadId,
@@ -498,7 +533,9 @@ export class NarrativeTurnState {
       this.agentCallStack = stack;
     }
     const presentation = this.subagentPresentation(event);
-    buffer.push(this.createBufferedToolCall(event, presentation, sortOrder, parentToolCallId));
+    const toolCall = this.createBufferedToolCall(event, presentation, sortOrder, parentToolCallId);
+    buffer.push(toolCall);
+    this.recordRecoveryChange(this.toolCallRecoveryItem(toolCall));
     this.turnToolCalls = buffer;
     return parentToolCallId;
   }
@@ -562,7 +599,7 @@ export class NarrativeTurnState {
   ): void {
     this.assertThread(threadId);
     this.removeAgentFromStack(threadId, toolCallId);
-    const toolCall = this.latestBufferedToolCall(threadId, toolCallId);
+    const toolCall = this.mutableBufferedToolCall(threadId, toolCallId);
     if (!toolCall) return;
     this.applyToolCallOutput(toolCall, output, isError, outputMeta);
     this.mergeToolCallInput(toolCall, toolInput);
@@ -576,6 +613,7 @@ export class NarrativeTurnState {
       );
       this.applyAgentPresentation(toolCall, toolCall._rawToolInput ?? {}, toolCallId);
     }
+    this.recordRecoveryChange(this.toolCallRecoveryItem(toolCall));
   }
 
   private removeAgentFromStack(threadId: string, toolCallId: string): void {
@@ -597,6 +635,18 @@ export class NarrativeTurnState {
     const buffer = this.turnToolCalls;
     for (let index = buffer.length - 1; index >= 0; index -= 1) {
       if (buffer[index].toolCallId === toolCallId) return buffer[index];
+    }
+    return undefined;
+  }
+
+  private mutableBufferedToolCall(threadId: string, toolCallId: string): BufferedToolCall | undefined {
+    this.assertThread(threadId);
+    for (let index = this.turnToolCalls.length - 1; index >= 0; index -= 1) {
+      if (this.turnToolCalls[index].toolCallId !== toolCallId) continue;
+      // Forks share history, so only the record being changed needs a deep copy.
+      const detached = structuredClone(this.turnToolCalls[index]);
+      this.turnToolCalls[index] = detached;
+      return detached;
     }
     return undefined;
   }
@@ -674,74 +724,55 @@ export class NarrativeTurnState {
    * retaining provider protocol traffic or private raw tool input.
    */
   recoverySnapshot(threadId: string): ParentNarrativeRecoveryItem[] {
+    return this.createRecoverySnapshot(threadId, true);
+  }
+
+  /** Materialize terminal history; its whole-operation admission belongs to the progress owner. */
+  terminalSnapshot(threadId: string): ParentNarrativeRecoveryItem[] {
+    return this.createRecoverySnapshot(threadId, false);
+  }
+
+  private createRecoverySnapshot(threadId: string, enforceRetention: boolean): ParentNarrativeRecoveryItem[] {
     this.assertThread(threadId);
-    const snapshot: ParentNarrativeRecoveryItem[] = [];
+    const snapshot = [
+      ...this.turnToolCalls.map((toolCall) => this.toolCallRecoveryItem(toolCall)),
+      ...this.turnThoughts.map((thought) => this.thoughtRecoveryItem(thought)),
+      ...(this.turnOpenThought ? [this.openThoughtRecoveryItem(this.turnOpenThought)] : []),
+      ...this.turnHooks.map((hook) => this.hookRecoveryItem(hook)),
+      ...Array.from(this.turnOpenHooks.values(), (hook) => this.openHookRecoveryItem(hook)),
+    ];
     let bytes = 0;
-    bytes = this.appendBufferedToolCallRecoveryItems(snapshot, bytes, threadId);
-    for (const thought of this.turnThoughts) {
-      bytes = this.appendRecoverySnapshotItem(
-        snapshot,
-        bytes,
-        this.thoughtRecoveryItem(thought),
-        threadId,
-      );
-    }
-    const openThought = this.turnOpenThought;
-    if (openThought) {
-      bytes = this.appendRecoverySnapshotItem(
-        snapshot,
-        bytes,
-        this.openThoughtRecoveryItem(openThought),
-        threadId,
-      );
-    }
-    for (const hook of this.turnHooks) {
-      bytes = this.appendRecoverySnapshotItem(
-        snapshot,
-        bytes,
-        this.hookRecoveryItem(hook),
-        threadId,
-      );
-    }
-    for (const hook of this.turnOpenHooks.values()) {
-      bytes = this.appendRecoverySnapshotItem(
-        snapshot,
-        bytes,
-        this.openHookRecoveryItem(hook),
-        threadId,
-      );
+    for (const [index, item] of snapshot.entries()) {
+      const itemBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
+      this.assertRecoveryItemFitsWriteBatch(itemBytes, threadId);
+      bytes += itemBytes;
+      if (enforceRetention) assertActiveTurnRecoveryRetention(index + 1, bytes);
     }
     return this.sortRecoverySnapshot(snapshot);
   }
 
-  private appendBufferedToolCallRecoveryItems(
-    snapshot: ParentNarrativeRecoveryItem[],
-    bytes: number,
-    threadId: string,
-  ): number {
-    for (const toolCall of this.turnToolCalls) {
-      bytes = this.appendRecoverySnapshotItem(
-        snapshot,
-        bytes,
-        this.toolCallRecoveryItem(toolCall),
-        threadId,
-      );
-    }
-    return bytes;
+  /** Drain this execution candidate's changed records and removals without replaying accepted history. */
+  takeRecoveryChanges(threadId: string): NarrativeRecoveryChanges {
+    this.assertThread(threadId);
+    const changes = { items: this.sortRecoverySnapshot([...this.recoveryChanges.values()]),
+      discardedItemIds: [...this.recoveryDiscards] };
+    this.recoveryChanges.clear();
+    this.recoveryDiscards.clear();
+    return changes;
   }
 
-  private appendRecoverySnapshotItem(
-    snapshot: ParentNarrativeRecoveryItem[],
-    bytes: number,
-    item: ParentNarrativeRecoveryItem,
-    threadId: string,
-  ): number {
-    const nextBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
-    this.assertRecoveryItemFitsWriteBatch(nextBytes, threadId);
-    const retainedBytes = bytes + nextBytes;
-    assertActiveTurnRecoveryRetention(snapshot.length + 1, retainedBytes);
-    snapshot.push(item);
-    return retainedBytes;
+  private recordRecoveryChange(item: ParentNarrativeRecoveryItem): void {
+    if (!this.execution) return;
+    this.assertRecoveryItemFitsWriteBatch(Buffer.byteLength(JSON.stringify(item), "utf8"), this.threadId);
+    const id = `${item.kind}:${item.record.id}`;
+    this.recoveryChanges.set(id, item);
+    this.recoveryDiscards.delete(id);
+  }
+
+  private recordRecoveryDiscard(id: string): void {
+    if (!this.execution) return;
+    this.recoveryChanges.delete(id);
+    this.recoveryDiscards.add(id);
   }
 
   private toolCallRecoveryItem(toolCall: BufferedToolCall): Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }> {
@@ -909,9 +940,10 @@ export class NarrativeTurnState {
   recoverySnapshotWithStagedNarration(
     threadId: string,
     staged: StagedNarrationSegment,
+    enforceRetention = true,
   ): ParentNarrativeRecoveryItem[] {
     this.assertThread(threadId);
-    const snapshot = this.recoverySnapshot(threadId).filter((item) => (
+    const snapshot = this.createRecoverySnapshot(threadId, enforceRetention).filter((item) => (
       item.kind !== "narrationSegment" || item.record.id !== staged.id
     ));
     snapshot.push({
@@ -930,7 +962,7 @@ export class NarrativeTurnState {
       const itemBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
       this.assertRecoveryItemFitsWriteBatch(itemBytes, threadId);
       bytes += itemBytes;
-      assertActiveTurnRecoveryRetention(index + 1, bytes);
+      if (enforceRetention) assertActiveTurnRecoveryRetention(index + 1, bytes);
     }
     return snapshot.sort((left, right) => (
       left.record.sort_order - right.record.sort_order || left.record.id.localeCompare(right.record.id)
@@ -953,15 +985,17 @@ export class NarrativeTurnState {
       }
     }
     const thoughts = this.turnThoughts;
-    thoughts.push({
+    const thought: CreateThoughtSegmentInput = {
       id: staged.id,
       messageId: "",
       text: staged.text,
       startedAt: staged.startedAt,
       endedAt: staged.endedAt,
       sortOrder: staged.sortOrder,
-    });
+    };
+    thoughts.push(thought);
     this.turnThoughts = thoughts;
+    this.recordRecoveryChange(this.thoughtRecoveryItem(thought));
   }
 
   private requireRecoveryString(value: string | undefined, field: string): string {
@@ -1008,8 +1042,10 @@ export class NarrativeTurnState {
   ): string {
     this.assertThread(threadId);
     const map = this.turnOpenHooks;
+    const replaced = map.get(hook.hookName);
+    if (replaced) this.recordRecoveryDiscard(`hook:${replaced.id}`);
     const id = NodeCrypto.randomUUID();
-    map.set(hook.hookName, {
+    const open: OpenHook = {
       id,
       hookName: hook.hookName,
       toolName: hook.toolName,
@@ -1017,7 +1053,9 @@ export class NarrativeTurnState {
       payload: hook.payload,
       startedAt: new Date().toISOString(),
       sortOrder: hook.sortOrder,
-    });
+    };
+    map.set(hook.hookName, open);
+    this.recordRecoveryChange(this.openHookRecoveryItem(open));
     this.turnOpenHooks = map;
     return id;
   }
@@ -1031,6 +1069,8 @@ export class NarrativeTurnState {
   /** Remove an open hook by name (after it has been completed or flushed). */
   removeOpenHook(threadId: string, hookName: string): void {
     this.assertThread(threadId);
+    const open = this.turnOpenHooks.get(hookName);
+    if (open && !this.turnHooks.some((hook) => hook.id === open.id)) this.recordRecoveryDiscard(`hook:${open.id}`);
     this.turnOpenHooks.delete(hookName);
   }
 
@@ -1040,6 +1080,7 @@ export class NarrativeTurnState {
     const list = this.turnHooks;
     list.push(hook);
     this.turnHooks = list;
+    if (this.execution) this.recordRecoveryChange(this.hookRecoveryItem(hook));
   }
 
   /** Settle one turn's buffered records into data-only persistence rows. */
@@ -1055,7 +1096,11 @@ export class NarrativeTurnState {
     this.closeOpenHooksForPersistence(threadId);
     const thoughts = this.prepareThoughtsForPersistence(threadId, messageId, messageContent);
     const hooks = this.prepareHooksForPersistence(threadId, messageId);
-    return { toolCalls, thoughts, hooks };
+    return {
+      toolCalls: toolCalls.map(({ _rawToolInput, _subagentPresentation, ...record }) => record),
+      thoughts,
+      hooks,
+    };
   }
 
   private prepareToolCallsForPersistence(
@@ -1064,7 +1109,8 @@ export class NarrativeTurnState {
     outcome: TurnOutcome,
   ): BufferedToolCall[] {
     this.assertThread(threadId);
-    const toolCalls = this.turnToolCalls;
+    const toolCalls = structuredClone(this.turnToolCalls);
+    this.turnToolCalls = toolCalls;
     const settledAt = new Date().toISOString();
     for (const toolCall of toolCalls) {
       toolCall.toolCallId ??= NodeCrypto.randomUUID();
@@ -1150,7 +1196,8 @@ export class NarrativeTurnState {
     messageContent: string,
   ): CreateThoughtSegmentInput[] {
     this.assertThread(threadId);
-    const bufferedThoughts = this.turnThoughts;
+    const bufferedThoughts = this.turnThoughts.map((thought) => ({ ...thought }));
+    this.turnThoughts = bufferedThoughts;
     for (const thought of bufferedThoughts) thought.id ??= NodeCrypto.randomUUID();
     const thoughts = bufferedThoughts.map((thought) => ({ ...thought, messageId }));
     const message = messageContent.trim();
@@ -1189,7 +1236,8 @@ export class NarrativeTurnState {
     messageId: string,
   ): CreateHookExecutionInput[] {
     this.assertThread(threadId);
-    const bufferedHooks = this.turnHooks;
+    const bufferedHooks = this.turnHooks.map((hook) => ({ ...hook }));
+    this.turnHooks = bufferedHooks;
     for (const hook of bufferedHooks) hook.id ??= NodeCrypto.randomUUID();
     return bufferedHooks.map((hook) => ({ ...hook, messageId }));
   }
@@ -1207,6 +1255,8 @@ export class NarrativeTurnState {
     this.turnThoughts = [];
     this.turnOpenHooks = new Map<string, OpenHook>();
     this.turnHooks = [];
+    this.recoveryChanges.clear();
+    this.recoveryDiscards.clear();
   }
 
   /** Generate a human-readable summary of tool input. */

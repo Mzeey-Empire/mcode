@@ -22,8 +22,8 @@ export class ProjectActionRunPublisher {
   }
 
   /** Replaces one retained run and publishes the durable value. */
-  persistAndPublish(run: WorkspaceEnvironmentActionRun): WorkspaceEnvironmentActionRun {
-    const retained = this.runs.replace(run);
+  async persistAndPublish(run: WorkspaceEnvironmentActionRun): Promise<WorkspaceEnvironmentActionRun> {
+    const retained = await this.runs.replace(run);
     this.publish(retained);
     return retained;
   }

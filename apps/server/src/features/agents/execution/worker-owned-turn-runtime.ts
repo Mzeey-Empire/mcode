@@ -12,6 +12,8 @@ import { ExecutionThreadWorkerPort } from "./execution-worker-port.js";
 import type { ExecutionIdentity, ExecutionLease } from "./execution-mailbox-protocol.js";
 import { ExecutionWorkerLossCoordinator, workerLossIncidentId } from "./execution-worker-loss-coordinator.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
+import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
+import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 
 const EXECUTION_WORKER_COUNT = 4;
 const EXECUTION_MAILBOX_LIMITS: ExecutionMailboxLimits = {
@@ -25,10 +27,11 @@ const EXECUTION_MAILBOX_LIMITS: ExecutionMailboxLimits = {
   reservedPerExecutionControlBytes: 512 * 1024,
 };
 
-/** Owns the fixed execution pool and sole semantic writer for this server process. */
+/** Owns the execution pool and borrows the shared application's canonical writer adapter. */
 export class WorkerOwnedTurnRuntime {
   readonly writer: CanonicalAgentWriterClient;
   readonly writerPort: CanonicalExecutionWriterPort;
+  readonly progress: CanonicalAcceptedProgress | undefined;
   readonly workerLoss: ExecutionWorkerLossCoordinator;
   readonly scheduler: ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>;
   readonly owner: ExecutionMailboxOwner;
@@ -37,8 +40,9 @@ export class WorkerOwnedTurnRuntime {
   private readonly rejectedRecoveries = new Map<string, Promise<void>>();
   private onRecovered: ((execution: ExecutionIdentity) => void) | undefined;
 
-  constructor(dbPath: string, publication: AgentEventPublicationRegistry) {
-    this.writer = new CanonicalAgentWriterClient(dbPath);
+  constructor(writer: CanonicalAgentWriterClient, publication: AgentEventPublicationRegistry, canonical?: CanonicalAgentBoundary) {
+    this.writer = writer;
+    this.progress = canonical ? new CanonicalAcceptedProgress(canonical, this.writer) : undefined;
     this.writerPort = new CanonicalExecutionWriterPort(
       this.writer,
       publishCanonicalAgentEvents,
@@ -46,6 +50,7 @@ export class WorkerOwnedTurnRuntime {
       new ExecutionPlanQuestionRelease((threadId, questions) => {
         broadcast("plan.questions", { threadId, questions: [...questions] });
       }),
+      this.progress,
     );
     this.workerLoss = new ExecutionWorkerLossCoordinator(this.writerPort, {
       workerCount: EXECUTION_WORKER_COUNT,
@@ -62,6 +67,7 @@ export class WorkerOwnedTurnRuntime {
     this.scheduler = this.workerLoss.scheduler;
     this.owner = new ExecutionMailboxOwner(this.scheduler);
     this.providerEvents = new ExecutionProviderEventOwnership(this.owner);
+    this.progress?.bindPermanentFailure(async (execution) => this.recoverRejected(execution));
   }
 
   /** Notify the runtime controller only after writer-backed worker-loss recovery releases the lease. */
@@ -90,7 +96,7 @@ export class WorkerOwnedTurnRuntime {
       reason: "The provider event could not be durably applied to this execution.",
       recoveryIncidentId: workerLossIncidentId({ execution, lease }),
     });
-    if (receipt.kind !== "committed" && receipt.recoveryState !== "already-terminal") {
+    if (receipt.kind !== "accepted" && receipt.kind !== "committed" && (receipt.kind !== "conflict" || receipt.recoveryState !== "already-terminal")) {
       throw new Error("Rejected execution has no durable recovery evidence");
     }
     await this.owner.releaseRecovered(execution, receipt);
@@ -106,9 +112,10 @@ export class WorkerOwnedTurnRuntime {
     }
   }
 
-  /** Stop mailbox admission before closing its durable writer. */
+  /** Stop mailbox admission and flush canonical receipts; application composition closes the shared writer. */
   async close(): Promise<void> {
     this.scheduler.shutdown();
-    await this.writer.close();
+    try { await this.progress?.close(); }
+    finally { await this.writer.close(); }
   }
 }

@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
 import type { Message, MessageMention, PreviewAnnotationBundle, SelectedTextComment, StoredAttachment } from "@mcode/contracts";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
-import { MessageRepo } from "../../persistence/message-repo.js";
-import { ToolCallRecordRepo } from "../../../tools/persistence/tool-call-record-repo.js";
-import { ThoughtSegmentRepo } from "../../narrative/persistence/thought-segment-repo.js";
-import { HookExecutionRepo } from "../../../events/persistence/hook-execution-repo.js";
-import { PlanQuestionAnswersRepo } from "../../../planning/persistence/plan-question-answers-repo.js";
-import { NarrativeStore } from "../../narrative/narrative-store.js";
+import { MessageStore as MessageRepo } from "../../persistence/message-store.js";
+import { ToolCallRecordStore as ToolCallRecordRepo } from "../../../tools/persistence/tool-call-record-store.js";
+import { ThoughtSegmentStore as ThoughtSegmentRepo } from "../../narrative/persistence/thought-segment-store.js";
+import { HookExecutionStore as HookExecutionRepo } from "../../../events/persistence/hook-execution-store.js";
+import { PlanQuestionAnswersStore as PlanQuestionAnswersRepo } from "../../../planning/persistence/plan-question-answers-store.js";
+import { NarrativeReadStore } from "../../narrative/narrative-read-store.js";
 import {
   loadConversationPage,
   loadConversationTail,
@@ -41,8 +41,7 @@ function insertMessage(
 
 function createDeps(db: Database) {
   const messageRepo = new MessageRepo(db);
-  const narrativeStore = new NarrativeStore(
-    messageRepo,
+  const narrativeStore = new NarrativeReadStore(
     new ToolCallRecordRepo(db),
     new ThoughtSegmentRepo(db),
     new HookExecutionRepo(db),
@@ -98,7 +97,7 @@ describe("loadConversationPage", () => {
       "Old security notice", "Security notice", "Model rerouted", "Tail message one", "Tail message two",
     ]);
     expect(tail.messages.map((message) => message.content)).toEqual(["Tail message one", "Tail message two"]);
-    expect(page.sessionNotices.map((message) => message.content)).toEqual([
+    expect(page.sessionNotices?.map((message) => message.content)).toEqual([
       "Security notice", "Warning notice", "Model rerouted", "Fix config again",
     ]);
     expect(tail.sessionNotices).toEqual(page.sessionNotices);
@@ -389,8 +388,9 @@ describe("loadConversationTail", () => {
     insertMessage(db, "display-child-prompt", "user", "Implement the canonical tail fix.", 5);
     const canonicalSink = { loadConversationProjection: vi.fn() };
 
+    const tailDeps = { ...deps, canonicalSink };
     const tail = loadConversationTail(
-      { ...deps, canonicalSink },
+      tailDeps,
       { threadId: "thread-1", limit: 2 },
     );
 

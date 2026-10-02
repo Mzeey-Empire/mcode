@@ -35,6 +35,28 @@ const parentTurn = {
 };
 
 describe("ExecutionMailboxOwner", () => {
+  it("preserves the original bounded writer rejection through the owner", async () => {
+    const worker = new WorkerPort();
+    const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
+      workerCount: 1,
+      limits: { maxPending: 8, maxPendingBytes: 128_000, reservedControl: 2, reservedControlBytes: 16_000,
+        maxPerExecutionPending: 8, maxPerExecutionBytes: 128_000,
+        reservedPerExecutionControl: 2, reservedPerExecutionControlBytes: 16_000 },
+      createWorker: () => worker, onWorkerLost: () => {},
+    });
+    const owner = new ExecutionMailboxOwner(scheduler);
+    const starting = owner.start({ execution, ownerEpoch: 1, providerId: "codex", parentTurn });
+    worker.reply(0, { kind: "committed", operationId: `${worker.requests[0]?.lease.leaseId}:1`, durableRevision: 1 });
+    await starting;
+    const command = owner.submit(execution, { kind: "checkpoint", phase: "running", nativeCursor: null });
+    const rejected = expect(command).rejects.toMatchObject({ name: "SqliteError", message: "original checkpoint rejected",
+      code: "SQLITE_BUSY", cause: { message: "writer held" } });
+    worker.reply(1, { kind: "rejected", reason: "writer-failure", failure: { name: "SqliteError",
+      message: "original checkpoint rejected", code: "SQLITE_BUSY", cause: { name: "Error", message: "writer held" } } });
+    await rejected;
+    scheduler.shutdown();
+  });
+
   it("claims before durable start and admits Stop behind earlier commands", async () => {
     const worker = new WorkerPort();
     const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
@@ -59,7 +81,9 @@ describe("ExecutionMailboxOwner", () => {
     const checkpoint = owner.submit(execution, { kind: "checkpoint", phase: "running", nativeCursor: null });
     const stopped = owner.stop(execution, "stop-1");
     expect(worker.requests[1]?.command.kind).toBe("checkpoint");
-    await expect(owner.submit(execution, { kind: "assistant-text", inputs: [] }))
+    await expect(owner.submit(execution, { kind: "live-event", text: { kind: "unchanged" },
+      publication: { after: "writer", event: { type: "system", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, subtype: "provider.notice.info", message: "Late notice" } } }))
       .rejects.toThrow("stopping");
     expect(() => owner.submit({ ...execution, executionId: "stale" }, { kind: "checkpoint", phase: "running", nativeCursor: null }))
       .toThrow("No matching execution owner");
@@ -141,7 +165,7 @@ describe("ExecutionProviderEventOwnership", () => {
     expect(ownership.resolve(execution.executionId)).toMatchObject({ kind: "worker", deliveryAttempt: 2 });
     await ownership.retire(execution);
     expect(ownership.resolve(execution.executionId)).toEqual({ kind: "rejected" });
-    expect(ownership.resolve("legacy-execution", "claude")).toEqual({ kind: "legacy" });
+    expect(ownership.resolve("legacy-execution", "claude")).toEqual({ kind: "rejected" });
     expect(worker.requests).toHaveLength(2);
     scheduler.shutdown();
   });

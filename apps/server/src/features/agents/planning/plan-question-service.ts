@@ -1,24 +1,34 @@
 /**
  * Plan-question wizard engine, extracted from {@link AgentService}.
  *
- * Owns the read-only parts of the wizard: parsing the latest plan-questions
- * fence from message history, building the human-readable plan-answer payload,
- * locating the assistant message that carries the fence, and durably settling
- * a batch on dismiss. It depends only on database repositories - it reads
- * persisted messages, never volatile per-turn state - so it unit-tests without
- * a turn or a provider.
+ * Resolves the latest plan-questions fence through accepted progress before
+ * saved message history. Builds the answer payload and records dismissal
+ * through the accepted owner or the repository when no accepted match exists.
  *
  * The service builds the answer payload; the facade performs the send and the
  * dismiss broadcast, keeping the send path single-owned.
  */
 
 import { injectable, inject } from "tsyringe";
+import { z } from "zod";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "./persistence/plan-question-answers-repo.js";
-import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
+import { lazySchema, PLAN_ANSWER_MESSAGE_PREFIX, type Message } from "@mcode/contracts";
 
 /** Matches a fenced `plan-questions` block and captures its JSON body. */
 const PLAN_QUESTIONS_RE = /```plan-questions\n([\s\S]*?)```/;
+const questionContextSchema = lazySchema(() => z.object({
+  id: z.string(), question: z.string(), options: z.unknown().optional(),
+}));
+const questionOptionContextSchema = lazySchema(() => z.object({
+  id: z.string(), title: z.unknown().optional(),
+}).transform((option) => ({ id: option.id, title: String(option.title ?? option.id) })));
+
+/** Read accepted assistant bodies and admit ordered dismissal markers before their rows are saved. */
+export interface AcceptedPlanQuestionProgress {
+  latestAssistantMessage(threadId: string): Message | undefined;
+  markPlanAnswered(threadId: string, messageId: string): boolean;
+}
 
 /** A user answer to a single plan question. */
 export interface PlanAnswerInput {
@@ -38,23 +48,31 @@ export interface PlanAnswerPayload {
   markPlanAnswerForMessageId: string | undefined;
 }
 
-/** Read-only plan-question wizard logic backed by database repositories. */
+/** Plan-question wizard logic with accepted progress read-through and saved history fallback. */
 @injectable()
 export class PlanQuestionService {
+  private acceptedProgress: AcceptedPlanQuestionProgress | undefined;
+
   constructor(
     @inject(MessageRepo) private readonly messageRepo: MessageRepo,
     @inject(PlanQuestionAnswersRepo)
     private readonly planQuestionAnswersRepo: PlanQuestionAnswersRepo,
   ) {}
 
+  /** Compose accepted read-through without making the wizard own execution progress or saving. */
+  bindAcceptedProgress(progress: AcceptedPlanQuestionProgress): void {
+    this.acceptedProgress = progress;
+  }
+
   /**
    * Build the human-readable follow-up message for a set of answers and
    * identify the assistant message whose plan-questions fence they answer.
-   * Question text and option titles are resolved from message history so the
-   * message reads naturally instead of using opaque IDs.
+   * Question text and option titles come from the accepted or saved assistant
+   * body so the message reads naturally instead of using opaque IDs.
    */
   buildAnswerPayload(threadId: string, answers: PlanAnswerInput[]): PlanAnswerPayload {
-    const questionContext = this.buildQuestionContext(threadId);
+    const message = this.findLatestPlanQuestionsMessage(threadId);
+    const questionContext = this.buildQuestionContext(message);
 
     const lines: string[] = [`${PLAN_ANSWER_MESSAGE_PREFIX}\n`];
     for (const a of answers) {
@@ -74,38 +92,44 @@ export class PlanQuestionService {
 
     // Key the marker on the assistant message carrying the fence (not just on
     // the thread) so it survives restarts and mid-turn errors.
-    const markPlanAnswerForMessageId =
-      this.findLatestPlanQuestionsMessageId(threadId) ?? undefined;
+    const markPlanAnswerForMessageId = message?.id;
 
     return { content: lines.join("\n"), markPlanAnswerForMessageId };
   }
 
   /**
-   * Walk message history newest-first and return the id of the most recent
-   * assistant message containing a `plan-questions` fence, or null when no
-   * such message exists in the thread.
+   * Prefer the accepted current assistant fence, then walk saved history
+   * newest-first. Returns its stable message ID or null when no fence exists.
    */
   findLatestPlanQuestionsMessageId(threadId: string): string | null {
+    return this.findLatestPlanQuestionsMessage(threadId)?.id ?? null;
+  }
+
+  private findLatestPlanQuestionsMessage(threadId: string): Message | undefined {
+    const accepted = this.acceptedProgress?.latestAssistantMessage(threadId);
+    if (accepted?.thread_id === threadId && accepted.role === "assistant" && PLAN_QUESTIONS_RE.test(accepted.content)) {
+      return accepted;
+    }
     const { messages } = this.messageRepo.listByThread(threadId, 50);
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (msg.role !== "assistant") continue;
-      if (PLAN_QUESTIONS_RE.test(msg.content)) return msg.id;
+      if (PLAN_QUESTIONS_RE.test(msg.content)) return msg;
     }
-    return null;
+    return undefined;
   }
 
   /**
-   * Durably mark the latest plan-questions batch for the thread as settled
-   * without sending answers, so the batch does NOT re-surface on reloads or
-   * thread switches. Idempotent via `INSERT OR IGNORE`. Returns the assistant
-   * message id that was settled so the facade can broadcast `plan.dismissed`,
-   * or null when there is no fenced message to settle.
+   * Admit dismissal of the latest accepted fence before its message is saved,
+   * or persist the marker for saved history. Returns the exact message ID for
+   * the facade's dismissal broadcast. The progress owner and repository each
+   * keep repeated dismissal idempotent; acceptance does not confirm saving.
    */
-  dismiss(threadId: string): string | null {
+  async dismiss(threadId: string): Promise<string | null> {
     const assistantMessageId = this.findLatestPlanQuestionsMessageId(threadId);
     if (!assistantMessageId) return null;
-    this.planQuestionAnswersRepo.markAnswered(assistantMessageId, threadId);
+    if (this.acceptedProgress?.markPlanAnswered(threadId, assistantMessageId)) return assistantMessageId;
+    await this.planQuestionAnswersRepo.markAnswered(assistantMessageId, threadId);
     return assistantMessageId;
   }
 
@@ -137,22 +161,16 @@ The fenced block can appear anywhere in your response. The sections should mirro
   }
 
   /**
-   * Parse the most recent plan-questions block from message history to build
+   * Parse the selected accepted or saved plan-questions block to build
    * a lookup map of question ID to its text and option titles. Used to produce
    * human-readable answer summaries instead of opaque IDs.
    */
   private buildQuestionContext(
-    threadId: string,
+    message: Message | undefined,
   ): Map<string, { question: string; options: Array<{ id: string; title: string }> }> {
     const map = new Map<string, { question: string; options: Array<{ id: string; title: string }> }>();
 
-    const { messages } = this.messageRepo.listByThread(threadId, 50);
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.role !== "assistant") continue;
-      if (!this.appendQuestionContext(map, msg.content)) continue;
-      break;
-    }
+    if (message) this.appendQuestionContext(map, message.content);
     return map;
   }
 
@@ -163,7 +181,7 @@ The fenced block can appear anywhere in your response. The sections should mirro
     const match = PLAN_QUESTIONS_RE.exec(content);
     if (!match) return false;
     try {
-      const raw = JSON.parse(match[1]);
+      const raw: unknown = JSON.parse(match[1]);
       if (Array.isArray(raw)) this.appendQuestions(context, raw);
     } catch {
       // Opaque IDs remain valid when prior plan output is malformed.
@@ -186,23 +204,20 @@ The fenced block can appear anywhere in your response. The sections should mirro
     question: string;
     options: Array<{ id: string; title: string }>;
   } | undefined {
-    if (!value || typeof value !== "object") return undefined;
-    const record = value as Record<string, unknown>;
-    if (typeof record.id !== "string" || typeof record.question !== "string") return undefined;
+    const parsed = questionContextSchema().safeParse(value);
+    if (!parsed.success) return undefined;
     return {
-      id: record.id,
-      question: record.question,
-      options: this.questionOptions(record.options),
+      id: parsed.data.id,
+      question: parsed.data.question,
+      options: this.questionOptions(parsed.data.options),
     };
   }
 
   private questionOptions(value: unknown): Array<{ id: string; title: string }> {
     if (!Array.isArray(value)) return [];
     return value.flatMap((option) => {
-      if (!option || typeof option !== "object") return [];
-      const record = option as Record<string, unknown>;
-      if (typeof record.id !== "string") return [];
-      return [{ id: record.id, title: String(record.title ?? record.id) }];
+      const parsed = questionOptionContextSchema().safeParse(option);
+      return parsed.success ? [parsed.data] : [];
     });
   }
 }

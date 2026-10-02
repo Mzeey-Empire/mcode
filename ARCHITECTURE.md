@@ -66,8 +66,9 @@ Runtime-neutral authority for canonical agent identities, records, semantic even
 
 Authority for transport schemas, renderer events, and provider-runtime events.
 It imports canonical agent types through `compat/agent-model.ts`. Renderer
-payloads contain provider-neutral `AgentEvent` data. Provider-native evidence
-travels only in a provider-runtime extension before server projection.
+publications contain provider-neutral `AgentEvent` data. Provider-native
+evidence enters through a provider-runtime extension and can remain in opaque
+canonical records; renderers interpret the publications rather than that evidence.
 
 ```text
 packages/contracts/src/
@@ -94,16 +95,24 @@ packages/contracts/src/
 
 ### Provider event path
 
-Providers emit `ProviderRuntimeEvent` values. Provider ingress validates the
-provider and queues each event. A registered provider adapter then projects the
-event as `forward`, `consumed`, or `rejected`. Only a forwarded `AgentEvent`
-enters the turn event pipeline and the `agent.event` WebSocket channel.
+Providers emit `ProviderRuntimeEvent` values. Provider adapters project
+provider-neutral publications from native evidence for the admitted execution.
+One per-thread owner assigns stable event identities and order before publishing
+accepted progress on `agent.canonical`. Execution progress and completion do not
+wait for successful saves.
 
-Canonical commits submit their committed runtime envelopes directly to ingress.
-Their receipt confirms durable acceptance or queueing, not renderer
-publication. `AgentService` depends on provider registration and narrow
-parent-turn durability only. It has no dependency on a concrete provider,
-adapter, or canonical implementation.
+A bounded, fair save queue sends those immutable operations to the shared
+application SQLite writer. Saved receipts confirm actual commits and advance the saved
+prefix. They cannot replay provider commands or renderer publication effects.
+Execution state and saving state are independent: a completed turn can still be
+saving. Durable turn admission waits for the preceding accepted suffix before
+changing the stored thread.
+
+Reconnect restores the saved model plus the retained accepted suffix. That
+suffix belongs to the server runtime, survives execution-worker release, and can
+be lost if the server crashes. Recovery reports detected loss rather than
+claiming the suffix was saved or rerunning provider tools. See the
+[narrative pipeline constraints](docs/internals/narrative-pipeline.md#accepted-progress-and-saving).
 
 ### packages/shared
 
@@ -280,8 +289,8 @@ sequenceDiagram
     T-->>S: resolves Promise
 
     Note over WS,C: Push events (async)
-    Svc->>WS: broadcast("agent.event", event)
-    WS-->>T: { type: "push", channel: "agent.event", data: {...} }
+    Svc->>WS: broadcast("agent.canonical", acceptedFrame)
+    WS-->>T: { type: "push", channel: "agent.canonical", data: {...} }
     T->>T: pushEmitter.emit(channel, data)
     T-->>S: store update
 ```
@@ -379,7 +388,22 @@ Forward-only migrations are applied on startup by `database.ts` using a `_migrat
 
 ### 5.3 Repository Pattern
 
-Each entity has a dedicated repo class (`WorkspaceRepo`, `ThreadRepo`, `MessageRepo`). Repos accept a `Database` instance via constructor injection and return typed objects. Services depend on repos through DI; no module reads the database directly.
+Repositories expose synchronous queries through a physically read-only runtime
+connection and asynchronous mutations through
+[`ApplicationDatabaseWriter`](apps/server/src/runtime/persistence/sqlite/application-database-writer.ts).
+After startup migrations, one worker per server process owns the writable
+connection. Ordinary feature commands and canonical saves share its bounded FIFO.
+Complete read/write transactions execute inside that worker; callers await
+committed results before performing dependent actions. Shutdown stops write
+producers before draining and closing the owner.
+
+A failed command does not poison later jobs. Canonical commands can resolve lost
+replies using durable receipts. An ordinary dispatched command whose reply is lost
+reports an unknown outcome and is not automatically replayed: repeating a claim,
+counter update or generated insertion could duplicate its effects. Separate server
+processes still contend through SQLite's WAL and busy timeout. See the
+[owner implementation](apps/server/src/runtime/persistence/sqlite/application-database-writer.ts)
+and [connection policy](apps/server/src/runtime/persistence/sqlite/sqlite-connection-policy.ts).
 
 ## 6. WebSocket RPC Protocol
 
@@ -406,7 +430,7 @@ Each entity has a dedicated repo class (`WorkspaceRepo`, `ThreadRepo`, `MessageR
 **Push (server to client, no request ID):**
 
 ```typescript
-{ type: "push", channel: "agent.event", data: { threadId: "abc", type: "toolUse", ... } }
+{ type: "push", channel: "agent.canonical", data: acceptedFrame }
 ```
 
 ### 6.2 RPC Methods
@@ -468,7 +492,8 @@ Push events are broadcast to all connected WebSocket clients. The server validat
 
 | Channel | Data | Description |
 |---------|------|-------------|
-| `agent.event` | `AgentEvent` | Agent stream events (message, toolUse, toolResult, turnComplete, error, ended, system) |
+| `agent.canonical` | `CanonicalAgentProgressFrame` | Accepted progress, actual saved acknowledgements, and subscription recovery |
+| `turn.savingStatus` | `TurnSavingStatus` | Saving state independent of execution state |
 | `terminal.data` | `{ ptyId, data }` | PTY output |
 | `terminal.exit` | `{ ptyId, code }` | PTY exited |
 | `thread.status` | `{ threadId, status }` | Thread status changed |
@@ -489,7 +514,15 @@ Connections without a valid token are closed with code `4001 Unauthorized`.
 
 ### 6.5 Agent Events
 
-Events emitted by agent providers and broadcast on the `agent.event` push channel:
+Provider-neutral events appear inside canonical publication records on the
+`agent.canonical` channel. Their first accepted delivery applies live effects;
+saved acknowledgements and recovery rebuild data without replaying those effects.
+
+The send RPC acknowledges turn admission, while the event stream reports the
+execution's progress and completion. Holding the RPC open for the whole provider
+turn lets a request timeout report failure during a healthy long-running turn.
+Admission failures still reject the request; later failures belong to the exact
+execution's stream.
 
 | Event | Fields | Description |
 |-------|--------|-------------|
@@ -506,18 +539,11 @@ Events emitted by agent providers and broadcast on the `agent.event` push channe
 
 ### 7.1 Composition Root
 
-The server uses tsyringe for dependency injection. All services, repositories, and providers are registered as singletons in `apps/server/src/container.ts`.
-
-```typescript
-// Simplified registration flow:
-container.register("Database", { useValue: openDatabase() });
-container.register(WorkspaceRepo, { useClass: WorkspaceRepo }, { lifecycle: Lifecycle.Singleton });
-container.register(ClaudeProvider, { useClass: ClaudeProvider }, { lifecycle: Lifecycle.Singleton });
-container.register("IAgentProvider", { useFactory: (c) => c.resolve(ClaudeProvider) });
-container.register(ProviderRegistry, { useClass: ProviderRegistry }, { lifecycle: Lifecycle.Singleton });
-container.register(AgentService, { useClass: AgentService }, { lifecycle: Lifecycle.Singleton });
-// ... all other services
-```
+The server uses tsyringe for dependency injection. The
+[composition root](apps/server/src/application/composition/container.ts) registers
+the process-owned database writer and read-only reader, then the services,
+repositories and providers. Feature runtimes borrow the writer; they do not open
+or close competing application writers.
 
 ### 7.2 Layer Responsibilities
 
@@ -743,7 +769,8 @@ The WebSocket transport includes automatic reconnection:
 
 | Channel | Handler |
 |---------|---------|
-| `agent.event` | Forwards to `threadStore.handleAgentEvent()` |
+| `agent.canonical` | Reconciles the saved model and accepted suffix, applying first-delivery publication effects |
+| `turn.savingStatus` | Updates saving notices for active or completed executions |
 | `terminal.data` | Dispatches `mcode:pty-data` CustomEvent for xterm instances |
 | `terminal.exit` | Dispatches `mcode:pty-exit` CustomEvent, removes terminal after delay |
 | `thread.status` | Updates thread status in `workspaceStore` |
@@ -754,8 +781,9 @@ The renderer has one conversation residency authority, registered by
 `threadStore`. `workspaceStore` owns sidebar selection and rows only. The
 residency owns selected activation, forced refresh, bounded inactive retention,
 pagination cache synchronization, and prefetch routing. `threadStore` projects
-validated AgentEvents into resident Thread records. The server remains the
-durability authority for messages and persisted narrative metadata.
+validated canonical progress into resident Thread records. The server remains
+the durability authority for messages and persisted narrative metadata; an
+accepted position is not a promise that its data has reached SQLite.
 
 ## 11. Session Lifecycle
 

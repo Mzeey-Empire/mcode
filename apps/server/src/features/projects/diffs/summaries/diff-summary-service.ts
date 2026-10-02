@@ -17,6 +17,8 @@ import { ThreadDiffSource } from "./diff-summary-source.js";
 import type { TurnSnapshotRow } from "./diff-summary-source.js";
 import { buildDiffSummaryPrompt } from "./diff-summary-prompt.js";
 import { diffSummaries } from "../../../../runtime/persistence/sqlite/schema.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { diffSummaryWriteOperations } from "./diff-summary-write-operations.js";
 
 /** A persisted diff summary record. */
 export interface DiffSummaryRecord {
@@ -60,6 +62,8 @@ export class DiffSummaryService {
     private readonly gitExecutor: GitExecutor,
     @inject("Database")
     db: Database,
+    @inject(ApplicationDatabaseWriter)
+    private readonly writer: ApplicationDatabaseWriter,
   ) {
     this.orm = drizzle(db);
   }
@@ -110,30 +114,7 @@ export class DiffSummaryService {
       createdAt: new Date().toISOString(),
     };
 
-    // Atomic upsert via INSERT OR REPLACE (unique index on thread_id)
-    this.orm
-      .insert(diffSummaries)
-      .values({
-        id: record.id,
-        threadId: record.threadId,
-        content: record.content,
-        turnCount: record.turnCount,
-        lastTurnId: record.lastTurnId,
-        model: record.model,
-        createdAt: record.createdAt,
-      })
-      .onConflictDoUpdate({
-        target: diffSummaries.threadId,
-        set: {
-          id: record.id,
-          content: record.content,
-          turnCount: record.turnCount,
-          lastTurnId: record.lastTurnId,
-          model: record.model,
-          createdAt: record.createdAt,
-        },
-      })
-      .run();
+    await this.writer.execute(diffSummaryWriteOperations.upsert, [record]);
 
     logger.info(`Generated diff summary for thread ${threadId} (${payload.turnCount} turns)`);
 

@@ -4,17 +4,17 @@ import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
 import { openMemoryDatabase } from "../../../../../runtime/persistence/sqlite/database.js";
 import {
-  PullRequestReviewLinkRepo,
+  PullRequestReviewLinkStore,
   type CreatePullRequestReviewLinkInput,
-} from "../pull-request-review-link-repo.js";
-import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
-import { WorkspaceRepo } from "../../../../projects/persistence/workspace-repo.js";
+} from "../pull-request-review-link-store.js";
+import { ThreadStore } from "../../../../thread-control/persistence/thread-store.js";
+import { WorkspaceStore } from "../../../../projects/persistence/workspace-store.js";
 
-describe("PullRequestReviewLinkRepo", () => {
+describe("PullRequestReviewLinkStore", () => {
   let db: Database;
-  let repo: PullRequestReviewLinkRepo;
-  let threadRepo: ThreadRepo;
-  let workspaceRepo: WorkspaceRepo;
+  let repo: PullRequestReviewLinkStore;
+  let threadRepo: ThreadStore;
+  let workspaceRepo: WorkspaceStore;
   let workspaceId: string;
   let threadId: string;
 
@@ -22,9 +22,9 @@ describe("PullRequestReviewLinkRepo", () => {
     db = openMemoryDatabase();
     container.reset();
     container.registerInstance("Database", db);
-    repo = container.resolve(PullRequestReviewLinkRepo);
-    threadRepo = container.resolve(ThreadRepo);
-    workspaceRepo = container.resolve(WorkspaceRepo);
+    repo = new PullRequestReviewLinkStore(db);
+    threadRepo = new ThreadStore(db);
+    workspaceRepo = new WorkspaceStore(db);
 
     const workspace = workspaceRepo.create(
       "mcode",

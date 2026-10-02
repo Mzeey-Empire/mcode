@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentThreadIdSchema } from "../compat/agent-model.js";
+import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
 import {
   WorkspaceEnvironmentReadResultSchema,
@@ -121,9 +121,9 @@ import {
 } from "../models/permission.js";
 import { GoalLookupResultSchema, GoalObjectiveSchema } from "../models/goal.js";
 import {
-  CanonicalAgentReconnectRecoverySchema,
   CanonicalAgentRevisionSchema,
 } from "../models/canonical-agent-reconnect.js";
+import { CanonicalAgentProgressRecoverySchema } from "../models/canonical-agent-progress.js";
 import {
   CanonicalSubagentRosterRequestSchema,
   CanonicalSubagentRosterSchema,
@@ -243,6 +243,15 @@ export const SetThreadSubscriptionsSchema = lazySchema(() =>
         context.addIssue({ code: z.ZodIssueCode.custom, message: "threadIds must be unique" });
       }
     }),
+    /** Retained progress cursor from this renderer, including its server epoch. */
+    progressCursors: z.record(ThreadSubscriptionIdSchema, AgentProgressPositionSchema.extend({
+      ownerThreadId: ThreadSubscriptionIdSchema.optional(),
+    }).strict())
+      .superRefine((cursors, context) => {
+        if (Object.keys(cursors).length > MAX_THREAD_SUBSCRIPTIONS) {
+          context.addIssue({ code: z.ZodIssueCode.custom, message: "Too many progress cursors" });
+        }
+      }).optional(),
     /** Last installed canonical revisions per desired thread. */
     revisions: z.record(
       ThreadSubscriptionIdSchema,
@@ -264,7 +273,7 @@ export type SetThreadSubscriptionsInput = z.infer<ReturnType<typeof SetThreadSub
 /** Result of an atomic subscription replacement and any synchronous replay. */
 export const SetThreadSubscriptionsResultSchema = lazySchema(() =>
   z.object({
-    canonicalRecoveries: z.array(CanonicalAgentReconnectRecoverySchema())
+    canonicalRecoveries: z.array(CanonicalAgentProgressRecoverySchema())
       .max(MAX_THREAD_SUBSCRIPTIONS),
   }),
 );
@@ -1092,6 +1101,10 @@ export const WS_METHODS = lazySchema(() => ({
   "agent.stop": {
     params: z.object({ threadId: z.string() }),
     result: AgentStopResultSchema(),
+  },
+  "agent.retrySave": {
+    params: z.object({ threadId: z.string().min(1).max(256) }).strict(),
+    result: z.object({ retried: z.boolean() }).strict(),
   },
   "agent.activeCount": {
     params: z.object({}),

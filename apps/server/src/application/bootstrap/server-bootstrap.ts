@@ -71,6 +71,8 @@ import {
 } from "../../features/agents";
 import { AgentEventPublicationRegistry } from "../../features/agents/orchestration/agent-event-publication-registry.js";
 import { WorkerOwnedTurnRuntime } from "../../features/agents/execution/worker-owned-turn-runtime.js";
+import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
+import { TURN_FINALIZER, TurnFinalizer } from "../../features/agents/turns/turn-finalizer.js";
 import {
   AgentEventPublicationRuntimePort,
   AgentReliabilityPort,
@@ -97,6 +99,8 @@ import { TurnSnapshotRepo } from "../../features/agents/turns/persistence/turn-s
 import { TurnDiffService } from "../../features/agents/turns/turn-diff-service.js";
 import { TaskRepo } from "../../features/agents/orchestration/persistence/task-repo.js";
 import { PlanQuestionAnswersRepo } from "../../features/agents/planning/persistence/plan-question-answers-repo.js";
+import { PlanQuestionService } from "../../features/agents/planning/plan-question-service.js";
+import { PostTerminalHookCompletionEffect } from "../../features/agents/turns/post-terminal-hook-completion-effect.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
 import { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
 import { SettingsService } from "../../features/settings/settings-service.js";
@@ -127,6 +131,7 @@ import type { JobObject } from "../../runtime/process/containment/job-object.js"
 import { resolveWebAutomationFlag } from "../../runtime/startup/startup-policy.js";
 import { listenWithPortRetry } from "../../runtime/http/http-listener.js";
 import { createReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
+import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
 
 /** Start the server runtime and install its shutdown handlers. */
 export async function startServer(): Promise<void> {
@@ -280,7 +285,7 @@ applyDevGitCheckoutEnv();
 recordStartupCheckpoint("checkout environment resolved");
 
 // Initialize DI container (PtyPidRegistry needs the data dir path at construction time)
-const container = setupContainer(getMcodeDir());
+const container = await setupContainer(getMcodeDir());
 recordStartupCheckpoint("dependency container initialized");
 
 const browserAutomationCredentials = container.resolve(BrowserAutomationCredentialRegistry);
@@ -351,6 +356,15 @@ const thoughtSegmentRepo = container.resolve(ThoughtSegmentRepo);
 const hookExecutionRepo = container.resolve(HookExecutionRepo);
 const narrativeStore = container.resolve(NarrativeStore);
 const canonicalSink = container.resolve(CanonicalAgentBoundary);
+if (workerOwnedTurnRuntime.progress) {
+  const progress = workerOwnedTurnRuntime.progress;
+  container.resolve(PlanQuestionService).bindAcceptedProgress(progress);
+  container.resolve(SubagentLifecycleService).bindAcceptedProgress(progress);
+  container.resolve(ThreadService).bindAcceptedProgress(progress);
+  container.resolve(PostTerminalHookCompletionEffect).bindAcceptedProgress(progress);
+  canonicalSink.bindAcceptedSynthesizedPublications((threadId, events) =>
+    progress.acceptSynthesizedPublications(threadId, events));
+}
 const legacyConversationMigration = container.resolve(LegacyConversationMigration);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
@@ -372,7 +386,7 @@ const modelCacheService = container.resolve(ModelCacheService);
 const providerUsageWarmup = container.resolve(ProviderUsageWarmupService);
 recordStartupCheckpoint("services resolved");
 
-seedAgentRuntimeWorkspace({
+await seedAgentRuntimeWorkspace({
   MCODE_AGENT_RUNTIME: process.env.MCODE_AGENT_RUNTIME,
   MCODE_AGENT_FIXTURE_REPO: process.env.MCODE_AGENT_FIXTURE_REPO,
 }, {
@@ -384,10 +398,14 @@ let lastCliPathsForModelCache = settingsService.get().provider.cli;
 let lastProviderUsageWarmupSnapshot = JSON.stringify(settingsService.get().provider);
 settingsService.on("change", (next) => {
   if (next.provider.cli.cursor !== lastCliPathsForModelCache.cursor) {
-    modelCacheService.invalidate("cursor");
+    void modelCacheService.invalidate("cursor").catch((error: unknown) => {
+      logger.error("Failed to invalidate Cursor model cache", { error });
+    });
   }
   if (next.provider.cli.copilot !== lastCliPathsForModelCache.copilot) {
-    modelCacheService.invalidate("copilot");
+    void modelCacheService.invalidate("copilot").catch((error: unknown) => {
+      logger.error("Failed to invalidate Copilot model cache", { error });
+    });
   }
   lastCliPathsForModelCache = next.provider.cli;
   // Re-warm the Codex version gate when its CLI path changes so the next
@@ -422,7 +440,8 @@ const recapService = container.resolve(RecapService);
 const handoffStorage = container.resolve(HandoffStorage);
 const handoffCheckoutService = container.resolve(HandoffCheckoutService);
 const db = container.resolve<Database>("Database");
-const reliabilityHarness = createReliabilityHarnessAdapter(db, undefined, {
+const databaseWriter = container.resolve(ApplicationDatabaseWriter);
+const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undefined, {
   streamAssistant: (threadId) => agentReliability.streamAssistantText(threadId),
 });
 const jobObject = container.resolve<JobObject>("JobObject");
@@ -454,6 +473,9 @@ const ciWatcherService = new CiWatcherService(githubService, (channel, data) => 
 });
 container.registerInstance(CiWatcherService, ciWatcherService);
 const threadDeletionTeardownService = container.resolve(ThreadDeletionTeardownService);
+if (workerOwnedTurnRuntime.progress) {
+  threadDeletionTeardownService.bindAcceptedProgress(workerOwnedTurnRuntime.progress);
+}
 const cleanupWorker = container.resolve(CleanupWorker);
 const threadCompletionService = container.resolve(ThreadCompletionService);
 const pullRequestCompletionEffect = new TurnPullRequestCompletionEffect(
@@ -537,8 +559,8 @@ setInterval(() => {
 }, 50).unref();
 
 /** Reconciles incomplete turns and reports any execution interrupted at boot. */
-function recoverTurnsAtStartup(): void {
-  const startupRecovery = turnRecoveryService.reconcileOnStartup();
+async function recoverTurnsAtStartup(): Promise<void> {
+  const startupRecovery = await turnRecoveryService.reconcileOnStartup();
   if (startupRecovery.interrupted.length > 0) {
     logger.info("Interrupted unproved executions during startup recovery", {
       count: startupRecovery.interrupted.length,
@@ -547,8 +569,8 @@ function recoverTurnsAtStartup(): void {
 }
 
 /** Marks startup records interrupted because no process survives server restart. */
-function interruptThreadStartupsAtStartup(): void {
-  const interrupted = threadStartupService.interruptNonterminalOnStartup();
+async function interruptThreadStartupsAtStartup(): Promise<void> {
+  const interrupted = await threadStartupService.interruptNonterminalOnStartup();
   if (interrupted.length > 0) {
     logger.info("Interrupted incomplete thread startups during server startup", {
       count: interrupted.length,
@@ -585,23 +607,23 @@ providerAvailability
   });
 
 /** Removes expired turn snapshots before accepting new work. */
-function removeExpiredSnapshots(): void {
+async function removeExpiredSnapshots(): Promise<void> {
   const maxAge = parseInt(process.env.SNAPSHOT_MAX_AGE_DAYS ?? "30", 10);
-  const removed = turnSnapshotRepo.deleteExpired(maxAge);
+  const removed = await turnSnapshotRepo.deleteExpired(maxAge);
   if (removed > 0) logger.info(`Cleaned up ${removed} expired turn snapshots`);
 }
 
-removeExpiredSnapshots();
+await removeExpiredSnapshots();
 
 /** Starts workspace and worktree Git watchers, then repairs stale Git flags. */
-function initializeWorkspaceWatchers(): ReturnType<typeof workspaceRepo.listAll> {
+async function initializeWorkspaceWatchers(): Promise<ReturnType<typeof workspaceRepo.listAll>> {
   const allWorkspaces = workspaceRepo.listAll();
-  for (const workspace of allWorkspaces) initializeWorkspaceWatcher(workspace);
+  for (const workspace of allWorkspaces) await initializeWorkspaceWatcher(workspace);
   return allWorkspaces;
 }
 
 /** Starts watchers and repairs metadata for one persisted workspace. */
-function initializeWorkspaceWatcher(workspace: ReturnType<typeof workspaceRepo.listAll>[number]): void {
+async function initializeWorkspaceWatcher(workspace: ReturnType<typeof workspaceRepo.listAll>[number]): Promise<void> {
   gitWatcherService.watchWorkspace(workspace.id, workspace.path);
   for (const thread of threadService.list(workspace.id)) {
     if (thread.mode === "worktree" && thread.worktree_path) {
@@ -609,12 +631,12 @@ function initializeWorkspaceWatcher(workspace: ReturnType<typeof workspaceRepo.l
     }
   }
   if (!workspace.is_git_repo && NodeFS.existsSync(NodePath.join(workspace.path, ".git"))) {
-    workspaceRepo.setIsGitRepo(workspace.id, true);
+    await workspaceRepo.setIsGitRepo(workspace.id, true);
     logger.info("Corrected stale is_git_repo=false at startup", { workspaceId: workspace.id, path: workspace.path });
   }
 }
 
-const allWorkspaces = initializeWorkspaceWatchers();
+const allWorkspaces = await initializeWorkspaceWatchers();
 
 // Begin watching the user's Claude skills/commands/plugins directories so the
 // skill registry stays current without a server restart.
@@ -665,7 +687,7 @@ codexCatalogService.onSkillsChanged((cwd) => {
 });
 
 // Create and start HTTP + WS server
-const { httpServer, wss } = createWsServer({
+const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   workerQueueDepth: () => workerOwnedTurnRuntime.scheduler.depth(),
   runtime: hostRuntime,
   workspaceService,
@@ -707,6 +729,7 @@ const { httpServer, wss } = createWsServer({
   hookExecutionRepo,
   narrativeStore,
   canonicalSink,
+  canonicalProgress: workerOwnedTurnRuntime.progress,
   turnSnapshotRepo,
   turnDiffs: container.resolve(TurnDiffService),
   snapshotService,
@@ -850,8 +873,8 @@ async function bootstrapServer(): Promise<void> {
     await canonicalSink.materializeConversationDisplay();
     recordStartupCheckpoint("conversation display materialization completed");
 
-    interruptThreadStartupsAtStartup();
-    projectActionService.recoverStaleRuns();
+    await interruptThreadStartupsAtStartup();
+    await projectActionService.recoverStaleRuns();
     cleanupWorker.start(process.env.MCODE_AGENT_RUNTIME === "1"
       ? process.env.MCODE_AGENT_FIXTURE_REPO?.trim()
       : undefined);
@@ -881,11 +904,11 @@ async function bootstrapServer(): Promise<void> {
         portPush.send("permission.resolved", payload);
       },
     });
-    recoverTurnsAtStartup();
+    await recoverTurnsAtStartup();
     recordStartupCheckpoint("turn recovery completed");
     await threadControlService.recoverApprovals();
     recordStartupCheckpoint("approval recovery completed");
-    externalThreadControlMcpRuntime.reconcileOnStartup();
+    await externalThreadControlMcpRuntime.reconcileOnStartup();
     recordStartupCheckpoint("external thread control reconciled");
     await workspaceEnvironmentService.reconcileAutomaticSetup();
     recordStartupCheckpoint("automatic workspace setup reconciled");
@@ -923,6 +946,9 @@ async function shutdown(): Promise<void> {
   graceController?.dispose();
   graceController = null;
 
+  shutdownCoordinator.setPhase("drain admitted transport work");
+  await stopAdmissionAndDrain();
+
   // 0. Close the MessagePort stream transport
   shutdownCoordinator.setPhase("detach message transport");
   portPush.detach();
@@ -938,8 +964,6 @@ async function shutdown(): Promise<void> {
 
   // 1. Stop all agent sessions. The provider owns the terminal outcome.
   shutdownCoordinator.setPhase("stop agent sessions");
-  await agentService.stopAll();
-
   let shutdownFailure: unknown = null;
   const captureCleanupFailure = async (cleanup: () => Promise<void> | void): Promise<void> => {
     try {
@@ -948,19 +972,20 @@ async function shutdown(): Promise<void> {
       shutdownFailure ??= error;
     }
   };
+  await captureCleanupFailure(() => agentService.stopAll());
+
+  settingsService.dispose();
+  shutdownCoordinator.setPhase("drain provider catalogs");
+  await captureCleanupFailure(() => modelCacheService.close());
+  await captureCleanupFailure(() => providerCatalogService.close());
 
   // 2. Shutdown provider registry
   shutdownCoordinator.setPhase("shutdown providers");
   await captureCleanupFailure(() => providerRegistry.shutdown());
   shutdownCoordinator.setPhase("shutdown provider event workers");
-  providerEventIngress.shutdown();
-  shutdownCoordinator.setPhase("shutdown execution workers and writer");
-  await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
+  await captureCleanupFailure(() => providerEventIngress.stopAdmissionAndDrain());
   browserAutomationBroker.shutdown();
   browserAutomationSessionLease.shutdown();
-
-  // 3. Dispose settings file watcher
-  settingsService.dispose();
 
   // 6. Contain Project command sessions before their Terminal dependency shuts down.
   shutdownCoordinator.setPhase("shutdown Project commands");
@@ -984,10 +1009,19 @@ async function shutdown(): Promise<void> {
   // 9a. Dispose cleanup worker
   shutdownCoordinator.setPhase("shutdown cleanup worker");
   await captureCleanupFailure(() => cleanupWorker.shutdown());
+  await captureCleanupFailure(() => threadCompletionService.shutdown());
 
   // 9b. Dispose CI check watcher timers and in-flight GitHub CLI children
   shutdownCoordinator.setPhase("shutdown CI watcher");
   await captureCleanupFailure(() => ciWatcherService.dispose());
+
+  shutdownCoordinator.setPhase("drain terminal persistence and execution workers");
+  await captureCleanupFailure(() => container.resolve(ProviderTurnEventApplication).drainPersistence());
+  await captureCleanupFailure(() => container.resolve<TurnFinalizer>(TURN_FINALIZER).drain());
+  await captureCleanupFailure(() => container.resolve(AgentEventPublicationRegistry).drain());
+  await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
+  shutdownCoordinator.setPhase("close application database writer");
+  await captureCleanupFailure(() => databaseWriter.close());
 
   // 9. Close all WebSocket clients and shut down the WS server
   closeWebSocketClients(wss.clients);
@@ -1001,15 +1035,11 @@ async function shutdown(): Promise<void> {
     httpServer.close((err) => (err ? rej(err) : res()));
   });
 
-  await Promise.allSettled([wssClose, httpClose]);
+  await Promise.all([captureCleanupFailure(() => wssClose), captureCleanupFailure(() => httpClose)]);
 
   // 11. Close database
   shutdownCoordinator.setPhase("close database");
-  try {
-    db.close();
-  } catch {
-    // Already closed or other non-fatal error
-  }
+  await captureCleanupFailure(() => db.close());
 
   // Close the Windows Job Object. With KILL_ON_JOB_CLOSE, any child processes
   // still alive are terminated atomically by the OS. No-op on non-Windows.

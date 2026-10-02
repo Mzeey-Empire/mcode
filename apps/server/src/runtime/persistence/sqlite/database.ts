@@ -11,9 +11,9 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import {
   bootstrapDrizzle,
-  reconcileMigrations,
   reconcileSubagentIdentityMigration,
 } from "./bootstrap-drizzle.js";
+import { repairLostConversationWriterReceipts } from "./migration-history-repair.js";
 import {
   createMigrationBackup,
   pruneMigrationBackups,
@@ -169,8 +169,8 @@ function applyMessageSchemaPatches(db: Database): void {
 function runMigrations(db: Database): void {
   const dir = getDrizzleMigrationsDir();
   bootstrapDrizzle(db, dir);
-  reconcileMigrations(db, dir);
   reconcileSubagentIdentityMigration(db, dir);
+  repairLostConversationWriterReceipts(db, dir);
   const d = drizzle(db);
   migrate(d, { migrationsFolder: migrationsFolderForDrizzle(dir) });
   applySchemaPatches(db, dir);
@@ -233,7 +233,8 @@ export function openDatabase(opts?: OpenDatabaseOptions): Database {
   return db;
 }
 
-function resolveDatabasePath(opts: OpenDatabaseOptions | undefined): string {
+/** Resolve the application database filename without opening a writable connection. */
+export function resolveDatabasePath(opts?: OpenDatabaseOptions): string {
   return opts?.dbPath ?? process.env.MCODE_DB_PATH ?? resolveDbPath(getMcodeDir(), {
     branch: opts?.branch ?? process.env.MCODE_GIT_BRANCH,
     gitToplevel: opts?.gitToplevel ?? process.env.MCODE_GIT_TOPLEVEL,

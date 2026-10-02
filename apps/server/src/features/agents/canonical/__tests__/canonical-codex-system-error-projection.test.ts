@@ -7,9 +7,9 @@ import type { AgentEvent, ProviderId } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
-import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { MessageStore as MessageRepo } from "../../conversation/persistence/message-store.js";
 import { CodexLiveEventReducer } from "../../execution/codex-live-event-reducer.js";
-import { CanonicalAgentBoundary } from "../canonical-agent-boundary.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "../canonical-agent-store.js";
 import { CanonicalCodexSystemErrorProjection } from "../canonical-codex-system-error-projection.js";
 import { CanonicalParentTurnWrite } from "../canonical-parent-turn-write.js";
 
@@ -90,6 +90,7 @@ describe("CanonicalCodexSystemErrorProjection", () => {
     expect(new MessageRepo(db).findByIdInThread(THREAD_ID, first.event.messageId))
       .toMatchObject({ role: "system", content: "Codex reported an update." });
     expect(projection.project(reduction)).toEqual(first);
+    if (!notice.message) throw new Error("Fixture notice message is missing");
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE thread_id = ? AND content = ?")
       .get(THREAD_ID, notice.message)).toEqual({ count: 1 });
     expect(structuredClone(first)).toEqual(first);

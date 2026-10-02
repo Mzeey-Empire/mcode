@@ -282,6 +282,8 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   private pendingBrowserAccess = new Map<string, PendingBrowserAccess>();
   /** Serialises setup of overlapping sends so staged browser handles cannot be overwritten. */
   private sendLocks = new Map<string, Promise<void>>();
+  private readonly turnTasks = new Set<Promise<void>>();
+  private readonly activeTurnEnds = new Map<CopilotSession, Set<() => void>>();
   /** Serialises concurrent refreshClient() calls so only one rebuild runs at a time. */
   private clientStartLock: Promise<void> = Promise.resolve();
 
@@ -929,7 +931,12 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     if (existing) {
       await this.applyCopilotAgent(state.session, sessionId, copilotAgent, true);
     }
-    void this.runTurn(sessionId, threadId, state.session, message, routing);
+    const task = this.runTurn(sessionId, threadId, state.session, message, routing)
+      .finally(() => { this.turnTasks.delete(task); });
+    this.turnTasks.add(task);
+    void task.catch((error: unknown) => {
+      logger.error("Copilot turn finalization failed", { sessionId, error: this.errorMessage(error) });
+    });
   }
 
   private async emitCliResolutionError(
@@ -1306,6 +1313,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
 
   /** Graceful protocol interrupt: disconnect the SDK session. Guarded so a double-disconnect is harmless. */
   async interrupt(state: CopilotSessionState): Promise<void> {
+    this.settleActiveTurns(state.session);
     try {
       await state.session.disconnect();
     } catch (err) {
@@ -1321,6 +1329,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
    * disconnect, so this is guarded against a double-disconnect.
    */
   async close(state: CopilotSessionState): Promise<void> {
+    this.settleActiveTurns(state.session);
     if (state.browserCredential) {
       if (state.browserLeaseId) {
         this.browserAutomationLease.release(state.browserLeaseId);
@@ -1354,6 +1363,11 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
    * session becomes idle. All AgentEvents are emitted via EventEmitter so
    * they reach the push channel without blocking sendMessage's return.
    */
+  private settleActiveTurns(session: CopilotSession): void {
+    // The SDK clears its event handlers on disconnect without emitting idle or error.
+    for (const settle of this.activeTurnEnds.get(session) ?? []) settle();
+  }
+
   private async runTurn(
     sessionId: string,
     threadId: string,
@@ -1383,9 +1397,14 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     let totalCost: number | undefined;
 
     const unsubscribers: Array<() => void> = [];
+    let endTurn: (() => void) | undefined;
 
     try {
       const turnPromise = new Promise<void>((resolve) => {
+        endTurn = resolve;
+        const ends = this.activeTurnEnds.get(session) ?? new Set<() => void>();
+        ends.add(resolve);
+        this.activeTurnEnds.set(session, ends);
         // assistant.message_delta - streaming text chunk
         unsubscribers.push(
           session.on("assistant.message_delta", (event) => {
@@ -1614,6 +1633,9 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
         error: errorMessage,
       } satisfies AgentEvent);
     } finally {
+      const ends = this.activeTurnEnds.get(session);
+      if (endTurn) ends?.delete(endTurn);
+      if (ends?.size === 0) this.activeTurnEnds.delete(session);
       // The turn has settled: clear the busy marker so the runtime's idle
       // eviction (which reads `isBusy` → `turnActive`) can reclaim the session.
       const settled = this.runtime.get(sessionId);
@@ -1714,10 +1736,12 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   }
 
   /** Tear down all sessions, stop the client, and release resources. */
-  shutdown(): void {
-    void this.runtime.shutdown().catch((err: unknown) =>
-      logger.warn("CopilotProvider: runtime shutdown failed", { error: String(err) }),
-    );
+  async shutdown(): Promise<void> {
+    const results = await Promise.allSettled([this.runtime.shutdown()]);
+    results.push(...await Promise.allSettled(this.sendLocks.values()));
+    const clientResults = await Promise.allSettled([this.client?.stop()]);
+    results.push(...await Promise.allSettled(this.turnTasks));
+    results.push(...await Promise.allSettled([this.canonicalEventPublisher?.stopAdmissionAndDrain()]));
     this.sdkSessionIds.clear();
     this.pendingSpawnTurns.clear();
     this.sendLocks.clear();
@@ -1728,16 +1752,15 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     this.contextWindowBySession.clear();
 
     if (this.client) {
-      this.client.stop().catch((err) =>
-        logger.warn("CopilotProvider: error stopping client during shutdown", {
-          error: String(err),
-        }),
-      );
       this.client = null;
       this.modelCache = null;
       this.modelCacheTimestamp = 0;
     }
-
+    const failures = [
+      ...results.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
+      ...clientResults.flatMap((result) => result.status === "rejected" ? [result.reason] : result.value ?? []),
+    ];
+    if (failures.length > 0) throw new AggregateError(failures, "Copilot provider shutdown failed");
     logger.info("CopilotProvider shutdown complete");
   }
 }

@@ -1,4 +1,4 @@
-import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, PlanRecord, TurnFileEffectSummary, TurnOutcome } from "@mcode/contracts";
+import type { AgentEvent, AgentProgressPosition, ParentNarrativeRecoveryItem, PlanQuestion, PlanRecord, TurnFileEffectSummary, TurnOutcome } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 
 import type {
@@ -25,6 +25,7 @@ import type {
   ExecutionWorkerRequest,
 } from "./execution-mailbox-protocol.js";
 import type { ExecutionMailboxCommand, ExecutionRecoveryReceipt } from "./execution-mailbox-scheduler.js";
+import type { ExecutionWriterFailure, ProgressAdmissionFailureReason } from "./execution-writer-failure.js";
 import { ProviderExecutionEventState, type ExecutionParentStartContext, type PreparedProviderLiveEvent } from "./provider-execution-event-state.js";
 import { ExecutionWorkerFileEvidence } from "./execution-worker-file-evidence.js";
 import type { FrozenExecutionFileEvidence } from "./execution-file-evidence-coordinator.js";
@@ -34,17 +35,13 @@ import type { SyntheticTerminalInput } from "./codex-live-event-reducer.js";
 /** Data that an execution worker may receive without a server dependency container. */
 export type ExecutionWorkCommand =
   | { readonly kind: "start"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput; readonly parentLive?: ExecutionParentStartContext; readonly publishParentStart?: boolean; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
-  | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
   | { readonly kind: "begin-files"; readonly cwd: string; readonly handoff: FileTurnHandoff; readonly deliveryAttempt: number }
   | { readonly kind: "event"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[]; readonly parentLive?: ParentLiveEffects; readonly terminalInput?: DataOnlyParentTurnFinishInput; readonly deliveryAttempt?: number; readonly capturedFileObservation?: CapturedToolUseObservation | null; readonly frozenFileEvidence?: FrozenExecutionFileEvidence; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
-  | { readonly kind: "assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
   | { readonly kind: "narrative-delta"; readonly input: ParentNarrativeRecoveryCommit }
   | ({ readonly kind: "live-event"; readonly publication: ExecutionLivePublicationIntent } & ParentLiveEffects)
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
   | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
   | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
-  | { readonly kind: "stage-terminal"; readonly input: DataOnlyParentTerminalProjectionInput }
-  | { readonly kind: "finalize"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
   | { readonly kind: "finish-live-event"; readonly outcome: TurnOutcome; readonly projection: DataOnlyParentTerminalProjectionInput; readonly input: DataOnlyParentTurnFinishInput; readonly providerEvent?: TerminalProviderEventInput; readonly frozenFileEvidence?: FrozenExecutionFileEvidence; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
   | { readonly kind: "finish-from-state"; readonly outcome: SyntheticTerminalInput["outcome"]; readonly input: DataOnlyParentTurnFinishInput; readonly frozenFileEvidence?: FrozenExecutionFileEvidence }
   | ({ readonly kind: "post-terminal-event"; readonly publication: ExecutionLivePublicationIntent } & PostTerminalEffects)
@@ -55,7 +52,7 @@ export interface ParentLiveEffects {
   readonly text:
     | { readonly kind: "unchanged" }
     | { readonly kind: "append"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
-    | { readonly kind: "reclassify"; readonly expectedText: string }
+    | { readonly kind: "reclassify"; readonly expectedText: string; readonly retainedText?: string }
     | { readonly kind: "promote"; readonly input: ParentAssistantTextCheckpointInput };
   readonly narrative?: ParentNarrativeRecoveryCommit;
   readonly taskIntents?: readonly TaskToolWriteIntent[];
@@ -85,27 +82,23 @@ export interface ExecutionSemanticOperation {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
   readonly ordinal: number;
-  /** Live Codex events to release with this operation's durable receipt. */
+  /** Live events released once when this operation is accepted. */
   readonly livePublication?: readonly ExecutionLivePublicationIntent[];
   readonly mutation:
     | { readonly kind: "begin"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput }
-    | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
     | { readonly kind: "append-events"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[]; readonly parentLive?: ParentLiveEffects }
-    | { readonly kind: "append-assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
     | { readonly kind: "narrative-delta"; readonly input: ParentNarrativeRecoveryCommit }
     | ({ readonly kind: "live-event" } & ParentLiveEffects)
     | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
     | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
     | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
-    | { readonly kind: "stage-terminal"; readonly input: DataOnlyParentTerminalProjectionInput }
     | { readonly kind: "worker-lost"; readonly reason: string; readonly recoveryIncidentId: string }
-    | { readonly kind: "finish"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput }
     | { readonly kind: "finish-live-event"; readonly outcome: TurnOutcome; readonly projection: DataOnlyParentTerminalProjectionInput; readonly input: DataOnlyParentTurnFinishInput; readonly providerEvent?: TerminalProviderEventInput }
     | ({ readonly kind: "post-terminal-event" } & PostTerminalEffects);
 }
 
-/** A live event has one durability barrier and stays inert until its semantic effects commit. */
+/** A live publication accompanies its prepared semantic observation in accepted order. */
 export interface ExecutionLivePublicationIntent {
   readonly event: AgentEvent;
   readonly after: "writer" | "terminal";
@@ -116,7 +109,7 @@ export interface ExecutionLivePublicationReceipt extends ExecutionLivePublicatio
   readonly publicationId: string;
 }
 
-/** Plan questions may be pushed only after their text event's durable writer receipt. */
+/** Plan questions are released once with their accepted text observation. */
 export interface ExecutionPlanQuestionsReceipt {
   readonly publicationId: string;
   readonly threadId: string;
@@ -147,15 +140,28 @@ export interface ExecutionTerminalPersistenceReceipt {
   readonly fileEffects?: TurnFileEffectSummary;
 }
 
-/** A writer reply is valid only after the semantic operation commits durably. */
+/** Accepted replies retain immutable saving work; committed replies certify an actual transaction. */
 export type ExecutionWriteReceipt =
+  | ExecutionAcceptedReceipt
   | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[]; readonly assistantTextCheckpoint?: ParentAssistantTextCheckpointResult; readonly livePublication?: readonly ExecutionLivePublicationReceipt[]; readonly planQuestions?: ExecutionPlanQuestionsReceipt; readonly planOutput?: PlanRecord; readonly terminalPersistence?: ExecutionTerminalPersistenceReceipt }
   | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState?: "not-started" | "already-terminal" };
 
+/** Live acceptance has immutable order and retains saving work without claiming a disk commit. */
+export interface ExecutionAcceptedReceipt {
+  readonly kind: "accepted";
+  readonly operationId: string;
+  readonly progressPosition: AgentProgressPosition;
+  readonly acceptedThrough: number;
+  readonly eventCount: number;
+  readonly livePublication?: readonly ExecutionLivePublicationReceipt[];
+  readonly planQuestions?: ExecutionPlanQuestionsReceipt;
+  readonly terminalAcceptance?: ExecutionTerminalPersistenceReceipt;
+}
+
 /**
- * Implemented by one acknowledged writer, not by a worker-local SQLite connection.
- * It must fence the durable lease and enforce terminal prerequisites in the
- * same transaction that records each semantic operation.
+ * The canonical owner admits prepared progress and retains its write intent.
+ * Durable commands await their actual writer transaction; queued writes retain
+ * the exact lease and predecessor checks on the storage connection.
  */
 export interface ExecutionSemanticWriter {
   transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt>;
@@ -166,9 +172,10 @@ export type ExecutionParentEventResult = Pick<PreparedProviderLiveEvent, "runtim
 
 /** A command result that never calls an uncommitted mutation successful. */
 export type ExecutionWorkerResult =
-  | (Extract<ExecutionWriteReceipt, { kind: "committed" }> & { readonly parentEvent?: ExecutionParentEventResult })
+  | (Extract<ExecutionWriteReceipt, { kind: "committed" | "accepted" }> & { readonly parentEvent?: ExecutionParentEventResult })
   | { readonly kind: "released" }
-  | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-text-routing" | "invalid-narrative-routing" | "invalid-stop-watermark" | "writer-conflict" | "writer-failure" };
+  | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-text-routing" | "invalid-narrative-routing" | "invalid-stop-watermark" | "writer-conflict" | "writer-failure" | ProgressAdmissionFailureReason;
+    readonly failure?: ExecutionWriterFailure };
 
 type WorkerCommand = ExecutionMailboxCommand<ExecutionWorkCommand>;
 
@@ -176,7 +183,7 @@ interface ExecutionState {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
   readonly providerId: string;
-  readonly parentEvents?: ProviderExecutionEventState;
+  parentEvents?: ProviderExecutionEventState;
   nextOrdinal: number;
   phase: "running" | "stopping" | "finalized" | "poisoned";
   durableRevision: number;
@@ -186,6 +193,7 @@ interface ExecutionState {
 interface PreparedExecutionRequest {
   readonly request: ExecutionWorkerRequest<WorkerCommand>;
   readonly parentEvent?: ExecutionParentEventResult;
+  readonly candidate?: ProviderExecutionEventState;
 }
 
 /**
@@ -215,7 +223,7 @@ export class ExecutionWorkerHandler {
 
   private async apply(request: ExecutionWorkerRequest<WorkerCommand>): Promise<ExecutionWorkerResult> {
     const state = this.states.get(request.execution.threadId);
-    if (request.command.kind === "start" || request.command.kind === "resume") {
+    if (request.command.kind === "start") {
       return await this.begin(request, state);
     }
     if (!state) return { kind: "rejected", reason: "no-execution" };
@@ -269,18 +277,25 @@ export class ExecutionWorkerHandler {
       if (state.parentEvents) state.phase = "poisoned";
       throw error;
     }
-    if (!isDurableReceipt(receipt, request, state.durableRevision)) {
+    if (!validWriteReceipt(receipt, request, state.durableRevision)) {
       if (state.parentEvents) state.phase = "poisoned";
       return { kind: "rejected", reason: "writer-conflict" };
     }
+    this.advanceAcceptedState(prepared, state, receipt);
+    return prepared.parentEvent ? { ...receipt, parentEvent: prepared.parentEvent } : receipt;
+  }
+
+  private advanceAcceptedState(prepared: PreparedExecutionRequest, state: ExecutionState,
+    receipt: Extract<ExecutionWriteReceipt, { kind: "committed" | "accepted" }>): void {
+    const { request } = prepared;
     state.nextOrdinal += 1;
-    state.durableRevision = receipt.durableRevision;
+    if (receipt.kind === "committed") state.durableRevision = receipt.durableRevision;
+    if (prepared.candidate) state.parentEvents = prepared.candidate;
     if (request.command.kind === "stop") state.phase = "stopping";
-    if (request.command.kind === "finalize" || request.command.kind === "finish-live-event") {
+    if (request.command.kind === "finish-live-event") {
       state.phase = "finalized";
       if (state.fileAttempt !== undefined) this.files.retire(state.execution, state.fileAttempt);
     }
-    return prepared.parentEvent ? { ...receipt, parentEvent: prepared.parentEvent } : receipt;
   }
 
   private prepareRequest(request: ExecutionWorkerRequest<WorkerCommand>, state: ExecutionState): PreparedExecutionRequest | undefined {
@@ -289,17 +304,18 @@ export class ExecutionWorkerHandler {
     if (!state.parentEvents || command.kind !== "event") return { request };
     if (state.phase === "finalized") return this.preparePostTerminalEvent(request, command, state);
     if (!validOwnedEventCommand(command, state)) return undefined;
-    const reduction = state.parentEvents.prepare(command.events, command.terminalInput !== undefined);
+    const candidate = state.parentEvents.fork();
+    const reduction = candidate.prepare(command.events, command.terminalInput !== undefined);
     if (reduction.kind === "rejected") return undefined;
     if (reduction.kind === "writer-owned") return { request };
     const { effects, ...parentEvent } = reduction.prepared;
     if (parentEvent.publication.after === "terminal") {
       const terminal = prepareTerminalEvent(command, parentEvent, state.providerId);
       if (!terminal) { state.phase = "poisoned"; return undefined; }
-      return { request: { ...request, command: terminal }, parentEvent };
+      return { request: { ...request, command: terminal }, parentEvent, candidate };
     }
     return { request: { ...request, command: { ...command,
-      parentLive: effects, livePublication: [parentEvent.publication] } }, parentEvent };
+      parentLive: effects, livePublication: [parentEvent.publication] } }, parentEvent, candidate };
   }
 
 
@@ -310,7 +326,8 @@ export class ExecutionWorkerHandler {
   ): PreparedExecutionRequest | undefined {
     const terminalInput = syntheticTerminalInput(command, state);
     if (!terminalInput || !state.parentEvents) return undefined;
-    const reduction = state.parentEvents.finishFromState(terminalInput);
+    const candidate = state.parentEvents.fork();
+    const reduction = candidate.finishFromState(terminalInput);
     if (reduction.kind !== "parent" || !reduction.prepared.terminal) return undefined;
     const { effects: _effects, ...parentEvent } = reduction.prepared;
     const projection = reduction.prepared.terminal;
@@ -321,7 +338,7 @@ export class ExecutionWorkerHandler {
       ...(command.frozenFileEvidence ? { frozenFileEvidence: command.frozenFileEvidence } : {}),
       livePublication: [parentEvent.publication],
     };
-    return { request: { ...request, command: finish }, parentEvent };
+    return { request: { ...request, command: finish }, parentEvent, candidate };
   }
 
   private preparePostTerminalEvent(
@@ -330,12 +347,13 @@ export class ExecutionWorkerHandler {
     state: ExecutionState,
   ): PreparedExecutionRequest | undefined {
     if (!validLateOwnedEventCommand(command, state) || !state.parentEvents) return undefined;
-    const reduction = state.parentEvents.prepare(command.events, true);
+    const candidate = state.parentEvents.fork();
+    const reduction = candidate.prepare(command.events, true);
     if (reduction.kind !== "parent" || reduction.prepared.terminal) return undefined;
     const { effects, ...prepared } = reduction.prepared;
     const parentEvent = { ...prepared, publication: { ...prepared.publication, after: "terminal" as const } };
     const hooks = effects.narrative?.items.filter((item) => item.kind === "hook");
-    return { parentEvent, request: { ...request, command: {
+    return { parentEvent, candidate, request: { ...request, command: {
       kind: "post-terminal-event", publication: parentEvent.publication,
       ...(hooks?.length ? { hooks } : {}), ...(effects.systemIntents ? { systemIntents: effects.systemIntents } : {}),
       providerEvent: { phase: command.phase, nativeCursor: command.nativeCursor, events: command.events },
@@ -400,7 +418,7 @@ export class ExecutionWorkerHandler {
     const rejection = beginRejection(request, existing);
     if (rejection) return { kind: "rejected", reason: rejection };
     const command = request.command;
-    if (command.kind !== "start" && command.kind !== "resume") throw new Error("Invalid begin command escaped validation");
+    if (command.kind !== "start") throw new Error("Invalid begin command escaped validation");
     const parent = parentReducerState(command, request.execution);
     const started = this.admissionStart(command, parent);
     const receipt = await this.writer.transact(operationFor(
@@ -422,10 +440,10 @@ export class ExecutionWorkerHandler {
   }
 
   private admissionStart(
-    command: Extract<ExecutionWorkCommand, { kind: "start" | "resume" }>,
+    command: Extract<ExecutionWorkCommand, { kind: "start" }>,
     parent: Pick<ExecutionState, "parentEvents">,
   ): PreparedProviderLiveEvent | undefined {
-    if (command.kind !== "start" || !command.publishParentStart) return undefined;
+    if (!command.publishParentStart) return undefined;
     const started = parent.parentEvents?.startFromAdmission();
     if (started?.kind !== "parent" || started.prepared.publication.event.type !== "turnStarted") {
       throw new Error("Worker-owned parent start could not be prepared");
@@ -450,15 +468,13 @@ function beginRejection(
   if (existing) return "invalid-transition";
   if (request.ordinal !== 1) return "out-of-order";
   const command = request.command;
-  if (command.kind !== "start" && command.kind !== "resume") return "invalid-transition";
-  return command.kind === "start" && !validStartInput(command, request.execution)
+  if (command.kind !== "start") return "invalid-transition";
+  return !validStartInput(command, request.execution)
     ? "invalid-transition" : null;
 }
 
-function beginMutation(command: Extract<ExecutionWorkCommand, { kind: "start" | "resume" }>): ExecutionSemanticOperation["mutation"] {
-  return command.kind === "start"
-    ? { kind: "begin", providerId: command.providerId, input: command.input }
-    : { kind: "resume", providerId: command.providerId, checkpointId: command.checkpointId };
+function beginMutation(command: Extract<ExecutionWorkCommand, { kind: "start" }>): ExecutionSemanticOperation["mutation"] {
+  return { kind: "begin", providerId: command.providerId, input: command.input };
 }
 
 function withParentStartPublication(
@@ -489,22 +505,19 @@ function mutationFor(
       return liveEventMutation(command, request.execution, state);
     case "stop":
       return stopMutation(command, request, state);
-    case "finalize":
     case "finish-live-event":
       return finishMutation(command, request.execution, state.providerId);
-    default: return auxiliaryMutation(command, request.execution, state);
+    default: return auxiliaryMutation(command);
   }
 }
 
 function auxiliaryMutation(
-  command: Extract<WorkerCommand, { kind: "begin-files" | "start" | "resume" | "release" | "finish-from-state" | "assistant-text" | "checkpoint" | "effect-result" | "provider-outcome" | "stage-terminal" }>,
-  execution: ExecutionIdentity,
-  state: ExecutionState,
+  command: Extract<WorkerCommand, { kind: "begin-files" | "start" | "release" | "finish-from-state" | "checkpoint" | "effect-result" | "provider-outcome" }>,
 ): ExecutionSemanticOperation["mutation"] | undefined {
-  if (command.kind === "start" || command.kind === "resume" || command.kind === "release" || command.kind === "finish-from-state") return undefined;
+  if (command.kind === "start" || command.kind === "release" || command.kind === "finish-from-state") return undefined;
   // File handoff is the first command after durable start, before a provider cursor exists.
   if (command.kind === "begin-files") return { kind: "checkpoint", phase: "running", nativeCursor: null };
-  return metadataOrTextMutation(command, execution, state);
+  return command;
 }
 
 function syntheticTerminalInput(
@@ -533,16 +546,6 @@ function validOwnedEventCommand(command: Extract<WorkerCommand, { kind: "event" 
 function validLateOwnedEventCommand(command: Extract<WorkerCommand, { kind: "event" }>, state: ExecutionState): boolean {
   return command.parentLive === undefined && command.livePublication === undefined
     && (state.fileAttempt === undefined || command.deliveryAttempt === state.fileAttempt);
-}
-
-function metadataOrTextMutation(
-  command: Extract<WorkerCommand, { kind: "assistant-text" | "checkpoint" | "effect-result" | "provider-outcome" | "stage-terminal" }>,
-  execution: ExecutionIdentity,
-  state: ExecutionState,
-): ExecutionSemanticOperation["mutation"] | undefined {
-  if (command.kind !== "assistant-text") return command;
-  return state.phase === "running" && validTextRouting(command.inputs, execution)
-    ? { kind: "append-assistant-text", inputs: command.inputs } : undefined;
 }
 
 function eventMutation(
@@ -595,19 +598,16 @@ function stopMutation(
 }
 
 function finishMutation(
-  command: Extract<WorkerCommand, { kind: "finalize" | "finish-live-event" }>,
+  command: Extract<WorkerCommand, { kind: "finish-live-event" }>,
   execution: ExecutionIdentity,
   providerId: string,
 ): ExecutionSemanticOperation["mutation"] | undefined {
   if (!validFinishInput(command, execution, providerId)) return undefined;
-  if (command.kind === "finish-live-event") {
-    if (command.projection.threadId !== execution.threadId || command.projection.executionId !== execution.executionId
-      || command.projection.outcome !== command.outcome) return undefined;
-    if (command.providerEvent && !validEventRouting(command.providerEvent.events, execution)) return undefined;
-    return { kind: "finish-live-event", outcome: command.outcome, projection: command.projection, input: command.input,
-      ...(command.providerEvent ? { providerEvent: command.providerEvent } : {}) };
-  }
-  return { kind: "finish", outcome: command.outcome, input: command.input };
+  if (command.projection.threadId !== execution.threadId || command.projection.executionId !== execution.executionId
+    || command.projection.outcome !== command.outcome) return undefined;
+  if (command.providerEvent && !validEventRouting(command.providerEvent.events, execution)) return undefined;
+  return { kind: "finish-live-event", outcome: command.outcome, projection: command.projection, input: command.input,
+    ...(command.providerEvent ? { providerEvent: command.providerEvent } : {}) };
 }
 
 function commandRejection(
@@ -624,6 +624,7 @@ function validRecoveryRelease(command: WorkerCommand, lease: ExecutionLease): bo
   if (command.kind !== "release" || !command.recovery
     || command.recovery.operationId !== `${lease.leaseId}:worker-lost`) return false;
   return command.recovery.kind === "committed" && Number.isSafeInteger(command.recovery.durableRevision)
+    || command.recovery.kind === "accepted" && Number.isSafeInteger(command.recovery.progressPosition.sequence)
     || command.recovery.kind === "conflict" && command.recovery.recoveryState === "already-terminal";
 }
 
@@ -642,8 +643,6 @@ function invalidRoutingReason(
   switch (command.kind) {
     case "event":
       return invalidEventRoutingReason(command, execution);
-    case "assistant-text":
-      return validTextRouting(command.inputs, execution) ? null : "invalid-text-routing";
     case "narrative-delta":
       return command.input?.executionId === execution.executionId ? null : "invalid-narrative-routing";
     default:
@@ -713,16 +712,11 @@ function invalidEventRoutingReason(
 }
 
 function parentReducerState(
-  command: Extract<ExecutionWorkCommand, { kind: "start" | "resume" }>,
+  command: Extract<ExecutionWorkCommand, { kind: "start" }>,
   execution: ExecutionIdentity,
 ): Pick<ExecutionState, "parentEvents"> {
-  if (command.kind !== "start" || !command.parentLive) return {};
-  switch (command.providerId) {
-    case "codex": return { parentEvents: new ProviderExecutionEventState("codex", execution, command.parentLive) };
-    case "claude": return { parentEvents: new ProviderExecutionEventState("claude", execution, command.parentLive) };
-    case "cursor": return { parentEvents: new ProviderExecutionEventState("cursor", execution, command.parentLive) };
-    default: throw new Error("Unsupported execution parent provider");
-  }
+  if (!command.parentLive) return {};
+  return { parentEvents: new ProviderExecutionEventState(command.providerId, execution, command.parentLive) };
 }
 
 function validParentStartContext(command: Extract<ExecutionWorkCommand, { kind: "start" }>): boolean {
@@ -734,7 +728,7 @@ function validParentStartContext(command: Extract<ExecutionWorkCommand, { kind: 
 }
 
 function supportedParentProvider(providerId: string): boolean {
-  return providerId === "codex" || providerId === "claude" || providerId === "cursor";
+  return providerId.length > 0 && providerId.length <= 256;
 }
 
 function prepareTerminalEvent(
@@ -756,7 +750,7 @@ function prepareTerminalEvent(
 }
 
 function validFinishInput(
-  command: Extract<ExecutionWorkCommand, { kind: "finalize" | "finish-live-event" }>,
+  command: Extract<ExecutionWorkCommand, { kind: "finish-live-event" }>,
   execution: ExecutionIdentity,
   providerId: string,
 ): boolean {
@@ -784,8 +778,7 @@ function livePublicationFor(command: WorkerCommand): readonly ExecutionLivePubli
   switch (command.kind) {
     case "start":
     case "event":
-    case "finish-live-event":
-    case "finalize": return command.livePublication;
+    case "finish-live-event": return command.livePublication;
     case "live-event": return [command.publication];
     case "post-terminal-event": return [command.publication];
     default: return undefined;
@@ -803,4 +796,10 @@ function isDurableReceipt(
 ): receipt is Extract<ExecutionWriteReceipt, { kind: "committed" }> {
   return receipt.kind === "committed" && receipt.operationId === operationId(request)
     && Number.isSafeInteger(receipt.durableRevision) && receipt.durableRevision >= previousRevision;
+}
+
+function validWriteReceipt(receipt: ExecutionWriteReceipt, request: ExecutionWorkerRequest<WorkerCommand>, previousRevision: number):
+  receipt is Extract<ExecutionWriteReceipt, { kind: "accepted" | "committed" }> {
+  return receipt.operationId === operationId(request)
+    && (receipt.kind === "accepted" || isDurableReceipt(receipt, request, previousRevision));
 }

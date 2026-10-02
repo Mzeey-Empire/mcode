@@ -4,7 +4,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
+let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
@@ -39,17 +40,17 @@ describe("ThreadCompletionService", () => {
   let settingsListener: ((settings: Settings) => void) | null;
   let activeThreadIds: ReturnType<typeof vi.fn<() => string[]>>;
 
-  beforeEach(() => {
-    db = openMemoryDatabase();
-    const workspaceRepo = new WorkspaceRepo(db);
-    threadRepo = new ThreadRepo(db);
-    cleanupJobRepo = new CleanupJobRepo(db);
-    threadId = threadRepo.create(
-      workspaceRepo.create("Test", "/tmp/test", true).id,
+  beforeEach(async () => {
+    db = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
+    const workspaceRepo = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    threadRepo = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    cleanupJobRepo = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    threadId = (await threadRepo.create(
+      (await workspaceRepo.create("Test", "/tmp/test", true)).id,
       "Complete me",
       "direct",
       "main",
-    ).id;
+    )).id;
     activeThreadIds = vi.fn(() => []);
     agentService = {
       runtimeAccess: () => ({ activeThreadIds }),
@@ -85,7 +86,7 @@ describe("ThreadCompletionService", () => {
     service.start();
   });
 
-  function applyRetention(retentionDays: CompletedThreadRetentionDays): void {
+  async function applyRetention(retentionDays: CompletedThreadRetentionDays): Promise<void> {
     settings = {
       ...settings,
       thread: {
@@ -96,6 +97,9 @@ describe("ThreadCompletionService", () => {
       },
     };
     settingsListener?.(settings);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await persistenceRuntime.writer.barrier();
+    await Promise.resolve();
   }
 
   it("persists completion separately from runtime status and releases resources", async () => {
@@ -118,7 +122,7 @@ describe("ThreadCompletionService", () => {
   });
 
   it("disables automatic deletion when the setting is Never", async () => {
-    applyRetention(null);
+    await applyRetention(null);
 
     const completed = await service.complete(threadId);
 
@@ -130,7 +134,7 @@ describe("ThreadCompletionService", () => {
     service.onDeadlineChanges(changed);
     await service.complete(threadId);
 
-    applyRetention(10);
+    await applyRetention(10);
 
     const recalculated = threadRepo.findById(threadId);
     expect(recalculated?.user_completed_at).toBe("2026-08-12T08:00:00.000Z");
@@ -138,14 +142,14 @@ describe("ThreadCompletionService", () => {
     expect(changed).toHaveBeenCalledWith([recalculated]);
   });
 
-  it("preserves blocked cleanup state while recalculating its deadline", () => {
+  it("preserves blocked cleanup state while recalculating its deadline", async () => {
     db.prepare(
       `UPDATE threads
           SET user_completed_at = ?, scheduled_deletion_at = ?, cleanup_state = 'blocked', cleanup_reason = 'dirty'
         WHERE id = ?`,
     ).run(now.toISOString(), "2026-08-13T08:00:00.000Z", threadId);
 
-    applyRetention(10);
+    await applyRetention(10);
 
     expect(threadRepo.findById(threadId)).toMatchObject({
       scheduled_deletion_at: "2026-08-22T08:00:00.000Z",
@@ -159,11 +163,11 @@ describe("ThreadCompletionService", () => {
     const updateSpy = vi.spyOn(threadRepo, "updateCompletedThreadDeadlines");
     const workspaceId = threadRepo.findById(threadId)!.workspace_id;
     for (let index = 0; index < 101; index += 1) {
-      const id = threadRepo.create(workspaceId, `Completed ${index}`, "direct", "main").id;
-      threadRepo.complete(id, now.toISOString(), "2026-08-15T08:00:00.000Z");
+      const id = (await threadRepo.create(workspaceId, `Completed ${index}`, "direct", "main")).id;
+      (await threadRepo.complete(id, now.toISOString(), "2026-08-15T08:00:00.000Z"));
     }
 
-    applyRetention(10);
+    await applyRetention(10);
 
     await vi.waitFor(() => {
       expect(updateSpy).toHaveBeenCalledTimes(2);
@@ -174,7 +178,7 @@ describe("ThreadCompletionService", () => {
   it("shortens a future deadline from its original completion timestamp", async () => {
     await service.complete(threadId);
 
-    applyRetention(2);
+    await applyRetention(2);
 
     expect(threadRepo.findById(threadId)?.scheduled_deletion_at).toBe(
       "2026-08-14T08:00:00.000Z",
@@ -182,12 +186,12 @@ describe("ThreadCompletionService", () => {
   });
 
   it("cancels every pending deadline without reopening completed threads", async () => {
-    const secondThreadId = threadRepo.create(
+    const secondThreadId = (await threadRepo.create(
       threadRepo.findById(threadId)!.workspace_id,
       "Also complete",
       "direct",
       "main",
-    ).id;
+    )).id;
     await service.complete(threadId);
     await service.complete(secondThreadId);
     db.prepare("UPDATE threads SET cleanup_state = 'queued' WHERE id = ?").run(threadId);
@@ -197,7 +201,7 @@ describe("ThreadCompletionService", () => {
        VALUES ('retention-cancel', ?, '/repo', NULL, 'main', 'retention', 0, 0, 1)`,
     ).run(threadId);
 
-    applyRetention(null);
+    await applyRetention(null);
 
     expect(threadRepo.findById(threadId)).toMatchObject({
       user_completed_at: "2026-08-12T08:00:00.000Z",
@@ -215,12 +219,12 @@ describe("ThreadCompletionService", () => {
   });
 
   it("gives a newly overdue thread 24 hours after retention becomes shorter", async () => {
-    applyRetention(10);
+    await applyRetention(10);
     now = new Date("2026-08-05T08:00:00.000Z");
     await service.complete(threadId);
     now = new Date("2026-08-12T08:00:00.000Z");
 
-    applyRetention(3);
+    await applyRetention(3);
 
     expect(threadRepo.findById(threadId)?.scheduled_deletion_at).toBe(
       "2026-08-13T08:00:00.000Z",
@@ -232,7 +236,7 @@ describe("ThreadCompletionService", () => {
     service.onDeadlineChanges(changed);
     await service.complete(threadId);
 
-    applyRetention(3);
+    await applyRetention(3);
 
     expect(threadRepo.findById(threadId)?.scheduled_deletion_at).toBe(
       "2026-08-15T08:00:00.000Z",
@@ -242,7 +246,7 @@ describe("ThreadCompletionService", () => {
 
   it("keeps recalculated deadlines after the service restarts", async () => {
     await service.complete(threadId);
-    applyRetention(10);
+    await applyRetention(10);
     service.stop();
     const persistedDeadline = threadRepo.findById(threadId)?.scheduled_deletion_at;
     const restarted = new ThreadCompletionService(
@@ -288,7 +292,7 @@ describe("ThreadCompletionService", () => {
     const releaseBarrier = vi.fn();
     const releaseOwner = vi.fn().mockResolvedValue(releaseBarrier);
     service.registerResourceOwner("workspace-environment", releaseOwner);
-    vi.spyOn(threadRepo, "complete").mockReturnValueOnce(null);
+    vi.spyOn(threadRepo, "complete").mockResolvedValueOnce(null);
 
     await expect(service.complete(threadId)).rejects.toThrow(`Thread not found: ${threadId}`);
 
@@ -418,7 +422,7 @@ describe("ThreadCompletionService", () => {
   it("reopens the thread and cancels its pending deletion", async () => {
     await service.complete(threadId);
 
-    const reopened = service.reopen(threadId);
+    const reopened = (await service.reopen(threadId));
 
     expect(reopened.user_completed_at).toBeNull();
     expect(reopened.scheduled_deletion_at).toBeNull();
@@ -434,7 +438,7 @@ describe("ThreadCompletionService", () => {
        VALUES ('cleanup-1', ?, '/repo', NULL, 'main', 'retention', 0, 0, 1)`,
     ).run(threadId);
 
-    const reopened = service.reopen(threadId);
+    const reopened = (await service.reopen(threadId));
 
     expect(reopened).toMatchObject({
       user_completed_at: null,
@@ -451,7 +455,7 @@ describe("ThreadCompletionService", () => {
     await service.complete(threadId);
     db.prepare("UPDATE threads SET cleanup_state = 'running' WHERE id = ?").run(threadId);
 
-    expect(() => service.reopen(threadId)).toThrow("Thread cleanup has already started");
+    await expect(service.reopen(threadId)).rejects.toThrow("Thread cleanup has already started");
     expect(threadRepo.findById(threadId)).toMatchObject({
       cleanup_state: "running",
       user_completed_at: expect.any(String),
@@ -464,7 +468,7 @@ describe("ThreadCompletionService", () => {
       "UPDATE threads SET cleanup_state = 'blocked', cleanup_reason = ? WHERE id = ?",
     ).run("Cleanup failed after 5 attempts.", threadId);
 
-    expect(service.reopen(threadId)).toMatchObject({
+    expect((await service.reopen(threadId))).toMatchObject({
       cleanup_state: null,
       user_completed_at: null,
     });
@@ -479,24 +483,24 @@ describe("ThreadCompletionService", () => {
     await service.complete(threadId);
     db.prepare("UPDATE threads SET cleanup_state = 'blocked' WHERE id = ?").run(threadId);
 
-    expect(service.reopen(threadId)).toMatchObject({
+    expect((await service.reopen(threadId))).toMatchObject({
       cleanup_state: null,
       user_completed_at: null,
     });
   });
 
-  it("counts blocked completed retention candidates", () => {
+  it("counts blocked completed retention candidates", async () => {
     db.prepare(
       `UPDATE threads
           SET user_completed_at = ?, scheduled_deletion_at = ?, cleanup_state = 'blocked'
         WHERE id = ?`,
     ).run(now.toISOString(), now.toISOString(), threadId);
-    const second = threadRepo.create(
+    const second = (await threadRepo.create(
       threadRepo.findById(threadId)!.workspace_id,
       "Second blocked",
       "direct",
       "main",
-    );
+    ));
     db.prepare(
       `UPDATE threads
           SET user_completed_at = ?, scheduled_deletion_at = ?, cleanup_state = 'blocked'
@@ -506,31 +510,31 @@ describe("ThreadCompletionService", () => {
     expect(service.cleanupBlockedCount()).toEqual({ count: 2 });
   });
 
-  it("requeues one blocked thread and rebuilds its retention job atomically", () => {
+  it("requeues one blocked thread and rebuilds its retention job atomically", async () => {
     db.prepare(
       `UPDATE threads
           SET user_completed_at = ?, scheduled_deletion_at = ?, cleanup_state = 'blocked'
         WHERE id = ?`,
     ).run(now.toISOString(), now.toISOString(), threadId);
-    const oldJob = cleanupJobRepo.insert({
+    const oldJob = (await cleanupJobRepo.insert({
       thread_id: threadId,
       workspace_path: "/tmp/test",
       worktree_path: null,
       branch: "main",
       kind: "retention",
-    });
-    cleanupJobRepo.recordFailure(oldJob.id, "old failure");
+    }));
+    (await cleanupJobRepo.recordFailure(oldJob.id, "old failure"));
 
-    const queued = service.retryCleanup(threadId);
+    const queued = await service.retryCleanup(threadId);
     const rebuilt = cleanupJobRepo.findByThreadId(threadId);
     expect(queued.cleanup_state).toBe("queued");
     expect(rebuilt).toMatchObject({ kind: "retention", attempts: 0, next_retry_at: 0 });
     expect(rebuilt?.id).not.toBe(oldJob.id);
   });
 
-  it("rejects retry for a thread that is not blocked", () => {
+  it("rejects retry for a thread that is not blocked", async () => {
     const initial = threadRepo.findById(threadId);
-    expect(() => service.retryCleanup(threadId)).toThrow();
+    await expect(service.retryCleanup(threadId)).rejects.toThrow();
     expect(threadRepo.findById(threadId)).toEqual(initial);
     db.prepare(
       `UPDATE threads
@@ -538,20 +542,20 @@ describe("ThreadCompletionService", () => {
         WHERE id = ?`,
     ).run(now.toISOString(), now.toISOString(), threadId);
     const queued = threadRepo.findById(threadId);
-    expect(() => service.retryCleanup(threadId)).toThrow();
+    await expect(service.retryCleanup(threadId)).rejects.toThrow();
     expect(threadRepo.findById(threadId)).toEqual(queued);
     expect(cleanupJobRepo.findByThreadId(threadId)).toBeNull();
   });
 
   it("preserves conversation, attachments, and repository identity", async () => {
-    const messageRepo = new MessageRepo(db);
-    messageRepo.create(threadId, "user", "Keep this context", 1, [{
+    const messageRepo = new MessageRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    (await messageRepo.create(threadId, "user", "Keep this context", 1, [{
       id: "attachment-1",
       name: "context.txt",
       mimeType: "text/plain",
       sizeBytes: 12,
-    }]);
-    threadRepo.updateWorktreePath(threadId, "C:/repo/worktree");
+    }]));
+    (await threadRepo.updateWorktreePath(threadId, "C:/repo/worktree"));
 
     await service.complete(threadId);
 

@@ -67,30 +67,29 @@ export function createExternalThreadControlMcpSession(options: {
     const deliveryId = request.deliveryId ?? normalizeRequestId(request.requestId);
     if (!deliveryId) throw new ExternalThreadControlPairingError("conflict", "External delivery id is required");
     const fingerprint = requestFingerprint(request.toolName, request.arguments);
-    const reservation = options.pairingService.beginDelivery(pairing, deliveryId, fingerprint);
+    const reservation = await options.pairingService.beginDelivery(pairing, deliveryId, fingerprint);
     if (reservation.status === "replayed") return reservation.result ?? {};
     if (reservation.status === "joined") {
       const existing = inFlight.get(reservation.key);
       if (existing) return existing;
       throw new ExternalThreadControlPairingError("conflict", "External delivery is already being reconciled");
     }
-    const execution = executeTool(options.service, pairing.authority, request);
-    inFlight.set(reservation.key, execution);
+    const delivery = executeTool(options.service, pairing.authority, request).then(
+      async (result) => {
+        await options.pairingService.finalizeDelivery(pairing, deliveryId, result);
+        return result;
+      },
+      async (error: unknown) => {
+        await options.pairingService.finalizeDelivery(pairing, deliveryId, {
+          status: "rejected",
+          error: { code: "internal_error", message: "External thread-control delivery failed", retryable: true },
+        });
+        throw error;
+      },
+    );
+    inFlight.set(reservation.key, delivery);
     try {
-      const result = await execution;
-      options.pairingService.finalizeDelivery(pairing, deliveryId, result);
-      return result;
-    } catch (error) {
-      const replayResult = {
-        status: "rejected",
-        error: {
-          code: "internal_error",
-          message: "External thread-control delivery failed",
-          retryable: true,
-        },
-      } as Record<string, unknown>;
-      options.pairingService.finalizeDelivery(pairing, deliveryId, replayResult);
-      throw error;
+      return await delivery;
     } finally {
       inFlight.delete(reservation.key);
     }
@@ -135,9 +134,9 @@ async function executeTool(
       ThreadTargetListInputSchema().parse(request.arguments);
       return ThreadTargetListResultSchema().parse(await service.threadTargetList(authority));
     case "thread_search":
-      return ThreadSearchResultSchema().parse(service.threadSearch(authority, ThreadSearchInputSchema().parse(request.arguments)));
+      return ThreadSearchResultSchema().parse(await service.threadSearch(authority, ThreadSearchInputSchema().parse(request.arguments)));
     case "thread_get":
-      return ThreadGetResultSchema().parse(service.threadGet(authority, ThreadGetInputSchema().parse(request.arguments)));
+      return ThreadGetResultSchema().parse(await service.threadGet(authority, ThreadGetInputSchema().parse(request.arguments)));
     case "thread_send":
       return ThreadSendResultSchema().parse(await service.threadSend(authority, ThreadSendInputSchema().parse(request.arguments)));
     case "thread_stop":

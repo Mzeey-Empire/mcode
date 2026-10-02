@@ -49,7 +49,7 @@ type PrSyncResult = { threadId: string; prNumber: number; prStatus: string };
 
 /** Defines the feature services required to route validated Workspace and Thread RPC calls. */
 export interface WorkspaceThreadRouterDeps {
-  workspaceService: Pick<WorkspaceService, "create" | "delete" | "findById" | "forceDelete" | "list" | "rename" | "reorder" | "touch">;
+  workspaceService: Pick<WorkspaceService, "create" | "delete" | "findById" | "forceDelete" | "list" | "rename" | "reorder">;
   workspaceEnvironmentService: Pick<
     WorkspaceEnvironmentService,
     "beginThreadDeletion" | "beginWorkspaceDeletion" | "cancelSetupForThread" | "cancelSetupForWorkspace" | "clearApprovals" | "read"
@@ -74,26 +74,26 @@ const workspaceThreadHandlers = {
   "workspace.rename": (deps, params) => deps.workspaceService.rename(params.id, params.name),
   "workspace.delete": (deps, params) => deleteWorkspace(deps, params.id),
   "workspace.forceDelete": (deps, params) => forceDeleteWorkspace(deps, params.id),
-  "workspace.pin": (deps, params) => {
-    deps.workspaceRepo.setPinned(params.id, params.pinned);
+  "workspace.pin": async (deps, params) => {
+    await deps.workspaceRepo.setPinned(params.id, params.pinned);
     return { ok: true as const };
   },
-  "workspace.removeRecent": (deps, params) => {
-    deps.workspaceRepo.removeRecent(params.id);
+  "workspace.removeRecent": async (deps, params) => {
+    await deps.workspaceRepo.removeRecent(params.id);
     return { ok: true as const };
   },
-  "workspace.touchLastOpened": (deps, params) => {
-    deps.workspaceRepo.touchLastOpened(params.id);
+  "workspace.touchLastOpened": async (deps, params) => {
+    await deps.workspaceRepo.touchLastOpened(params.id);
     return { ok: true as const };
   },
-  "workspace.reorder": (deps, params) => {
-    deps.workspaceService.reorder(params.id, params.newIndex);
+  "workspace.reorder": async (deps, params) => {
+    await deps.workspaceService.reorder(params.id, params.newIndex);
     broadcast("workspace.orderChanged", {});
     return { ok: true as const };
   },
   "workspace.enrich": enrichWorkspaces,
   "filesystem.browse": (deps, params) => deps.filesystemBrowser.browse(params.path),
-  "thread.list": listThreads,
+  "thread.list": listWorkspaceThreads,
   "thread.recent": (deps, params) => deps.threadService.listRecent(params.limit),
   "thread.create": createThread,
   "thread.delete": (deps, params) => deleteThread(deps, params),
@@ -178,16 +178,16 @@ async function forceDeleteWorkspace(
 async function deleteWorkspaceWithTeardown(
   deps: WorkspaceThreadRouterDeps,
   workspaceId: string,
-  removeWorkspace: (workspaceId: string) => boolean,
+  removeWorkspace: (workspaceId: string) => Promise<boolean>,
   publishDeleted: () => void,
 ): Promise<boolean> {
   const releaseDeletionBarrier = deps.workspaceEnvironmentService.beginWorkspaceDeletion(workspaceId);
   const releaseActionAdmission = await deps.projectActionService.beginWorkspaceTeardown(workspaceId);
   try {
     await teardownWorkspaceThreads(deps, workspaceId);
-    const deleted = removeWorkspace(workspaceId);
+    const deleted = await removeWorkspace(workspaceId);
     if (deleted) {
-      deps.workspaceEnvironmentService.clearApprovals(workspaceId);
+      await deps.workspaceEnvironmentService.clearApprovals(workspaceId);
       deps.gitWatcherService.unwatchWorkspace(workspaceId);
       publishDeleted();
     }
@@ -209,11 +209,16 @@ async function enrichWorkspaces(
   return { items: await deps.enricher.enrich(workspaces) };
 }
 
-function listThreads(
-  deps: WorkspaceThreadRouterDeps,
+/** Read sidebar threads without requiring SQLite's writer lock during reconnect. */
+export function listWorkspaceThreads(
+  deps: {
+    workspaceService: Pick<WorkspaceService, "findById">;
+    threadService: Pick<ThreadService, "list">;
+    gitWatcherService: Pick<GitWatcherService, "retryWatch">;
+  },
   params: { workspaceId: string },
 ): Thread[] {
-  deps.workspaceService.touch(params.workspaceId);
+  // Opening is recorded by workspace.touchLastOpened; reconnect reads must not need the writer lock.
   // Re-detect git status for non-git workspaces (catches `git init` within a session)
   const workspace = deps.workspaceService.findById(params.workspaceId);
   if (workspace && !workspace.is_git_repo) {
@@ -286,15 +291,15 @@ async function completeThread(
   }
 }
 
-function reopenThread(deps: WorkspaceThreadRouterDeps, threadId: string): Thread {
-  const reopened = deps.threadCompletionService.reopen(threadId);
+async function reopenThread(deps: WorkspaceThreadRouterDeps, threadId: string): Promise<Thread> {
+  const reopened = await deps.threadCompletionService.reopen(threadId);
   deps.projectActionService.reopenThread(threadId);
   broadcast("thread.lifecycleChanged", { thread: reopened });
   return reopened;
 }
 
-function retryThreadCleanup(deps: WorkspaceThreadRouterDeps, threadId: string): Thread {
-  const queued = deps.threadCompletionService.retryCleanup(threadId);
+async function retryThreadCleanup(deps: WorkspaceThreadRouterDeps, threadId: string): Promise<Thread> {
+  const queued = await deps.threadCompletionService.retryCleanup(threadId);
   broadcast("thread.lifecycleChanged", { thread: queued });
   return queued;
 }
@@ -313,7 +318,7 @@ function updateThreadSettings(
     codexFastMode?: boolean | null;
     defaultOpenInApp?: string | null;
   },
-): boolean {
+): Promise<boolean> {
   return deps.threadService.updateSettings(params.threadId, {
     reasoning_level: params.reasoningLevel,
     interaction_mode: params.interactionMode,

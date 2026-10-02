@@ -163,6 +163,7 @@ export const mockTransport: McodeTransport = {
   sendMessage: vi.fn().mockResolvedValue(1),
   getRecoveryIncident: vi.fn().mockResolvedValue(null),
   retryTurn: vi.fn().mockResolvedValue(undefined),
+  retrySave: vi.fn().mockResolvedValue({ retried: false }),
   getThreadStartup: vi.fn().mockResolvedValue(null),
   listThreadStartups: vi.fn().mockResolvedValue({ records: [] }),
   cancelThreadStartup: vi.fn(),

@@ -4,11 +4,14 @@ import { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
-import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { openDatabase as openBootstrapDatabase } from "../../../runtime/persistence/sqlite/database.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "./canonical-agent-store.js";
+import { CanonicalProviderCommitProjector } from "./canonical-provider-projection.js";
+import { CanonicalAcceptedEventWrite } from "./canonical-accepted-write.js";
 import { CanonicalExecutionSemanticWriter } from "./canonical-execution-semantic-writer.js";
 import { isGroupableAppend, selectAppendGroup, type QueuedCanonicalWrite } from "./canonical-append-group.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
-import { ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-service.js";
+import { ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService } from "../turns/parent-assistant-text-checkpoint-store.js";
 import { CanonicalAgentWriterReceipts, CanonicalWriterOperationConflict, CanonicalWriterReceiptCapacity } from "./canonical-agent-writer-receipts.js";
 import type {
   CanonicalParentNarrativeClassificationReceipt,
@@ -17,23 +20,31 @@ import type {
   CanonicalWriterResponse,
 } from "./canonical-agent-writer-protocol.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "./canonical-agent-writer-protocol.js";
+import { applicationDatabaseHandlers } from "../../../runtime/persistence/sqlite/application-database-handlers.js";
+import { executeOwnedDatabaseCommand } from "../../../runtime/persistence/sqlite/owned-database-command.js";
+import { DatabaseQueryOnlyRequestSchema, OrdinaryDatabaseWriteRequestSchema, type ApplicationDatabaseWriterRequest, type ApplicationDatabaseWriterResponse } from "../../../runtime/persistence/sqlite/application-database-writer-protocol.js";
 import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 
 let db: Database | undefined;
+let ordinaryHandlers: ReadonlyMap<string, (input: unknown) => unknown> | undefined;
 let boundary: CanonicalAgentBoundary | undefined;
+let providerProjector: CanonicalProviderCommitProjector | undefined;
+let acceptedWriter: CanonicalAcceptedEventWrite | undefined;
 let assistantTextCheckpoints: ParentAssistantTextCheckpointService | undefined;
 let receipts: CanonicalAgentWriterReceipts | undefined;
 let semanticWriter: CanonicalExecutionSemanticWriter | undefined;
 let semanticPublication: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId"> | undefined;
 
-function openDatabase(dbPath: string): void {
-  if (boundary || !NodePath.isAbsolute(dbPath) || !NodeFS.existsSync(dbPath)) {
+function openDatabase(dbPath: string, bootstrap = false): void {
+  if (boundary || !NodePath.isAbsolute(dbPath) || (!bootstrap && !NodeFS.existsSync(dbPath))) {
     throw new Error("Canonical writer requires an existing absolute database path");
   }
-  const connection = new Database(dbPath, { strict: true, readwrite: true });
+  const connection = bootstrap ? openBootstrapDatabase({ dbPath }) : new Database(dbPath, { strict: true, readwrite: true });
   try {
     applySQLiteConnectionPolicy(connection, true);
-    boundary = new CanonicalAgentBoundary(connection, () => {});
+    ordinaryHandlers = applicationDatabaseHandlers(connection);
+    providerProjector = new CanonicalProviderCommitProjector(connection);
+    boundary = providerProjector.canonical;
     assistantTextCheckpoints = new ParentAssistantTextCheckpointService(connection);
     receipts = new CanonicalAgentWriterReceipts(connection);
     semanticWriter = new CanonicalExecutionSemanticWriter(connection, (events) => {
@@ -41,9 +52,12 @@ function openDatabase(dbPath: string): void {
       if (!correlation) throw new Error("Semantic publication has no active request");
       publishSemantic(correlation, events);
     });
+    acceptedWriter = new CanonicalAcceptedEventWrite(connection, boundary, semanticWriter);
     db = connection;
   } catch (error) {
     boundary = undefined;
+    providerProjector = undefined;
+    acceptedWriter = undefined;
     assistantTextCheckpoints = undefined;
     receipts = undefined;
     semanticWriter = undefined;
@@ -96,14 +110,16 @@ async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterR
   };
   if (request.kind === "open") {
     try {
-      openDatabase(request.dbPath);
+      openDatabase(request.dbPath, request.bootstrap);
       return { ...correlation, kind: "opened" };
-    } catch {
-      return { ...correlation, kind: "failed", reason: "open-failed" };
+    } catch (error) {
+      return { ...correlation, kind: "failed", reason: "open-failed", failure: describeFailure(error) };
     }
   }
   if (request.kind === "close") {
     boundary = undefined;
+    providerProjector = undefined;
+    acceptedWriter = undefined;
     assistantTextCheckpoints = undefined;
     receipts = undefined;
     semanticWriter = undefined;
@@ -116,8 +132,8 @@ async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterR
       if (!receipts) throw new Error("Canonical writer has not opened its database");
       receipts.acknowledge(request.executionId, request.operationId);
       return { ...correlation, kind: "operation-acknowledged" };
-    } catch {
-      return { ...correlation, kind: "failed", reason: "write-failed" };
+    } catch (error) {
+      return { ...correlation, kind: "failed", reason: "write-failed", failure: describeFailure(error) };
     }
   }
   if (request.kind === "semantic-transact" || request.kind === "semantic-worker-loss") {
@@ -145,8 +161,8 @@ async function handleSemanticWrite(
       ? await withSQLiteBusyRetry(() => writer.transact(request.operation))
       : await withSQLiteBusyRetry(() => writer.interruptWorkerLoss(request.input));
     return { ...correlation, kind: "semantic-transacted", receipt };
-  } catch {
-    return { ...correlation, kind: "failed", reason: "write-failed" };
+  } catch (error) {
+    return { ...correlation, kind: "failed", reason: "write-failed", failure: describeFailure(error) };
   } finally {
     semanticPublication = undefined;
   }
@@ -181,7 +197,7 @@ function isSQLiteBusy(error: unknown): boolean {
 }
 
 async function handleWrite(
-  request: Extract<CanonicalWriterRequest, { kind: "commit" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery" }>,
+  request: Extract<CanonicalWriterRequest, { kind: "commit" | "append-accepted" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery" }>,
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
 ): Promise<CanonicalWriterResponse> {
   try {
@@ -204,15 +220,22 @@ async function handleWrite(
       kind: "failed",
       reason: error instanceof CanonicalWriterOperationConflict ? "operation-conflict"
         : error instanceof CanonicalWriterReceiptCapacity ? "receipt-capacity" : "write-failed",
+      failure: describeFailure(error),
     };
   }
 }
 
 function applyWrite(
-  request: Extract<CanonicalWriterRequest, { kind: "commit" | "classify-parent-narrative-recovery" }>,
+  request: Extract<CanonicalWriterRequest, { kind: "commit" | "append-accepted" | "classify-parent-narrative-recovery" }>,
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
   canonical: CanonicalAgentBoundary,
-): Extract<CanonicalWriterResponse, { kind: "committed" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified" }> {
+): Extract<CanonicalWriterResponse, { kind: "committed" | "accepted-appended" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified" }> {
+  if (request.kind === "append-accepted") {
+    if (!acceptedWriter || request.input.execution.executionId !== request.executionId) {
+      throw new Error("Accepted writer execution mismatch");
+    }
+    return { ...correlation, kind: "accepted-appended", result: acceptedWriter.apply(request.input, request.operationId) };
+  }
   if (request.kind === "classify-parent-narrative-recovery") {
     if (request.input.executionId !== request.executionId) {
       throw new Error("Canonical writer classification execution mismatch");
@@ -221,21 +244,37 @@ function applyWrite(
     return { ...correlation, kind: "parent-narrative-recovery-classified", receipt };
   }
   assertRouting(request.input, request.executionId);
-  const result = canonical.commit(request.input);
+  const projected = request.projectProviderEvents ? requireProviderProjector().commit(request.input) : undefined;
+  const result = projected ?? canonical.commit(request.input);
   const { outcome, conversationRevision, rosterRevision, acceptedThrough, durableThrough, events } = result;
   return {
     ...correlation,
     kind: "committed",
-    receipt: { outcome, conversationRevision, rosterRevision, acceptedThrough, durableThrough, events },
+    receipt: { outcome, conversationRevision, rosterRevision, acceptedThrough, durableThrough, events,
+      ...(projected ? { providerProjection: projected.providerProjection } : {}) },
   };
+}
+
+function requireProviderProjector(): CanonicalProviderCommitProjector {
+  if (!providerProjector) throw new Error("Canonical provider projector has not opened its database");
+  return providerProjector;
 }
 
 const requestQueue: QueuedCanonicalWrite[] = [];
 let draining = false;
 
-function failRequest(request: CanonicalWriterRequest): void {
+function describeFailure(error: unknown): { name: string; message: string; code?: string; retryAfterSeconds?: number } {
+  if (!(error instanceof Error)) return { name: "Error", message: String(error).slice(0, 8_000) };
+  return { name: error.name.slice(0, 128), message: error.message.slice(0, 8_000),
+    ...("code" in error && typeof error.code === "string" ? { code: error.code.slice(0, 128) } : {}),
+    ...("retryAfterSeconds" in error && typeof error.retryAfterSeconds === "number" && Number.isFinite(error.retryAfterSeconds)
+      ? { retryAfterSeconds: error.retryAfterSeconds } : {}) };
+}
+
+function failRequest(request: CanonicalWriterRequest, error: unknown): void {
   globalThis.postMessage({ requestId: request.requestId, operationId: request.operationId,
-    executionId: request.executionId, kind: "failed", reason: "write-failed" } satisfies CanonicalWriterResponse);
+    executionId: request.executionId, kind: "failed", reason: "write-failed",
+    failure: describeFailure(error) } satisfies CanonicalWriterResponse);
 }
 
 async function handleAppendGroup(requests: Extract<CanonicalWriterRequest, { kind: "semantic-transact" }>[]): Promise<number> {
@@ -267,8 +306,7 @@ async function handleSingleRequest(request: CanonicalWriterRequest): Promise<voi
   const response = await handle(request);
   globalThis.postMessage(response);
   if (requestQueue.length === 1 && response.kind === "semantic-transacted" && response.receipt.kind === "committed"
-    && request.kind === "semantic-transact" && (request.operation.mutation.kind === "finish"
-      || request.operation.mutation.kind === "finish-live-event")) gc(true);
+    && request.kind === "semantic-transact" && request.operation.mutation.kind === "finish-live-event") gc(true);
 }
 
 async function drainRequests(): Promise<void> {
@@ -282,7 +320,7 @@ async function drainRequests(): Promise<void> {
     else await handleSingleRequest(request);
   } catch (error) {
     console.error("Canonical writer request failed unexpectedly", error);
-    failRequest(request);
+    failRequest(request, error);
   } finally {
     requestQueue.splice(0, consumed);
     if (requestQueue.length > 0) setImmediate(() => { void drainRequests(); });
@@ -290,14 +328,22 @@ async function drainRequests(): Promise<void> {
   }
 }
 
-globalThis.onmessage = (message: MessageEvent<CanonicalWriterRequest>): void => {
+globalThis.onmessage = (message: MessageEvent<ApplicationDatabaseWriterRequest>): void => {
   const request = message.data;
+  if (request.kind === "query-only-policy") {
+    handleQueryOnlyPolicy(request);
+    return;
+  }
+  if (request.kind === "ordinary-write") {
+    handleOrdinaryWrite(request);
+    return;
+  }
   try {
     requestQueue.push({ request,
       bytes: request.kind === "semantic-transact" && isGroupableAppend(request.operation)
         ? Buffer.byteLength(JSON.stringify(request.operation), "utf8") : 0 });
-  } catch {
-    failRequest(request);
+  } catch (error) {
+    failRequest(request, error);
     return;
   }
   if (!draining) {
@@ -306,5 +352,37 @@ globalThis.onmessage = (message: MessageEvent<CanonicalWriterRequest>): void => 
     setImmediate(() => { void drainRequests(); });
   }
 };
+
+function handleQueryOnlyPolicy(request: Extract<ApplicationDatabaseWriterRequest, { kind: "query-only-policy" }>): void {
+  try {
+    const parsed = DatabaseQueryOnlyRequestSchema.parse(request);
+    if (!db) throw new Error("Database writer is not open");
+    db.run(parsed.enabled ? "PRAGMA query_only = ON" : "PRAGMA query_only = OFF");
+  } catch (error) {
+    globalThis.postMessage({ kind: "ordinary-failed", requestId: request.requestId,
+      name: request.name, failure: describeFailure(error) } satisfies ApplicationDatabaseWriterResponse);
+    return;
+  }
+  globalThis.postMessage({ kind: "ordinary-written", requestId: request.requestId,
+    name: request.name, result: undefined } satisfies ApplicationDatabaseWriterResponse);
+}
+
+function handleOrdinaryWrite(request: Extract<ApplicationDatabaseWriterRequest, { kind: "ordinary-write" }>): void {
+  let result: unknown;
+  try {
+    const parsed = OrdinaryDatabaseWriteRequestSchema.parse(request);
+    const handler = ordinaryHandlers?.get(parsed.name);
+    const connection = db;
+    if (!handler || !connection) throw new Error("Database operation is not registered");
+    result = executeOwnedDatabaseCommand(connection, handler, parsed.input);
+  } catch (error) {
+    globalThis.postMessage({ kind: "ordinary-failed", requestId: request.requestId,
+      name: request.name, failure: describeFailure(error) } satisfies ApplicationDatabaseWriterResponse);
+    return;
+  }
+  // A lost reply after commit is uncertain. Only failures inside the transaction are rolled back.
+  globalThis.postMessage({ kind: "ordinary-written", requestId: request.requestId,
+    name: request.name, result } satisfies ApplicationDatabaseWriterResponse);
+}
 
 process.on("exit", () => db?.close(true));

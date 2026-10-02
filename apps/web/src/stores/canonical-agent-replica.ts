@@ -2,16 +2,30 @@ import {
   createAgentModelState,
   reduceAgentEventBatch,
   type AgentModelState,
+  type AcceptedCanonicalAgentEventEnvelope,
   type CanonicalAgentEventEnvelope,
   type CanonicalAgentReconnectRecovery,
   type CanonicalAgentRevision,
 } from "@mcode/contracts";
 
-/** Renderer-owned replica of one thread's canonical durable state. */
+/** Renderer-owned replica of one thread's saved state and accepted progress. */
 export interface CanonicalAgentReplica {
+  /** Durable revisions and progress positions belong to this stream owner. */
+  ownerThreadId: string | null;
+  /** Visible state combines saved history with the retained accepted suffix. */
   state: AgentModelState;
+  durableState: AgentModelState;
   revision: CanonicalAgentRevision;
   recoveryRequired: boolean;
+  progress: {
+    epoch: string;
+    acceptedThrough: number;
+    savedThrough: number;
+    retained: readonly AcceptedCanonicalAgentEventEnvelope[];
+  } | null;
+  retiredEpochs: readonly string[];
+  lostProgress: boolean;
+  interruptedTurnIds: readonly string[];
 }
 
 /** Result of one ordered canonical replica update. */
@@ -23,10 +37,17 @@ export interface CanonicalAgentReplicaUpdate {
 
 /** Create an empty canonical replica for a thread with no installed durable state. */
 export function createCanonicalAgentReplica(): CanonicalAgentReplica {
+  const state = createAgentModelState();
   return {
-    state: createAgentModelState(),
+    ownerThreadId: null,
+    state,
+    durableState: state,
     revision: { conversationRevision: 0, rosterRevision: 0 },
     recoveryRequired: false,
+    progress: null,
+    retiredEpochs: [],
+    lostProgress: false,
+    interruptedTurnIds: [],
   };
 }
 
@@ -45,7 +66,9 @@ export function applyCanonicalReconnectRecovery(
     }
     return {
       replica: {
+        ...current,
         state: recovery.snapshot.state,
+        durableState: recovery.snapshot.state,
         revision: nextRevision,
         recoveryRequired: false,
       },
@@ -127,11 +150,13 @@ function applyCanonicalEvents(
       installedSnapshot: false,
     };
   }
-  const reduction = reduceAgentEventBatch(current.state, events);
+  const reduction = reduceAgentEventBatch(current.durableState, events);
   if (reduction.outcome === "rejected") return recoveryRequired(current);
   return {
     replica: {
+      ...current,
       state: reduction.state,
+      durableState: reduction.state,
       revision: through,
       recoveryRequired: false,
     },

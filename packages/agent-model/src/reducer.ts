@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { CanonicalAgentEventEnvelopeSchema } from "./events.js";
+import { bindResponseItems } from "./response-binding.js";
+import { applyCollaborationObservation } from "./collaboration-observation.js";
+import { CanonicalAgentSemanticEnvelopeSchema } from "./events.js";
 import {
   AgentItemSchema,
   AgentThreadSchema,
@@ -57,7 +59,7 @@ const TERMINAL_TURN_STATUSES: ReadonlySet<AgentTurnStatus> = new Set([
   "Errored",
 ]);
 
-type AgentEvent = z.infer<typeof CanonicalAgentEventEnvelopeSchema>;
+type AgentEvent = z.infer<typeof CanonicalAgentSemanticEnvelopeSchema>;
 type AgentEventPayload = AgentEvent["payload"];
 type AgentEventType = AgentEventPayload["type"];
 type AgentEventFor<TType extends AgentEventType> = AgentEvent & {
@@ -74,6 +76,9 @@ type AgentEventReducer = (
 ) => AgentReducerResult;
 
 const AGENT_EVENT_REDUCERS: Record<AgentEventType, AgentEventReducer> = {
+  "collaboration.observed": reduceCollaborationObserved,
+  "execution.checkpoint": (state, _event, acceptedInputState) => reduceVolatileTruncation(state, acceptedInputState),
+  "turn.response-bound": (state, event, acceptedInputState) => reduceResponseBound(state, event, acceptedInputState),
   "thread.recorded": (state, event, acceptedInputState) =>
     reduceThreadRecorded(state, event as AgentEventFor<"thread.recorded">, acceptedInputState),
   "child-thread.recorded": (state, event, acceptedInputState) =>
@@ -111,6 +116,12 @@ const AGENT_EVENT_REDUCERS: Record<AgentEventType, AgentEventReducer> = {
   "publication.recorded": (state, _event, acceptedInputState) =>
     reduceVolatileTruncation(state, acceptedInputState),
 };
+
+function reduceCollaborationObserved(state: AgentModelState, event: AgentEvent, acceptedInputState: AcceptedInputState): AgentReducerResult {
+  if (event.payload.type !== "collaboration.observed" || !event.routing.turnId) return { state, outcome: "routing-conflict" };
+  const candidate = applyCollaborationObservation(state, { ...event.routing, turnId: event.routing.turnId }, event.payload.changes);
+  return candidate ? { state: { ...candidate, ...acceptedInputState }, outcome: "applied" } : { state, outcome: "routing-conflict" };
+}
 
 /** Create an empty canonical reducer state. */
 export function createAgentModelState(): AgentModelState {
@@ -351,6 +362,16 @@ function reduceVolatileTruncation(
   return { state: { ...state, ...acceptedInputState }, outcome: "applied" };
 }
 
+function reduceResponseBound(state: AgentModelState, event: AgentEvent, acceptedInputState: AcceptedInputState): AgentReducerResult {
+  if (event.payload.type !== "turn.response-bound") return { state, outcome: "routing-conflict" };
+  const turn = event.routing.turnId ? state.turns[event.routing.turnId] : undefined;
+  if (!turn || turn.threadId !== event.routing.threadId || turn.executionId !== event.routing.executionId) {
+    return { state, outcome: "routing-conflict" };
+  }
+  return { state: { ...state, ...acceptedInputState, items: bindResponseItems(state.items,
+    { ...event.payload, threadId: turn.threadId, turnId: turn.id }) }, outcome: "applied" };
+}
+
 function reduceItemRecorded(
   state: AgentModelState,
   event: AgentEventFor<"item.recorded">,
@@ -395,7 +416,7 @@ function reduceCollaborationActionRecorded(
 /** Apply a semantic event batch atomically or return the unchanged input state. */
 export function reduceAgentEventBatch(
   state: AgentModelState,
-  events: readonly z.infer<typeof CanonicalAgentEventEnvelopeSchema>[],
+  events: readonly z.infer<typeof CanonicalAgentSemanticEnvelopeSchema>[],
 ): AgentBatchReduction {
   let nextState = state;
   let appliedCount = 0;

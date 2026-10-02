@@ -3,6 +3,7 @@ import type { ThoughtSegment } from "@/features/conversation/narrative/types";
 import type { PlanQuestion } from "@mcode/contracts";
 import { LruCache } from "@/lib/lru-cache";
 import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "./threadStore";
+import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import {
   createEmptyThreadRecord,
@@ -44,6 +45,7 @@ export function resetThreadStoreForTests(opts?: {
   runningThreadIds?: Set<string>;
   recentlyAnsweredPlanMessageIds?: Set<string>;
 }) {
+  stableAgentEventPublications.reset();
   const baseline = createEmptyThreadStoreState();
   useThreadStore.setState({
     ...baseline,

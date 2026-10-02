@@ -4,6 +4,7 @@ import { sameExecution } from "./execution-mailbox-protocol.js";
 import type { ExecutionIdentity, ExecutionLease, ExecutionMailboxCompletion } from "./execution-mailbox-protocol.js";
 import type { ExecutionMailboxScheduler, ExecutionRecoveryReceipt } from "./execution-mailbox-scheduler.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
+import { restoreExecutionWriterFailure } from "./execution-writer-failure.js";
 
 type Scheduler = ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>;
 
@@ -124,6 +125,7 @@ export class ExecutionMailboxOwner {
 function requireReply(completion: ExecutionMailboxCompletion<ExecutionWorkerResult>): ExecutionWorkerResult {
   if (completion.kind !== "reply") throw new Error(`Execution worker ${completion.kind}`);
   if (completion.result.kind === "rejected") {
+    if (completion.result.failure) throw restoreExecutionWriterFailure(completion.result.failure);
     throw new Error(`Execution worker rejected command: ${completion.result.reason}`);
   }
   return completion.result;

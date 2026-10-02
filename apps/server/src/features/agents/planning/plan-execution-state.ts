@@ -24,6 +24,17 @@ export class PlanExecutionState {
   private pendingExitMarkdown: string | undefined;
   private captured = false;
 
+  /** Prepare plans without consuming the accepted parser or materialization state. */
+  fork(): PlanExecutionState {
+    const copy = new PlanExecutionState();
+    copy.questionParser = this.questionParser?.fork();
+    copy.outputParser = this.outputParser?.fork();
+    copy.pendingOutput = structuredClone(this.pendingOutput);
+    copy.pendingExitMarkdown = this.pendingExitMarkdown;
+    copy.captured = this.captured;
+    return copy;
+  }
+
   beginQuestionGeneration(): void {
     this.questionParser = new PlanQuestionParser();
   }

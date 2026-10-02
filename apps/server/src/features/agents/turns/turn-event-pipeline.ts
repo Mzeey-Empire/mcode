@@ -227,7 +227,11 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
   private drain(threadId: string): void {
     if (this.drainingThreads.has(threadId) || this.applicationErrors.has(threadId)) return;
     this.drainingThreads.add(threadId);
-    this.drainOwnedQueue(threadId);
+    try {
+      this.drainOwnedQueue(threadId);
+    } catch (error) {
+      this.failApplication(threadId, error);
+    }
   }
 
   private drainOwnedQueue(threadId: string): void {

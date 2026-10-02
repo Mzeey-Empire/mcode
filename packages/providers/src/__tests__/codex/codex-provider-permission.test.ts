@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@mcode/shared", () => ({
   getMcodeDir: () => process.env.MCODE_DATA_DIR ?? ".",
@@ -36,6 +36,10 @@ function seedSession(
     cwd: "/",
     runTurnSeq: 0,
     pendingTurnId: null,
+    childExecutionGenerations: new Map(),
+    nativeThreadExecutionIds: new Map(),
+    pendingChildEvents: [],
+    nativeExecutionConflictKeys: new Set(),
     ...state,
   };
   const pool = (
@@ -76,6 +80,14 @@ describe("CodexProvider permission flow", () => {
       lastUsedAt: Date.now() - 1000,
       sandboxMode: "workspace-write",
     });
+  });
+
+  afterEach(async () => {
+    try {
+      await provider.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("emits permission_request and lists the pending entry when handler is invoked", async () => {
@@ -180,7 +192,7 @@ describe("CodexProvider permission flow", () => {
     const pending = provider.listPendingPermissions!(threadId);
     expect(pending).toHaveLength(1);
 
-    provider.shutdown();
+    await provider.shutdown();
 
     const response = await p;
     expect(response).toEqual({ decision: "abort" });
@@ -347,6 +359,7 @@ describe("CodexProvider permission flow", () => {
       cwd: "/",
       model: "gpt-5",
       permissionMode: "full",
+      approvalReviewMode: "manual",
       interactionMode: "build",
       providerOptions: {},
     });

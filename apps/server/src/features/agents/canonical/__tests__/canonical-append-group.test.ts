@@ -9,6 +9,7 @@ import type { ExecutionSemanticOperation } from "../../execution/execution-worke
 import { APPEND_GROUP_LIMITS, selectAppendGroup, type QueuedCanonicalWrite } from "../canonical-append-group.js";
 import { CanonicalExecutionSemanticWriter } from "../canonical-execution-semantic-writer.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 
 const NOW = "2026-09-25T12:00:00.000Z";
 
@@ -163,7 +164,8 @@ describe("file-backed grouped semantic commits", () => {
 
   it("correlates concurrent worker requests and publishes only rows visible from a separate connection", async () => {
     vi.restoreAllMocks();
-    const client = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const databaseWriter = new ApplicationDatabaseWriter(NodePath.join(directory, "app.sqlite"));
+    const client = new CanonicalAgentWriterClient(databaseWriter);
     const observed: string[] = [];
     try {
       const operations = [append(1), append(2)];
@@ -190,7 +192,8 @@ describe("file-backed grouped semantic commits", () => {
       expect(observer.query("SELECT id, thread_id FROM canonical_agent_items WHERE id IN ('item-1-2', 'item-2-2') ORDER BY id").all())
         .toEqual([{ id: "item-1-2", thread_id: "thread-1" }, { id: "item-2-2", thread_id: "thread-2" }]);
     } finally {
-      await client.close();
+      try { await client.close(); }
+      finally { await databaseWriter.close(); }
     }
   });
 
@@ -199,7 +202,8 @@ describe("file-backed grouped semantic commits", () => {
     db.exec(`CREATE TRIGGER reject_first_append BEFORE INSERT ON canonical_writer_operation_receipts
       WHEN NEW.kind = 'semantic:append-events' AND NEW.execution_id = '${append(1).execution.executionId}'
       BEGIN SELECT RAISE(ABORT, 'execution write failed'); END;`);
-    const client = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const databaseWriter = new ApplicationDatabaseWriter(NodePath.join(directory, "app.sqlite"));
+    const client = new CanonicalAgentWriterClient(databaseWriter);
     const seen: string[] = [];
     try {
       const results = await Promise.allSettled([1, 2].map((index) => client.transactSemantic(append(index),
@@ -210,7 +214,8 @@ describe("file-backed grouped semantic commits", () => {
       expect(seen).toContain(append(2).execution.executionId);
       expect(persistedAppends()).toEqual([{ operation_id: "lease-2:2" }]);
     } finally {
-      await client.close();
+      try { await client.close(); }
+      finally { await databaseWriter.close(); }
     }
   });
 
@@ -219,7 +224,8 @@ describe("file-backed grouped semantic commits", () => {
     const invalid = append(1);
     if (invalid.mutation.kind !== "append-events") throw new Error("Expected append");
     const operation = { ...invalid, mutation: { ...invalid.mutation, nativeCursor: 1n } };
-    const client = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const databaseWriter = new ApplicationDatabaseWriter(NodePath.join(directory, "app.sqlite"));
+    const client = new CanonicalAgentWriterClient(databaseWriter);
     try {
       const results = await Promise.allSettled([
         client.transactSemantic(operation, () => {}), client.transactSemantic(append(2), () => {}),
@@ -228,7 +234,8 @@ describe("file-backed grouped semantic commits", () => {
       expect(results[1]).toMatchObject({ status: "fulfilled", value: { kind: "committed" } });
       expect(persistedAppends()).toEqual([{ operation_id: "lease-2:2" }]);
     } finally {
-      await client.close();
+      try { await client.close(); }
+      finally { await databaseWriter.close(); }
     }
   });
 });

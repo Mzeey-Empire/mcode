@@ -53,15 +53,15 @@ export class AgentTurnContinuationPort {
 
 /** Streams deterministic assistant text for the restart-reliability harness. */
 export class AgentReliabilityPort {
-  private stream: ((threadId: string) => { threadId: string; executionId: string; text: string }) | undefined;
+  private stream: ((threadId: string) => Promise<{ threadId: string; executionId: string; text: string }>) | undefined;
 
   /** Bind the runtime owner during composition. */
-  bind(stream: (threadId: string) => { threadId: string; executionId: string; text: string }): void {
+  bind(stream: (threadId: string) => Promise<{ threadId: string; executionId: string; text: string }>): void {
     this.stream = stream;
   }
 
   /** Stream one deterministic assistant prefix. */
-  streamAssistantText(threadId: string): { threadId: string; executionId: string; text: string } {
+  streamAssistantText(threadId: string): Promise<{ threadId: string; executionId: string; text: string }> {
     if (!this.stream) throw new Error("Agent reliability runtime is not configured");
     return this.stream(threadId);
   }

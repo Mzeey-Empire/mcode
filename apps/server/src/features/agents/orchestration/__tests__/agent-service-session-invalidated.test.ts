@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
 import { AgentEventType } from "@mcode/contracts";
@@ -11,14 +11,14 @@ import type {
   ProviderId,
   TurnRequest,
 } from "@mcode/contracts";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { AgentService } from "../agent-service.js";
-import { createAgentServiceForTest, startAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, drainAgentServicePersistenceForTest, startAgentServiceIngressForTest, wrapProviderEmitterForRuntimeEvents } from "./agent-service-test-harness.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
@@ -88,6 +88,7 @@ async function flushIngressEvents(): Promise<void> {
  * a fresh session instead of resuming the broken transcript forever.
  */
 describe("AgentService clears sdk_session_id on session invalidation", () => {
+  let database: OwnedTestDatabase;
   let db: Database;
   let threadRepo: ThreadRepo;
   let workspaceRepo: WorkspaceRepo;
@@ -95,19 +96,23 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
   let toolCallRecordRepo: ToolCallRecordRepo;
   let turnSnapshotRepo: TurnSnapshotRepo;
   let svc: AgentService;
-  let providerStub: NodeEvents.EventEmitter & Partial<IAgentProvider>;
+  let providerStub: NodeEvents.EventEmitter & IAgentProvider;
   let providerEventIngress: ProviderEventIngress;
 
   beforeEach(() => {
-    db = openMemoryDatabase();
-    threadRepo = new ThreadRepo(db);
-    workspaceRepo = new WorkspaceRepo(db);
-    messageRepo = new MessageRepo(db);
-    toolCallRecordRepo = new ToolCallRecordRepo(db);
-    turnSnapshotRepo = new TurnSnapshotRepo(db);
+    database = createOwnedTestDatabase();
+    db = database.db;
+    threadRepo = new ThreadRepo(db, database.writer);
+    workspaceRepo = new WorkspaceRepo(db, database.writer);
+    messageRepo = new MessageRepo(db, database.writer);
+    toolCallRecordRepo = new ToolCallRecordRepo(db, database.writer);
+    turnSnapshotRepo = new TurnSnapshotRepo(db, database.writer);
 
     providerStub = wrapProviderEmitterForRuntimeEvents(Object.assign(new NodeEvents.EventEmitter(), {
       id: "claude" as ProviderId,
+      descriptor: { id: "claude" as const, capabilities: [] },
+      forker: { fork: async () => { throw new Error("Unexpected fixture session fork"); } },
+      listModels: async () => [],
       supportsCompletion: false,
       sessionForkOnResume: "unsupported" as const,
       maxInputCharactersPerTurn: 16_000,
@@ -119,7 +124,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     const registryStub: IProviderRegistry = {
       resolve: () => providerStub as unknown as IAgentProvider,
       resolveAll: () => [providerStub as unknown as IAgentProvider],
-      shutdown: () => {},
+      shutdown: async () => {},
     };
 
     const gitServiceStub = {
@@ -147,7 +152,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       assertUsable: vi.fn(),
     } as unknown as ProviderAvailabilityService;
     providerEventIngress = new ProviderEventIngress();
-    const canonicalSink = createCanonicalAgentBoundaryStub(db);
+    const canonicalSink = createCanonicalAgentBoundaryStub(db, database.writer);
     Object.assign(canonicalSink, { recordNativeCursor: vi.fn(() => true) });
 
     svc = createAgentServiceForTest(
@@ -158,14 +163,12 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
       attachmentServiceStub,
       registryStub,
       threadServiceStub,
-      { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../events/persistence/hook-execution-repo.js").HookExecutionRepo,
       turnSnapshotRepo,
       snapshotServiceStub,
       db,
       memoryPressureServiceStub,
       settingsServiceStub,
       availabilityStub,
-      { markAnswered: vi.fn(), isAnswered: vi.fn(() => false), listAnsweredForThread: vi.fn(() => []) } as unknown as import("../../planning/persistence/plan-question-answers-repo.js").PlanQuestionAnswersRepo,
       { deliverHandoff: vi.fn(async () => ({ providerWireOverride: "" })) } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
       new NarrativeStore(
@@ -174,21 +177,34 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
         { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../conversation/narrative/persistence/thought-segment-repo.js").ThoughtSegmentRepo,
         { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../events/persistence/hook-execution-repo.js").HookExecutionRepo,
       ),
-      new ParentAssistantTextCheckpointService(db),
+      new ParentAssistantTextCheckpointService(db, database.writer),
       undefined,
       undefined,
       undefined,
       canonicalSink,
       undefined,
       providerEventIngress,
-    );
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    database.writer,
+  );
     startAgentServiceIngressForTest(svc, );
   });
 
+  afterEach(async () => {
+    try { await drainAgentServicePersistenceForTest(svc); }
+    finally { await database.close(); }
+  });
+
   it("nulls sdk_session_id when a sdk_session_invalidated event arrives", async () => {
-    const workspace = workspaceRepo.create("test-ws", process.cwd());
-    const thread = threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
-    threadRepo.updateSdkSessionId(thread.id, "poison-sid");
+    const workspace = await workspaceRepo.create("test-ws", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
+    await threadRepo.updateSdkSessionId(thread.id, "poison-sid");
     expect(threadRepo.findById(thread.id)?.sdk_session_id).toBe("poison-sid");
 
     providerStub.emit("event", {
@@ -198,13 +214,13 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     } satisfies AgentEvent);
     await flushIngressEvents();
 
-    expect(threadRepo.findById(thread.id)?.sdk_session_id).toBeNull();
+    await vi.waitFor(() => expect(threadRepo.findById(thread.id)?.sdk_session_id).toBeNull());
   });
 
   it("leaves sdk_session_id intact for an unrelated System subtype", async () => {
-    const workspace = workspaceRepo.create("test-ws", process.cwd());
-    const thread = threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
-    threadRepo.updateSdkSessionId(thread.id, "keep-sid");
+    const workspace = await workspaceRepo.create("test-ws", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
+    await threadRepo.updateSdkSessionId(thread.id, "keep-sid");
 
     providerStub.emit("event", {
       type: AgentEventType.System,
@@ -219,8 +235,8 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
   it("accepts a committed Cursor SDK session identity and resumes the next turn", async () => {
     Object.assign(providerStub, { id: "cursor" as ProviderId });
     vi.mocked(providerStub.sendTurn).mockResolvedValue(undefined);
-    const workspace = workspaceRepo.create("test-ws", process.cwd());
-    const thread = threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "cursor");
+    const workspace = await workspaceRepo.create("test-ws", process.cwd());
+    const thread = await threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "cursor");
 
     await svc.sendMessage({
       threadId: thread.id,
@@ -235,7 +251,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     ]);
     await flushIngressEvents();
 
-    expect(threadRepo.findById(thread.id)?.sdk_session_id).toBe("cursor-session-1");
+    await vi.waitFor(() => expect(threadRepo.findById(thread.id)?.sdk_session_id).toBe("cursor-session-1"));
 
     providerStub.emit("event", {
       type: AgentEventType.TurnComplete,

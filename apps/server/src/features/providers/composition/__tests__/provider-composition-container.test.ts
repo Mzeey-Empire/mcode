@@ -7,14 +7,13 @@ import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
 import {
   AgentEventType,
-  type ProviderEventBatch,
 } from "@mcode/contracts";
 import type { ProviderHostPorts } from "@mcode/providers";
 
 import { setupContainer } from "../../../../application/composition/container.js";
-import { CanonicalAgentBoundary } from "../../../agents/canonical/canonical-agent-boundary.js";
 import { WorkerOwnedTurnRuntime } from "../../../agents/execution/worker-owned-turn-runtime.js";
-import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ProviderRegistry } from "../provider-registry.js";
 import { SettingsService } from "../../../settings/settings-service.js";
 import { ProviderEventIngress, type ProviderEventIngressEvent } from "../provider-event-ingress.js";
@@ -31,11 +30,13 @@ function seedThread(db: Database): void {
   ).run("thread-1", "workspace-1", "Thread", "main", "cursor", NOW, NOW);
 }
 
-function runtimeBatch(): ProviderEventBatch {
+function runtimeBatch(): Parameters<ProviderHostPorts["events"]["submit"]>[0] {
   return {
     threadId: "thread-1",
     turnId: "turn-1",
     executionId: EXECUTION_ID,
+    batchId: "cursor:runtime-event-1",
+    deliveryAttempt: 1,
     phase: "running",
     events: [{
       eventId: "cursor:runtime-event-1",
@@ -77,23 +78,28 @@ function runtimeBatch(): ProviderEventBatch {
 
 describe("provider composition container", () => {
   let database: Database | undefined;
+  let seedDatabase: Database | undefined;
   let temporaryDirectory: string | undefined;
   const previousDatabasePath = process.env.MCODE_DB_PATH;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     container.reset();
     temporaryDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-provider-composition-"));
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
-    setupContainer(temporaryDirectory);
+    await setupContainer(temporaryDirectory);
     database = container.resolve<Database>("Database");
+    seedDatabase = openDatabase({ dbPath: process.env.MCODE_DB_PATH });
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
     await container.resolve(ProviderRegistry).shutdown();
+    await container.resolve(ProviderEventIngress).stopAdmissionAndDrain();
     await container.resolve(WorkerOwnedTurnRuntime).close();
-    container.resolve(ProviderEventIngress).shutdown();
     container.resolve(SettingsService).dispose();
+    await container.resolve(ApplicationDatabaseWriter).close();
+    seedDatabase?.close(true);
+    seedDatabase = undefined;
     database?.close(true);
     database = undefined;
     container.reset();
@@ -103,7 +109,7 @@ describe("provider composition container", () => {
     temporaryDirectory = undefined;
   });
 
-  it("constructs providers before ingress starts and hands canonical commits to ingress", async () => {
+  it("constructs providers before ingress starts and accepts worker-owned canonical progress", async () => {
     const host = container.resolve<ProviderHostPorts>("ProviderHostPorts");
     const ingress = container.resolve(ProviderEventIngress);
     const registry = container.resolve(ProviderRegistry);
@@ -116,33 +122,35 @@ describe("provider composition container", () => {
 
     ingress.start(registry, {
       handleProviderEvent: (event) => received.push(event),
+      handleProjectedCommitted: (event) => received.push(event),
       handleProviderFileMutation: () => undefined,
+      handleProviderTurnDiff: () => undefined,
     });
 
-    seedThread(database!);
-    const canonical = container.resolve(CanonicalAgentBoundary);
-    const messages = container.resolve(MessageRepo);
-    canonical.startParentTurn({
-      thread: { id: "thread-1", workspaceId: "workspace-1", providerId: "cursor", createdAt: NOW },
-      turnId: "turn-1",
-      executionId: EXECUTION_ID,
-      permissionMode: "supervised",
-      providerIdentities: [],
-      projectUserMessage: () => messages.create("thread-1", "user", "Start", 1),
+    if (!seedDatabase) throw new Error("The fixture seed database must be initialized");
+    seedThread(seedDatabase);
+    const runtime = container.resolve(WorkerOwnedTurnRuntime);
+    const execution = { threadId: "thread-1", turnId: "turn-1", executionId: EXECUTION_ID };
+    await runtime.owner.start({
+      execution,
+      ownerEpoch: 1,
+      providerId: "cursor",
+      parentTurn: {
+        thread: { id: "thread-1", workspaceId: "workspace-1", providerId: "cursor", createdAt: NOW },
+        turnId: "turn-1",
+        executionId: EXECUTION_ID,
+        permissionMode: "supervised",
+        providerIdentities: [],
+        userMessage: { kind: "create", messageId: "thread-1-user", content: "Start", sequence: 1 },
+      },
     });
+    await runtime.providerEvents.bind(execution, 1);
 
     await expect(host.events.submit(runtimeBatch())).resolves.toMatchObject({
-      commit: { outcome: "committed", eventCount: 1 },
-      delivery: { ingress: "queued" },
+      commit: { outcome: "accepted", eventCount: 1 },
+      delivery: { ingress: "not-required" },
     });
-    await vi.waitFor(() => {
-      expect(received).toEqual([expect.objectContaining({
-        providerId: "cursor",
-        sourceKind: "canonical-commit",
-        event: expect.objectContaining({ delta: "canonical delivery" }),
-        canonicalReceipt: expect.objectContaining({ eventId: "cursor:runtime-event-1" }),
-      })]);
-    });
+    expect(received).toEqual([]);
   });
 
   it("waits for provider cleanup even when another provider shutdown fails", async () => {

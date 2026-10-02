@@ -68,7 +68,7 @@ const UNSUPPORTED_FEATURE_REASON = {
 export type CodexLiveWriterIntent =
   | { readonly kind: "turn-started" }
   | { readonly kind: "assistant-text-delta"; readonly delta: string; readonly classification: "final" | "unknown" }
-  | { readonly kind: "assistant-text-reclassify"; readonly text: string; readonly classification: "narration" }
+  | { readonly kind: "assistant-text-reclassify"; readonly text: string; readonly retainedText?: string; readonly classification: "narration" }
   | { readonly kind: "assistant-text-promote"; readonly text: string }
   | { readonly kind: "assistant-body"; readonly content: string; readonly model: string | null; readonly attachments: StoredAttachment[]; readonly tokens: number | null }
   | { readonly kind: "generated-attachment"; readonly attachment: StoredAttachment }
@@ -112,14 +112,14 @@ export type CodexLiveReduction =
  * the next event may only observe state whose preceding intents were committed.
  */
 export class CodexLiveEventReducer {
-  private readonly narrative: NarrativeTurnState;
-  private readonly narrativeDelta = new NarrativeRecoveryDelta();
-  private readonly assistant = new AssistantExecutionState();
+  private narrative: NarrativeTurnState;
+  private narrativeDelta = new NarrativeRecoveryDelta();
+  private assistant = new AssistantExecutionState();
   private phase: "awaiting-start" | "active" | "completed" | "ended" = "awaiting-start";
   private unknownText = "";
   private knownFinalText = false;
   private compacting = false;
-  private readonly plan: PlanExecutionState | null;
+  private plan: PlanExecutionState | null;
   private planTextBytes = 0;
   private planQuestionsResolved = false;
 
@@ -128,6 +128,22 @@ export class CodexLiveEventReducer {
     this.plan = planFeature === "none" ? null : new PlanExecutionState();
     if (planFeature === "questions") this.plan?.beginQuestionGeneration();
     if (planFeature === "output") this.plan?.beginOutputGeneration();
+  }
+
+  /** Stage one event against accepted state before reserving its complete write intent. */
+  fork(): CodexLiveEventReducer {
+    const copy = new CodexLiveEventReducer(this.execution, this.planFeature);
+    copy.narrative = this.narrative.fork();
+    copy.narrativeDelta = this.narrativeDelta.fork();
+    copy.assistant = this.assistant.fork();
+    copy.plan = this.plan?.fork() ?? null;
+    copy.phase = this.phase;
+    copy.unknownText = this.unknownText;
+    copy.knownFinalText = this.knownFinalText;
+    copy.compacting = this.compacting;
+    copy.planTextBytes = this.planTextBytes;
+    copy.planQuestionsResolved = this.planQuestionsResolved;
+    return copy;
   }
 
   reduce(input: AgentEvent): CodexLiveReduction {
@@ -164,7 +180,7 @@ export class CodexLiveEventReducer {
     this.phase = "completed";
     const writer: CodexLiveWriterIntent[] = [{ kind: "terminal-projection",
       source: input.outcome === "errored" ? "error" : "ended", outcome: input.outcome,
-      assistant: this.assistant.materializationInput(null), narrative: this.narrative.recoverySnapshot(this.execution.threadId) }];
+      assistant: this.assistant.materializationInput(null), narrative: this.narrative.terminalSnapshot(this.execution.threadId) }];
     if (input.outcome === "errored") writer.push({ kind: "turn-error", error: input.error });
     else writer.push({ kind: "turn-ended" });
     return structuredClone({ kind: "reduced", execution: this.execution, writer,
@@ -308,14 +324,15 @@ export class CodexLiveEventReducer {
       }
       this.unknownText = "";
     } else {
+      this.narrative.closeOpenThought(event.threadId);
       if (this.unknownText) {
         const staged = this.narrative.stageNarrationSegment(event.threadId, this.unknownText);
         if (staged) this.narrative.applyStagedNarrationSegment(event.threadId, staged);
-        writer.push({ kind: "assistant-text-reclassify", text: this.unknownText, classification: "narration" });
-        this.assistant.resetStreamingText();
+        const retainedText = this.assistant.removeStreamingSuffix(this.unknownText);
+        writer.push({ kind: "assistant-text-reclassify", text: this.unknownText,
+          ...(retainedText ? { retainedText } : {}), classification: "narration" });
         this.unknownText = "";
       }
-      this.narrative.closeOpenThought(event.threadId);
     }
     this.knownFinalText = false;
     writer.push(this.recovery());
@@ -367,7 +384,7 @@ export class CodexLiveEventReducer {
     return [
       { kind: "tool-result", event },
       { kind: "feature-event", feature: "task-tool", event },
-      this.recoveryIntent(this.narrativeDelta.prepareToolUpdate(this.narrative.toolRecoveryItem(event.threadId, event.toolCallId))),
+      this.recovery(),
     ];
   }
 
@@ -404,7 +421,7 @@ export class CodexLiveEventReducer {
     return [
       ...this.contextUsage(event),
       { kind: "terminal-projection", source: "turnComplete", outcome: "completed",
-        assistant: this.assistant.materializationInput(null), narrative: this.narrative.recoverySnapshot(event.threadId) },
+        assistant: this.assistant.materializationInput(null), narrative: this.narrative.terminalSnapshot(event.threadId) },
       { kind: "feature-event", feature: "goal-refresh", event },
     ];
   }
@@ -414,7 +431,7 @@ export class CodexLiveEventReducer {
     return [
       { kind: "turn-error", error: event.error },
       { kind: "terminal-projection", source: "error", outcome: "errored",
-        assistant: this.assistant.materializationInput(null), narrative: this.narrative.recoverySnapshot(event.threadId) },
+        assistant: this.assistant.materializationInput(null), narrative: this.narrative.terminalSnapshot(event.threadId) },
     ];
   }
 
@@ -454,7 +471,7 @@ export class CodexLiveEventReducer {
     if (event.outcome && this.phase !== "completed") {
       writer.push({ kind: "terminal-projection", source: "ended",
         outcome: event.outcome === "cancelled" ? "interrupted" : event.outcome,
-        assistant: this.assistant.materializationInput(null), narrative: this.narrative.recoverySnapshot(event.threadId) });
+        assistant: this.assistant.materializationInput(null), narrative: this.narrative.terminalSnapshot(event.threadId) });
     }
     writer.push({ kind: "turn-ended" });
     this.phase = "ended";
@@ -462,7 +479,7 @@ export class CodexLiveEventReducer {
   }
 
   private recovery(): CodexLiveWriterIntent {
-    return this.recoveryIntent(this.narrativeDelta.prepare(this.narrative.recoverySnapshot(this.execution.threadId)));
+    return this.recoveryIntent(this.narrativeDelta.prepareChanges(this.narrative.takeRecoveryChanges(this.execution.threadId)));
   }
 
   private recoveryIntent(delta: PreparedNarrativeRecoveryDelta | null): CodexLiveWriterIntent {

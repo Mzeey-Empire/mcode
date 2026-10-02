@@ -7,7 +7,8 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
+let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { CleanupJobRepo } from "../persistence/cleanup-job-repo.js";
 import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
@@ -25,7 +26,6 @@ import {
   WorkspaceService,
 } from "../../../projects/index.js";
 import type { ThreadDeletionTeardownService } from "../../lifecycle/thread-deletion-teardown-service.js";
-import type { AgentService } from "../../../agents/index.js";
 import { killDescendantsByName } from "../../../../runtime/process/containment/process-kill.js";
 import { getMcodeDir } from "@mcode/shared";
 
@@ -52,16 +52,15 @@ describe("Cleanup integration", () => {
   let mockCleanupPolicy: SandboxWorktreeCleanupPolicy;
   let mockAttachmentService: AttachmentService;
   let mockHandoffStorage: HandoffStorage;
-  let mockAgentService: AgentService;
   let workspaceService: WorkspaceService;
   let projectWorktreeService: ProjectWorktreeService;
 
   beforeEach(() => {
     vi.mocked(killDescendantsByName).mockClear();
-    db = openMemoryDatabase();
-    cleanupJobRepo = new CleanupJobRepo(db);
-    threadRepo = new ThreadRepo(db);
-    workspaceRepo = new WorkspaceRepo(db);
+    db = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
+    cleanupJobRepo = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    threadRepo = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
+    workspaceRepo = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
 
     mockClaudeProvider = {
       waitForSessionExit: vi.fn().mockResolvedValue(undefined),
@@ -88,11 +87,13 @@ describe("Cleanup integration", () => {
     } as unknown as HandoffStorage;
     mockThreadDeletion = {
       teardownThread: vi.fn().mockResolvedValue(undefined),
+      bindAcceptedProgress: vi.fn(),
+      deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove(),
     } as unknown as ThreadDeletionTeardownService;
     projectWorktreeService = new ProjectWorktreeService(
       threadRepo,
       workspaceRepo,
-      cleanupJobRepo,
+      persistenceRuntime.writer,
       mockGitWorktrees,
       mockCleanupPolicy,
     );
@@ -105,7 +106,6 @@ describe("Cleanup integration", () => {
     );
 
     worker = new CleanupWorker(
-      db,
       cleanupJobRepo,
       threadRepo,
       mockClaudeProvider,
@@ -119,13 +119,12 @@ describe("Cleanup integration", () => {
       TEST_HOST_RUNTIME,
     );
 
-    mockAgentService = { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService;
     workspaceService = new WorkspaceService(
       workspaceRepo,
       threadRepo,
-      cleanupJobRepo,
+      persistenceRuntime.writer,
       mockAttachmentService,
-      mockAgentService,
+      mockThreadDeletion,
       {} as unknown as GitExecutor,
     );
   });
@@ -136,7 +135,7 @@ describe("Cleanup integration", () => {
 
   it("full flow: delete thread -> enqueue job -> worker processes -> thread hard-deleted", async () => {
     // Setup: create workspace and a managed worktree thread
-    const ws = workspaceRepo.create("integration-test", "/test-repo");
+    const ws = (await workspaceRepo.create("integration-test", "/test-repo"));
     const now = new Date().toISOString();
     const wtPath = NodePath.join(WT_BASE, "feat-wt");
     db.prepare(
@@ -194,7 +193,7 @@ describe("Cleanup integration", () => {
   });
 
   it("delete queues cleanup without blocking on filesystem work", async () => {
-    const ws = workspaceRepo.create("perf-test", "/test-repo-2");
+    const ws = (await workspaceRepo.create("perf-test", "/test-repo-2"));
     const now = new Date().toISOString();
     db.prepare(
       `INSERT INTO threads
@@ -216,7 +215,7 @@ describe("Cleanup integration", () => {
   });
 
   it("retry flow: failed cleanup retries on next poll", async () => {
-    const ws = workspaceRepo.create("retry-test", "/test-repo-3");
+    const ws = (await workspaceRepo.create("retry-test", "/test-repo-3"));
     const now = new Date().toISOString();
     db.prepare(
       `INSERT INTO threads
@@ -224,12 +223,12 @@ describe("Cleanup integration", () => {
        VALUES (?, ?, ?, ?, 'worktree', 'deleted', ?, 1, ?, ?)`,
     ).run("thread-retry", ws.id, "Retry Thread", "mcode/retry", NodePath.join(WT_BASE, "retry-wt"), now, now);
 
-    cleanupJobRepo.insert({
+    (await cleanupJobRepo.insert({
       thread_id: "thread-retry",
       workspace_path: "/test-repo-3",
       worktree_path: NodePath.join(WT_BASE, "retry-wt"),
       branch: "mcode/retry",
-    });
+    }));
 
     // First attempt: removeWorktree fails
     (mockGitWorktrees.removeWorktree as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
@@ -257,7 +256,7 @@ describe("Cleanup integration", () => {
   });
 
   it("duplicate delete is idempotent (INSERT OR IGNORE)", async () => {
-    const ws = workspaceRepo.create("dup-test", "/test-repo-4");
+    const ws = (await workspaceRepo.create("dup-test", "/test-repo-4"));
     const now = new Date().toISOString();
     db.prepare(
       `INSERT INTO threads
@@ -276,15 +275,15 @@ describe("Cleanup integration", () => {
 
   it("start() preserves retry counters from the previous session", async () => {
     // Simulate a stale job from a previous app session
-    const job = cleanupJobRepo.insert({
+    const job = (await cleanupJobRepo.insert({
       thread_id: "thread-stale",
       workspace_path: "/old-repo",
       worktree_path: NodePath.join(WT_BASE, "stale-wt"),
       branch: null,
-    });
-    cleanupJobRepo.recordFailure(job.id, "previous failure");
-    cleanupJobRepo.recordFailure(job.id, "another failure");
-    cleanupJobRepo.recordFailure(job.id, "yet another");
+    }));
+    (await cleanupJobRepo.recordFailure(job.id, "previous failure"));
+    (await cleanupJobRepo.recordFailure(job.id, "another failure"));
+    (await cleanupJobRepo.recordFailure(job.id, "yet another"));
 
     const before = cleanupJobRepo.findById(job.id)!;
     expect(before.attempts).toBe(3);
@@ -300,17 +299,17 @@ describe("Cleanup integration", () => {
 
   describe("Workspace deletion - full lifecycle", () => {
     it("completes two-phase delete: soft-delete → worker drains → hard-delete", async () => {
-      const ws = workspaceRepo.create("Full Test", "/tmp/full");
-      const direct = threadRepo.create(ws.id, "Direct", "direct", "main");
-      const wt1 = threadRepo.create(ws.id, "WT1", "worktree", "feat/a");
-      const wt2 = threadRepo.create(ws.id, "WT2", "worktree", "feat/b");
+      const ws = (await workspaceRepo.create("Full Test", "/tmp/full"));
+      const direct = (await threadRepo.create(ws.id, "Direct", "direct", "main"));
+      const wt1 = (await threadRepo.create(ws.id, "WT1", "worktree", "feat/a"));
+      const wt2 = (await threadRepo.create(ws.id, "WT2", "worktree", "feat/b"));
       db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
         .run("/tmp/full/.worktrees/a", wt1.id);
       db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
         .run("/tmp/full/.worktrees/b", wt2.id);
 
       // Phase 1: workspace service delete
-      workspaceService.delete(ws.id);
+      await workspaceService.delete(ws.id);
 
       // Direct thread is hard-deleted immediately
       expect(threadRepo.findById(direct.id)).toBeNull();

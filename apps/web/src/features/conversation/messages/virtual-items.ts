@@ -3,7 +3,6 @@ import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRe
 import type { ThoughtSegment, TurnFooterSummary } from "../narrative/types";
 import { computeLiveStreamingText } from "../narrative/build-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
-import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
 
 /**
@@ -373,10 +372,16 @@ interface StableItemInput {
   currentAgentDisplayState?: AgentDisplayState;
 };
 
+function hasPersistedNarrative(records: PersistedNarrativeRecordsByMessage[string] | undefined): boolean {
+  return !!records && (records.tools.length > 0 || records.thoughts.length > 0 || records.hooks.length > 0);
+}
+
 function persistedNarrativeItems(message: Message, input: StableItemInput): ChatVirtualItem[] {
+  if (isCurrentResponse(message, input)) return [];
   const records = message.role === "assistant" ? input.persistedNarrativeByMessage?.[message.id] : undefined;
-  const rows = records ? buildPersistedNarrativeItems({ ...records, messageContent: message.content }) : undefined;
-  return rows && rows.length > 0 ? [{ key: `persisted-narrative-${message.id}`, type: "persisted-narrative", messageId: message.id, messageContent: message.content }] : [];
+  return hasPersistedNarrative(records)
+    ? [{ key: `persisted-narrative-${message.id}`, type: "persisted-narrative", messageId: message.id, messageContent: message.content }]
+    : [];
 }
 
 function isCurrentResponse(message: Message, input: StableItemInput): boolean {

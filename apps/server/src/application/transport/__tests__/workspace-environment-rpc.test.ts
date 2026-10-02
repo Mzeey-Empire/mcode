@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { routeMessage, type RouterDeps } from "../ws-router.js";
 import { WorkspaceEnvironmentService } from "../../../features/projects/environment/workspace-environment-service.js";
-import { openMemoryDatabase } from "../../../runtime/persistence/sqlite/database.js";
+import { createThreadPersistenceTestRuntime } from "../../../features/thread-control/testing/thread-persistence-test-runtime.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -291,10 +291,13 @@ describe("workspace environment RPC", () => {
   it("routes strict automatic Setup lifecycle reads and recovery mutations", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-environment-rpc-"));
     roots.push(root);
-    const database = openMemoryDatabase();
+    const persistence = createThreadPersistenceTestRuntime();
+    await persistence.writer.whenReady();
+    const database = persistence.database;
     const workspaceEnvironmentService = new WorkspaceEnvironmentService({
       mcodeDir: root,
-      database,
+      database: persistence.reader,
+      databaseWriter: persistence.writer,
       threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
       terminalRecovery: { create: () => ({ ptyId: "recovery-pty", shell: "pwsh" }) },
       platform: "linux",
@@ -369,7 +372,7 @@ describe("workspace environment RPC", () => {
       sourceRevision: null,
       document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
     });
-    workspaceEnvironmentService.queueAutomaticFirstTurn({
+    await workspaceEnvironmentService.queueAutomaticFirstTurn({
       threadId: "thread-1",
       messageId: "message-1",
       content: "Blocked Turn",

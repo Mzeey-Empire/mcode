@@ -24,6 +24,15 @@ export class PlanQuestionParser {
    * Advances past failed blocks so the same malformed content is never retried. */
   private _scanFrom = 0;
 
+  /** Keep partial parser input in a detached admission candidate. */
+  fork(): PlanQuestionParser {
+    const copy = new PlanQuestionParser();
+    copy.buffer = this.buffer;
+    copy._hasQuestions = this._hasQuestions;
+    copy._scanFrom = this._scanFrom;
+    return copy;
+  }
+
   /**
    * Append a streaming text delta to the internal buffer and attempt to
    * extract a plan-questions block. Returns the parsed question array if a

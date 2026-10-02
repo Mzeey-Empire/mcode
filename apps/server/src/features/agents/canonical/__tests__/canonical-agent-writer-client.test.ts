@@ -1,24 +1,49 @@
 import "reflect-metadata";
+import * as NodeFS from "node:fs";
 import type { Database } from "bun:sqlite";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AgentEventType, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
+import { AcceptedCanonicalAgentEventEnvelopeSchema, AgentEventType, type ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
-import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import { CanonicalAgentWriterClient as SharedCanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { workspaceWriteOperations } from "../../../projects/persistence/workspace-write-operations.js";
+import { CanonicalAgentWriterReceipts } from "../canonical-agent-writer-receipts.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
 import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 import { AgentEventPublicationRegistry } from "../../orchestration/agent-event-publication-registry.js";
 import type { CanonicalWriterResponse } from "../canonical-agent-writer-protocol.js";
-import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
+import { ParentAssistantTextCheckpointStore as ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-store.js";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
+import type { CanonicalAcceptedWriteInput } from "../canonical-accepted-write.js";
+import { syntheticThreadExecutionId } from "../canonical-thread-execution.js";
 
 const THREAD_ID = "writer-thread";
 const TURN_ID = "writer-turn";
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000176";
 const NOW = "2026-09-24T12:00:00.000Z";
+
+// This fixture owns its transport. Production canonical adapters share the composition-owned writer.
+class CanonicalAgentWriterClient extends SharedCanonicalAgentWriterClient {
+  readonly owner: ApplicationDatabaseWriter;
+  private readonly pathExists: boolean;
+
+  constructor(dbPath: string, createWorker?: () => Worker) {
+    const owner = new ApplicationDatabaseWriter(dbPath, createWorker);
+    super(owner);
+    this.owner = owner;
+    this.pathExists = NodeFS.existsSync(dbPath);
+  }
+
+  override async close(): Promise<void> {
+    await super.close();
+    if (this.pathExists) await this.owner.close();
+    else await expect(this.owner.close()).rejects.toThrow("open-failed");
+  }
+}
 
 function workerDroppingReply(kind: CanonicalWriterResponse["kind"]): Worker {
   const worker = new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
@@ -129,6 +154,50 @@ function recoveryToolCall(id = "writer-recovery-tool"): ParentNarrativeRecoveryI
   };
 }
 
+function headlessAcceptedInput(threadId: string, operationId: string): CanonicalAcceptedWriteInput {
+  const executionId = syntheticThreadExecutionId(threadId);
+  const epoch = `headless:${threadId}`;
+  return {
+    execution: { threadId, turnId: "", executionId }, phase: "synthesized", nativeCursor: null,
+    contentHash: "a".repeat(64), baseRevision: 0,
+    predecessor: { epoch, sequence: 0 }, through: { epoch, sequence: 2 },
+    events: [
+      AcceptedCanonicalAgentEventEnvelopeSchema.parse({
+        eventId: `${threadId}:${operationId}:thread`, routing: { threadId, executionId },
+        sourceProviderId: "codex", sourceIdentities: [], acceptedSequence: 1,
+        serverTimestamps: { acceptedAt: NOW }, progressPosition: { epoch, sequence: 1 },
+        payload: { type: "thread.recorded", thread: {
+          id: threadId, workspaceId: "writer-workspace", rootThreadId: threadId,
+          providerId: "codex", providerIdentities: [], activityState: "Idle",
+          conversationRevision: 0, rosterRevision: 0, createdAt: NOW, updatedAt: NOW,
+        } },
+      }),
+      AcceptedCanonicalAgentEventEnvelopeSchema.parse({
+        eventId: `${threadId}:${operationId}:publication`, routing: { threadId, executionId },
+        sourceProviderId: "codex", sourceIdentities: [], acceptedSequence: 2,
+        serverTimestamps: { acceptedAt: NOW }, progressPosition: { epoch, sequence: 2 },
+        payload: { type: "publication.recorded", publicationId: "1",
+          event: { type: "compacting", threadId, active: false } },
+      }),
+    ],
+  };
+}
+
+function nextHeadlessInput(input: CanonicalAcceptedWriteInput, operationId: string): CanonicalAcceptedWriteInput {
+  return { ...input, predecessor: input.through,
+    through: { ...input.through, sequence: input.through.sequence + 1 },
+    events: [AcceptedCanonicalAgentEventEnvelopeSchema.parse({
+      eventId: `${input.execution.threadId}:${operationId}:publication`, routing: {
+        threadId: input.execution.threadId, executionId: input.execution.executionId,
+      }, sourceProviderId: "codex", sourceIdentities: [], acceptedSequence: 3,
+      serverTimestamps: { acceptedAt: NOW },
+      progressPosition: { ...input.through, sequence: input.through.sequence + 1 },
+      payload: { type: "publication.recorded", publicationId: "2",
+        event: { type: "compacting", threadId: input.execution.threadId, active: true } },
+    })],
+  };
+}
+
 describe("canonical SQLite writer", () => {
   let tempDir: string;
   let dbPath: string;
@@ -164,6 +233,264 @@ describe("canonical SQLite writer", () => {
     expect(replay).toEqual(first);
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 3 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 1 });
+  });
+
+  it("stores supplied acceptance on the writer and replays a lost receipt without renumbering", async () => {
+    let workers = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => ++workers === 1
+      ? workerDroppingReply("accepted-appended")
+      : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+    const started = await writer.commit("accepted:start", { threadId: THREAD_ID, turnId: TURN_ID,
+      executionId: EXECUTION_ID, phase: "running", events: events() });
+    const accepted = AcceptedCanonicalAgentEventEnvelopeSchema.parse({
+      eventId: "accepted:publication", routing: { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID },
+      sourceProviderId: "codex", sourceIdentities: [], acceptedSequence: started.acceptedThrough + 1,
+      serverTimestamps: { acceptedAt: NOW }, progressPosition: { epoch: "accepted-epoch", sequence: 1 },
+      payload: { type: "publication.recorded", publicationId: "1", event: { type: "textDelta", threadId: THREAD_ID,
+        turnExecutionId: EXECUTION_ID, delta: "before save", textKind: "final-response" } },
+    });
+    const input = { execution: { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID },
+      phase: "running", nativeCursor: null, contentHash: "a".repeat(64),
+      predecessor: { epoch: "accepted-epoch", sequence: 0 }, through: { epoch: "accepted-epoch", sequence: 1 },
+      baseRevision: started.conversationRevision, events: [accepted] };
+    const saved = await writer.appendAccepted("accepted:append", input);
+    expect(workers).toBe(2);
+    expect(saved.receipt).toMatchObject({ operationId: "accepted:append", contentHash: input.contentHash,
+      predecessor: input.predecessor, through: input.through, durableRevision: started.conversationRevision + 1 });
+    expect(saved.events[0]).toMatchObject({ eventId: accepted.eventId, acceptedSequence: accepted.acceptedSequence,
+      progressPosition: accepted.progressPosition, serverTimestamps: { acceptedAt: NOW } });
+    expect(await writer.appendAccepted("accepted:append", input)).toEqual(saved);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE event_id = ?").get(accepted.eventId))
+      .toEqual({ count: 1 });
+    await expect(writer.appendAccepted("accepted:wrong-next", { ...input, contentHash: "b".repeat(64), events: [{ ...accepted,
+      eventId: "accepted:other", acceptedSequence: accepted.acceptedSequence + 1 }] }))
+      .rejects.toThrow();
+  });
+
+  it("saves headless accepted progress without creating a turn or ingest checkpoint", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const input = headlessAcceptedInput(THREAD_ID, "headless-save");
+    const saved = await writer.appendAccepted("headless-save", input);
+    expect(saved.events).toMatchObject(input.events);
+    expect(saved.receipt).toMatchObject({ operationId: "headless-save", durableRevision: 1, through: input.through });
+    expect(saved.events.every((event) => event.routing.turnId === undefined)).toBe(true);
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_turns").get()).toEqual({ count: 0 });
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_ingest_checkpoints").get()).toEqual({ count: 0 });
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 0 });
+    expect(db.query("SELECT thread_id, execution_id, operation_id FROM canonical_writer_thread_operation_receipts").all())
+      .toEqual([{ thread_id: THREAD_ID, execution_id: input.execution.executionId, operation_id: "headless-save" }]);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("replays headless committed envelopes after lost replies and continues their sequence after restart", async () => {
+    let workers = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => ++workers === 1
+      ? workerDroppingReply("accepted-appended")
+      : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+    const input = headlessAcceptedInput(THREAD_ID, "headless-lost");
+    const saved = await writer.appendAccepted("headless-lost", input);
+    expect(workers).toBe(2);
+    await writer.close();
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect(await writer.appendAccepted("headless-lost", input)).toEqual(saved);
+    await expect(writer.appendAccepted("headless-lost", { ...input, contentHash: "b".repeat(64) }))
+      .rejects.toThrow("Canonical writer operation-conflict");
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 2 });
+    const next = await writer.appendAccepted("headless-next", nextHeadlessInput(input, "headless-next"));
+    expect(next.events).toMatchObject([{ acceptedSequence: 3, routing: { executionId: input.execution.executionId } }]);
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 3 });
+  });
+
+  it("keeps matching operation IDs independent across headless threads and retries only their acknowledgements", async () => {
+    const otherThreadId = "other-headless-thread";
+    db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(otherThreadId, "writer-workspace", "Other headless", "main", "codex", NOW, NOW);
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const first = headlessAcceptedInput(THREAD_ID, "same-headless-operation");
+    const second = headlessAcceptedInput(otherThreadId, "same-headless-operation");
+    const firstSaved = await writer.appendAccepted("same-headless-operation", first);
+    const secondSaved = await writer.appendAccepted("same-headless-operation", second);
+    expect(first.execution.executionId).not.toBe(second.execution.executionId);
+    expect(firstSaved.events.map((event) => event.acceptedSequence)).toEqual([1, 2]);
+    expect(secondSaved.events.map((event) => event.acceptedSequence)).toEqual([1, 2]);
+    db.run(`CREATE TRIGGER reject_headless_ack BEFORE DELETE ON canonical_writer_thread_operation_receipts
+      BEGIN SELECT RAISE(FAIL, 'headless ack unavailable'); END`);
+    await expect(writer.acknowledgeOperation(first.execution.executionId, "same-headless-operation"))
+      .rejects.toThrow("Canonical writer write-failed");
+    expect(writer.pendingAcknowledgementCount).toBe(1);
+    db.run("DROP TRIGGER reject_headless_ack");
+    expect(await writer.appendAccepted("same-headless-operation", second)).toEqual(secondSaved);
+    expect(writer.pendingAcknowledgementCount).toBe(0);
+    expect(db.query("SELECT thread_id FROM canonical_writer_thread_operation_receipts").all()).toEqual([{ thread_id: otherThreadId }]);
+    await writer.close();
+    let workers = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => ++workers === 1
+      ? workerDroppingReply("operation-acknowledged")
+      : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+    await writer.acknowledgeOperation(second.execution.executionId, "same-headless-operation");
+    await writer.acknowledgeOperation(second.execution.executionId, "same-headless-operation");
+    expect(workers).toBe(2);
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_thread_operation_receipts").get()).toEqual({ count: 0 });
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 4 });
+  });
+
+  it("rejects forged headless execution ownership before replaying or appending progress", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const input = headlessAcceptedInput(THREAD_ID, "headless-forged");
+    const saved = await writer.appendAccepted("headless-forged", input);
+    await expect(writer.appendAccepted("headless-forged", { ...input,
+      execution: { ...input.execution, threadId: "another-headless-owner" } })).rejects.toThrow();
+    await expect(writer.appendAccepted("headless-other", { ...input,
+      execution: { ...input.execution, executionId: EXECUTION_ID } })).rejects.toThrow();
+    expect(await writer.appendAccepted("headless-forged", input)).toEqual(saved);
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_thread_operation_receipts").get()).toEqual({ count: 1 });
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 2 });
+  });
+
+  it("rejects virtual identity overlap and preserves both receipts when an acknowledgement has ambiguous ownership", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const input = headlessAcceptedInput(THREAD_ID, "headless-overlap");
+    db.prepare(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, root_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, 'writer-workspace', ?, 'codex', 'Active', ?, ?)`).run(THREAD_ID, THREAD_ID, NOW, NOW);
+    db.prepare(`INSERT INTO canonical_agent_turns
+      (id, thread_id, execution_id, status, trigger_json, permission_mode, created_at, updated_at)
+      VALUES (?, ?, ?, 'Running', '{"kind":"user"}', 'supervised', ?, ?)`)
+      .run(TURN_ID, THREAD_ID, input.execution.executionId, NOW, NOW);
+    await expect(writer.appendAccepted("headless-overlap", input)).rejects.toThrow("Canonical writer operation-conflict");
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 0 });
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_thread_operation_receipts").get()).toEqual({ count: 0 });
+    db.prepare(`INSERT INTO canonical_writer_operation_receipts
+      (execution_id, operation_id, kind, input_hash, receipt_json)
+      VALUES (?, 'ambiguous-receipt', 'commit', 'seed', '{}')`).run(input.execution.executionId);
+    db.prepare(`INSERT INTO canonical_writer_thread_operation_receipts
+      (execution_id, thread_id, operation_id, kind, input_hash, receipt_json)
+      VALUES (?, ?, 'ambiguous-receipt', 'append-accepted', 'seed', '{}')`).run(input.execution.executionId, THREAD_ID);
+    try {
+      await expect(writer.acknowledgeOperation(input.execution.executionId, "ambiguous-receipt"))
+        .rejects.toThrow("Canonical writer write-failed");
+      expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 1 });
+      expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_thread_operation_receipts").get()).toEqual({ count: 1 });
+    } finally {
+      db.run("DELETE FROM canonical_writer_operation_receipts WHERE operation_id = 'ambiguous-receipt'");
+      db.run("DELETE FROM canonical_writer_thread_operation_receipts WHERE operation_id = 'ambiguous-receipt'");
+    }
+  });
+
+  it("cascades headless receipts with their thread while retaining real-turn foreign keys", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const input = headlessAcceptedInput(THREAD_ID, "headless-delete");
+    await writer.appendAccepted("headless-delete", input);
+    const insertTurnReceipt = db.prepare(`INSERT INTO canonical_writer_operation_receipts
+      (execution_id, operation_id, kind, input_hash, receipt_json) VALUES (?, ?, 'commit', 'seed', '{}')`);
+    expect(() => insertTurnReceipt.run(input.execution.executionId, "fake-turn"))
+      .toThrow("FOREIGN KEY constraint failed");
+    expect(() => db.prepare(`INSERT INTO canonical_writer_thread_operation_receipts
+      (execution_id, thread_id, operation_id, kind, input_hash, receipt_json)
+      VALUES (?, ?, 'missing-thread', 'append-accepted', 'seed', '{}')`)
+      .run(syntheticThreadExecutionId("missing-thread"), "missing-thread")).toThrow("FOREIGN KEY constraint failed");
+    expect(() => db.prepare(`INSERT INTO canonical_writer_thread_operation_receipts
+      (execution_id, thread_id, operation_id, kind, input_hash, receipt_json)
+      VALUES (?, ?, 'wrong-kind', 'commit', 'seed', '{}')`)
+      .run(input.execution.executionId, THREAD_ID)).toThrow();
+    db.prepare("DELETE FROM canonical_agent_threads WHERE id = ?").run(THREAD_ID);
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_writer_thread_operation_receipts").get()).toEqual({ count: 0 });
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("bounds thread receipt capacity without consuming another thread or a real turn's capacity", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const input = headlessAcceptedInput(THREAD_ID, "headless-capacity");
+    await writer.appendAccepted("headless-capacity", input);
+    const insert = db.prepare(`INSERT INTO canonical_writer_thread_operation_receipts
+      (execution_id, thread_id, operation_id, kind, input_hash, receipt_json)
+      VALUES (?, ?, ?, 'append-accepted', 'seed', '{}')`);
+    db.transaction(() => {
+      for (let index = 1; index < 16_384; index++) insert.run(input.execution.executionId, THREAD_ID, `seed-${index}`);
+    })();
+    const nextInput = nextHeadlessInput(input, "headless-capacity-next");
+    await expect(writer.appendAccepted("headless-capacity-next", nextInput)).rejects.toThrow("Canonical writer receipt-capacity");
+    expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 2 });
+    const otherThreadId = "capacity-independent-thread";
+    db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(otherThreadId, "writer-workspace", "Other capacity", "main", "codex", NOW, NOW);
+    expect(await writer.appendAccepted("headless-capacity", headlessAcceptedInput(otherThreadId, "headless-capacity")))
+      .toMatchObject({ receipt: { durableRevision: 1 } });
+    await writer.acknowledgeOperation(input.execution.executionId, "headless-capacity");
+    expect(await writer.appendAccepted("headless-capacity-next", nextInput))
+      .toMatchObject({ receipt: { durableRevision: 2 } });
+    expect(await writer.commit("turn-capacity", { threadId: THREAD_ID, turnId: TURN_ID,
+      executionId: EXECUTION_ID, phase: "running", events: events() })).toMatchObject({ outcome: "committed" });
+  }, 30_000);
+
+  it("reserves the receipt writer before a peer can invalidate its read snapshot", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    const input = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+      phase: "running", events: events() };
+    const receipt = await writer.commit("receipt-lock:start", input);
+    const peer = openDatabase({ dbPath });
+    peer.run("PRAGMA busy_timeout = 0");
+    try {
+      let peerFailure: unknown;
+      const receipts = new CanonicalAgentWriterReceipts(db);
+      const response = receipts.execute({ kind: "commit", requestId: "receipt-lock:request",
+        operationId: "receipt-lock:append", executionId: EXECUTION_ID, input }, () => {
+        try {
+          peer.prepare("UPDATE threads SET title = ? WHERE id = ?").run("Peer update", THREAD_ID);
+        } catch (error) { peerFailure = error; }
+        return { kind: "committed", requestId: "receipt-lock:request", operationId: "receipt-lock:append",
+          executionId: EXECUTION_ID, receipt };
+      });
+      expect(response.kind).toBe("committed");
+      expect(peerFailure).toMatchObject({ code: "SQLITE_BUSY" });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
+        .get("receipt-lock:append")).toEqual({ count: 1 });
+      peer.prepare("UPDATE threads SET title = ? WHERE id = ?").run("Peer update", THREAD_ID);
+      expect(db.prepare("SELECT title FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ title: "Peer update" });
+    } finally { peer.close(true); }
+  });
+
+  it("retains a failed publication head until the worker's final response before releasing an ordinary tail", async () => {
+    const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID };
+    const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "failed-publication-lease" };
+    const operation: ExecutionSemanticOperation = {
+      operationId: "failed-publication-lease:1", execution, lease, ordinal: 1,
+      mutation: { kind: "begin", providerId: "codex", input: {
+        thread: { id: THREAD_ID, workspaceId: "writer-workspace", providerId: "codex", createdAt: NOW },
+        turnId: TURN_ID, executionId: EXECUTION_ID, permissionMode: "supervised", providerIdentities: [],
+        userMessage: { kind: "create", messageId: "failed-publication-user", content: "Question", sequence: 1 },
+      } },
+    };
+    let notifyFinal: () => void = () => {};
+    const workerFinished = new Promise<void>((resolve) => { notifyFinal = resolve; });
+    writer = new CanonicalAgentWriterClient(dbPath, () => {
+      const worker = new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
+      return new Proxy(worker, {
+        set(target, property, value) {
+          if (property !== "onmessage" || typeof value !== "function") return Reflect.set(target, property, value);
+          target.onmessage = (message: MessageEvent<CanonicalWriterResponse>) => {
+            if (message.data.kind === "semantic-transacted") {
+              notifyFinal();
+              setTimeout(() => value(message), 100);
+            } else value(message);
+          };
+          return true;
+        },
+        get(target, property) {
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    });
+    const failedPublication = writer.transactSemantic(operation, () => { throw new Error("Publication callback failed"); });
+    const observed = expect(failedPublication).rejects.toThrow("Publication callback failed");
+    const tail = writer.owner.execute(workspaceWriteOperations.create, ["After publication", "after-publication", true]);
+    await workerFinished;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(db.query("SELECT COUNT(*) AS count FROM workspaces WHERE path = 'after-publication'").get()).toEqual({ count: 0 });
+    await observed;
+    expect(await tail).toMatchObject({ name: "After publication" });
+    expect(db.query("SELECT COUNT(*) AS count FROM messages WHERE id = 'failed-publication-user'").get()).toEqual({ count: 1 });
   });
 
   it("recovers one durable live publication identity after a file-backed writer loses its reply", async () => {
@@ -234,7 +561,9 @@ describe("canonical SQLite writer", () => {
       : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
     const textOperation: ExecutionSemanticOperation = {
       operationId: "text-lease:2", execution, lease, ordinal: 2,
-      mutation: { kind: "append-assistant-text", inputs: [{ ...execution, sequence: 1, text: "Worker durable text" }] },
+      livePublication: [{ after: "writer", event: { type: "textDelta", threadId: THREAD_ID,
+        turnExecutionId: EXECUTION_ID, delta: "Worker durable text", isFinalResponse: true } }],
+      mutation: { kind: "live-event", text: { kind: "append", inputs: [{ ...execution, sequence: 1, text: "Worker durable text" }] } },
     };
     const receipt = await writer.transactSemantic(textOperation, () => {});
     expect(receipt).toMatchObject({ kind: "committed", operationId: "text-lease:2",
@@ -686,6 +1015,24 @@ describe("canonical SQLite writer", () => {
     expect(writer.pendingAcknowledgementCount).toBe(0);
     expect(db.prepare("SELECT operation_id FROM canonical_writer_operation_receipts").all())
       .toEqual([{ operation_id: "ack-retry-next" }]);
+  });
+
+  it("retries receipt deletion after its committed acknowledgement response is lost", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("lost-ack", { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+      phase: "running", events: events() });
+    await writer.close();
+    let created = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => created++ === 0
+      ? workerDroppingReply("operation-acknowledged")
+      : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+    const before = db.prepare("SELECT event_id FROM canonical_agent_events").all();
+    await writer.acknowledgeOperation(EXECUTION_ID, "lost-ack");
+    await writer.acknowledgeOperation(EXECUTION_ID, "lost-ack");
+    expect(created).toBe(2);
+    expect(writer.pendingAcknowledgementCount).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT event_id FROM canonical_agent_events").all()).toEqual(before);
   });
 
   it("retries failed acknowledgements on close", async () => {

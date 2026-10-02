@@ -1,3 +1,5 @@
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
 import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -9,7 +11,7 @@ import type {
   ProviderCatalogRequest,
   ProviderCatalogSnapshot,
 } from "@mcode/contracts";
-import { openDatabase, openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ProviderCatalogSnapshotRepo } from "../persistence/provider-catalog-snapshot-repo.js";
 import {
   ProviderCatalogService,
@@ -37,30 +39,44 @@ const CACHED: ProviderCatalogSnapshot = {
 
 describe("ProviderCatalogService", () => {
   let db: Database | undefined;
+  let owned: OwnedTestDatabase | undefined;
+  let writer: ApplicationDatabaseWriter | undefined;
+  const services: ProviderCatalogService[] = [];
 
-  afterEach(() => db?.close());
+  afterEach(async () => {
+    for (const service of services.splice(0)) await service.close();
+    if (owned) await owned.close(); else { await writer?.close(); db?.close(); }
+    owned = undefined; writer = undefined; db = undefined;
+  });
 
   function createService(): {
     repo: ProviderCatalogSnapshotRepo;
     service: ProviderCatalogService;
   } {
-    db = openMemoryDatabase();
+    owned = createOwnedTestDatabase();
+    db = owned.db;
+    writer = owned.writer;
     db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)")
       .run("workspace-1", "Workspace 1", "C:/repo");
-    const repo = new ProviderCatalogSnapshotRepo(db);
-    return { repo, service: new ProviderCatalogService(repo) };
+    const repo = new ProviderCatalogSnapshotRepo(db, writer!);
+    const service = new ProviderCatalogService(repo);
+    services.push(service);
+    return { repo, service };
   }
 
-  it("keeps a background refresh failure contained while another SQLite writer holds the database", async () => {
+  it("keeps catalog refresh responsive while the owner waits for another process to release SQLite", async () => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-catalog-busy-"));
     const path = NodePath.join(directory, "app.sqlite");
     db = openDatabase({ dbPath: path });
     db.run("PRAGMA busy_timeout = 1");
     db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)")
       .run("workspace-1", "Workspace 1", "C:/repo");
+    writer = new ApplicationDatabaseWriter(path);
+    await writer.whenReady();
     const blocker = new Database(path, { strict: true });
-    const repo = new ProviderCatalogSnapshotRepo(db);
+    const repo = new ProviderCatalogSnapshotRepo(db, writer!);
     const service = new ProviderCatalogService(repo);
+    services.push(service);
     const upsert = vi.spyOn(repo, "upsert");
     const changes: ProviderCatalogChange[] = [];
     service.onChanged((change) => changes.push(change));
@@ -85,6 +101,9 @@ describe("ProviderCatalogService", () => {
     } finally {
       if (locked) blocker.run("ROLLBACK");
       blocker.close(true);
+      await service.close();
+      await writer.close();
+      writer = undefined;
       db.close(true);
       db = undefined;
       NodeFS.rmSync(directory, { recursive: true, force: true });
@@ -94,7 +113,7 @@ describe("ProviderCatalogService", () => {
   it("returns a stale persisted snapshot before background refresh completes", async () => {
     const { repo, service } = createService();
     const key = providerCatalogContextKey(REQUEST, "C:/repo");
-    repo.upsert(key, "workspace-1", "C:/repo", CACHED);
+    await repo.upsert(key, "workspace-1", "C:/repo", CACHED);
     let finishRefresh!: (snapshot: ProviderCatalogSnapshot) => void;
     const refresh = new Promise<ProviderCatalogSnapshot>((resolve) => { finishRefresh = resolve; });
 
@@ -137,7 +156,7 @@ describe("ProviderCatalogService", () => {
   it("retains cached entries and records a scoped diagnostic after refresh failure", async () => {
     const { repo, service } = createService();
     const key = providerCatalogContextKey(REQUEST, "C:/repo");
-    repo.upsert(key, "workspace-1", "C:/repo", CACHED);
+    await repo.upsert(key, "workspace-1", "C:/repo", CACHED);
     const changed = new Promise<ProviderCatalogChange>((resolve) => service.onChanged(resolve));
 
     service.request({
@@ -188,7 +207,7 @@ describe("ProviderCatalogService", () => {
       name: "prompts:removed",
       description: "Removed prompt",
     };
-    repo.upsert(key, "workspace-1", "C:/repo", {
+    await repo.upsert(key, "workspace-1", "C:/repo", {
       ...CACHED,
       entries: [...CACHED.entries, releasePrompt, removedPrompt],
     });
@@ -253,23 +272,25 @@ describe("ProviderCatalogService", () => {
     finishRefresh(CACHED);
 
     await vi.waitFor(() => expect(persist).toHaveBeenCalledOnce());
-    expect(persist.mock.results[0]?.value).toBe(false);
+    await expect(persist.mock.results[0]?.value).resolves.toBe(false);
     expect(repo.get(key)).toBeNull();
     expect(changes).toEqual([]);
   });
 
-  it("uses the workspace snapshot provisionally for a realized worktree context", () => {
+  it("uses the workspace snapshot provisionally for a realized worktree context", async () => {
     const { repo, service } = createService();
     const workspaceKey = providerCatalogContextKey(REQUEST, "C:/repo");
-    repo.upsert(workspaceKey, "workspace-1", "C:/repo", CACHED);
+    await repo.upsert(workspaceKey, "workspace-1", "C:/repo", CACHED);
     const worktreeRequest = { ...REQUEST, threadId: "thread-1" };
+    let finish!: (snapshot: ProviderCatalogSnapshot) => void;
+    const refreshed = new Promise<ProviderCatalogSnapshot>((resolve) => { finish = resolve; });
 
     const immediate = service.request({
       request: worktreeRequest,
       context: { scope: "workspace", workspaceId: "workspace-1", threadId: "thread-1" },
       cwd: "C:/repo/.worktrees/thread-1",
       fallbackCwd: "C:/repo",
-      refresh: () => new Promise(() => undefined),
+      refresh: () => refreshed,
     });
 
     expect(immediate.context).toEqual({
@@ -279,12 +300,14 @@ describe("ProviderCatalogService", () => {
     });
     expect(immediate.entries).toEqual(CACHED.entries);
     expect(immediate.freshness.status).toBe("stale");
+    finish(CACHED);
+    await service.close();
   });
 
   it("tracks every logical request sharing one persisted checkout", async () => {
     const { repo, service } = createService();
     const key = providerCatalogContextKey(REQUEST, "C:/repo");
-    repo.upsert(key, "workspace-1", "C:/repo", CACHED);
+    await repo.upsert(key, "workspace-1", "C:/repo", CACHED);
     const changes: ProviderCatalogChange[] = [];
     service.onChanged((change) => changes.push(change));
     const firstRequest = { ...REQUEST, threadId: "thread-1" };
@@ -331,7 +354,7 @@ describe("ProviderCatalogService", () => {
   it("queues a native change received during an active refresh", async () => {
     const { repo, service } = createService();
     const key = providerCatalogContextKey(REQUEST, "C:/repo");
-    repo.upsert(key, "workspace-1", "C:/repo", CACHED);
+    await repo.upsert(key, "workspace-1", "C:/repo", CACHED);
     let finishRefresh!: (snapshot: ProviderCatalogSnapshot) => void;
     const initialRefresh = new Promise<ProviderCatalogSnapshot>((resolve) => {
       finishRefresh = resolve;
@@ -401,7 +424,8 @@ describe("ProviderCatalogService", () => {
 
   it("bounds concurrent physical catalog refreshes", async () => {
     const { service } = createService();
-    const refresh = vi.fn(() => new Promise<ProviderCatalogSnapshot>(() => undefined));
+    const completions: Array<(snapshot: ProviderCatalogSnapshot) => void> = [];
+    const refresh = vi.fn(() => new Promise<ProviderCatalogSnapshot>((resolve) => { completions.push(resolve); }));
     const immediate: ProviderCatalogSnapshot[] = [];
 
     for (let index = 0; index < 65; index += 1) {
@@ -422,6 +446,8 @@ describe("ProviderCatalogService", () => {
       diagnostics: [expect.objectContaining({ code: "source-unavailable" })],
       freshness: { status: "stale", reason: expect.stringContaining("capacity") },
     });
+    for (const finish of completions) finish(CACHED);
+    await service.close();
   });
 
   it("admits a new context after evicting the oldest completed context", async () => {
@@ -459,5 +485,27 @@ describe("ProviderCatalogService", () => {
     expect(next.diagnostics).toEqual([]);
     await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(65));
     await vi.waitFor(() => expect(changes).toHaveLength(65));
+  });
+
+  it("drains scheduled fetches and saves without admitting queued or later refreshes", async () => {
+    const { service, repo } = createService();
+    let finish!: (snapshot: ProviderCatalogSnapshot) => void;
+    const refresh = vi.fn(() => new Promise<ProviderCatalogSnapshot>((resolve) => { finish = resolve; }));
+    const followup = vi.fn(async () => CACHED);
+    const input = { request: REQUEST, context: CACHED.context, cwd: "C:/repo", refresh, refreshFromCache: followup };
+    service.request(input);
+    service.refreshKnownContexts("codex", "C:/repo");
+    const settled = vi.fn();
+    const closed = service.close().then(settled);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(settled).not.toHaveBeenCalled();
+    service.request(input);
+    service.refreshKnownContexts("codex", "C:/repo");
+    finish(CACHED);
+    await closed;
+    expect(repo.get(providerCatalogContextKey(REQUEST, "C:/repo"))).toEqual(CACHED);
+    expect(followup).not.toHaveBeenCalled();
+    expect(service.request(input).entries).toEqual(CACHED.entries);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

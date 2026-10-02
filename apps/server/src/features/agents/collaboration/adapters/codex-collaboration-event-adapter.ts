@@ -1,5 +1,4 @@
 import * as NodeCrypto from "node:crypto";
-import { inject, injectable } from "tsyringe";
 import {
   AgentEventType,
   createCanonicalSubagentPresentation,
@@ -7,7 +6,6 @@ import {
   type CodexCollaborationEvidence,
   type CodexContinuationEvidence,
   type AgentEvent,
-  type CollaborationAction,
   type CollaborationActionKind,
   type ProviderRuntimeExtension,
   type SubagentPresentation,
@@ -15,7 +13,6 @@ import {
 import { logger } from "@mcode/shared";
 
 import {
-  CODEX_COLLABORATION_DURABILITY,
   type CodexChildDelegation,
   type CodexChildRoutingDiagnosticInput,
   type CodexCollaborationDurability,
@@ -36,10 +33,6 @@ type CodexToolEvent = Extract<
   AgentEvent,
   { type: typeof AgentEventType.ToolUse | typeof AgentEventType.ToolResult }
 > & CodexRuntimeEvidence;
-type CodexTurnStartedEvent = Extract<
-  AgentEvent,
-  { type: typeof AgentEventType.TurnStarted }
-> & CodexRuntimeEvidence;
 
 type ChildRoutingContext = {
   delegation: CodexChildDelegation;
@@ -53,18 +46,6 @@ type DiagnosticContext = {
   threadId: string;
   executionId: string;
   parentItemId?: string;
-};
-
-type ContinuationContext = {
-  diagnostic: DiagnosticContext;
-  parentThreadId: string;
-  providerIdentities: readonly import("@mcode/contracts").ProviderIdentity[];
-  triggerActionId: string;
-};
-
-type ContinuationSource = {
-  action: CollaborationAction | null;
-  diagnostic: DiagnosticContext;
 };
 
 type CollaborationSource = {
@@ -99,12 +80,10 @@ const CODEX_COLLABORATION_KIND_BY_NATIVE = new Map<string, CollaborationActionKi
 ]);
 
 /** Projects Codex-native collaboration evidence before generic turn handling. */
-@injectable()
 export class CodexCollaborationEventAdapter implements ProviderEventAdapter {
   readonly providerId = "codex" as const;
 
   constructor(
-    @inject(CODEX_COLLABORATION_DURABILITY)
     private readonly durability: CodexCollaborationDurability,
   ) {}
 
@@ -281,111 +260,12 @@ export class CodexCollaborationEventAdapter implements ProviderEventAdapter {
 
   private projectProviderContinuation(event: CodexRuntimeEvent): ProviderEventProjection | undefined {
     if (event.type !== AgentEventType.TurnStarted || !event.codexContinuation) return undefined;
-    const turnStarted = event as CodexTurnStartedEvent;
-    if (this.startProviderContinuation(turnStarted)) return;
-    logger.warn("Ignoring provider continuation without canonical collaboration action", {
-      threadId: event.threadId,
-      turnExecutionId: event.turnExecutionId,
-    });
     return this.reject(
       event,
       undefined,
       "continuation-evidence-not-found",
-      this.continuationDiagnostic(turnStarted),
+      this.latestThreadDiagnostic(event.threadId),
     );
-  }
-
-  private startProviderContinuation(
-    event: CodexTurnStartedEvent,
-  ): boolean {
-    const evidence = event.codexContinuation;
-    const executionId = event.turnExecutionId;
-    if (!evidence || !executionId) return false;
-    try {
-      const context = this.continuationContext(event);
-      if (!context) return false;
-      this.durability.startProviderContinuation({
-        parentThreadId: context.parentThreadId,
-        turnId: NodeCrypto.randomUUID(),
-        executionId,
-        permissionMode: this.durability.loadLatestPermissionMode(context.parentThreadId) ?? "supervised",
-        providerIdentities: context.providerIdentities,
-        triggerActionId: context.triggerActionId,
-      });
-      this.durability.activateProviderContinuation(context.parentThreadId);
-      return true;
-    } catch (error) {
-      logger.warn("Codex provider continuation persistence failed", {
-        threadId: event.threadId,
-        sourceNativeThreadId: evidence.sourceNativeThreadId,
-        sourceNativeTurnId: evidence.sourceNativeTurnId,
-        sourceNativeItemId: evidence.sourceNativeItemId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
-  }
-
-  private continuationContext(
-    event: CodexTurnStartedEvent,
-  ): ContinuationContext | null {
-    const evidence = event.codexContinuation;
-    const source = this.continuationSource(event);
-    if (!evidence || !source?.action) return null;
-    const targetThread = this.durability.loadThreadByProviderIdentity(this.nativeIdentity("thread", evidence.targetNativeThreadId));
-    if (!targetThread || targetThread.id !== event.threadId || source.action.target.threadId !== targetThread.id) return null;
-    const parentThread = this.durability.loadThread(event.threadId);
-    if (!parentThread || parentThread.id !== targetThread.id) return null;
-    return {
-      diagnostic: source.diagnostic,
-      parentThreadId: parentThread.id,
-      providerIdentities: parentThread.providerIdentities,
-      triggerActionId: source.action.id,
-    };
-  }
-
-  private continuationSource(
-    event: CodexTurnStartedEvent,
-  ): ContinuationSource | undefined {
-    const evidence = event.codexContinuation;
-    if (!evidence) return undefined;
-    const sourceThread = this.durability.loadThreadByProviderIdentity(
-      this.nativeIdentity("thread", evidence.sourceNativeThreadId),
-    );
-    if (!sourceThread) return undefined;
-    const sourceTurn = this.durability.loadTurnByProviderIdentity(
-      sourceThread.id,
-      this.nativeIdentity("turn", evidence.sourceNativeTurnId),
-    );
-    if (!sourceTurn) return undefined;
-    const action = this.durability.loadCollaborationActionBySourceProviderIdentity(
-      sourceThread.id,
-      sourceTurn.id,
-      this.nativeIdentity("item", evidence.sourceNativeItemId),
-    );
-    return {
-      action,
-      diagnostic: {
-        threadId: sourceThread.id,
-        executionId: this.durability.loadExecutionIdForTurn(sourceTurn.id),
-        ...(action ? { parentItemId: action.source.itemId } : {}),
-      },
-    };
-  }
-
-  private continuationDiagnostic(
-    event: CodexTurnStartedEvent,
-  ): DiagnosticContext | undefined {
-    try {
-      const source = this.continuationSource(event);
-      if (source) return source.diagnostic;
-    } catch (error) {
-      logger.warn("Codex continuation diagnostic context failed", {
-        threadId: event.threadId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    return this.latestThreadDiagnostic(event.threadId);
   }
 
   private latestThreadDiagnostic(threadId: string): DiagnosticContext | undefined {
