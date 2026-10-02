@@ -22,8 +22,18 @@ older bundles or differently formatted SQL. Removing a record leaves its schema
 in place and makes a later startup replay DDL. The bounded
 [`migration-history-repair.ts`](../../../apps/server/src/runtime/persistence/sqlite/migration-history-repair.ts)
 repairs the known lost 0061–0066 records only after certifying their complete
-reviewed DDL. Data migrations still run through Drizzle; schema presence cannot
-prove that a backfill ran.
+reviewed DDL. Repairing those records cannot prove that a data backfill ran.
+
+Conversation conversion and retained execution-ID repair run through the
+application database writer before display materialization and provider recovery.
+See the [startup ordering](../../../apps/server/src/application/bootstrap/server-bootstrap.ts)
+and [conversion owner](../../../apps/server/src/features/agents/conversation/migrations/legacy-conversation-migration-store.ts).
+
+A completed legacy conversion does not exempt its retained execution IDs from
+the wire UUID contract. Repair the original converter turn and checkpoint
+together. Do not reimport classified messages to repair identifiers. Their current
+display ownership may already belong to a newer turn. Startup applies this repair
+in every build channel; it does not depend on an updater or a manual command.
 
 ## Conversation display materialization
 
