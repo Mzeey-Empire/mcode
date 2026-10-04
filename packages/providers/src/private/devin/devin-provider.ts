@@ -234,7 +234,8 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
           this.cancelPendingPermissionsForSession(state.mcodeSessionId);
           await state.acpRuntime.close().catch(() => undefined);
         },
-        isStale: (state, args) => state.cwd !== args.cwd,
+        isStale: (state, args) => state.child.exitCode !== null ||
+          state.child.signalCode !== null || state.cwd !== args.cwd,
       },
       {
         jobObject: { isWindowsJob: host.runtime.platform === "win32", assign: () => false, setDescription: () => {} },
