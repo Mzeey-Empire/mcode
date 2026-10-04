@@ -313,6 +313,40 @@ describe("DevinProvider", () => {
     expect(fake.connection.newSession).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { exitCode: 1, signalCode: null },
+    { exitCode: null, signalCode: "SIGTERM" },
+  ] satisfies Pick<NodeChildProcess.ChildProcess, "exitCode" | "signalCode">[])(
+    "replaces an exited process before resuming the next turn: %j",
+    async ({ exitCode, signalCode }) => {
+      const host = createHost();
+      const first = createFakeRuntime("devin-acp-first", 101);
+      const replacement = createFakeRuntime("devin-acp-replacement", 102);
+      starts.push(mockAcpStart([first, replacement]));
+      const p = createProvider(host);
+      await p.sendTurn(turn());
+
+      first.child.exitCode = exitCode;
+      first.child.signalCode = signalCode;
+      first.child.emit("exit", exitCode, signalCode);
+      vi.mocked(first.runtime.prompt).mockRejectedValue(new Error("Connection closed"));
+      await p.sendTurn(turn({
+        turnId: "turn-2",
+        turnExecutionId: "execution-2",
+        resumeFrom: "devin-acp-first",
+      }));
+
+      expect(first.runtime.prompt).toHaveBeenCalledOnce();
+      expect(first.runtime.close).toHaveBeenCalledOnce();
+      expect(replacement.connection.loadSession).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "devin-acp-first" }),
+      );
+      expect(replacement.connection.newSession).not.toHaveBeenCalled();
+      expect(replacement.runtime.prompt).toHaveBeenCalledOnce();
+      expect(submittedRuntimeEvents(host).some((event) => event.type === "error")).toBe(false);
+    },
+  );
+
   it("applies model and native mode through session/set_config_option, restoring the prior mode after plan", async () => {
     const host = createHost();
     const fake = createFakeRuntime("devin-acp-1", 101);
