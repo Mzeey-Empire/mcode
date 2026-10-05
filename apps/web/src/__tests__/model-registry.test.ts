@@ -93,10 +93,10 @@ describe("pickProviderModelsForSettings", () => {
 });
 
 describe("ModelRegistry", () => {
-  it("MODEL_PROVIDERS contains Claude with 9 models", () => {
+  it("MODEL_PROVIDERS contains Claude with 11 models", () => {
     const claude = MODEL_PROVIDERS.find((p) => p.id === "claude");
     expect(claude).toBeTruthy();
-    expect(claude?.models).toHaveLength(9);
+    expect(claude?.models).toHaveLength(11);
     expect(claude?.comingSoon).toBe(false);
   });
 
@@ -116,6 +116,11 @@ describe("ModelRegistry", () => {
     expect(model?.providerId).toBe("claude");
     expect(model?.availableUntil).toBeUndefined();
     expect(isModelAvailable(model!)).toBe(true);
+  });
+
+  it("findModelById returns Sonnet 5.5 and Fable 5.1", () => {
+    expect(findModelById("claude-sonnet-5-5")?.label).toBe("Claude Sonnet 5.5");
+    expect(findModelById("claude-fable-5-1")?.label).toBe("Claude Fable 5.1");
   });
 
   it("findModelById returns Sonnet 5", () => {

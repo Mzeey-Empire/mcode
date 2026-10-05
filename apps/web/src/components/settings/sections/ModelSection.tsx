@@ -382,7 +382,7 @@ export function ModelSection() {
     if (provider === "copilot") {
       return "Reasoning effort passed to the Copilot model. Not all models support all levels.";
     }
-    return "Default reasoning level. Max requires Fable 5, Sonnet 5, Opus 4.8/4.7/4.6, or Sonnet 4.6. X-High requires Opus 4.8 or Opus 4.7.";
+    return "Default reasoning level. Max requires Opus 5.5/5, Sonnet 5.5/5, Fable 5.1/5, Opus 4.8/4.7/4.6, or Sonnet 4.6. X-High requires Opus 5.5/5/4.8/4.7, Sonnet 5.5/5, or Fable 5.1/5.";
   }, [declaredLevels, provider, activeProvider]);
 
   const handleProviderChange = (v: string) => {

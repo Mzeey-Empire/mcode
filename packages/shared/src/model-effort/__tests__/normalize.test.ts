@@ -254,6 +254,20 @@ describe("normalizeReasoningLevelForModel", () => {
     });
   });
 
+  describe("Claude Sonnet 5.5/5 and Fable 5.1/5 (supports all tiers)", () => {
+    it.each(["claude-sonnet-5-5", "claude-fable-5-1", "claude-fable-5", "claude-sonnet-5"])("passes xhigh and max through for %s", (modelId) => {
+      expect(normalizeReasoningLevelForModel(modelId, "max")).toBe("max");
+      expect(normalizeReasoningLevelForModel(modelId, "xhigh")).toBe("xhigh");
+      expect(isXhighEffortModel(modelId)).toBe(true);
+      expect(isMaxEffortModel(modelId)).toBe(true);
+    });
+
+    it("resolves dated variants without being shadowed by the 5.0 base IDs", () => {
+      expect(normalizeReasoningLevelForModel("claude-sonnet-5-5-20270101", "xhigh")).toBe("xhigh");
+      expect(normalizeReasoningLevelForModel("claude-fable-5-1-20270101", "xhigh")).toBe("xhigh");
+    });
+  });
+
   describe("OpenAI Codex GPT-6.1 Sol", () => {
     it.each(["gpt-6.1-sol", "gpt-6.1-sol-20260930"])(
       "normalizes unsupported lower tiers and preserves ordinary efforts for %s",

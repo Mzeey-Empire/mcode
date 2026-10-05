@@ -10,6 +10,8 @@ describe("MODEL_CONTEXT_WINDOWS_DEFAULT", () => {
   it("exposes 200K as the default for every Claude model (no opt-in)", () => {
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-5-5"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-5"]).toBe(200_000);
+    expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-sonnet-5-5"]).toBe(200_000);
+    expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-fable-5-1"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-8"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-7"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-6"]).toBe(200_000);
@@ -25,6 +27,10 @@ describe("MODEL_CONTEXT_WINDOWS_DEFAULT", () => {
 describe("MODEL_CONTEXT_WINDOWS_EXTENDED", () => {
   it("exposes 1M for Opus 5.5", () => {
     expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-opus-5-5"]).toBe(1_000_000);
+  });
+  it("exposes 1M for Sonnet 5.5 and Fable 5.1", () => {
+    expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-sonnet-5-5"]).toBe(1_000_000);
+    expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-fable-5-1"]).toBe(1_000_000);
   });
   it("exposes 1M for Opus 5", () => {
     expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-opus-5"]).toBe(1_000_000);
