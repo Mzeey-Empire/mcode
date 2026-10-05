@@ -184,3 +184,11 @@ jobs:
 
       - name: Smoke test server bundle
         run: bun apps/desktop/scripts/desktop-packaging/package-validation/smoke-test.mjs --bundle
+
+      - name: Smoke launch desktop app
+        timeout-minutes: 3
+        env:
+          # Regression guard: terminals inside Electron-based apps inherit this,
+          # and prod-electron.mjs must strip it or main crashes at startup.
+          ELECTRON_RUN_AS_NODE: "1"
+        run: xvfb-run -a bun apps/desktop/scripts/desktop-packaging/package-validation/launch-smoke.mjs
