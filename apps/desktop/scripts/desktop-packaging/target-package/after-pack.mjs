@@ -208,6 +208,11 @@ async function configureBrowserSnapshotAndFuses(context, snapshotFile) {
     resetAdHocDarwinSignature: isMacPlatform(context.electronPlatformName),
     [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: hasSnapshot,
     [FuseV1Options.EnableNodeCliInspectArguments]: false,
+    // Terminals inside Electron apps (VS Code, Mcode) export ELECTRON_RUN_AS_NODE=1,
+    // and a GUI binary that honors it crashes on launch. Node-mode work uses the
+    // renamed mcode-server copy instead. Unsigned macOS builds still run the GUI
+    // binary as their PTY host (terminal-release-evidence.mjs), so macOS keeps it.
+    [FuseV1Options.RunAsNode]: isMacPlatform(context.electronPlatformName),
   });
   console.log("[after-pack] Security fuses applied");
 }
