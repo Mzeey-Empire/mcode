@@ -12,6 +12,8 @@ import type { ContextWindowMode } from "@mcode/contracts";
 export const MODEL_CONTEXT_WINDOWS_DEFAULT: Readonly<Record<string, number>> = {
   "claude-opus-5-5": 200_000,
   "claude-opus-5": 200_000,
+  "claude-sonnet-5-5": 200_000,
+  "claude-fable-5-1": 200_000,
   "claude-fable-5": 200_000,
   "claude-sonnet-5": 200_000,
   "claude-opus-4-8": 200_000,
@@ -30,6 +32,8 @@ export const MODEL_CONTEXT_WINDOWS_DEFAULT: Readonly<Record<string, number>> = {
 export const MODEL_CONTEXT_WINDOWS_EXTENDED: Readonly<Record<string, number>> = {
   "claude-opus-5-5": 1_000_000,
   "claude-opus-5": 1_000_000,
+  "claude-sonnet-5-5": 1_000_000,
+  "claude-fable-5-1": 1_000_000,
   "claude-fable-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
   "claude-opus-4-8": 1_000_000,
