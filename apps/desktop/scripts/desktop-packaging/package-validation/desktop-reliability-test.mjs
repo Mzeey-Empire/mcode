@@ -190,7 +190,8 @@ function reliabilityEvidence(initialLock, recoveredLock, persisted, thread, stre
   };
 }
 
-async function waitForServerLock(dataDir, timeoutMs) {
+/** Poll `dataDir/server.lock` until it holds a valid server identity. */
+export async function waitForServerLock(dataDir, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   const lockPath = NodePath.join(dataDir, "server.lock");
   while (Date.now() < deadline) {
@@ -226,7 +227,8 @@ async function waitForChangedServerLock(dataDir, previous, timeoutMs) {
   throw new Error(`Server identity did not change within the bounded recovery window (${timeoutMs}ms)`);
 }
 
-async function waitForHealth(port, timeoutMs) {
+/** Poll the server `/health` endpoint on `port` until it answers OK. */
+export async function waitForHealth(port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -370,7 +372,7 @@ export async function cleanupOwnedRun(child, dataDir, runRoot, overrides = {}) {
     errors.push(error);
   }
   try {
-    operations.removeRunRoot(runRoot);
+    await operations.removeRunRoot(runRoot);
     if (operations.pathExists(runRoot)) {
       throw new Error(`Owned reliability run directory survived cleanup: ${runRoot}`);
     }
