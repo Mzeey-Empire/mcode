@@ -519,6 +519,7 @@ export class ThreadHydrator {
         return {
           records: patchThreadRecord(state.records, threadId, {
             error: String(error),
+            errorSource: "load",
             loading: false,
           }),
         };
@@ -1468,7 +1469,7 @@ export class ThreadHydrator {
   private failFetchCommit(threadId: string, error: unknown): void {
     if (this.deps.getState().currentThreadId === threadId) {
       this.deps.setState((state: ThreadHydratorWriteState) => ({
-        records: patchThreadRecord(state.records, threadId, { error: String(error), loading: false }),
+        records: patchThreadRecord(state.records, threadId, { error: String(error), errorSource: "load", loading: false }),
       }));
     }
     evictCachedRecord(threadId);

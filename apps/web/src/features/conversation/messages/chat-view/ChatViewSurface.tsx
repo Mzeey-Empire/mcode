@@ -369,9 +369,17 @@ function hasConversationTransition(state: ChatViewState): boolean {
 
 /** Checks whether a hydration failure replaces the transcript stage. */
 function hasFullConversationError(state: ChatViewState): boolean {
-  return isConversationError(state.sessionError)
+  return conversationErrorLabel(state) === LOAD_ERROR_LABEL
     && state.messageCount === 0
     && !state.isAgentRunning;
+}
+
+const LOAD_ERROR_LABEL = "Could not refresh conversation";
+
+/** Names the failed action for a conversation error; turn errors already render in the transcript. */
+function conversationErrorLabel(state: ChatViewState): string | null {
+  if (!isConversationError(state.sessionError) || state.sessionErrorSource === "turn") return null;
+  return state.sessionErrorSource === "send" ? "Could not send message" : LOAD_ERROR_LABEL;
 }
 
 /** Checks whether an error belongs in the conversation rather than the CLI banner. */
@@ -696,14 +704,13 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps) {
     thread.id,
     thread.mode === "worktree" && thread.worktree_managed === true,
   );
-  const showConversationError = isConversationError(state.sessionError);
-  const showConversationErrorBanner = showConversationError && (state.messageCount > 0 || state.isAgentRunning);
+  const conversationErrorBanner = state.messageCount > 0 || state.isAgentRunning ? conversationErrorLabel(state) : null;
   const showCliError = isVisibleCliError(state.sessionError, dismissedError);
   return (
     <div ref={state.chatPaneRef} className="flex h-full flex-col bg-background" data-testid="chat-view">
       <ActiveThreadHeader state={state} editingThreadId={editingThreadId} onEditingThreadIdChange={onEditingThreadIdChange} onSaveTitle={interactions.onSaveTitle} />
       <ActiveThreadBanners state={state} recovery={recovery} />
-      {showConversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">Could not refresh conversation: {state.sessionError}</p></div> : null}
+      {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
       <HandoffFallbackBanner threadId={thread.id} />
       <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
       <TurnSavingNotice lostProgress={state.lostProgress} />

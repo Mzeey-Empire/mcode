@@ -100,7 +100,10 @@ function createRuntimePatch(
     ...runtimeIdentityPatch(placeholder, persisted, placeholderRunning),
     ...runtimeNarrativePatch(placeholder, persisted, persistedId, createTurnResponseKey),
   };
-  if (!persistedExists || persisted.error === null) patch.error = placeholder.error;
+  if (!persistedExists || persisted.error === null) {
+    patch.error = placeholder.error;
+    patch.errorSource = placeholder.errorSource;
+  }
   return patch;
 }
 
