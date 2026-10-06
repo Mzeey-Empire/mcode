@@ -455,6 +455,7 @@ interface ClaudeStreamLoopState {
   awaitingResume: boolean;
   resumedTurnStarted: boolean;
   suppressEnded: boolean;
+  endedTurnExecutionId?: string;
   mapper: ClaudeEventMapper;
 }
 
@@ -2118,17 +2119,30 @@ export class ClaudeProvider
           break;
         }
         const outcome = await state.mapper.map(message);
-        if (outcome !== "none") {
-          await this.flushCanonicalExecution(state.currentRouting);
-          state.awaitingResume = outcome === "turn_complete";
-          state.resumedTurnStarted = false;
-        }
+        if (outcome !== "none") await this.endClaudeTurn(sessionId, state);
       }
     } catch (error: unknown) {
       this.publishClaudeStreamError(sessionId, q, state, error);
     } finally {
       await this.finalizeClaudeStream(sessionId, q, state);
     }
+  }
+
+  /**
+   * Ends the execution at its SDK result. The warm session can outlive the turn
+   * by many minutes, and the server only releases the thread on `ended`.
+   */
+  private async endClaudeTurn(sessionId: string, state: ClaudeStreamLoopState): Promise<void> {
+    const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
+    this.publishTurnEvent(state.currentRouting, sessionId, {
+      type: AgentEventType.Ended,
+      threadId,
+      turnExecutionId: state.currentTurnExecutionId,
+    } satisfies AgentEvent);
+    state.endedTurnExecutionId = state.currentTurnExecutionId;
+    await this.waitForCanonicalExecution(state.currentRouting);
+    state.awaitingResume = true;
+    state.resumedTurnStarted = false;
   }
 
   private isFailedClaudeResume(
@@ -2178,12 +2192,12 @@ export class ClaudeProvider
     message: Record<string, unknown>,
     isResumeFailure: boolean,
   ): Promise<void> {
+    const hasQueuedPrompt = state.pendingPromptExecutionIds.length > 0;
+    // A queued prompt's turn can open with system messages such as session hooks.
     if (
       !state.awaitingResume ||
-      message.type === "system" ||
-      (message.type === "result" &&
-        state.pendingPromptExecutionIds.length === 0 &&
-        !isResumeFailure)
+      (message.type === "system" && !hasQueuedPrompt) ||
+      (message.type === "result" && !hasQueuedPrompt && !isResumeFailure)
     )
       return;
     const executionId = state.pendingPromptExecutionIds.shift();
@@ -2250,6 +2264,11 @@ export class ClaudeProvider
     const current = this.runtime.get(sessionId);
     if (this.suppressClaudeStreamError(current, q)) return;
     const message = error instanceof Error ? error.message : String(error);
+    if (state.endedTurnExecutionId === state.currentTurnExecutionId) {
+      // The turn already reported its outcome; the server no longer admits its events.
+      logger.warn("SDK stream error after turn end", { sessionId, error: message });
+      return;
+    }
     const tail = this.recentStderr.get(sessionId)?.trim();
     const threadId = sessionId.startsWith("mcode-")
       ? sessionId.slice(6)
@@ -2332,6 +2351,7 @@ export class ClaudeProvider
   ): boolean {
     return (
       !state.suppressEnded &&
+      state.endedTurnExecutionId !== state.currentTurnExecutionId &&
       !suppressedQuery &&
       !superseded &&
       !current?.suppressEnded &&
@@ -2392,14 +2412,6 @@ export class ClaudeProvider
       await this.reportCanonicalDeliveryFailure(routing, error);
     } finally {
       if (this.getCanonicalRoutings().get(routing.executionId) === routing) this.getCanonicalRoutings().delete(routing.executionId);
-    }
-  }
-
-  private async flushCanonicalExecution(routing: ClaudeCanonicalEventRouting): Promise<void> {
-    try {
-      await this.canonicalEventPublisher.flushForExecution(routing);
-    } catch (error: unknown) {
-      await this.reportCanonicalDeliveryFailure(routing, error);
     }
   }
 
