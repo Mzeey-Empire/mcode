@@ -447,8 +447,11 @@ interface ThreadState {
   setTurnSavingStatus: (status: import("@mcode/contracts").TurnSavingStatus) => void;
   /** Apply one authoritative runtime snapshot without replacing other running threads. */
   applyThreadRuntimeSnapshot: (snapshot: TurnRuntimeSnapshot) => void;
-  /** Atomically move optimistic first-turn runtime state to the persisted thread identity. */
-  transferThreadRuntime: (placeholderId: string, persistedId: string) => void;
+  /**
+   * Atomically move optimistic first-turn runtime state to the persisted thread identity.
+   * Pass `runtimeKnown: false` when no server runtime snapshot identifies the turn.
+   */
+  transferThreadRuntime: (placeholderId: string, persistedId: string, options?: { runtimeKnown: boolean }) => void;
   /** Reconcile server runtime snapshots while preserving locally advanced state. */
   hydrateRunningThreads: (ids: string[], observed?: ReadonlyMap<string, RuntimeHydrationObservation>) => void;
   /** Restore authoritative per-thread execution snapshots during reconnect. */
@@ -3641,16 +3644,22 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
   },
 
-  transferThreadRuntime: (placeholderId, persistedId) => {
+  transferThreadRuntime: (placeholderId, persistedId, options) => {
     set((state) => {
+      const runtimeKnown = options?.runtimeKnown ?? true;
+      // A running mark with no execution identity can never correlate to its
+      // canonical turn, so an unknown runtime starts idle for canonical to claim.
+      const source = runtimeKnown || !state.records.has(placeholderId)
+        ? state.records
+        : patchThreadRecord(state.records, placeholderId, { runtimePhase: "idle" });
       const records = transferOptimisticThreadRuntime(
-        state.records,
+        source,
         placeholderId,
         persistedId,
-        state.runningThreadIds.has(placeholderId),
+        runtimeKnown && state.runningThreadIds.has(placeholderId),
         createTurnResponseKey,
       );
-      if (records === state.records) return {};
+      if (records === source) return {};
       const nextRunning = new Set(state.runningThreadIds);
       nextRunning.delete(placeholderId);
       const persistedRecord = getThreadRecord(records, persistedId);
@@ -3659,7 +3668,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       } else {
         nextRunning.delete(persistedId);
       }
-      return { records, runningThreadIds: nextRunning };
+      // Canonical events may have settled this turn before the identity moved.
+      return reconcileCanonicalRuntime(records, nextRunning, persistedId);
     });
   },
 

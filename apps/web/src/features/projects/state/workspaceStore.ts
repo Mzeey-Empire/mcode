@@ -933,7 +933,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     // Without the create response, the server snapshot is the only source of the
     // execution identity that lets the turn's terminal event settle the record.
     if (runtimeSnapshot) useThreadStore.getState().applyThreadRuntimeSnapshot(runtimeSnapshot);
-    useThreadStore.getState().transferThreadRuntime(placeholderId, thread.id);
+    useThreadStore.getState().transferThreadRuntime(placeholderId, thread.id, { runtimeKnown: runtimeSnapshot !== undefined });
     useDiffStore.getState().hideRightPanel(pending.workspaceId, thread.id);
     set((state) => optimisticCreationSuccessState(
       state,
