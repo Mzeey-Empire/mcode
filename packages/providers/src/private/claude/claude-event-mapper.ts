@@ -226,8 +226,10 @@ export class ClaudeEventMapper {
     this.observeGoal(message);
     this.emitResultMessage(usage);
     this.emitFallback(message);
-    const snapshot = this.emitTurnComplete(message, usage);
+    const snapshot = this.callbacks.updateUsage(metrics(message, usage));
+    // The canonical writer rejects non-hook events after the terminal event, so quota must precede turnComplete.
     await this.emitQuotaUpdate(snapshot);
+    this.emitTurnComplete(message, usage);
     this.resetResult();
     return "turn_complete";
   }
@@ -299,13 +301,9 @@ export class ClaudeEventMapper {
       });
   }
 
-  private emitTurnComplete(
-    message: Message,
-    usage: Usage,
-  ): ClaudeUsageSnapshot {
+  private emitTurnComplete(message: Message, usage: Usage): void {
     const session = this.callbacks.getSession();
     const contextWindow = resultContextWindow(message, session);
-    const snapshot = this.callbacks.updateUsage(metrics(message, usage));
     this.emit({
       type: AgentEventType.TurnComplete,
       threadId: this.threadId,
@@ -323,7 +321,6 @@ export class ClaudeEventMapper {
       providerId: "claude",
     });
     this.lastContextWindow = contextWindow;
-    return snapshot;
   }
 
   private async emitQuotaUpdate(snapshot: ClaudeUsageSnapshot): Promise<void> {
