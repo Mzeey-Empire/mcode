@@ -102,15 +102,16 @@ describe("providers.listAvailability RPC", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it("returns six entries in catalog order", async () => {
+  it("returns every entry in catalog order", async () => {
     /** Canned response that mirrors PROVIDER_CATALOG order. */
     const fakeAvailability: ProviderAvailability[] = [
       { id: "claude",   enabled: true,  hasAdapter: true,  beta: false, comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
       { id: "codex",    enabled: true,  hasAdapter: true,  beta: false, comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
       { id: "copilot",  enabled: false, hasAdapter: true,  beta: true,  comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
       { id: "gemini",   enabled: false, hasAdapter: false, beta: false, comingSoon: true,  capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
-      { id: "cursor",   enabled: false, hasAdapter: false, beta: false, comingSoon: true,  capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
-      { id: "opencode", enabled: false, hasAdapter: false, beta: false, comingSoon: true,  capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
+      { id: "cursor",   enabled: false, hasAdapter: true,  beta: true,  comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
+      { id: "opencode", enabled: false, hasAdapter: true,  beta: true,  comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
+      { id: "devin",    enabled: false, hasAdapter: true,  beta: true,  comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
     ];
 
     const deps = makeMinimalDeps({
@@ -133,6 +134,7 @@ describe("providers.listAvailability RPC", () => {
       "gemini",
       "cursor",
       "opencode",
+      "devin",
     ]);
   });
 
