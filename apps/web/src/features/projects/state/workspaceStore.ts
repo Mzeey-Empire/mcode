@@ -34,7 +34,7 @@ import {
   releaseBrowserAutomationThreadScope,
   releaseBrowserAutomationWorkspaceScopes,
 } from "@/features/preview/automation/browserAutomationStore";
-import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode } from "@mcode/contracts";
+import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode, TurnRuntimeSnapshot } from "@mcode/contracts";
 import { sanitizeCustomBranchInput } from "@/lib/branch-name";
 import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
@@ -921,7 +921,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
   };
 
-  const applyRecoveredCreation = (placeholderId: string, thread: Thread) => {
+  const applyRecoveredCreation = (placeholderId: string, thread: Thread, runtimeSnapshot: TurnRuntimeSnapshot | undefined) => {
     const pending = pendingThreadCreationByPlaceholderId.get(placeholderId);
     if (!pending || !get().workspaces.some((workspace) => workspace.id === pending.workspaceId)) return;
     const draftStore = useComposerDraftStore.getState();
@@ -930,6 +930,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     bumpThreadListMutationEpoch(pending.workspaceId);
     pendingThreadCreationByPlaceholderId.delete(placeholderId);
     draftStore.removeDraftAfterAttachmentTransfer(placeholderId);
+    // Without the create response, the server snapshot is the only source of the
+    // execution identity that lets the turn's terminal event settle the record.
+    if (runtimeSnapshot) useThreadStore.getState().applyThreadRuntimeSnapshot(runtimeSnapshot);
     useThreadStore.getState().transferThreadRuntime(placeholderId, thread.id);
     useDiffStore.getState().hideRightPanel(pending.workspaceId, thread.id);
     set((state) => optimisticCreationSuccessState(
@@ -966,10 +969,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const startup = useThreadStartupStore.getState().recordsByStartupId[pending.startupId];
       if (!startup) return "missing";
       if (!startup.threadId) return unboundStartupResolution(startup.state);
-      const threads = await getTransport().listThreads(pending.workspaceId);
+      const [threads, runtimes] = await Promise.all([
+        getTransport().listThreads(pending.workspaceId),
+        getTransport().listRunning(),
+      ]);
       const thread = threads.find((candidate) => candidate.id === startup.threadId);
       if (!thread) return "unbound";
-      applyRecoveredCreation(placeholderId, thread);
+      applyRecoveredCreation(placeholderId, thread, runtimes.find((runtime) => runtime.threadId === thread.id));
       return thread;
     })();
     creationLookups.set(placeholderId, lookup);
