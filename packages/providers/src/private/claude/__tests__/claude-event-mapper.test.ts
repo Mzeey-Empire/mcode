@@ -94,4 +94,13 @@ describe("ClaudeEventMapper native dispatch", () => {
     expect(captureSdkSessionId).not.toHaveBeenCalled();
     expect(events).toEqual([]);
   });
+
+  it("ends a successful result with turnComplete so the writer accepts every event", async () => {
+    const { events, mapper } = createMapper();
+
+    await expect(mapper.map({ type: "result", is_error: false, result: "pong", usage: { output_tokens: 1 } }))
+      .resolves.toBe("turn_complete");
+
+    expect(events.map((event) => event.type)).toEqual([AgentEventType.QuotaUpdate, AgentEventType.TurnComplete]);
+  });
 });
