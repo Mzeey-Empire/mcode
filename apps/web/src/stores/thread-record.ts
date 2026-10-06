@@ -94,6 +94,9 @@ export function providerNoticeSessionId(
   return metadata ? metadata.sessionId ?? null : undefined;
 }
 
+/** Operation that produced a thread error: loading history, sending a message, or the agent's turn. */
+export type ThreadErrorSource = "load" | "send" | "turn";
+
 /**
  * Canonical in-memory state for one thread.
  * Collapses the former ~30 parallel `Record<string, X>` maps and active-thread mirror fields.
@@ -139,6 +142,8 @@ export interface ThreadRecord {
   answeredPlanMessageIds: Set<string>;
 
   error: string | null;
+  /** Which operation produced `error`, so the UI can name the failed action. */
+  errorSource: ThreadErrorSource | null;
   streaming: string;
   streamingPreview: string;
   /** Whether the current response text accepts deltas, independently of turn activity. */
@@ -239,6 +244,7 @@ export function createEmptyThreadRecord(): ThreadRecord {
     answeredPlanMessageIds: new Set(),
 
     error: null,
+    errorSource: null,
     streaming: "",
     streamingPreview: "",
     responseTextIsStreaming: false,

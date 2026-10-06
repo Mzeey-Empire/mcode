@@ -2669,6 +2669,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       const { messages, evicted } = capMessages([...record.messages, message]);
       return {
         error: event.error,
+        errorSource: "turn",
         runtimePhase: "errored",
         streaming: "",
         streamingPreview: "",
@@ -3058,6 +3059,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       return {
         records: patchThreadRecord(state.records, threadId, (current) => ({
           error: message,
+          errorSource: "send",
           ...(current.optimisticUserMessageId === userMessageId ? { optimisticUserMessageId: null } : {}),
           ...(activeSessionConflict && state.currentThreadId === threadId ? { messages: current.messages.filter((item) => item.id !== userMessageId) } : {}),
           ...(ownsRuntime ? { agentStartTime: undefined, runtimePhase: "errored" as const } : {}),
@@ -3978,6 +3980,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         records: patchThreadRecord(s.records, threadId, {
           planQuestionsStatus: "pending",
           error: String(e),
+          errorSource: "send",
         }),
       }));
     }

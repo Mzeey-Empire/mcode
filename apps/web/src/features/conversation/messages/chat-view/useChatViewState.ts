@@ -101,6 +101,7 @@ export function useChatViewState() {
   const residentContent = useActiveThreadRecord(hasResidentContent);
   const historyLoading = useActiveThreadRecord((record) => record.loading);
   const sessionError = useActiveThreadRecord((record) => record.error);
+  const sessionErrorSource = useActiveThreadRecord((record) => record.errorSource);
   const setPendingPrefill = useComposerDraftStore((state) => state.setPendingPrefill);
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   const activeThread = useActiveWorkspaceThread((thread) => thread);
@@ -159,6 +160,7 @@ export function useChatViewState() {
     savingStatus,
     lostProgress,
     sessionError,
+    sessionErrorSource,
     setPendingPrefill,
     setActiveThread,
     setForkMode,
