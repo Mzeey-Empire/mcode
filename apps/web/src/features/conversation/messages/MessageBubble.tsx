@@ -811,12 +811,17 @@ function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) 
       </div>
     );
   }
+  return <TimelineNote text={message.content} />;
+}
+
+/** A centered divider line carrying one short timeline note. */
+function TimelineNote({ text }: { text: string }) {
   return (
     <div className="flex items-center gap-3 py-2" role="note">
       <div className="h-px flex-1 bg-border" aria-hidden="true" />
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <RotateCcw size={12} aria-hidden="true" />
-        <span>{message.content}</span>
+        <span>{text}</span>
       </div>
       <div className="h-px flex-1 bg-border" aria-hidden="true" />
     </div>
@@ -1009,6 +1014,8 @@ function MessageRoleContent({
   showParentAgentProvenance = true,
 }: MessageBubbleProps) {
   if (message.role === "system") return <SystemMessageContent message={message} />;
+  // A turn the provider started on its own opens with the server notice, not text the user typed.
+  if (message.role === "user" && message.systemNotice?.kind === "provider-turn") return <TimelineNote text={message.content} />;
   if (message.role === "user") {
     return <UserMessageContent message={message} interactive={interactive} onBranch={onBranch} onScrollToMessage={onScrollToMessage} agentDisplayState={agentDisplayState} showParentAgentProvenance={showParentAgentProvenance} />;
   }
