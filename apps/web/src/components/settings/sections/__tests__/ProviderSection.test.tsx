@@ -66,8 +66,9 @@ beforeEach(() => {
       { id: "codex",    enabled: true,  hasAdapter: true,  beta: false, comingSoon: false, capabilities: [], cli: { status: "not_found", resolvedPath: null, configuredPath: "" } },
       { id: "copilot",  enabled: false, hasAdapter: true,  beta: true,  comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
       { id: "gemini",   enabled: false, hasAdapter: false, beta: false, comingSoon: true,  capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
-      { id: "cursor",   enabled: false, hasAdapter: false, beta: false, comingSoon: true,  capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
-      { id: "opencode", enabled: false, hasAdapter: false, beta: false, comingSoon: true,  capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
+      { id: "cursor",   enabled: false, hasAdapter: true,  beta: true,  comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
+      { id: "opencode", enabled: false, hasAdapter: true,  beta: true,  comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
+      { id: "devin",    enabled: false, hasAdapter: true,  beta: true,  comingSoon: false, capabilities: [], cli: { status: "unchecked", resolvedPath: null, configuredPath: "" } },
     ],
   });
 });
@@ -76,25 +77,26 @@ describe("ProviderSection", () => {
   it("renders switches only for available providers", () => {
     render(<ProviderSection />);
     const switches = screen.getAllByRole("switch");
-    expect(switches).toHaveLength(3);
+    expect(switches.map((element) => element.dataset.testid)).toEqual([
+      "provider-switch-claude",
+      "provider-switch-codex",
+      "provider-switch-copilot",
+      "provider-switch-cursor",
+      "provider-switch-opencode",
+      "provider-switch-devin",
+    ]);
     expect(screen.queryByTestId("provider-switch-gemini")).not.toBeInTheDocument();
   });
 
-  it("renders the Beta badge for copilot and Coming soon badges for planned providers", () => {
+  it("renders Beta badges for beta providers and a Coming soon badge for planned providers", () => {
     render(<ProviderSection />);
     expect(screen.getByTestId("provider-badge-copilot-beta")).toBeInTheDocument();
+    expect(screen.getByTestId("provider-badge-opencode-beta")).toBeInTheDocument();
     expect(screen.getByTestId("provider-badge-gemini-comingsoon")).toHaveAttribute(
       "variant",
       "secondary",
     );
-    expect(screen.getByTestId("provider-badge-cursor-comingsoon")).toHaveAttribute(
-      "variant",
-      "secondary",
-    );
-    expect(screen.getByTestId("provider-badge-opencode-comingsoon")).toHaveAttribute(
-      "variant",
-      "secondary",
-    );
+    expect(screen.queryByTestId("provider-badge-opencode-comingsoon")).not.toBeInTheDocument();
   });
 
   it("groups planned providers after available providers without adapter copy", () => {
@@ -102,8 +104,7 @@ describe("ProviderSection", () => {
 
     const comingSoon = screen.getByTestId("coming-soon-providers");
     expect(within(comingSoon).getByText("Gemini")).toBeInTheDocument();
-    expect(within(comingSoon).getByText("Cursor")).toBeInTheDocument();
-    expect(within(comingSoon).getByText("Opencode")).toBeInTheDocument();
+    expect(within(comingSoon).queryByText("OpenCode")).not.toBeInTheDocument();
     expect(screen.queryByText("Adapter not available yet.")).not.toBeInTheDocument();
     expect(
       screen
@@ -166,5 +167,40 @@ describe("ProviderSection", () => {
     render(<ProviderSection />);
 
     expect(screen.queryByTestId("provider-config-trigger-gemini")).not.toBeInTheDocument();
+  });
+
+  it("commits a normalized OpenCode serve URL on blur", async () => {
+    const user = userEvent.setup();
+    const update = vi.fn().mockResolvedValue(undefined);
+    useSettingsStore.setState({ settings: getDefaultSettings(), update });
+    render(<ProviderSection />);
+
+    const input = screen.getByTestId("provider-serve-url-opencode");
+    await user.type(input, "http://127.0.0.1:4096/");
+    expect(update).not.toHaveBeenCalled();
+    await user.tab();
+
+    expect(update).toHaveBeenCalledWith({ provider: { opencode: { serveUrl: "http://127.0.0.1:4096" } } });
+    expect(input).toHaveValue("http://127.0.0.1:4096");
+  });
+
+  it("rejects a non-http OpenCode serve URL without saving it", async () => {
+    const user = userEvent.setup();
+    const update = vi.fn().mockResolvedValue(undefined);
+    useSettingsStore.setState({ settings: getDefaultSettings(), update });
+    render(<ProviderSection />);
+
+    const input = screen.getByTestId("provider-serve-url-opencode");
+    await user.type(input, "file:///tmp/serve{Enter}");
+
+    expect(update).not.toHaveBeenCalled();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Enter an http or https URL, or leave it empty.")).toBeInTheDocument();
+  });
+
+  it("shows the OpenCode CLI path alongside its serve URL", () => {
+    render(<ProviderSection />);
+    expect(screen.getByTestId("provider-cli-path-opencode")).toBeEnabled();
+    expect(screen.getByTestId("provider-serve-url-opencode")).toHaveAttribute("placeholder", "http://127.0.0.1:4096");
   });
 });
