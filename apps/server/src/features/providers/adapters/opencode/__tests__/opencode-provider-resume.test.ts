@@ -16,7 +16,7 @@ function testPool(): OpenCodeServerPool {
 }
 
 function testProvider(http: never, pool: OpenCodeServerPool) {
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" } } }) };
+  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
   const envService = { getEnv: () => ({}) };
   const submitted: unknown[] = [];
   const host = {
@@ -103,7 +103,7 @@ describe("OpenCodeProvider resume cursor", () => {
     const { provider, submitted } = testProvider(http as never, testPool());
     await provider.sendTurn(turnRequest({ resumeFrom: "ses_kept" }));
     expect(http.createSession).not.toHaveBeenCalled();
-    expect(http.promptAsync).toHaveBeenCalledWith("http://127.0.0.1:4096", "ses_kept", expect.anything());
+    expect(http.promptAsync).toHaveBeenCalledWith({ baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_kept", expect.anything());
     const events = submittedEvents(submitted);
     expect(events).toContainEqual(expect.objectContaining({ subtype: "sdk_session_id:ses_kept" }));
     await provider.shutdown();
@@ -116,7 +116,7 @@ describe("OpenCodeProvider resume cursor", () => {
       resumeFrom: JSON.stringify({ schemaVersion: 99, sessionId: "ses_kept" }),
     }));
     expect(http.createSession).toHaveBeenCalledTimes(1);
-    expect(http.promptAsync).toHaveBeenCalledWith("http://127.0.0.1:4096", "ses_brand_new", expect.anything());
+    expect(http.promptAsync).toHaveBeenCalledWith({ baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_brand_new", expect.anything());
     await provider.shutdown();
   });
 
@@ -131,7 +131,7 @@ describe("OpenCodeProvider resume cursor", () => {
     const { provider, submitted } = testProvider(http as never, testPool());
     await provider.sendTurn(turnRequest({ resumeFrom: "ses_gone" }));
     expect(http.createSession).toHaveBeenCalledTimes(1);
-    expect(http.promptAsync).toHaveBeenCalledWith("http://127.0.0.1:4096", "ses_fresh_1", expect.anything());
+    expect(http.promptAsync).toHaveBeenCalledWith({ baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_fresh_1", expect.anything());
     const events = submittedEvents(submitted);
     expect(events).toContainEqual(expect.objectContaining({
       type: "system",

@@ -61,7 +61,7 @@ function fakeHttp(envelopes: unknown[]): FakeHttp {
 }
 
 function testProvider(http: FakeHttp) {
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" } } }) };
+  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
   const envService = { getEnv: () => ({}) };
   const host = {
     events: { submit: async () => ({ commit: {}, delivery: { ingress: "queued" } }) },
@@ -171,7 +171,7 @@ describe("OpenCodeProvider full-access permission bypass", () => {
     expect(cards).toHaveLength(0);
     expect(http.replyPermission).toHaveBeenCalledTimes(1);
     expect(http.replyPermission).toHaveBeenCalledWith(
-      "http://127.0.0.1:4096", "ses_1", "per_1", "always", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "per_1", "always", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(resolved).toEqual([{ requestId: "per_1", decision: "allow-session" }]);
     expect(provider.listPendingPermissions("thread-1")).toHaveLength(0);
@@ -210,7 +210,7 @@ describe("OpenCodeProvider full-access permission bypass", () => {
     await sending;
     expect(http.replyPermission).toHaveBeenCalledTimes(1);
     expect(http.replyPermission).toHaveBeenCalledWith(
-      "http://127.0.0.1:4096", "ses_1", "per_1", "once", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "per_1", "once", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     await provider.shutdown();
   });

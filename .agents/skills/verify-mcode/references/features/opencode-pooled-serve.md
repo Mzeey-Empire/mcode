@@ -13,6 +13,7 @@
 - Supervised permissions (#1624): permission and question asks surface as inline cards through the existing permission flow (`permission.request` → `permission.respond` → upstream reply). A shell approval relays once. A question reply carries the user’s ordered selected labels; questions do not offer session approval. Reject relays once and the turn settles cleanly. Duplicate replies and terminal outcomes are blocked.
 - Provider notices (#1624): reroute (`session.next.model.switched`) uses the canonical model-fallback event. Warning/error toasts, configuration signals, and authentication failures use bounded provider-neutral notices with replay deduplication. The screen and thread state stay intact.
 - Resolved dispatch modes (#1626): every turn carries the resolved permission and review modes. Full Access auto-answers upstream permission asks with `always` and shows no card; questions still card; supervised behavior is unchanged. `getApprovalReviewSupport` honestly reports `unavailable` — OpenCode has no native turn-review verdict — so the resolved review mode is always manual and the turn footer reflects it. The approval-review capability stays undeclared, so the Composer never offers Auto for OpenCode. The adapter is registered in the shared conformance suite (`opencode-core.synthetic.json`).
+- External attach (#1627): a non-empty `provider.opencode.serveUrl` attaches every OpenCode thread to that `opencode serve` instead of the pool. The app never spawns, pools, or closes an attached server. Every OpenCode HTTP request carries `?directory=<thread cwd>`, so one shared server keeps each thread in its own working directory. A second client of the same server sees the sessions. An empty URL restores the pooled spawn.
 
 ## How to get to it (user POV)
 
@@ -27,6 +28,9 @@
 9. Supervised question: send a prompt that asks a question. Select an option or enter a custom answer, submit the ordered answers through `permission.respond`, and confirm the provider continues. Confirm no session-wide approval control appears.
 10. Supervised rejection: reject either card (`deny`) and confirm the turn settles with one terminal outcome.
 11. Unknown-event diagnostic (focused tests only; no public seam injects upstream events by design): the mapper tests cover unknown valid types across both envelope shapes and oversized-envelope rejection. Record live unknown-event injection as a coverage gap, not a pass.
+12. External attach: start `opencode serve --port 4096 --hostname 127.0.0.1` yourself. In Settings > Providers, expand OpenCode and enter `http://127.0.0.1:4096` in **Serve URL**. The value saves on blur or Enter. Send a turn on a new OpenCode thread and confirm it completes.
+13. From a second client, request `GET http://127.0.0.1:4096/session?directory=<project path>`. Confirm that the thread's session is listed and that its `directory` is the project path.
+14. Quit Mcode. Confirm that the external server still answers `GET /global/health`. Clear **Serve URL** to return to the pooled spawn.
 
 ## Driving it with verify-mcode
 
@@ -36,11 +40,14 @@ Run `runtime health`, then run:
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime live --provider opencode --model opencode/muse-spark-1.3-contributor-free --scenario completion --confirm-provider-call
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime live --provider opencode --model opencode/muse-spark-1.3-contributor-free --scenario stop --confirm-provider-call
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime live --provider opencode --model opencode/muse-spark-1.3-contributor-free --scenario opencode-resume --confirm-provider-call
+bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime live --provider opencode --scenario opencode-attach --confirm-provider-call
 ```
 
 Completion requires `turnComplete` or `ended`, then a durable assistant message in `conversation.page` and `message.list`. Stop requires the cancelled settle with `agent.activeCount` at zero. The receipt omits assistant text and provider-private payloads.
 
 The OpenCode resume proof creates and removes an owned temporary workspace with two owned direct threads. It restarts only this worktree runtime, continues the first thread on its original upstream session, deletes the second thread's owned upstream session through `opencode session delete`, and checks the public `sdk_session_invalidated` event plus both persisted session identities. It deletes the threads and workspace after the proof. The focused web store test covers the generic reset notice. This command does not claim browser proof for the notice.
+
+The OpenCode attach proof uses the Muse Spark free model unless `--model` overrides it. It spawns its own `opencode serve` on a free loopback port in an owned temp directory and captures the PID at spawn. It records the prior `provider.opencode.serveUrl`, points the setting at that server, and runs one completion turn on a new direct thread in `.dev/fixture-repo`. The verifier then acts as a second client. It lists `GET /session?directory=<fixture path>` and requires the thread's persisted session with a matching `directory`. It restarts only this worktree runtime. The same PID must still be alive and must answer `/global/health` with the same version. Cleanup restores the prior serve URL and deletes the owned thread. It stops only the captured process tree (`taskkill /T /F /PID` on Windows) and removes the temp directory. The receipt's `opencodeAttach` block records the binary version, the server version, `sdk: "none (hand-written HTTP client)"`, one result per assertion, and each cleanup outcome. It omits assistant text and provider payloads.
 
 Focused OpenCode HTTP-client tests prove the 1-200 page bound, default limit, timeout, caller abort, 404 discrimination, malformed-response failure, and cleanup. The live resume proof confirms that app restart uses the bounded resume path, but it does not inspect the upstream query string.
 
@@ -68,5 +75,8 @@ Requires a running agent runtime and the Playwright scratch install
 - OpenCode quota was exhausted for the #1624 verification run. The primary completion, stop, resume, permission, and question proof is blocked until quota is available. Focused mapper, HTTP-client, provider, RPC, and inline-card tests support component behavior only; they do not prove the live public path.
 - Model IDs are `provider/model` slugs from `provider.listModels` for `opencode` (for example `opencode/muse-spark-1.3-contributor-free`), not bare model names.
 - Free-tier models can interrupt a turn under load; the harness records the phase and the next turn still dispatches. Treat isolated interruptions as flakiness, repeats as a defect.
-- The pool keys on binary path, working directory, and hostname. Pool isolation needs two different worktrees; the resume journey instead checks per-thread session isolation in one owned workspace.
+- The pool keys on binary path, working directory, and hostname. Pool isolation needs two different worktrees; the resume journey instead checks per-thread session isolation in one owned workspace. A non-empty serve URL bypasses the pool entirely, so pool keying, idle close, and process-tree termination do not apply to an attached server.
+- Mcode never closes an attached server. Quitting the app, restarting the runtime, or clearing the serve URL leaves it running. Whoever started it owns stopping it. The attach proof stops only the PID it spawned.
+- An attached server serves every directory it is asked about. Directory routing depends on the `?directory=` query on each request, not on the server's own cwd. A `GET /session` without that query omits the thread's session (observed on 1.18.28), so a second client must pass the thread's directory.
+- On Windows `opencode` is an npm `.cmd` shim. The captured PID belongs to the shell wrapper, so cleanup must kill the tree (`/T`), never match processes by name.
 - A desktop reload needs `$electorn-live-testing`; this harness proves the public server conversation RPC only.

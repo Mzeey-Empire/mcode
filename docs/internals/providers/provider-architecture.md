@@ -38,6 +38,11 @@ instead. Its pool key includes the executable, working directory, and hostname.
 Sessions in one worktree share a server, while another worktree gets a separate
 server. Reference counting and idle eviction belong to that pool, so it does
 not also create a `SessionRuntime` for each session.
+When `provider.opencode.serveUrl` is set, the provider attaches to that
+external server and bypasses the pool, because the app must never close or
+idle-evict a server it did not start. One serve process hosts many
+directories, so every request carries a `directory` query parameter; without
+it, sessions run in the server's own working directory.
 
 Both the Claude and Codex providers were originally built with per-turn process spawning
 (via their respective SDKs). Both suffered the same reliability issues: stdin pipe timing

@@ -171,3 +171,42 @@ describe("settings.externalApps.defaultEditor", () => {
     expect(p.externalApps?.defaultEditor).toBe("cursor");
   });
 });
+
+describe("provider.opencode.serveUrl", () => {
+  const parseServeUrl = (serveUrl: string) =>
+    SettingsSchema().parse({ provider: { opencode: { serveUrl } } }).provider.opencode.serveUrl;
+
+  it("defaults to empty so the adapter spawns a pooled local server", () => {
+    expect(getDefaultSettings().provider.opencode.serveUrl).toBe("");
+  });
+
+  it.each([
+    ["", ""],
+    ["  ", ""],
+    ["http://127.0.0.1:4096", "http://127.0.0.1:4096"],
+    ["http://127.0.0.1:4096/", "http://127.0.0.1:4096"],
+    ["https://OpenCode.example.com/serve/", "https://opencode.example.com/serve"],
+  ])("accepts %j as %j", (input, expected) => {
+    expect(parseServeUrl(input)).toBe(expected);
+  });
+
+  it.each([
+    "file:///tmp/opencode.sock",
+    "javascript:alert(1)",
+    "ws://127.0.0.1:4096",
+    "not a url",
+    "127.0.0.1:4096",
+    "http://user:secret@127.0.0.1:4096",
+    "http://127.0.0.1:4096/?directory=/etc",
+  ])("rejects %j", (serveUrl) => {
+    expect(SettingsSchema().safeParse({ provider: { opencode: { serveUrl } } }).success).toBe(false);
+    expect(PartialSettingsSchema().safeParse({ provider: { opencode: { serveUrl } } }).success).toBe(false);
+  });
+
+  it("normalizes a partial update the same way", () => {
+    expect(
+      PartialSettingsSchema().parse({ provider: { opencode: { serveUrl: "http://localhost:4096/" } } })
+        .provider?.opencode?.serveUrl,
+    ).toBe("http://localhost:4096");
+  });
+});

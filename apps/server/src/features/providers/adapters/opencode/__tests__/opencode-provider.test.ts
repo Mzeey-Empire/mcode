@@ -6,7 +6,7 @@ import type { OpenCodeHttpClient } from "../opencode-http-client.js";
 import type { TurnRequest } from "@mcode/contracts";
 
 function testProvider(http: OpenCodeHttpClient | undefined, pool: OpenCodeServerPool) {
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" } } }) };
+  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
   const envService = { getEnv: () => ({}) };
   const submitted: unknown[] = [];
   const host = {
@@ -116,7 +116,7 @@ describe("OpenCodeProvider minimal turn", () => {
     await provider.sendTurn(turnRequest());
     expect(http.createSession).toHaveBeenCalledTimes(1);
     expect(http.promptAsync).toHaveBeenCalledTimes(1);
-    expect(http.promptAsync).toHaveBeenCalledWith("http://127.0.0.1:4096", "ses_1", {
+    expect(http.promptAsync).toHaveBeenCalledWith({ baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", {
       model: { providerID: "anthropic", modelID: "claude-sonnet-4-6" },
       parts: [{ type: "text", text: "hello" }],
     });

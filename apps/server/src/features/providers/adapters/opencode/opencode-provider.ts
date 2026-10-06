@@ -32,6 +32,7 @@ import { OpenCodeServerPool, type OpenCodePoolKey } from "./opencode-server-pool
 import {
   defaultOpenCodeHttpClient,
   OpenCodeReplySessionNotFoundError,
+  type OpenCodeEndpoint,
   type OpenCodeHttpClient,
   type OpenCodeRequestVersion,
 } from "./opencode-http-client.js";
@@ -92,7 +93,7 @@ interface OpenCodePendingAsk {
   request: PermissionRequest;
   sessionId: string;
   upstreamSessionId: string;
-  baseUrl: string;
+  endpoint: OpenCodeEndpoint;
   kind: "permission" | "question";
   version: OpenCodeRequestVersion;
   signal: AbortSignal;
@@ -100,9 +101,19 @@ interface OpenCodePendingAsk {
   replying: boolean;
 }
 
+/**
+ * Where a turn's requests go. A pooled lease borrows a reference on an
+ * app-owned serve child; an attached lease points at an external server the
+ * app never spawns, releases into idle close, or terminates.
+ */
+type OpenCodeServeLease =
+  | { kind: "pooled"; key: OpenCodePoolKey; endpoint: OpenCodeEndpoint }
+  | { kind: "attached"; endpoint: OpenCodeEndpoint };
+
 interface OpenCodeTurnState {
   upstreamSessionId: string;
-  poolKey: OpenCodePoolKey;
+  /** Last lease this session ran on; stop aborts through it. */
+  lease: OpenCodeServeLease | null;
   abortController: AbortController;
   active: boolean;
   aborted: boolean;
@@ -328,19 +339,18 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   }
 
   async listModels(): Promise<ProviderModelInfo[]> {
-    const cliPath = this.cliPath();
-    const entry = await this.pool.acquire({ binaryPath: cliPath, cwd: process.cwd(), hostname: OPENCODE_SERVE_HOSTNAME }).catch((error: unknown) => {
-      logger.debug("OpenCode listModels pool acquire failed", { error: error instanceof Error ? error.message : String(error) });
+    const lease = await this.acquireServeLease(process.cwd()).catch((error: unknown) => {
+      logger.debug("OpenCode listModels serve acquire failed", { error: error instanceof Error ? error.message : String(error) });
       return null;
     });
-    // Model discovery must not leak pooled servers; release the listing lease.
-    if (entry) this.pool.release(entry.key);
-    if (!entry) return [];
+    if (!lease) return [];
     try {
-      return await this.http.listModels(entry.baseUrl);
+      return await this.http.listModels(lease.endpoint);
     } catch (error) {
       logger.warn("OpenCode listModels failed", { error: error instanceof Error ? error.message : String(error) });
       return [];
+    } finally {
+      this.releaseServeLease(lease);
     }
   }
 
@@ -364,13 +374,10 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     state.aborted = true;
     this.drainPendingForSession(sessionId);
     state.abortController.abort();
-    if (state.upstreamSessionId) {
-      const entry = this.pool.entryFor(state.poolKey);
-      if (entry) {
-        await this.http.abortSession(entry.baseUrl, state.upstreamSessionId).catch((error: unknown) => {
-          logger.debug("OpenCode abort failed", { sessionId, error: error instanceof Error ? error.message : String(error) });
-        });
-      }
+    if (state.upstreamSessionId && state.lease) {
+      await this.http.abortSession(state.lease.endpoint, state.upstreamSessionId).catch((error: unknown) => {
+        logger.debug("OpenCode abort failed", { sessionId, error: error instanceof Error ? error.message : String(error) });
+      });
     }
   }
 
@@ -441,7 +448,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       if (!this.ownsPendingAsk(entry)) return;
       if (entry.kind === "permission") {
         await this.http.replyPermission(
-          entry.baseUrl,
+          entry.endpoint,
           entry.upstreamSessionId,
           entry.request.requestId,
           mapPermissionDecisionToReply(decision),
@@ -454,7 +461,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
           return;
         }
         await this.http.replyQuestion(
-          entry.baseUrl,
+          entry.endpoint,
           entry.upstreamSessionId,
           entry.request.requestId,
           answers,
@@ -463,7 +470,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
         );
       } else {
         await this.http.rejectQuestion(
-          entry.baseUrl,
+          entry.endpoint,
           entry.upstreamSessionId,
           entry.request.requestId,
           entry.version,
@@ -560,6 +567,25 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     return this.settingsService.get().provider.cli.opencode?.trim() || "opencode";
   }
 
+  /**
+   * Resolve where requests for one working directory go. A configured serve
+   * URL attaches without probing the CLI or touching the pool; otherwise the
+   * pool spawns or reuses the serve child keyed by this directory.
+   */
+  private async acquireServeLease(cwd: string): Promise<OpenCodeServeLease> {
+    const serveUrl = this.settingsService.get().provider.opencode.serveUrl;
+    if (serveUrl) return { kind: "attached", endpoint: { baseUrl: serveUrl, directory: cwd } };
+    const probe = await this.probeCli(this.cliPath(), this.host.runtime.platform);
+    const key: OpenCodePoolKey = { binaryPath: probe.binaryPath, cwd, hostname: OPENCODE_SERVE_HOSTNAME };
+    const entry = await this.pool.acquire(key);
+    return { kind: "pooled", key, endpoint: { baseUrl: entry.baseUrl, directory: cwd } };
+  }
+
+  /** Return a pooled reference; an attached server has no app-owned lifetime to release. */
+  private releaseServeLease(lease: OpenCodeServeLease): void {
+    if (lease.kind === "pooled") this.pool.release(lease.key);
+  }
+
   private threadIdFor(sessionId: string): string {
     return sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
   }
@@ -569,7 +595,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     if (existing) return existing;
     const created: OpenCodeTurnState = {
       upstreamSessionId: "",
-      poolKey: { binaryPath: "", cwd: "", hostname: OPENCODE_SERVE_HOSTNAME },
+      lease: null,
       abortController: new AbortController(),
       active: false,
       aborted: false,
@@ -631,35 +657,34 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     state.nativeDiff = new OpenCodeNativeTurnDiff();
     state.nativeDiffRevision = 0;
     emit({ type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent);
-    const entry = await this.acquireTurnEntry(req, routing, state, emit);
-    if (!entry) {
+    const lease = await this.acquireTurnLease(req, routing, state, emit);
+    if (!lease) {
       this.drainPendingForSession(req.sessionId);
       return;
     }
     const settler = new OpenCodeTurnSettler(emit, threadId, req.turnExecutionId, state);
     state.abortController.signal.addEventListener("abort", settler.onAbort, { once: true });
     try {
-      await this.streamTurn(req, state, entry, settler);
+      await this.streamTurn(req, state, lease.endpoint, settler);
     } finally {
       this.drainPendingForSession(req.sessionId);
       state.abortController.signal.removeEventListener("abort", settler.onAbort);
       state.active = false;
-      this.pool.release(state.poolKey);
+      this.releaseServeLease(lease);
       await this.waitForCanonicalExecution(routing.executionId);
     }
   }
 
-  private async acquireTurnEntry(
+  private async acquireTurnLease(
     req: TurnRequest<"opencode">,
     routing: CanonicalLiveEventRouting,
     state: OpenCodeTurnState,
     emit: (event: AgentEvent) => void,
-  ): Promise<{ baseUrl: string } | null> {
+  ): Promise<OpenCodeServeLease | null> {
     const threadId = this.threadIdFor(req.sessionId);
     try {
-      const probe = await this.probeCli(this.cliPath(), this.host.runtime.platform);
-      state.poolKey = { binaryPath: probe.binaryPath, cwd: req.cwd, hostname: OPENCODE_SERVE_HOSTNAME };
-      return await this.pool.acquire(state.poolKey);
+      state.lease = await this.acquireServeLease(req.cwd);
+      return state.lease;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: AgentEventType.Error, threadId, error: message } satisfies AgentEvent);
@@ -672,12 +697,12 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private async streamTurn(
     req: TurnRequest<"opencode">,
     state: OpenCodeTurnState,
-    entry: { baseUrl: string },
+    endpoint: OpenCodeEndpoint,
     settler: OpenCodeTurnSettler,
   ): Promise<void> {
     state.active = true;
     try {
-      await this.promptUpstream(req, state, entry, settler, false);
+      await this.promptUpstream(req, state, endpoint, settler, false);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error("OpenCodeProvider turn error", { sessionId: req.sessionId, error: message });
@@ -694,7 +719,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private async promptUpstream(
     req: TurnRequest<"opencode">,
     state: OpenCodeTurnState,
-    entry: { baseUrl: string },
+    endpoint: OpenCodeEndpoint,
     settler: OpenCodeTurnSettler,
     retried: boolean,
   ): Promise<void> {
@@ -704,10 +729,10 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       req.sessionId,
       event,
     );
-    await this.ensureUpstreamSession(req, state, entry, emit, retried);
+    await this.ensureUpstreamSession(req, state, endpoint, emit, retried);
     const upstreamId = state.upstreamSessionId;
-    const subscribe = this.http.subscribeEvents(entry.baseUrl, state.abortController.signal, (envelope) => {
-      this.handleTurnEnvelope(envelope, req, state, entry.baseUrl, upstreamId, settler);
+    const subscribe = this.http.subscribeEvents(endpoint, state.abortController.signal, (envelope) => {
+      this.handleTurnEnvelope(envelope, req, state, endpoint, upstreamId, settler);
     }).catch((error: unknown) => {
       logger.debug("OpenCode event subscription ended", {
         sessionId: req.sessionId,
@@ -715,7 +740,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       });
     });
     try {
-      await this.http.promptAsync(entry.baseUrl, upstreamId, {
+      await this.http.promptAsync(endpoint, upstreamId, {
         model: toOpenCodeModelRef(req.model),
         parts: [{ type: "text", text: req.message }],
       });
@@ -733,7 +758,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
         logger.info("OpenCode upstream session missing; starting fresh", { sessionId: req.sessionId });
         this.emitSessionInvalidatedNotice(emit, threadId, upstreamId);
         state.upstreamSessionId = "";
-        await this.promptUpstream(req, state, entry, settler, true);
+        await this.promptUpstream(req, state, endpoint, settler, true);
         return;
       }
       throw error;
@@ -750,7 +775,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private async ensureUpstreamSession(
     req: TurnRequest<"opencode">,
     state: OpenCodeTurnState,
-    entry: { baseUrl: string },
+    endpoint: OpenCodeEndpoint,
     emit: (event: AgentEvent) => void,
     skipResume: boolean,
   ): Promise<void> {
@@ -761,7 +786,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     const resumed = skipResume ? undefined : parseOpenCodeResumeCursor(req.resumeFrom);
     if (resumed) {
       try {
-        await this.http.listSessionMessages(entry.baseUrl, resumed, {
+        await this.http.listSessionMessages(endpoint, resumed, {
           limit: 1,
           signal: state.abortController.signal,
         });
@@ -774,7 +799,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
         this.emitSessionInvalidatedNotice(emit, threadId, resumed);
       }
     }
-    const created = await this.http.createSession(entry.baseUrl, req.threadId);
+    const created = await this.http.createSession(endpoint, req.threadId);
     // Validate the upstream id before it becomes the durable resume cursor.
     state.upstreamSessionId = formatOpenCodeResumeCursor(created.id);
     emit({ type: AgentEventType.System, threadId, subtype: `sdk_session_id:${created.id}` } satisfies AgentEvent);
@@ -815,7 +840,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     envelope: unknown,
     req: TurnRequest<"opencode">,
     state: OpenCodeTurnState,
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     upstreamId: string,
     settler: OpenCodeTurnSettler,
   ): void {
@@ -837,14 +862,14 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       partRole: normalized ? partRoleOf(state.messageRoles, normalized) : undefined,
       forwardedText: state.forwardedText,
     });
-    this.dispatchMappedEnvelope(req, state, baseUrl, upstreamId, threadId, mapped, normalized, settler);
+    this.dispatchMappedEnvelope(req, state, endpoint, upstreamId, threadId, mapped, normalized, settler);
   }
 
   /** Route one mapped envelope to cards, canonical events, and settlement. */
   private dispatchMappedEnvelope(
     req: TurnRequest<"opencode">,
     state: OpenCodeTurnState,
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     upstreamId: string,
     threadId: string,
     mapped: OpenCodeMappedOutput,
@@ -852,13 +877,13 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     settler: OpenCodeTurnSettler,
   ): void {
     if (mapped.reason === "permission-request" || mapped.reason === "question-request") {
-      this.maybeEmitAsk(req, baseUrl, upstreamId, normalized, mapped.reason);
+      this.maybeEmitAsk(req, endpoint, upstreamId, normalized, mapped.reason);
     }
     this.forwardTurnEvents(mapped.events, req, threadId, settler);
     if (mapped.events.some((e) => e.type === AgentEventType.Error)) {
       settler.settle("errored");
     } else if (mapped.events.some((e) => e.type === AgentEventType.TurnComplete)) {
-      void this.confirmIdleCompleted(req, state, baseUrl, upstreamId, settler);
+      void this.confirmIdleCompleted(req, state, endpoint, upstreamId, settler);
     } else if (mapped.disposition === "mapped") {
       settler.noteActivity();
     }
@@ -876,7 +901,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private async confirmIdleCompleted(
     req: TurnRequest<"opencode">,
     state: OpenCodeTurnState,
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     upstreamId: string,
     settler: OpenCodeTurnSettler,
   ): Promise<void> {
@@ -885,7 +910,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       return;
     }
     state.idleConfirming = true;
-    const confirmation = this.pollIdleConfirmation(req, state, baseUrl, upstreamId, settler);
+    const confirmation = this.pollIdleConfirmation(req, state, endpoint, upstreamId, settler);
     state.idleConfirmPromise = confirmation;
     try {
       await confirmation;
@@ -898,7 +923,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private async pollIdleConfirmation(
     req: TurnRequest<"opencode">,
     state: OpenCodeTurnState,
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     upstreamId: string,
     settler: OpenCodeTurnSettler,
   ): Promise<void> {
@@ -914,7 +939,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       if (gate === "restart") continue;
       await waitForAbortableDelay(this.idleConfirm.intervalMs, state.abortController.signal);
       const poll = await this.pollIdleStep(
-        baseUrl,
+        endpoint,
         upstreamId,
         state.abortController.signal,
         Math.max(1, confirm.deadline - Date.now()),
@@ -986,13 +1011,13 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
 
   /** One live status read: quiet (idle or drained), active (busy work), or error. */
   private async pollIdleStep(
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     upstreamId: string,
     signal: AbortSignal,
     timeoutMs: number,
   ): Promise<{ kind: "error" } | { kind: "quiet" } | { kind: "active" }> {
     try {
-      const type = (await this.http.getSessionStatus(baseUrl, { signal, timeoutMs }))[upstreamId]?.type;
+      const type = (await this.http.getSessionStatus(endpoint, { signal, timeoutMs }))[upstreamId]?.type;
       // Drained sessions leave the status map: after an idle event, a missing
       // entry means the session stayed quiet, not that polling broke.
       if (type === undefined) return { kind: "quiet" };
@@ -1018,7 +1043,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
    */
   private maybeEmitAsk(
     req: TurnRequest<"opencode">,
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     upstreamId: string,
     normalized: { type: string; properties: Record<string, unknown> } | null,
     reason: "permission-request" | "question-request",
@@ -1034,14 +1059,14 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
       deliveryAttempt: req.deliveryAttempt ?? 1,
     };
     if (reason === "permission-request") {
-      this.maybeEmitPermissionAsk(req, baseUrl, upstreamId, normalized, state, routing);
+      this.maybeEmitPermissionAsk(req, endpoint, upstreamId, normalized, state, routing);
       return;
     }
     const synthesized = synthesizeOpenCodeQuestionRequest({ threadId, properties: normalized.properties });
     if (!synthesized) return this.emitAskDiagnostic(req, threadId);
     if (this.pendingPermissions.has(synthesized.requestId)) return;
     this.pendingPermissions.set(synthesized.requestId, {
-      request: synthesized, sessionId: req.sessionId, upstreamSessionId: upstreamId, baseUrl,
+      request: synthesized, sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint,
       kind: "question", version: askVersion(normalized.type),
       signal: state.abortController.signal, routing, replying: false,
     });
@@ -1057,7 +1082,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
    */
   private maybeEmitPermissionAsk(
     req: TurnRequest<"opencode">,
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     upstreamId: string,
     normalized: { type: string; properties: Record<string, unknown> },
     state: OpenCodeTurnState,
@@ -1068,7 +1093,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
     if (!request) return this.emitAskDiagnostic(req, threadId);
     if (this.pendingPermissions.has(request.requestId)) return;
     const entry: OpenCodePendingAsk = {
-      request, sessionId: req.sessionId, upstreamSessionId: upstreamId, baseUrl,
+      request, sessionId: req.sessionId, upstreamSessionId: upstreamId, endpoint,
       kind: "permission", version: askVersion(normalized.type),
       signal: state.abortController.signal, routing, replying: false,
     };

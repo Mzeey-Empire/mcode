@@ -66,7 +66,7 @@ function fakeHttp(envelopes: unknown[], hooks?: { onPrompt?: () => void }): Fake
 }
 
 function testProvider(http: FakeHttp) {
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" } } }) };
+  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
   const envService = { getEnv: () => ({}) };
   const submitted: unknown[] = [];
   const host = {
@@ -163,7 +163,7 @@ describe("OpenCodeProvider permission flow", () => {
     await sending;
     expect(http.replyPermission).toHaveBeenCalledTimes(1);
     expect(http.replyPermission).toHaveBeenCalledWith(
-      "http://127.0.0.1:4096", "ses_1", "per_1", "once", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "per_1", "once", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(provider.listPendingPermissions("thread-1")).toHaveLength(0);
 
@@ -187,7 +187,7 @@ describe("OpenCodeProvider permission flow", () => {
     expect(provider.resolvePermission("per_1", "deny")).toBe(true);
     await sending;
     expect(http.replyPermission).toHaveBeenCalledWith(
-      "http://127.0.0.1:4096", "ses_1", "per_1", "reject", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "per_1", "reject", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(resolved).toEqual([{ requestId: "per_1", decision: "deny" }]);
     expect(provider.resolvePermission("nope", "allow")).toBe(false);
@@ -229,7 +229,7 @@ describe("OpenCodeProvider permission flow", () => {
     expect(provider.resolvePermission("que_1", "allow", [["Yes"], ["East"]])).toBe(true);
     await vi.waitFor(() => expect(http.replyQuestion).toHaveBeenCalledTimes(1));
     expect(http.replyQuestion).toHaveBeenCalledWith(
-      "http://127.0.0.1:4096",
+      { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" },
       "ses_1",
       "que_1",
       [["Yes"], ["East"]],
@@ -242,7 +242,7 @@ describe("OpenCodeProvider permission flow", () => {
     expect(provider.resolvePermission("que_2", "deny")).toBe(false);
     await sending;
     expect(http.rejectQuestion).toHaveBeenCalledWith(
-      "http://127.0.0.1:4096", "ses_1", "que_2", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      { baseUrl: "http://127.0.0.1:4096", directory: "/w/a" }, "ses_1", "que_2", "v2", expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(http.rejectQuestion).toHaveBeenCalledTimes(1);
     await provider.shutdown();

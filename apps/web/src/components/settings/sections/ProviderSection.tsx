@@ -11,12 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import type { ProviderAvailability, ProviderId } from "@mcode/contracts";
+import { getCatalogEntry, PartialSettingsSchema, type ProviderAvailability, type ProviderId } from "@mcode/contracts";
 import { ConfirmDisableDialog } from "./ConfirmDisableDialog";
 
 /** Provider IDs that expose a CLI path input field. */
-type CliProvider = "claude" | "codex" | "copilot" | "cursor" | "devin";
-const HAS_CLI_INPUT: readonly CliProvider[] = ["claude", "codex", "copilot", "cursor", "devin"];
+type CliProvider = "claude" | "codex" | "copilot" | "cursor" | "opencode" | "devin";
+const HAS_CLI_INPUT: readonly CliProvider[] = ["claude", "codex", "copilot", "cursor", "opencode", "devin"];
 
 /** Narrows a ProviderId to those that have an editable CLI path setting. */
 function hasCliInput(id: ProviderId): id is CliProvider {
@@ -75,6 +75,7 @@ export function ProviderSection() {
                 ? (val: string) => void update({ provider: { cli: { [p.id]: val } } })
                 : undefined
             }
+            extraConfig={p.id === "opencode" ? <OpenCodeServeUrlField /> : undefined}
           />
         ))}
         {comingSoonProviders.length > 0 && (
@@ -114,6 +115,8 @@ interface ProviderRowProps {
   cliPath: string | undefined;
   /** Called when the user edits the CLI path; undefined when no CLI path config exists. */
   onCliPathChange?: (v: string) => void;
+  /** Provider-specific settings rendered under the CLI path. */
+  extraConfig?: ReactNode;
 }
 
 function ProviderControls({ row, switchDisabled, onToggle }: Pick<ProviderRowProps, "row" | "onToggle"> & { switchDisabled: boolean }) {
@@ -124,18 +127,18 @@ function ProviderControls({ row, switchDisabled, onToggle }: Pick<ProviderRowPro
   </div>;
 }
 
-function ProviderConfig({ row, label, hint, cliPath, onCliPathChange, controls }: { row: ProviderAvailability; label: string; hint: string; cliPath: string | undefined; onCliPathChange: (value: string) => void; controls: ReactNode }) {
+function ProviderConfig({ row, label, hint, cliPath, onCliPathChange, controls, extraConfig }: { row: ProviderAvailability; label: string; hint: string; cliPath: string | undefined; onCliPathChange: (value: string) => void; controls: ReactNode; extraConfig?: ReactNode }) {
   const [isConfigOpen, setIsConfigOpen] = useState(row.beta);
   return <Collapsible open={isConfigOpen} onOpenChange={setIsConfigOpen} className="border-b border-border/50 last:border-b-0"><div className="px-1 py-4"><div className={SETTING_ROW_GRID_CLASS}>
     <CollapsibleTrigger asChild><Button type="button" variant="ghost" size="sm" data-testid={`provider-config-trigger-${row.id}`} aria-label={`${isConfigOpen ? "Hide" : "Show"} ${label} configuration`} className="-ml-2 h-auto w-full min-w-0 items-start justify-between gap-4 rounded-md px-2 py-1 text-left hover:bg-accent/60 aria-expanded:bg-transparent dark:aria-expanded:bg-transparent"><span className="flex min-w-0 flex-col items-start"><span className="text-sm font-semibold text-foreground">{label}</span>{hint && <span className="mt-1 text-xs text-muted-foreground">{hint}</span>}</span><ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none", isConfigOpen && "rotate-180")} aria-hidden /></Button></CollapsibleTrigger>
     {controls}
-  </div><CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none"><div className={cn(SETTING_ROW_GRID_CLASS, "mt-3 border-t border-border/40 pt-3 pl-2")}><label htmlFor={`provider-cli-path-${row.id}`} className="text-sm font-medium text-foreground">{label} CLI path</label><Input id={`provider-cli-path-${row.id}`} data-testid={`provider-cli-path-${row.id}`} value={cliPath ?? ""} onChange={(event) => onCliPathChange(event.target.value)} placeholder={row.id} className="h-7 w-56 text-xs" /></div></CollapsibleContent></div></Collapsible>;
+  </div><CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none"><div className={cn(SETTING_ROW_GRID_CLASS, "mt-3 border-t border-border/40 pt-3 pl-2")}><label htmlFor={`provider-cli-path-${row.id}`} className="text-sm font-medium text-foreground">{label} CLI path</label><Input id={`provider-cli-path-${row.id}`} data-testid={`provider-cli-path-${row.id}`} value={cliPath ?? ""} onChange={(event) => onCliPathChange(event.target.value)} placeholder={row.id} className="h-7 w-56 text-xs" /></div>{extraConfig}</CollapsibleContent></div></Collapsible>;
 }
 
 /**
  * Single provider row with a disclosure for editable CLI path configuration.
  */
-function ProviderRow({ row, isLastEnabled, onToggle, cliPath, onCliPathChange }: ProviderRowProps) {
+function ProviderRow({ row, isLastEnabled, onToggle, cliPath, onCliPathChange, extraConfig }: ProviderRowProps) {
   // Adapter-less providers cannot be toggled; the last enabled provider also
   // blocks toggling to prevent an unusable state.
   const switchDisabled = !row.hasAdapter || isLastEnabled;
@@ -152,7 +155,63 @@ function ProviderRow({ row, isLastEnabled, onToggle, cliPath, onCliPathChange }:
     );
   }
 
-  return <ProviderConfig row={row} label={label} hint={hint} cliPath={cliPath} onCliPathChange={onCliPathChange} controls={controls} />;
+  return <ProviderConfig row={row} label={label} hint={hint} cliPath={cliPath} onCliPathChange={onCliPathChange} controls={controls} extraConfig={extraConfig} />;
+}
+
+/** Parse a serve URL draft through the settings contract; null when it would be rejected. */
+function parseServeUrlDraft(draft: string): string | null {
+  const parsed = PartialSettingsSchema().safeParse({ provider: { opencode: { serveUrl: draft } } });
+  return parsed.success ? (parsed.data.provider?.opencode?.serveUrl ?? "") : null;
+}
+
+/**
+ * OpenCode serve URL editor. Commits on blur or Enter rather than per
+ * keystroke, because a half-typed URL fails validation and would be dropped.
+ */
+function OpenCodeServeUrlField() {
+  const saved = useSettingsStore((s) => s.settings.provider.opencode.serveUrl);
+  const update = useSettingsStore((s) => s.update);
+  const [draft, setDraft] = useState(saved);
+  const [invalid, setInvalid] = useState(false);
+
+  const commit = () => {
+    const normalized = parseServeUrlDraft(draft);
+    if (normalized === null) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    setDraft(normalized);
+    if (normalized !== saved) void update({ provider: { opencode: { serveUrl: normalized } } });
+  };
+
+  return <div className={cn(SETTING_ROW_GRID_CLASS, "mt-3 pl-2")}>
+    <div className="min-w-0">
+      <label htmlFor="provider-serve-url-opencode" className="text-sm font-medium text-foreground">Serve URL</label>
+      <p id="provider-serve-url-opencode-hint" className={cn("mt-1 max-w-[62ch] text-xs", invalid ? "text-destructive" : "text-muted-foreground")}>
+        {invalid
+          ? "Enter an http or https URL, or leave it empty."
+          : "Empty spawns a local server per worktree. A URL attaches to a shared server the app never closes."}
+      </p>
+    </div>
+    <Input
+      id="provider-serve-url-opencode"
+      data-testid="provider-serve-url-opencode"
+      value={draft}
+      aria-invalid={invalid || undefined}
+      aria-describedby="provider-serve-url-opencode-hint"
+      onChange={(event) => {
+        setDraft(event.target.value);
+        setInvalid(false);
+      }}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+      placeholder="http://127.0.0.1:4096"
+      className="h-7 w-56 text-xs"
+    />
+  </div>;
 }
 
 /** Displays a non-interactive provider that is not available yet. */
@@ -174,8 +233,7 @@ function ComingSoonProviderRow({ row }: { row: ProviderAvailability }) {
 
 /** Returns the human-readable display name for a provider ID. */
 function labelFor(id: ProviderId): string {
-  if (id === "copilot") return "GitHub Copilot";
-  return id.charAt(0).toUpperCase() + id.slice(1);
+  return getCatalogEntry(id).name;
 }
 
 /** Returns the hint text shown below the provider label. */
