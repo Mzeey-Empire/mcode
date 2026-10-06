@@ -165,7 +165,7 @@ The registered runtime implementations are split between two locations:
 - Claude, Codex, Copilot, Cursor, and Devin implementations live privately in [`packages/providers`](packages/providers/src/private) and enter the server through usable public factories.
 - OpenCode remains in [`server-local adapters`](apps/server/src/features/providers/adapters).
 
-The OpenCode factory currently prepares a descriptor rather than a usable runtime adapter. Gemini is a coming-soon catalog entry.
+The OpenCode factory resolves the server-local `OpenCodeProvider`, a usable runtime adapter. Gemini is a coming-soon catalog entry.
 
 The six registered providers use different transports.
 

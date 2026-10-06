@@ -21,11 +21,18 @@ export class OpenCodeReplySessionNotFoundError extends Error {
   }
 }
 
-/** Narrow HTTP surface the OpenCode provider needs from one `serve` instance. */
+/**
+ * One `serve` instance plus the project directory a request acts in. A single
+ * serve process hosts many directories and routes each request by its
+ * `directory` query; without it, sessions land in the server's own cwd.
+ */
+export type OpenCodeEndpoint = Readonly<{ baseUrl: string; directory: string }>;
+
+/** Narrow HTTP surface the OpenCode provider needs from one `serve` directory. */
 export interface OpenCodeHttpClient {
-  createSession(baseUrl: string, title?: string): Promise<{ id: string }>;
-  promptAsync(baseUrl: string, sessionId: string, body: Record<string, unknown>): Promise<void>;
-  abortSession(baseUrl: string, sessionId: string): Promise<void>;
+  createSession(endpoint: OpenCodeEndpoint, title?: string): Promise<{ id: string }>;
+  promptAsync(endpoint: OpenCodeEndpoint, sessionId: string, body: Record<string, unknown>): Promise<void>;
+  abortSession(endpoint: OpenCodeEndpoint, sessionId: string): Promise<void>;
   /**
    * Relay one user decision to a pending permission request.
    * `once` approves a single run, `always` approves for the session,
@@ -33,7 +40,7 @@ export interface OpenCodeHttpClient {
    * already consumed the request; a missing session remains visible.
    */
   replyPermission(
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     sessionId: string,
     permissionId: string,
     response: "once" | "always" | "reject",
@@ -45,7 +52,7 @@ export interface OpenCodeHttpClient {
    * Only a typed QuestionNotFound 404 means upstream already consumed it.
    */
   replyQuestion(
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     sessionId: string,
     requestId: string,
     answers: string[][],
@@ -54,7 +61,7 @@ export interface OpenCodeHttpClient {
   ): Promise<void>;
   /** Dismiss a pending question request. Only QuestionNotFound is idempotent. */
   rejectQuestion(
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     sessionId: string,
     requestId: string,
     version: OpenCodeRequestVersion,
@@ -66,15 +73,15 @@ export interface OpenCodeHttpClient {
    * `session.idle` between steps of a multi-step turn, so the first idle is
    * never terminal proof on its own.
    */
-  getSessionStatus(baseUrl: string, options?: OpenCodeStatusRequestOptions): Promise<Record<string, { type: string }>>;
-  listModels(baseUrl: string): Promise<ProviderModelInfo[]>;
-  subscribeEvents(baseUrl: string, signal: AbortSignal, onEnvelope: (envelope: unknown) => void): Promise<void>;
+  getSessionStatus(endpoint: OpenCodeEndpoint, options?: OpenCodeStatusRequestOptions): Promise<Record<string, { type: string }>>;
+  listModels(endpoint: OpenCodeEndpoint): Promise<ProviderModelInfo[]>;
+  subscribeEvents(endpoint: OpenCodeEndpoint, signal: AbortSignal, onEnvelope: (envelope: unknown) => void): Promise<void>;
   /**
    * Read one bounded page of upstream session history. The limit is always
    * sent and clamped; there is no unbounded full-history fetch.
    */
   listSessionMessages(
-    baseUrl: string,
+    endpoint: OpenCodeEndpoint,
     sessionId: string,
     options?: { limit?: number; timeoutMs?: number; signal?: AbortSignal },
   ): Promise<unknown[]>;
@@ -95,6 +102,18 @@ const MAX_STATUS_SESSION_ID_CHARS = 512;
 const MAX_STATUS_TYPE_CHARS = 64;
 const OVERSIZED_SSE_ENVELOPE = { type: "mcode.adapter.oversized-sse-frame", properties: {} };
 const MALFORMED_SSE_ENVELOPE = { type: "mcode.adapter.malformed-sse-frame", properties: {} };
+
+/**
+ * Build one request URL. Every request carries the endpoint directory as a
+ * query parameter: the `x-opencode-directory` header cannot carry non-Latin-1
+ * paths, and percent-encoding keeps spaces and non-ASCII unambiguous.
+ */
+function endpointUrl(endpoint: OpenCodeEndpoint, path: string, query: Readonly<Record<string, string>> = {}): string {
+  const params = [...Object.entries(query), ["directory", endpoint.directory]]
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+  return `${endpoint.baseUrl}${path}?${params}`;
+}
 
 function checkStatus(res: Response, what: string): void {
   if (res.ok) return;
@@ -304,8 +323,8 @@ async function drainSseStream(
 
 /** Default fetch-based client over the `opencode serve` REST + SSE surface. */
 export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
-  async createSession(baseUrl, title) {
-    const res = await fetch(`${baseUrl}/session`, {
+  async createSession(endpoint, title) {
+    const res = await fetch(endpointUrl(endpoint, "/session"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(title ? { title } : {}),
@@ -316,8 +335,8 @@ export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
     return { id: data.id };
   },
 
-  async promptAsync(baseUrl, sessionId, body) {
-    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}/prompt_async`, {
+  async promptAsync(endpoint, sessionId, body) {
+    const res = await fetch(endpointUrl(endpoint, `/session/${encodeURIComponent(sessionId)}/prompt_async`), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -325,17 +344,17 @@ export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
     if (res.status !== 204 && !res.ok) throw new Error(`OpenCode prompt_async failed with HTTP ${res.status}`);
   },
 
-  async abortSession(baseUrl, sessionId) {
-    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}/abort`, { method: "POST" });
+  async abortSession(endpoint, sessionId) {
+    const res = await fetch(endpointUrl(endpoint, `/session/${encodeURIComponent(sessionId)}/abort`), { method: "POST" });
     if (!res.ok && res.status !== 404) throw new Error(`OpenCode abort failed with HTTP ${res.status}`);
   },
 
-  async replyPermission(baseUrl, sessionId, permissionId, response, version, options) {
+  async replyPermission(endpoint, sessionId, permissionId, response, version, options) {
     const path = version === "v2"
       ? `/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(permissionId)}/reply`
       : `/session/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(permissionId)}`;
     const res = await fetch(
-      `${baseUrl}${path}`,
+      endpointUrl(endpoint, path),
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -346,11 +365,11 @@ export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
     await consumeReplyNotFound(res, "PermissionNotFoundError", "reply permission");
   },
 
-  async replyQuestion(baseUrl, sessionId, requestId, answers, version, options) {
+  async replyQuestion(endpoint, sessionId, requestId, answers, version, options) {
     const path = version === "v2"
       ? `/api/session/${encodeURIComponent(sessionId)}/question/${encodeURIComponent(requestId)}/reply`
       : `/question/${encodeURIComponent(requestId)}/reply`;
-    const res = await fetch(`${baseUrl}${path}`, {
+    const res = await fetch(endpointUrl(endpoint, path), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ answers }),
@@ -359,25 +378,25 @@ export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
     await consumeReplyNotFound(res, "QuestionNotFoundError", "reply question");
   },
 
-  async rejectQuestion(baseUrl, sessionId, requestId, version, options) {
+  async rejectQuestion(endpoint, sessionId, requestId, version, options) {
     const path = version === "v2"
       ? `/api/session/${encodeURIComponent(sessionId)}/question/${encodeURIComponent(requestId)}/reject`
       : `/question/${encodeURIComponent(requestId)}/reject`;
-    const res = await fetch(`${baseUrl}${path}`, { method: "POST", signal: options?.signal });
+    const res = await fetch(endpointUrl(endpoint, path), { method: "POST", signal: options?.signal });
     await consumeReplyNotFound(res, "QuestionNotFoundError", "reject question");
   },
 
-  async getSessionStatus(baseUrl, options) {
+  async getSessionStatus(endpoint, options) {
     const data = await fetchSessionStatus(
-      `${baseUrl}/session/status`,
+      endpointUrl(endpoint, "/session/status"),
       boundedStatusTimeout(options?.timeoutMs),
       options?.signal,
     );
     return boundedSessionStatuses(data);
   },
 
-  async listModels(baseUrl) {
-    const res = await fetch(`${baseUrl}/config/providers`);
+  async listModels(endpoint) {
+    const res = await fetch(endpointUrl(endpoint, "/config/providers"));
     checkStatus(res, "list providers");
     const data = (await res.json()) as {
       providers?: Array<{ id: string; name: string; models?: Record<string, { id?: string; name?: string; limit?: { context?: number } }> }>;
@@ -397,8 +416,8 @@ export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
     return out;
   },
 
-  async subscribeEvents(baseUrl, signal, onEnvelope) {
-    const res = await fetch(`${baseUrl}/event`, {
+  async subscribeEvents(endpoint, signal, onEnvelope) {
+    const res = await fetch(endpointUrl(endpoint, "/event"), {
       headers: { accept: "text/event-stream" },
       signal,
     });
@@ -408,13 +427,13 @@ export const defaultOpenCodeHttpClient: OpenCodeHttpClient = {
     await drainSseStream(reader, onEnvelope);
   },
 
-  async listSessionMessages(baseUrl, sessionId, options) {
+  async listSessionMessages(endpoint, sessionId, options) {
     const limit = clampHistoryLimit(options?.limit);
     const timeoutMs = options?.timeoutMs ?? OPENCODE_HISTORY_TIMEOUT_MS;
     // Race the fetch against the timeout so a stalled upstream fails visibly
     // instead of hanging the turn behind an endless spinner. Listeners come
     // off in the finally so repeated resumes never accumulate them.
-    const url = `${baseUrl}/session/${encodeURIComponent(sessionId)}/message?limit=${limit}`;
+    const url = endpointUrl(endpoint, `/session/${encodeURIComponent(sessionId)}/message`, { limit: String(limit) });
     const res = await fetchSessionHistory(url, timeoutMs, options?.signal);
     if (res.status === 404) throw new Error(`OpenCode session history failed with HTTP 404 for ${sessionId}`);
     if (!res.ok) throw new Error(`OpenCode session history failed with HTTP ${res.status}`);

@@ -26,7 +26,7 @@ function testPool(): OpenCodeServerPool {
 }
 
 function testProvider(http: never) {
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" } } }) };
+  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
   const envService = { getEnv: () => ({}) };
   const submitted: unknown[] = [];
   const host = {

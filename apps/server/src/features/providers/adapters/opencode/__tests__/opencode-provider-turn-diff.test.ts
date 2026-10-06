@@ -5,7 +5,7 @@ import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import type { ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts";
 
 function testProvider(http: never, pool: OpenCodeServerPool) {
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" } } }) };
+  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
   const envService = { getEnv: () => ({}) };
   const host = {
     events: { submit: async () => ({ commit: {}, delivery: { ingress: "queued" } }) },

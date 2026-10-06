@@ -111,6 +111,43 @@ export const SERVER_HEAP_MAX_MB = 8192;
 /** Shipped default from older installs, migrated to {@link SERVER_HEAP_DEFAULT_MB}. */
 export const SERVER_HEAP_LEGACY_DEFAULT_MB = 96;
 
+/**
+ * Normalize an OpenCode serve URL, or return null when it is not attachable.
+ * Empty means "spawn a local server". Otherwise only an absolute http(s)
+ * origin with an optional path prefix is accepted, without a trailing slash.
+ */
+function normalizeOpenCodeServeUrl(raw: string): string | null {
+  if (raw === "") return "";
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.username || url.password) return null;
+  // The adapter appends its own `?directory=` query to every request.
+  if (url.search || url.hash) return null;
+  return url.href.replace(/\/+$/, "");
+}
+
+/**
+ * External `opencode serve` URL. Empty spawns a pooled local server per
+ * worktree; an http(s) URL attaches to a shared server the app never owns.
+ */
+const OpenCodeServeUrlSchema = z
+  .string()
+  .trim()
+  .transform((raw, ctx) => {
+    const normalized = normalizeOpenCodeServeUrl(raw);
+    if (normalized !== null) return normalized;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "OpenCode serve URL must be empty or an absolute http(s) URL without credentials, query, or fragment",
+    });
+    return z.NEVER;
+  });
+
 // ---------------------------------------------------------------------------
 // Settings schema
 // ---------------------------------------------------------------------------
@@ -319,6 +356,13 @@ export const SettingsSchema = lazySchema(() =>
                 : o.priorityProcessing === true,
           }))
           .default({ fastMode: false }),
+        /** OpenCode (`opencode serve`) backend selection. */
+        opencode: z
+          .object({
+            /** External serve URL to attach to. Empty spawns a pooled local server. */
+            serveUrl: OpenCodeServeUrlSchema.default(""),
+          })
+          .default({}),
         /** Cursor ACP-only tuning (`provider` + `cursor` keeps nesting depth ≤ 3). */
         cursor: z
           .object({
@@ -613,6 +657,11 @@ export const PartialSettingsSchema = lazySchema(() =>
           .object({
             fastMode: z.boolean().optional(),
             priorityProcessing: z.boolean().optional(),
+          })
+          .optional(),
+        opencode: z
+          .object({
+            serveUrl: OpenCodeServeUrlSchema.optional(),
           })
           .optional(),
       })
