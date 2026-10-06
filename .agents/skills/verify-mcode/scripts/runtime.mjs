@@ -1670,7 +1670,12 @@ function openCodeServeUrlFromSettings(settings, method) {
 /** Spawns the owned external serve and points provider.opencode.serveUrl at it before the thread exists. */
 async function prepareOpenCodeAttach(socket, options, run) {
   if (options.scenario !== "opencode-attach") return;
-  const priorServeUrl = openCodeServeUrlFromSettings(await socket.rpc("settings.get", {}), "settings.get");
+  const settings = await socket.rpc("settings.get", {});
+  // A disabled provider fails createAndSend server-side, which the harness would only see as a silent 120-second timeout.
+  if (settings?.provider?.enabled?.opencode !== true) {
+    throw actionable("OpenCode is disabled in this runtime", "Enable OpenCode in Settings > Providers, then retry the attach proof.");
+  }
+  const priorServeUrl = openCodeServeUrlFromSettings(settings, "settings.get");
   const binaryVersion = readOpenCodeBinaryVersion();
   run.opencodeServe = await startOwnedOpenCodeServe({ env: childCommandEnvironment() });
   run.report.opencodeAttach = createOpenCodeAttachReport({ binaryVersion, serverVersion: run.opencodeServe.version, sdk: OPENCODE_SDK_LABEL });
