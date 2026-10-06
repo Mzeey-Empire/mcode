@@ -1409,6 +1409,42 @@ describe("Workspace Behavior", () => {
       expect(useWorkspaceStore.getState().worktrees).toEqual(worktrees);
     });
 
+    it("stamps the server execution on a creation recovered before its response arrives", async () => {
+      const ws = createMockWorkspace({ id: "ws-binding-race" });
+      const durable = createMockThread({ id: "durable-binding-race", workspace_id: ws.id });
+      const executionId = "44444444-4444-4444-8444-444444444444";
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockReturnValueOnce(new Promise<CreateAndSendResult>(() => {}));
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+
+      void useWorkspaceStore.getState().createAndSendMessage("Hello", "claude-opus-5-5");
+      const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+      (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        startupId: placeholderId,
+        workspaceId: ws.id,
+        kind: "direct",
+        state: "running",
+        phase: "agent",
+        steps: [{ phase: "thread", state: "completed" }, { phase: "agent", state: "running" }],
+        transcript: [],
+        cancellation: "none",
+        revision: 1,
+        threadId: durable.id,
+        createdAt: "2026-10-06T12:00:00.000Z",
+        updatedAt: "2026-10-06T12:00:00.000Z",
+      });
+      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+      (mockTransport.listRunning as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+        { threadId: durable.id, turnExecutionId: executionId, phase: "running" } satisfies TurnRuntimeSnapshot,
+      ]);
+
+      await useWorkspaceStore.getState().recoverPreparingThreads();
+
+      expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id);
+      const record = useThreadStore.getState().records.get(durable.id);
+      expect({ phase: record?.runtimePhase, turnExecutionId: record?.turnExecutionId })
+        .toEqual({ phase: "running", turnExecutionId: executionId });
+    });
+
     it("uses a binding push when an in-flight lookup returns an older unbound startup", async () => {
       const ws = createMockWorkspace({ id: "ws-late-binding-push" });
       const durable = createMockThread({ id: "durable-late-binding", workspace_id: ws.id });

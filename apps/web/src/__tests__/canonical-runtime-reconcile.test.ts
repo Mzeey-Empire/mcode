@@ -194,6 +194,37 @@ describe("canonical runtime reconciliation", () => {
     expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
   });
 
+  it("settles a recovered first turn whose terminal arrived before its stale running snapshot", () => {
+    useThreadStore.setState({ records: seedThreadRecord("placeholder-1", { runtimePhase: "running", turnExecutionId: null }) });
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, { runtimePhase: "idle", turnExecutionId: null }),
+      runningThreadIds: new Set(["placeholder-1"]),
+    });
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, turnEvents(EXECUTION_ID, "completed"));
+
+    useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD_ID, turnExecutionId: EXECUTION_ID, phase: "running" });
+    useThreadStore.getState().transferThreadRuntime("placeholder-1", THREAD_ID);
+
+    expect(readThreadField(THREAD_ID, (r) => r.runtimePhase)).toBe("completed");
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
+  });
+
+  it("lets canonical claim and then settle a recovered first turn with no runtime snapshot", () => {
+    useThreadStore.setState({
+      records: seedThreadRecord("placeholder-1", { runtimePhase: "running", turnExecutionId: null }),
+      runningThreadIds: new Set(["placeholder-1"]),
+    });
+
+    useThreadStore.getState().transferThreadRuntime("placeholder-1", THREAD_ID, { runtimeKnown: false });
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, turnEvents(EXECUTION_ID));
+    expect(readThreadField(THREAD_ID, (r) => [r.runtimePhase, r.turnExecutionId])).toEqual(["running", EXECUTION_ID]);
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(true);
+
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [envelope("e4", 4, EXECUTION_ID, { type: "turn.completed", endedAt: NOW })]);
+    expect(readThreadField(THREAD_ID, (r) => r.runtimePhase)).toBe("completed");
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
+  });
+
   it("claims an idle record when canonical reports a running turn", () => {
     seedRuntime("idle", null, false);
 
