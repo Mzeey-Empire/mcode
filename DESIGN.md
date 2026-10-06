@@ -8,8 +8,8 @@ colors:
   amber-hover-light: "oklch(0.48 0.17 75)"
   amber-ink: "oklch(0.15 0.005 260)"
   amber-ink-light: "oklch(0.985 0 0)"
-  ink: "oklch(0.93 0 0)"
-  ink-light: "oklch(0.18 0.005 260)"
+  ink: "oklch(0.955 0.005 260)"
+  ink-light: "oklch(0.19 0.005 260)"
   muted-ink: "oklch(0.65 0.005 260)"
   muted-ink-light: "oklch(0.5 0.005 260)"
   slate-page: "oklch(0.12 0.005 260)"
@@ -21,7 +21,7 @@ colors:
   control-border: "oklch(0.50 0.01 260)"
   slate-page-light: "oklch(0.955 0.005 260)"
   slate-bg-light: "oklch(0.99 0.005 260)"
-  slate-card-light: "oklch(0.985 0.005 260)"
+  slate-card-light: "oklch(0.99 0.005 260)"
   slate-muted-light: "oklch(0.955 0.005 260)"
   slate-accent-light: "oklch(0.95 0.005 260)"
   slate-border-light: "oklch(0.9 0.005 260)"
@@ -35,7 +35,7 @@ colors:
   oxide-clay: "oklch(0.78 0.13 25)"
   oxide-clay-light: "oklch(0.52 0.14 25)"
   destructive: "oklch(0.65 0.2 25)"
-  destructive-light: "oklch(0.577 0.245 27.325)"
+  destructive-light: "oklch(0.577 0.19 27.3)"
   diff-add-bg: "oklch(0.26 0.035 145)"
   diff-add-gutter: "oklch(0.50 0.11 145)"
   diff-add-text: "oklch(0.86 0.09 145)"
@@ -146,7 +146,7 @@ typography:
     lineHeight: "1.6rem"
     letterSpacing: "normal"
   mono-data:
-    fontFamily: "SF Mono, Cascadia Code, Consolas, monospace"
+    fontFamily: "JetBrains Mono, Cascadia Code, Consolas, monospace"
     fontSize: "1.2rem"
     fontWeight: 400
     lineHeight: "1.6rem"
@@ -330,18 +330,26 @@ Then use this file for visual and interaction choices. Use
 `docs/internals/renderer/ui-components.md` for the component registry and live-verification
 requirements.
 
+The [Mcode Paper file](https://app.paper.design/file/01M3V9R04VVSFTYQ76BRHHA83K)
+is the visual source of truth. Its "01 · Style guide" page defines the design
+tokens, and its "04 · Components" page defines each component's variants and
+states. Design changes start in Paper; this file and the code follow. When
+Paper and this file disagree, Paper wins, and the next edit to this file
+corrects the drift.
+
 When guidance conflicts, apply this order:
 
 1. Explicit user feedback, screenshots, and selected references.
-2. `PRODUCT.md` for audience, jobs, and product principles.
-3. This file for tokens, component anatomy, interaction, and visual rules.
-4. Existing shared components and neighboring product patterns.
+2. The Paper file for tokens and component appearance.
+3. `PRODUCT.md` for audience, jobs, and product principles.
+4. This file for interaction, accessibility, and rules a canvas cannot show.
+5. Existing shared components and neighboring product patterns.
 
 Within this file, each decision has one normative owner:
 
 | Concern | Normative owner |
 |---|---|
-| Exact token values and primitive recipes | YAML frontmatter. |
+| Exact token values and primitive recipes | The Paper file's design tokens. The YAML frontmatter mirrors them and owns values Paper does not define, such as shadows and layers. |
 | Domain ownership and lifecycle | `CONTEXT.md`; this file describes presentation only. |
 | Layout, component anatomy, interaction, motion, and accessibility | The matching section in Sections 3 through 10. |
 | Product-state composition | Canonical compositions; recipes assemble existing rules and do not redefine them. |
@@ -389,7 +397,7 @@ A warm amber accent rationed over a matte cool-slate canvas, with a sage/clay pa
 - **Oxide Clay** (`oklch(0.78 0.13 25)` strong): Removals and the errored reading. Diff remove gutters and remove text. Closely related to `destructive` (`oklch(0.65 0.2 25)`) but desaturated for inline diff legibility.
 
 ### Neutral
-- **Ink** (`oklch(0.93 0 0)` dark / `oklch(0.18 0.005 260)` light): Primary text. Near-white in dark, near-black-cool in light. Never pure `#fff` or `#000`.
+- **Ink** (`oklch(0.955 0.005 260)` dark / `oklch(0.19 0.005 260)` light): Primary text. Near-white in dark, near-black-cool in light. Never pure `#fff` or `#000`.
 - **Muted Ink** (`oklch(0.65 0.005 260)`): Secondary text, meta, captions. Holds ≥4.5:1 on slate surfaces; do not push muted text lighter "for elegance."
 - **Slate Page** (`oklch(0.12 0.005 260)`): The darkest layer, page chrome. Panels sit *above* it.
 - **Slate Background** (`oklch(0.16 0.005 260)`): App background, one step up from page.
@@ -397,7 +405,7 @@ A warm amber accent rationed over a matte cool-slate canvas, with a sage/clay pa
 - **Slate Muted / Accent** (`oklch(0.22–0.24 0.005 260)`): Hover fills, secondary surfaces, input wells, selection backgrounds.
 - **Slate Border** (`oklch(0.28 0.005 260)`): The rare explicit hairline, only where tonal lift cannot carry the separation.
 
-Light theme mirrors this on cool neutrals: page `oklch(0.955 0.005 260)`, background `oklch(0.99 0.005 260)`, card `oklch(0.985 0.005 260)`, all at hue 260 with 0.005 chroma so the neutral foundation remains coherent.
+Light theme mirrors this on cool neutrals: page `oklch(0.955 0.005 260)`, background `oklch(0.99 0.005 260)`, card `oklch(0.99 0.005 260)`, all at hue 260 with 0.005 chroma so the neutral foundation remains coherent.
 
 ### Theme contract
 
@@ -447,7 +455,7 @@ boundaries use these tokens when tone alone does not identify the control.
 ## 3. Typography
 
 **Display / Body Font:** Public Sans (with `ui-sans-serif, system-ui, -apple-system, sans-serif`)
-**Label / Mono Font:** SF Mono (with `Cascadia Code, Consolas, monospace`)
+**Label / Mono Font:** JetBrains Mono (with `Cascadia Code, Consolas, monospace`)
 
 **Character:** A single humanist sans handles headings, prose, controls, captions, and incidental numerals. Monospace supports code, identifiers, and aligned values where fixed-width characters improve scanning. It is a functional contrast, not a decorative "developer vibe."
 
