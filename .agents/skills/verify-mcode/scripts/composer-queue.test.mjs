@@ -1378,9 +1378,21 @@ test("uses one Electron-local socket for Composer queue RPCs and provider events
   expect(() => requireSameQueueSocket(uiSocket, worktreeSocket)).toThrow("same Electron-local socket");
   const evidence = { events: [] };
   let opened = 0;
+  const turnStarted = {
+    eventId: "publication:thread-owned:1",
+    routing: { threadId: "thread-owned", turnId: "turn-1", executionId: "execution-1" },
+    sourceProviderId: "codex",
+    sourceIdentities: [],
+    acceptedSequence: 1,
+    serverTimestamps: { acceptedAt: "2026-10-06T09:37:20.543Z" },
+    progressPosition: { epoch: "epoch-1", sequence: 1 },
+    payload: { type: "publication.recorded", publicationId: "1", event: { type: "turnStarted", threadId: "thread-owned", publicationId: "1" } },
+  };
   const socket = await openQueueSocket(async (onPush) => {
     opened += 1;
-    onPush({ channel: "agent.event", data: { threadId: "thread-owned", type: "turnStarted" } });
+    onPush({ channel: "agent.canonical", data: { phase: "accepted", threadId: "thread-owned", epoch: "epoch-1", from: 0, through: 1, events: [turnStarted] } });
+    onPush({ channel: "agent.canonical", data: { phase: "saved", threadId: "thread-owned", epoch: "epoch-1", through: 1,
+      revision: { conversationRevision: 1, rosterRevision: 0 }, events: [{ ...turnStarted, durableRevision: 1 }] } });
     return uiSocket;
   }, ownedRecord(), evidence);
   expect(socket).toBe(uiSocket);

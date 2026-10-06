@@ -186,7 +186,7 @@ Run `runtime health`, then run:
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime live --provider codex --model <id> --scenario completion --confirm-provider-call
 ```
 
-The harness requires `turnComplete` or `ended`. It fails immediately when the target thread emits `error`, `errored`, `cancelled`, `interrupted`, or `paused` first. It then reads `conversation.page` and `message.list` until both return a durable assistant message. The receipt omits assistant text and provider-private payloads.
+The harness reads provider events from the `publication.recorded` payloads of `agent.canonical` frames. The `agent.event` channel no longer exists. Saved and recovery frames repeat accepted events, so it records each event ID once. It requires `turnComplete`, or `ended` with a completed outcome. It fails immediately when the target thread first emits `error`, an `ended` outcome other than completed, or an `errored`, `cancelled`, `interrupted`, or `paused` status. It then reads `conversation.page` and `message.list` until both return a durable assistant message. The receipt omits assistant text and provider-private payloads.
 
 ### Codex notice triggers and desktop proof
 
