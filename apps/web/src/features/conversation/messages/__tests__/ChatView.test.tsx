@@ -1514,6 +1514,39 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByTestId("conversation-error")).not.toBeInTheDocument();
   });
 
+  it("leaves a failed turn's error to the transcript instead of a refresh banner", () => {
+    chatViewThreadMockRef.current = defaultThreadState({
+      activeRecord: {
+        ...createEmptyThreadRecord(),
+        messages: [createMockMessage({ id: "resident-message", thread_id: "thread-1" })],
+        error: "API Error: 400 unsupported model",
+        errorSource: "turn",
+      },
+    });
+
+    render(<ChatView />);
+
+    expect(screen.queryByTestId("conversation-error-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-list")).toBeInTheDocument();
+  });
+
+  it("labels a rejected send as a send failure", () => {
+    chatViewThreadMockRef.current = defaultThreadState({
+      activeRecord: {
+        ...createEmptyThreadRecord(),
+        messages: [createMockMessage({ id: "resident-message", thread_id: "thread-1" })],
+        error: "Thread thread-1 already has an active agent session",
+        errorSource: "send",
+      },
+    });
+
+    render(<ChatView />);
+
+    expect(screen.getByTestId("conversation-error-banner")).toHaveTextContent(
+      "Could not send message: Thread thread-1 already has an active agent session",
+    );
+  });
+
   it("keeps running threads subscribed while another thread is selected", async () => {
     const thread1 = makeThread({ id: "thread-1", title: "Thread 1" });
     const thread2 = makeThread({ id: "thread-2", title: "Thread 2", status: "active" });
