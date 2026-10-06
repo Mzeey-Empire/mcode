@@ -90,7 +90,7 @@ import {
   type ProviderBrowserLeaseHandle as BrowserAutomationSessionLeaseStage,
 } from "../../host-ports.js";
 import type { SessionForker } from "@mcode/contracts";
-import type { ProviderHostPorts } from "../../host-ports.js";
+import type { ProviderHostPorts, ProviderTurnOpening, ProviderTurnRouting } from "../../host-ports.js";
 import type { ProviderIdentity } from "@mcode/contracts";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
 import {
@@ -456,7 +456,18 @@ interface ClaudeStreamLoopState {
   resumedTurnStarted: boolean;
   suppressEnded: boolean;
   endedTurnExecutionId?: string;
+  /** Opening line for the next turn Claude starts without a prompt, from its task notification. */
+  providerTurnNotice?: string;
+  /** Drops a declined self-started turn's output until its SDK result. */
+  discardingProviderTurn: boolean;
   mapper: ClaudeEventMapper;
+}
+
+/** Keeps a finished background task summary as the opening line of the turn Claude starts next. */
+function rememberProviderTurnNotice(state: ClaudeStreamLoopState, message: Record<string, unknown>): void {
+  if (message.subtype !== "task_notification" || typeof message.summary !== "string") return;
+  const summary = message.summary.trim();
+  if (summary) state.providerTurnNotice = summary.slice(0, 500);
 }
 
 /** Claude Agent SDK adapter implementing IAgentProvider with prompt queue pattern. */
@@ -2045,6 +2056,7 @@ export class ClaudeProvider
       awaitingResume: isResuming,
       resumedTurnStarted: false,
       suppressEnded: false,
+      discardingProviderTurn: false,
     };
     return Object.assign(state, { mapper: new ClaudeEventMapper(
       sessionId,
@@ -2095,37 +2107,39 @@ export class ClaudeProvider
   ): Promise<void> {
     try {
       for await (const raw of q) {
-        const message = raw as Record<string, unknown>;
         const current = this.runtime.get(sessionId);
         if (this.suppressEndedQueries.has(q) || this.isSupersededClaudeStream(current, q)) break;
         if (current) current.lastUsedAt = Date.now();
-        if (!state.sessionInitialized && message.type !== "result") {
-          state.sessionInitialized = true;
-          this.emit(`_resumeOk:${sessionId}`);
-        }
-        state.mapper.captureSessionIdentity(message, state.sessionInitialized);
-        const isResumeFailure = this.isFailedClaudeResume(
-          message,
-          state.sessionInitialized,
-        );
-        await this.startClaudeResume(
-          sessionId,
-          state,
-          message,
-          isResumeFailure,
-        );
-        if (isResumeFailure) {
-          this.handleFailedClaudeResume(sessionId, state);
-          break;
-        }
-        const outcome = await state.mapper.map(message);
-        if (outcome !== "none") await this.endClaudeTurn(sessionId, state);
+        if (!(await this.handleClaudeStreamMessage(sessionId, state, raw as Record<string, unknown>))) break;
       }
     } catch (error: unknown) {
       this.publishClaudeStreamError(sessionId, q, state, error);
     } finally {
       await this.finalizeClaudeStream(sessionId, q, state);
     }
+  }
+
+  /** Routes one SDK message to its turn; returns false when the stream must stop. */
+  private async handleClaudeStreamMessage(
+    sessionId: string,
+    state: ClaudeStreamLoopState,
+    message: Record<string, unknown>,
+  ): Promise<boolean> {
+    if (!state.sessionInitialized && message.type !== "result") {
+      state.sessionInitialized = true;
+      this.emit(`_resumeOk:${sessionId}`);
+    }
+    state.mapper.captureSessionIdentity(message, state.sessionInitialized);
+    if (await this.skipUnownedClaudeOutput(sessionId, state, message)) return true;
+    const isResumeFailure = this.isFailedClaudeResume(message, state.sessionInitialized);
+    await this.startClaudeResume(sessionId, state, message, isResumeFailure);
+    if (isResumeFailure) {
+      this.handleFailedClaudeResume(sessionId, state);
+      return false;
+    }
+    const outcome = await state.mapper.map(message);
+    if (outcome !== "none") await this.endClaudeTurn(sessionId, state);
+    return true;
   }
 
   /**
@@ -2143,6 +2157,70 @@ export class ClaudeProvider
     await this.waitForCanonicalExecution(state.currentRouting);
     state.awaitingResume = true;
     state.resumedTurnStarted = false;
+  }
+
+  /**
+   * Claude can start a turn by itself, for example after a background task
+   * finishes. No execution owns that output until the host admits a turn for
+   * it, so it is either routed to a newly opened turn or dropped here.
+   * Returns true when the message must not reach the mapper.
+   */
+  private async skipUnownedClaudeOutput(
+    sessionId: string,
+    state: ClaudeStreamLoopState,
+    message: Record<string, unknown>,
+  ): Promise<boolean> {
+    if (state.discardingProviderTurn && this.discardsDeclinedOutput(state, message)) return true;
+    const unowned = state.endedTurnExecutionId === state.currentTurnExecutionId
+      && state.pendingPromptExecutionIds.length === 0;
+    if (!unowned) return false;
+    if (message.type === "system") {
+      rememberProviderTurnNotice(state, message);
+      return true;
+    }
+    if (message.type === "result") return true;
+    return !(await this.openProviderTurn(sessionId, state));
+  }
+
+  /** Drops a declined turn until its result, or until the SDK consumes the queued prompt of the user. */
+  private discardsDeclinedOutput(state: ClaudeStreamLoopState, message: Record<string, unknown>): boolean {
+    if (state.pendingPromptExecutionIds.length > 0 || message.type === "result") state.discardingProviderTurn = false;
+    return state.pendingPromptExecutionIds.length === 0;
+  }
+
+  /** Asks the host to admit a self-started turn; returns true when the stream moved onto it. */
+  private async openProviderTurn(sessionId: string, state: ClaudeStreamLoopState): Promise<boolean> {
+    const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
+    const notice = state.providerTurnNotice ?? "Claude continued without a prompt";
+    state.providerTurnNotice = undefined;
+    const opening = await this.host.turns.open({ threadId, notice })
+      .catch((error: unknown): ProviderTurnOpening => {
+        logger.warn("Claude self-started turn could not be opened", {
+          sessionId, error: error instanceof Error ? error.message : String(error),
+        });
+        return { kind: "declined", reason: "unavailable" };
+      });
+    if (opening.kind === "declined") {
+      logger.info("Claude self-started turn declined", { sessionId, reason: opening.reason });
+      state.discardingProviderTurn = true;
+      return false;
+    }
+    this.adoptProviderTurn(sessionId, state, opening.routing);
+    return true;
+  }
+
+  /** Moves the stream onto a server-opened turn and announces its start. */
+  private adoptProviderTurn(sessionId: string, state: ClaudeStreamLoopState, routing: ProviderTurnRouting): void {
+    const adopted: ClaudeCanonicalEventRouting = { ...routing };
+    this.getCanonicalRoutings().set(adopted.executionId, adopted);
+    state.currentRouting = adopted;
+    state.currentTurnExecutionId = adopted.executionId;
+    const session = this.runtime.get(sessionId);
+    if (session) session.executionRouting = adopted;
+    state.awaitingResume = false;
+    state.resumedTurnStarted = true;
+    state.mapper.resetExecution();
+    this.publishTurnEvent(adopted, sessionId, { type: AgentEventType.TurnStarted, threadId: adopted.threadId } satisfies AgentEvent);
   }
 
   private isFailedClaudeResume(
