@@ -1673,6 +1673,11 @@ async function restartOpenCodeResumeRuntime(repoRoot, run) {
   run.socket = null;
   await runWorktreeRuntimeCommand(repoRoot, "agent:down");
   await runWorktreeRuntimeCommand(repoRoot, "agent:up");
+  // agent:up returns once it writes ports.json, before the server answers health.
+  // A loaded host has measured past agent:ready's fixed 30-second CLI budget, so
+  // readiness shares the proof deadline instead.
+  const { agentReady } = await import("../../../../scripts/agent/agent-ready.mjs");
+  await agentReady(repoRoot, { timeoutMs: Math.max(HEALTH_TIMEOUT_MS, run.proofDeadline - Date.now()) });
   await health(repoRoot);
   run.socket = await openSocket(repoRoot, readRuntime(repoRoot), (push) => recordPush(run, push));
   const subscription = await run.socket.rpc("push.setThreadSubscriptions", {
