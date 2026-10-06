@@ -349,6 +349,29 @@ describe("canonical runtime reconciliation", () => {
     expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
   });
 
+  it("lets a newer turn the client did not start claim a settled record", () => {
+    seedRuntime("running", EXECUTION_ID, true);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, turnEvents(EXECUTION_ID, "completed"));
+    expect(readThreadField(THREAD_ID, (r) => [r.runtimePhase, r.turnExecutionId])).toEqual(["completed", EXECUTION_ID]);
+
+    const second = (eventId: string, sequence: number, payload: CanonicalAgentEventEnvelope["payload"]) => {
+      const event = envelope(eventId, sequence, OTHER_EXECUTION_ID, payload);
+      return { ...event, routing: { ...event.routing, turnId: "turn-2" } };
+    };
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [
+      second("p1", 5, { type: "turn.created", turn: { id: "turn-2", threadId: THREAD_ID, status: "Pending", trigger: { kind: "user" },
+        permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", providerIdentities: [],
+        startedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW } }),
+      second("p2", 6, { type: "turn.started", startedAt: NOW }),
+    ]);
+    expect(readThreadField(THREAD_ID, (r) => [r.runtimePhase, r.turnExecutionId])).toEqual(["running", OTHER_EXECUTION_ID]);
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(true);
+
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, [second("p3", 7, { type: "turn.completed", endedAt: NOW })]);
+    expect(readThreadField(THREAD_ID, (r) => r.runtimePhase)).toBe("completed");
+    expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
+  });
+
   it("ignores a canonical turn carrying a different execution identity", () => {
     seedRuntime("running", OTHER_EXECUTION_ID, true);
 

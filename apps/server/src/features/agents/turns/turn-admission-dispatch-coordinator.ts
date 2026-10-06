@@ -99,6 +99,8 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   };
   /** Whether a handled native command must clean pre-persisted automatic-gate attachments. */
   cleanupPersistedAttachmentsOnHandledCommand?: boolean;
+  /** Admits a turn the provider already started; `content` is its opening notice, not a prompt. */
+  providerOriginated?: boolean;
 };
 
 /** An opaque receipt for a command effect that can be activated or rolled back. */
@@ -393,7 +395,9 @@ export class TurnAdmissionDispatchCoordinator {
     const automatic = await this.admitAutomaticSetup(command, thread, mentions, providerId);
     if (automatic.kind !== "continue") return automatic;
     const provider = this.providers.resolve(providerId);
-    const routed = await this.routeCommand(command, provider);
+    const routed = command.providerOriginated
+      ? { kind: "ready" as const, content: command.content, commandEffect: null }
+      : await this.routeCommand(command, provider);
     if (routed.kind === "handled") {
       await this.cleanupHandledAttachments(command.threadId, automatic.handledCommandAttachmentCleanup);
       return routed;
@@ -750,6 +754,7 @@ export class TurnAdmissionDispatchCoordinator {
           previewAnnotations: command.previewAnnotations,
           origin: this.messageOrigin(command),
           selectedTextComments: command.selectedTextComments,
+          ...(command.providerOriginated ? { systemNotice: { kind: "provider-turn" as const, presentation: "timeline" as const } } : {}),
         };
     return {
       thread: {

@@ -142,6 +142,15 @@ function makeMixedFeedbackBundle(): PreviewAnnotationBundle {
 }
 
 describe("MessageBubble user messages", () => {
+  it("renders a provider-started turn's opening line as a timeline note, not a user bubble", () => {
+    const { container, getByRole } = render(
+      <MessageBubble message={{ ...makeMessage("Background command \"sleep 20\" completed"), systemNotice: { kind: "provider-turn", presentation: "timeline" } }} />,
+    );
+
+    expect(getByRole("note")).toHaveTextContent("Background command \"sleep 20\" completed");
+    expect(container.querySelector("[data-testid='markdown-content']")).toBeNull();
+  });
+
   it("renders user message through MarkdownContent with variant='user'", async () => {
     const { container } = render(
       <MessageBubble message={makeMessage("Hello **world**")} />,

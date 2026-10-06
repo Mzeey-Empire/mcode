@@ -158,6 +158,76 @@ describe("AgentService container composition", () => {
     expect(workerRuntime?.scheduler.depth().activeExecutions).toBe(0);
   });
 
+  it("admits a provider-started turn with its opening notice and releases it after Ended", async () => {
+    const sendTurn = vi.fn(async (request: TurnRequest) => {
+      await submitCodexEvent(workerRuntime!, request, 1, { type: "turnComplete", threadId: request.threadId,
+        turnExecutionId: request.turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
+        tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2, contextWindow: undefined, cacheReadTokens: undefined });
+      await submitCodexEvent(workerRuntime!, request, 2, { type: "ended", threadId: request.threadId, turnExecutionId: request.turnExecutionId });
+    });
+    registerFakeCodex(fakeCodexProvider(sendTurn));
+    const publication = container.resolve(AgentEventPublicationRegistry);
+    publication.bind(() => undefined);
+    publication.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("provider-turn", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Provider turn", "direct", "main", true, "codex");
+    await container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "start a background task", provider: "codex", permissionMode: "full" });
+    await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
+
+    const opening = await container.resolve(TurnRuntimeController).openProviderTurn({ threadId: thread.id, notice: "Background command finished" });
+    if (opening.kind !== "opened") throw new Error(`Provider turn was declined: ${opening.reason}`);
+    const adopted = { threadId: opening.routing.threadId, turnId: opening.routing.turnId, turnExecutionId: opening.routing.executionId } as TurnRequest;
+    await submitCodexEvent(workerRuntime!, adopted, 1, { type: "textDelta", threadId: thread.id,
+      turnExecutionId: adopted.turnExecutionId, delta: "the task finished", isFinalResponse: true });
+    await submitCodexEvent(workerRuntime!, adopted, 2, { type: "turnComplete", threadId: thread.id,
+      turnExecutionId: adopted.turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
+      tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2, contextWindow: undefined, cacheReadTokens: undefined });
+    await submitCodexEvent(workerRuntime!, adopted, 3, { type: "ended", threadId: thread.id, turnExecutionId: adopted.turnExecutionId });
+    await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined
+      && canonicalPayloadTypes(thread.id).filter((type) => type === "turn.completed").length === 2);
+
+    expect(sendTurn).toHaveBeenCalledTimes(1);
+    const notice = (await container.resolve(MessageRepo).listByThread(thread.id, 50)).messages.find((message) => message.content === "Background command finished");
+    expect(notice).toMatchObject({ role: "user", systemNotice: { kind: "provider-turn" } });
+    expect(container.resolve(TurnRuntimeController).snapshot(thread.id)).toMatchObject({ phase: "completed", turnExecutionId: adopted.turnExecutionId });
+  });
+
+  it("declines a provider-started turn while a user turn holds the thread", async () => {
+    let userTurn: TurnRequest | undefined;
+    registerFakeCodex(fakeCodexProvider(async (request) => { userTurn = request; }));
+    const publication = container.resolve(AgentEventPublicationRegistry);
+    publication.bind(() => undefined);
+    publication.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("provider-turn-busy", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Busy", "direct", "main", true, "codex");
+    void container.resolve(AgentService).sendMessage({ threadId: thread.id, content: "long task", provider: "codex", permissionMode: "full" });
+    await waitFor(() => workerRuntime?.owner.current(thread.id) !== undefined);
+
+    await expect(container.resolve(TurnRuntimeController).openProviderTurn({ threadId: thread.id, notice: "Background command finished" }))
+      .resolves.toEqual({ kind: "declined", reason: "busy" });
+
+    await waitFor(() => userTurn !== undefined);
+    const request = requireValue(userTurn, "user turn was not dispatched");
+    await submitCodexEvent(workerRuntime!, request, 1, { type: "turnComplete", threadId: thread.id,
+      turnExecutionId: request.turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
+      tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2, contextWindow: undefined, cacheReadTokens: undefined });
+    await submitCodexEvent(workerRuntime!, request, 2, { type: "ended", threadId: thread.id, turnExecutionId: request.turnExecutionId });
+    await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
+  });
+
+  it("declines and stops a provider-started turn on an archived thread", async () => {
+    const stopSession = vi.fn(async () => undefined);
+    registerFakeCodex(fakeCodexProvider(async () => undefined, stopSession));
+    const workspace = await container.resolve(WorkspaceRepo).create("provider-turn-stopped", temporaryDirectory!);
+    const threads = container.resolve(ThreadRepo);
+    const thread = await threads.create(workspace.id, "Stopped", "direct", "main", true, "codex");
+    await threads.updateStatus(thread.id, "archived");
+
+    await expect(container.resolve(TurnRuntimeController).openProviderTurn({ threadId: thread.id, notice: "Background command finished" }))
+      .resolves.toEqual({ kind: "declined", reason: "stopped" });
+    await waitFor(() => stopSession.mock.calls.length > 0);
+  });
+
   it.each([false, true])("publishes a session notice through the production progress owner while its SQLite save is held (scoped=%s)", async (scoped) => {
     registerFakeCodex(fakeCodexProvider(async () => undefined));
     const publication = container.resolve(AgentEventPublicationRegistry);

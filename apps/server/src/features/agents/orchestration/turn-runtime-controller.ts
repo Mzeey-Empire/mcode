@@ -9,7 +9,7 @@ import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { AgentEventType, ProviderRuntimeEventSchema, isSessionEvictable } from "@mcode/contracts";
-import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary, CopilotProviderBoundary } from "@mcode/providers";
+import type { ClaudeCanonicalEventRouting, ClaudeProviderBoundary, CodexProviderBoundary, CopilotProviderBoundary, ProviderTurnOpening } from "@mcode/providers";
 import type {
   Thread,
   IProviderRegistry,
@@ -1970,6 +1970,76 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const admitted = await this.turnAdmissions.admit(command, this.runtimeAdmissionAuthority(), canReserve);
     if (admitted.kind !== "dispatch") return;
     await this.dispatchPreparedTurn(admitted);
+  }
+
+  /**
+   * Admit a turn the provider started by itself, such as Claude replying to a
+   * finished background task. It runs the user-turn admission pipeline with
+   * `notice` as the opening line, binds the worker route, and returns the
+   * server-minted routing; the provider is already running the turn, so nothing
+   * is dispatched to it.
+   */
+  async openProviderTurn(request: { threadId: string; notice: string }): Promise<ProviderTurnOpening> {
+    const declined = this.declineProviderTurn(request.threadId);
+    if (declined) return declined;
+    let admitted: Awaited<ReturnType<TurnAdmissionDispatchCoordinator["admit"]>>;
+    try {
+      admitted = await this.turnAdmissions.admit({
+        threadId: request.threadId,
+        content: request.notice,
+        providerOriginated: true,
+        permissionMode: "default",
+      }, this.runtimeAdmissionAuthority());
+    } catch (error) {
+      return this.providerTurnAdmissionFailure(request.threadId, error);
+    }
+    if (admitted.kind !== "dispatch") return { kind: "declined", reason: "unavailable" };
+    if (!admitted.workerOwned) {
+      await this.failPreparedTurnDispatch(admitted, new Error("Provider-started turns require the worker event route"));
+      return { kind: "declined", reason: "unavailable" };
+    }
+    try {
+      await this.prepareRuntimeDispatch(admitted);
+      await this.activatePreparedCommandEffect(admitted);
+      this.adoptPreparedProviderDispatch(admitted);
+    } catch (error) {
+      await this.failPreparedTurnDispatch(admitted, error);
+      return { kind: "declined", reason: "unavailable" };
+    }
+    return { kind: "opened", routing: {
+      threadId: admitted.lease.threadId, turnId: admitted.request.turnId,
+      executionId: admitted.lease.turnExecutionId, deliveryAttempt: 1,
+    } };
+  }
+
+  /** Refuse provider turns while the user is stopping the thread, and stop the session as the legacy path did. */
+  private declineProviderTurn(threadId: string): Extract<ProviderTurnOpening, { kind: "declined" }> | null {
+    const thread = this.runtimePersistence.load(threadId);
+    if (!thread) return { kind: "declined", reason: "unavailable" };
+    if (this.mutationReservations.get(threadId)?.state !== "stopping") return null;
+    this.stopUnadmittedTurn(threadId, thread.provider as ProviderId | undefined, "provider turn while stopping");
+    return { kind: "declined", reason: "stopping" };
+  }
+
+  /** Map an admission refusal to the decline the provider acts on; a terminal thread also stops the session. */
+  private providerTurnAdmissionFailure(threadId: string, error: unknown): Extract<ProviderTurnOpening, { kind: "declined" }> {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/already has an active agent session|already has a pending mutation/.test(message)) return { kind: "declined", reason: "busy" };
+    if (/Cannot send message to (terminal|deleted) thread/.test(message)) {
+      this.stopUnadmittedTurn(threadId, this.runtimePersistence.load(threadId)?.provider as ProviderId | undefined, "provider turn on stopped thread");
+      return { kind: "declined", reason: "stopped" };
+    }
+    logger.warn("Provider turn admission failed", { threadId, error: message });
+    return { kind: "declined", reason: "unavailable" };
+  }
+
+  /** Record an adopted turn's dispatch state without sending a prompt the provider never received. */
+  private adoptPreparedProviderDispatch(prepared: PreparedTurnDispatch): void {
+    const dispatch = this.createRetryDispatch(prepared);
+    dispatch.dispatchStarted = true;
+    this.turnRetryDispatchByThread.set(prepared.lease.threadId, dispatch);
+    this.bindClaudeCanonicalDelivery(prepared.provider);
+    logger.info("Provider-started turn admitted", { threadId: prepared.lease.threadId, executionId: prepared.lease.turnExecutionId });
   }
 
   /** Provision a thread through its coordinator, then start its generic first-turn command. */

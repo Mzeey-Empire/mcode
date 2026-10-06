@@ -183,7 +183,7 @@ describe("ClaudeProvider AssistantMessageBoundary from stop_reason", () => {
     expect(boundaries).toHaveLength(0);
   });
 
-  it("keeps queued execution identity behind an internal result continuation", async () => {
+  it("drops a self-started continuation the server declines while a queued prompt holds the thread", async () => {
     let releaseContinuation!: () => void;
     const continuationReleased = new Promise<void>((resolve) => {
       releaseContinuation = resolve;
@@ -268,15 +268,19 @@ describe("ClaudeProvider AssistantMessageBoundary from stop_reason", () => {
       undefined,
       undefined,
       undefined,
-      mockProviderHost((runtimeEvent) => {
-        events.push(runtimeEvent);
-        if (runtimeEvent.event.type === AgentEventType.TurnComplete && runtimeEvent.event.turnExecutionId === "A") {
-          resolveTurnComplete();
-        }
-        if (runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "B started") {
-          resolveBText();
-        }
-      }),
+      {
+        ...mockProviderHost((runtimeEvent) => {
+          events.push(runtimeEvent);
+          if (runtimeEvent.event.type === AgentEventType.TurnComplete && runtimeEvent.event.turnExecutionId === "A") {
+            resolveTurnComplete();
+          }
+          if (runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "B started") {
+            resolveBText();
+          }
+        }),
+        // The queued prompt was admitted first, so the server refuses the self-started turn.
+        turns: { open: async () => ({ kind: "declined" as const, reason: "busy" as const }) },
+      },
     );
 
     await provider.sendTurn({
@@ -309,7 +313,7 @@ describe("ClaudeProvider AssistantMessageBoundary from stop_reason", () => {
     const continuation = events.find(
       (runtimeEvent) => runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "A continuation",
     );
-    expect(continuation?.event.turnExecutionId).toBe("A");
+    expect(continuation).toBeUndefined();
     expect(
       events.some(
         (runtimeEvent) => runtimeEvent.event.type === AgentEventType.TurnStarted && runtimeEvent.event.turnExecutionId === "B",

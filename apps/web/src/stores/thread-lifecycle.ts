@@ -19,6 +19,22 @@ function admitsOptimisticPrompt(threadId: string, turn: AgentTurn, record: Threa
   });
 }
 
+/**
+ * Whether `latest` is a newer parent turn this client did not start, such as one
+ * the provider began on its own. It may take over only a settled record whose own
+ * turn is already in the replica, so `latest` is provably newer rather than a
+ * lagging copy; a running record keeps its turn and child turns keep their own lifecycle.
+ */
+function correlatesTrackedTurn(threadId: string, latest: AgentTurn, record: ThreadRecord): boolean {
+  return latest.executionId === record.turnExecutionId || succeedsSettledTurn(threadId, latest, record);
+}
+
+function succeedsSettledTurn(threadId: string, latest: AgentTurn, record: ThreadRecord): boolean {
+  if (record.runtimePhase === "running" || !latest.executionId || latest.trigger.kind === "child") return false;
+  return Object.values(record.canonicalAgent.state.turns)
+    .some((turn) => turn.threadId === threadId && turn.executionId === record.turnExecutionId);
+}
+
 /** Selects the provider-owned child lifecycle when no local execution is active. */
 export function getCanonicalLifecycleTurn(threadId: string, record: ThreadRecord): AgentTurn | undefined {
   const latest = latestCanonicalTurn(threadId, record);
@@ -43,9 +59,7 @@ export function getCanonicalRuntimeTurn(threadId: string, record: ThreadRecord):
   if (record.runtimePhase === "finalizing") return undefined;
   const latest = latestCanonicalTurn(threadId, record);
   if (!latest) return undefined;
-  if (record.turnExecutionId !== null) {
-    return latest.executionId === record.turnExecutionId ? latest : undefined;
-  }
+  if (record.turnExecutionId !== null) return correlatesTrackedTurn(threadId, latest, record) ? latest : undefined;
   // Saved admission does not replay turnStarted. Only this exact prompt can
   // claim an optimistic run; an older recovery must not cancel a newer send.
   if (record.runtimePhase === "running") return admitsOptimisticPrompt(threadId, latest, record) ? latest : undefined;

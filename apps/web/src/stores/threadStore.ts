@@ -3094,7 +3094,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     // Stamp the execution identity on live claims so later reconciles and the
     // child lifecycle gate can keep correlating this turn to the record.
     const executionId = activeCanonicalExecutionId(turn);
-    if (record.turnExecutionId === null && executionId) {
+    if (executionId && record.turnExecutionId !== executionId) {
       patch.turnExecutionId = executionId;
       patch.optimisticUserMessageId = null;
     }

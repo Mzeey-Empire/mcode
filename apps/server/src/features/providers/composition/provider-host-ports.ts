@@ -3,6 +3,7 @@ import type {
   ProviderEventCommitReceipt,
   ProviderHostPorts,
   ProviderEventSubmissionReceipt,
+  ProviderTurnPort,
 } from "@mcode/providers";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
@@ -58,7 +59,12 @@ export interface ProviderHostPortDependencies {
   events: CanonicalAgentBoundary;
   ingress: ProviderEventIngress;
   eventOwnership?: ProviderEventOwnership;
+  /** Resolved per call because the turn owner itself depends on the provider registry. */
+  turns: () => ProviderTurnPort;
 }
+
+/** Injection token for the server service that admits provider-started turns. */
+export const PROVIDER_TURN_PORT = "ProviderTurnPort";
 
 /** Adapts server-owned services to the only host operations exposed to Providers. */
 export function createProviderHostPorts(
@@ -122,6 +128,9 @@ export function createProviderHostPorts(
     },
     events: {
       submit: (batch) => submitProviderEvents(dependencies, batch),
+    },
+    turns: {
+      open: (request) => dependencies.turns().open(request),
     },
   };
 }

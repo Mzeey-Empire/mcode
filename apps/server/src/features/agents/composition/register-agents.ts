@@ -60,6 +60,8 @@ import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service
 import { FileService } from "../../projects/files/file-service.js";
 import { WorkspaceEnvironmentService } from "../../projects/index.js";
 import { ProviderAvailabilityService } from "../../providers/availability/provider-availability-service.js";
+import { PROVIDER_TURN_PORT } from "../../providers/composition/provider-host-ports.js";
+import type { ProviderTurnPort } from "@mcode/providers";
 import { SettingsService } from "../../settings/settings-service.js";
 import { TURN_FINALIZER, TurnFinalizer } from "../turns/turn-finalizer.js";
 import { TURN_FILE_TRACKER, TurnFileTracker } from "../turns/turn-file-tracker.js";
@@ -279,6 +281,12 @@ export function registerAgentServices(container: DependencyContainer): void {
   });
   container.register<TurnRuntimeEventControl>(TURN_RUNTIME_EVENT_CONTROL, {
     useFactory: (c) => c.resolve(TurnRuntimeController),
+  });
+  container.register<ProviderTurnPort>(PROVIDER_TURN_PORT, {
+    useFactory: (c) => {
+      const turns = c.resolve(TurnRuntimeController);
+      return { open: (request) => turns.openProviderTurn(request) };
+    },
   });
   container.register(
     ProviderTurnEventApplication,

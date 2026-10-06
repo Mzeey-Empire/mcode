@@ -165,6 +165,31 @@ export interface ProviderEventSubmissionReceipt {
   };
 }
 
+/** Server-issued routing for a turn the provider started without a user prompt. */
+export interface ProviderTurnRouting {
+  threadId: string;
+  turnId: string;
+  executionId: string;
+  deliveryAttempt: number;
+}
+
+/** Why the server did not admit a provider-started turn. */
+export type ProviderTurnDeclineReason = "busy" | "stopping" | "stopped" | "unavailable";
+
+/** Server decision for a provider-started turn. */
+export type ProviderTurnOpening =
+  | { kind: "opened"; routing: ProviderTurnRouting }
+  | { kind: "declined"; reason: ProviderTurnDeclineReason };
+
+/**
+ * Admits a turn the provider started on its own, such as a reply to a finished
+ * background task. The server mints the identity and records `notice` as the
+ * turn's opening line; a declined turn's output must not be published.
+ */
+export interface ProviderTurnPort {
+  open(request: { threadId: string; notice: string }): Promise<ProviderTurnOpening>;
+}
+
 /** Narrow server services that Provider implementations can use. */
 export interface ProviderHostPorts {
   runtime: ProviderRuntimePort;
@@ -174,4 +199,5 @@ export interface ProviderHostPorts {
   threadControl: ProviderThreadControlPort;
   grants: ProviderGrantPort;
   events: ProviderEventSinkPort;
+  turns: ProviderTurnPort;
 }
