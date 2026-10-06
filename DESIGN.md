@@ -311,6 +311,9 @@ The register is editorial and typeset, closer to a well-made code editor or a te
 This system explicitly rejects the consumer-app reflexes: no softened "Oops, something went wrong" copy (we say "Errored", "Idle", "Empty"), no emoji decoration, no colorful status chips, no glassmorphism, no gradient hero metrics, no marketing voice in the diff. If it looks like it wants to convert a visitor, it is wrong. It should look like it wants to get out of the way.
 
 **Key Characteristics:**
+- Register in three words: editorial, quiet, instrument-grade. A senior
+  developer at 11pm should feel in control and unhurried, reading an
+  instrument, not being marketed to.
 - Glance-first: status communicated by tinted dots and small monochrome glyphs, never paragraphs.
 - Dark-primary, Filament Amber accent on cool-slate surfaces; light theme is the cool-neutral counterpart.
 - Tonal lift instead of divider lines: panels float a few percent off the page.
@@ -1123,9 +1126,26 @@ state the condition; supporting copy explains the next useful move.
 
 ### External references
 
+A reference is a scalpel, not a template: borrow the one quality named here,
+not the whole look.
+
 - [Introducing the Codex app](https://openai.com/index/introducing-the-codex-app/)
   defines Codex as a command center for parallel, long-running agent work. Use
   its published product imagery as an interaction and composition reference.
+  Codex centers one task and one stream; Mcode holds many runs and optimizes
+  for the cross-thread glance.
+- [Zed](https://zed.dev) treats performance as a design property: instant
+  response, no jank, density without lag. Borrow the discipline behind Mcode's
+  targets (sub-2s startup, under 150MB idle, 60fps timeline). Zed is an editor
+  with editor chrome; Mcode sits beside the editor.
+- [T3 Code](https://github.com/pingdotgg/t3code) is Mcode's closest peer, a
+  minimal GUI for coding agents. Borrow its multi-provider control patterns and
+  its build discipline (Vite, oxlint, a fast desktop shell). It centers a single
+  agent view; the sidebar of runs and the worktree as an object stay Mcode's.
+- [Synara](https://github.com/Emanuele-web04/synara), a T3 Code fork, adds
+  broader provider coverage and a multi-tab layout for threads, views, and an
+  embedded browser. Borrow the tab layout and the provider breadth. Mcode's
+  organizing object is the thread on the sidebar, not a tab.
 - [Phosphor for React](https://github.com/phosphor-icons/react) is the icon API
   source of truth. It documents weights, sizing, mirroring, accessible labels,
   React context, and per-icon imports.
@@ -1135,6 +1155,20 @@ state the condition; supporting copy explains the next useful move.
   is comparative research, not an authority on the referenced brands. Its
   useful lesson is document completeness: tokens, component recipes, and
   explicit rules must appear together.
+
+### What not to resemble
+
+If a design wants to convert a visitor, it is wrong.
+
+- SaaS dashboards and admin panels: colorful stat chips, the hero-metric
+  template, "your week in Mcode" summaries.
+- The AI-tool aesthetic: neon or cyan accents on dark, purple-to-blue
+  gradients, glassmorphism, gradient text.
+- Consumer chat apps: speech bubbles, emoji reactions, "typing..." theatrics,
+  soft rounded everything.
+- Marketing-page tropes inside the product: oversized hero type,
+  tracked-uppercase eyebrows above every section, identical repeating card
+  grids, decorative resting shadows, colored side-stripe borders.
 
 ### Before an agent changes UI
 
