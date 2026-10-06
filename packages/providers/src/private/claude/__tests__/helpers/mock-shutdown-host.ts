@@ -2,7 +2,10 @@ import type { ProviderHostPorts } from "@mcode/providers";
 import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts";
 
 /** Supplies the complete provider host contract without external processes or credentials. */
-export function mockShutdownHost(onEvent: (event: ProviderRuntimeEvent) => void): ProviderHostPorts {
+export function mockShutdownHost(
+  onEvent: (event: ProviderRuntimeEvent) => void,
+  turns: ProviderHostPorts["turns"] = { open: async () => ({ kind: "declined", reason: "unavailable" }) },
+): ProviderHostPorts {
   return {
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: () => ({}) },
@@ -15,6 +18,7 @@ export function mockShutdownHost(onEvent: (event: ProviderRuntimeEvent) => void)
     },
     threadControl: { bootstrap: async () => null, close: async () => {} },
     grants: { consume: () => false },
+    turns,
     events: {
       submit: async (batch) => {
         for (const draft of batch.events) {

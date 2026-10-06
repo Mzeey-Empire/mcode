@@ -3,7 +3,8 @@ import { hostRuntime } from "@mcode/shared/node/host-runtime";
 
 import { OpenCodeProvider } from "../adapters/opencode/opencode-provider.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { createProviderHostPorts } from "./provider-host-ports.js";
+import { createProviderHostPorts, PROVIDER_TURN_PORT } from "./provider-host-ports.js";
+import type { ProviderTurnPort } from "@mcode/providers";
 import { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { InternalThreadControlMcpRuntime } from "../../thread-control/index.js";
 import { CanonicalAgentBoundary } from "../../agents/index.js";
@@ -64,6 +65,7 @@ export function registerProviderAdapters(container: DependencyContainer): void {
       events: c.resolve(CanonicalAgentBoundary),
       ingress: c.resolve(ProviderEventIngress),
       eventOwnership: c.resolve(WorkerOwnedTurnRuntime).providerEvents,
+      turns: () => c.resolve<ProviderTurnPort>(PROVIDER_TURN_PORT),
     }),
   });
 }

@@ -45,6 +45,10 @@ export type {
   ProviderThreadControlPort,
   ProviderThreadControlHttpConnection,
   ProviderThreadControlRequest,
+  ProviderTurnDeclineReason,
+  ProviderTurnOpening,
+  ProviderTurnPort,
+  ProviderTurnRouting,
 } from "./host-ports.js";
 export { providerBrowserPermissionCapability } from "./host-ports.js";
 export {

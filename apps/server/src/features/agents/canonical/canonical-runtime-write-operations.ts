@@ -3,7 +3,7 @@ import {
   AgentItemSchema, AgentThreadSchema, AgentTurnSchema, CanonicalAgentEventEnvelopeSchema,
   CollaborationActionSchema, MessageMentionSchema,
   PreviewAnnotationBundleSchema, ProviderIdentitySchema, SelectedTextCommentsSchema,
-  StoredAttachmentSchema, TurnOutcomeSchema,
+  StoredAttachmentSchema, SystemNoticeMetadataSchema, TurnOutcomeSchema,
   MessageSchema, NarrativeEntrySchema, TurnFileEffectSummarySchema,
 } from "@mcode/contracts";
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
@@ -51,7 +51,8 @@ export const CanonicalRuntimeParentStartSchema = z.object({
       origin: z.discriminatedUnion("type", [z.object({ type: z.literal("composer") }),
         z.object({ type: z.literal("thread"), sourceThreadId: identity, sourceTurnId: identity,
           sourceProviderId: identity })]).optional(),
-      selectedTextComments: SelectedTextCommentsSchema().optional() }),
+      selectedTextComments: SelectedTextCommentsSchema().optional(),
+      systemNotice: SystemNoticeMetadataSchema().optional() }),
   ]),
 });
 

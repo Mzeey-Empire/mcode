@@ -58,6 +58,7 @@ export type ParentUserMessageWrite =
       previewAnnotations?: CreateMessageArgument[10];
       origin?: CreateMessageArgument[11];
       selectedTextComments?: CreateMessageArgument[13];
+      systemNotice?: CreateMessageArgument[14];
     };
 
 /** Project prepared user-message data on the transaction's SQLite connection. */
@@ -84,6 +85,7 @@ export function projectParentUserMessage(messages: MessageRepo, threadId: string
     userMessage.origin,
     userMessage.messageId,
     userMessage.selectedTextComments,
+    userMessage.systemNotice,
   );
 }
 
