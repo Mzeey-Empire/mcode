@@ -6,7 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
-import { assertRuntimeFreshness, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openVerificationSocketUrl, runBun } from "./runtime.mjs";
+import { assertRuntimeFreshness, canonicalFrameToLiveEvents, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openVerificationSocketUrl, runBun } from "./runtime.mjs";
 
 const CLI = NodePath.join(import.meta.dirname, "verify-mcode.mjs");
 const BROWSER_PROOF = NodePath.join(import.meta.dirname, "browser-opencode-proof.mjs");
@@ -143,6 +143,85 @@ NodeTest.test("cleans only OpenCode resume artifacts created by the runtime veri
 NodeTest.test("recognizes the provider-neutral OpenCode session invalidation subtype", () => {
   NodeAssertStrict.equal(isOpenCodeSessionInvalidatedEvent({ type: "system", subtype: "sdk_session_invalidated" }), true);
   NodeAssertStrict.equal(isOpenCodeSessionInvalidatedEvent({ type: "system", subtype: "opencode:session-recreated" }), false);
+});
+
+const THREAD = "e2487eb3-3152-4bfb-b466-1aec64ef7ec5";
+const CHILD = "7c0f2d64-1b5e-4c55-9d0b-3f5a1f0e9b21";
+const EXECUTION = "660e1a9f-f474-4e6e-8c13-ac64abd4dace";
+const EPOCH = "5d3d286f-a6d0-4cdc-b734-2d9fb26eb0d3:a9eafe97-3bdc-4701-ab55-345856cdf877";
+
+// Mirrors one `AcceptedCanonicalAgentEventEnvelopeSchema` envelope captured from a live Claude turn.
+function canonicalEnvelope(eventId, sequence, payload, routingThreadId = THREAD) {
+  return {
+    eventId,
+    routing: { threadId: routingThreadId, turnId: "1fe19a18-e38b-4696-853d-8809a04e4a9e", executionId: EXECUTION },
+    sourceProviderId: "claude",
+    sourceIdentities: [],
+    acceptedSequence: sequence,
+    serverTimestamps: { acceptedAt: "2026-10-06T09:37:20.543Z" },
+    payload,
+    progressPosition: { epoch: EPOCH, sequence },
+  };
+}
+
+function publication(eventId, sequence, event, routingThreadId) {
+  return canonicalEnvelope(eventId, sequence, { type: "publication.recorded", publicationId: String(sequence), event: { ...event, publicationId: String(sequence) } }, routingThreadId);
+}
+
+NodeTest.test("reads terminal publications from an accepted canonical frame and ignores semantic payloads", () => {
+  const frame = {
+    phase: "accepted", threadId: THREAD, epoch: EPOCH, from: 26, through: 28,
+    events: [
+      canonicalEnvelope("e:27", 27, { type: "turn.completed", endedAt: "2026-10-06T09:37:20.543Z" }),
+      publication("e:28", 28, { type: "turnComplete", threadId: THREAD, reason: "end_turn", providerId: "claude", turnExecutionId: EXECUTION }),
+    ],
+  };
+
+  NodeAssertStrict.deepEqual(canonicalFrameToLiveEvents(frame), [
+    { eventId: "e:28", threadId: THREAD, type: "turnComplete", turnExecutionId: EXECUTION },
+  ]);
+});
+
+NodeTest.test("reads stop outcomes and session notices from saved frames", () => {
+  const frame = {
+    phase: "saved", threadId: THREAD, epoch: EPOCH, through: 9,
+    revision: { conversationRevision: 9, rosterRevision: 0 },
+    events: [
+      { ...publication("e:8", 8, { type: "system", threadId: THREAD, subtype: "sdk_session_invalidated" }), durableRevision: 8 },
+      { ...publication("e:9", 9, { type: "ended", threadId: THREAD, turnExecutionId: EXECUTION, outcome: "interrupted" }), durableRevision: 9 },
+    ],
+  };
+
+  NodeAssertStrict.deepEqual(canonicalFrameToLiveEvents(frame), [
+    { eventId: "e:8", threadId: THREAD, type: "system", subtype: "sdk_session_invalidated" },
+    { eventId: "e:9", threadId: THREAD, type: "ended", outcome: "interrupted", turnExecutionId: EXECUTION },
+  ]);
+});
+
+NodeTest.test("reads a recovery frame's durable delta before its retained suffix", () => {
+  const frame = {
+    phase: "recovery", threadId: THREAD, epoch: EPOCH, acceptedThrough: 2, savedThrough: 1, loss: "none",
+    durable: {
+      mode: "delta", threadId: THREAD,
+      from: { conversationRevision: 0, rosterRevision: 0 }, through: { conversationRevision: 1, rosterRevision: 0 },
+      events: [{ ...publication("e:1", 1, { type: "turnStarted", threadId: THREAD, turnExecutionId: EXECUTION }), durableRevision: 1 }],
+    },
+    retained: [publication("e:2", 2, { type: "turnComplete", threadId: THREAD, turnExecutionId: EXECUTION })],
+  };
+
+  NodeAssertStrict.deepEqual(canonicalFrameToLiveEvents(frame).map((event) => event.type), ["turnStarted", "turnComplete"]);
+});
+
+NodeTest.test("skips mirrored child frames and publications routed to another thread or execution", () => {
+  const events = [
+    publication("e:1", 1, { type: "turnComplete", threadId: THREAD, turnExecutionId: EXECUTION }),
+    publication("e:2", 2, { type: "turnComplete", threadId: CHILD, turnExecutionId: EXECUTION }),
+    publication("e:3", 3, { type: "turnComplete", threadId: THREAD, turnExecutionId: "0b6b2c7e-8f1d-4c3a-9e5f-2a7d4c1b8e90" }),
+  ];
+  const owned = { phase: "accepted", threadId: THREAD, epoch: EPOCH, from: 0, through: 3, events };
+
+  NodeAssertStrict.deepEqual(canonicalFrameToLiveEvents(owned).map((event) => event.eventId), ["e:1"]);
+  NodeAssertStrict.deepEqual(canonicalFrameToLiveEvents({ ...owned, threadId: CHILD, ownerThreadId: THREAD }), []);
 });
 
 NodeTest.test("rejects desktop verification sockets without loopback authentication", async () => {

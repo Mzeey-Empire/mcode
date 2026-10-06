@@ -13,7 +13,7 @@ import {
   openDesktopSocket,
   verifyThreadLifecycleHealth,
 } from "./thread-lifecycle.mjs";
-import { openRuntimeVerificationSocket } from "./runtime.mjs";
+import { canonicalFrameToLiveEvents, openRuntimeVerificationSocket } from "./runtime.mjs";
 import { stopElectron } from "../../../../.agents/skills/electorn-live-testing/scripts/stop-electron.mjs";
 
 const EVIDENCE_DIRECTORY = ".dev/verification/composer-queue";
@@ -1087,18 +1087,26 @@ async function subscribeQueueProviderEvents(socket, threadId, evidence) {
   evidence.subscribed = true;
 }
 
+// Evidence keeps the redacted `agent.event` record shape that the queue checks
+// read; the wire source is now the `agent.canonical` publication stream.
 function recordQueueProviderPush(evidence, record, push) {
-  if (push?.channel !== "agent.event" || push.data?.threadId !== record.threadId || typeof push.data.type !== "string") return;
-  evidence.events.push({
-    channel: "agent.event",
-    data: {
-      outcome: safeEventOutcome(push.data.outcome),
-      threadId: record.threadId,
-      turnExecutionId: safeTurnExecutionId(push.data.turnExecutionId),
-      type: push.data.type,
-    },
-  });
-  if (evidence.events.length > 40) evidence.events.shift();
+  if (push?.channel !== "agent.canonical" || push.data?.threadId !== record.threadId) return;
+  evidence.seenEventIds ??= new Set();
+  for (const event of canonicalFrameToLiveEvents(push.data)) {
+    // Saved and recovery frames repeat accepted events.
+    if (evidence.seenEventIds.has(event.eventId)) continue;
+    evidence.seenEventIds.add(event.eventId);
+    evidence.events.push({
+      channel: "agent.event",
+      data: {
+        outcome: safeEventOutcome(event.outcome),
+        threadId: record.threadId,
+        turnExecutionId: safeTurnExecutionId(event.turnExecutionId),
+        type: event.type,
+      },
+    });
+    if (evidence.events.length > 40) evidence.events.shift();
+  }
 }
 
 function safeEventOutcome(value) {

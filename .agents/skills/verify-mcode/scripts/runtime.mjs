@@ -526,6 +526,7 @@ async function live(repoRoot, options) {
     proofDeadline: null,
     ownedThreadIds: [],
     eventsByThread: new Map(),
+    seenCanonicalEventIds: new Set(),
   };
   try {
     await prepareLiveRun(repoRoot, options, run);
@@ -1672,6 +1673,11 @@ async function restartOpenCodeResumeRuntime(repoRoot, run) {
   run.socket = null;
   await runWorktreeRuntimeCommand(repoRoot, "agent:down");
   await runWorktreeRuntimeCommand(repoRoot, "agent:up");
+  // agent:up returns once it writes ports.json, before the server answers health.
+  // A loaded host has measured past agent:ready's fixed 30-second CLI budget, so
+  // readiness shares the proof deadline instead.
+  const { agentReady } = await import("../../../../scripts/agent/agent-ready.mjs");
+  await agentReady(repoRoot, { timeoutMs: Math.max(HEALTH_TIMEOUT_MS, run.proofDeadline - Date.now()) });
   await health(repoRoot);
   run.socket = await openSocket(repoRoot, readRuntime(repoRoot), (push) => recordPush(run, push));
   const subscription = await run.socket.rpc("push.setThreadSubscriptions", {
@@ -1728,13 +1734,25 @@ async function requireTerminalEvent(report, deadline) {
 
 function findCompletionOutcome(events) {
   for (const event of events) {
-    if (event.kind === "agent" && ["turnComplete", "ended"].includes(event.type)) {
-      return { succeeded: true, label: event.type };
-    }
-    if (event.kind === "agent" && event.type === "error") return { succeeded: false, label: "error" };
-    if (event.kind === "status" && ["errored", "cancelled", "interrupted", "paused"].includes(event.status)) {
-      return { succeeded: false, label: event.status };
-    }
+    const outcome = event.kind === "agent" ? agentEventOutcome(event) : statusEventOutcome(event);
+    if (outcome) return outcome;
+  }
+  return null;
+}
+
+function agentEventOutcome(event) {
+  if (event.type === "turnComplete") return { succeeded: true, label: event.type };
+  // A stopped turn publishes only `ended`, so its outcome decides success.
+  if (event.type === "ended") {
+    return isCompletedOutcome(event.outcome) ? { succeeded: true, label: event.type } : { succeeded: false, label: event.outcome };
+  }
+  if (event.type === "error") return { succeeded: false, label: "error" };
+  return null;
+}
+
+function statusEventOutcome(event) {
+  if (event.kind === "status" && ["errored", "cancelled", "interrupted", "paused"].includes(event.status)) {
+    return { succeeded: false, label: event.status };
   }
   return null;
 }
@@ -1780,7 +1798,12 @@ async function requireStoppedOutcome(report, deadline) {
 }
 
 function hasStoppedStatus(events) {
-  return events.some((event) => event.kind === "status" && ["paused", "interrupted", "cancelled"].includes(event.status));
+  return events.some((event) => (event.kind === "status" && ["paused", "interrupted", "cancelled"].includes(event.status))
+    || (event.kind === "agent" && event.type === "ended" && ["interrupted", "cancelled"].includes(event.outcome)));
+}
+
+function isCompletedOutcome(outcome) {
+  return outcome === undefined || outcome === "completed";
 }
 
 function hasSharedStopResult(stopResults, threadId) {
@@ -1939,23 +1962,77 @@ function recordPush(run, push) {
   if (typeof threadId !== "string" || !run.ownedThreadIds.includes(threadId)) return;
   const events = run.eventsByThread.get(threadId);
   if (!events) return;
+  for (const event of liveEventsFromPush(run, push)) {
+    events.push(event);
+    if (!includeInReceipt(run, threadId, event)) continue;
+    run.report.events.push(event);
+    if (run.report.events.length > 400) run.report.events.splice(0, run.report.events.length - 400);
+  }
+}
+
+function liveEventsFromPush(run, push) {
+  if (push.channel === "agent.canonical") {
+    // Saved and recovery frames repeat accepted events, and a restarted runtime
+    // replays them from cursor 0, so one event ID records only once per run.
+    const unseen = canonicalFrameToLiveEvents(push.data).filter((event) => !run.seenCanonicalEventIds.has(event.eventId));
+    for (const event of unseen) run.seenCanonicalEventIds.add(event.eventId);
+    return unseen.map((event) => ({
+      kind: "agent",
+      type: event.type,
+      subtype: event.subtype === OPENCODE_SESSION_INVALIDATED_SUBTYPE ? event.subtype : undefined,
+      outcome: event.outcome,
+      elapsedMs: Date.now(),
+    }));
+  }
   const event = liveEventFromPush(push);
-  if (!event) return;
-  events.push(event);
-  if (!includeInReceipt(run, threadId, event)) return;
-  run.report.events.push(event);
-  if (run.report.events.length > 400) run.report.events.splice(0, run.report.events.length - 400);
+  return event ? [event] : [];
+}
+
+/**
+ * Reads the renderer-facing agent events that one `agent.canonical` frame publishes.
+ * Each record keeps the envelope's event ID so callers can drop the repeats that
+ * saved and recovery frames carry. Frames mirrored to a child subscriber
+ * (`ownerThreadId` set) and publications routed to another thread or execution
+ * are skipped, matching the web client's publication route.
+ */
+export function canonicalFrameToLiveEvents(frame) {
+  if (!frame || typeof frame !== "object" || frame.ownerThreadId !== undefined) return [];
+  return canonicalFrameEnvelopes(frame).flatMap((envelope) => {
+    const event = routedPublication(envelope, frame.threadId);
+    if (!event) return [];
+    return [{
+      eventId: envelope.eventId,
+      threadId: event.threadId,
+      type: event.type,
+      ...optionalString("subtype", event.subtype),
+      ...optionalString("outcome", event.outcome),
+      ...optionalString("turnExecutionId", event.turnExecutionId),
+    }];
+  });
+}
+
+function canonicalFrameEnvelopes(frame) {
+  if (frame.phase !== "recovery") return frame.events ?? [];
+  const durable = frame.durable?.mode === "delta" ? frame.durable.events : [];
+  return [...durable, ...(frame.retained ?? [])];
+}
+
+function routedPublication(envelope, threadId) {
+  const event = envelope?.payload?.type === "publication.recorded" ? envelope.payload.event : null;
+  if (typeof event?.type !== "string" || event.threadId !== threadId) return null;
+  return publicationMatchesRoute(event, envelope.routing, threadId) ? event : null;
+}
+
+function publicationMatchesRoute(event, routing, threadId) {
+  return routing?.threadId === threadId
+    && (event.turnExecutionId === undefined || event.turnExecutionId === routing.executionId);
+}
+
+function optionalString(key, value) {
+  return typeof value === "string" ? { [key]: value } : {};
 }
 
 function liveEventFromPush(push) {
-  if (push.channel === "agent.event" && typeof push.data.type === "string") {
-    return {
-      kind: "agent",
-      type: push.data.type,
-      subtype: push.data.subtype === OPENCODE_SESSION_INVALIDATED_SUBTYPE ? push.data.subtype : undefined,
-      elapsedMs: Date.now(),
-    };
-  }
   if (push.channel === "thread.status" && typeof push.data.status === "string") {
     return { kind: "status", status: push.data.status, elapsedMs: Date.now() };
   }
