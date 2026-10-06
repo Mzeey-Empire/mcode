@@ -12,6 +12,15 @@ import {
   readPortsFile,
   resolveRepoRoot,
 } from "../../../../scripts/agent/runtime-contract.mjs";
+import {
+  fetchOpenCodeHealth,
+  findOpenCodeSession,
+  listOpenCodeSessions,
+  OPENCODE_SDK_LABEL,
+  readOpenCodeBinaryVersion,
+  startOwnedOpenCodeServe,
+  stopOwnedOpenCodeServe,
+} from "./opencode-serve.mjs";
 
 const HEALTH_TIMEOUT_MS = 15_000;
 const LIVE_TIMEOUT_MS = 120_000;
@@ -43,10 +52,16 @@ const RUNTIME_SOURCE_DIRECTORIES = [
   ["packages", "thread-orchestration", "src"],
 ];
 const PROVIDERS = new Set(["codex", "claude", "cursor", "opencode", "devin"]);
-const SCENARIOS = new Set(["completion", "stop", "subagent", "opencode-resume", "devin-permission"]);
+const SCENARIOS = new Set(["completion", "stop", "subagent", "opencode-resume", "opencode-attach", "devin-permission"]);
 const OPENCODE_RESUME_MODEL = "opencode/muse-spark-1.3-contributor-free";
 const OPENCODE_RESUME_WORKSPACE_NAME = "Verify OpenCode resume";
 const OPENCODE_SESSION_INVALIDATED_SUBTYPE = "sdk_session_invalidated";
+const SCENARIO_REQUIREMENTS = {
+  "devin-permission": { provider: "devin" },
+  subagent: { provider: "codex", model: "gpt-5.6-terra" },
+  "opencode-resume": { provider: "opencode", model: OPENCODE_RESUME_MODEL },
+  "opencode-attach": { provider: "opencode" },
+};
 const FOCUSED_TEST_FILES = [
   "src/features/agents/composition/__tests__/agent-service-container.test.ts",
   "src/features/agents/orchestration/__tests__/agent-service-child-stop.test.ts",
@@ -85,6 +100,7 @@ const FIXED_PROMPTS = {
   stop: "Inspect this repository with read-only file-search and file-reading tools. Do not write files, change settings, or run mutating commands. Explain the repository structure in detail.",
   subagent: "Use exactly one subagent through provider-native collaboration. Give it this task: VERIFY_SUBAGENT_PARENT_TASK: wait five seconds without modifying files, then reply exactly VERIFY_SUBAGENT_CHILD_MESSAGE. After it finishes, reply exactly VERIFY_SUBAGENT_PARENT_DONE.",
   "opencode-resume": "Reply with exactly: Agent runtime verification complete. Do not edit files or invoke tools.",
+  "opencode-attach": "Reply with exactly: Agent runtime verification complete. Do not edit files or invoke tools.",
   "devin-permission": "Run this exact shell command once: mkdir verify_devin_permission_tmp. Do not use file tools or edit files. After the command finishes, reply with exactly: VERIFY_DEVIN_PERMISSION_DONE.",
 };
 
@@ -105,7 +121,7 @@ Commands:
       --watch polls while the runtime starts or stops to catch transient flashes.
   inspect
       Read active runtime and workspace summaries through the authenticated WebSocket RPC API.
-  live --provider <codex|claude|cursor|opencode|devin> --model <id> --scenario <completion|stop|subagent|opencode-resume|devin-permission> --confirm-provider-call [--keep-thread] [--allow-enable-devin]
+  live --provider <codex|claude|cursor|opencode|devin> --model <id> --scenario <completion|stop|subagent|opencode-resume|opencode-attach|devin-permission> --confirm-provider-call [--keep-thread] [--allow-enable-devin]
       Make one confirmed provider call in an owned or registered workspace. Does not start a runtime.
       Devin defaults to disabled; --allow-enable-devin enables it for the proof and restores the original setting.
       The devin-permission scenario runs supervised: it answers Devin's real permission prompt
@@ -132,7 +148,16 @@ Stop proof:
   The stop scenario requires agent.activeCount to reach 0 and agent.listRunning to retain the matching cancelled snapshot for reconnect hydration.
 
 OpenCode resume proof:
-  The opencode-resume scenario requires --provider opencode and --model ${OPENCODE_RESUME_MODEL}. It creates and removes an owned temporary workspace, creates two owned direct threads, restarts only this worktree runtime, deletes one owned upstream session, and removes both threads after proof.`;
+  The opencode-resume scenario requires --provider opencode and --model ${OPENCODE_RESUME_MODEL}. It creates and removes an owned temporary workspace, creates two owned direct threads, restarts only this worktree runtime, deletes one owned upstream session, and removes both threads after proof.
+
+OpenCode attach proof:
+  live --provider opencode --scenario opencode-attach --confirm-provider-call [--model <id>]
+  The model defaults to ${OPENCODE_RESUME_MODEL}. The proof spawns an external opencode serve on a free
+  loopback port in an owned temp directory and captures its PID at spawn. It sets provider.opencode.serveUrl
+  to that server, runs one turn on a new direct thread in .dev/fixture-repo, and lists the server's sessions
+  for the fixture directory as a second client. It restarts only this worktree runtime and checks that the
+  same serve PID still answers /global/health. Cleanup restores the prior serveUrl, deletes owned threads,
+  stops only the captured serve process tree, and removes its temp directory.`;
 
 async function main() {
   const parsed = parseArguments(process.argv.slice(2));
@@ -146,7 +171,8 @@ async function main() {
   return result.exitCode;
 }
 
-function parseArguments(argv) {
+/** Parses runtime CLI arguments; exported for contract tests. */
+export function parseArguments(argv) {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) return { help: true };
   const [command, ...rest] = argv;
   validateCommand(command);
@@ -207,8 +233,8 @@ function parseOptionlessCommand(command, rest) {
 function parseLiveArguments(rest) {
   const options = readLiveOptions(rest);
   const provider = options.get("--provider");
-  const model = options.get("--model");
   const scenario = options.get("--scenario");
+  const model = options.get("--model") ?? (scenario === "opencode-attach" ? OPENCODE_RESUME_MODEL : undefined);
   validateLiveOptions(options, provider, model, scenario);
   return { command: "live", provider, model, scenario, keepThread: options.has("--keep-thread"), allowEnableDevin: options.has("--allow-enable-devin") };
 }
@@ -255,16 +281,11 @@ function validateLiveOptions(options, provider, model, scenario) {
 }
 
 function validateLiveScenario(provider, model, scenario) {
-  if (!SCENARIOS.has(scenario)) throw cliError("--scenario must be completion, stop, subagent, opencode-resume, or devin-permission");
-  if (scenario === "devin-permission" && provider !== "devin") {
-    throw cliError("the devin-permission scenario requires --provider devin");
-  }
-  if (scenario === "subagent" && (provider !== "codex" || model !== "gpt-5.6-terra")) {
-    throw cliError("the subagent scenario requires --provider codex --model gpt-5.6-terra");
-  }
-  if (scenario === "opencode-resume" && (provider !== "opencode" || model !== OPENCODE_RESUME_MODEL)) {
-    throw cliError(`the opencode-resume scenario requires --provider opencode --model ${OPENCODE_RESUME_MODEL}`);
-  }
+  if (!SCENARIOS.has(scenario)) throw cliError("--scenario must be completion, stop, subagent, opencode-resume, opencode-attach, or devin-permission");
+  const required = SCENARIO_REQUIREMENTS[scenario];
+  if (!required || (required.provider === provider && (required.model === undefined || required.model === model))) return;
+  const flags = required.model ? `--provider ${required.provider} --model ${required.model}` : `--provider ${required.provider}`;
+  throw cliError(`the ${scenario} scenario requires ${flags}`);
 }
 
 async function execute(parsed, repoRoot) {
@@ -527,6 +548,8 @@ async function live(repoRoot, options) {
     ownedThreadIds: [],
     eventsByThread: new Map(),
     seenCanonicalEventIds: new Set(),
+    opencodeServe: null,
+    opencodePriorServeUrl: null,
   };
   try {
     await prepareLiveRun(repoRoot, options, run);
@@ -1322,6 +1345,7 @@ function createLiveReport(options) {
     subagentParentMessagePromptAbsent: false,
     subagentMessageRetained: false,
     opencodeResume: null,
+    opencodeAttach: null,
     stopResults: [],
     sharedStopResult: null,
     activeCountCleared: false,
@@ -1340,6 +1364,7 @@ async function prepareLiveRun(repoRoot, options, run) {
   await health(repoRoot);
   run.socket = await openSocket(repoRoot, readRuntime(repoRoot), (push) => recordPush(run, push));
   await prepareDevinForLive(run.socket, options, run);
+  await prepareOpenCodeAttach(run.socket, options, run);
   run.proofDeadline = Date.now() + LIVE_TIMEOUT_MS;
   const workspace = await findLiveWorkspace(run.socket, repoRoot, options.scenario, run);
   run.workspace = workspace;
@@ -1400,12 +1425,13 @@ async function proveLiveScenario(repoRoot, scenario, run) {
   if (scenario === "completion") return proveCompletion(run);
   if (scenario === "subagent") return proveSubagent(run);
   if (scenario === "opencode-resume") return proveOpenCodeResume(repoRoot, run);
+  if (scenario === "opencode-attach") return proveOpenCodeAttach(repoRoot, run);
   return proveStop(run);
 }
 
 async function findLiveWorkspace(socket, repoRoot, scenario, run) {
   if (scenario === "opencode-resume") return createOpenCodeResumeWorkspace(socket, repoRoot, run);
-  if (scenario !== "subagent") return findCurrentWorkspace(socket, repoRoot);
+  if (scenario !== "subagent" && scenario !== "opencode-attach") return findCurrentWorkspace(socket, repoRoot);
   const fixtureRepo = getRuntimePaths(repoRoot).fixtureRepoDir;
   const workspaces = await socket.rpc("workspace.list", {});
   const workspace = Array.isArray(workspaces)
@@ -1586,7 +1612,7 @@ async function proveOpenCodeResume(repoRoot, run) {
   };
   run.report.opencodeResume = resume;
 
-  await restartOpenCodeResumeRuntime(repoRoot, run);
+  await restartLiveRuntime(repoRoot, run);
   resume.runtimeRestarted = true;
   const primaryResumeStart = liveEventCount(run, primaryThreadId);
   await sendLiveMessage(run.socket, primaryThreadId, run.proofDeadline, run.report);
@@ -1614,6 +1640,93 @@ async function proveOpenCodeResume(repoRoot, run) {
     "The OpenCode restart, recreated-session, or thread-isolation proof did not complete",
     "Inspect the redacted receipt, then retry with an authenticated OpenCode account.",
   );
+}
+
+/** Creates the redacted attach receipt block; every assertion starts unproven. */
+export function createOpenCodeAttachReport(upstream) {
+  return {
+    upstream,
+    assertions: {
+      turnCompletedWithDurableAssistant: false,
+      sessionVisibleToSecondClient: false,
+      sessionDirectoryMatchesThreadCwd: false,
+      serveSurvivedRuntimeRestart: false,
+    },
+    cleanup: { serveUrlRestored: null, externalServeStopped: null, tempDirectoryRemoved: null },
+  };
+}
+
+/** True only when every attach assertion passed. */
+export function openCodeAttachPassed(report) {
+  return Boolean(report) && Object.values(report.assertions).every((value) => value === true);
+}
+
+function openCodeServeUrlFromSettings(settings, method) {
+  const serveUrl = settings?.provider?.opencode?.serveUrl;
+  if (typeof serveUrl === "string") return serveUrl;
+  throw actionable(`${method} returned no provider.opencode.serveUrl`, "Rebuild and restart this worktree runtime with bun run agent:setup and bun run --shell system agent:up, then retry the attach proof.");
+}
+
+/** Spawns the owned external serve and points provider.opencode.serveUrl at it before the thread exists. */
+async function prepareOpenCodeAttach(socket, options, run) {
+  if (options.scenario !== "opencode-attach") return;
+  const priorServeUrl = openCodeServeUrlFromSettings(await socket.rpc("settings.get", {}), "settings.get");
+  const binaryVersion = readOpenCodeBinaryVersion();
+  run.opencodeServe = await startOwnedOpenCodeServe({ env: childCommandEnvironment() });
+  run.report.opencodeAttach = createOpenCodeAttachReport({ binaryVersion, serverVersion: run.opencodeServe.version, sdk: OPENCODE_SDK_LABEL });
+  run.opencodePriorServeUrl = priorServeUrl;
+  const updated = await socket.rpc("settings.update", { provider: { opencode: { serveUrl: run.opencodeServe.url } } });
+  if (openCodeServeUrlFromSettings(updated, "settings.update") === run.opencodeServe.url) return;
+  throw actionable("settings.update did not store the external OpenCode serve URL", "Inspect the OpenCode serveUrl setting contract, then retry the attach proof.");
+}
+
+async function proveOpenCodeAttach(repoRoot, run) {
+  const attach = run.report.opencodeAttach;
+  const serve = run.opencodeServe;
+  await proveCompletion(run);
+  attach.assertions.turnCompletedWithDurableAssistant = true;
+  const sessionId = await requireOpenCodeSessionId(run.socket, run.workspace.id, run.threadId, run.proofDeadline);
+  const threadCwd = run.workspace.path;
+  const session = findOpenCodeSession(await listOpenCodeSessions(serve.url, threadCwd), sessionId, threadCwd, pathsMatch);
+  attach.assertions.sessionVisibleToSecondClient = session.visible;
+  attach.assertions.sessionDirectoryMatchesThreadCwd = session.directoryMatches;
+  await restartLiveRuntime(repoRoot, run);
+  const serverVersionAfterRestart = await fetchOpenCodeHealth(serve.url).catch(() => null);
+  attach.assertions.serveSurvivedRuntimeRestart = isProcessAlive(serve.pid) && serverVersionAfterRestart === attach.upstream.serverVersion;
+  if (openCodeAttachPassed(attach)) return;
+  throw actionable(
+    "The OpenCode attach turn, second-client session listing, directory routing, or restart survival proof did not pass",
+    "Inspect opencodeAttach.assertions in the redacted receipt, then retry with an authenticated OpenCode account.",
+  );
+}
+
+/** Restores the serveUrl captured before the proof whenever this proof may have changed it. */
+async function restoreOpenCodeServeUrl(run) {
+  if (run.opencodePriorServeUrl === null || !run.report.opencodeAttach) return;
+  const cleanup = run.report.opencodeAttach.cleanup;
+  try {
+    if (!run.socket) throw actionable("No runtime socket was available to restore provider.opencode.serveUrl", "Set the OpenCode serve URL back in Mcode Settings.");
+    const updated = await run.socket.rpc("settings.update", { provider: { opencode: { serveUrl: run.opencodePriorServeUrl } } });
+    cleanup.serveUrlRestored = openCodeServeUrlFromSettings(updated, "settings.update") === run.opencodePriorServeUrl;
+    if (!cleanup.serveUrlRestored) run.report.cleanup.failure ??= safeError(actionable("settings.update did not restore the prior OpenCode serve URL", "Set the OpenCode serve URL back in Mcode Settings."));
+  } catch (error) {
+    cleanup.serveUrlRestored = false;
+    run.report.cleanup.failure ??= safeError(error);
+  }
+}
+
+/** Stops only the serve process tree this proof spawned and removes its temp directory. */
+async function stopOpenCodeAttachServe(run) {
+  if (!run.opencodeServe) return;
+  const stopped = await stopOwnedOpenCodeServe(run.opencodeServe);
+  run.opencodeServe = null;
+  if (run.report.opencodeAttach) {
+    run.report.opencodeAttach.cleanup.externalServeStopped = stopped.stopped;
+    run.report.opencodeAttach.cleanup.tempDirectoryRemoved = stopped.tempDirectoryRemoved;
+  }
+  if (!stopped.stopped || !stopped.tempDirectoryRemoved) {
+    run.report.cleanup.failure ??= safeError(actionable("The verifier-owned opencode serve did not stop or its temp directory remains", "Stop only the PID this proof spawned, then remove its mcode-verify-opencode-serve temp directory."));
+  }
 }
 
 async function createOpenCodeResumeWorkspace(socket, repoRoot, run) {
@@ -1668,7 +1781,7 @@ async function requireOpenCodeSessionId(socket, workspaceId, threadId, deadline)
   throw actionable("The OpenCode thread did not persist its upstream session ID", "Inspect the redacted receipt, then retry with an authenticated OpenCode account.");
 }
 
-async function restartOpenCodeResumeRuntime(repoRoot, run) {
+async function restartLiveRuntime(repoRoot, run) {
   await run.socket?.close();
   run.socket = null;
   await runWorktreeRuntimeCommand(repoRoot, "agent:down");
@@ -1687,7 +1800,7 @@ async function restartOpenCodeResumeRuntime(repoRoot, run) {
   const hydrationRequired = Array.isArray(subscription?.hydrationRequiredThreadIds)
     && subscription.hydrationRequiredThreadIds.some((threadId) => run.ownedThreadIds.includes(threadId));
   if (!hydrationRequired) return;
-  throw actionable("The restarted runtime requires hydration for an OpenCode proof thread", "Run runtime inspect, then retry the OpenCode resume proof.");
+  throw actionable("The restarted runtime requires hydration for an OpenCode proof thread", "Run runtime inspect, then retry the OpenCode proof.");
 }
 
 async function runWorktreeRuntimeCommand(repoRoot, script) {
@@ -1699,7 +1812,7 @@ async function runWorktreeRuntimeCommand(repoRoot, script) {
     stderr: "ignore",
   });
   if (await child.exited === 0) return;
-  throw actionable(`${script} failed for this worktree runtime`, "Run runtime health, then retry the OpenCode resume proof.");
+  throw actionable(`${script} failed for this worktree runtime`, "Run runtime health, then retry the OpenCode proof.");
 }
 
 async function deleteOwnedOpenCodeSession(repoRoot, sessionId) {
@@ -1862,8 +1975,10 @@ async function disposeLiveRun(run, keepThread) {
     await deleteLiveThread(run, keepThread);
     await deleteLiveWorkspace(run, keepThread);
     await restoreDevinAfterLive(run);
+    await restoreOpenCodeServeUrl(run);
   } finally {
     if (run.socket) await run.socket.close();
+    await stopOpenCodeAttachServe(run);
   }
 }
 
@@ -2152,6 +2267,7 @@ function redactReceipt(report) {
     subagentParentMessagePromptAbsent: report.subagentParentMessagePromptAbsent,
     subagentMessageRetained: report.subagentMessageRetained,
     opencodeResume: report.opencodeResume,
+    opencodeAttach: report.opencodeAttach,
     stopResults: report.stopResults.map((result) => ({ status: result?.status ?? null, phase: result?.snapshot?.phase ?? null, dispatchState: result?.dispatchState ?? null })),
     sharedStopResult: report.sharedStopResult,
     activeCountCleared: report.activeCountCleared,
@@ -2284,7 +2400,7 @@ function cleanup(repoRoot) {
 export function isRuntimeHarnessEvidenceFile(name) {
   const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-/;
   if (!timestamp.test(name)) return false;
-  return /^(?:\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(?:completion|stop|opencode-resume)-(?:receipt\.json|timeline\.html)|\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-worktree-setup-receipt\.json|\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(?:focused-agent-runtime|lint)\.log)$/.test(name);
+  return /^(?:\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(?:completion|stop|opencode-resume|opencode-attach)-(?:receipt\.json|timeline\.html)|\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-worktree-setup-receipt\.json|\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-(?:focused-agent-runtime|lint)\.log)$/.test(name);
 }
 
 function ensureEvidenceDirectory(repoRoot) {

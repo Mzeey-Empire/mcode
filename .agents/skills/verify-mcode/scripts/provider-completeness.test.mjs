@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureReview, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, installWebSocketDisconnect, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordElectronRightPanelEvidence, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runProviderJourneys, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureReview, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, installWebSocketDisconnect, resolveProofUpstreamOpenCode, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordElectronRightPanelEvidence, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runProviderJourneys, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 const asRequiredEvidence = (entry) => ({ ...entry, requirement: "required" });
 
@@ -335,7 +335,7 @@ NodeTest.test("records focused gates once under their true owner and preserves t
     return { exitCode: 0, output: "all passed" };
   });
   NodeAssertStrict.deepEqual(failures, []);
-  NodeAssertStrict.equal(calls.length, 10);
+  NodeAssertStrict.equal(calls.length, 11);
   NodeAssertStrict.deepEqual(calls.slice(0, 4).map((call) => call.args.at(-1)), [
     "src/features/agents/turns/__tests__/turn-diff-service.test.ts",
     "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts",
@@ -349,6 +349,10 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   NodeAssertStrict.ok(calls[6].args.includes("src/__tests__/codex/codex-provider-first-turn.test.ts"));
   NodeAssertStrict.ok(calls[8].args.includes("src/transport/ws-events.test.ts"));
   NodeAssertStrict.ok(calls[9].args.includes("src/__tests__/codex/codex-provider-permission.test.ts"));
+  NodeAssertStrict.deepEqual(calls[10].args.slice(-2), [
+    "src/features/providers/adapters/opencode/__tests__/opencode-provider-turn-diff.test.ts",
+    "src/features/providers/adapters/opencode/__tests__/opencode-provider-approval-review.test.ts",
+  ]);
   NodeAssertStrict.deepEqual(receipt.focusedGates.map(({ control, rows, limitation }) => ({ control, rows, limitation })), [
     { control: "apps/server focused integration tests", rows: ["empty", "interruption"], limitation: undefined },
     { control: "apps/server focused integration tests", rows: ["strictManual", "managedRequired", "fullAccessDispatch"], limitation: undefined },
@@ -360,8 +364,9 @@ NodeTest.test("records focused gates once under their true owner and preserves t
     { control: "apps/web focused component tests", rows: ["fullAccessControl", "fileSurfaces"], limitation: undefined },
     { control: "apps/web focused permission handoff tests", rows: ["strictReviewNoticeOnly", "realProviderRequestCard"], limitation: undefined },
     { control: "packages/providers focused permission handoff tests", rows: ["providerResponseSettlementRemoval"], limitation: undefined },
+    { control: "apps/server focused OpenCode adapter tests", rows: ["opencodeNativeDiff", "opencodeReviewUnavailable"], limitation: "OpenCode reports approval review unavailable for every input, so Automatic resolves to manual; it never reports required, so the managed block is proven only by the provider-neutral server-approval-review-policy gate." },
   ]);
-  for (const row of ["empty", "invalidationDelta", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "nonGitScope", "noDeltaSilent", "frozenRetryDecision", "staleRetryReview", "staleRetryDiff", "strictReviewNoticeOnly", "realProviderRequestCard", "providerResponseSettlementRemoval"]) {
+  for (const row of ["empty", "invalidationDelta", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "nonGitScope", "noDeltaSilent", "frozenRetryDecision", "staleRetryReview", "staleRetryDiff", "strictReviewNoticeOnly", "realProviderRequestCard", "providerResponseSettlementRemoval", "opencodeNativeDiff", "opencodeReviewUnavailable"]) {
     NodeAssertStrict.equal(receipt.matrix[row], undefined, `${row} only belongs to its focused-test owner`);
     NodeAssertStrict.equal(receipt.electron.matrix[row], undefined, `${row} is not copied to Electron`);
   }
@@ -372,8 +377,8 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   };
   applyProviderPrerequisites(receipt.matrix, prerequisites);
   applyProviderPrerequisites(receipt.electron.matrix, prerequisites);
-  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.kind), ["focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof"]);
-  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.exitCode), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.kind), ["focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof"]);
+  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.exitCode), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   NodeAssertStrict.equal(receipt.matrix.reviewApproved.kind, "coverage-gap");
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.kind, "blocked");
   NodeAssertStrict.equal(receipt.matrix.codexNative.provider, "codex");
@@ -500,7 +505,7 @@ NodeTest.test("retains all focused gate evidence before reporting nonzero gates"
   let calls = 0;
   const failures = await runFocusedEvidenceGates("root", receipt, async () => ({ exitCode: calls++ === 5 ? 1 : 0, output: "failed C:\\secret\\token" }));
   NodeAssertStrict.deepEqual(failures, ["codex-protocol exited 1"]);
-  NodeAssertStrict.equal(receipt.focusedGates.length, 10);
+  NodeAssertStrict.equal(receipt.focusedGates.length, 11);
   NodeAssertStrict.equal(receipt.focusedGates[5].control, "packages/providers focused protocol tests");
   NodeAssertStrict.equal(receipt.focusedGates[5].kind, "focused-proof-failed");
   NodeAssertStrict.equal(receipt.focusedGates[5].exitCode, 1);
@@ -1086,8 +1091,51 @@ NodeTest.test("records public provider prerequisites without hardcoded provider 
   NodeAssertStrict.equal(matrix.cursorNative.observedPrerequisites.availability.enabled, true);
   NodeAssertStrict.equal(matrix.claudeFallback.observedPrerequisites.availability.enabled, false);
   NodeAssertStrict.equal(matrix.claudeFallback.observedPrerequisites.account, null);
-  NodeAssertStrict.equal(calls.filter(({ method }) => method === "provider.catalog").length, 3);
-  NodeAssertStrict.equal(calls.filter(({ method }) => method === "provider.listModels").length, 3);
+  NodeAssertStrict.equal(matrix.opencodeNative.kind, "coverage-gap");
+  NodeAssertStrict.equal(matrix.opencodeNative.provider, "opencode");
+  NodeAssertStrict.equal(calls.filter(({ method }) => method === "provider.catalog").length, 4);
+  NodeAssertStrict.equal(calls.filter(({ method }) => method === "provider.listModels").length, 4);
+});
+
+NodeTest.test("proves an available OpenCode provider with its free model and records missing access as a coverage gap", async () => {
+  const availability = (opencode) => ({ rpc: async (method, params) => {
+    if (method === "providers.listAvailability") return [{ id: "opencode", hasAdapter: true, ...opencode }];
+    if (method === "provider.listModels") return params.providerId === "opencode" ? [{ id: "opencode/paid-model", name: "Paid" }, { id: "opencode/muse-spark-1.3-contributor-free", name: "Muse Spark 1.3 Free" }] : [];
+    if (method === "provider.catalog") return { freshness: "fresh", selectableAgents: [] };
+    throw new Error(`unexpected ${method}`);
+  } });
+  const available = await inspectProviderPrerequisites(availability({ enabled: true, comingSoon: false, cli: { status: "found" } }), { id: "workspace" }, () => "");
+  NodeAssertStrict.equal(available.opencodeNative.kind, "required-live-proof");
+  NodeAssertStrict.equal(available.opencodeNative.model, "opencode/muse-spark-1.3-contributor-free");
+  NodeAssertStrict.equal(available.opencodeNative.modelName, "Muse Spark 1.3 Free");
+  NodeAssertStrict.equal(available.opencodeNative.observedPrerequisites.account, null);
+
+  const missingCli = await inspectProviderPrerequisites(availability({ enabled: true, comingSoon: false, cli: { status: "not_found" } }), { id: "workspace" }, () => "");
+  NodeAssertStrict.equal(missingCli.opencodeNative.kind, "coverage-gap");
+  NodeAssertStrict.match(missingCli.opencodeNative.coverageGap, /missing provider, account, model, or catalog prerequisite/);
+  NodeAssertStrict.deepEqual(aggregateEvidenceFailures([], { web: { opencodeNative: missingCli.opencodeNative } }), ["web/opencode"]);
+});
+
+NodeTest.test("starts the OpenCode row and review route unproven and records its upstream versions", async () => {
+  const receipt = createReceipt(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-opencode-")));
+  NodeAssertStrict.equal(receipt.upstreamOpenCode, "not reached");
+  for (const matrix of [receipt.matrix, receipt.electron.matrix]) {
+    NodeAssertStrict.equal(matrix.opencodeNative.kind, "pending-observation");
+    NodeAssertStrict.equal(matrix.opencodeNative.requirement, "required");
+  }
+  NodeAssertStrict.equal(receipt.matrix.opencodeReviewRoute.kind, "coverage-gap");
+  NodeAssertStrict.equal(receipt.matrix.opencodeReviewRoute.requirement, "informational");
+  NodeAssertStrict.match(receipt.matrix.opencodeReviewRoute.reason, /manual-required fallback, never Approved or Denied/);
+  NodeAssertStrict.deepEqual(receipt.matrix.opencodeReviewRoute.focusedEvidence, { opencodeReviewUnavailable: "opencode-provider-routes", managedRequired: "server-approval-review-policy" });
+  NodeAssertStrict.equal(receipt.electron.matrix.opencodeReviewRoute, undefined);
+
+  const requests = [];
+  const resolve = async (request) => { requests.push(request); return { binaryVersion: "1.18.28", serverVersion: "1.18.28", sdk: "none (hand-written HTTP client)" }; };
+  const attached = { rpc: async (method) => method === "settings.get" ? { provider: { opencode: { serveUrl: "http://127.0.0.1:4096" } } } : null };
+  const settingsFailed = { rpc: async () => { throw new Error("settings unavailable"); } };
+  NodeAssertStrict.deepEqual(await resolveProofUpstreamOpenCode(attached, resolve), { binaryVersion: "1.18.28", serverVersion: "1.18.28", sdk: "none (hand-written HTTP client)" });
+  await resolveProofUpstreamOpenCode(settingsFailed, resolve);
+  NodeAssertStrict.deepEqual(requests, [{ attachedUrl: "http://127.0.0.1:4096" }, { attachedUrl: "" }]);
 });
 
 NodeTest.test("marks an available Claude provider as a coverage gap only when its CLI reports no account", async () => {

@@ -6,7 +6,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
-import { assertRuntimeFreshness, canonicalFrameToLiveEvents, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openVerificationSocketUrl, runBun } from "./runtime.mjs";
+import { findOpenCodeSession, parseOpenCodeHealth, resolveUpstreamOpenCode } from "./opencode-serve.mjs";
+import { assertRuntimeFreshness, canonicalFrameToLiveEvents, createOpenCodeAttachReport, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openCodeAttachPassed, openVerificationSocketUrl, parseArguments, runBun } from "./runtime.mjs";
 
 const CLI = NodePath.join(import.meta.dirname, "verify-mcode.mjs");
 const BROWSER_PROOF = NodePath.join(import.meta.dirname, "browser-opencode-proof.mjs");
@@ -138,6 +139,69 @@ NodeTest.test("cleans only OpenCode resume artifacts created by the runtime veri
   NodeAssertStrict.equal(isRuntimeHarnessEvidenceFile("2026-09-04T12-34-56-789Z-opencode-resume-receipt.json"), true);
   NodeAssertStrict.equal(isRuntimeHarnessEvidenceFile("2026-09-04T12-34-56-789Z-opencode-resume-timeline.html"), true);
   NodeAssertStrict.equal(isRuntimeHarnessEvidenceFile("2026-09-04T12-34-56-789Z-opencode-resume-notes.txt"), false);
+});
+
+NodeTest.test("parses the OpenCode attach scenario with its default model and rejects other providers", () => {
+  NodeAssertStrict.deepEqual(parseArguments(["live", "--provider", "opencode", "--scenario", "opencode-attach", "--confirm-provider-call"]), {
+    command: "live",
+    provider: "opencode",
+    model: "opencode/muse-spark-1.3-contributor-free",
+    scenario: "opencode-attach",
+    keepThread: false,
+    allowEnableDevin: false,
+  });
+  NodeAssertStrict.equal(parseArguments(["live", "--provider", "opencode", "--model", "opencode/other", "--scenario", "opencode-attach", "--confirm-provider-call"]).model, "opencode/other");
+  NodeAssertStrict.throws(() => parseArguments(["live", "--provider", "codex", "--scenario", "opencode-attach", "--confirm-provider-call"]), /opencode-attach scenario requires --provider opencode/);
+  NodeAssertStrict.throws(() => parseArguments(["live", "--provider", "opencode", "--scenario", "opencode-attach"]), /Provider confirmation is missing/);
+  NodeAssertStrict.throws(() => parseArguments(["live", "--provider", "opencode", "--scenario", "completion", "--confirm-provider-call"]), /--model must be a non-empty ID/);
+});
+
+NodeTest.test("cleans only OpenCode attach artifacts created by the runtime verifier", () => {
+  NodeAssertStrict.equal(isRuntimeHarnessEvidenceFile("2026-10-06T12-34-56-789Z-opencode-attach-receipt.json"), true);
+  NodeAssertStrict.equal(isRuntimeHarnessEvidenceFile("2026-10-06T12-34-56-789Z-opencode-attach-timeline.html"), true);
+  NodeAssertStrict.equal(isRuntimeHarnessEvidenceFile("2026-10-06T12-34-56-789Z-opencode-attach-serve.log"), false);
+});
+
+NodeTest.test("passes the attach receipt only when every assertion is proven", () => {
+  const report = createOpenCodeAttachReport({ binaryVersion: "1.18.28", serverVersion: "1.18.28", sdk: "none (hand-written HTTP client)" });
+  NodeAssertStrict.equal(openCodeAttachPassed(report), false);
+  report.assertions.turnCompletedWithDurableAssistant = true;
+  report.assertions.sessionVisibleToSecondClient = true;
+  report.assertions.sessionDirectoryMatchesThreadCwd = true;
+  NodeAssertStrict.equal(openCodeAttachPassed(report), false);
+  report.assertions.serveSurvivedRuntimeRestart = true;
+  NodeAssertStrict.equal(openCodeAttachPassed(report), true);
+  NodeAssertStrict.deepEqual(report.upstream, { binaryVersion: "1.18.28", serverVersion: "1.18.28", sdk: "none (hand-written HTTP client)" });
+  NodeAssertStrict.deepEqual(report.cleanup, { serveUrlRestored: null, externalServeStopped: null, tempDirectoryRemoved: null });
+});
+
+NodeTest.test("reads the OpenCode server version only from a healthy /global/health payload", () => {
+  NodeAssertStrict.equal(parseOpenCodeHealth({ healthy: true, version: "1.18.28" }), "1.18.28");
+  NodeAssertStrict.throws(() => parseOpenCodeHealth({ healthy: false, version: "1.18.28" }), /did not report healthy/);
+  NodeAssertStrict.throws(() => parseOpenCodeHealth({ healthy: true }), /did not report healthy/);
+});
+
+NodeTest.test("finds the thread session in a second client's listing and checks its directory", () => {
+  const sameDirectory = (left, right) => left.toLowerCase() === right.toLowerCase();
+  const sessions = [{ id: "ses_other", directory: "C:/elsewhere" }, { id: "ses_thread", directory: "C:/Fixture-Repo" }];
+  NodeAssertStrict.deepEqual(findOpenCodeSession(sessions, "ses_thread", "c:/fixture-repo", sameDirectory), { visible: true, directoryMatches: true });
+  NodeAssertStrict.deepEqual(findOpenCodeSession(sessions, "ses_other", "c:/fixture-repo", sameDirectory), { visible: true, directoryMatches: false });
+  NodeAssertStrict.deepEqual(findOpenCodeSession(sessions, "ses_missing", "c:/fixture-repo", sameDirectory), { visible: false, directoryMatches: false });
+});
+
+NodeTest.test("records upstream OpenCode versions from an attached URL, a probe serve, or a blocker", async () => {
+  const attached = await resolveUpstreamOpenCode({ attachedUrl: "http://127.0.0.1:4096", readBinaryVersion: () => "1.18.28", readServerVersion: async (url) => url === "http://127.0.0.1:4096" ? "1.18.27" : "wrong" });
+  NodeAssertStrict.deepEqual(attached, { binaryVersion: "1.18.28", serverVersion: "1.18.27", sdk: "none (hand-written HTTP client)", serverSource: "attached serve" });
+
+  const stopped = [];
+  const probed = await resolveUpstreamOpenCode({ readBinaryVersion: () => "1.18.28", startServe: async () => ({ pid: 7, version: "1.18.28" }), stopServe: async (serve) => { stopped.push(serve.pid); } });
+  NodeAssertStrict.deepEqual(probed, { binaryVersion: "1.18.28", serverVersion: "1.18.28", sdk: "none (hand-written HTTP client)", serverSource: "verifier-owned probe serve" });
+  NodeAssertStrict.deepEqual(stopped, [7]);
+
+  const missing = await resolveUpstreamOpenCode({ readBinaryVersion: () => { throw new Error("spawn opencode ENOENT"); } });
+  NodeAssertStrict.equal(missing.binaryVersion, null);
+  NodeAssertStrict.equal(missing.serverVersion, null);
+  NodeAssertStrict.match(missing.auditBlocker, /opencode --version failed: spawn opencode ENOENT/);
 });
 
 NodeTest.test("recognizes the provider-neutral OpenCode session invalidation subtype", () => {

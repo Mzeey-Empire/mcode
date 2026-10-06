@@ -8,8 +8,12 @@ import * as NodeURL from "node:url";
 import * as NodeChildProcess from "node:child_process";
 import { getRuntimePaths, readPortsFile, resolveRepoRoot } from "../../../../scripts/agent/runtime-contract.mjs";
 import { assertRuntimeFreshness, deleteLiveWorkspace, openRuntimeVerificationSocket, openVerificationSocketUrl } from "./runtime.mjs";
+import { resolveUpstreamOpenCode } from "./opencode-serve.mjs";
 
 const MODEL = "gpt-5.6-terra";
+// Codex must use the Terra model the Codex journeys were tuned for; OpenCode prefers its free model so an account without paid access still runs.
+const PREFERRED_PROVIDER_MODELS = { codex: { id: MODEL, required: true }, opencode: { id: "opencode/muse-spark-1.3-contributor-free", required: false } };
+const PREREQUISITE_PROVIDERS = ["codex", "cursor", "claude", "opencode"];
 const EVIDENCE_DIRECTORY = ".dev/verification/provider-completeness";
 const HEALTH_TIMEOUT_MS = 10_000;
 const TIMEOUT_MS = 120_000;
@@ -31,6 +35,7 @@ const FOCUSED_GATES = [
   { name: "web-composer-and-files", control: "apps/web focused component tests", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileRefresh.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccessControl", "fileSurfaces"] },
   { name: "web-permission-handoff", control: "apps/web focused permission handoff tests", workspace: "apps/web", files: ["src/transport/ws-events.test.ts"], rows: ["strictReviewNoticeOnly", "realProviderRequestCard"] },
   { name: "codex-permission-handoff", control: "packages/providers focused permission handoff tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-provider-permission.test.ts"], rows: ["providerResponseSettlementRemoval"] },
+  { name: "opencode-provider-routes", control: "apps/server focused OpenCode adapter tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/providers/adapters/opencode/__tests__/opencode-provider-turn-diff.test.ts", "src/features/providers/adapters/opencode/__tests__/opencode-provider-approval-review.test.ts"], rows: ["opencodeNativeDiff", "opencodeReviewUnavailable"], limitation: "OpenCode reports approval review unavailable for every input, so Automatic resolves to manual; it never reports required, so the managed block is proven only by the provider-neutral server-approval-review-policy gate." },
 ];
 const HELP = `Verify provider completeness
 
@@ -42,6 +47,10 @@ Commands:
       Check the matching runtime, idle-agent gate, and separate Chromium setup.
   proof --confirm-provider-call --confirm-cleanup
       Drive the normal Codex Composer journey in separate web Chromium and Electron clients.
+      Each available Cursor, Claude, or OpenCode provider also runs one Composer and Review journey;
+      an unavailable provider is recorded as a coverage gap. The receipt records upstreamOpenCode
+      versions from the attached provider.opencode.serveUrl, or from one owned probe opencode serve
+      that the proof starts and stops by its captured PID.
   cleanup --confirm-cleanup
       Delete only exact resources named in incomplete provider-completeness receipts.`;
 
@@ -172,6 +181,7 @@ async function openProofClients(repoRoot, receipt, dependencies, state) {
   const workspace = await createOwnedFixtureWorkspace(state.socket, repoRoot, receipt);
   receipt.workspace = workspaceIdentity(workspace);
   applyProviderPrerequisites(receipt.matrix, await inspectProviderPrerequisites(state.socket, workspace));
+  receipt.upstreamOpenCode = await (dependencies.resolveUpstreamOpenCode ?? resolveProofUpstreamOpenCode)(state.socket);
   const ports = readPortsFile(repoRoot);
   const playwright = dependencies.playwright ?? requirePlaywright(repoRoot);
   state.web = dependencies.web ?? await openWeb(playwright, ports, findChromiumPath());
@@ -301,7 +311,7 @@ export function createReceipt(repoRoot) {
   const directory = NodePath.join(repoRoot, EVIDENCE_DIRECTORY, runId);
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${runId}`);
   NodeFS.mkdirSync(directory, { recursive: true });
-  return { runId, phase: "initializing", path: NodePath.join(directory, "receipt.json"), directory, fixtureDirectory, fixtureFile: NodePath.join(fixtureDirectory, "target.txt"), applicationCommit: "not reached", upstreamCodex: "not reached", provider: "codex", model: MODEL, baseline: "not reached", publicComparison: "not reached", fetchedPatch: "not reached", disk: "not reached", renderedEvidence: [], run: { ownedWorkspaceId: null, ownedFixtureDirectory: null, ownedFile: null, threadId: null, ownedThreadIds: [] }, electron: { matrix: providerMatrix("electron") }, journeys: {}, screenshots: [], observations: {}, comparison: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, focusedGates: focusedGateMatrix(), matrix: providerMatrix("web"), watcherOwnership: { kind: "live-rpc-required", control: "public file.refresh RPC and files.changed push", status: "not-run" }, cleanup: { complete: false, failures: [] }, failure: null };
+  return { runId, phase: "initializing", path: NodePath.join(directory, "receipt.json"), directory, fixtureDirectory, fixtureFile: NodePath.join(fixtureDirectory, "target.txt"), applicationCommit: "not reached", upstreamCodex: "not reached", upstreamOpenCode: "not reached", provider: "codex", model: MODEL, baseline: "not reached", publicComparison: "not reached", fetchedPatch: "not reached", disk: "not reached", renderedEvidence: [], run: { ownedWorkspaceId: null, ownedFixtureDirectory: null, ownedFile: null, threadId: null, ownedThreadIds: [] }, electron: { matrix: providerMatrix("electron") }, journeys: {}, screenshots: [], observations: {}, comparison: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, focusedGates: focusedGateMatrix(), matrix: providerMatrix("web"), watcherOwnership: { kind: "live-rpc-required", control: "public file.refresh RPC and files.changed push", status: "not-run" }, cleanup: { complete: false, failures: [] }, failure: null };
 }
 
 function createSurfaceRun(repoRoot, receipt, surface) {
@@ -476,7 +486,7 @@ function recordWorkspaceCleanupGap(receipt, gap) {
 export async function inspectProviderPrerequisites(socket, workspace, execute = NodeChildProcess.execFileSync) {
   const availability = await fetchProviderAvailability(socket);
   const matrix = {};
-  for (const provider of ["codex", "cursor", "claude"]) {
+  for (const provider of PREREQUISITE_PROVIDERS) {
     matrix[providerMatrixKey(provider)] = await inspectProviderPrerequisite(socket, workspace, provider, availability, execute);
   }
   return matrix;
@@ -575,7 +585,16 @@ function providerEvidence(provider, observed, models, catalog, modelList, accoun
 }
 
 function selectableProviderModel(provider, modelList) {
-  return provider === "codex" ? modelList.find((model) => model?.id === MODEL) : modelList[0];
+  const preferred = PREFERRED_PROVIDER_MODELS[provider];
+  const match = preferred ? modelList.find((model) => model?.id === preferred.id) : undefined;
+  return match ?? (preferred?.required ? undefined : modelList[0]);
+}
+
+/** Records the OpenCode binary and the serve this runtime would use: the attached URL, or an owned probe serve. */
+export async function resolveProofUpstreamOpenCode(socket, resolve = resolveUpstreamOpenCode) {
+  const settings = await socket.rpc("settings.get", {}).catch(() => null);
+  const attachedUrl = settings?.provider?.opencode?.serveUrl;
+  return resolve({ attachedUrl: typeof attachedUrl === "string" ? attachedUrl : "" });
 }
 
 function providerReady(observed, models, catalog, model, unavailableClaudeAccount) {
@@ -2569,7 +2588,7 @@ function optionalStrings(values) {
 }
 
 function isExactOrRedacted(value, expected) { return value === expected || value === "[path]"; }
-function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?\.(?:txt|md)|(?:approved|denied)-review-codex\.md|full-access-codex\.md|watch-(?:owner|observer)-sentinel\.txt)$/i.test(NodePath.basename(value))); }
+function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude|opencode))?\.(?:txt|md)|(?:approved|denied)-review-codex\.md|full-access-codex\.md|watch-(?:owner|observer)-sentinel\.txt)$/i.test(NodePath.basename(value))); }
 
 function hydrateOwnedReceipt(receipt, repoRoot) {
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${receipt.runId}`);
@@ -2599,6 +2618,7 @@ function providerMatrix(surface) { return {
   codexNative: requiredEvidence({ kind: "live-proof-required", control: `${surface} Composer, Review, and public turn comparison`, fields: ["provider", "model", "observations.live", "observations.settled", "observations.reopened", "observations.reloaded", "observations.reconnected", "comparison", "disk"] }),
   cursorNative: requiredEvidence({ kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" }),
   claudeFallback: requiredEvidence({ kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" }),
+  opencodeNative: requiredEvidence({ kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" }),
   ...(surface === "web"
     ? {
       warningStability: informationalEvidence({
@@ -2630,6 +2650,14 @@ function providerMatrix(surface) { return {
         prerequisite: "a deterministic native transient failure after an Automatic Composer dispatch",
         reason: "Mcode has no deterministic public trigger for a native transient retry, so the verifier records focused retry-dispatch evidence instead of claiming a live retry.",
         focusedEvidence: { frozenRetryDecision: "server-retry-decision-freeze" },
+      }),
+      opencodeReviewRoute: informationalEvidence({
+        kind: "coverage-gap",
+        control: "web Composer Automatic review request on an OpenCode thread",
+        provider: "opencode",
+        prerequisite: "a public Composer route that requests Automatic review for OpenCode and reads the resolved mode from canonical recovery",
+        reason: "OpenCode reports approval review unavailable, so an Automatic request must resolve to the visible manual-required fallback, never Approved or Denied. The verifier has no live OpenCode Automatic route, so it records focused adapter and policy evidence instead.",
+        focusedEvidence: { opencodeReviewUnavailable: "opencode-provider-routes", managedRequired: "server-approval-review-policy" },
       }),
       staleRetryEvents: informationalEvidence({
         kind: "coverage-gap",
