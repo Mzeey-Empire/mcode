@@ -108,8 +108,7 @@ export function maxPanelWidthInSplit(
   return Math.max(PANEL_MIN_WIDTH, splitWidthPx - COMPOSER_MIN_WIDTH - gapPx);
 }
 
-/** Currently selected file for diff viewing. */
-/** Source used to resolve a file's diff. */
+/** Review comparison source that decides how a file's diff is fetched and cached. */
 export type DiffSource = "snapshot" | "turn-diff" | "cumulative" | "commit" | "unstaged" | "staged" | "branch";
 
 /**
@@ -892,20 +891,18 @@ export const useDiffStore = create<DiffState>((set, get) => ({
     return defaultReviewView("thread", changeState);
   },
   setReviewViewForThread: (threadId, mode) =>
-    set((s) => {
-      return {
-        viewMode: mode,
-        reviewViewByThread: { ...s.reviewViewByThread, [threadId]: mode },
-        reviewViewManuallySelectedByThread: {
-          ...s.reviewViewManuallySelectedByThread,
-          [threadId]: true,
-        },
-        selectedCommitSha: null,
-        // A jump request belongs to the view it was issued for; a fresh pick
-        // drops it so a stale path cannot fire in an unrelated view.
-        reviewFileJumpRequest: null,
-      };
-    }),
+    set((s) => ({
+      viewMode: mode,
+      reviewViewByThread: { ...s.reviewViewByThread, [threadId]: mode },
+      reviewViewManuallySelectedByThread: {
+        ...s.reviewViewManuallySelectedByThread,
+        [threadId]: true,
+      },
+      selectedCommitSha: null,
+      // A jump request belongs to the view it was issued for; a fresh pick
+      // drops it so a stale path cannot fire in an unrelated view.
+      reviewFileJumpRequest: null,
+    })),
   setReviewTurnForThread: (threadId, messageId) =>
     set((s) => ({
       selectedTurnMessageIdByThread: {
