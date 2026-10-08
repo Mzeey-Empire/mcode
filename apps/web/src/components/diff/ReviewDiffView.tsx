@@ -695,7 +695,7 @@ function DiffStatusRow({ status }: { readonly status: "loading" | "empty" | "bin
     );
   }
   return (
-    <p className="px-3 py-2 font-mono text-[11px] text-muted/70">
+    <p className="px-3 py-2 font-mono text-caption text-muted/70">
       {status === "binary" ? "Binary file changed" : "No diff content"}
     </p>
   );
@@ -716,7 +716,7 @@ function SavedAnnotationChip({
       aria-label={`Edit comment ${annotation.displayNumber}`}
       className="mx-3 my-1.5 flex w-[calc(100%-1.5rem)] items-start gap-2 rounded-lg bg-hover/45 px-3 py-2 text-left ring-1 ring-inset ring-border/60 transition-colors hover:bg-hover/60"
     >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-ink font-mono text-[10px] font-semibold tabular-nums text-background">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-ink font-mono text-caption font-semibold tabular-nums text-background">
         {annotation.displayNumber}
       </span>
       <MessageCircle size={12} className="mt-1 shrink-0 text-muted" aria-hidden />

@@ -1130,14 +1130,14 @@ export function ProjectTree() {
               aria-hidden
               className="text-muted/25"
             />
-            <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/45">
+            <p className="font-mono text-caption uppercase tracking-[0.18em] text-muted/45">
               No projects yet
             </p>
             <Button
               variant="ghost"
               size="xs"
               onClick={handleOpenFolder}
-              className="group h-auto gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-[11.5px] font-normal text-muted/80 hover:border-border hover:bg-selected/50 hover:text-ink"
+              className="group h-auto gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-caption font-normal text-muted/80 hover:border-border hover:bg-selected/50 hover:text-ink"
             >
               <FolderPlus
                 size={11}
@@ -1852,7 +1852,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
         onTriggerMouseLeave?.(event);
       }}
       className={cn(
-        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-[13px] cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-body-small cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         isActive ? "bg-selected text-ink" : "text-muted/85 hover:bg-selected/40 hover:text-ink",
         triggerClassName,
       )}
@@ -2150,7 +2150,7 @@ const WorkspaceCiRollupChip = memo(function WorkspaceCiRollupChip({
             aria-label={rollup.label}
             className={cn(
               "shrink-0 inline-flex items-center gap-0.5 px-1 h-4 rounded-[3px] border transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none",
-              "text-[10px] font-medium tabular-nums leading-none",
+              "text-caption font-medium tabular-nums",
               chromeClass,
             )}
           >
@@ -2490,7 +2490,7 @@ function ProjectWorkspaceRow({
       data-testid={`project-row-${workspace.id}`}
       onClick={toggle}
       className={cn(
-        "group/ws relative flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] transition-colors touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "group/ws relative flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-body-small transition-colors touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         isProjectDragging && "cursor-grabbing",
         isActive ? "text-ink" : "text-muted hover:bg-selected/40 hover:text-ink",
       )}
@@ -2632,7 +2632,7 @@ function ProjectThreadListToggle({
   onToggleThreadList,
 }: { workspaceId: string; isExpanded: boolean; hiddenCount: number; onToggleThreadList: (workspaceId: string) => void }) {
   const label = isExpanded ? "Show less" : `Show more (${hiddenCount})`;
-  return <Button variant="ghost" size="xs" onClick={() => onToggleThreadList(workspaceId)} className="mt-0.5 h-auto w-full justify-start rounded-md px-2 py-1 text-[11px] font-normal text-muted/55 hover:bg-selected/40 hover:text-ink">{label}</Button>;
+  return <Button variant="ghost" size="xs" onClick={() => onToggleThreadList(workspaceId)} className="mt-0.5 h-auto w-full justify-start rounded-md px-2 py-1 text-caption font-normal text-muted/55 hover:bg-selected/40 hover:text-ink">{label}</Button>;
 }
 
 /**
@@ -2844,7 +2844,7 @@ function DraftRow({
       onClick={() => onOpen(workspaceId, draft.id)}
       onContextMenu={(event) => onContextMenu(event, draft.id)}
       className={cn(
-        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-[13px] cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-body-small cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         isActive
           ? "bg-selected text-ink"
           : "text-muted/70 hover:bg-selected/40 hover:text-ink",
@@ -2884,13 +2884,13 @@ function DraftRow({
         </span>
       </span>
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="shrink-0 text-[11px] font-medium text-muted/60">
+        <span className="shrink-0 text-caption font-medium text-muted/60">
           Draft
         </span>
         <span className="min-w-0 flex-1 text-fade text-muted/75">
           {preview}
         </span>
-        <span className="shrink-0 text-[11px] text-muted/50">
+        <span className="shrink-0 text-caption text-muted/50">
           {formatRelative(new Date(draft.updatedAt).toISOString())}
         </span>
       </div>

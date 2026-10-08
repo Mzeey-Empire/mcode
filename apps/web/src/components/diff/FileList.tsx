@@ -189,7 +189,7 @@ export function FileList({
 
   if (files.length === 0) {
     return (
-      <p className="px-3 py-1 text-[11px] text-muted">No files changed</p>
+      <p className="px-3 py-1 text-caption text-muted">No files changed</p>
     );
   }
 
@@ -489,7 +489,7 @@ function FileJumpPopover({ open, onOpenChange, files, onJumpToFile }: FileJumpPo
             placeholder="Jump to file"
             aria-label="Jump to file"
             data-testid="review-file-filter"
-            className="h-9 font-mono text-[11px]"
+            className="h-9 font-mono text-caption"
           />
           <CommandList className="max-h-72">
             <CommandEmpty>No files found</CommandEmpty>
@@ -525,9 +525,9 @@ function FileJumpItem({ filePath, onSelect }: FileJumpItemProps) {
     >
       <FileTypeIcon filePath={filePath} size={14} className="mt-0.5" />
       <span className="min-w-0 flex-1">
-        <span className="block text-fade font-mono text-[11px] text-ink/85">{basename}</span>
+        <span className="block text-fade font-mono text-caption text-ink/85">{basename}</span>
         {parent && (
-          <span className="block text-fade font-mono text-[10px] text-muted/65">
+          <span className="block text-fade font-mono text-caption text-muted/65">
             {parent}/
           </span>
         )}

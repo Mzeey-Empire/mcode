@@ -63,7 +63,7 @@ export function PreviewErrorPanel({
       <div className="flex max-w-md flex-col items-center gap-3">
         <p
           data-testid="preview-error-headline"
-          className="text-[2.4rem] font-semibold leading-[2.8rem] tracking-[-0.01em] text-ink"
+          className="text-xl font-semibold tracking-[-0.01em] text-ink"
         >
           {error.message}
         </p>
@@ -77,7 +77,7 @@ export function PreviewErrorPanel({
         ) : null}
       </div>
       {diagnosticLine ? (
-        <p className="max-w-md text-fade font-mono text-[11px] text-muted/70">
+        <p className="max-w-md text-fade font-mono text-caption text-muted/70">
           {diagnosticLine}
         </p>
       ) : null}

@@ -193,7 +193,7 @@ function PaletteInput({
           // Reserve right padding for the browse action so the typed path
           // remains visible beneath long folder names.
           "flex w-full bg-transparent outline-none placeholder:text-muted/70 disabled:cursor-not-allowed disabled:opacity-50",
-          browseMode ? "h-[60px] pe-[148px] font-mono text-[14px]" : "h-12 text-sm",
+          browseMode ? "h-[60px] pe-[148px] font-mono text-body-small" : "h-12 text-sm",
         )}
       />
       {browseMode && (
@@ -212,7 +212,7 @@ function PaletteInput({
                     e.preventDefault();
                   }}
                   onClick={onAddClick}
-                  className="h-[36px] min-w-[132px] gap-[8px] px-[16px] text-[14px] leading-none"
+                  className="h-[36px] min-w-[132px] gap-[8px] px-[16px] text-body-small"
                 >
                   <Plus size={14} />
                   Add project

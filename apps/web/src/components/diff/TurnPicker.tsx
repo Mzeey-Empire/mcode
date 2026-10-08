@@ -78,14 +78,14 @@ export function TurnPicker({ threadId }: { threadId: string }) {
 
   if (snapshots === undefined) {
     return (
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/40">
+      <span className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
         Resolving
       </span>
     );
   }
   if (turns.length === 0) {
     return (
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/40">
+      <span className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
         No turns yet
       </span>
     );
@@ -123,11 +123,11 @@ export function TurnPicker({ threadId }: { threadId: string }) {
         <Command>
           <CommandInput
             placeholder="Search turns..."
-            className="h-8 text-[11.5px]"
+            className="h-8 text-caption"
             data-testid="turn-picker-filter"
           />
           <CommandList>
-            <CommandEmpty className="py-4 text-[11px]">No turns found</CommandEmpty>
+            <CommandEmpty className="py-4 text-caption">No turns found</CommandEmpty>
             <CommandGroup heading="Turns with changes">
               {turns.map((turn) => {
                 const ordinal = ordinals.get(turn.message_id) ?? 0;
@@ -144,14 +144,14 @@ export function TurnPicker({ threadId }: { threadId: string }) {
                     aria-current={active ? "true" : undefined}
                     className="gap-2 px-2 py-1.5"
                   >
-                    <span className="min-w-0 flex-1 text-fade whitespace-nowrap text-[11px]">
+                    <span className="min-w-0 flex-1 text-fade whitespace-nowrap text-caption">
                       Turn {ordinal}
                       <span className="text-muted/60"> · {statLabel(turn)}</span>
                     </span>
                     {active ? (
                       <Check size={11} className="shrink-0 text-muted" />
                     ) : (
-                      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted/45">
+                      <span className="shrink-0 font-mono text-caption tabular-nums text-muted/45">
                         {relativeTime(turn.created_at)}
                       </span>
                     )}

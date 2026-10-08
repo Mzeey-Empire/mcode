@@ -19,7 +19,7 @@ export function PlanSkeleton({ title }: PlanSkeletonProps) {
         <Tooltip>
           <TooltipTrigger
             render={
-              <h1 className="text-fade px-4 pt-4 text-[15px] font-semibold leading-snug opacity-35">
+              <h1 className="text-fade px-4 pt-4 text-label font-semibold opacity-35">
                 {title}
               </h1>
             }
@@ -30,7 +30,7 @@ export function PlanSkeleton({ title }: PlanSkeletonProps) {
 
       <div className="flex items-center gap-2 px-4 pb-2 pt-4">
         <span className="h-[5px] w-[5px] animate-pulse rounded-full bg-primary" aria-hidden />
-        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted/60">
+        <span className="font-mono text-caption uppercase tracking-[0.16em] text-muted/60">
           Generating plan revision
         </span>
       </div>
