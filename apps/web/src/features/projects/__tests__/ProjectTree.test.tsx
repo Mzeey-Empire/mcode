@@ -1542,7 +1542,7 @@ describe("ProjectTree action-required indicator", () => {
     };
     render(<ProjectTree />);
     const indicator = screen.getByLabelText("Action required");
-    expect(indicator.className).toContain("ring-amber-500");
+    expect(indicator.className).toContain("ring-primary");
     expect(indicator.className).toContain("bg-transparent");
     expect(indicator.className).toContain("status-pulse");
   });
@@ -1570,7 +1570,7 @@ describe("ProjectTree action-required indicator", () => {
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
     render(<ProjectTree />);
     const indicator = screen.getByLabelText("Action required");
-    expect(indicator.className).toContain("ring-amber-500");
+    expect(indicator.className).toContain("ring-primary");
     expect(indicator.className).not.toContain("bg-primary");
   });
 
@@ -1613,7 +1613,7 @@ describe("ProjectTree action-required indicator", () => {
 
     render(<ProjectTree />);
 
-    expect(await screen.findByLabelText("Setup running")).toHaveClass("text-white");
+    expect(await screen.findByLabelText("Setup running")).toHaveClass("text-ink");
   });
 
   it("shows Awaiting response for a failed blocking setup", async () => {
@@ -1628,13 +1628,13 @@ describe("ProjectTree action-required indicator", () => {
     render(<ProjectTree />);
 
     const indicator = await screen.findByLabelText("Awaiting response");
-    expect(indicator).toHaveClass("ring-amber-500", "status-pulse");
+    expect(indicator).toHaveClass("ring-primary", "status-pulse");
     expect(screen.queryByLabelText("Setup running")).not.toBeInTheDocument();
   });
 
   it.each([
-    ["completed", "Completed", "--diff-add-strong"],
-    ["errored", "Errored", "--diff-remove-strong"],
+    ["completed", "Completed", "bg-success"],
+    ["errored", "Errored", "bg-error"],
   ] as const)(
     "shows the %s turn notification blob when a PR has checks",
     (status, label, tone) => {
@@ -1777,7 +1777,7 @@ describe("ProjectTree action-required indicator", () => {
     };
     render(<ProjectTree />);
     const indicator = screen.getByLabelText("Action required");
-    expect(indicator.className).toContain("ring-amber-500");
+    expect(indicator.className).toContain("ring-primary");
     expect(indicator.className).not.toContain("absolute");
   });
 
@@ -1803,7 +1803,7 @@ describe("ProjectTree action-required indicator", () => {
     };
     render(<ProjectTree />);
     const indicator = screen.getByLabelText("Action required");
-    expect(indicator.className).toContain("ring-amber-500");
+    expect(indicator.className).toContain("ring-primary");
     // CI "failing" would normally paint bg-red-500; the ring must suppress it.
     expect(indicator.className).not.toContain("bg-red-500");
     expect(screen.queryByTestId("thread-pr-ci-thread-pending")).toBeNull();
