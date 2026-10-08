@@ -1,7 +1,7 @@
 /**
  * Tests for the CommandRow selection indicator in SlashCommandPopup.
  *
- * The selected row should use bg-accent as its only selection indicator.
+ * The selected row should use bg-selected as its only selection indicator.
  * The previous border-l-2 left-stripe must not appear on any row.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";

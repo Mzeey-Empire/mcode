@@ -12,8 +12,7 @@ const PX_PER_REM = 10;
 
 /**
  * Paper role name to the matching code variables. Dark values come from
- * `--color-<role>`, light values from
- * `--color-light-<role>`.
+ * `--color-<role>`, light values from `--color-light-<role>`.
  */
 const ROLE_VARIABLES: Readonly<Record<string, readonly string[]>> = {
   page: ["--page"],
