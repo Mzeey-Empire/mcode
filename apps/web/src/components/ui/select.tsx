@@ -87,13 +87,13 @@ function SelectContent({
         align={align}
         alignOffset={alignOffset}
         alignItemWithTrigger={alignItemWithTrigger}
-        className="pointer-events-none isolate z-50"
+        className="pointer-events-none isolate z-(--layer-modal)"
       >
         <SelectPrimitive.Popup
           data-slot="select-content"
           data-align-trigger={alignItemWithTrigger}
           className={cn(
-            "pointer-events-auto relative isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-36 overflow-x-hidden overflow-y-auto",
+            "pointer-events-auto relative isolate z-(--layer-modal) max-h-(--available-height) w-(--anchor-width) min-w-36 overflow-x-hidden overflow-y-auto",
             POPOVER_SURFACE_CLASS,
             POPOVER_FADE_CLASS,
             "data-[align-trigger=true]:animate-none",
@@ -172,7 +172,7 @@ function SelectScrollUpButton({
     <SelectPrimitive.ScrollUpArrow
       data-slot="select-scroll-up-button"
       className={cn(
-        "top-0 z-10 flex w-full cursor-default items-center justify-center bg-panel py-1 [&_svg:not([class*='size-'])]:size-4",
+        "top-0 z-(--layer-sticky) flex w-full cursor-default items-center justify-center bg-panel py-1 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
@@ -191,7 +191,7 @@ function SelectScrollDownButton({
     <SelectPrimitive.ScrollDownArrow
       data-slot="select-scroll-down-button"
       className={cn(
-        "bottom-0 z-10 flex w-full cursor-default items-center justify-center bg-panel py-1 [&_svg:not([class*='size-'])]:size-4",
+        "bottom-0 z-(--layer-sticky) flex w-full cursor-default items-center justify-center bg-panel py-1 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}

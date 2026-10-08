@@ -26,7 +26,7 @@ const HEADING_BASE =
   "group/heading scroll-mt-14 cursor-pointer rounded-md px-1.5 -mx-1.5 transition-colors duration-100 hover:bg-selected/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/50";
 
 function getHeadingClass(level: number): string {
-  const levelClass = { 1: "text-base font-semibold", 2: "text-[13.5px] font-semibold", 3: "text-[13px] font-medium" }[level];
+  const levelClass = { 1: "text-base font-semibold", 2: "text-label font-semibold", 3: "text-label" }[level];
   return cn(HEADING_BASE, levelClass);
 }
 
@@ -45,7 +45,7 @@ function PlanHeading({ level, children, sectionMap, commentMap, activeHeading, o
     }}>
       {children}
       {hasComment && <span className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-primary/70 align-middle" aria-hidden />}
-      <span className="ml-2 font-mono text-[10px] font-normal text-muted/0 transition-colors group-hover/heading:text-muted/50 group-focus-visible/heading:text-muted/50" aria-hidden>+</span>
+      <span className="ml-2 font-mono text-caption font-normal text-muted/0 transition-colors group-hover/heading:text-muted/50 group-focus-visible/heading:text-muted/50" aria-hidden>+</span>
     </Tag>
     {isOpen && <PlanAnnotation key={`annotation-${key}`} sectionTitle={text} initialValue={commentMap.get(key) ?? ""} onCommit={(value) => onCommit(text, value)} onSave={(value) => onSave(text, value)} onDiscard={() => onDiscard(text)} />}
   </>;
@@ -151,9 +151,9 @@ export function PlanDocument({
           "prose prose-sm prose-invert max-w-none min-w-0",
           "[&>h2]:mt-6 [&>h2]:mb-2",
           "[&>h3]:mt-4 [&>h3]:mb-2",
-          "[&>p]:max-w-[62ch] [&>p]:text-[13px] [&>p]:leading-[1.75] [&>p]:text-muted",
-          "[&>ul]:text-[13px] [&>ul]:leading-[1.7] [&>li]:text-[13px]",
-          "[&>ol]:text-[13px] [&>ol]:leading-[1.7]",
+          "[&>p]:max-w-[62ch] [&>p]:text-body-small [&>p]:leading-[1.75] [&>p]:text-muted",
+          "[&>ul]:text-body-small [&>ul]:leading-[1.7] [&>li]:text-body-small",
+          "[&>ol]:text-body-small [&>ol]:leading-[1.7]",
         )}
       >
         <Suspense fallback={<span className="text-sm text-muted">Loading plan…</span>}>

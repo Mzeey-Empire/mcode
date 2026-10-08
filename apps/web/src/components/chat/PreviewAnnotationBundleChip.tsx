@@ -168,7 +168,7 @@ export function PreviewAnnotationBundleChip({
                       {isComment ? "Comment" : "Annotation"}
                     </span>
                     <span aria-hidden className="text-muted/45">·</span>
-                    <span className="min-w-0 text-fade font-mono text-[1.1rem] font-normal text-muted">
+                    <span className="min-w-0 text-fade font-mono text-caption font-normal text-muted">
                       {feedbackTargetLabel(item)}
                     </span>
                   </div>

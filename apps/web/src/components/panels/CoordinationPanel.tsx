@@ -131,7 +131,7 @@ function RelationCard({
             >
               {destination.title}
             </Button>
-            <Badge variant="outline" className="shrink-0 text-[11px]" aria-label={`Status: ${destinationState}`}>
+            <Badge variant="outline" className="shrink-0 text-caption" aria-label={`Status: ${destinationState}`}>
               {destinationState}
             </Badge>
           </div>

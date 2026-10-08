@@ -403,7 +403,7 @@ function ReviewViewMenu({
         data-testid="review-view-switcher"
         disabled={viewModes.length === 0}
         aria-label="Select review view"
-        className="flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium tracking-tight text-ink hover:bg-selected disabled:pointer-events-none disabled:opacity-50"
+        className="flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium tracking-tight text-ink hover:bg-selected disabled:pointer-events-none disabled:opacity-50"
       >
         {activeView?.label ?? "-"}
         <ReviewFileCount fileCount={reviewFileCount} />
@@ -431,7 +431,7 @@ function ReviewFileCount({ fileCount }: { readonly fileCount: number | null }) {
   if (fileCount === null || fileCount <= 0) return null;
   return (
     <span
-      className="ml-1 rounded-full bg-muted/15 px-1.5 text-[10px] font-medium tabular-nums text-muted"
+      className="ml-1 rounded-full bg-muted/15 px-1.5 text-caption font-medium tabular-nums text-muted"
       data-testid="review-file-count"
     >
       {fileCount}

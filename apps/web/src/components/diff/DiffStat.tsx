@@ -23,7 +23,7 @@ export function DiffStat({ additions, deletions, bar = false, zeroDash = false, 
   return (
     <span
       className={cn(
-        "flex shrink-0 items-center gap-1.5 font-mono text-[10px] tabular-nums",
+        "flex shrink-0 items-center gap-1.5 font-mono text-caption tabular-nums",
         className,
       )}
     >

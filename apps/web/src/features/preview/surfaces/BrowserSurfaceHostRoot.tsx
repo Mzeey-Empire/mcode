@@ -219,7 +219,7 @@ export function BrowserSurfaceHostRoot() {
     <div
       ref={setRoot}
       data-browser-surface-host=""
-      className="fixed left-0 top-0 z-30 size-0"
+      className="fixed left-0 top-0 z-(--layer-floating-panel) size-0"
     />
   );
 }

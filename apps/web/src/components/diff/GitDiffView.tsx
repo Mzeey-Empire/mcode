@@ -28,7 +28,7 @@ function EmptyState({ label }: { label: string }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 py-14">
       <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted/15">⊘</span>
-      <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/40">{label}</p>
+      <p className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">{label}</p>
     </div>
   );
 }

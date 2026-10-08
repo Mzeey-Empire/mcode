@@ -53,7 +53,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   return createPortal(
     <div
       ref={ref}
-      style={{ position: "fixed", left: x, top: y, zIndex: 50 }}
+      style={{ position: "fixed", left: x, top: y, zIndex: "var(--layer-modal)" }}
       className={cn("min-w-[160px] p-1", POPOVER_SURFACE_CLASS)}
     >
       {items.map((item, i) =>

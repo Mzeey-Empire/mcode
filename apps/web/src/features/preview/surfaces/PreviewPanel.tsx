@@ -1188,7 +1188,7 @@ function ColorInspectorControl({
                 variant="ghost"
                 size="icon-xs"
                 aria-label={`Open ${label} picker`}
-                className="absolute left-2 z-10 size-4 rounded-full border border-white/25 p-0 shadow-none ring-1 ring-black/20 hover:ring-white/20"
+                className="absolute left-2 z-(--layer-sticky) size-4 rounded-full border border-white/25 p-0 shadow-none ring-1 ring-black/20 hover:ring-white/20"
                 style={{ background: swatch }}
               />
             }
@@ -1952,7 +1952,7 @@ function previewSurfaceClassName(
 ): string {
   return cn(
     "relative min-h-[min(40vh,20rem)] min-w-0 flex-1 basis-0",
-    "z-0 rounded-tl-md",
+    "z-(--layer-base) rounded-tl-md",
     responsiveViewportSize ? "overflow-auto bg-hover/20" : "overflow-hidden",
     webviewLayerInteractive && "pointer-events-none",
     showLocalPorts && "overflow-y-auto",
@@ -1970,7 +1970,7 @@ function annotationBubbleClassName(
       ? "border-white/25 ring-1 ring-white/15"
       : "border-white/10 ring-1 ring-black/20";
   return cn(
-    "pointer-events-auto absolute z-30 w-[min(20.5rem,calc(100%-1rem))] overflow-hidden rounded-[1.55rem] border shadow-xl transition-[border-color,box-shadow] duration-150",
+    "pointer-events-auto absolute z-(--layer-floating-panel) w-[min(20.5rem,calc(100%-1rem))] overflow-hidden rounded-[1.55rem] border shadow-xl transition-[border-color,box-shadow] duration-150",
     focusClassName,
     bubbleAdvancedOpen ? "max-h-[20.5rem]" : "min-h-11",
   );
@@ -3680,8 +3680,8 @@ export function PreviewPanel({
             ? "absolute left-0 top-0"
             : "absolute inset-0 h-full w-full",
           tab.id === activeWebviewTabId
-            ? "z-0 block"
-            : "pointer-events-none -z-10 opacity-0",
+            ? "z-(--layer-base) block"
+            : "pointer-events-none -z-(--layer-sticky) opacity-0",
         )}
         onPageStatus={(status) => {
           usePreviewTabsStore.getState().updateTabChrome(browserWorkspaceId, threadId, tab.id, {
@@ -3720,7 +3720,7 @@ export function PreviewPanel({
 
   const renderPreviewChrome = (): ReactNode => (
     <div
-      className="pointer-events-auto relative z-20"
+      className="pointer-events-auto relative z-(--layer-dropdown)"
       style={coveredLeft ? { clipPath: `inset(0 0 0 ${coveredLeft}px)` } : undefined}
     >
         {showAnnotationCommandBar ? (
@@ -3852,7 +3852,7 @@ export function PreviewPanel({
         <RenderWhen condition={webviewLoading}>
           <div
             data-testid="preview-loading-banner"
-            className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden rounded-t-md"
+            className="absolute inset-x-0 top-0 z-(--layer-sticky) h-0.5 overflow-hidden rounded-t-md"
             role="status"
             aria-live="polite"
             aria-label="Page loading"
@@ -3867,7 +3867,7 @@ export function PreviewPanel({
               aria-live="polite"
               data-testid="preview-capture-confirmation"
               className={cn(
-                "pointer-events-none absolute right-2 bottom-2 z-10 flex items-center gap-1.5",
+                "pointer-events-none absolute right-2 bottom-2 z-(--layer-sticky) flex items-center gap-1.5",
                 "rounded-sm border border-primary/30 bg-background/90 px-2 py-1 shadow-sm",
                 "font-mono text-xs uppercase tracking-[0.14em] text-primary",
                 "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1",
@@ -3883,7 +3883,7 @@ export function PreviewPanel({
         <RenderWhen condition={hasWebviewLayer}>
           <div
             data-testid="preview-webview-surface"
-            className="pointer-events-none absolute inset-0 z-0 overflow-hidden rounded-tl-md"
+            className="pointer-events-none absolute inset-0 z-(--layer-base) overflow-hidden rounded-tl-md"
           >
           <BrowserViewportCanvas
             coordinator={activeViewportCoordinator}
@@ -3900,7 +3900,7 @@ export function PreviewPanel({
         <RenderWhen condition={agentControlsBrowser}>
           <div
             data-testid="browser-automation-overlay"
-            className="pointer-events-none absolute inset-0 z-20 rounded-tl-md"
+            className="pointer-events-none absolute inset-0 z-(--layer-dropdown) rounded-tl-md"
             style={{
               clipPath: coveredLeft ? `inset(0 0 0 ${coveredLeft}px)` : undefined,
               backgroundImage: BROWSER_CONTROL_EDGE_BACKGROUND_IMAGE,
@@ -3937,7 +3937,7 @@ export function PreviewPanel({
                     data-testid="preview-annotation-marker"
                     variant="ghost"
                     size="icon-sm"
-                    className="pointer-events-auto group/marker absolute z-20 flex size-8 items-center justify-center rounded-full bg-transparent p-0 hover:bg-transparent focus-visible:bg-transparent"
+                    className="pointer-events-auto group/marker absolute z-(--layer-dropdown) flex size-8 items-center justify-center rounded-full bg-transparent p-0 hover:bg-transparent focus-visible:bg-transparent"
                     style={{
                       left: Math.max(
                         16,
@@ -3961,7 +3961,7 @@ export function PreviewPanel({
                       aria-hidden
                     >
                       <span className="absolute -bottom-0.5 left-1.5 size-2 rotate-45 rounded-sm bg-primary/80" />
-                      <span className="relative z-10 text-xs font-semibold tabular-nums">
+                      <span className="relative z-(--layer-sticky) text-xs font-semibold tabular-nums">
                         {annotation.displayNumber}
                       </span>
                     </span>
@@ -3995,7 +3995,7 @@ export function PreviewPanel({
           {(annotation) => (
             <div
               data-testid="preview-annotation-active-target-highlight"
-              className="pointer-events-none absolute z-10 rounded-sm border-2 border-primary/80 bg-primary/10"
+              className="pointer-events-none absolute z-(--layer-sticky) rounded-sm border-2 border-primary/80 bg-primary/10"
               style={{
                 left: annotation.bounds.x,
                 top: annotation.bounds.y,
@@ -4011,7 +4011,7 @@ export function PreviewPanel({
               {(proposal) => (
                 <div
                   data-testid="preview-annotation-visual-proposal"
-                  className="pointer-events-none absolute z-10 rounded-sm border border-dashed border-primary/80"
+                  className="pointer-events-none absolute z-(--layer-sticky) rounded-sm border border-dashed border-primary/80"
                   style={{
                     ...visualOverlayStyle(proposal),
                     ...visualProposalGeometryStyle(
@@ -4030,7 +4030,7 @@ export function PreviewPanel({
             <div
               aria-hidden
               data-testid="preview-annotation-discard-overlay"
-              className="pointer-events-auto absolute inset-0 z-20 bg-transparent"
+              className="pointer-events-auto absolute inset-0 z-(--layer-dropdown) bg-transparent"
             />
           )}
         </RenderValue>

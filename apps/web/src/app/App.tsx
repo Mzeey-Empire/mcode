@@ -230,7 +230,7 @@ function FloatingSidebar({
         aria-label="Close project tree"
         aria-hidden={exiting}
         inert={exiting}
-        className={`app-viewport-fixed fixed z-40 bg-black/20 duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
+        className={`app-viewport-fixed fixed z-(--layer-modal-backdrop) bg-black/20 duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
           exiting ? "pointer-events-none animate-out fade-out-0" : "animate-in fade-in-0"
         }`}
         onClick={() => useUiStore.getState().closeFloatingSidebar()}
@@ -240,7 +240,7 @@ function FloatingSidebar({
         data-testid="sidebar-floating"
         aria-hidden={exiting}
         inert={exiting}
-        className={`app-panel-top-inset fixed bottom-1.5 left-1.5 z-50 flex w-sidebar overflow-hidden rounded-lg bg-page shadow-xl ring-1 ring-border/40 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
+        className={`app-panel-top-inset fixed bottom-1.5 left-1.5 z-(--layer-modal) flex w-sidebar overflow-hidden rounded-lg bg-page shadow-xl ring-1 ring-border/40 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
           exiting
             ? "pointer-events-none animate-out fade-out-0 slide-out-to-left-4 duration-200"
             : "animate-in fade-in-0 slide-in-from-left-4 duration-250"

@@ -854,7 +854,7 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.queryByTestId("preview-webview-surface")).not.toBeInTheDocument();
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
     expect(screen.getByTestId("preview-surface")).toHaveClass(
-      "z-0",
+      "z-(--layer-base)",
       "overflow-hidden",
       "rounded-tl-md",
     );
@@ -870,7 +870,7 @@ describe("PreviewPanel: full panel state", () => {
     expect(screen.queryByTestId("preview-webview")).not.toBeInTheDocument();
     expect(screen.getByTestId("browser-local-ports")).toBeInTheDocument();
     expect(screen.getByTestId("preview-surface")).toHaveClass(
-      "z-0",
+      "z-(--layer-base)",
       "overflow-hidden",
       "rounded-tl-md",
     );
@@ -884,7 +884,7 @@ describe("PreviewPanel: full panel state", () => {
     );
     expect(screen.getByTestId("browser-header").parentElement).toHaveClass(
       "relative",
-      "z-20",
+      "z-(--layer-dropdown)",
     );
     expect(mockUsePreviewBridge).toHaveBeenLastCalledWith(
       expect.objectContaining({ threadId: "thread-1" }),
@@ -958,7 +958,7 @@ describe("PreviewPanel: full panel state", () => {
       const webview = screen.getByTestId("preview-webview");
       expect(webview).toHaveAttribute("data-tab-id", PREVIEW_WEBVIEW_FALLBACK_TAB_ID);
       expect(webview).toHaveAttribute("src", "https://example.com");
-      expect(webview).toHaveClass("absolute", "inset-0", "z-0", "h-full", "w-full");
+      expect(webview).toHaveClass("absolute", "inset-0", "z-(--layer-base)", "h-full", "w-full");
       expect(screen.getByTestId("preview-panel")).toHaveClass("pointer-events-none");
       expect(screen.getByTestId("preview-surface")).toHaveClass("pointer-events-none");
       expect(screen.queryByTestId("browser-local-ports")).not.toBeInTheDocument();

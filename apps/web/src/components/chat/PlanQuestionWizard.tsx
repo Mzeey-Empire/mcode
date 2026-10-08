@@ -151,7 +151,7 @@ function PlanQuestionNavigation({
 function KeyboardLegend({ open }: { open: boolean }) {
   if (!open) return null;
   return (
-    <div role="note" aria-label="Keyboard shortcuts" className={cn("absolute right-5 bottom-12 z-10", "rounded-sm border border-border/40 bg-panel/95 backdrop-blur-sm", "px-3 py-2 font-mono text-xs leading-relaxed text-muted/80", "shadow-sm animate-wizard-legend")}>
+    <div role="note" aria-label="Keyboard shortcuts" className={cn("absolute right-5 bottom-12 z-(--layer-sticky)", "rounded-sm border border-border/40 bg-panel/95 backdrop-blur-sm", "px-3 py-2 font-mono text-xs leading-relaxed text-muted/80", "shadow-sm animate-wizard-legend")}>
       <div><span className="text-ink/80">1-5</span> select</div>
       <div><span className="text-ink/80">← →</span> navigate</div>
       <div><span className="text-ink/80">⏎</span> advance</div>

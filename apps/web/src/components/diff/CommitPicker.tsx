@@ -225,11 +225,11 @@ function CommitPickerScope({
         aria-label="Pick a commit"
         className="flex h-6 min-w-0 max-w-[220px] items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-selected disabled:pointer-events-none disabled:opacity-50"
       >
-        <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink/55">
+        <span className="shrink-0 font-mono text-caption tabular-nums text-ink/55">
           {selected?.shortSha ?? (loadingInitial ? "..." : "-")}
         </span>
         {selected && (
-          <span className="min-w-0 text-fade text-[11px] text-muted">
+          <span className="min-w-0 text-fade text-caption text-muted">
             {selected.message}
           </span>
         )}
@@ -242,10 +242,10 @@ function CommitPickerScope({
             placeholder="Search commits…"
             value={search}
             onValueChange={setSearch}
-            className="h-8 text-[11.5px]"
+            className="h-8 text-caption"
           />
           <CommandList>
-            <CommandEmpty className="py-4 text-[11px]">No commits found</CommandEmpty>
+            <CommandEmpty className="py-4 text-caption">No commits found</CommandEmpty>
             {commits.map((commit) => {
               const active = commit.sha === selectedSha;
               return (
@@ -261,13 +261,13 @@ function CommitPickerScope({
                   }}
                   className="gap-2 px-2 py-1.5"
                 >
-                  <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink/60">
+                  <span className="shrink-0 font-mono text-caption tabular-nums text-ink/60">
                     {commit.shortSha}
                   </span>
-                  <span className="min-w-0 flex-1 text-fade text-[11.5px] text-ink/80">
+                  <span className="min-w-0 flex-1 text-fade text-caption text-ink/80">
                     {commit.message}
                   </span>
-                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted/45">
+                  <span className="shrink-0 font-mono text-caption tabular-nums text-muted/45">
                     {relativeTime(commit.date)}
                   </span>
                   {active && <Check size={11} className="shrink-0 text-muted" />}
@@ -282,7 +282,7 @@ function CommitPickerScope({
                   size="sm"
                   disabled={loadingMore}
                   onClick={loadOlder}
-                  className="h-7 w-full justify-center text-[11px] text-muted"
+                  className="h-7 w-full justify-center text-caption text-muted"
                 >
                   {loadingMore
                     ? "Loading older commits..."

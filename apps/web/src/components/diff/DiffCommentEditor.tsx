@@ -139,7 +139,7 @@ export function DiffCommentEditor({
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="min-w-0 text-fade font-mono text-[11px] text-muted" />
+              <span className="min-w-0 text-fade font-mono text-caption text-muted" />
             }
           >
             {basename(target.filePath)}:{target.line}

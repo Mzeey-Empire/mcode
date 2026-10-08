@@ -262,7 +262,7 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
 function SummaryTotals({ totals }: { readonly totals: { additions: number; deletions: number } | null }) {
   if (!totals) return null;
   return (
-    <span className="font-mono text-[11px] tabular-nums">
+    <span className="font-mono text-caption tabular-nums">
       {totals.additions > 0 && (
         <span className="text-[var(--diff-add-strong)]">+{totals.additions}</span>
       )}
@@ -394,7 +394,7 @@ function ChangedFileRow({ filePath, stat, onJump }: ChangedFileRowProps) {
               <span
                 data-change-type={changeType}
                 aria-hidden
-                className={cn("w-3 text-center font-mono text-[10px] font-medium", changeTypeTone(changeType))}
+                className={cn("w-3 text-center font-mono text-caption font-medium", changeTypeTone(changeType))}
               >
                 {CHANGE_TYPE_GLYPHS[changeType]}
               </span>

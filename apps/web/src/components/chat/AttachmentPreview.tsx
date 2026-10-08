@@ -121,13 +121,13 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
         {scrollEdges.left ? (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 left-0 z-10 w-4 bg-gradient-to-r from-background to-transparent"
+            className="pointer-events-none absolute inset-y-0 left-0 z-(--layer-sticky) w-4 bg-gradient-to-r from-background to-transparent"
           />
         ) : null}
         {scrollEdges.right ? (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 right-0 z-10 w-4 bg-gradient-to-l from-background to-transparent"
+            className="pointer-events-none absolute inset-y-0 right-0 z-(--layer-sticky) w-4 bg-gradient-to-l from-background to-transparent"
           />
         ) : null}
         <div
@@ -202,7 +202,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
                     {spill ? (
                       <Tooltip>
                         <TooltipTrigger
-                          render={<span className="absolute bottom-0.5 left-0.5 right-0.5 z-10 flex justify-center rounded bg-background/85 px-0.5 text-xs font-medium text-ink/90 shadow-sm" />}
+                          render={<span className="absolute bottom-0.5 left-0.5 right-0.5 z-(--layer-sticky) flex justify-center rounded bg-background/85 px-0.5 text-xs font-medium text-ink/90 shadow-sm" />}
                         >
                           {/* The fade mask covers its whole box, so it sits inside the pill to keep the pill fill solid. */}
                           <span className="text-fade">+ spill file</span>

@@ -131,7 +131,7 @@ describe("PullRequestIssueCommentComposer", () => {
       screen.getByRole("region", { name: "Add a comment" }),
     ).toHaveClass(
       "relative",
-      "z-10",
+      "z-(--layer-sticky)",
       "before:bg-gradient-to-t",
       "before:from-page",
       "before:to-transparent",

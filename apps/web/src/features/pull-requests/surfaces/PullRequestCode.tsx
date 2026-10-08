@@ -693,7 +693,7 @@ function FloatingFilesSheet({
           aria-label="Changed files"
           initialFocus={false}
           finalFocus={false}
-          className={cn("absolute inset-y-0 right-0 z-30 flex outline-none", SHEET_SURFACE_CLASS, SHEET_MOUNT_FADE_CLASS)}
+          className={cn("absolute inset-y-0 right-0 z-(--layer-floating-panel) flex outline-none", SHEET_SURFACE_CLASS, SHEET_MOUNT_FADE_CLASS)}
         >
           {children}
         </DialogPrimitive.Popup>

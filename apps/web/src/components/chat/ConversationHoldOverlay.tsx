@@ -13,7 +13,7 @@ export function ConversationHoldOverlay({ targetTitle }: ConversationHoldOverlay
       data-testid="conversation-hold-overlay"
       role="status"
       aria-live="polite"
-      className="absolute inset-0 z-10 flex items-center justify-center bg-background/45 backdrop-blur-[1px]"
+      className="absolute inset-0 z-(--layer-sticky) flex items-center justify-center bg-background/45 backdrop-blur-[1px]"
     >
       <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-xs text-muted shadow-sm">
         <Spinner size={14} />

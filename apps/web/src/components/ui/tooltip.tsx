@@ -57,12 +57,12 @@ function TooltipContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
-        className="pointer-events-none isolate z-50"
+        className="pointer-events-none isolate z-(--layer-modal)"
       >
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
-            "pointer-events-none z-50 inline-flex min-h-control-compact w-fit max-w-80 items-center gap-2 rounded-menu border border-border bg-panel px-3 py-[7px] text-caption text-ink transition-opacity duration-(--duration-standard) data-ending-style:opacity-0 data-instant:transition-none data-starting-style:opacity-0",
+            "pointer-events-none z-(--layer-modal) inline-flex min-h-control-compact w-fit max-w-80 items-center gap-2 rounded-menu border border-border bg-panel px-3 py-[7px] text-caption text-ink transition-opacity duration-(--duration-standard) data-ending-style:opacity-0 data-instant:transition-none data-starting-style:opacity-0",
             className
           )}
           {...props}
