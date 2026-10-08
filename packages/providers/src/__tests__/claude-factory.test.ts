@@ -58,6 +58,26 @@ afterEach(async () => { await Promise.allSettled(providers.splice(0).map((provid
 async function completed(events: () => ProviderRuntimeEvent[], count: number) { await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(count)); }
 
 describe("Claude public factory core and capabilities", () => {
+  it.each([false, true])("finishes a textless native plan turn, oversized=%s", async (oversized) => {
+    const markdown = oversized ? "x".repeat(256 * 1024 + 1) : "## Native plan\nShip it.";
+    installTransport((_turn, options) => {
+      assert(options.canUseTool);
+      void options.canUseTool("ExitPlanMode", { plan: markdown },
+        { signal: new AbortController().signal, toolUseID: "PLAN_ONLY" });
+      return [result()];
+    });
+    const { provider, events } = fixture();
+    const capture = vi.fn();
+    provider.on("plan_captured", capture);
+    provider.setPlanAnswerMode("thread-1", true);
+    await provider.sendTurn(request());
+    await completed(events, 1);
+    expect(capture.mock.calls).toEqual(oversized ? [] : [[{ threadId: "thread-1", markdown, source: "native" }]]);
+    expect(events().flatMap((runtime) => runtime.planCapture ? [runtime.planCapture] : [])).toEqual(
+      oversized ? [] : [{ markdown, source: "native" }],
+    );
+    expect(events().filter((runtime) => runtime.event.type === "error")).toEqual([]);
+  });
   it("carries native ExitPlanMode capture into the canonical assistant message once", async () => {
     const decisions: Array<Promise<unknown>> = [];
     installTransport((turn, options) => {

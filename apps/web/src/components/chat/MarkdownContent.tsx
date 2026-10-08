@@ -1,4 +1,5 @@
-import { stripPlanFences } from "@/lib/plan-fences";
+import { isHiddenPlanFenceLanguage } from "@/lib/plan-fences";
+import type { Element } from "hast";
 import { memo, useMemo, lazy, Suspense } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -549,7 +550,10 @@ function makeComponents(
   chatHighlighting: boolean,
   componentOverrides?: Partial<Components>,
 ) {
-  const codeRenderer = ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+  const codeRenderer = ({ children, className, node }: { children?: React.ReactNode; className?: string; node?: Element }) => {
+    const language = className?.match(/language-(\S+)/)?.[1] ?? "";
+    const metadata = typeof node?.data?.meta === "string" ? node.data.meta : undefined;
+    if (isHiddenPlanFenceLanguage(language, metadata)) return null;
     return (
       <MarkdownCode
         children={children}
@@ -598,7 +602,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 
   return (
     <ReactMarkdown remarkPlugins={remarkPlugins} components={components} urlTransform={markdownUrlTransform}>
-      {stripPlanFences(content, isStreaming)}
+      {content}
     </ReactMarkdown>
   );
 });

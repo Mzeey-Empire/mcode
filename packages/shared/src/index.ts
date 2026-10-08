@@ -36,4 +36,4 @@ export {
 
 export { redactMcodeBrowserCaptureV2 } from "./browser-preview/redact.js";
 
-export { PlanFenceParser } from "./plan-fence-parser.js";
+export { PlanFenceParser, isPlanFenceOpener } from "./plan-fence-parser.js";

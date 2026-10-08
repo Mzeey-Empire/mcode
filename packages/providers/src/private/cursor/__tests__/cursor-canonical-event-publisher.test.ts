@@ -24,6 +24,7 @@ describe("CursorCanonicalEventPublisher", () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
     const publisher = new CursorCanonicalEventPublisher(createSink(submit));
     const capture = { markdown: "# Cursor plan", source: "native" as const };
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnStarted, threadId: routing.threadId }), []);
     publisher.capturePlan(routing, capture);
     const message = providerRuntimeEvent({ type: AgentEventType.Message, threadId: routing.threadId, content: "Summary", tokens: null });
     publisher.publish(routing, message, []);

@@ -6,10 +6,9 @@
   "provenance": "synthetic",
   "requiredProfiles": ["core", "build", "plan", "permissions", "session-eviction", "clean-fork", "browser-access", "thread-control"],
   "scenario": "synthetic Cursor ACP lifecycle and unsupported extension replay",
-  "sourceHash": "ed22e68651acbfed5e2c33f51224b9ab3b616c30abf92d27cf9f4c3a0db506bf",
+  "sourceHash": "d31b48f5f71cefedc942c2f72e2b85f265b91e5be1f3112a02041e650df1b68d",
   "redaction": { "reviewed": true, "removedFields": ["prompt", "response", "environment", "tool output", "absolute paths"] },
   "input": {
-    "planTextDeltas": ["Summary\n``","``mcode-","plan\n# Synthetic plan\n\n## Build\n```ts\nconst answer = 42;\n```\n```","`"],
     "events": [
       { "kind": "session", "sequence": 1, "nativeId": "SESSION_1", "status": "started" },
       { "kind": "turn", "sequence": 2, "nativeId": "TURN_1", "status": "started" },

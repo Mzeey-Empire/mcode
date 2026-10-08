@@ -6,10 +6,10 @@
   "provenance": "synthetic",
   "requiredProfiles": ["core"],
   "scenario": "core lifecycle structure",
-  "sourceHash": "aee978b4120869e400e3ab9241db471177765d3258baccbdf55cf06f39d80a85",
+  "sourceHash": "fc410ecb0cb680c8611959c9891d6fc7f2047a1f7a2cf5c16862c17ebb37dc52",
   "redaction": { "reviewed": true, "removedFields": ["prompt", "response", "environment", "tool output", "absolute paths"] },
   "input": {
-    "planTextDeltas": ["Summary\n``","``mcode-","plan\n# Synthetic plan\n\n## Build\n```ts\nconst answer = 42;\n```\n```","`"],
+    "planTrace": {"providerId":"opencode","events":[{"type":"message.part.updated","properties":{"part":{"id":"PART_1","messageID":"ITEM_1","type":"text"},"delta":"Summary\n``"}},{"type":"message.part.updated","properties":{"part":{"id":"PART_1","messageID":"ITEM_1","type":"text"},"delta":"``mcode-"}},{"type":"message.part.updated","properties":{"part":{"id":"PART_1","messageID":"ITEM_1","type":"text"},"delta":"plan\n# Synthetic plan\n\n## Build\n```ts\nconst answer = 42;\n```\n```"}},{"type":"message.part.updated","properties":{"part":{"id":"PART_1","messageID":"ITEM_1","type":"text"},"delta":"`"}}]},
     "events": [
       { "kind": "session", "sequence": 1, "nativeId": "SESSION_1", "status": "started" },
       { "kind": "turn", "sequence": 2, "nativeId": "TURN_1", "status": "started" },

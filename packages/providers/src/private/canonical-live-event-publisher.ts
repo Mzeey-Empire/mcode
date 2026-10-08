@@ -57,7 +57,8 @@ export class CanonicalLiveEventPublisher {
 
   /** Retain native plan evidence within its exact execution until an assistant message arrives. */
   capturePlan(routing: CanonicalLiveEventRouting, capture: NonNullable<ProviderRuntimeEvent["planCapture"]>): void {
-    if (!this.admissionStopped) this.queueFor(routing).planCapture = capture;
+    const queue = this.queues.get(this.queueKey(routing));
+    if (!this.admissionStopped && queue && !queue.failure) queue.planCapture = capture;
   }
 
   /** Queues one runtime event; a replay ID alone does not imply a native timestamp. */
@@ -75,6 +76,10 @@ export class CanonicalLiveEventPublisher {
       return;
     }
     const queue = this.queueFor(routing);
+    if (queue.planCapture && runtimeEvent.event.type === AgentEventType.TurnComplete) {
+      this.publish(routing, { event: { type: AgentEventType.Message, threadId: routing.threadId,
+        turnExecutionId: routing.executionId, content: "", tokens: null } }, sourceIdentities);
+    }
     if (!this.admit(queue, routing, runtimeEvent, sourceIdentities, native)) return;
     if (runtimeEvent.event.type === AgentEventType.Message && queue.planCapture) {
       runtimeEvent = { ...runtimeEvent, planCapture: queue.planCapture };

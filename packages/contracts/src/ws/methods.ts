@@ -341,7 +341,7 @@ export const SendMessageSchema = lazySchema(() => z.object({
     /** Highlighted text excerpt from the original message. Absent for full-message replies. */
     quotedText: z.string().max(2000).optional(),
     /**
-     * Plan-tab action hint. `revise` arms plan-captured capture; `implement` runs
+     * Plan-tab action hint. `revise` enables plan capture; `implement` runs
      * in chat mode without the plan-questions wrapper.
      */
     planAction: PlanActionSchema().optional(),

@@ -1,5 +1,14 @@
+import { isPlanFenceOpener } from "@mcode/shared";
+
 /** Protocol fences rendered outside the transcript, including historic stored plans. */
 export const HIDDEN_PLAN_FENCE_INFO = ["plan-questions", "mcode-plan", "plan-output"];
+
+/** Identify a protocol code block by its exact language, including nested historic blocks. */
+export function isHiddenPlanFenceLanguage(language: string, metadata?: string): boolean {
+  return language === "mcode-plan"
+    ? isPlanFenceOpener("```", [language, metadata].filter(Boolean).join(" "))
+    : HIDDEN_PLAN_FENCE_INFO.includes(language);
+}
 
 interface Fence {
   marker: string;
@@ -27,12 +36,13 @@ export function stripPlanFences(content: string, isStreaming = false): string {
 }
 
 function openingFence(line: string, partial: boolean): Fence | null {
-  if (partial && /^ {0,3}`{1,2}$/.test(line)) return { marker: "`", length: line.trim().length, hidden: true };
+  if (partial && /^ {0,3}(`{1,2}|~{1,2})$/.test(line)) return { marker: line.trim()[0], length: line.trim().length, hidden: true };
   const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
   if (!match) return null;
   if (match[1][0] === "`" && match[2].includes("`")) return null;
   const info = match[2].trim();
-  const hidden = HIDDEN_PLAN_FENCE_INFO.includes(info)
+  const hidden = isPlanFenceOpener(match[1], info)
+    || isHiddenPlanFenceLanguage(info.split(/\s+/, 1)[0]) && !info.startsWith("mcode-plan")
     || partial && HIDDEN_PLAN_FENCE_INFO.some((candidate) => candidate.startsWith(info));
   return { marker: match[1][0], length: match[1].length, hidden };
 }

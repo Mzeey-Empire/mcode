@@ -44,6 +44,7 @@ export interface CursorAcpTraceProfileResult {
   emittedEventTypes: readonly string[];
   toolNames: readonly string[];
   unsupportedMethods: readonly string[];
+  planCaptureCount: number;
 }
 
 /** Capture the fenced fallback from the assistant text delivered by a fixture or mapper. */
@@ -95,7 +96,19 @@ export async function runCursorAcpTraceProfile(
     emittedEventTypes: actual.emittedEventTypes,
     toolNames: actual.toolNames,
     unsupportedMethods: actual.unsupportedMethods,
+    planCaptureCount: actual.planCaptureCount,
   };
+}
+
+/** Replay a plan request through the same Cursor bridge used by native trace fixtures. */
+export async function replayCursorPlanRequest(
+  fixture: ProviderFixtureManifest,
+  params: Parameters<NonNullable<ReturnType<CursorAcpClientBridge["createClient"]>["extMethod"]>>[1],
+): Promise<PlanCapture[]> {
+  const { trace } = getCursorAcpTraceFixture(fixture);
+  const replay = createCursorAcpTraceReplay(trace);
+  await replay.requestExtMethod("cursor/create_plan", params);
+  return replay.planCaptures;
 }
 
 /** Drives one public factory through fake host ports and the shared session runtime. */

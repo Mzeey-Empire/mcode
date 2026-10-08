@@ -1060,7 +1060,9 @@ export class ClaudeProvider
     }
     const planMarkdown =
       typeof input.plan === "string" ? input.plan.trim() : "";
-    if (planMarkdown) {
+    if (planMarkdown.length > 256 * 1024) {
+      logger.warn("Ignoring oversized native plan capture", { threadId, length: planMarkdown.length });
+    } else if (planMarkdown) {
       this.planAnswerThreads.delete(threadId);
       const routing = this.runtime.get(`mcode-${threadId}`)?.executionRouting;
       if (routing) this.canonicalEventPublisher.capturePlan(routing, { markdown: planMarkdown, source: "native" });

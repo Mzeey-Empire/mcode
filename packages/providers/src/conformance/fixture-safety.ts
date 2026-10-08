@@ -10,6 +10,7 @@ import type {
 import { PROVIDER_CONFORMANCE_CONTRACT_VERSION } from "./types.js";
 import { ClaudeNativeTraceSchema } from "./claude-native-trace-schema.js";
 import { parseCopilotCapturedTrace } from "./copilot-trace.js";
+import { SyntheticPlanTraceSchema } from "./synthetic-plan-trace.js";
 
 const PROVIDER_IDS = new Set(["claude", "codex", "copilot", "cursor", "opencode"]);
 const PROFILES = new Set([
@@ -71,11 +72,18 @@ export function loadProviderFixtureManifest(filePath: string): ProviderFixtureMa
 export function validateProviderFixtureManifest(value: unknown): ProviderFixtureManifest {
   const manifest = requireRecord(value, "fixture manifest");
   const nativeInput = requireRecord(manifest.input, "input");
+  if (nativeInput.planTrace !== undefined) {
+    const trace = SyntheticPlanTraceSchema.parse(nativeInput.planTrace);
+    if (manifest.provenance !== "synthetic" || trace.providerId !== manifest.providerId) {
+      throw new TypeError("Synthetic plan trace requires its matching synthetic provider fixture");
+    }
+  }
+  const safeInput = { ...nativeInput, planTrace: undefined };
   if (nativeInput.claudeNativeTrace !== undefined) {
     if (manifest.providerId !== "claude") throw new TypeError("Claude native trace requires the Claude provider");
     ClaudeNativeTraceSchema.parse(nativeInput.claudeNativeTrace);
-    rejectForbiddenContent({ ...manifest, input: { ...nativeInput, claudeNativeTrace: undefined } });
-  } else rejectForbiddenContent(value);
+    rejectForbiddenContent({ ...manifest, input: { ...safeInput, claudeNativeTrace: undefined } });
+  } else rejectForbiddenContent({ ...manifest, input: safeInput });
   requireExactKeys(manifest, [
     "contractVersion",
     "providerId",
@@ -135,8 +143,7 @@ function validateManifestRedaction(value: unknown): void {
 function validateManifestInput(value: unknown, isCursor: boolean, providerId: unknown): void {
   const input = requireRecord(value, "input");
   const nativeKeys = nativeFixtureInputKeys(providerId);
-  requireExactKeys(input, ["events", "planTextDeltas", ...(isCursor ? ["cursorAcpTrace"] : nativeKeys)], "input");
-  if (input.planTextDeltas !== undefined) requireStringArray(input.planTextDeltas, "planTextDeltas", 100);
+  requireExactKeys(input, ["events", "planTrace", ...(isCursor ? ["cursorAcpTrace"] : nativeKeys)], "input");
   if (!Array.isArray(input.events) || input.events.length === 0 || input.events.length > 10_000) {
     throw new TypeError("Provider fixture events are invalid");
   }

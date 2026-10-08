@@ -24,6 +24,7 @@ describe("ClaudeCanonicalEventPublisher", () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const publisher = new ClaudeCanonicalEventPublisher(createSink(submit));
     const capture = { markdown: "# Native plan", source: "native" as const };
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnStarted, threadId: routing.threadId }), []);
     publisher.capturePlan(routing, capture);
     const message = providerRuntimeEvent({ type: AgentEventType.Message, threadId: routing.threadId, content: "Summary", tokens: null });
     const retry = { ...routing, deliveryAttempt: 2 };

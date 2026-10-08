@@ -45,6 +45,60 @@ function prepareCandidate(accepted: ProviderExecutionEventState, input: AgentEve
 }
 
 describe("CodexLiveEventReducer", () => {
+  it.each(["boundary", "tool", "text-item"])("settles a closing plan fence before the next %s", (boundary) => {
+    const reducer = new CodexLiveEventReducer(execution, "output");
+    const firstItem = `assistant-text:${"a".repeat(64)}`;
+    const nextItem = `assistant-text:${"b".repeat(64)}`;
+    reduceEvent(reducer, "turnStarted");
+    reduceEvent(reducer, "textDelta", { delta: "````mcode-plan\n## Native-sized plan\n````", textItemId: firstItem, isFinalResponse: false });
+    if (boundary === "boundary") reduceEvent(reducer, "assistantMessageBoundary", { textItemId: firstItem, isFinalResponse: false });
+    if (boundary === "tool") reduceEvent(reducer, "toolUse", { toolCallId: "read", toolName: "Read", toolInput: {} });
+    reduceEvent(reducer, "textDelta", { delta: "Summary.", textItemId: boundary === "text-item" ? nextItem : firstItem, isFinalResponse: false });
+    const message = reduceEvent(reducer, "message", { content: "Summary.", tokens: null });
+    expect(message.writer).toContainEqual({ kind: "plan-captured", output: {
+      title: "Native-sized plan", contentMd: "## Native-sized plan",
+      sectionsJson: '[{"id":"s1","title":"Native-sized plan","level":2}]', changeSummary: null,
+    } });
+  });
+
+  it.each(["none", "questions", "output"] as const)("reports missing only for an armed completed %s turn", (feature) => {
+    const reducer = new CodexLiveEventReducer(execution, feature);
+    reduceEvent(reducer, "turnStarted");
+    reducer.reduce(event("message", { content: "Summary", tokens: null }), { source: "native", markdown: " " });
+    const result = reduceEvent(reducer, "turnComplete", { providerId: "codex", reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+    expect(result.writer.filter((intent) => intent.kind === "plan-capture-outcome")).toEqual(
+      feature === "output" ? [{ kind: "plan-capture-outcome", outcome: "missing" }] : [],
+    );
+  });
+
+  it.each(["cancelled", "interrupted", "errored"] as const)("does not report a missing plan for %s", (outcome) => {
+    const reducer = new CodexLiveEventReducer(execution, "output");
+    reduceEvent(reducer, "turnStarted");
+    const result = reducer.finishFromState(outcome === "errored" ? { outcome, error: "failed" } : { outcome });
+    if (result.kind !== "reduced") throw new Error(result.reason);
+    expect(result.writer.filter((intent) => intent.kind === "plan-capture-outcome")).toEqual([]);
+  });
+
+  it("reports captured from worker state without a server callback", () => {
+    const reducer = new CodexLiveEventReducer(execution, "output");
+    reduceEvent(reducer, "turnStarted");
+    reduceEvent(reducer, "message", { content: "````mcode-plan\n# Plan\n````", tokens: null });
+    const result = reduceEvent(reducer, "turnComplete", { providerId: "codex", reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+    expect(result.writer).toContainEqual({ kind: "plan-capture-outcome", outcome: "captured" });
+  });
+
+  it("retains an earlier summary when a textless native capture arrives at turn end", () => {
+    const reducer = new CodexLiveEventReducer(execution, "output");
+    reduceEvent(reducer, "turnStarted");
+    reduceEvent(reducer, "message", { content: "Earlier summary.", tokens: null });
+    const result = reducer.reduce(event("message", { content: "", tokens: null }), { markdown: "# Native plan", source: "native" });
+    if (result.kind !== "reduced") throw new Error(result.reason);
+    expect(result.writer[0]).toMatchObject({ kind: "assistant-body", content: "Earlier summary." });
+    expect(result.publication.event).toMatchObject({ type: "message", content: "Earlier summary." });
+    expect(result.writer).toContainEqual({ kind: "plan-captured", output: {
+      title: "Native plan", contentMd: "# Native plan", sectionsJson: "[]", changeSummary: null,
+    } });
+  });
   it.each(["claude", "cursor"])("materializes %s native capture through the worker, ahead of its fence", (providerId) => {
     const state = new ProviderExecutionEventState(providerId, execution, { precedingMessageId: "user", planFeature: "output" });
     state.startFromAdmission();

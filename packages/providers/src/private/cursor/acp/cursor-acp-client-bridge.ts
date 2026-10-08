@@ -180,7 +180,9 @@ export class CursorAcpClientBridge {
   ): AcpExtMethodResponse {
     const record = toRecord(params) ?? {};
     const planMarkdown = extractCursorCreatePlanMarkdown(record);
-    if (planMarkdown) {
+    if (planMarkdown && planMarkdown.length > 256 * 1024) {
+      logger.warn("Ignoring oversized native plan capture", { threadId: entry.threadId, length: planMarkdown.length });
+    } else if (planMarkdown) {
       this.deps.emitPlanCaptured({ threadId: entry.threadId, markdown: planMarkdown, source: "native" }, entry);
     } else {
       logger.warn("cursor/create_plan missing plan markdown", {

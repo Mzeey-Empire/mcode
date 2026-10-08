@@ -75,7 +75,7 @@ describe("PlanTurnService output", () => {
     await service.persistAssistantMessage({ ...event, messageId: reply.id, content: prose });
     service.clearTurn(thread.id);
     expect(plans.getLatestForThread(thread.id)?.version).toBe(1);
-    expect(warn).toHaveBeenCalledExactlyOnceWith("Planning turn produced no plan", { threadId: thread.id, outcome: "missing" });
+    expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
     db.close(true);
   });

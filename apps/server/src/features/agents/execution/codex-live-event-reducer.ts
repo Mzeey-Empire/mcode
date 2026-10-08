@@ -81,6 +81,7 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "feature-event"; readonly feature: "plan-text" | "assistant-message" | "task-tool" | "goal-refresh"; readonly event: AgentEvent }
   | { readonly kind: "plan-questions"; readonly questions: readonly PlanQuestion[] }
   | { readonly kind: "plan-captured"; readonly output: PlanPersistenceReady }
+  | { readonly kind: "plan-capture-outcome"; readonly outcome: "captured" | "missing" }
   | { readonly kind: "context-usage"; readonly tokensIn: number; readonly contextWindow?: number }
   | { readonly kind: "compaction-started" }
   | { readonly kind: "compaction-divider" }
@@ -122,6 +123,7 @@ export class CodexLiveEventReducer {
   private plan: PlanExecutionState | null;
   private planTextBytes = 0;
   private planQuestionsResolved = false;
+  private planTextItemId: string | undefined;
 
   constructor(readonly execution: ExecutionIdentity, readonly planFeature: CodexPlanFeature = "none") {
     this.narrative = new NarrativeTurnState(execution);
@@ -143,6 +145,7 @@ export class CodexLiveEventReducer {
     copy.compacting = this.compacting;
     copy.planTextBytes = this.planTextBytes;
     copy.planQuestionsResolved = this.planQuestionsResolved;
+    copy.planTextItemId = this.planTextItemId;
     return copy;
   }
 
@@ -295,6 +298,8 @@ export class CodexLiveEventReducer {
   private textDelta(event: TextDeltaEvent): CodexLiveWriterIntent[] {
     const writer: CodexLiveWriterIntent[] = [{ kind: "feature-event", feature: "plan-text", event }];
     if (this.plan && !this.planQuestionsResolved) {
+      if (event.textItemId !== this.planTextItemId) this.plan.finishTextItem();
+      this.planTextItemId = event.textItemId;
       this.planTextBytes += Buffer.byteLength(event.delta, "utf8");
       const ready = this.plan.feedText(event.delta);
       if (ready) {
@@ -315,6 +320,7 @@ export class CodexLiveEventReducer {
   }
 
   private boundary(event: Extract<AgentEvent, { type: "assistantMessageBoundary" }>): CodexLiveWriterIntent[] {
+    this.plan?.finishTextItem();
     const writer: CodexLiveWriterIntent[] = [];
     const settlement = this.narrative.settleAssistantTextItem(event.threadId, event);
     if (event.isFinalResponse) {
@@ -340,7 +346,7 @@ export class CodexLiveEventReducer {
   }
 
   private message(event: MessageEvent, capture?: ProviderRuntimeEvent["planCapture"]): CodexLiveWriterIntent[] {
-    if (capture) this.plan?.handlePlanCapture(capture);
+    this.captureMessagePlan(event, capture);
     this.assistant.bufferBody(event.content, event.model ?? null, event.attachments ?? []);
     const body = this.assistant.materializationInput(event.model ?? null);
     this.assistant.resetStreamingText();
@@ -361,12 +367,24 @@ export class CodexLiveEventReducer {
     return writer;
   }
 
+  private captureMessagePlan(event: MessageEvent, capture: ProviderRuntimeEvent["planCapture"]): void {
+    if (!capture) return;
+    this.plan?.handlePlanCapture(capture);
+    if (event.content) return;
+    // A textless native capture gets a synthetic message at turn end, which must preserve the earlier summary.
+    const previous = this.assistant.materializationInput(event.model ?? null);
+    event.content = previous.content || "The provider returned a proposed plan.";
+    event.attachments = previous.attachments;
+    if (previous.model) event.model = previous.model;
+  }
+
   private attachment(event: Extract<AgentEvent, { type: "generatedAttachment" }>): CodexLiveWriterIntent[] {
     this.assistant.bufferAttachments([event.attachment]);
     return [{ kind: "generated-attachment", attachment: event.attachment }];
   }
 
   private toolUse(event: ToolUseEvent): CodexLiveWriterIntent[] {
+    this.plan?.finishTextItem();
     this.narrative.closeOpenThought(event.threadId);
     const parentToolCallId = this.narrative.bufferToolCall(event.threadId, event);
     const attributed = { ...event, parentToolCallId };
@@ -422,7 +440,9 @@ export class CodexLiveEventReducer {
 
   private turnComplete(event: Extract<AgentEvent, { type: "turnComplete" }>): CodexLiveWriterIntent[] {
     this.phase = "completed";
+    const planOutcome = this.plan?.finishTurn();
     return [
+      ...(planOutcome ? [{ kind: "plan-capture-outcome", ...planOutcome } satisfies CodexLiveWriterIntent] : []),
       ...this.contextUsage(event),
       { kind: "terminal-projection", source: "turnComplete", outcome: "completed",
         assistant: this.assistant.materializationInput(null), narrative: this.narrative.terminalSnapshot(event.threadId) },

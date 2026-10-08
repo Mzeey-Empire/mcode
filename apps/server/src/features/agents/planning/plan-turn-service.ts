@@ -151,8 +151,6 @@ ${userMessage}`;
 
   /** Clear volatile plan state once a turn reaches its terminal lifecycle. */
   clearTurn(threadId: string): void {
-    const result = this.executionByThread.get(threadId)?.finishTurn();
-    if (result?.outcome === "missing") logger.warn("Planning turn produced no plan", { threadId, ...result });
     this.executionByThread.delete(threadId);
   }
 

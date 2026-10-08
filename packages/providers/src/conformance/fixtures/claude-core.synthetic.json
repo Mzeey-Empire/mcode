@@ -19,7 +19,7 @@
     "thread-control"
   ],
   "scenario": "core lifecycle structure",
-  "sourceHash": "aee978b4120869e400e3ab9241db471177765d3258baccbdf55cf06f39d80a85",
+  "sourceHash": "f0ffac4e64f0baec2ebe87528a350ac844c500e9f964e271c7a115315b1704a8",
   "redaction": {
     "reviewed": true,
     "removedFields": [
@@ -31,7 +31,7 @@
     ]
   },
   "input": {
-    "planTextDeltas": ["Summary\n``","``mcode-","plan\n# Synthetic plan\n\n## Build\n```ts\nconst answer = 42;\n```\n```","`"],
+    "planTrace": {"providerId":"claude","requests":[{"toolName":"ExitPlanMode","input":{"plan":"# Synthetic plan\n\n## Build\n```ts\nconst answer = 42;\n```"}}]},
     "events": [
       {
         "kind": "session",

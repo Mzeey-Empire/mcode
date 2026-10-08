@@ -14,7 +14,7 @@ type TerminalIntent = Extract<CodexLiveWriterIntent, { kind: "terminal-projectio
 export type CodexLiveRuntimeIntent = Extract<CodexLiveWriterIntent, { kind:
   "turn-started" | "generated-attachment" | "tool-use" | "tool-result" | "hook-started"
   | "hook-completed" | "narrative-effect" | "context-usage" | "compaction-started"
-  | "compaction-divider" | "compaction-summary" | "turn-error" | "turn-ended" | "plan-captured"
+  | "compaction-divider" | "compaction-summary" | "turn-error" | "turn-ended" | "plan-captured" | "plan-capture-outcome"
 }> | { readonly kind: "feature-event"; readonly feature: "goal-refresh"; readonly event: ReducedEvent["publication"]["event"] };
 
 /** Cloneable parent writes and the remaining work required before publication. */

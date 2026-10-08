@@ -1,3 +1,8 @@
+/** Match the exact plan info string on a Markdown fence opener. */
+export function isPlanFenceOpener(marker: string, info: string): boolean {
+  return /^(?:`{3,}|~{3,})$/.test(marker) && info.trim() === "mcode-plan";
+}
+
 /** Captures the first complete mcode-plan fence without interpreting its markdown. */
 export class PlanFenceParser {
   private pendingLine = "";
@@ -45,7 +50,7 @@ export class PlanFenceParser {
     const marker = match[1][0];
     if (marker === "`" && match[2].includes("`")) return;
     this.fence = { marker, length: match[1].length,
-      plan: marker === "`" && match[1].length >= 4 && match[2].trim() === "mcode-plan" };
+      plan: isPlanFenceOpener(match[1], match[2]) };
   }
 
   private readFencedLine(line: string, match: RegExpExecArray | null, fence: { marker: string; length: number; plan: boolean }): void {

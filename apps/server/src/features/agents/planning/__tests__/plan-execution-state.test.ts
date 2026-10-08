@@ -85,16 +85,52 @@ describe("PlanExecutionState", () => {
     });
   });
 
-  it("allows a titled plan without subheadings and rejects missing or unclosed captures", () => {
+  it("allows a titled plan without subheadings and rejects unclosed captures", () => {
     const state = new PlanExecutionState();
     state.beginOutputGeneration();
     expect(state.consumeAssistantMessage("````mcode-plan\n# Unclosed")).toBeNull();
-    state.handlePlanCapture({ markdown: "## No H1", source: "native" });
-    expect(state.consumeAssistantMessage("Summary")).toBeNull();
     state.handlePlanCapture({ markdown: "# Small plan\nDo it.", source: "native" });
     expect(state.consumeAssistantMessage("Summary")).toEqual({
       title: "Small plan", contentMd: "# Small plan\nDo it.", sectionsJson: "[]", changeSummary: null,
     });
+  });
+
+  it.each([
+    ["## First heading\n### Next\nSteps", "First heading"],
+    ["\n  Implement the login screen.\nThen test it.", "Implement the login screen."],
+    ["# " + "x".repeat(250), "x".repeat(200)],
+  ])("captures native markdown with a bounded fallback title: %s", (body, title) => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    state.handlePlanCapture({ markdown: body, source: "native" });
+    expect(state.consumeAssistantMessage(fenced)).toMatchObject({ title, contentMd: body });
+  });
+
+  it.each(["   ", "x".repeat(256 * 1024 + 1)])("retains the fence when native capture is unusable", (body) => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    state.handlePlanCapture({ markdown: body, source: "native" });
+    expect(state.consumeAssistantMessage(fenced)?.contentMd).toBe(markdown);
+  });
+
+  it("does not arm planning from a native capture during questions", () => {
+    const state = new PlanExecutionState();
+    state.beginQuestionGeneration();
+    state.handlePlanCapture({ markdown, source: "native" });
+    expect(state.consumeAssistantMessage("Summary")).toBeNull();
+    expect(state.finishTurn()).toBeNull();
+  });
+
+  it("bounds navigation sections while retaining the complete markdown", () => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    const body = "# Plan\n" + Array.from({ length: 150 }, (_, index) => `## Step ${index}\n`).join("");
+    state.handlePlanCapture({ markdown: body, source: "native" });
+    const output = state.consumeAssistantMessage("Summary");
+    expect(output?.contentMd).toBe(body);
+    expect(JSON.parse(output?.sectionsJson ?? "null")).toEqual(Array.from({ length: 128 }, (_, index) => ({
+      id: `s${index + 1}`, title: `Step ${index}`, level: 2,
+    })));
   });
 
   it("forks partial fences without consuming accepted state", () => {

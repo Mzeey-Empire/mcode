@@ -34,7 +34,6 @@ describe("PlanFenceParser", () => {
 
   it.each([
     "# Plain prose\n## Headings",
-    "```mcode-plan\n# Too short\n```",
     "````mcode-plan extra\n# Wrong info\n````",
     "````mcode-plan\n# Unclosed\n```",
     "`````mcode-plan\n# Short closer\n````",

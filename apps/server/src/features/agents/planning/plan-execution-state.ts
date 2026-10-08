@@ -61,9 +61,16 @@ export class PlanExecutionState {
 
   /** Native output takes precedence over a pending fence capture. */
   handlePlanCapture(capture: Pick<PlanCapture, "markdown" | "source">): void {
-    if (this.captured || !capture.markdown.trim() || this.pendingCapture?.source === "native") return;
-    this.planning = true;
+    if (!this.planning || this.captured || !capture.markdown.trim() || capture.markdown.length > 256 * 1024
+      || this.pendingCapture?.source === "native") return;
     this.pendingCapture = capture;
+  }
+
+  /** Finish the current text item before another item or tool can append text. */
+  finishTextItem(): void {
+    const markdown = this.fenceParser?.finish();
+    if (markdown) this.handlePlanCapture({ markdown, source: "fence" });
+    if (this.fenceParser) this.fenceParser = new PlanFenceParser();
   }
 
   /** Keep assistant materialization armed until a valid capture can be persisted. */
@@ -102,15 +109,24 @@ export class PlanExecutionState {
 }
 
 function extractMarkdown(content: string): PlanPersistenceReady | null {
-  let title: string | null = null;
+  const headings = [...markdownHeadings(content)];
+  const titleHeading = headings.find((heading) => heading.level === 1);
+  const title = titleHeading?.title ?? headings[0]?.title ?? content.split("\n").find((line) => line.trim())?.trim();
+  return title ? { title: title.slice(0, 200), contentMd: content,
+    sectionsJson: planNavigation(headings.filter((heading) => heading !== titleHeading)), changeSummary: null } : null;
+}
+
+function planNavigation(headings: Array<{ title: string; level: number }>): string {
+  let sectionsLength = 2;
   const sections: Array<{ id: string; title: string; level: number }> = [];
-  for (const heading of markdownHeadings(content)) {
-    if (!title && heading.level === 1) title = heading.title;
-    else sections.push({ id: `s${sections.length + 1}`, ...heading });
+  for (const heading of headings) {
+    const section = { id: `s${sections.length + 1}`, ...heading };
+    const length = JSON.stringify(section).length + Number(sections.length > 0);
+    if (sections.length >= 128 || sectionsLength + length > 64 * 1024) break;
+    sections.push(section);
+    sectionsLength += length;
   }
-  return title
-    ? { title, contentMd: content, sectionsJson: JSON.stringify(sections), changeSummary: null }
-    : null;
+  return JSON.stringify(sections);
 }
 
 function* markdownHeadings(content: string): Generator<{ title: string; level: number }> {
@@ -125,6 +141,7 @@ function* markdownHeadings(content: string): Generator<{ title: string; level: n
     if (fence) continue;
     const match = /^ {0,3}(#{1,3})[ \t]+(.+)/.exec(line);
     if (!match) continue;
-    yield { title: match[2].replace(/\s+#+\s*$/, "").trim(), level: match[1].length };
+    const title = match[2].replace(/\s+#+\s*$/, "").trim().slice(0, 200);
+    if (title) yield { title, level: match[1].length };
   }
 }

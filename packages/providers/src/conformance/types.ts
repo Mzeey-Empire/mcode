@@ -123,8 +123,8 @@ export interface ProviderFixtureManifest {
   };
   input: {
     events: readonly SanitizedTraceEvent[];
-    /** Synthetic assistant deltas that exercise the provider-neutral plan fallback. */
-    planTextDeltas?: readonly string[];
+    /** Native synthetic events replayed through the provider's mapper or bridge. */
+    planTrace?: import("./synthetic-plan-trace.js").SyntheticPlanTrace;
     /** Cursor-only ACP envelopes. Generic ACP fixtures remain private. */
     cursorAcpTrace?: CursorAcpTraceFixture;
     /** Claude native structural envelopes; content fields contain only allowlisted tool shapes. */

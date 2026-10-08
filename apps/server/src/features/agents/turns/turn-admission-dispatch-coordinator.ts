@@ -716,7 +716,7 @@ export class TurnAdmissionDispatchCoordinator {
     if (!this.parentStartOwner) return this.startParentTurn(input);
     const precedingMessageId = input.userMessage.messageId;
     if (!precedingMessageId) throw new Error("Worker-owned turn needs its committed user message identity");
-    const planFeature = prepared.command.planAction === "revise" ? "output"
+    const planFeature = prepared.command.planAction === "revise" || prepared.command.markPlanAnswerForMessageId ? "output"
       : this.effectiveInteractionMode(prepared.command) === "plan" ? "questions" : "none";
     await this.parentStartOwner.start({
       execution: { threadId: lease.threadId, turnId: sourceTurnId, executionId: lease.turnExecutionId },

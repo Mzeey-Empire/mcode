@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { AgentEventType, providerRuntimeEvent } from "@mcode/contracts";
+import { AgentEventType, ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contracts";
+import { CanonicalLiveEventPublisher } from "../canonical-live-event-publisher.js";
 import type { ProviderEventSinkPort, ProviderEventSubmissionReceipt } from "../../host-ports.js";
 import { CodexCanonicalEventPublisher } from "../codex/codex-canonical-event-publisher.js";
 import { CursorCanonicalEventPublisher } from "../cursor/cursor-canonical-event-publisher.js";
@@ -28,6 +29,33 @@ const factories = [
     return { publish: () => publisher.publish(routing, event, []), publishTerminal: () => publisher.publish(routing, terminal, []), publishPeer: () => publisher.publish({ ...routing, executionId: "00000000-0000-4000-8000-000000000002" }, event, []), drain: () => publisher.stopAdmissionAndDrain() };
   } },
 ];
+
+describe.each(["claude", "cursor"] as const)("%s native plan lifecycle", (providerId) => {
+  it("delivers textless captures before completion and rejects captures after retirement", async () => {
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
+    const publisher = providerId === "cursor"
+      ? new CursorCanonicalEventPublisher({ submit }) : new CanonicalLiveEventPublisher(providerId, { submit });
+    const capture = { markdown: "## Review plan", source: "native" as const };
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnStarted, threadId: routing.threadId }), []);
+    publisher.capturePlan(routing, capture);
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnComplete, threadId: routing.threadId,
+      reason: "end_turn", providerId, tokensIn: 0, tokensOut: 0, costUsd: null }), []);
+    await publisher.waitForExecution(routing);
+    const emitted = submit.mock.calls.flatMap(([batch]) => batch.events.flatMap((draft) =>
+      draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent"
+        ? [ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent)] : []));
+    expect(emitted.map((runtime) => runtime.event.type)).toEqual(["turnStarted", "message", "turnComplete"]);
+    expect(emitted[1]).toMatchObject({ event: { content: "", turnExecutionId: routing.executionId }, planCapture: capture });
+    publisher.capturePlan(routing, capture);
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.Message, threadId: routing.threadId, content: "Late", tokens: null }), []);
+    await publisher.waitForExecution(routing);
+    const late = submit.mock.calls.at(-1)?.[0].events[0]?.payload;
+    expect(late).toMatchObject({ type: "item.recorded", item: { payload: { runtimeEvent: { event: { content: "Late" } } } } });
+    if (late?.type !== "item.recorded") throw new Error("Missing late event");
+    expect(ProviderRuntimeEventSchema().parse(late.item.payload.runtimeEvent).planCapture).toBeUndefined();
+    await publisher.stopAdmissionAndDrain();
+  });
+});
 
 describe.each(factories)("$name publisher shutdown", ({ create }) => {
   it("drains every accepted draft and rejects late callbacks", async () => {

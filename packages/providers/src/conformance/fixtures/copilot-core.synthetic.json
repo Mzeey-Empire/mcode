@@ -17,7 +17,7 @@
     "thread-control"
   ],
   "scenario": "core lifecycle structure",
-  "sourceHash": "aee978b4120869e400e3ab9241db471177765d3258baccbdf55cf06f39d80a85",
+  "sourceHash": "9838ec09ebddb79e4b2190e1331fbcf2e1f52a862a70603f3cd1f4c42fb3b945",
   "redaction": {
     "reviewed": true,
     "removedFields": [
@@ -29,7 +29,7 @@
     ]
   },
   "input": {
-    "planTextDeltas": ["Summary\n``","``mcode-","plan\n# Synthetic plan\n\n## Build\n```ts\nconst answer = 42;\n```\n```","`"],
+    "planTrace": {"providerId":"copilot","events":[{"id":"EVENT_1","timestamp":"2026-01-01T00:00:00.000Z","parentId":null,"type":"assistant.message_delta","data":{"messageId":"ITEM_1","deltaContent":"Summary\n``"}},{"id":"EVENT_2","timestamp":"2026-01-01T00:00:00.000Z","parentId":null,"type":"assistant.message_delta","data":{"messageId":"ITEM_1","deltaContent":"``mcode-"}},{"id":"EVENT_3","timestamp":"2026-01-01T00:00:00.000Z","parentId":null,"type":"assistant.message_delta","data":{"messageId":"ITEM_1","deltaContent":"plan\n# Synthetic plan\n\n## Build\n```ts\nconst answer = 42;\n```\n```"}},{"id":"EVENT_4","timestamp":"2026-01-01T00:00:00.000Z","parentId":null,"type":"assistant.message_delta","data":{"messageId":"ITEM_1","deltaContent":"`"}}]},
     "events": [
       {
         "kind": "session",
