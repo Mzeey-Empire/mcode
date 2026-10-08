@@ -142,6 +142,28 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
       retryable: true, detail: "fatal: Could not resolve host: github.com" });
   });
 
+  it("records a thread creation failure after a successful direct PR fetch", async () => {
+    const { db, workspace, threads, startups, gitRepository, coordinator } = await harness();
+    db.exec(`CREATE TRIGGER reject_thread_creation BEFORE INSERT ON threads
+      BEGIN SELECT RAISE(ABORT, '\n  Thread storage unavailable  \nmore context'); END`);
+    await expect(coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Review", mode: "direct",
+      branch: "feature/pr", pullRequestNumber: 42, startupId: directStartupId })).rejects.toThrow();
+    expect(gitRepository.fetchBranch).toHaveBeenCalledExactlyOnceWith(workspace.id, "feature/pr", 42);
+    expect(threads.listByWorkspace(workspace.id)).toEqual([]);
+    expect(startups.get(directStartupId)?.error).toEqual({ code: "THREAD_CREATE_FAILED", message: "Thread creation failed",
+      retryable: true, detail: "Thread storage unavailable" });
+  });
+
+  it("does not fetch or record a fetch phase for a direct branch carrying a PR number", async () => {
+    const { workspace, startups, gitRepository, parent, fork, makeCoordinator } = await branchHarness();
+    const created = await makeCoordinator().createInitialTurn({ workspaceId: workspace.id, content: "Branch here",
+      mode: "direct", branch: "feature/pr", pullRequestNumber: 42, parentThreadId: parent.id,
+      forkedFromMessageId: fork.id, startupId: directStartupId });
+    expect(created).toMatchObject({ kind: "dispatch", command: { content: "Branch here", providerWireOverride: "Parent handoff" } });
+    expect(gitRepository.fetchBranch).not.toHaveBeenCalled();
+    expect(startups.get(directStartupId)?.steps.map((step) => step.phase)).toEqual(["thread", "agent"]);
+  });
+
   it.each([
     ["\n  useful cause  \nignored line", "useful cause"],
     ["x".repeat(2_100), "x".repeat(2_000)],
@@ -355,12 +377,14 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     );
     const command = {
       workspaceId: workspace.id, content: "Branch in a worktree", mode: "worktree" as const,
-      branch: "feature/child", parentThreadId: parent.id, startupId: managedStartupId,
+      branch: "feature/child", pullRequestNumber: 42, parentThreadId: parent.id, startupId: managedStartupId,
     };
     const coordinator = makeCoordinator();
     const created = await coordinator.createInitialTurn(command);
     expect(created).toMatchObject({ kind: "dispatch", startupId: managedStartupId });
+    expect(gitRepository.fetchBranch).not.toHaveBeenCalled();
     expect(startups.get(managedStartupId)?.steps[1].detail).toEqual({ phase: "worktree", mode: "created", folderName: "branched", path: "/project/branched" });
+    expect(startups.get(managedStartupId)?.steps[2].detail).toEqual({ phase: "setup" });
     expect(startups.get(managedStartupId)).toMatchObject({
       state: "running", phase: "agent", threadId: created.thread.id,
       steps: [

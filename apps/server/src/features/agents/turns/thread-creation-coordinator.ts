@@ -327,7 +327,17 @@ export class ThreadCreationCoordinator {
   private async fetchInitialBranch(params: BranchedInitialTurnParams, startupId?: string): Promise<void> {
     if (params.pullRequestNumber === undefined || params.existingWorktreePath) return;
     if (startupId) await this.startups()?.advance(startupId, "fetch");
-    await this.gitRepository.fetchBranch(params.workspaceId, params.branch, params.pullRequestNumber);
+    try {
+      await this.gitRepository.fetchBranch(params.workspaceId, params.branch, params.pullRequestNumber);
+    } catch (cause) {
+      if (startupId) {
+        await this.startups()?.fail(startupId, {
+          code: "FETCH_FAILED", message: "Git fetch failed", retryable: true,
+          detail: startupErrorDetail(cause, true),
+        });
+      }
+      throw cause;
+    }
     await this.cancelIfRequested(startupId);
   }
 
@@ -447,7 +457,7 @@ export class ThreadCreationCoordinator {
       kind: params.mode === "worktree"
         ? params.existingWorktreePath ? "attached-worktree" : "managed-worktree"
         : "direct",
-      fetch: params.pullRequestNumber !== undefined && !params.existingWorktreePath ? {
+      fetch: params.pullRequestNumber !== undefined && !params.existingWorktreePath && !params.parentThreadId ? {
         ref: `pull/${params.pullRequestNumber}/head`,
         pullRequestNumber: params.pullRequestNumber,
         branch: params.branch,
@@ -496,14 +506,12 @@ export class ThreadCreationCoordinator {
     if (!startupId) return;
     const startup = this.startups()?.get(startupId);
     if (!startup || startup.state === "blocked") return;
-    const error = startup.phase === "fetch"
-      ? { code: "FETCH_FAILED", message: "Git fetch failed", retryable: true }
-      : startup.phase === "thread"
-        ? { code: "THREAD_CREATE_FAILED", message: "Thread creation failed", retryable: true }
-        : startup.phase === "worktree"
-          ? { code: "WORKTREE_PREPARATION_FAILED", message: "Worktree preparation failed", retryable: true }
-          : { code: "SETUP_ADMISSION_FAILED", message: "Project Setup admission failed", retryable: true };
-    await this.startups()?.fail(startupId, { ...error, detail: startupErrorDetail(cause, startup.phase === "fetch") });
+    const error = startup.phase === "thread" || startup.phase === "fetch"
+      ? { code: "THREAD_CREATE_FAILED", message: "Thread creation failed", retryable: true }
+      : startup.phase === "worktree"
+        ? { code: "WORKTREE_PREPARATION_FAILED", message: "Worktree preparation failed", retryable: true }
+        : { code: "SETUP_ADMISSION_FAILED", message: "Project Setup admission failed", retryable: true };
+    await this.startups()?.fail(startupId, { ...error, detail: startupErrorDetail(cause, false) });
   }
 
   /** Apply first-turn provider settings to an already-provisioned thread. */
@@ -607,7 +615,6 @@ export class ThreadCreationCoordinator {
   ): Promise<CreatedInitialTurn> {
     const branching = this.branching?.();
     if (!branching) throw new Error("Thread branching is not configured");
-    await this.fetchInitialBranch(params, startup?.startupId);
     const provisioned = await branching.create({
       workspaceId: params.workspaceId,
       content: params.content,
@@ -696,7 +703,10 @@ export class ThreadCreationCoordinator {
     }
     if (startup.kind === "managed-worktree" || startup.kind === "attached-worktree") {
       await this.startups()?.advance(startup.startupId, "setup");
-      await this.startups()?.skip(startup.startupId, "setup", { phase: "setup", skipReason: "not-configured" });
+      await this.startups()?.skip(startup.startupId, "setup", {
+        phase: "setup",
+        ...(startup.kind === "attached-worktree" ? { skipReason: "not-configured" } : {}),
+      });
     }
     await this.cancelIfRequested(startup.startupId);
   }
