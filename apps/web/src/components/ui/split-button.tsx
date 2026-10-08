@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, type ReactNode } from "react"
+import { useRef, type ReactNode, type RefObject } from "react"
 import { ChevronDown } from "lucide-react"
 
 import { Button, type ButtonProps } from "@/components/ui/button"
@@ -44,6 +44,58 @@ interface SplitButtonProps {
   menuTriggerProps?: Omit<ButtonProps, "children" | "variant" | "size" | "disabled" | "aria-label"> & DataAttributes
 }
 
+type SplitButtonMenuProps = Pick<
+  SplitButtonProps,
+  "menu" | "menuLabel" | "menuSide" | "menuAlign" | "menuSideOffset" | "menuTriggerProps"
+> & {
+  variant: SplitButtonVariant
+  size: SplitButtonSize
+  disabled: boolean
+  anchor: RefObject<HTMLDivElement | null>
+}
+
+/** The chevron half and its menu of alternates. */
+function SplitButtonMenu({
+  menu,
+  menuLabel,
+  menuSide = "bottom",
+  menuAlign = "end",
+  menuSideOffset,
+  menuTriggerProps,
+  variant,
+  size,
+  disabled,
+  anchor,
+}: SplitButtonMenuProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            {...menuTriggerProps}
+            variant={variant}
+            size={CHEVRON_SIZE[size]}
+            disabled={disabled}
+            aria-label={menuLabel}
+            className={cn(
+              // The divider sits inside the chevron half so both fills stay continuous.
+              // Outline already divides with the chevron's own left border.
+              "rounded-l-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-current before:opacity-25",
+              variant === "outline" && "before:hidden",
+              menuTriggerProps?.className,
+            )}
+          >
+            <ChevronDown aria-hidden />
+          </Button>
+        }
+      />
+      <DropdownMenuContent anchor={anchor} side={menuSide} align={menuAlign} sideOffset={menuSideOffset}>
+        {menu}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 /**
  * One control with the action on the left and a chevron on the right that opens a
  * menu of alternate methods. Both halves share one outline; focus order is action,
@@ -52,18 +104,13 @@ interface SplitButtonProps {
 function SplitButton({
   children,
   onClick,
-  menuLabel,
-  menu,
   variant = "outline",
   size = "compact",
   disabled = false,
   loading = false,
   className,
   actionProps,
-  menuTriggerProps,
-  menuSide = "bottom",
-  menuAlign = "end",
-  menuSideOffset,
+  ...menuProps
 }: SplitButtonProps) {
   // The menu belongs to the whole control, so it positions against both halves, not the chevron.
   const rootRef = useRef<HTMLDivElement>(null)
@@ -80,31 +127,13 @@ function SplitButton({
       >
         {children}
       </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              {...menuTriggerProps}
-              variant={variant}
-              size={CHEVRON_SIZE[size]}
-              disabled={disabled || loading}
-              aria-label={menuLabel}
-              className={cn(
-                // The divider sits inside the chevron half so both fills stay continuous.
-                // Outline already divides with the chevron's own left border.
-                "rounded-l-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-current before:opacity-25",
-                variant === "outline" && "before:hidden",
-                menuTriggerProps?.className,
-              )}
-            >
-              <ChevronDown aria-hidden />
-            </Button>
-          }
-        />
-        <DropdownMenuContent anchor={rootRef} side={menuSide} align={menuAlign} sideOffset={menuSideOffset}>
-          {menu}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <SplitButtonMenu
+        {...menuProps}
+        variant={variant}
+        size={size}
+        disabled={disabled || loading}
+        anchor={rootRef}
+      />
     </div>
   )
 }
