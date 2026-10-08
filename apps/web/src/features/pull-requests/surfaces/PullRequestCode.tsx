@@ -11,6 +11,8 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type ReactNode,
+  type RefObject,
   type SetStateAction,
 } from "react";
 import {
@@ -22,6 +24,7 @@ import {
   Files,
   GitBranch,
 } from "lucide-react";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { ErrorIcon } from "@/components/ui/icon-map";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -600,6 +603,8 @@ interface PullRequestCodeFilesPaneProps {
   onWidthChange: (width: number) => void;
   onActivate: (path: string) => void;
   onQueryChange: (query: PullRequestCodeView["query"]) => void;
+  /** Code area the floating sheet docks into, so it covers the diff and not the toolbar. */
+  sheetHostRef: RefObject<HTMLDivElement | null>;
 }
 
 function PullRequestCodeFilesPane({
@@ -614,6 +619,7 @@ function PullRequestCodeFilesPane({
   onWidthChange,
   onActivate,
   onQueryChange,
+  sheetHostRef,
 }: PullRequestCodeFilesPaneProps) {
   if (!view.fileTreeVisible) return null;
 
@@ -637,21 +643,62 @@ function PullRequestCodeFilesPane({
   }
 
   return (
-    <PullRequestChangedFilesPane
-      files={displayedFiles}
-      activePath={view.activePath}
-      query={view.query}
-      width={Math.min(filesPanelWidth, floatingFilesPanelMaxWidth)}
-      minWidth={floatingFilesPanelMinWidth}
-      maxWidth={`calc(100% - ${FLOATING_FILES_PANEL_EDGE_GAP}px)`}
-      defaultWidth={FILES_PANEL_DEFAULT_WIDTH}
-      wideWidth={FILES_PANEL_WIDE_WIDTH}
-      getMaxWidth={getFloatingFilesPanelMaxWidth}
-      onWidthChange={onWidthChange}
-      className={cn("absolute inset-y-0 right-0 z-30 h-full", SHEET_SURFACE_CLASS, SHEET_MOUNT_FADE_CLASS)}
-      onActivate={onActivate}
-      onQueryChange={onQueryChange}
-    />
+    <FloatingFilesSheet hostRef={sheetHostRef}>
+      <PullRequestChangedFilesPane
+        files={displayedFiles}
+        activePath={view.activePath}
+        query={view.query}
+        width={Math.min(filesPanelWidth, floatingFilesPanelMaxWidth)}
+        minWidth={floatingFilesPanelMinWidth}
+        maxWidth={`calc(100% - ${FLOATING_FILES_PANEL_EDGE_GAP}px)`}
+        defaultWidth={FILES_PANEL_DEFAULT_WIDTH}
+        wideWidth={FILES_PANEL_WIDE_WIDTH}
+        getMaxWidth={getFloatingFilesPanelMaxWidth}
+        onWidthChange={onWidthChange}
+        className="h-full"
+        onActivate={onActivate}
+        onQueryChange={onQueryChange}
+      />
+    </FloatingFilesSheet>
+  );
+}
+
+/**
+ * Non-modal sheet over the right edge of the diff. The user keeps reading and scrolling the
+ * diff beside it, so it neither takes focus nor closes on outside presses. Escape closes it
+ * only while focus is inside it, so Escape in a diff comment editor stays with that editor.
+ */
+function FloatingFilesSheet({
+  hostRef,
+  children,
+}: {
+  hostRef: RefObject<HTMLDivElement | null>;
+  children: ReactNode;
+}) {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const handleOpenChange = (open: boolean, details: DialogPrimitive.Root.ChangeEventDetails): void => {
+    if (open) return;
+    if (details.reason === "escape-key" && !sheetRef.current?.contains(document.activeElement)) {
+      details.cancel();
+      return;
+    }
+    usePullRequestCodeStore.getState().setFileTreeVisible(false);
+  };
+
+  return (
+    <DialogPrimitive.Root open modal={false} disablePointerDismissal onOpenChange={handleOpenChange}>
+      <DialogPrimitive.Portal container={hostRef}>
+        <DialogPrimitive.Popup
+          ref={sheetRef}
+          aria-label="Changed files"
+          initialFocus={false}
+          finalFocus={false}
+          className={cn("absolute inset-y-0 right-0 z-30 flex outline-none", SHEET_SURFACE_CLASS, SHEET_MOUNT_FADE_CLASS)}
+        >
+          {children}
+        </DialogPrimitive.Popup>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -813,6 +860,7 @@ export function PullRequestCode({
     useShallow(selectPullRequestCodeComments(identityKey)),
   );
   const codeRootRef = useRef<HTMLElement>(null);
+  const filesSheetHostRef = useRef<HTMLDivElement>(null);
   const codeWidth = useElementWidth(codeRootRef, identityKey);
   const filesPanelLayout = usePullRequestFilesPanelLayout(codeWidth, isNarrow);
   const commentsPaginationStalled = useReviewThreadPagination(
@@ -925,7 +973,7 @@ export function PullRequestCode({
           stalled={commentsPaginationStalled}
         />
 
-        <div className="relative flex min-h-0 flex-1">
+        <div ref={filesSheetHostRef} className="relative flex min-h-0 flex-1">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-page">
             <PullRequestCodeDiffBody
               code={code}
@@ -965,6 +1013,7 @@ export function PullRequestCode({
             onWidthChange={setFilesPanelWidth}
             onActivate={activateFile}
             onQueryChange={updateFileQuery}
+            sheetHostRef={filesSheetHostRef}
           />
         </div>
       </section>
