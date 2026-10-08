@@ -100,7 +100,7 @@ export function WorktreeFilesPane({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               aria-label="Refresh comparison"
               disabled={refreshing}
               onClick={onRefresh}

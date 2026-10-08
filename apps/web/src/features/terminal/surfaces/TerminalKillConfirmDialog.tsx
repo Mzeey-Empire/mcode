@@ -56,10 +56,10 @@ export const TerminalKillConfirmDialog = memo(function TerminalKillConfirmDialog
             This will terminate the entire process tree, including every running child process.
           </DialogDescription>
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" onClick={onCancel} disabled={pending}>
+            <Button variant="outline" size="compact" onClick={onCancel} disabled={pending}>
               Cancel
             </Button>
-            <Button variant="destructive" size="sm" onClick={onConfirm} disabled={pending}>
+            <Button variant="destructive" size="compact" onClick={onConfirm} disabled={pending}>
               {pending ? "Closing..." : "Close process tree"}
             </Button>
           </div>

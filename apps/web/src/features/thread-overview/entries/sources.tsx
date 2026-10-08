@@ -38,7 +38,7 @@ function ThreadOverviewSources({ sources, onOpen }: ThreadOverviewSourcesProps) 
               render={
                 <Button
                   variant="ghost"
-                  size="icon-xs"
+                  size="icon-compact"
                   type="button"
                   aria-label={source.url}
                   data-testid="thread-overview-source"

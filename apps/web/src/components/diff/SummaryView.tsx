@@ -337,7 +337,7 @@ function CancelSummaryButton({ onCancel }: { readonly onCancel: () => void }) {
   return (
     <Button
       variant="ghost"
-      size="xs"
+      size="compact"
       onClick={onCancel}
       className="gap-1 text-caption text-muted hover:text-ink"
     >
@@ -409,7 +409,7 @@ function RenderedSummary({
               render={
                 <Button
                   variant="ghost"
-                  size="icon-xs"
+                  size="icon-compact"
                   onClick={actions.onCopy}
                   className="h-6 w-6 text-muted/50 hover:text-ink/70"
                   aria-label="Copy summary to clipboard"
@@ -424,7 +424,7 @@ function RenderedSummary({
           </Tooltip>
           <Button
             variant="ghost"
-            size="xs"
+            size="compact"
             onClick={actions.onGenerate}
             className="gap-1 text-caption text-muted hover:text-ink"
           >
@@ -469,7 +469,7 @@ function EmptySummary({
       <SummaryError error={error} />
       <Button
         variant="ghost"
-        size="xs"
+        size="compact"
         onClick={onGenerate}
         disabled={!hasFileChanges || !activeThreadId}
         className="mt-1 text-caption text-muted hover:text-ink"

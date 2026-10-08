@@ -94,6 +94,79 @@ describe("StartupProgressCard", () => {
     expect(screen.queryByText("Creating a thread")).toBeNull();
   });
 
+  it("shows a local PR fetch as the project checkout step", () => {
+    render(
+      <StartupProgressCard
+        startup={startup({
+          kind: "direct",
+          phase: "fetch",
+          steps: [
+            { phase: "thread", state: "completed" },
+            { phase: "fetch", state: "running" },
+            { phase: "agent", state: "pending" },
+          ],
+        })}
+        startupId={startupId}
+        context="direct"
+      />,
+    );
+
+    const steps = screen.getAllByRole("listitem");
+    expect(steps.map((item) => [item.textContent, item.dataset.state])).toEqual([
+      [expect.stringContaining("Use project checkout"), "running"],
+      [expect.stringContaining("Start agent"), "pending"],
+    ]);
+  });
+
+  it("shows a failed new worktree PR fetch on the checkout step", () => {
+    render(
+      <StartupProgressCard
+        startup={startup({
+          state: "failed",
+          phase: "fetch",
+          error: { code: "FETCH_FAILED", message: "Git fetch failed", retryable: true },
+          steps: [
+            { phase: "thread", state: "completed" },
+            { phase: "fetch", state: "failed" },
+            { phase: "worktree", state: "pending" },
+            { phase: "setup", state: "pending" },
+            { phase: "agent", state: "pending" },
+          ],
+        })}
+        startupId={startupId}
+        context="managed-worktree"
+      />,
+    );
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByText("Prepare checkout").closest("li")).toHaveAttribute("data-state", "failed");
+  });
+
+  it("keeps the existing worktree layout to its attach and agent steps", () => {
+    render(
+      <StartupProgressCard
+        startup={startup({
+          kind: "attached-worktree",
+          phase: "agent",
+          steps: [
+            { phase: "thread", state: "completed" },
+            { phase: "worktree", state: "completed" },
+            { phase: "setup", state: "skipped", detail: { phase: "setup", skipReason: "not-configured" } },
+            { phase: "agent", state: "running" },
+          ],
+        })}
+        startupId={startupId}
+        context="attached-worktree"
+      />,
+    );
+
+    const steps = screen.getAllByRole("listitem");
+    expect(steps.map((item) => [item.textContent, item.dataset.state])).toEqual([
+      [expect.stringContaining("Attach existing checkout"), "completed"],
+      [expect.stringContaining("Start agent"), "running"],
+    ]);
+  });
+
   it("uses native details and updates the live transcript", async () => {
     const user = userEvent.setup();
     const initial = startup({

@@ -48,7 +48,7 @@ export function ReviewFileChangeRow({
             type="button"
             role="treeitem"
             variant="ghost"
-            size="sm"
+            size="compact"
             tabIndex={tabIndex}
             aria-label={`${CHANGE_TYPE_LABELS[file.changeType]} ${pathLabel}${file.binary ? ", Binary" : ""}`}
             aria-level={depth}

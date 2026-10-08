@@ -291,10 +291,14 @@ describe("automatic Project Setup", () => {
     await eventually(() => expect(startup.skip).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       "setup",
+      { phase: "setup", skipReason: "not-configured" },
     ));
   });
 
-  it("forwards automatic Setup output before completion and blocks a failed attempt", async () => {
+  it.each([
+    ["this attempt's last output line", "installing\n  command failed  \n\n", "command failed"],
+    ["no line from an earlier attempt", "\n", undefined],
+  ])("forwards automatic Setup output and blocks a failed attempt with %s", async (_case, attemptOutput, detail) => {
     const startup = {
       appendOutput: vi.fn(),
       block: vi.fn(),
@@ -302,6 +306,11 @@ describe("automatic Project Setup", () => {
         startupId: "00000000-0000-4000-8000-000000000001",
         state: "running",
         phase: "setup",
+        steps: [{ phase: "setup", state: "running", startedAt: "2026-10-08T10:00:01.000Z" }],
+        transcript: [
+          { phase: "setup", content: "npm ERR! from the previous attempt\n", createdAt: "2026-10-08T10:00:00.000Z" },
+          { phase: "setup", content: attemptOutput, createdAt: "2026-10-08T10:00:02.000Z" },
+        ],
       })),
       resume: vi.fn(),
       skip: vi.fn(),
@@ -322,7 +331,8 @@ describe("automatic Project Setup", () => {
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(startup.block).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
-      expect.objectContaining({ code: "SETUP_FAILED", actions: ["retry", "continue"] }),
+      expect.objectContaining({ code: "SETUP_FAILED", detail, actions: ["retry", "continue"] }),
+      { phase: "setup", exitCode: 1 },
     ));
   });
 
@@ -335,6 +345,8 @@ describe("automatic Project Setup", () => {
         startupId: "00000000-0000-4000-8000-000000000001",
         state: startupState,
         phase: "setup",
+        steps: [],
+        transcript: [],
       })),
       resume: vi.fn(() => { startupState = "running"; }),
       skip: vi.fn(),
@@ -351,7 +363,7 @@ describe("automatic Project Setup", () => {
     await eventually(() => expect(startup.block).toHaveBeenCalledTimes(2));
 
     await service.continueAutomaticSetup({ threadId: "thread-1" });
-    expect(startup.skip).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001", "setup");
+    expect(startup.skip).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001", "setup", { phase: "setup", skipReason: "user-skipped" });
   });
 
   it("re-resolves an approval-waiting shared Setup when the command is removed", async () => {
@@ -1183,6 +1195,7 @@ describe("automatic Project Setup", () => {
     expect(snapshot.gate).toBe("released-by-continue");
     expect(dispatch).toHaveBeenCalledOnce();
     expect(startups.findByThreadId(threadId)?.state).toBe("completed");
+    expect(startups.findByThreadId(threadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "user-skipped" });
   });
 
   it("completes a blocked startup when Continue leaves no queued Turn", async () => {
@@ -1205,15 +1218,20 @@ describe("automatic Project Setup", () => {
 
     await service.queueAutomaticFirstTurn(queuedInput(1, threadId));
     await eventually(() => expect(start).toHaveBeenCalledOnce());
+    await startups.appendOutput(startupId, "Installing\ncommand");
+    await startups.appendOutput(startupId, " failed\n \n");
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(service.getAutomaticSetup({ threadId }).attempt?.state).toBe("failed"));
     await eventually(() => expect(startups.findByThreadId(threadId)?.state).toBe("blocked"));
+    expect(startups.findByThreadId(threadId)?.block?.detail).toBe("command failed");
+    expect(startups.findByThreadId(threadId)?.steps[2].detail).toEqual({ phase: "setup", exitCode: 1 });
 
     const queued = service.getAutomaticSetup({ threadId }).queuedTurns[0]!;
     await service.cancelQueuedAutomaticTurn({ threadId, queuedTurnId: queued.id });
     await service.continueAutomaticSetup({ threadId });
 
     expect(startups.findByThreadId(threadId)?.state).toBe("completed");
+    expect(startups.findByThreadId(threadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "user-skipped" });
   });
 
   it("settles an interrupted startup whose gate can no longer offer recovery", async () => {

@@ -354,7 +354,7 @@ function FilesToggle({ filesVisible, onToggle }: FilesToggleProps) {
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             aria-label={label}
             aria-pressed={filesVisible}
             data-testid="review-files-toggle"
@@ -469,7 +469,7 @@ function FileJumpPopover({ open, onOpenChange, files, onJumpToFile }: FileJumpPo
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 aria-label="Jump to file"
                 data-testid="review-file-jump-trigger"
                 className="h-6 w-6 text-muted/60 hover:bg-ink/10 hover:text-ink"
@@ -555,7 +555,7 @@ function RenderModeToggle({ renderMode, onToggle }: RenderModeToggleProps) {
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             onClick={onToggle}
             aria-pressed={isSideBySide}
             aria-label={label}

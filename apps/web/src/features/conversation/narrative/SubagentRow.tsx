@@ -215,7 +215,7 @@ function SubagentParticipant({
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="compact"
         onClick={() => handleSubagentSelection(
           participant,
           lifecycle,
@@ -258,7 +258,7 @@ function AggregateSubagentButton({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="compact"
       onClick={() => onOpenSubagents?.(target)}
       className="shrink-0 justify-start rounded-full px-2 text-left text-xs text-muted hover:bg-hover/30"
       aria-label={`Open full Subagents roster, ${label}`}

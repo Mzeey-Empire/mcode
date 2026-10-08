@@ -54,7 +54,7 @@ export function ComposerNewThreadContext({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
+                    size="icon-compact"
                     aria-label={`Clear ${activeWorkspace.name} project`}
                     onClick={() => setActiveWorkspace(null)}
                     className="-mr-0.5 size-7 rounded-md text-muted transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:border-destructive/40 focus-visible:ring-destructive/20"

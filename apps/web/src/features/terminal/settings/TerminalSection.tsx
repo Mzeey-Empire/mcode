@@ -34,7 +34,7 @@ const profileName = (profileId: TerminalProfileReference): string => {
 };
 
 const terminalFieldClassName =
-  "bg-transparent shadow-none focus-visible:ring-3 focus-visible:ring-focus/50 dark:bg-selected/30";
+  "bg-transparent shadow-none dark:bg-selected/30";
 
 interface ProfileDialogProps {
   open: boolean;
@@ -427,7 +427,7 @@ function WorkspaceProfileDefault({ model }: { readonly model: TerminalSectionMod
           onChange={model.selectWorkspaceProfile}
         />
         {model.workspaceOverride ? (
-          <Button variant="ghost" size="sm" disabled={model.pending} onClick={model.resetWorkspaceProfile}>
+          <Button variant="ghost" size="compact" disabled={model.pending} onClick={model.resetWorkspaceProfile}>
             Use inherited profile
           </Button>
         ) : null}
@@ -454,8 +454,8 @@ function CustomProfileRow({
         <span className="ml-2 text-muted">{profile.executable}</span>
       </span>
       <span className="flex shrink-0 gap-1">
-        <Button variant="ghost" size="xs" disabled={pending} onClick={() => onEdit(profile)}>Edit</Button>
-        <Button variant="ghost" size="xs" disabled={pending} onClick={() => onDelete(profile.id)}>Delete</Button>
+        <Button variant="ghost" size="compact" disabled={pending} onClick={() => onEdit(profile)}>Edit</Button>
+        <Button variant="ghost" size="compact" disabled={pending} onClick={() => onDelete(profile.id)}>Delete</Button>
       </span>
     </div>
   );
@@ -514,7 +514,7 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
           ))}
           <Button
             variant="outline"
-            size="sm"
+            size="compact"
             disabled={model.pending || model.customProfiles.length >= 32}
             onClick={model.openNewProfileDialog}
           >

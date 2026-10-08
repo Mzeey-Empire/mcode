@@ -443,7 +443,7 @@ function SelectedTextCommentPopover({
           ref={actionButtonRef}
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           className="w-full justify-start"
           onClick={onOpenEditor}
         >

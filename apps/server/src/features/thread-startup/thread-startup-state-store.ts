@@ -2,10 +2,12 @@ import {
   THREAD_STARTUP_TRANSCRIPT_MAX_CHARS,
   THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES,
   ThreadStartupTranscriptEntrySchema,
+  ThreadStartupSchema,
+  getThreadStartupPhases,
   type ThreadStartup,
   type ThreadStartupBlock,
   type ThreadStartupError,
-  type ThreadStartupKind,
+  type ThreadStartupStepDetail,
   type ThreadStartupPhase,
   type ThreadStartupStartInput,
 } from "@mcode/contracts";
@@ -20,12 +22,6 @@ export interface ThreadStartupThreadCreation {
   readonly args: z.output<typeof threadWriteOperations.create.input>;
   readonly worktreePath?: string;
 }
-
-const phasesByKind: Record<ThreadStartupKind, readonly ThreadStartupPhase[]> = {
-  direct: ["thread", "agent"],
-  "managed-worktree": ["thread", "worktree", "setup", "agent"],
-  "pull-request-review": ["thread", "worktree", "agent"],
-};
 
 const terminalStates = new Set<ThreadStartup["state"]>([
   "completed",
@@ -55,18 +51,28 @@ export class ThreadStartupStateStore {
     const existing = this.startupRepo.findById(input.startupId);
     if (existing) {
       const persistedFingerprint = this.startupRepo.requestFingerprint(input.startupId);
-      if (existing.workspaceId === input.workspaceId && existing.kind === input.kind
-        && (!persistedFingerprint || !requestFingerprint || persistedFingerprint === requestFingerprint)) return existing;
+      // A matching fingerprint is the same request even when an older server
+      // derived a different kind or step list for it, as before record v2.
+      const sameRequest = persistedFingerprint && requestFingerprint
+        ? persistedFingerprint === requestFingerprint
+        : existing.kind === input.kind
+          && existing.steps.some((step) => step.phase === "fetch") === (input.fetch !== undefined);
+      if (existing.workspaceId === input.workspaceId && sameRequest) return existing;
       throw new ThreadStartupConflictError(input.startupId);
     }
 
     const timestamp = this.now().toISOString();
-    const phases = phasesByKind[input.kind];
+    const phases = getThreadStartupPhases(input.kind, input.fetch !== undefined);
     const startup: ThreadStartup = {
-      ...input,
+      startupId: input.startupId,
+      workspaceId: input.workspaceId,
+      kind: input.kind,
       state: "pending",
       phase: phases[0],
-      steps: phases.map((phase) => ({ phase, state: "pending" })),
+      steps: phases.map((phase) => ({
+        phase, state: "pending",
+        ...(phase === "fetch" && input.fetch ? { detail: { phase, ...input.fetch } } : {}),
+      })),
       transcript: [],
       cancellation: "none",
       revision: 1,
@@ -117,12 +123,13 @@ export class ThreadStartupStateStore {
   }
 
   /** Mark the current phase active or move from it to the next phase. */
-  advance(startupId: string, phase: ThreadStartupPhase): ThreadStartup {
+  advance(startupId: string, phase: ThreadStartupPhase, detail?: ThreadStartupStepDetail): ThreadStartup {
     const startup = this.require(startupId);
     if (isTerminal(startup)) return startup;
     if (startup.state === "blocked") throw new Error("Blocked startup must resume before advancing");
     const targetIndex = startup.steps.findIndex((step) => step.phase === phase);
     if (targetIndex < 0) throw new Error(`Phase ${phase} does not apply to startup ${startupId}`);
+    const timestamp = this.now().toISOString();
 
     if (startup.state === "pending") {
       if (targetIndex !== 0) throw new Error("Startup must begin with its first phase");
@@ -130,19 +137,24 @@ export class ThreadStartupStateStore {
         ...startup,
         state: "running",
         phase,
-        steps: startup.steps.map((step, index) => index === 0 ? { ...step, state: "running" } : step),
+        steps: startup.steps.map((step, index) => index === 0
+          ? { ...step, state: "running", startedAt: timestamp, detail: detail ?? step.detail } : step),
       });
     }
 
     const activeIndex = startup.steps.findIndex((step) => step.state === "running");
-    if (targetIndex === activeIndex) return startup;
+    if (targetIndex === activeIndex) {
+      if (!detail) return startup;
+      return this.persistNext({ ...startup, steps: startup.steps.map((step, index) =>
+        index === activeIndex ? { ...step, detail } : step) });
+    }
     if (targetIndex !== activeIndex + 1) throw new Error("Startup phases must advance in order");
     return this.persistNext({
       ...startup,
       phase,
       steps: startup.steps.map((step, index) => {
-        if (index === activeIndex) return { ...step, state: "completed" };
-        if (index === targetIndex) return { ...step, state: "running" };
+        if (index === activeIndex) return { ...step, state: "completed", endedAt: timestamp };
+        if (index === targetIndex) return { ...step, state: "running", startedAt: timestamp, detail: detail ?? step.detail };
         return step;
       }),
     });
@@ -180,6 +192,7 @@ export class ThreadStartupStateStore {
   /** Complete the final active phase and make the lifecycle terminal. */
   complete(startupId: string): ThreadStartup {
     const startup = this.require(startupId);
+    const timestamp = this.now().toISOString();
     // An interrupted record completes when its remaining phases are resolved
     // outside this lifecycle, for example when the user continues without Setup.
     if (startup.state === "interrupted") {
@@ -190,8 +203,8 @@ export class ThreadStartupStateStore {
         phase: startup.steps.at(-1)!.phase,
         block: undefined,
         steps: startup.steps.map((step) => {
-          if (step.state === "interrupted") return { ...step, state: "skipped" };
-          if (step.state === "pending") return { ...step, state: "completed" };
+          if (step.state === "interrupted") return { ...step, state: "skipped", endedAt: timestamp };
+          if (step.state === "pending") return { ...step, state: "completed", endedAt: timestamp };
           return step;
         }),
       });
@@ -203,13 +216,13 @@ export class ThreadStartupStateStore {
       ...startup,
       state: "completed",
       steps: startup.steps.map((step, index) => index === activeIndex
-        ? { ...step, state: "completed" }
+        ? { ...step, state: "completed", endedAt: timestamp }
         : step),
     });
   }
 
   /** Keep the current phase recoverably blocked until the user retries or continues. */
-  block(startupId: string, block: ThreadStartupBlock): ThreadStartup {
+  block(startupId: string, block: ThreadStartupBlock, detail?: ThreadStartupStepDetail): ThreadStartup {
     const startup = this.require(startupId);
     if (isTerminal(startup) || startup.state === "blocked") return startup;
     const activeIndex = this.activeIndex(startup);
@@ -218,7 +231,7 @@ export class ThreadStartupStateStore {
       state: "blocked",
       phase: startup.steps[activeIndex].phase,
       steps: startup.steps.map((step, index) => index === activeIndex
-        ? { ...step, state: "blocked" }
+        ? { ...step, state: "blocked", endedAt: this.now().toISOString(), detail: detail ?? step.detail }
         : step),
       block,
     });
@@ -235,29 +248,31 @@ export class ThreadStartupStateStore {
       ...startup,
       state: "running",
       steps: startup.steps.map((step, index) => index === activeIndex
-        ? { ...step, state: "running" }
+        ? { ...step, state: "running", startedAt: this.now().toISOString(), endedAt: undefined,
+          detail: step.phase === "setup" ? undefined : step.detail }
         : step),
       block: undefined,
     });
   }
 
   /** Skip the current recoverable phase and enter the next phase. */
-  skip(startupId: string, phase: ThreadStartupPhase): ThreadStartup {
+  skip(startupId: string, phase: ThreadStartupPhase, detail?: ThreadStartupStepDetail): ThreadStartup {
     const startup = this.require(startupId);
-    if (isTerminal(startup)) return startup;
+    if (isTerminal(startup) && startup.state !== "interrupted") return startup;
     const activeIndex = this.currentIndex(startup);
     if (startup.steps[activeIndex]?.phase !== phase) {
       throw new Error(`Startup ${startupId} cannot skip phase ${phase}`);
     }
     const next = startup.steps[activeIndex + 1];
     if (!next) throw new Error("Startup cannot skip its final phase");
+    const timestamp = this.now().toISOString();
     return this.persistNext({
       ...startup,
       state: "running",
       phase: next.phase,
       steps: startup.steps.map((step, index) => {
-        if (index === activeIndex) return { ...step, state: "skipped" };
-        if (index === activeIndex + 1) return { ...step, state: "running" };
+        if (index === activeIndex) return { ...step, state: "skipped", endedAt: timestamp, detail: detail ?? step.detail };
+        if (index === activeIndex + 1) return { ...step, state: "running", startedAt: timestamp };
         return step;
       }),
       block: undefined,
@@ -265,7 +280,7 @@ export class ThreadStartupStateStore {
   }
 
   /** Fail the current phase with structured error detail. */
-  fail(startupId: string, error: ThreadStartupError): ThreadStartup {
+  fail(startupId: string, error: ThreadStartupError, detail?: ThreadStartupStepDetail): ThreadStartup {
     const startup = this.require(startupId);
     if (isTerminal(startup)) return startup;
     const activeIndex = this.currentIndex(startup);
@@ -274,7 +289,7 @@ export class ThreadStartupStateStore {
       state: "failed",
       phase: startup.steps[activeIndex].phase,
       steps: startup.steps.map((step, index) => index === activeIndex
-        ? { ...step, state: "failed" }
+        ? { ...step, state: "failed", endedAt: this.now().toISOString(), detail: detail ?? step.detail }
         : step),
       error,
       block: undefined,
@@ -299,7 +314,7 @@ export class ThreadStartupStateStore {
       state: "cancelled",
       phase: startup.steps[activeIndex].phase,
       steps: startup.steps.map((step, index) => index === activeIndex
-        ? { ...step, state: "cancelled" }
+        ? { ...step, state: "cancelled", endedAt: this.now().toISOString() }
         : step),
       cancellation: "requested",
       block: undefined,
@@ -334,7 +349,7 @@ export class ThreadStartupStateStore {
       state: "interrupted",
       phase: startup.steps[activeIndex].phase,
       steps: startup.steps.map((step, index) => index === activeIndex
-        ? { ...step, state: "interrupted" }
+        ? { ...step, state: "interrupted", endedAt: this.now().toISOString() }
         : step),
       block: undefined,
     });
@@ -358,11 +373,11 @@ export class ThreadStartupStateStore {
   }
 
   private persistNext(startup: ThreadStartup): ThreadStartup {
-    const persisted: ThreadStartup = {
+    const persisted = ThreadStartupSchema().parse({
       ...startup,
       revision: startup.revision + 1,
       updatedAt: this.now().toISOString(),
-    };
+    });
     this.startupRepo.update(persisted);
     return persisted;
   }

@@ -60,7 +60,7 @@ export function AccessModeSelector({
         render={
           <Button
             variant="ghost"
-            size="xs"
+            size="compact"
             aria-label={`Access mode: ${selected.label}`}
             className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
           >
@@ -81,7 +81,7 @@ export function AccessModeSelector({
               <Button
                 key={mode.id}
                 variant="ghost"
-                size="xs"
+                size="compact"
                 disabled={disabled}
                 aria-pressed={accessMode === mode.id}
                 onClick={() => {
@@ -153,7 +153,7 @@ export function ComposerOptionsMenu({
       {hasPlans && (
         <Button
           variant="ghost"
-          size="xs"
+          size="compact"
           onClick={togglePlanPanel}
           aria-pressed={panelVisible}
           className={cn(

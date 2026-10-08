@@ -64,7 +64,7 @@ function NoticeDisclosure({ open, onToggle }: { open: boolean; onToggle: () => v
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      size="icon-compact"
       aria-expanded={open}
       aria-label={open ? "Hide details" : "Show details"}
       onClick={onToggle}
@@ -78,7 +78,7 @@ function NoticeDisclosure({ open, onToggle }: { open: boolean; onToggle: () => v
 function NoticeAction({ action }: { action: NoticeAction }) {
   return (
     <div className="pl-8 pt-1">
-      <Button type="button" variant={action.emphasis === "neutral" ? "secondary" : "default"} onClick={action.onClick}>{action.label}</Button>
+      <Button type="button" size="compact" variant={action.emphasis === "neutral" ? "secondary" : "default"} onClick={action.onClick}>{action.label}</Button>
     </div>
   );
 }
@@ -99,7 +99,7 @@ function NoticeHeader({ tone, title, busy = false, disclosure, onDismiss, dismis
       <div className="min-w-0 flex-1 text-body font-medium text-ink">{title}</div>
       {disclosure ? <NoticeDisclosure open={disclosure.open} onToggle={disclosure.onToggle} /> : null}
       {onDismiss ? (
-        <Button type="button" variant="ghost" size="icon" aria-label={dismissLabel} onClick={onDismiss} className="text-muted">
+        <Button type="button" variant="ghost" size="icon-compact" aria-label={dismissLabel} onClick={onDismiss} className="text-muted">
           <CloseIcon aria-hidden />
         </Button>
       ) : null}

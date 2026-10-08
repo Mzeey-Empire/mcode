@@ -43,7 +43,7 @@ export function LocalPortsEmptyState({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon-xs"
+                  size="icon-compact"
                   disabled
                   aria-label="Sort and filter (coming soon)"
                   className="text-muted opacity-40"

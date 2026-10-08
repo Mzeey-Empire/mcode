@@ -2102,14 +2102,14 @@ describe("AgentService Ended finalization", () => {
         terminalOutcome: "interrupted",
       });
     });
-    // The thread row and its broadcast land after the checkpoint, so a slow runner can still see "active" here.
+    // Publication saves the thread status after the checkpoint commits, without awaiting it.
     await vi.waitFor(() => {
       expect(threadRepo.findById(thread.id)?.status).toBe("interrupted");
       expect(broadcast).toHaveBeenCalledWith("thread.status", {
         threadId: thread.id,
         status: "interrupted",
       });
-    });
+    }, { timeout: 5_000 });
   });
 
   it("leaves a full-looking response unresolved without terminal proof", async () => {
@@ -2187,7 +2187,8 @@ describe("AgentService Ended finalization", () => {
     expect(canonicalSink.loadTurnByExecution(executionId)?.status).toBe("Errored");
     expect(canonicalSink.loadConversationProjection(thread.id, 10).messages)
       .toContainEqual(expect.objectContaining({ id: assistant?.id, outcome: "errored" }));
-    expect(reduceAgentEventBatch(createAgentModelState(), canonicalEvents)).toMatchObject({
+    // Canonical events reach the renderer after the checkpoint commits, so the reduced state converges later.
+    await vi.waitFor(() => expect(reduceAgentEventBatch(createAgentModelState(), canonicalEvents)).toMatchObject({
       outcome: "applied",
       state: {
         turns: {
@@ -2196,7 +2197,7 @@ describe("AgentService Ended finalization", () => {
           }),
         },
       },
-    });
+    }), { timeout: 5_000 });
     await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
       threadId: thread.id,
       messageId: assistant?.id,
@@ -2251,20 +2252,22 @@ describe("AgentService Ended finalization", () => {
     expect(assistant).toMatchObject({ outcome: "completed", outcomeExecutionId: executionId });
     expect(canonicalSink.loadConversationProjection(thread.id, 10).messages)
       .toContainEqual(expect.objectContaining({ id: assistant?.id, outcome: "completed" }));
-    expect(reduceAgentEventBatch(createAgentModelState(), canonicalEvents)).toMatchObject({
-      outcome: "applied",
-      state: {
-        turns: {
-          [turn!.id]: expect.objectContaining({ status: "Completed" }),
+    // Publication reaches the renderer after the checkpoint commits, so wait for it to converge.
+    await vi.waitFor(() => {
+      expect(reduceAgentEventBatch(createAgentModelState(), canonicalEvents)).toMatchObject({
+        outcome: "applied",
+        state: {
+          turns: {
+            [turn!.id]: expect.objectContaining({ status: "Completed" }),
+          },
         },
-      },
-    });
-    // turn.persisted is broadcast after the checkpoint settles; wait for it rather than racing it.
-    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
-      threadId: thread.id,
-      messageId: assistant?.id,
-      outcome: "completed",
-      executionId,
-    })));
+      });
+      expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
+        threadId: thread.id,
+        messageId: assistant?.id,
+        outcome: "completed",
+        executionId,
+      }));
+    }, { timeout: 5_000 });
   });
 });

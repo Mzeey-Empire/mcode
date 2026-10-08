@@ -65,7 +65,7 @@ function ThreadOverviewTrigger({ ciDot, open, className, ...triggerProps }: Thre
     <Button
       {...triggerProps}
       variant="ghost"
-      size="icon-xs"
+      size="icon-compact"
       type="button"
       aria-label={status}
       aria-expanded={open}

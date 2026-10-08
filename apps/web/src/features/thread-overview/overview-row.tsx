@@ -3,7 +3,7 @@ import { type ReactElement } from "react";
 
 /** Existing row spacing and interaction styles shared by overview entries. */
 export const OVERVIEW_ROW_CLASS =
-  "group h-8 w-full gap-3 px-2 text-left transition-[background-color,color,transform] duration-150 ease-out active:translate-y-px motion-reduce:transform-none";
+  "group h-8 w-full gap-3 px-2 text-left transition-[background-color,color,box-shadow] duration-150 ease-out active:inset-ring-2 active:inset-ring-ink";
 
 /** Renders children only when an Overview row should be visible. */
 export function ThreadOverviewWhen({ when, children }: { when: boolean; children: React.ReactNode }) {

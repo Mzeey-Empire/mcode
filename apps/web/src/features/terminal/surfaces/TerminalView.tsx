@@ -523,17 +523,17 @@ function TerminalStatus({
       </div>
       <div className="mt-1 flex items-center gap-2">
         {showRetry ? (
-          <Button type="button" size="xs" variant="outline" onClick={onRetry}>
+          <Button type="button" size="compact" variant="outline" onClick={onRetry}>
             {sessionEnded ? "Retry terminal" : "Reload available output"}
           </Button>
         ) : null}
         {sessionEnded ? (
-          <Button type="button" size="xs" variant="ghost" onClick={onClose}>
+          <Button type="button" size="compact" variant="ghost" onClick={onClose}>
             Close terminal
           </Button>
         ) : null}
         {diagnosticsAvailable ? (
-          <Button type="button" size="xs" variant="ghost" onClick={onCopyDiagnostics}>
+          <Button type="button" size="compact" variant="ghost" onClick={onCopyDiagnostics}>
             Copy diagnostics
           </Button>
         ) : null}

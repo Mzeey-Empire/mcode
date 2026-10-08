@@ -126,7 +126,7 @@ function DraftEditor({
         <Button
           type="button"
           variant="ghost"
-          size="xs"
+          size="compact"
           className="text-xs text-muted"
           onClick={removeAndRestore}
         >
@@ -135,7 +135,7 @@ function DraftEditor({
         <Button
           type="button"
           variant="secondary"
-          size="xs"
+          size="compact"
           className="text-xs"
           onClick={() => onRestoreFocus(originLineKey)}
         >
@@ -214,7 +214,7 @@ function PullRequestInlineThreadComponent({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="xs"
+                  size="compact"
                   className="text-xs text-muted"
                   onClick={() => onCreateReply(thread, row.anchorLineKey)}
                 >

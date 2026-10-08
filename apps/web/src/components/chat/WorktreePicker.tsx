@@ -107,7 +107,7 @@ export function WorktreePicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={
-        <Button variant="ghost" size="xs" className={cn("text-muted", triggerClassName)}>
+        <Button variant="ghost" size="compact" className={cn("text-muted", triggerClassName)}>
           <GitFork size={iconSize} className={triggerClassName ? "size-3.5" : undefined} />
           {selectedName === null ? <Spinner size={12} className="text-current" /> : <span>{selectedName}</span>}
           <ChevronDown size={Math.max(10, iconSize - 2)} className={triggerClassName ? "size-3" : undefined} />

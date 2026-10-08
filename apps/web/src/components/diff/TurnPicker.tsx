@@ -102,7 +102,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             data-testid="turn-picker"
             aria-label="Select turn"
             aria-expanded={open}

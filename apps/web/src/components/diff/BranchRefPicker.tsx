@@ -197,7 +197,7 @@ function RefCombobox({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             data-testid="branch-target-picker"
             aria-label="Select comparison ref"
             aria-expanded={open}

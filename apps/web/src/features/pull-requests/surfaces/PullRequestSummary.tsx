@@ -484,7 +484,7 @@ function IssueCommentActions({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           className="text-xs text-muted"
           aria-expanded={prompting}
           onClick={() => onTogglePrompt(item)}
@@ -504,7 +504,7 @@ function IssueCommentActions({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           className="ml-auto text-xs text-muted"
           onClick={() => onReply(item)}
         >
@@ -534,7 +534,7 @@ function PromptFixConfirmation({
       <Button
         type="button"
         variant="secondary"
-        size="sm"
+        size="compact"
         className="text-xs"
         onClick={() => onPromptFix(item)}
       >
@@ -792,7 +792,7 @@ function ResourceLoadContinuation({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="compact"
       className="mt-2 w-full text-xs text-muted"
       onClick={onLoadMore}
       disabled={loading}

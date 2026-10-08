@@ -299,7 +299,7 @@ function ChangesEntry() {
   }, []);
   return (<Button
     variant="ghost"
-    size="sm"
+    size="compact"
     onClick={openChanges}
     data-testid="workspace-menu-changes"
     aria-label={`Changes, ${changedFilesLabel(changeSummary.files)}`}

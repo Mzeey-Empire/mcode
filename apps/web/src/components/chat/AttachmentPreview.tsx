@@ -88,7 +88,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
     <Button
       type="button"
       variant="ghost"
-      size="icon-sm"
+      size="icon-compact"
       onClick={(e) => {
         e.stopPropagation();
         onRemove(id);

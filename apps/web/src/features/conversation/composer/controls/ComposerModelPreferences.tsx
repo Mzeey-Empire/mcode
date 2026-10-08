@@ -146,7 +146,7 @@ function ComposerModelPreferencesTrigger({ state }: { state: ModelPreferenceStat
             render={
               <Button
                 variant="ghost"
-                size="xs"
+                size="compact"
                 className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
               >
                 {state.hasCodexFast && state.codexFastMode && (

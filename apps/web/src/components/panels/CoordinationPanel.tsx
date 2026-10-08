@@ -124,7 +124,7 @@ function RelationCard({
             <Button
               type="button"
               variant="link"
-              size="sm"
+              size="compact"
               className="min-w-0 text-fade px-0 text-left text-sm font-medium"
               onClick={() => void navigateToThread(destination)}
               aria-label={`Open destination Project and thread ${destination.title}`}
@@ -141,18 +141,18 @@ function RelationCard({
             <span className="text-fade">{destination.workspaceId}</span>
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => void navigateToThread(destination)}>
+            <Button type="button" variant="outline" size="compact" onClick={() => void navigateToThread(destination)}>
               <ExternalLink size={13} aria-hidden />
               Open thread
             </Button>
             {canSend && (
-              <Button type="button" variant="ghost" size="sm" onClick={() => setComposerOpen((open) => !open)}>
+              <Button type="button" variant="ghost" size="compact" onClick={() => setComposerOpen((open) => !open)}>
                 <ArrowRight size={13} aria-hidden />
                 Send follow-up
               </Button>
             )}
             {canStop && (
-              <Button type="button" variant="ghost" size="sm" onClick={() => void stop()} disabled={busy}>
+              <Button type="button" variant="ghost" size="compact" onClick={() => void stop()} disabled={busy}>
                 <Square size={13} aria-hidden />
                 Stop
               </Button>
@@ -170,7 +170,7 @@ function RelationCard({
                 maxLength={100_000}
                 disabled={busy}
               />
-              <Button type="submit" size="sm" disabled={busy || draft.trim().length === 0}>
+              <Button type="submit" size="compact" disabled={busy || draft.trim().length === 0}>
                 Send
               </Button>
             </form>
@@ -203,7 +203,7 @@ function OriginRow({
         {origin.type === "thread" && <ProviderIcon provider={origin.sourceProviderId} />}
         <span>{label}</span>
         {source && !sourceUnavailable && (
-          <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={() => void navigateToThread(source)}>
+          <Button type="button" variant="link" size="compact" className="h-auto px-0" onClick={() => void navigateToThread(source)}>
             Open source
           </Button>
         )}
@@ -220,7 +220,7 @@ function OriginRow({
 
 function CoordinationRelationSection({ relation }: { relation: ThreadControlProjection["relation"] }) {
   if (!relation) return null;
-  return <section aria-labelledby="coordination-relation-heading"><h3 id="coordination-relation-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Delegated from</h3><div className="px-4 pb-2">{relation.source ? <Button type="button" variant="outline" size="sm" onClick={() => void navigateToThread(relation.source!)}><ProviderIcon provider={relation.source.providerId} /><ExternalLink size={13} aria-hidden />{relation.source.title}</Button> : <p className="text-xs text-muted">Source thread is no longer available.</p>}</div></section>;
+  return <section aria-labelledby="coordination-relation-heading"><h3 id="coordination-relation-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Delegated from</h3><div className="px-4 pb-2">{relation.source ? <Button type="button" variant="outline" size="compact" onClick={() => void navigateToThread(relation.source!)}><ProviderIcon provider={relation.source.providerId} /><ExternalLink size={13} aria-hidden />{relation.source.title}</Button> : <p className="text-xs text-muted">Source thread is no longer available.</p>}</div></section>;
 }
 
 function CoordinationChildrenSection({ children, identity, onRefresh }: { children: ThreadControlProjection["children"]; identity: ThreadControlIdentity; onRefresh: () => void }) {
@@ -230,7 +230,7 @@ function CoordinationChildrenSection({ children, identity, onRefresh }: { childr
 
 function CoordinationApprovalsSection({ approvals, onRefresh }: { approvals: ThreadControlProjection["approvals"]; onRefresh: () => void }) {
   if (approvals.length === 0) return null;
-  return <section aria-labelledby="coordination-approvals-heading"><h3 id="coordination-approvals-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Approval requests ({approvals.length})</h3>{approvals.map((approval) => <div key={approval.requestId} className="border-b border-border/40 px-4 py-3" data-testid="coordination-approval"><p className="text-sm font-medium">{approval.title ?? approval.toolName}</p><p className="mt-1 text-xs text-muted">Owned by {approval.ownerThreadId ?? approval.threadId}</p><div className="mt-2 flex gap-2"><Button type="button" size="sm" onClick={() => void getTransport().respondToPermission(approval.requestId, "allow").then(onRefresh)}><Check size={13} aria-hidden />Allow</Button><Button type="button" variant="ghost" size="sm" onClick={() => void getTransport().respondToPermission(approval.requestId, "deny").then(onRefresh)}><X size={13} aria-hidden />Deny</Button></div></div>)}</section>;
+  return <section aria-labelledby="coordination-approvals-heading"><h3 id="coordination-approvals-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Approval requests ({approvals.length})</h3>{approvals.map((approval) => <div key={approval.requestId} className="border-b border-border/40 px-4 py-3" data-testid="coordination-approval"><p className="text-sm font-medium">{approval.title ?? approval.toolName}</p><p className="mt-1 text-xs text-muted">Owned by {approval.ownerThreadId ?? approval.threadId}</p><div className="mt-2 flex gap-2"><Button type="button" size="compact" onClick={() => void getTransport().respondToPermission(approval.requestId, "allow").then(onRefresh)}><Check size={13} aria-hidden />Allow</Button><Button type="button" variant="ghost" size="compact" onClick={() => void getTransport().respondToPermission(approval.requestId, "deny").then(onRefresh)}><X size={13} aria-hidden />Deny</Button></div></div>)}</section>;
 }
 
 function CoordinationOriginsSection({ messages }: { messages: ThreadControlProjection["messages"] }) {

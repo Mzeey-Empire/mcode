@@ -279,7 +279,7 @@ function CommitPickerScope({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
+                  size="compact"
                   disabled={loadingMore}
                   onClick={loadOlder}
                   className="h-7 w-full justify-center text-caption text-muted"

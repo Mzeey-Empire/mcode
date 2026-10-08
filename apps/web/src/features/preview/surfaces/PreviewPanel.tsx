@@ -905,7 +905,7 @@ function VisualLinkButton({
     <Button
       type="button"
       variant="ghost"
-      size="icon-xs"
+      size="icon-compact"
       aria-label={label}
       aria-pressed={active}
       className={cn(
@@ -1186,7 +1186,7 @@ function ColorInspectorControl({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 aria-label={`Open ${label} picker`}
                 className="absolute left-2 z-(--layer-sticky) size-4 rounded-full border border-white/25 p-0 shadow-none ring-1 ring-black/20 hover:ring-white/20"
                 style={{ background: swatch }}
@@ -1272,7 +1272,7 @@ function ColorInspectorControl({
                         <Button
                           type="button"
                           variant="ghost"
-                          size="icon-xs"
+                          size="icon-compact"
                           aria-label={`Pick ${label} from screen`}
                           disabled={!EyeDropperApi}
                           onClick={pickFromScreen}
@@ -1309,7 +1309,7 @@ function ColorInspectorControl({
                     key={format}
                     type="button"
                     variant="ghost"
-                    size="xs"
+                    size="compact"
                     aria-label={`Use ${format.toUpperCase()} for ${label}`}
                     aria-pressed={colorFormat === format}
                     className={cn(
@@ -1460,7 +1460,7 @@ function ExpandableQuadGroup({
         <Button
           type="button"
           variant="ghost"
-          size="xs"
+          size="compact"
           className="-ml-1 h-7 justify-start gap-1 rounded-md px-1 text-xs text-neutral-300/90 hover:bg-transparent hover:text-white focus-visible:!border-white/[0.18] focus-visible:!ring-1 focus-visible:!ring-white/[0.18]"
           aria-expanded={false}
           onClick={() => onToggleExpanded(groupId)}
@@ -1479,7 +1479,7 @@ function ExpandableQuadGroup({
       <Button
         type="button"
         variant="ghost"
-        size="xs"
+        size="compact"
         className="col-span-3 -ml-1 h-6 w-[calc(100%+0.25rem)] justify-start gap-1 rounded-md px-1 text-xs text-neutral-300/90 hover:bg-white/[0.04] hover:text-white focus-visible:!border-white/[0.18] focus-visible:!bg-white/[0.06] focus-visible:!ring-1 focus-visible:!ring-white/[0.18]"
         aria-expanded
         onClick={() => onToggleExpanded(groupId)}
@@ -3936,7 +3936,7 @@ export function PreviewPanel({
                     type="button"
                     data-testid="preview-annotation-marker"
                     variant="ghost"
-                    size="icon-sm"
+                    size="icon-compact"
                     className="pointer-events-auto group/marker absolute z-(--layer-dropdown) flex size-8 items-center justify-center rounded-full bg-transparent p-0 hover:bg-transparent focus-visible:bg-transparent"
                     style={{
                       left: Math.max(
@@ -4057,7 +4057,7 @@ export function PreviewPanel({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 className={cn(
                   "shrink-0 rounded-full text-neutral-300 hover:bg-white/10 hover:text-white",
                   bubbleAdvancedOpen && "bg-white/10 text-white",
@@ -4096,7 +4096,7 @@ export function PreviewPanel({
                 <Button
                   type="button"
                   data-testid="preview-annotation-save"
-                  size="icon-sm"
+                  size="icon-compact"
                   className="size-8 shrink-0 rounded-full bg-neutral-100 text-neutral-950 hover:bg-white"
                   aria-label="Save annotation"
                   onClick={() => void saveOpenBubble()}
@@ -4203,7 +4203,7 @@ export function PreviewPanel({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon-compact"
                   className="rounded-full text-neutral-300 hover:bg-red-500/[0.18] hover:text-red-100"
                   aria-label="Delete annotation"
                   onClick={deleteOpenBubble}
@@ -4214,7 +4214,7 @@ export function PreviewPanel({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
+                    size="compact"
                     className="h-7 rounded-full px-3 text-neutral-100 hover:bg-white/[0.08] hover:text-white"
                     onClick={() => {
                       usePreviewAnnotationStore
@@ -4229,7 +4229,7 @@ export function PreviewPanel({
                   </Button>
                   <Button
                     type="button"
-                    size="sm"
+                    size="compact"
                     className="h-7 rounded-full bg-neutral-200 px-3 text-neutral-950 hover:bg-white disabled:bg-neutral-500/40 disabled:text-neutral-300"
                     disabled={!canSaveOpenBubble}
                     onClick={() => void saveOpenBubble()}

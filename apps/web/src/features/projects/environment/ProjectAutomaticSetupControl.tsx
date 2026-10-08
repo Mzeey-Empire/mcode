@@ -184,11 +184,11 @@ function AutomaticSetupRecoveryActions({ busy, onContinue, onRetry }: {
 }) {
   return (
     <div className="mt-3 flex gap-2">
-      <Button type="button" size="sm" disabled={busy !== null} onClick={() => { void onRetry(); }}>
+      <Button type="button" size="compact" disabled={busy !== null} onClick={() => { void onRetry(); }}>
         {busy === "retry" ? <Spinner size={12} aria-hidden /> : null}
         Retry setup
       </Button>
-      <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => { void onContinue(); }}>
+      <Button type="button" size="compact" variant="outline" disabled={busy !== null} onClick={() => { void onContinue(); }}>
         {busy === "continue" ? <Spinner size={12} aria-hidden /> : null}
         Continue without setup
       </Button>

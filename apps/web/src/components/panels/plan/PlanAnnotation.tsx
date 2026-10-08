@@ -90,7 +90,7 @@ export function PlanAnnotation({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             onMouseDown={(e) => {
               // Blur fires before click; block it so discard runs first.
               e.preventDefault();
@@ -103,7 +103,7 @@ export function PlanAnnotation({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             onMouseDown={(e) => {
               e.preventDefault();
             }}

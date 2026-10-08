@@ -29,7 +29,7 @@ function PlansEntry({ thread }: { thread: Thread }) {
   return (<ThreadOverviewWhen when={latestPlan !== null}>
     <Button
       variant="ghost"
-      size="sm"
+      size="compact"
       type="button"
       data-testid="thread-overview-plan"
       onClick={openLatestPlan}

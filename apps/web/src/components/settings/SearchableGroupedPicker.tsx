@@ -102,7 +102,7 @@ export function SearchableGroupedPicker({
           <Button
             type="button"
             variant="outline"
-            size="sm"
+            size="compact"
             disabled={disabled || loading}
             data-testid={testId}
             aria-expanded={open}

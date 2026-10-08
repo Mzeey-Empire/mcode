@@ -15,7 +15,7 @@ export function ScrollToBottomButton({ hasNewContent, onScrollToBottom }: Scroll
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      size="icon-compact"
       onClick={onScrollToBottom}
       className={`pointer-events-auto h-7 w-7 rounded-md border backdrop-blur-sm transition-colors ${
         hasNewContent

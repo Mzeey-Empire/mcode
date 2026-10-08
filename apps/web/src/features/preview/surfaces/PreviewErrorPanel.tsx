@@ -86,7 +86,7 @@ export function PreviewErrorPanel({
           // The lamp hue as a tonal wash: still the primary recovery action,
           // but the solid fill reads muddy at control scale.
           <Button
-            size="sm"
+            size="compact"
             variant="ghost"
             onClick={onRetry}
             data-testid="preview-error-retry"
@@ -97,7 +97,7 @@ export function PreviewErrorPanel({
           </Button>
         ) : null}
         {canBack ? (
-          <Button size="sm" variant="ghost" onClick={onGoBack} className="rounded-2xl">
+          <Button size="compact" variant="ghost" onClick={onGoBack} className="rounded-2xl">
             <BackIcon aria-hidden />
             Go back
           </Button>

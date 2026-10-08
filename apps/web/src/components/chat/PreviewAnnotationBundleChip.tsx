@@ -119,7 +119,7 @@ export function PreviewAnnotationBundleChip({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 aria-label={`Remove ${label}`}
                 onClick={(event) => {
                   event.stopPropagation();
