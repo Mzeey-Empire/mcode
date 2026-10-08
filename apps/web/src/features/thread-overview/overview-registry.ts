@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode } from "react";
 import { BranchEntryBlock, BranchEntryState } from "./entries/branch";
 import { BrowserEntryBlock, BrowserEntryState } from "./entries/browser";
 import { ChangesEntryBlock, ChangesEntryState } from "./entries/changes";
-import { CommitEntryBlock } from "./entries/commit";
+import { CommitOrPushEntryBlock } from "./entries/commit";
 import { CreateBranchEntryBlock } from "./entries/create-branch";
 import { LocalEntryBlock, LocalEntryState } from "./entries/local";
 import { PlansEntryBlock } from "./entries/plans";
@@ -52,7 +52,7 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "local", section: "lane", order: 50, subjects: ["thread"], Entry: LocalEntryBlock, State: LocalEntryState },
   { id: "create-branch", section: "lane", order: 60, subjects: ["thread"], Entry: CreateBranchEntryBlock },
   { id: "branch", section: "lane", order: 70, subjects: ["thread"], Entry: BranchEntryBlock, State: BranchEntryState },
-  { id: "commit", section: "lane", order: 80, subjects: ["thread"], Entry: CommitEntryBlock },
+  { id: "commit", section: "lane", order: 80, subjects: ["thread"], Entry: CommitOrPushEntryBlock },
   { id: "usage", section: "summary", order: 90, subjects: ["thread"], Entry: UsageEntryBlock },
   { id: "subagents", section: "activity", order: 100, subjects: ["thread"], Entry: SubagentsEntryBlock },
   { id: "pull-request", section: "lane", order: 110, subjects: ["thread"], Entry: PullRequestEntryBlock },

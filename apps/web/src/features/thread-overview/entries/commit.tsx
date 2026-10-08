@@ -4,7 +4,7 @@ import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { GitPullRequest } from "lucide-react";
 import { ThreadOverviewTooltipButton, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
-function CommitEntry() {
+function CommitOrPushEntry() {
   const { branchlessCreatePr } = useOverviewContext();
 
   return (<ThreadOverviewWhen when={branchlessCreatePr}>
@@ -27,7 +27,7 @@ function CommitEntry() {
   </ThreadOverviewWhen>);
 }
 
-/** Commit block in the thread overview, preserving its existing row position. */
-export function CommitEntryBlock({ subject }: { subject: OverviewSubject }) {
-  return subject.kind === "thread" ? <CommitEntry /> : null;
+/** Commit or push block in the thread overview, preserving its existing row position. */
+export function CommitOrPushEntryBlock({ subject }: { subject: OverviewSubject }) {
+  return subject.kind === "thread" ? <CommitOrPushEntry /> : null;
 }
