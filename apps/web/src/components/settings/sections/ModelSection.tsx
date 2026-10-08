@@ -23,27 +23,8 @@ import { SettingsProviderPicker } from "../SettingsProviderPicker";
 import { Switch } from "@/components/ui/switch";
 import type { ContextWindowMode, ProviderAvailability, SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
 import { Sparkles } from "lucide-react";
-import {
-  ClaudeIcon,
-  CodexIcon,
-  CursorProviderIcon,
-  DevinIcon,
-  OpenCodeIcon,
-  GeminiIcon,
-  CopilotIcon,
-} from "@/components/chat/ProviderIcons";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { useToastStore } from "@/stores/toastStore";
-
-/** Maps provider id to its brand icon component. */
-const PROVIDER_ICONS: Record<string, ReactNode> = {
-  claude: <ClaudeIcon size={12} />,
-  codex: <CodexIcon size={12} />,
-  copilot: <CopilotIcon size={12} />,
-  cursor: <CursorProviderIcon size={12} />,
-  devin: <DevinIcon size={12} />,
-  opencode: <OpenCodeIcon size={12} />,
-  gemini: <GeminiIcon size={12} />,
-};
 
 
 const REASONING_OPTIONS_BASE = [
@@ -97,7 +78,7 @@ function buildProviderOption(
     value: p.id,
     label: p.name,
     disabled: p.comingSoon || unavailable,
-    icon: PROVIDER_ICONS[p.id],
+    icon: <ProviderIcon provider={p.id} size={12} />,
     title,
   };
 }

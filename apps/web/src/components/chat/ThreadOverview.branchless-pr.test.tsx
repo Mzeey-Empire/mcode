@@ -175,7 +175,6 @@ vi.mock("./CreatePrDialog", () => ({
 import { getThreadOverviewBrowserTabs } from "@/features/thread-overview/entries/browser";
 import { ThreadOverview } from "./ThreadOverview";
 import { canStartBranchlessCreatePr } from "@/features/thread-overview/branch-creation";
-import { getSubagentIdentityPaletteIndex } from "@/features/subagents";
 import { ProjectEnvironmentPanel } from "@/features/projects/environment";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
@@ -733,13 +732,10 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(summary).toHaveAccessibleName("Subagents, 1 active, 0 done");
     expect(summary).toHaveTextContent("1 active, 0 done");
     expect(summary).not.toHaveTextContent("total");
-    expect(summary.querySelectorAll("[data-subagent-identity-glyph]")).toHaveLength(1);
+    expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(1);
     expect(screen.queryByTestId("thread-overview-subagents-running")).not.toBeInTheDocument();
     expect(screen.getByText("Subagents").compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-    expect(summary.querySelector('[data-subagent-identity-glyph="Explorer"]')).toHaveAttribute(
-      "data-subagent-palette",
-      String(getSubagentIdentityPaletteIndex("agent-1")),
-    );
+    expect(summary.querySelector('[data-provider-icon="claude"]')).toBeInTheDocument();
     fireEvent.click(summary);
     expect(mockOpenSubagentsPanel).toHaveBeenCalledOnce();
   });
@@ -773,11 +769,11 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(usage.compareDocumentPosition(subagents) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
-  it("bounds finished identity glyphs and omits the zero active count", () => {
+  it("bounds the disc stack to three, lets the text carry the total, and omits the zero active count", () => {
     const thread = makeThread();
     mockThreadRecords.set(thread.id, {
       ...createEmptyThreadRecord(),
-      toolCalls: Array.from({ length: 5 }, (_, index) => ({
+      toolCalls: Array.from({ length: 8 }, (_, index) => ({
         id: `agent-${index}`,
         toolName: "Agent",
         toolInput: { agentName: `Worker ${index}` },
@@ -791,10 +787,10 @@ describe("ThreadOverview branchless Create PR", () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
     const summary = screen.getByTestId("thread-overview-subagents");
-    expect(summary).toHaveAccessibleName("Subagents, 0 active, 5 done");
-    expect(summary).toHaveTextContent("5 done");
+    expect(summary).toHaveAccessibleName("Subagents, 0 active, 8 done");
+    expect(summary).toHaveTextContent("8 done");
     expect(summary).not.toHaveTextContent("active");
-    expect(summary.querySelectorAll("[data-subagent-identity-glyph]")).toHaveLength(4);
+    expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(3);
   });
 
   it("counts repeated Codex paths as one logical subagent and keeps pathless calls separate", () => {
@@ -834,48 +830,7 @@ describe("ThreadOverview branchless Create PR", () => {
     const summary = screen.getByTestId("thread-overview-subagents");
     expect(summary).toHaveAccessibleName("Subagents, 0 active, 2 done");
     expect(summary).toHaveTextContent("2 done");
-    expect(summary.querySelectorAll("[data-subagent-identity-glyph]")).toHaveLength(2);
-  });
-
-  it("renders unnamed and explicitly named Subagent identities with distinct provenance", () => {
-    const thread = makeThread();
-    mockThreadRecords.set(thread.id, {
-      ...createEmptyThreadRecord(),
-      toolCalls: [
-        {
-          id: "unnamed",
-          toolName: "Agent",
-          toolInput: {},
-          output: null,
-          isError: false,
-          isComplete: false,
-        },
-        {
-          id: "explicit",
-          toolName: "Agent",
-          toolInput: { agentName: "Subagent" },
-          output: null,
-          isError: false,
-          isComplete: false,
-        },
-      ],
-      narrativeByMessage: {},
-    });
-
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
-
-    const glyphs = screen.getByTestId("thread-overview-subagents")
-      .querySelectorAll('[data-subagent-identity-glyph="Subagent"]');
-    expect(glyphs[0]).toHaveAttribute(
-      "data-subagent-palette",
-      String(getSubagentIdentityPaletteIndex("unnamed")),
-    );
-    expect(glyphs[0]?.getAttribute("style")).toContain("--subagent-identity-color");
-    expect(glyphs[1]).toHaveAttribute(
-      "data-subagent-palette",
-      String(getSubagentIdentityPaletteIndex("explicit")),
-    );
-    expect(glyphs[1]?.getAttribute("style")).toContain("--subagent-identity-color");
+    expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(2);
   });
 
   it("creates a named branch from the branchless worktree row", async () => {

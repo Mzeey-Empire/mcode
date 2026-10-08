@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { openSubagentsRoster, projectSubagents, SubagentIdentityGlyph } from "@/features/subagents";
+import { ProviderDiscStack } from "@/components/ui/provider-icon";
+import { openSubagentsRoster, projectSubagents } from "@/features/subagents";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { cn } from "@/lib/utils";
@@ -27,7 +28,11 @@ function SubagentsEntry({ thread }: { thread: Thread }) {
     [overviewNarrative, overviewToolCalls],
   );
   const subagentTotal = subagentRoster.active.length + subagentRoster.finished.length;
-  const subagentGlyphRows = [...subagentRoster.active, ...subagentRoster.finished].slice(0, 4);
+  // Subagent threads are provider-native, so every subagent shows the thread's provider.
+  const subagentProviders = useMemo(
+    () => Array.from({ length: subagentTotal }, () => thread.provider),
+    [subagentTotal, thread.provider],
+  );
   const subagentStateCopy = [
     subagentRoster.active.length > 0 ? `${subagentRoster.active.length} active` : null,
     `${subagentRoster.finished.length} done`,
@@ -47,18 +52,7 @@ function SubagentsEntry({ thread }: { thread: Thread }) {
         aria-label={`Subagents, ${subagentRoster.active.length} active, ${subagentRoster.finished.length} done`}
         className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2")}
       >
-        <span className="flex -space-x-1" aria-hidden>
-          {subagentGlyphRows.map((row) => (
-            <SubagentIdentityGlyph
-              key={row.id}
-              identity={row.identity}
-              hasExplicitIdentity={row.hasExplicitIdentity}
-              paletteSeed={row.id}
-              size={11}
-              className="size-4 ring-2 ring-background"
-            />
-          ))}
-        </span>
+        <ProviderDiscStack providers={subagentProviders} />
         <span className="shrink-0 text-xs tabular-nums text-muted">
           {subagentStateCopy}
         </span>

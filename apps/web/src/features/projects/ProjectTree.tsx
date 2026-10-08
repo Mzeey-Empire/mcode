@@ -10,7 +10,6 @@ import {
   forwardRef,
   type CSSProperties,
   type ComponentPropsWithoutRef,
-  type ComponentType,
   type ReactNode,
 } from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
@@ -30,7 +29,6 @@ import {
   Folder,
   FolderCheck,
   FolderOpen,
-  Activity,
   Pencil,
   Plus,
   SquarePen,
@@ -45,15 +43,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
-import {
-  ClaudeIcon,
-  CodexIcon,
-  CopilotIcon,
-  CursorProviderIcon,
-  DevinIcon,
-  GeminiIcon,
-  OpenCodeIcon,
-} from "@/components/chat/ProviderIcons";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { getPrVisual } from "@/lib/pr-status";
 import { formatRelative } from "@/lib/format-relative";
 import { cn } from "@/lib/utils";
@@ -1530,7 +1520,7 @@ interface ThreadRowPresentation {
   isRunning: boolean;
   showPrCi: boolean;
   isStaleWorktree: boolean;
-  providerMeta: ReturnType<typeof getProviderMeta>;
+  provider: string;
   unusable: boolean;
   unusableReason: string;
   scaffoldDim: string | false | null;
@@ -1633,14 +1623,14 @@ function hasStaleThreadWorktree(
 function threadProviderPresentation(
   provider: string,
   availableProviders: ThreadRowProps["availableProviders"],
-): Pick<ThreadRowPresentation, "providerMeta" | "unusable" | "unusableReason"> {
+): Pick<ThreadRowPresentation, "provider" | "unusable" | "unusableReason"> {
   const providerRow = availableProviders.find((candidate) => candidate.id === provider);
   if (!providerRow) {
-    return { providerMeta: getProviderMeta(provider), unusable: false, unusableReason: "" };
+    return { provider, unusable: false, unusableReason: "" };
   }
   const unusable = !providerRow.enabled || providerRow.cli.status === "not_found";
   const unusableReason = providerRow.enabled ? "CLI not found" : "Provider disabled";
-  return { providerMeta: getProviderMeta(provider), unusable, unusableReason };
+  return { provider, unusable, unusableReason };
 }
 
 // In-flight lifecycle flags live outside React: virtualized rows unmount
@@ -1908,20 +1898,18 @@ function ThreadRowLeading({
   presentation,
   lifecycle,
 }: Pick<ThreadRowVisualProps, "thread" | "depth" | "presentation" | "lifecycle">) {
-  const ProviderIcon = presentation.providerMeta.icon;
   return (
     <span className="absolute left-0.5 top-1/2 flex -translate-y-1/2 items-center justify-end gap-1" style={{ width: `${40 + depth * 12}px` }}>
       <ThreadLifecycleButton thread={thread} isRunning={presentation.isRunning} presentation={presentation} lifecycle={lifecycle} />
       <span
-        aria-label={`Provider, ${presentation.providerMeta.label}`}
+        aria-label={`Provider, ${providerLabel(presentation.provider)}`}
         className={cn(
           "-mt-px flex h-4 w-4 items-center justify-center",
-          presentation.providerMeta.color,
           presentation.scaffoldDim,
           presentation.isUserCompleted && "grayscale opacity-45",
         )}
       >
-        <ProviderIcon size={12} />
+        <ProviderIcon provider={presentation.provider} size={12} />
       </span>
     </span>
   );
@@ -2208,33 +2196,18 @@ function ciRollupStatus(
   return { aggregate, count, label };
 }
 
-type IconComponent = ComponentType<{ size?: number; className?: string }>;
-
-const PROVIDER_META: Record<
-  string,
-  { icon: IconComponent; label: string; color: string }
-> = {
-  claude: { icon: ClaudeIcon, label: "Claude", color: "" },
-  codex: { icon: CodexIcon, label: "Codex", color: "text-ink" },
-  copilot: {
-    icon: CopilotIcon,
-    label: "GitHub Copilot",
-    color: "text-violet-400 dark:text-violet-300",
-  },
-  cursor: { icon: CursorProviderIcon, label: "Cursor", color: "" },
-  devin: { icon: DevinIcon, label: "Devin", color: "" },
-  gemini: { icon: GeminiIcon, label: "Gemini", color: "text-sky-400" },
-  opencode: { icon: OpenCodeIcon, label: "OpenCode", color: "text-violet-400" },
+const PROVIDER_LABELS: Record<string, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  copilot: "GitHub Copilot",
+  cursor: "Cursor",
+  devin: "Devin",
+  gemini: "Gemini",
+  opencode: "OpenCode",
 };
 
-function getProviderMeta(provider: string) {
-  return (
-    PROVIDER_META[provider] ?? {
-      icon: Activity,
-      label: provider || "Provider",
-      color: "text-muted",
-    }
-  );
+function providerLabel(provider: string): string {
+  return PROVIDER_LABELS[provider] ?? (provider || "Provider");
 }
 
 function SidebarThreadPreview({

@@ -2,7 +2,8 @@ import { ArrowLeft, CircleCheck, CircleDashed, CircleX } from "lucide-react";
 import { formatSubagentDisplayName } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { SubagentIdentityGlyph } from "@/components/ui/SubagentIdentityGlyph";
+import { ProviderIcon } from "@/components/ui/provider-icon";
+import { useSubagentProvider } from "@/features/conversation";
 import { resolveModelDisplayLabel } from "@/lib/format-model-label";
 import { formatSubagentIdentity } from "../identity/format-subagent-identity";
 import { narrativeRowStatus } from "../roster/narrative-subagents";
@@ -47,16 +48,15 @@ function NarrativeActivityRow({ activity }: { readonly activity: SubagentDetailA
  */
 export function NarrativeDetailView({
   row,
-  paletteSeed,
   onBack,
 }: {
   readonly row: ProjectedSubagentRow;
-  readonly paletteSeed: string;
   readonly onBack: () => void;
 }) {
   const identity = formatSubagentIdentity(row.identity);
   const title = row.task ? formatSubagentDisplayName(row.task) : identity;
   const configuration = narrativeConfiguration(row);
+  const provider = useSubagentProvider();
   return (
     <section className="flex min-h-0 flex-1 flex-col" aria-label={`${identity} subagent details`}>
       <header className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
@@ -64,13 +64,7 @@ export function NarrativeDetailView({
           <ArrowLeft size={15} aria-hidden />
         </Button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <SubagentIdentityGlyph
-            identity={identity}
-            hasExplicitIdentity={row.hasExplicitIdentity}
-            paletteSeed={paletteSeed}
-            className="size-6"
-            size={15}
-          />
+          <ProviderIcon provider={provider} size={20} />
           <div className="min-w-0 flex-1">
             <h2 className="text-fade text-sm font-semibold">{title}</h2>
             {row.task && <p className="text-fade text-xs text-muted">{identity}</p>}
