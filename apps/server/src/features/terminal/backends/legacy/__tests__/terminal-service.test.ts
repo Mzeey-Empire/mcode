@@ -210,18 +210,16 @@ describe("TerminalService host ownership", () => {
     }
   });
 
-  it("counts exited shells and actions toward eight records, and close frees a slot", async () => {
+  it("counts exited shells toward eight records, and close frees a slot", async () => {
     const host = new InMemoryPtyHostAdapter("1");
     const { service, launch } = createService({ host });
     const scope = "00000000-0000-4000-8000-000000000001";
     try {
       const first = await service.create(scope, launch);
       host.emitExit(first.ptyId, 0);
-      const action = await service.startPreparedCommand(scope, launch);
-      host.emitExit(action.terminalSessionId, 2);
-      await Promise.all(Array.from({ length: 6 }, () => service.create(scope, launch)));
+      await Promise.all(Array.from({ length: 7 }, () => service.create(scope, launch)));
       expect(service.listActiveSessions().map(({ kind, state }) => [kind, state])).toEqual([
-        ["shell", "exited"], ["action", "exited"],
+        ["shell", "exited"], ["shell", "running"],
         ["shell", "running"], ["shell", "running"], ["shell", "running"],
         ["shell", "running"], ["shell", "running"], ["shell", "running"],
       ]);
@@ -232,7 +230,7 @@ describe("TerminalService host ownership", () => {
       expect(service.listActiveSessions().at(-1)?.ptyId).toBe(replacement.ptyId);
       await service.killByThread(scope);
       expect(service.listActiveSessions()).toEqual([]);
-      expect(() => service.reattach(action.terminalSessionId, -1)).toThrow(/PTY not found/);
+      expect(() => service.reattach(replacement.ptyId, -1)).toThrow(/PTY not found/);
     } finally {
       await service.shutdown();
     }
@@ -286,6 +284,24 @@ describe("TerminalService host ownership", () => {
     await expect(service.startPreparedCommand("thread-two", launch)).rejects.toThrow(
       "app-wide Terminal session limit",
     );
+  });
+
+  it("allows shells above the app-wide limit while each scope is below eight", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host, sessionLimit: 1 });
+    const firstScope = "00000000-0000-4000-8000-000000000001";
+    const secondScope = "00000000-0000-4000-8000-000000000002";
+    try {
+      const first = await service.create(firstScope, launch);
+      host.emitExit(first.ptyId, 0);
+      const second = await service.create(secondScope, launch);
+      const third = await service.create(secondScope, launch);
+      expect(service.listActiveSessions().map(({ ptyId }) => ptyId)).toEqual([
+        first.ptyId, second.ptyId, third.ptyId,
+      ]);
+    } finally {
+      await service.shutdown();
+    }
   });
 
   it("releases a failed host-start reservation without creating a session", async () => {
@@ -430,14 +446,61 @@ describe("TerminalService host ownership", () => {
     expect(service.listActiveSessions()).toEqual([{ ...created, threadId: "thread", state: "exited", exitCode: 1 }]);
   });
 
-  it("includes prepared sessions in generic thread teardown", async () => {
-    const { service, host, launch } = createService();
-    const prepared = await service.startPreparedCommand("thread", launch);
+  it("counts a running headless session toward the cap but skips it during thread teardown", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    try {
+      const prepared = await service.startPreparedCommand(scope, launch);
+      const exits: Array<number | null> = [];
+      const received: Uint8Array[] = [];
+      prepared.onExit((code) => exits.push(code));
+      prepared.onOutput((data) => received.push(data));
+      await Promise.all(Array.from({ length: 7 }, () => service.create(scope, launch)));
+      expect(service.listActiveSessions()).toHaveLength(7);
+      await expect(service.create(scope, launch)).rejects.toThrow(/Maximum PTY limit/);
 
-    await service.killByThread("thread");
+      await service.killByThread(scope);
 
-    expect(host.closes.map((close) => close.sessionId)).toEqual([prepared.terminalSessionId]);
-    expect(service.listActiveSessions()).toEqual([]);
+      expect(service.listActiveSessions()).toEqual([]);
+      expect(exits).toEqual([]);
+      await service.write(prepared.terminalSessionId, "still running");
+      host.emitOutput(prepared.terminalSessionId, Buffer.from("action output"));
+      expect(Buffer.concat(received).toString()).toBe("action output");
+      host.emitExit(prepared.terminalSessionId, 3);
+      expect(exits).toEqual([3]);
+    } finally {
+      await service.shutdown();
+    }
+  });
+
+  it("removes an exited headless session, frees its slot, and replays to late listeners", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    const json = vi.fn();
+    service.setSender({ data: vi.fn(), json });
+    try {
+      const prepared = await service.startPreparedCommand(scope, launch);
+      expect(service.listActiveSessions()).toEqual([]);
+      host.emitOutput(prepared.terminalSessionId, Buffer.from("completed action\r\n"));
+      host.emitExit(prepared.terminalSessionId, 7);
+
+      expect(service.listActiveSessions()).toEqual([]);
+      expect(json.mock.calls).toEqual([]);
+      expect(() => service.reattach(prepared.terminalSessionId, -1)).toThrow(/PTY not found/);
+      await Promise.all(Array.from({ length: 8 }, () => service.create(scope, launch)));
+      expect(service.listActiveSessions()).toHaveLength(8);
+
+      const received: Uint8Array[] = [];
+      const exits: Array<number | null> = [];
+      prepared.onOutput((data) => received.push(data));
+      prepared.onExit((code) => exits.push(code));
+      expect(Buffer.concat(received).toString()).toBe("completed action\r\n");
+      expect(exits).toEqual([7]);
+    } finally {
+      await service.shutdown();
+    }
   });
 
   it("retains a synchronous headless exit until its owner attaches", async () => {
@@ -465,9 +528,7 @@ describe("TerminalService host ownership", () => {
     });
 
     expect(() => host.emit(exit(prepared.terminalSessionId))).not.toThrow();
-    expect(service.listActiveSessions().map(({ ptyId, state, exitCode }) => ({ ptyId, state, exitCode }))).toEqual([
-      { ptyId: prepared.terminalSessionId, state: "exited", exitCode: 0 },
-    ]);
+    expect(service.listActiveSessions()).toEqual([]);
     await expect(prepared.stop()).resolves.toBeUndefined();
   });
 

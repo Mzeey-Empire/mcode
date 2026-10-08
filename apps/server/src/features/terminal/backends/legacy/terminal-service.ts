@@ -55,6 +55,7 @@ interface PtySession {
   readonly headless: boolean;
   readonly outputListeners: Set<(data: Uint8Array) => void>;
   readonly exitListeners: Set<(exitCode: number | null) => void>;
+  headlessOutput: Uint8Array[];
   headlessExit: number | null | undefined;
   readonly closeBarrier: Promise<void>;
   readonly resolveCloseBarrier: () => void;
@@ -85,6 +86,7 @@ export interface PtySender {
 @injectable()
 export class TerminalService {
   private sessions = new Map<string, PtySession>();
+  private readonly completedHeadlessSessions = new Map<string, PtySession>();
   private threadIndex = new Map<string, Set<string>>();
   private pendingCreations = new Map<string, Set<string>>();
   private sender: PtySender | null = null;
@@ -146,7 +148,7 @@ export class TerminalService {
    * @returns The unique PTY session ID.
    */
   async create(scopeId: string, launch: LegacyTerminalLaunch): Promise<LegacyTerminalCreateResult> {
-    const { cwd } = this.preparePtyCreation(scopeId);
+    const { cwd } = this.preparePtyCreation(scopeId, launch);
     const id = uuid();
     this.reserveCreation(scopeId, id);
     const shell = launch.executable;
@@ -201,6 +203,7 @@ export class TerminalService {
 
   private preparePtyCreation(
     scopeId: string,
+    launch: LegacyTerminalLaunch,
   ): { readonly cwd: string } {
     const cwd = this.resolveWorkingDirectory(scopeId);
     if (!NodePath.isAbsolute(cwd) || !NodeFS.existsSync(cwd) || !NodeFS.statSync(cwd).isDirectory()) {
@@ -210,13 +213,13 @@ export class TerminalService {
     if ((threadPtys?.size ?? 0) + (this.pendingCreations.get(scopeId)?.size ?? 0) >= TERMINAL_MAX_PER_SCOPE) {
       throw new Error(`Maximum PTY limit (${TERMINAL_MAX_PER_SCOPE}) reached for scope ${scopeId}`);
     }
-    this.assertCapacity();
+    this.assertHeadlessCapacity(launch);
     return { cwd };
   }
 
-  private assertCapacity(): void {
+  private assertHeadlessCapacity(launch: LegacyTerminalLaunch): void {
     const globalLimit = this.settingsService.get().terminal.behavior.sessionLimit;
-    if (this.sessions.size + this.pendingCreationCount() >= globalLimit) {
+    if (launch.headless && this.sessions.size + this.pendingCreationCount() >= globalLimit) {
       throw new Error("The app-wide Terminal session limit is reached");
     }
   }
@@ -263,6 +266,7 @@ export class TerminalService {
       headless: launch?.headless ?? false,
       outputListeners: new Set(),
       exitListeners: new Set(),
+      headlessOutput: [],
       headlessExit: undefined,
       closeBarrier,
       resolveCloseBarrier,
@@ -344,7 +348,7 @@ export class TerminalService {
       headless: true,
       environment,
     });
-    const session = this.sessions.get(created.ptyId);
+    const session = this.sessions.get(created.ptyId) ?? this.completedHeadlessSessions.get(created.ptyId);
     if (!session) throw new Error("Prepared terminal session was not retained");
     return {
       terminalSessionId: session.id,
@@ -354,17 +358,19 @@ export class TerminalService {
       environmentNames,
       onOutput: (listener) => {
         session.outputListeners.add(listener);
-        for (const chunk of this.replayBuffers.get(session.id)?.replay(-1).chunks ?? []) listener(chunk.bytes);
+        for (const data of session.headlessOutput) listener(data);
         return () => session.outputListeners.delete(listener);
       },
       onExit: (listener) => {
         session.exitListeners.add(listener);
         if (session.headlessExit !== undefined) {
           listener(session.headlessExit);
+          if (!this.sessions.has(session.id)) this.completedHeadlessSessions.delete(session.id);
         }
         return () => session.exitListeners.delete(listener);
       },
       stop: async () => {
+        if (this.completedHeadlessSessions.delete(session.id)) return;
         await this.stopPreparedCommand(session.id);
       },
     };
@@ -509,6 +515,7 @@ export class TerminalService {
     if (!ptys || ptys.size === 0) return;
     // Kill all PTYs concurrently: each killProcessTree is independent.
     await Promise.all([...ptys]
+      .filter((ptyId) => !this.sessions.get(ptyId)?.headless)
       .map((ptyId) => this.kill(ptyId)));
     logger.info("All PTYs killed for thread", { threadId });
   }
@@ -526,6 +533,7 @@ export class TerminalService {
     // The host closes all process scopes concurrently in one shutdown request.
     await this.host.shutdown();
     for (const session of sessions) this.finalizePty(session);
+    this.completedHeadlessSessions.clear();
   }
 
   /**
@@ -615,11 +623,13 @@ export class TerminalService {
   }
 
   /**
-   * Returns retained terminal records, including pending and exited processes.
+   * Returns retained shell records, including pending and exited processes.
    * Used by reconnecting clients to discover which PTYs to reattach.
    */
   listActiveSessions(): LegacyTerminalRecord[] {
-    return [...this.sessions.values()].map((session) => this.sessionRecord(session));
+    return [...this.sessions.values()]
+      .filter((session) => !session.headless)
+      .map((session) => this.sessionRecord(session));
   }
 
   private sessionRecord(session: PtySession): LegacyTerminalRecord {
@@ -666,6 +676,7 @@ export class TerminalService {
     const sequence = Number(event.outputSeq);
     this.replayBuffers.get(session.id)?.record(sequence, bytes);
     if (session.headless) {
+      appendHeadlessOutput(session, bytes, replayCapBytesForScrollback(this.lastScrollback));
       for (const listener of session.outputListeners) listener(bytes);
       return;
     }
@@ -684,6 +695,10 @@ export class TerminalService {
   }
 
   private retainExitedPty(session: PtySession, exitCode: number | null): void {
+    if (session.headless) {
+      this.finalizePty(session, exitCode ?? undefined);
+      return;
+    }
     if (session.status === "exited") return;
     session.status = "exited";
     session.exitCode = exitCode;
@@ -695,17 +710,25 @@ export class TerminalService {
     session.resolveCloseBarrier();
   }
 
-  private finalizePty(session: PtySession): void {
+  private finalizePty(session: PtySession, exitCode?: number): void {
     if (!this.sessions.has(session.id)) return;
-    this.retainExitedPty(session, null);
+    const awaitOwnerAttachment = session.headless && session.exitListeners.size === 0;
+    if (session.headless) this.notifyPtyExit(session, exitCode);
+    else this.retainExitedPty(session, exitCode ?? null);
     this.removePty(session.id);
+    if (awaitOwnerAttachment) {
+      this.completedHeadlessSessions.set(session.id, session);
+    }
+    session.resolveCloseBarrier();
   }
 
   private notifyPtyExit(session: PtySession, exitCode?: number): void {
-    this.sender?.json("terminal.exit", {
-      ptyId: session.id, code: exitCode ?? 0,
-      ...(exitCode === undefined ? { exitCode: null } : {}),
-    });
+    if (!session.headless) {
+      this.sender?.json("terminal.exit", {
+        ptyId: session.id, code: exitCode ?? 0,
+        ...(exitCode === undefined ? { exitCode: null } : {}),
+      });
+    }
     if (session.headless) session.headlessExit = exitCode ?? null;
     for (const listener of session.exitListeners) {
       try {
@@ -744,4 +767,12 @@ export class TerminalService {
     this.flowControls.delete(ptyId);
     this.replayBuffers.delete(ptyId);
   }
+}
+
+function appendHeadlessOutput(session: PtySession, data: Uint8Array, maxBytes: number): void {
+  const retained = Buffer.concat([...session.headlessOutput, Buffer.from(data)]);
+  const bounded = retained.byteLength > maxBytes
+    ? retained.subarray(retained.byteLength - maxBytes)
+    : retained;
+  session.headlessOutput = [bounded];
 }
