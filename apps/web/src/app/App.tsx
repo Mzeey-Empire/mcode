@@ -11,7 +11,7 @@ import {
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatView } from "@/features/conversation";
 import { openSubagentDetail, openSubagentsRoster } from "@/features/subagents";
-import { ConnectionBanner } from "@/components/ConnectionBanner";
+import { Notice } from "@/components/ui/notice";
 import { useUpdateStore } from "@/stores/updateStore";
 import { useToastStore } from "@/stores/toastStore";
 import { friendlyUpdateError } from "@/lib/update-error-message";
@@ -332,6 +332,14 @@ function RightPanelSlot({
   );
 }
 
+/** Shows a busy notice while the WebSocket reconnects or re-authenticates. */
+function ConnectionNotice() {
+  const status = useConnectionStore((s) => s.status);
+  if (status !== "reconnecting" && status !== "authFailed") return null;
+  const title = status === "authFailed" ? "Re-authenticating after server restart" : "Reconnecting to server";
+  return <div className="px-4 pt-2"><Notice tone="warning" busy title={title} /></div>;
+}
+
 function AppLayout(props: AppLayoutProps) {
   return (
     <TerminalPoolSlotProvider>
@@ -345,7 +353,7 @@ function AppLayout(props: AppLayoutProps) {
               onForward={() => props.navigateHistory("forward")}
             />
           ) : null}
-          <ConnectionBanner />
+          <ConnectionNotice />
           <div ref={props.outerRowRef} className="flex flex-1 overflow-hidden">
             {!props.sidebarFloating && (
               <DockedSidebar

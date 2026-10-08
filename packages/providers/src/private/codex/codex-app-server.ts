@@ -710,7 +710,7 @@ const STDERR_EXCERPT_MAX_CHARS = 256;
 
 /**
  * Bounds and sanitizes a stderr line for embedding in the user-facing fatal
- * message. Backticks are stripped because the web CliErrorBanner extracts
+ * message. Backticks are stripped because the web CLI error notice (`describeCliError`) extracts
  * backtick-quoted substrings as copyable commands, and child stderr can carry
  * agent-generated content. The full line stays in the structured log fields.
  */

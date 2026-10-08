@@ -201,8 +201,8 @@ vi.mock("@/components/chat/PlanQuestionWizard", () => ({
   PlanQuestionWizard: () => null,
 }));
 
-vi.mock("@/components/chat/CliErrorBanner", () => ({
-  CliErrorBanner: () => null,
+vi.mock("@/components/chat/cli-error", () => ({
+  describeCliError: () => ({ headline: "", installCommand: null, settingsHint: null }),
   isCliError: () => false,
 }));
 
