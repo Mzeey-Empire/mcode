@@ -2,6 +2,7 @@ import { useCallback, useRef, useState, type MutableRefObject } from "react";
 import type { LexicalEditor } from "lexical";
 import type { MessageMention, SelectedTextComment } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
+import { POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import type { SelectedTextCommentSource } from "../selected-text-projection";
 import {
@@ -252,7 +253,8 @@ export function SelectedTextCommentEditor({
       aria-label="Comment on selected text"
       style={{ maxHeight }}
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-border/70 bg-panel text-ink shadow-lg",
+        "relative overflow-hidden",
+        POPOVER_SURFACE_CLASS,
         isShaking && "animate-preview-annotation-shake",
       )}
     >

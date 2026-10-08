@@ -3,6 +3,7 @@ import { MessageCircle, Pencil, X } from "lucide-react";
 import type { SelectedTextComment } from "@mcode/contracts";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { Button } from "@/components/ui/button";
+import { POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SelectedTextCommentEditor } from "../messages/selection/SelectedTextCommentEditor";
 
@@ -517,7 +518,7 @@ export function ComposerCommentAttachmentShell({
             ref={previewRef}
             id={previewId}
             aria-label={`${label} preview`}
-            className={`absolute ${previewPlacementClass(readOnly, sentPreviewPlacement)} ${previewHorizontalPlacementClass(readOnly)} z-50 w-[min(38rem,calc(100vw-1.5rem))] rounded-xl border border-border bg-panel p-3 text-ink shadow-md`}
+            className={`absolute ${previewPlacementClass(readOnly, sentPreviewPlacement)} ${previewHorizontalPlacementClass(readOnly)} z-50 w-[min(38rem,calc(100vw-1.5rem))] p-3 ${POPOVER_SURFACE_CLASS}`}
             data-testid={previewTestId}
             onPointerEnter={openPreview}
             onFocus={openPreview}

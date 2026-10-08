@@ -14,6 +14,7 @@ import { formatContextWindow } from "./format-context-window";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Tooltip,
   TooltipContent,
@@ -526,22 +527,6 @@ function useFetchProviderModelsWhenOpen(
       void fetchProviderModels(providerId);
     }
   }, [open, locked, leftRailSelection, favoritesVisible, fetchProviderModels]);
-}
-
-function useCloseWhenClickOutside(
-  containerRef: React.RefObject<HTMLDivElement | null>,
-  setOpen: (open: boolean) => void,
-): void {
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [containerRef, setOpen]);
 }
 
 function FavoriteToggle({
@@ -1120,13 +1105,13 @@ function ModelSelectorPanel({
   if (!open) return null;
 
   return (
-    <div
+    <PopoverContent
       id={rightPanelProps.panelId}
       role="dialog"
       aria-label="Choose model and provider"
-      className={cn(
-        "absolute bottom-full left-0 z-20 mb-1 flex h-[min(440px,calc(100vh-8rem))] w-[min(92vw,520px)] flex-col overflow-hidden rounded-lg border border-border bg-panel shadow-lg",
-      )}
+      side="top"
+      align="start"
+      className="flex h-[min(440px,calc(100vh-8rem))] w-[min(92vw,520px)] flex-col overflow-hidden p-0"
     >
       <div className="flex shrink-0 border-b border-border/40">
         <div
@@ -1157,7 +1142,7 @@ function ModelSelectorPanel({
         />
 
         <div
-          className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-panel p-1"
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto p-1"
           role="region"
           aria-label="Model list"
         >
@@ -1168,7 +1153,7 @@ function ModelSelectorPanel({
           />
         </div>
       </div>
-    </div>
+    </PopoverContent>
   );
 }
 
@@ -1201,7 +1186,6 @@ export function ModelSelector({
   const [open, setOpen] = useState(false);
   const [leftRailSelection, setLeftRailSelection] = useState<LeftRailSelection>("favorites");
   const [rightPanelSearch, setRightPanelSearch] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
 
   const favorites = useModelFavoritesStore((store) => store.entries);
@@ -1245,7 +1229,6 @@ export function ModelSelector({
     favoritesVisible,
     fetchProviderModels,
   );
-  useCloseWhenClickOutside(containerRef, setOpen);
 
   const handleSelectModel = (modelId: string, providerId: string) => {
     onSelect(modelId, providerId);
@@ -1272,21 +1255,21 @@ export function ModelSelector({
   const TriggerIcon = presentation.icon;
 
   return (
-    <div ref={containerRef} className="relative">
-      <Button
-        variant="ghost"
-        size="xs"
-        data-testid="model-selector-trigger"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-controls={open ? panelId : undefined}
-        onClick={() => setOpen(!open)}
-        className="max-w-full shrink whitespace-normal text-muted transition-colors hover:bg-hover/40 hover:text-ink"
-      >
-        <TriggerIcon size={14} className={cn("shrink-0", presentation.iconClass)} aria-hidden />
-        <span className="min-w-0 whitespace-normal text-sm [overflow-wrap:anywhere]">{presentation.shortLabel}</span>
-        <ChevronDown size={11} className="shrink-0" aria-hidden />
-      </Button>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="xs"
+            data-testid="model-selector-trigger"
+            className="max-w-full shrink whitespace-normal text-muted transition-colors hover:bg-hover/40 hover:text-ink"
+          >
+            <TriggerIcon size={14} className={cn("shrink-0", presentation.iconClass)} aria-hidden />
+            <span className="min-w-0 whitespace-normal text-sm [overflow-wrap:anywhere]">{presentation.shortLabel}</span>
+            <ChevronDown size={11} className="shrink-0" aria-hidden />
+          </Button>
+        }
+      />
 
       <ModelSelectorPanel
         open={open}
@@ -1312,6 +1295,6 @@ export function ModelSelector({
         onSelect={handleSelectModel}
         onToggleFavorite={toggleFavorite}
       />
-    </div>
+    </Popover>
   );
 }

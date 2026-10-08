@@ -4,6 +4,7 @@ import { MessageCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MessageMention } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
+import { POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import { basename } from "@/lib/path";
 import { canSaveSelectedTextComment } from "@/features/conversation/messages/selection/comment-editor-model";
 import {
@@ -120,7 +121,8 @@ export function DiffCommentEditor({
       role="dialog"
       aria-label={`Comment on ${target.filePath} line ${target.line}`}
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-border/70 bg-panel text-ink shadow-lg",
+        "relative overflow-hidden",
+        POPOVER_SURFACE_CLASS,
         isShaking && "animate-preview-annotation-shake",
       )}
     >

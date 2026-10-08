@@ -40,6 +40,7 @@ import { usePullRequestReviewDraftStore } from "@/features/pull-requests/state/p
 import { usePullRequestStore } from "@/features/pull-requests/state/pullRequestStore";
 import type { PullRequestTransport } from "@/transport/pull-requests";
 import { cn } from "@/lib/utils";
+import { MOUNT_FADE_CLASS, SHEET_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import { useShallow } from "zustand/shallow";
 import { PullRequestChangedFilesPane } from "./PullRequestChangedFilesPane";
 import { PullRequestDiffViewport } from "./PullRequestDiffViewport";
@@ -647,7 +648,7 @@ function PullRequestCodeFilesPane({
       wideWidth={FILES_PANEL_WIDE_WIDTH}
       getMaxWidth={getFloatingFilesPanelMaxWidth}
       onWidthChange={onWidthChange}
-      className="absolute inset-y-0 right-0 z-30 h-full bg-panel shadow-lg animate-in slide-in-from-right-2 duration-150 motion-reduce:animate-none"
+      className={cn("absolute inset-y-0 right-0 z-30 h-full", SHEET_SURFACE_CLASS, MOUNT_FADE_CLASS)}
       onActivate={onActivate}
       onQueryChange={onQueryChange}
     />
