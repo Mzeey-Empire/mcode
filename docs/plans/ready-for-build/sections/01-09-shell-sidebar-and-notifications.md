@@ -487,7 +487,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
   - [ ] "Reload Window" and "Toggle Developer Tools" appear in the palette only in a development build.
   - [ ] The IPC handler rejects `closeWindow`, `undo` and the other removed actions as invalid.
   - [ ] macOS: the native menu template is unchanged, and its Keyboard Shortcuts and About Mcode items still open those Settings sections.
-- **Verify:** unit test for the reserve calc and full-screen attribute; `create-window.test.ts` (prior art) for options. `bun run --cwd apps/web test -- src/__tests__/keybinding-manager.test.ts src/__tests__/shortcuts.test.ts src/__tests__/App.test.tsx` (the `plus` key, the platform-scoped bindings, the new commands and the desktop command listener). `bun run --cwd apps/desktop test -- src/features/desktop-window/actions/__tests__/window-actions.test.ts src/features/desktop-window/actions/__tests__/handlers.test.ts src/features/desktop-window/menu/__tests__/application-menu.test.ts src/features/desktop-window/__tests__/desktop-window-feature.test.ts`. Live: Electron live-testing skill (`.agents/skills/electorn-live-testing/SKILL.md`); screenshot the 48 strip on Windows; drag the window by the spacer; on Windows press each shortcut in the F table and open each new palette command, and cut, copy and paste text in the composer.
+- **Verify:** `bun run --cwd apps/web test -- src/components/shell/__tests__/window-chrome.test.tsx src/__tests__/keybinding-manager.test.ts src/__tests__/shortcuts.test.ts src/__tests__/App.test.tsx` (`window-chrome.test.tsx` is a new unit test for the reserve calc and full-screen attribute; the others cover the `plus` key, the platform-scoped bindings, the new commands and the desktop command listener). `bun run --cwd apps/desktop test -- src/features/desktop-window/lifecycle/__tests__/create-window.test.ts src/features/desktop-window/actions/__tests__/window-actions.test.ts src/features/desktop-window/actions/__tests__/handlers.test.ts src/features/desktop-window/menu/__tests__/application-menu.test.ts src/features/desktop-window/__tests__/desktop-window-feature.test.ts` (`create-window.test.ts` for the window options). Live: Electron live-testing skill (`.agents/skills/electorn-live-testing/SKILL.md`); screenshot the 48 strip on Windows; drag the window by the spacer; on Windows press each shortcut in the F table and open each new palette command, and cut, copy and paste text in the composer.
 
 ### S01-02 Sidebar frame, resize, footer strip, empty workspace drop
 
@@ -557,7 +557,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
   - [ ] Background checks never show "Up to date".
   - [ ] With one running agent, Install opens the dialog with "1 agent is running…"; "When they finish" installs within 10s of the agent ending.
   - [ ] Release notes containing `<script>` or markdown links render as inert text.
-- **Verify:** `lifecycle/__tests__/installation.test.ts` (prior art) with fake timers for install-when-idle; `release-notes.test.ts` for HTML and markdown inputs; web test for the state map. Live: set the dev update feed (`apps/desktop/dev-app-update.yml`), turn off Auto-download in Settings › About, walk 4 → 5 → 6 → 7.
+- **Verify:** `bun run --cwd apps/desktop test -- src/features/application-updates/lifecycle/__tests__/installation.test.ts src/features/application-updates/state/__tests__/update-status.test.ts src/features/application-updates/ipc/__tests__/handlers.test.ts` and `bun run --cwd apps/web test -- src/features/updates/__tests__/release-notes.test.ts src/components/sidebar/__tests__/UpdateButton.test.tsx`. `installation.test.ts` (prior art) gains fake-timer cases for install-when-idle; `update-status.test.ts` and `handlers.test.ts` cover `downloaded.installWhenIdle` and the two new IPC channels. `release-notes.test.ts` is new, for HTML and markdown inputs; `UpdateButton.test.tsx` is the new web test for the state map. Live: set the dev update feed (`apps/desktop/dev-app-update.yml`), turn off Auto-download in Settings › About, walk 4 → 5 → 6 → 7.
 
 ### S09-01 One notification lane (merged)
 
@@ -575,7 +575,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
   - [ ] No toast for the thread on screen; a toast when the same thread finishes while the window is focused on another thread.
   - [ ] Answering an approval from the sidebar removes its toast.
   - [ ] Reconnecting does not replay toasts.
-- **Verify:** detector unit tests with scripted attention snapshots and pushes. Live: two threads in `.dev/fixture-repo`, watch thread B while A finishes; click the toast and confirm A opens and the row clears.
+- **Verify:** `bun run --cwd apps/web test -- src/features/thread-attention/__tests__/thread-event-detector.test.ts`, new detector unit tests with scripted attention snapshots and pushes. Live: two threads in `.dev/fixture-repo`, watch thread B while A finishes; click the toast and confirm A opens and the row clears.
 
 ### S09-03 OS notification while Mcode is in the background
 
@@ -588,7 +588,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
   - [ ] Unfocused + enabled → notification; focused → toast only; disabled → neither OS notification.
   - [ ] Click focuses or restores the window and selects the thread.
   - [ ] Body omits the file count when unknown.
-- **Verify:** desktop test beside `server-runtime/recovery/__tests__/notifications.test.ts` (prior art) with a fake Notification factory. Live: start a turn, focus another app, wait for the Windows toast, click it.
+- **Verify:** `bun run --cwd apps/desktop test -- src/features/desktop-window/notifications/__tests__/thread-notifications.test.ts` and `bun run --cwd apps/web test -- src/features/thread-attention/__tests__/thread-event-detector.test.ts`. The desktop test is new, with a fake Notification factory (prior art `server-runtime/recovery/__tests__/notifications.test.ts`). S09-02's detector test is extended for the renderer side: focused gives a toast only, the setting off gives no bridge call, and a notification click selects the thread. Live: start a turn, focus another app, wait for the Windows toast, click it.
 
 ### S09-04 Provider status contract and the bell
 
@@ -603,7 +603,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
   - [ ] No popover row shows usage, and opening the bell makes no `provider.getUsage` request (spy test).
   - [ ] A Claude `RateLimited { active: true }` with `retryAfterMs` shows "5-hour limit reached · resets 16:00" and the dot; `active: false`, or the reset time passing, removes the row. Without `retryAfterMs` the row reads "Rate limited" with no time.
   - [ ] A status refresh failure for one provider leaves the others intact.
-- **Verify:** service tests with fake adapters next to `provider-availability-service.test.ts`, including a Devin adapter fed an empty environment and then a placeholder key, and a scripted `RateLimited` sequence for the rate-limit store; web popover test for the empty state, the tooltip and the no-usage spy. Live, in an isolated provider home only:
+- **Verify:** `bun run --cwd apps/server test -- src/features/providers/status/__tests__/provider-status-service.test.ts` and `bun run --cwd apps/web test -- src/components/sidebar/__tests__/ProvidersPopover.test.tsx`. The service test is new, with fake adapters (prior art `availability/__tests__/provider-availability-service.test.ts`), including a Devin adapter fed an empty environment and then a placeholder key, and a scripted `RateLimited` sequence for the rate-limit store. The popover test is new, for the empty state, the tooltip and the no-usage spy. Live, in an isolated provider home only:
   1. Stop the runtime with `agent:down`. From a shell where `HOME`, `USERPROFILE`, `APPDATA` and `XDG_DATA_HOME` point at an empty directory under `.dev/verification/provider-home/`, and where `WINDSURF_API_KEY` and `DEVIN_API_KEY` are unset, run `agent:up`. `agent:up` passes the shell environment to the server (`scripts/agent/agent-up.mjs:237-238`) and still pins Mcode's own data to `.dev/` (`scripts/agent/runtime-contract.mjs:74-75`), so only provider lookups move.
   2. Devin now finds no credentials (`packages/providers/src/private/devin/devin-credentials.ts:20-53`). Open the bell and confirm its Signed out row with Sign in. Other providers may also read Signed out in this home; that is expected.
   3. Write a placeholder `devin/credentials.toml` with a dummy `windsurf_api_key` (`devin-credentials.ts:63`) into the scratch home, never a real key. Restart the runtime from the same shell and confirm the row clears.
@@ -622,7 +622,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
   - [ ] Two refreshes within 24 hours make one registry request per provider; with Provider CLI checks off, none, and no update row shows.
   - [ ] A failing update shows a reason of at most 240 chars and Retry.
   - [ ] A CLI whose resolved path is outside the detected npm prefix shows no Update action.
-- **Verify:** unit tests for `isNewer` (including prerelease) and the runner with a fake process host, including a CLI outside the detected prefix. Live, with a scratch CLI prefix only:
+- **Verify:** `bun run --cwd packages/providers test -- src/__tests__/version-policy.test.ts src/__tests__/codex/codex-version.test.ts` and `bun run --cwd apps/server test -- src/features/providers/status/__tests__/cli-update-runner.test.ts src/features/providers/status/__tests__/provider-status-service.test.ts`. `version-policy.test.ts` is new: unit tests for `isNewer` (including prerelease) and the moved `meetsMinVersion`, whose cases in `codex-version.test.ts` move with it while that file keeps covering the Codex check. `cli-update-runner.test.ts` is new: the runner with a fake process host, including a CLI outside the detected prefix. S09-04's service test is extended for a registry timeout, one registry request per provider per day, and Provider CLI checks off. Live, with a scratch CLI prefix only:
   1. Install an older Codex into a scratch npm prefix under `.dev/verification/npm-prefix/` (`npm install -g --prefix <scratch> @openai/codex@<older>`). Never install into or update the global prefix.
   2. `agent:down`, then run `agent:up` from a shell with `NPM_CONFIG_PREFIX=<scratch>`, so `npm prefix -g` resolves to the scratch prefix for the server. In Settings, point Codex's CLI path (`provider.cli.codex`, read at `provider-availability-service.ts:81`) at the scratch binary. The runtime's settings file lives in `.dev/` (`settings-service.ts:215` under `MCODE_DATA_DIR`), so nothing global changes.
   3. Open the bell, run Update, and confirm the scratch binary reports the target version while the global `codex --version` is unchanged.
@@ -638,7 +638,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
 - **Acceptance criteria:**
   - [ ] First run seeds every current model as acknowledged.
   - [ ] Adding a model id to the Claude static catalog yields one announcement; Try acknowledges it.
-- **Verify:** integration test with `model-cache-integration.test.ts` (prior art). Live: add a fake model to a dev catalog, open the bell.
+- **Verify:** `bun run --cwd apps/server test -- src/features/providers/status/__tests__/model-sightings.integration.test.ts`, a new integration test (prior art `models/__tests__/model-cache-integration.test.ts`). Live: add a fake model to a dev catalog, open the bell.
 
 ## Tests
 

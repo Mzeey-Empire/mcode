@@ -597,7 +597,7 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
 - **Acceptance criteria:**
   - [ ] The note is present exactly once after a revert and absent after Undo.
   - [ ] It is not shown in the user bubble and not persisted in message content.
-- **Verify:** server unit test at the admission seam (prior art: `features/agents/turns/__tests__`). Live: revert, then ask "what did you change in X?" and confirm the answer reflects the revert.
+- **Verify:** `bun run --cwd apps/server test -- src/features/agents/turns/__tests__/turn-revert-agent-note.test.ts` (new, at the admission seam on real SQLite, with `turn-conversation-write-operations.test.ts` in the same folder as prior art: the provider prompt carries the note exactly once after a revert and not after Undo, and neither the user bubble nor the persisted message content holds it). Live: revert, then ask "what did you change in X?" and confirm the answer reflects the revert.
 
 ### S08-07 Seen marker on threads (merged)
 

@@ -7,6 +7,7 @@
 //   node graph.mjs render       write ../tickets.md
 //   node graph.mjs issues       write issue bodies to ./out/<id>.md (needs ./issue-map.json for numbers, optional)
 //   node graph.mjs titles       print ticket titles as JSON (used by publish.mjs)
+//   node graph.mjs verify       list tickets whose Verify line names no command the gate can run
 //   node graph.mjs route <id>   print a ticket's lane, risk and design flag (build-ticket skill, step 4)
 //   node graph.mjs gate <id>    run a ticket's ledger proofs, Verify tests, typecheck and lint (step 7)
 
@@ -522,13 +523,16 @@ function route(id) {
   return 0;
 }
 
+// Verify commands the gate runs: a workspace test or typecheck script, a pinned bunx tool, or this folder's graph tool.
+const VERIFY_COMMAND = /^(?:bun run --cwd \S+ (?:test|typecheck)\b|bunx --no-install \S|node docs\/plans\/ready-for-build\/tools\/graph\.mjs )/;
+
 function verifyCommands(id, tickets) {
   const t = tickets.get(id);
   const lines = readFileSync(join(sectionsDir, t.file), "utf8").split(/\r?\n/);
   const commands = [];
   for (let i = t.line + 1; i < lines.length && !/^#{1,3} /.test(lines[i]); i += 1) {
     if (!lines[i].includes("**Verify:**")) continue;
-    for (const m of lines[i].matchAll(/`([^`]*)`/g)) if (/^bun run --cwd \S+ (test|typecheck)\b/.test(m[1])) commands.push(m[1]);
+    for (const m of lines[i].matchAll(/`([^`]*)`/g)) if (VERIFY_COMMAND.test(m[1])) commands.push(m[1]);
   }
   return commands;
 }
@@ -541,6 +545,15 @@ async function runWords(words, cwd) {
     result = spawnSync(`${exe}.cmd`, args, { cwd, encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024 });
   }
   return result;
+}
+
+// Repo-relative paths of the test files a `bun run --cwd <ws> test -- <files>` command names.
+function namedTestFiles(words) {
+  if (words[0] !== "bun" || words[1] !== "run" || words[2] !== "--cwd") return [];
+  const ws = words[3];
+  const dash = words.indexOf("--");
+  if (dash < 0) return [];
+  return words.slice(dash + 1).filter((w) => !w.startsWith("-") && /\.(m?[jt]sx?)$/.test(w)).map((w) => `${ws}/${w}`);
 }
 
 // The gate a ticket's branch must pass before review: its ledger proofs, the tests its Verify line
@@ -566,15 +579,24 @@ async function gate(id, tickets) {
     console.error("cannot find the merge base with origin/main; fetch origin first");
     return 1;
   }
-  const diff = await runWords(["git", "diff", "--name-only", "--diff-filter=d", base.stdout.trim()], repoRoot);
+  // Deletions count: a branch must not delete plan files, and a workspace touched only by a deletion still needs its checks.
+  const diff = await runWords(["git", "diff", "--name-only", base.stdout.trim()], repoRoot);
+  if (diff.status !== 0) {
+    console.error(`git diff failed: ${diff.stderr}`);
+    return 1;
+  }
   const changed = diff.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
   if (changed.length === 0) {
     console.error("no changes against origin/main; nothing to gate");
     return 1;
   }
-  const planEdits = changed.filter((f) => f.startsWith("docs/plans/ready-for-build/"));
+  // F-99's job includes narrowing over-broad proofs in the section ledgers; every other ticket treats the plan as read-only.
+  const planEdits = changed.filter((f) => f.startsWith("docs/plans/ready-for-build/") && !(id === "F-99" && /^docs\/plans\/ready-for-build\/sections\/[^/]+\.md$/.test(f)));
   results.push({ label: "plan folder unchanged", ok: planEdits.length === 0 });
   console.log(`${planEdits.length ? "FAIL" : "PASS"}  plan folder unchanged${planEdits.length ? `: ${planEdits.join(", ")}` : ""}`);
+
+  // The repo's .oxlintrc.json loads the built plugin, so build it before any Verify command or lint step runs oxlint.
+  const plugin = await step("bun run --cwd packages/oxlint-plugin build", ["bun", "run", "--cwd", "packages/oxlint-plugin", "build"]);
 
   console.log(`\n# Ledger proofs owned by ${id}`);
   if (ledgerRows().some((row) => (row.owner.match(ID_PATTERN) ?? []).includes(id))) {
@@ -586,15 +608,25 @@ async function gate(id, tickets) {
 
   console.log(`\n# Tests from the ticket's Verify line`);
   const verify = verifyCommands(id, tickets);
-  if (verify.length === 0) console.log("the Verify line names no bun test or typecheck command; rely on the workspace checks below");
+  if (verify.length === 0) {
+    results.push({ label: "Verify line names a runnable command", ok: false });
+    console.log("FAIL  the Verify line names no runnable command; typecheck and lint do not stand in for the ticket's tests");
+  }
   for (const cmd of verify) {
     const words = splitWords(cmd);
-    if (words) {
-      await step(cmd, words);
-    } else {
+    if (!words) {
       results.push({ label: cmd, ok: false });
       console.log(`FAIL  ${cmd} uses a shell operator`);
+      continue;
     }
+    // A test runner can pass when one of several file filters matches nothing, and some scripts ignore filters,
+    // so every named test file must exist before the command counts.
+    const missing = namedTestFiles(words).filter((file) => !existsSync(join(repoRoot, file)));
+    if (missing.length) {
+      results.push({ label: `${cmd} names existing files`, ok: false });
+      console.log(`FAIL  ${cmd}\n     missing test files: ${missing.join(", ")}`);
+    }
+    await step(cmd, words);
   }
 
   console.log(`\n# Typecheck and lint for touched workspaces`);
@@ -603,8 +635,8 @@ async function gate(id, tickets) {
     const pkgPath = join(repoRoot, ws, "package.json");
     if (existsSync(pkgPath) && JSON.parse(readFileSync(pkgPath, "utf8")).scripts?.typecheck) await step(`bun run --cwd ${ws} typecheck`, ["bun", "run", "--cwd", ws, "typecheck"]);
   }
-  const lintable = changed.filter((f) => /\.(m?[jt]sx?)$/.test(f) && !f.startsWith("docs/"));
-  if (lintable.length && (await step("bun run --cwd packages/oxlint-plugin build", ["bun", "run", "--cwd", "packages/oxlint-plugin", "build"]))) {
+  const lintable = changed.filter((f) => /\.(m?[jt]sx?)$/.test(f) && !f.startsWith("docs/") && existsSync(join(repoRoot, f)));
+  if (lintable.length && plugin) {
     await step(`bunx --no-install oxlint (${lintable.length} changed files)`, ["bunx", "--no-install", "oxlint", ...lintable]);
   }
 
@@ -640,6 +672,11 @@ if (command === "check") {
 } else if (command === "render") {
   render(tickets, waves);
   console.log("tickets.md written");
+} else if (command === "verify") {
+  // Every ticket's Verify line must name at least one command the gate can run.
+  const missing = allIds().filter((id) => verifyCommands(id, tickets).length === 0).sort(compareIds);
+  console.log(missing.length ? `no runnable Verify command: ${missing.join(" ")}` : `ok: every ticket's Verify line names a runnable command`);
+  process.exit(missing.length ? 1 : 0);
 } else if (command === "route") {
   process.exit(route(process.argv[3]));
 } else if (command === "gate") {

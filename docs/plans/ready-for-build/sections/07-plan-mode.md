@@ -729,7 +729,7 @@ Historic messages keep their `plan-output` fences. The ledger retires every writ
   - [ ] No plan prose in the chat. The overview row appears only when a version exists.
   - [ ] Picking an older version shows it read-only.
   - [ ] `mod+t` still toggles the panel.
-- **Verify:** Rewrite `PlanPanel.test.tsx` and `planStore.test.ts`. Live: Electron at 1440, open a thread with a plan, click the overview row; the layout is 304 | 552 | 536 | 48 and the header matches 07e.
+- **Verify:** `bun run --cwd apps/web test -- src/components/panels/plan/PlanPanel.test.tsx src/stores/planStore.test.ts` (both rewritten). Live: Electron at 1440, open a thread with a plan, click the overview row; the layout is 304 | 552 | 536 | 48 and the header matches 07e.
 
 ### S07-05 Live-preview editor: the first change creates "Edited by you"
 
@@ -750,7 +750,7 @@ Historic messages keep their `plan-output` fences. The ledger retires every writ
   - [ ] A lost response to the first save, followed by a retry, yields one version.
   - [ ] Two-window conflict and resolution, end to end on one server. Windows A and B fork ready v2 with different text. A's first save creates v3 (draft, revision 1). B gets the conflict notice with its text intact; Keep my text saves B's text into v3 at revision 2, and no v4 exists. A's next save, still based on revision 1, gets the notice in turn; Use saved version shows B's text, and A's next edit saves v3 at revision 3. B's following save, based on revision 2, gets the notice again rather than overwriting A.
   - [ ] When the latest version is accepted, the notice offers only Use saved version and keeps the local text visible until then.
-- **Verify:** Unit-test the pure decoration ranges and the save scheduler, including serialization, coalescing, same-payload retry, conflict hold, and both Keep my text branches (adopt a draft, fork a ready version) (`apps/web/src/components/panels/plan/__tests__/`). Replay the two-window request sequence above against real SQLite in `apps/server/src/features/agents/planning/__tests__/plan-service.test.ts`. Live, with two web clients on one server (`.dev/fixture-repo`): type in step 4 and check the picker flips to "v2 Edited by you" and `plan.snapshot` returns the text; then run the two-window sequence by hand and confirm the picker shows one "Edited by you" version holding the text of the last confirmed choice.
+- **Verify:** `bun run --cwd apps/web test -- src/components/panels/plan/plan-editor-decorations.test.ts src/components/panels/plan/plan-save-scheduler.test.ts`; `bun run --cwd apps/server test -- src/features/agents/planning/__tests__/plan-service.test.ts` (the two web tests are new and sit beside the plan panel's other tests; they test the pure decoration ranges and the save scheduler, including serialization, coalescing, same-payload retry, conflict hold, and both Keep my text branches: adopt a draft, fork a ready version. The server test, from S07-03, replays the two-window request sequence above against real SQLite). Live: with two web clients on one server (`.dev/fixture-repo`), type in step 4 and check the picker flips to "v2 Edited by you" and `plan.snapshot` returns the text; then run the two-window sequence by hand and confirm the picker shows one "Edited by you" version holding the text of the last confirmed choice.
 
 ### S07-06 Plan comments and the composer chip
 
@@ -928,7 +928,7 @@ Merged into S07-02, so native Codex plan mode and its question protocol activate
 - **Acceptance criteria:**
   - [ ] All four 07h states work by keyboard alone.
   - [ ] The draft text survives toggling.
-- **Verify:** Lexical plugin tests (prior art `components/chat/lexical/__tests__` if present, else a new one). Live: type `/plan fix the menu` and see the chip and the draft "fix the menu".
+- **Verify:** `bun run --cwd apps/web test -- src/components/chat/lexical/SlashCommandPlugin.test.tsx` (new; `components/chat/lexical` has no `__tests__` folder, so it sits beside its prior art `ComposerEditor.test.tsx`. It drives all four 07h states by keyboard alone and checks that the draft text survives toggling). Live: type `/plan fix the menu` and see the chip and the draft "fix the menu".
 
 ### S07-12 Claude native plan mode and plan-file sync
 

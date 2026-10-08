@@ -565,7 +565,7 @@ type DraftSubmission = {
   - [ ] `git.reviewState` reports dirty for untracked-only and staged-only trees.
   - [ ] The ADR-0011 default picks Unstaged for an untracked-only thread.
   - [ ] The thread overview's Changes row counts untracked files.
-- **Verify:** New `apps/server/src/features/projects/git/__tests__/git-comparison-untracked.integration.test.ts`, modelled on `diffs/snapshots/__tests__/snapshot-service.integration.test.ts`. Extend `git-comparison-service.test.ts` (FakeGitExecutor) for counts. Live: create `notes.md` in the fixture repo; Review › Unstaged shows it with `+N`.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/git/__tests__/git-comparison-untracked.integration.test.ts src/features/projects/git/__tests__/git-comparison-service.test.ts src/features/projects/git/__tests__/git-service-branch-comparison.test.ts`; `bun run --cwd apps/web test -- src/hooks/useReviewState.test.ts src/components/chat/HeaderActions.test.tsx src/components/chat/ThreadOverview.branchless-pr.test.tsx`; `bun run --cwd packages/contracts test -- src/__tests__/review-comparison.test.ts`. New: `git-comparison-untracked.integration.test.ts`, modelled on `src/features/projects/diffs/snapshots/__tests__/snapshot-service.integration.test.ts`, runs a real temp repo through every untracked, rename, absent-index, unreadable-index, mixed-status and index-immutability criterion above, plus `git.reviewState` on untracked-only and staged-only trees. New: `useReviewState.test.ts`, beside the hook (prior art `useHasCommitsAhead.test.ts`), proves an untracked-only or staged-only state is dirty, which makes the ADR-0011 default pick Unstaged. Extend `git-comparison-service.test.ts` (FakeGitExecutor) for per-file counts, `HeaderActions.test.tsx` (its `resolveThreadOverviewChangeSummary` tests) so the Changes row counts untracked files, `ThreadOverview.branchless-pr.test.tsx` for the migrated overview probes, and `review-comparison.test.ts` for `ReviewFileChange` v2. `git-service-branch-comparison.test.ts` drops its `branchFiles` case with the retired RPC. Live: create `notes.md` in the fixture repo; Review › Unstaged shows it with `+N`.
 
 ### S10-03 Truthful comparison outcomes and turn list
 
@@ -605,7 +605,7 @@ type DraftSubmission = {
   - [ ] Retry across the retention cutoff: attempt 1, 31 days old, edits `a.ts` and fails; its replacement, 29 days old, edits `b.ts`. After `deleteExpired(30)`, `turnDiff.getComparison` for the replacement's message returns `snapshot-expired`, never a diff of `b.ts` alone. `turnDiff.listTurns` marks the turn `snapshot-expired` with its ordinal unchanged, `snapshot.listByThread` omits the replacement's row, and All turns starts at the next turn.
   - [ ] Never written: attempt 1 has an assistant row but no snapshot row (its capture failed), and its replacement has a row. The turn reads `snapshot-expired`, while the same fixture with an attempt-1 row that attributes nothing reads as the replacement alone.
   - [ ] `turnDiff.listTurns` lists the retried turn once, keyed by the replacement's message, with the first attempt's ordinal. The next turn's ordinal does not move.
-- **Verify:** Extend `git-comparison-service.test.ts` and `diffs/transport/__tests__/snapshot-rpc.test.ts`, and add `turn-diff-rpc.test.ts`. Attempts: new `diffs/snapshots/__tests__/turn-snapshot-range.integration.test.ts` (real git in a temp repo, snapshot rows linked through checkpoints; prior art `snapshot-service.integration.test.ts`), and extend `agents/recovery/__tests__/turn-recovery-service.test.ts` for `attemptOf` (prior art: its `retried` phase assertion at `:689`). Web: extend `GitDiffView.test.tsx` and `DiffPanel.files.test.tsx` per status. Live: point a fixture thread's Branch base at a bad ref and see Couldn't load and Retry. Delete a worktree folder and see Couldn't load.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/git/__tests__/git-comparison-service.test.ts src/features/projects/git/transport/__tests__/git-rpc.test.ts src/features/projects/diffs/transport/__tests__/snapshot-rpc.test.ts src/features/projects/diffs/transport/__tests__/turn-diff-rpc.test.ts src/features/projects/diffs/snapshots/__tests__/turn-snapshot-range.integration.test.ts src/features/agents/recovery/__tests__/turn-recovery-service.test.ts src/features/agents/turns/__tests__/turn-diff-review.test.ts`; `bun run --cwd apps/web test -- src/components/diff/__tests__/GitDiffView.test.tsx src/components/diff/__tests__/DiffPanel.files.test.tsx src/components/diff/__tests__/CumulativeView.test.tsx`; `bun run --cwd packages/contracts test -- src/__tests__/review-comparison.test.ts`. New: `git-rpc.test.ts` (`routeGitRpc` with the strict resolver: a deleted worktree folder returns `worktree-missing`, never a read of the workspace root), `turn-diff-rpc.test.ts` (`snapshot-expired`, `snapshot-pruned`, `listTurns` ordinals), and `turn-snapshot-range.integration.test.ts` (real git in a temp repo, snapshot rows linked through checkpoints, every attempt and retention case above; prior art `snapshot-service.integration.test.ts`). Extend `git-comparison-service.test.ts` (timeout, the cap with the shortstat count, stderr classification), `snapshot-rpc.test.ts` (`attempt_count`, `listByThread` omitting an incomplete turn), `turn-recovery-service.test.ts` for `attemptOf` (prior art: its `retried` phase assertion at `:689`), `turn-diff-review.test.ts` (it parses `turnDiff.getComparison`, which now returns `ReviewComparisonResult`), `review-comparison.test.ts` for the result union, `GitDiffView.test.tsx` and `DiffPanel.files.test.tsx` per status (Details shows and copies the raw stderr), and `CumulativeView.test.tsx` (refresh in place, no banner, no summary lens). Live: point a fixture thread's Branch base at a bad ref and see Couldn't load and Retry. Delete a worktree folder and see Couldn't load.
 
 ### S10-04 Two-row header, names-only view menu, merged Turn view
 
@@ -636,7 +636,7 @@ type DraftSubmission = {
   - [ ] When a new turn starts while the view follows the latest turn, the view moves to it and keeps the previous diff on screen until the new one settles.
   - [ ] Wrap starts on. The unified/split pill shows the active segment filled.
   - [ ] With three files, the toggle collapses all three, then expands all three, and its icon and tooltip follow. It is present in every view, including empty and error states.
-- **Verify:** New `lib/__tests__/review-views.test.ts`. Extend `TurnPicker.test.tsx` (follow and pin, ordinals) and `DiffPanel.files.test.tsx` (the toggle; prior art for the bulk command: `ReviewDiffView.refresh.test.tsx`). Live: Electron live-testing skill on a fixture thread with three turns. Compare row 1 and row 2 against 10a and the menu against 10b. Take screenshots before and after.
+- **Verify:** `bun run --cwd apps/web test -- src/lib/__tests__/review-views.test.ts src/components/diff/__tests__/TurnPicker.test.tsx src/components/diff/__tests__/DiffPanel.files.test.tsx src/__tests__/diffStore.test.ts src/components/chat/__tests__/TurnChangeSummary.test.tsx`. All five exist; extend them. `review-views.test.ts`: menu order and groups, the `reviewViewAvailability` reasons, and `defaultReviewView(scope, changeState, availability)` never choosing an unavailable view. `TurnPicker.test.tsx`: follow and pin, ordinals. `DiffPanel.files.test.tsx`: row 2 and Refresh in loading, empty, error and too-many states, wrap on at start, following that keeps the previous diff until the next settles, and the expand/collapse-all toggle (prior art for the bulk command: `ReviewDiffView.refresh.test.tsx`). `diffStore.test.ts`: `last-turn` gone and `selectedTurnByThread`. `TurnChangeSummary.test.tsx`: the bar pins its messageId, or `"latest"` for the latest turn. Live: Electron live-testing skill on a fixture thread with three turns. Compare row 1 and row 2 against 10a and the menu against 10b. Take screenshots before and after.
 
 ### S10-05 Commit and Branch pickers with server search and paging
 
@@ -661,7 +661,7 @@ type DraftSubmission = {
   - [ ] A branchless thread's compare side reads `HEAD`, and its base defaults to the saved base branch (ADR-0015).
   - [ ] Ref listing failures show an error row, not an empty list.
   - [ ] No code swaps base and target anywhere, and no `git.listRefs` method exists.
-- **Verify:** Extend `git-service-branch-comparison.test.ts`. Add a `git-commit-search.integration.test.ts` real-repo test with 300 commits, and a picker test against S03-04's listing with 150 refs including a diverged `main`/`origin/main` pair. Live: the 10e flows on the fixture repo.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/git/__tests__/git-service-branch-comparison.test.ts src/features/projects/git/__tests__/git-commit-search.integration.test.ts`; `bun run --cwd apps/web test -- src/components/diff/__tests__/BranchOperandPickers.test.tsx src/components/diff/__tests__/DiffPanel.files.test.tsx`. New: `git-commit-search.integration.test.ts`, a real-repo test with 300 commits (a "delete" search past the first page, counts equal to `git rev-list --count`), and `BranchOperandPickers.test.tsx`, a picker test against S03-04's listing with 150 refs including a diverged `main`/`origin/main` pair (separate Local and Origin selections, sort order, the other-tab switch, an error row on a listing failure). Extend `git-service-branch-comparison.test.ts` for `{compare, base}` and the branchless `HEAD` default, and `DiffPanel.files.test.tsx` for the wire range `refs/heads/mcode-3f2a...refs/remotes/origin/main` with no swap. Live: the 10e flows on the fixture repo.
 
 ### S10-06 Diff presentation: filename-first header, ligatures off, full-width bands
 
@@ -683,7 +683,7 @@ type DraftSubmission = {
   - [ ] Folder text fades with the 24px mask and never shows an ellipsis.
   - [ ] Deletions appear before additions in the header, per Paper.
   - [ ] The header is 36px, and actions appear only on expanded files.
-- **Verify:** Extend `PierreCodeView.test.tsx` and `FileActionBar.test.tsx`. Live: screenshot 10a parity at 536 and at the expanded width.
+- **Verify:** `bun run --cwd apps/web test -- src/components/diff/__tests__/PierreCodeView.test.tsx src/components/diff/__tests__/FileActionBar.test.tsx` (extend both: the custom header, counts on collapsed files, deletions before additions, the folder fade, actions only on expanded files). Live: screenshot 10a parity at 536 and at the expanded width.
 
 ### S10-07 Files navigator: docked at 800+, popover below, scroll-spy, one order
 
@@ -701,7 +701,7 @@ type DraftSubmission = {
   - [ ] Scrolling past a file header moves the active row in both hosts.
   - [ ] The diff order equals the tree's depth-first order for `a/b/10.ts`, `a/b/9.ts`, `a/z.ts`, `b.ts`.
   - [ ] `FileJumpPopover` is gone.
-- **Verify:** Extend `DiffPanel.files.test.tsx` and `FileList.test.tsx`, and `features/pull-requests/lib/__tests__/pull-request-file-tree.test.ts` for the order helper. Live: resize the panel across 800 and scroll a ten-file diff.
+- **Verify:** `bun run --cwd apps/web test -- src/components/diff/__tests__/DiffPanel.files.test.tsx src/components/diff/__tests__/FileList.test.tsx src/features/pull-requests/lib/__tests__/pull-request-file-tree.test.ts` (extend all three; the last covers the order helper). Live: resize the panel across 800 and scroll a ten-file diff.
 
 ### S10-08 Commit backend: message generation, commit, push
 
@@ -735,7 +735,7 @@ type DraftSubmission = {
   - [ ] Committing with nothing changed returns `nothing-to-commit`.
   - [ ] A push failure returns `committed` with `push.failed`.
   - [ ] Generation failure returns `failed` with a reason, never text.
-- **Verify:** New `apps/server/src/features/projects/git/__tests__/git-commit-service.integration.test.ts` against a real temp repo, a local bare remote, and `pre-commit` and `commit-msg` hook scripts. It builds a second service on the same database file to stand in for a restart. Prove git 2.25+ `--pathspec-from-file` and the intent-to-add pathspec commit there first. Extend `git-service-push.test.ts` for the extracted service.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/git/__tests__/git-commit-service.integration.test.ts src/features/projects/git/__tests__/git-service-push.test.ts`. The first is new: it runs against a real temp repo, a local bare remote, and `pre-commit` and `commit-msg` hook scripts, and builds a second service on the same database file to stand in for a restart. Prove git 2.25+ `--pathspec-from-file` and the intent-to-add pathspec commit there first. Extend `git-service-push.test.ts` for the extracted service.
 
 ### S10-09 Commit sheet and floating Commit
 
@@ -768,7 +768,7 @@ type DraftSubmission = {
   - [ ] The commit prefill is gone from the overview and header tests.
   - [ ] A failing hook shows the output in the sheet, and the files stay checked for a retry.
   - [ ] A dropped connection during Commit resends the same `requestId`; the sheet shows one commit and its push result.
-- **Verify:** New `components/diff/__tests__/CommitSheet.test.tsx`. Update `HeaderActions.test.tsx` and `useThreadGitActions.branchless-pr.test.tsx`. Live: in the fixture repo, edit two files, add one, and commit two. Then add `.git/hooks/pre-commit` that exits 1 and see the failure. Video for the PR.
+- **Verify:** `bun run --cwd apps/web test -- src/components/diff/__tests__/CommitSheet.test.tsx src/components/chat/HeaderActions.test.tsx src/hooks/useThreadGitActions.branchless-pr.test.tsx`. `CommitSheet.test.tsx` is new; update the other two to drop the commit prefill. Live: in the fixture repo, edit two files, add one, and commit two. Then add `.git/hooks/pre-commit` that exits 1 and see the failure. Video for the PR.
 
 ### S10-10 Revert file in the Turn and All turns views
 
@@ -802,7 +802,7 @@ type DraftSubmission = {
   - [ ] In the Turn view of a retried turn, reverting a file that only the failed attempt edited restores it to its content before the first attempt.
   - [ ] Rename chain: Turn 1 renames `a.ts` to `b.ts` and Turn 3 renames `b.ts` to `c.ts`. In All turns, Revert file on `c.ts` shows "Restores a.ts and removes c.ts." After apply, `a.ts` holds its bytes from before Turn 1 and `b.ts` and `c.ts` are absent; Undo puts `c.ts` back and removes `a.ts`. The same chain across the two attempts of a retried turn gives the same result from the Turn view.
   - [ ] The inset is keyboard reachable, and Esc cancels.
-- **Verify:** Component test beside `FileActionBar.test.tsx`, covering both views and both receipt labels. Live: revert one file of a two-file fixture turn and check `git status`. Then have two turns edit the same fixture file, revert it from All turns, check that it matches its content before the first turn, and Undo.
+- **Verify:** `bun run --cwd apps/web test -- src/components/diff/__tests__/FileRevertConfirm.test.tsx src/features/conversation/turn-revert/__tests__/TurnRevertReceipt.test.tsx`. `FileRevertConfirm.test.tsx` is the new component test beside `FileActionBar.test.tsx`. It covers both views: the icon only in Turn and All turns, the Turn and range copy, the rename-chain sentence, `fromMessageId` and `messageId` on apply, a new `requestId` per click, and Esc. Extend S08-04's `TurnRevertReceipt.test.tsx` for both receipt labels. Live: revert one file of a two-file fixture turn and check `git status`. Then have two turns edit the same fixture file, revert it from All turns, check that it matches its content before the first turn, and Undo.
 
 ### S10-11 Comment drafts persist, one limit, mentions kept
 
@@ -868,14 +868,17 @@ type DraftSubmission = {
 
 - **Blocked by:** S10-04 Two-row header, names-only view menu, merged Turn view.
 - **Boards:** 10a `2241-2` ("Show whitespace", off at rest)
-- **Delivers:** The fourth row-2 control, with the behaviour chosen in Q2.
+- **Delivers:** The fourth row-2 control hides whitespace changes (Q2, decided by the user on 2026-10-08 as B4). Its tooltip reads "Hide whitespace changes".
 - **Build notes:**
-  - If Q2 is "hide whitespace changes": add `ignoreWhitespace: boolean` to `git.reviewComparison` and the per-file patch reads, passing `-w` for git views. Git-fallback turns are also git diffs. Native agent patches dim the control with the tooltip "Not available for agent patches".
-  - If Q2 is "show invisibles": web only, through Pierre's token transformer. Its feasibility is unproven.
+  - Add `ignoreWhitespace: boolean` to `git.reviewComparison` and the per-file patch reads, passing `-w` for git views. Git-fallback turns are also git diffs. Native agent patches dim the control with the tooltip "Not available for agent patches".
   - Per-thread preference, like wrap.
 - **Deletes:** none.
-- **Acceptance criteria:** decided with Q2.
-- **Verify:** Unit test at the comparison service seam. Live toggle.
+- **Acceptance criteria:**
+  - [ ] The control is off at rest. Turning it on re-reads the comparison with `ignoreWhitespace: true`, and a file whose only changes are whitespace drops out of the view and the file count.
+  - [ ] Git views and Git-fallback turns pass `-w` to both the comparison and the per-file patch read; line counts match the hidden view.
+  - [ ] On a native agent patch the control is dimmed with the tooltip "Not available for agent patches", and the patch is unchanged.
+  - [ ] The setting is remembered per thread, like wrap, and survives switching views and reloading.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/git/__tests__/git-comparison-service.test.ts src/features/projects/diffs/transport/__tests__/turn-diff-rpc.test.ts`; `bun run --cwd apps/web test -- src/components/diff/__tests__/DiffPanel.files.test.tsx`. Q2 is answered (`decisions.md` B4: hide whitespace changes), so the comparison service seam is the server pair: `ignoreWhitespace` passes `-w` to the comparison and per-file patch reads for git views and Git-fallback turns (FakeGitExecutor), and native agent patches are unchanged. The web test covers the control: it sets the per-thread preference, sends `ignoreWhitespace`, and is dimmed with "Not available for agent patches" on a native patch. Live: toggle the control on a fixture diff.
 
 ## Tests
 
@@ -892,7 +895,7 @@ Product calls go to the user. The rest are facts for the ticket owner to prove.
    - It keeps the diff at 520 or wider, so split view and line comments stay usable. 08c-5 leaves about 316px, which wraps almost every line.
    - It merges `FileJumpPopover` into one component.
    - It matches PR detail, which also floats its rail below 800.
-2. **Q2 (user): what the ¶ control does.** The layer is named "Show whitespace" and is off at rest. Pierre 1.4.1 has no invisibles option. Recommend **"Hide whitespace changes"** (`-w`), dimmed for native agent patches, with the tooltip renamed to match. The alternative, rendering invisible characters, needs a token transformer that is unproven.
+2. **Q2: what the ¶ control does. Decided (user, 2026-10-08, B4): hide whitespace changes.** The layer is named "Show whitespace" and is off at rest. Pierre 1.4.1 has no invisibles option. Recommend **"Hide whitespace changes"** (`-w`), dimmed for native agent patches, with the tooltip renamed to match. The alternative, rendering invisible characters, needs a token transformer that is unproven.
 3. **Q3 (user): Commit list domain.** Today, and in the 10b tooltip, the list covers commits ahead of the base. 10e's "412 commits" and "across all history" suggest full history. Recommend keeping ahead-of-base for the list and for Commit availability, and searching that whole range on the server. Full history is a one-parameter change, but it would make the "No commits ahead of origin/main" reason meaningless.
 4. **Q4 (user, open since 08): Commit overlapping the diff while scrolling.** Recommend accepting the overlap and adding 72px bottom padding so content can scroll clear. No hide-on-scroll motion.
 5. **Q5 (user): Summary lens.** The AI prose for All turns, `settings.diffSummary` and CONTEXT "Summary" are not drawn. Recommend retiring them, because thread Recap (ADR-0013) covers this. Decision V4 defaults to retire, so S10-03 retires them; a "keep" answer removes that ledger row and build note.

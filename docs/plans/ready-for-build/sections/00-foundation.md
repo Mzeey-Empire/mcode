@@ -345,7 +345,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Sidebar renders 304 wide at 1440.
   - [ ] No visual regression beyond the intended value changes in the four screenshots.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-01a` passes.
-- **Verify:** New `apps/web/src/__tests__/design-tokens.test.ts` parses `index.css` and compares each role in `:root` and `.dark` against a checked-in `design-tokens.paper.json` exported from Paper (the test fails when either side drifts). Live: `bun run --shell system agent:up`, open the Electron app with the live-testing harness, toggle dark and light, screenshot sidebar, composer, a dropdown, and Settings.
+- **Verify:** `bun run --cwd apps/web test -- src/__tests__/design-tokens.test.ts`. The test is new: it parses `index.css` and compares each role in `:root` and `.dark` against a checked-in `design-tokens.paper.json` exported from Paper (the test fails when either side drifts). Live: `bun run --shell system agent:up`, open the Electron app with the live-testing harness, toggle dark and light, screenshot sidebar, composer, a dropdown, and Settings.
 
 ### F-01b Token vocabulary rename
 
@@ -368,7 +368,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-01b` passes.
   - [ ] Typecheck, lint and web tests pass.
   - [ ] Screenshot diff of the four F-01a surfaces shows no change (rename only).
-- **Verify:** `bun run --cwd apps/web typecheck`; `bun run --cwd packages/oxlint-plugin build`, then `bunx --no-install oxlint apps/web/src`; focused tests `bun run --cwd apps/web test -- src/components/ui/__tests__/Button.test.tsx src/components/ui/__tests__/overlay-pointer-events.test.tsx src/__tests__/design-tokens.test.ts` (CI runs the full suite); live screenshots compared with F-01a's.
+- **Verify:** `bun run --cwd apps/web typecheck`; `bun run --cwd packages/oxlint-plugin build`, then `bunx --no-install oxlint apps/web/src`; focused tests `bun run --cwd apps/web test -- src/__tests__/Button.test.tsx src/components/ui/__tests__/overlay-pointer-events.test.tsx src/__tests__/design-tokens.test.ts` (CI runs the full suite); live screenshots compared with F-01a's.
 
 ### F-02 Fade truncation primitive
 
@@ -382,7 +382,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Icons, counts and actions next to faded text stay fully visible.
   - [ ] Faded text keeps its full value in the accessible name, and a tooltip shows it where the row already had one.
   - [ ] Lint rule at error; `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-02` passes.
-- **Verify:** Rule tests in `packages/oxlint-plugin/src/__tests__/no-ellipsis-truncation.test.ts` (prior art `no-native-title-tooltip.test.ts`). Component test for `PathText` ordering. Live: resize the sidebar narrow, confirm a long thread title and branch fade with no "…"; open a picker with long branch names; check the web client in Chromium.
+- **Verify:** `bun run --cwd packages/oxlint-plugin test -- src/__tests__/no-ellipsis-truncation.test.ts` and `bun run --cwd apps/web test -- src/components/ui/__tests__/path-text.test.tsx src/components/chat/__tests__/ComposerCapabilities.test.tsx src/components/chat/ThreadOverview.branchless-pr.test.tsx src/components/chat/__tests__/slash-command-popup-icons.test.tsx`. The rule test is new (prior art `no-native-title-tooltip.test.ts`); `path-text.test.tsx` is a new component test for `PathText` ordering; the other three web tests assert the old masks and change with them. Live: resize the sidebar narrow, confirm a long thread title and branch fade with no "…"; open a picker with long branch names; check the web client in Chromium.
 
 ### F-03 Button primitives
 
@@ -396,7 +396,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Round button: selected fill at rest, control-border fill with `aria-pressed="true"`, accessible name and tooltip required (type-level: `aria-label` is a required prop for icon-only).
   - [ ] Loading keeps width and blocks repeat clicks.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-03` passes and `bun run --cwd apps/web typecheck` passes.
-- **Verify:** `components/ui/__tests__/button.test.tsx`: loading blocks a second click; split button keyboard order (action, then chevron opens the menu). Live: Review panel header, sidebar header ghost buttons, a dialog's primary and destructive pair, both themes.
+- **Verify:** `bun run --cwd apps/web test -- src/components/ui/__tests__/button.test.tsx src/__tests__/Button.test.tsx`. `button.test.tsx` is new: loading blocks a second click; split button keyboard order (action, then chevron opens the menu). The existing `src/__tests__/Button.test.tsx` asserts today's size aliases and changes with the size map. Live: Review panel header, sidebar header ghost buttons, a dialog's primary and destructive pair, both themes.
 
 ### F-04a Menu primitive
 
@@ -410,7 +410,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] A disabled row is focusable for its tooltip, not invocable, and its reason is in the accessible description.
   - [ ] Escape closes and restores focus to the trigger.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-04a` passes.
-- **Verify:** `components/ui/__tests__/dropdown-menu.test.tsx` for keyboard, disabled reason and focus return (prior art `context-menu.test.tsx`). Live: sidebar thread context menu and Review view picker, both themes.
+- **Verify:** `bun run --cwd apps/web test -- src/components/ui/__tests__/dropdown-menu.test.tsx src/components/ui/context-menu.test.tsx`. `dropdown-menu.test.tsx` is new, for keyboard, disabled reason and focus return (prior art `context-menu.test.tsx`, which also runs because this ticket restyles its rows). Live: sidebar thread context menu and Review view picker, both themes.
 
 ### F-04b Picker primitive
 
@@ -443,7 +443,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Scrolling near the end calls `onLoadMore` once per page; the footer reads "Showing 50 of 568".
   - [ ] No-match reads `Nothing matches "q"` and offers the other tab when `emptySwitch` is set.
   - [ ] Failure shows the title, the raw detail in mono, and Retry.
-- **Verify:** `components/ui/__tests__/picker.test.tsx` with a fake paged source (load-more fires once per threshold, keyboard selection, tab switch keeps the query). Live: Settings model and provider pickers in both themes.
+- **Verify:** `bun run --cwd apps/web test -- src/components/ui/__tests__/picker.test.tsx`, a new test with a fake paged source (load-more fires once per threshold, keyboard selection, tab switch keeps the query). Live: Settings model and provider pickers in both themes.
 
 ### F-04c Migrate the model picker and file editor picker to the picker primitive
 
@@ -485,7 +485,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
 - **Acceptance criteria:**
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-06` passes.
   - [ ] A stack of 8 subagents shows three discs; the text beside it carries the count.
-- **Verify:** Small render test for the stack cap. Live: model picker provider tabs, a thread with Codex subagents, both themes.
+- **Verify:** `bun run --cwd apps/web test -- src/components/ui/__tests__/provider-icon.test.tsx`, a new small render test for the stack cap. Live: model picker provider tabs, a thread with Codex subagents, both themes.
 
 ### F-07a Overlay surfaces and side placement
 
@@ -498,7 +498,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Popover, dialog and menu surfaces render the recipe in both themes.
   - [ ] A surface opened from a row inside a 280px card opens beside the card, top-aligned to the row, and flips sides at the window edge.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-07a` passes.
-- **Verify:** Placement unit test with a mocked boundary rect (left, right, fallback below). Live: thread overview workspace and branch menus on a new thread, a dialog, a hover card, both themes.
+- **Verify:** `bun run --cwd apps/web test -- src/components/ui/__tests__/side-placement.test.ts src/components/ui/__tests__/overlay-pointer-events.test.tsx`. `side-placement.test.ts` is a new placement unit test for the shared positioning helper with a mocked boundary rect (left, right, fallback below); `overlay-pointer-events.test.tsx` covers the restyled popover, menu and select positioners. Live: thread overview workspace and branch menus on a new thread, a dialog, a hover card, both themes.
 
 ### F-07b Toast lane
 
@@ -531,7 +531,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Error and info toasts from existing callers render in the new lane.
   - [ ] `dismissByKey` removes the toast holding that key, cancels its timer and leaves other toasts in place; with no matching toast it does nothing. Showing a second toast with a live key replaces the first instead of stacking.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-07b` passes.
-- **Verify:** `stores/__tests__/toastStore.test.ts` with fake timers (lifetime, hover pause, cap, dedupe replacement, `dismissByKey` hit and miss). Live: trigger a background thread finishing (fixture repo) and an app error; swipe one away on a trackpad and with a mouse drag.
+- **Verify:** `bun run --cwd apps/web test -- src/stores/__tests__/toastStore.test.ts`, a new test with fake timers (lifetime, hover pause, cap, dedupe replacement, `dismissByKey` hit and miss). Live: trigger a background thread finishing (fixture repo) and an app error; swipe one away on a trackpad and with a mouse drag.
 
 ### F-08 Icon system: Lucide at 1.5px
 
@@ -543,7 +543,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
 - **Acceptance criteria:**
   - [ ] Rendered Lucide SVGs report `stroke-width: 1.5` in computed styles.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-08` passes; lint blocks a Phosphor import.
-- **Verify:** Live: inspect a sidebar icon and a menu icon in DevTools; compare against `81E-0`.
+- **Verify:** `bun run --cwd apps/web test -- src/components/ui/__tests__/icon-map.test.tsx`, a new test that renders the canonical icons from `icon-map.tsx` and checks each SVG has a stroke width of 1.5. Live: inspect a sidebar icon and a menu icon in DevTools; compare against `81E-0`.
 
 ### F-09 Tooltip primitive
 
@@ -570,7 +570,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Each state renders the Paper mark and announces its label.
   - [ ] No visible "Errored" anywhere, including the sidebar filter and toasts.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-10` passes.
-- **Verify:** `components/ui/__tests__/status-mark.test.tsx` for accessible names per state. Live: sidebar with one running, one failed, one finished-unseen thread on the fixture repo.
+- **Verify:** `bun run --cwd apps/web test -- src/components/ui/__tests__/status-mark.test.tsx`, a new test for accessible names per state. Live: sidebar with one running, one failed, one finished-unseen thread on the fixture repo.
 
 ### F-11a Raw colour and shadow sweep with lint guards
 
@@ -583,7 +583,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Both rules at error, and `bun run --cwd packages/oxlint-plugin build`, then `bunx --no-install oxlint apps/web/src` passes.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-11a` passes.
   - [ ] Preview panel (largest offender) screenshots match before and after in both themes except intended token corrections.
-- **Verify:** Rule tests in `packages/oxlint-plugin/src/__tests__/`. Live: Browser panel, image lightbox, terminal colours.
+- **Verify:** `bun run --cwd packages/oxlint-plugin test -- src/__tests__/no-raw-color.test.ts src/__tests__/no-raw-shadow.test.ts`, new rule tests for `mcode/no-raw-color` and `mcode/no-raw-shadow` (prior art `no-native-title-tooltip.test.ts`). Live: Browser panel, image lightbox, terminal colours.
 
 ### F-11b Type size, layer and motion sweep with lint guards
 
@@ -596,7 +596,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Both rules at error, and `bun run --cwd packages/oxlint-plugin build`, then `bunx --no-install oxlint apps/web/src` passes.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-11b` passes.
   - [ ] No text below 12px in the sidebar, composer, overview or Review header.
-- **Verify:** Rule tests; live screenshots at 100% and 200% zoom.
+- **Verify:** `bun run --cwd packages/oxlint-plugin test -- src/__tests__/no-arbitrary-text-size.test.ts src/__tests__/no-numeric-z-index.test.ts`, new rule tests for `mcode/no-arbitrary-text-size` and `mcode/no-numeric-z-index` (prior art `no-native-title-tooltip.test.ts`). Live: screenshots at 100% and 200% zoom.
 
 ### F-12 Form controls
 
@@ -609,7 +609,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] All states on the boards render in both themes.
   - [ ] Radio group arrow-key navigation works.
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-12` passes.
-- **Verify:** `components/ui/__tests__/radio-group.test.tsx` (keyboard). Live: Settings forms and a dialog form.
+- **Verify:** `bun run --cwd apps/web test -- src/components/ui/__tests__/radio-group.test.tsx src/features/projects/environment/__tests__/ProjectEnvironmentPanel.test.tsx`. `radio-group.test.tsx` is new (keyboard); `ProjectEnvironmentPanel.test.tsx` already drives the hand-rolled radios by role and must pass on `RadioGroup`. Live: Settings forms and a dialog form.
 
 ### F-99 Dead code sweep
 
@@ -629,7 +629,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] Every non-`rg` proof named in the ledgers passes; the PR lists each command with its result.
   - [ ] `bun run lint:deadcode` exits 0 with the committed config; every ignore entry has a reason and appears in the follow-up issue.
   - [ ] CI runs `bun run lint:deadcode`.
-- **Verify:** The commands above, with output pasted in the PR, and the knip step visible in the PR's CI run.
+- **Verify:** `node docs/plans/ready-for-build/tools/graph.mjs ledger`, `node docs/plans/ready-for-build/tools/graph.mjs ledger-run` (no ticket id, so it runs every proof) and `bunx --no-install knip` (what `bun run lint:deadcode` runs), with output pasted in the PR, and the knip step visible in the PR's CI run.
 
 ## Tests
 

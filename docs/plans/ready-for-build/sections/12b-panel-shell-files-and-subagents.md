@@ -366,7 +366,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
   - [ ] Closing the last rail entry hides the panel; reopening shows the empty state.
   - [ ] Hovering the rail expands it leftward with labels and × on the hovered row; no Close panel row.
   - [ ] A failed terminal kill shows an error instead of silently keeping the tab.
-- **Verify:** extend `components/panels/RightPanel.test.tsx`, `ActivityRail.test.tsx`, `apps/web/src/__tests__/diffStore.test.ts` (last close hides), `lib/__tests__/right-panel-layout.test.ts`. Live: `agent:up --desktop`, open Review, Browser, Terminal, Plan; screenshot each against 10a / 11a / 12a / 07e; close every rail entry and confirm the panel closes; Windows caption buttons never cover row-1 controls.
+- **Verify:** `bun run --cwd apps/web test -- src/components/panels/RightPanel.test.tsx src/components/panels/ActivityRail.test.tsx src/__tests__/diffStore.test.ts src/lib/__tests__/right-panel-layout.test.ts src/components/chat/HeaderActions.test.tsx src/features/preview/surfaces/__tests__/BrowserSurfacePresentationCoordinator.test.ts`. Extend `RightPanel.test.tsx` (row 1 and row 2 slots; a failed terminal kill shows a toast), `ActivityRail.test.tsx` (rail on the right; leftward hover expansion with × on the hovered row and no Close panel row), `diffStore.test.ts` (last close hides and clears maximize), `right-panel-layout.test.ts`, `HeaderActions.test.tsx` (the canvas toggle renders only while the panel is closed) and `BrowserSurfacePresentationCoordinator.test.ts` (rail overlap from the new side). Live: `agent:up --desktop`, open Review, Browser, Terminal, Plan; screenshot each against 10a / 11a / 12a / 07e; close every rail entry and confirm the panel closes; Windows caption buttons never cover row-1 controls.
 
 ### S12P-01 Rail lists tools; terminals and browser pages become row-1 tabs
 
@@ -384,7 +384,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
   - [ ] Reordering the rail never splits a tool's tabs.
   - [ ] With eight terminal records in a scope, in any mix of pending, running and exited shells and action runs, the + is disabled with its reason; closing one enables it again.
   - [ ] The new ADR names the eight-record cap from `TERMINAL_MAX_PER_SCOPE`, and ADR-0020 reads `status: superseded`.
-- **Verify:** `ActivityRail.test.tsx`, `RightPanel.test.tsx`, `apps/web/src/__tests__/diffStore.test.ts`, `lib/__tests__/panel-tabs.test.ts`. Live: open two terminals and two pages; screenshot rail and row 1.
+- **Verify:** `bun run --cwd apps/web test -- src/components/panels/ActivityRail.test.tsx src/components/panels/RightPanel.test.tsx src/__tests__/diffStore.test.ts src/lib/__tests__/panel-tabs.test.ts`. Cover one rail entry per tool with row-1 tabs for terminals and Browser pages, the store migration of old terminal and action instances, a rail reorder that never splits a tool, and the + disabled at `TERMINAL_MAX_PER_SCOPE` with its reason. Live: open two terminals and two pages; screenshot rail and row 1.
 
 ### S12P-02 Remove the Coordination tab
 
@@ -412,7 +412,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
   - [ ] The image route enforces the caller's cap and caching: a 3 MB PNG serves for `use=file` and answers 404 for `use=icon`; `use=file` answers `Cache-Control: no-store`; `use=icon` with `v` answers `immutable`; `use=icon` with a `threadId` answers 404.
   - [ ] Editing lines 12 to 15 of a tracked file returns `changedLines: [[12, 15]]`; untracked returns `null` and mark `A`.
   - [ ] Non-git folder: `file.changes` returns `git: false`.
-- **Verify:** extend `apps/server/src/features/projects/files/__tests__/file-service.test.ts`, `file-service-unicode-paths.integration.test.ts`, `transport/__tests__/file-rpc.test.ts`; route test for both callers beside the attachment route tests (inferred location). Use `.dev/fixture-repo` only.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/files/__tests__/file-service.test.ts src/features/projects/files/__tests__/file-service-unicode-paths.integration.test.ts src/features/projects/files/transport/__tests__/file-rpc.test.ts src/features/projects/files/transport/__tests__/workspace-image-route.test.ts`; `bun run --cwd apps/web test -- src/components/chat/useFileAutocomplete.test.ts src/components/diff/__tests__/ReviewDiffView.refresh.test.tsx`. Extend the first three for the path cases, caps, typed reads, changed lines, marks and the non-git folder. `workspace-image-route.test.ts` is new and covers both callers: auth, `nosniff` and the sandbox CSP, the per-caller cap and caching, and `threadId` rejected for `use=icon`. No attachment-route test exists to sit beside, so it sits beside `file-rpc.test.ts`. The web tests cover the callers this ticket migrates: the `file.list` shape in autocomplete, and a new context-expansion case in `ReviewDiffView.refresh.test.tsx` on the structured `file.read`. Use `.dev/fixture-repo` only.
 
 ### S12P-04 Files tool: tree, file tabs, code view, Go to file
 
@@ -436,7 +436,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
   - [ ] At a 900 body the tree docks at 280 and resizes between 220 and 480; at 536 the tree toggles as a body view and row 2 shows the Go to file field.
   - [ ] Closing the last file tab shows the tree; closing the Files rail entry closes the tool.
   - [ ] Paths with spaces and non-ASCII names open (fixture-repo).
-- **Verify:** unit tests for `rank-file-path.ts` and the tree model; component test for `FilesTool` with a mocked transport (prior art `components/files/__tests__/FilesPanel.test.tsx`, `components/panels/RightPanel.test.tsx`). Live: `.dev/fixture-repo`, open three files, screenshot against 12c "Code file", "Wide panel", "Tree".
+- **Verify:** `bun run --cwd apps/web test -- src/features/files/__tests__/rank-file-path.test.ts src/features/files/__tests__/FileTree.test.tsx src/features/files/__tests__/FilesTool.test.tsx src/lib/__tests__/panel-tabs.test.ts src/__tests__/shortcuts.test.ts`. Three files are new: `rank-file-path.test.ts` ("thread act" ranks `ThreadActionsMenu.tsx` first), `FileTree.test.tsx` for the tree model (compact folders, M and A marks, folder change dots), and `FilesTool.test.tsx` with a mocked transport (prior art `components/files/__tests__/FilesPanel.test.tsx`, `components/panels/RightPanel.test.tsx`) for the dock and body-view switch, the tree after the last tab closes, and refreshed marks and bars on `files.changed`. Extend `panel-tabs.test.ts` (Files is a real singleton, no "Soon" teaser) and `shortcuts.test.ts` (`mod+p` runs `files.goToFile`). Live: `.dev/fixture-repo`, open three files, screenshot against 12c "Code file", "Wide panel", "Tree".
 
 ### S12P-05 Files: Find in file
 
@@ -448,7 +448,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
 - **Acceptance criteria:**
   - [ ] Enter / Shift Enter step through matches and scroll them into view; counts update as you type.
   - [ ] Ctrl F in the terminal or chat does not open the Files find bar.
-- **Verify:** component test on `FindInFileBar` with a 10k-line fixture string. Live: screenshot against `2G96-2`.
+- **Verify:** `bun run --cwd apps/web test -- src/features/files/__tests__/FindInFileBar.test.tsx src/__tests__/shortcuts.test.ts`. `FindInFileBar.test.tsx` is new and runs on a 10k-line fixture string: counts update while typing, Enter and Shift Enter step through matches, "Invalid pattern", and Esc returns focus to the code. `shortcuts.test.ts` asserts that Ctrl F opens the Files find bar only while `filesFocused`. Live: screenshot against `2G96-2`.
 
 ### S12P-06 Files: markdown and images
 
@@ -461,7 +461,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
   - [ ] `README.md` opens rendered; clicking `CONTEXT.md` opens it as a new tab.
   - [ ] A transparent PNG shows the checker only behind transparent pixels; switching 100% scrolls a large image.
   - [ ] An SVG flips to highlighted source and back.
-- **Verify:** component tests for link resolution and the scale model. Live: fixture-repo README and an image; screenshot against `2GPG-2`, `2GRA-2`.
+- **Verify:** `bun run --cwd apps/web test -- src/features/files/__tests__/MarkdownFileView.test.tsx src/features/files/__tests__/ImageFileView.test.tsx`. Both are new. `MarkdownFileView.test.tsx` covers link resolution: a relative link opens a tab, an anchor scrolls, a link leaving the root is rejected, and a missing target shows "No file at docs/x.md". `ImageFileView.test.tsx` covers the scale model (Fit, 100%, 200%) and the SVG Source flip. Live: fixture-repo README and an image; screenshot against `2GPG-2`, `2GRA-2`.
 
 ### S12P-07 Files: line comments that ride the next message
 
@@ -473,7 +473,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
 - **Acceptance criteria:**
   - [ ] A comment survives reload and thread switch, shows in the composer chip count with Review comments, and is removed after send.
   - [ ] The agent receives path, line, line text and note.
-- **Verify:** unit test for the formatter (prior art in `lib/composer-feedback.ts` tests, inferred) and the store. Live: comment on line 14, reload, send; screenshot against `2G8C-2`.
+- **Verify:** `bun run --cwd apps/web test -- src/lib/__tests__/composer-feedback.test.ts src/lib/composer-draft-storage.test.ts src/features/conversation/composer/draft/draft-submission.test.ts src/features/conversation/composer/DiffCommentsComposerAttachment.test.tsx`; `bun run --cwd packages/contracts test -- src/models/__tests__/preview-annotation.test.ts`. `composer-feedback.test.ts` is new, since no formatter test exists: `path:line`, the quoted line and the note. The S10-11 draft tests gain file comments: they survive serialize and parse, count in the composer chip with Review comments, and leave the draft after send. The contract test adds `FileAnnotationPayloadSchema`. Live: comment on line 14, reload, send; screenshot against `2G8C-2`.
 
 ### S12P-08 Subagent roster: one contract, server projection, push
 
@@ -489,7 +489,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
   - [ ] A cancelled turn shows its running subagents as Stopped, not Failed.
   - [ ] Old rows after upgrade: a thread recorded before this ticket (Claude Agent calls, Devin's double call with the fake `nativeThreadId`) lists one row per subagent, and no entry reports `transcript` without a readable child thread.
   - [ ] Mixed providers: a thread that switched from Claude to Codex lists its Claude subagents under Claude and its Codex child under Codex.
-- **Verify:** server unit tests for merge, dedupe, id stability, per-entry provider, the tier rule and status normalization beside `apps/server/src/features/agents/orchestration/__tests__/agent-service-child-stop.test.ts`, with fixtures for an old Devin double call, a Copilot-shaped row without a child thread, and a mixed-provider thread; contract round-trip test; web store test with fake pushes and a reconnect (prior art `features/subagents/roster/__tests__/SubagentsPanel.real-store.test.tsx`). Live: Claude and Codex threads in fixture-repo.
+- **Verify:** `bun run --cwd apps/server test -- src/features/agents/orchestration/__tests__/subagent-roster-service.test.ts src/features/agents/orchestration/__tests__/agent-service-child-stop.test.ts src/application/transport/__tests__/push.test.ts`; `bun run --cwd packages/contracts test -- src/models/__tests__/subagent-roster.test.ts`; `bun run --cwd apps/web test -- src/features/subagents/state/__tests__/subagentRosterStore.test.ts src/features/subagents/__tests__/subagent-status.test.ts src/features/subagents/roster/__tests__/SubagentsPanel.real-store.test.tsx`. `subagent-roster-service.test.ts` is new, beside `agent-service-child-stop.test.ts`: merge, dedupe, id stability, per-entry provider, the tier rule and status normalization, with fixtures for an old Devin double call, a Copilot-shaped row without a child thread, and a mixed-provider thread. `agent-service-child-stop.test.ts` keeps Stop working on the renamed service; `push.test.ts` scopes `subagents.changed` to the parent's subscribers. The contract round-trip test is new. The web store test is new and uses fake pushes and a reconnect (prior art `SubagentsPanel.real-store.test.tsx`, which moves onto the store with no interval timer); `subagent-status.test.ts` is new and covers the words per surface. Live: Claude and Codex threads in fixture-repo.
 
 ### S12P-09 Claude, Cursor and Devin report subagents honestly
 
@@ -502,7 +502,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
   - [ ] Cursor fixture with a browser tool call yields zero subagent rows; a Task call yields one row from `tool_call` time, with the same entry id after its `cursor/task` metadata lands.
   - [ ] Devin fixture with two parallel subagents yields two rows, each with its own steps.
   - [ ] Claude fixture stopped mid-Agent yields status `stopped`.
-- **Verify:** `packages/providers/src/private/cursor/events/__tests__/cursor-subagent-detection.test.ts`, `cursor/acp/__tests__/cursor-acp-task.test.ts`, `devin/__tests__/devin-acp-event-mapper.test.ts`, Claude mapper tests under `private/claude/__tests__`.
+- **Verify:** `bun run --cwd packages/providers test -- src/private/cursor/events/__tests__/cursor-subagent-detection.test.ts src/private/cursor/acp/__tests__/cursor-acp-task.test.ts src/private/cursor/acp/__tests__/cursor-acp-event-mapper.test.ts src/private/cursor/stream-json/__tests__/cursor-stream-event-mapper.test.ts src/private/devin/__tests__/devin-acp-event-mapper.test.ts src/private/claude/__tests__/claude-event-mapper.test.ts`; `bun run --cwd apps/server test -- src/features/agents/orchestration/__tests__/subagent-roster-service.test.ts`. The Cursor tests cover detection, the ACP and stream-json callers of the removed heuristics, a browser tool call that yields no subagent, and a Task call whose late `cursor/task` metadata merges into the same tool call. The Devin test covers two parallel subagents with their own steps; the Claude mapper test covers a stop mid-Agent mapping to `cancelled`. The S12P-08 roster test checks that the Cursor entry keeps its id and bumps the revision when the metadata lands, and that a cancelled Claude call reads `stopped`.
 
 ### S12P-10 Copilot and OpenCode subagents in the roster
 
@@ -514,7 +514,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
 - **Acceptance criteria:**
   - [ ] Copilot conformance trace (`packages/providers/src/conformance/copilot-trace.ts`) with one subagent yields one row with its child tool steps.
   - [ ] An OpenCode `task` call yields one row. Its tier is `steps` only when the captured stream proves child steps; otherwise `meta`, with the meta copy and Show in chat.
-- **Verify:** Copilot mapper tests (`packages/providers/src/private/copilot/__tests__`); OpenCode mapper tests in `apps/server/src/features/providers/adapters/opencode/__tests__/opencode-event-mapper.test.ts` against the captured stream; a roster test asserting the OpenCode tier for both capability values.
+- **Verify:** `bun run --cwd packages/providers test -- src/private/copilot/__tests__/copilot-event-mapper.test.ts`; `bun run --cwd apps/server test -- src/features/providers/adapters/opencode/__tests__/opencode-event-mapper.test.ts src/features/agents/orchestration/__tests__/subagent-roster-service.test.ts`. `copilot-event-mapper.test.ts` is new, since no Copilot mapper test exists. It drives the conformance trace (`packages/providers/src/conformance/copilot-trace.ts`) with one subagent and asserts nested ToolUse and ToolResult events with `parentToolCallId`, `subagent.failed` as failed, and the summary. The OpenCode mapper test runs against the captured stream, kept as a fixture. The roster test asserts one Copilot row with its child steps, and the OpenCode tier for both capability values.
 
 ### S12P-11 Copilot full transcript
 
@@ -526,7 +526,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
 - **Acceptance criteria:**
   - [ ] A Copilot subagent detail shows its assistant text and tool rows live.
   - [ ] A Copilot row recorded under S12P-10 still opens as steps after upgrade, keeps its id, and never shows an empty transcript.
-- **Verify:** server tests beside `apps/server/src/features/agents/canonical/__tests__/accepted-codex-collaboration.test.ts` using the Copilot trace.
+- **Verify:** `bun run --cwd apps/server test -- src/features/agents/canonical/__tests__/accepted-copilot-collaboration.test.ts src/features/agents/canonical/__tests__/accepted-codex-collaboration.test.ts src/features/agents/collaboration/adapters/__tests__/codex-collaboration-event-adapter.test.ts src/features/agents/orchestration/__tests__/subagent-roster-service.test.ts`; `bun run --cwd packages/providers test -- src/private/copilot/__tests__/copilot-event-mapper.test.ts`. `accepted-copilot-collaboration.test.ts` is new, beside the Codex test, and uses the Copilot trace: the child thread records assistant text and tool items, and the entry keeps its `call:<toolCallId>` id. The two Codex tests prove the provider-neutral port leaves Codex unchanged. The roster test keeps a row recorded under S12P-10 at `steps` with its id; the mapper test replaces the interim nested steps with child events.
 
 ### S12P-12 Subagents list
 
@@ -538,7 +538,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
 - **Acceptance criteria:**
   - [ ] Mixed-provider fixture renders in the order running (newest first), divider, finished (newest first).
   - [ ] Only Codex rows offer Stop; stopping turns the row Stopped without a page reload.
-- **Verify:** component tests replacing `features/subagents/roster/__tests__/SubagentsPanel.test.tsx`. Live: screenshot against `2HDK-2`.
+- **Verify:** `bun run --cwd apps/web test -- src/features/subagents/list/__tests__/SubagentList.test.tsx src/features/subagents/__tests__/subagent-status.test.ts`. `SubagentList.test.tsx` is new and replaces `features/subagents/roster/__tests__/SubagentsPanel.test.tsx`: the mixed-provider order (running newest first, divider, finished newest first), Stop only on `canStop` rows, a stopped row turning Stopped from a roster push, and the empty and error states. `subagent-status.test.ts` adds the live-time format (`48s`, `1m 12s`, `1h 3m`). Live: screenshot against `2HDK-2`.
 
 ### S12P-13 Subagent detail as its own rail tab
 
@@ -552,7 +552,7 @@ Order: S12P-03 and S12P-08 have no blockers and can start at once. S12P-02's acc
   - [ ] Closing Subagents closes both subagent tabs; closing the last rail entry closes the panel.
   - [ ] Each tier shows its exact copy; a finished steps entry with no recorded steps shows "No steps were recorded."; Cursor's prompt bubble fills in when its metadata lands, in the same tab.
   - [ ] Thread switch and back restores the open subagent tabs (per-thread state).
-- **Verify:** component tests per tier with fixture rosters; store test for grouping, cap and close rules in `apps/web/src/__tests__/diffStore.test.ts`. Live: Codex and Claude subagents on fixture-repo; screenshot against `23HJ-2` and the three 12e detail states.
+- **Verify:** `bun run --cwd apps/web test -- src/features/subagents/detail/__tests__/SubagentDetailTab.test.tsx src/__tests__/diffStore.test.ts src/components/panels/ActivityRail.test.tsx src/features/subagents/detail/__tests__/open-subagent-detail.test.ts`. `SubagentDetailTab.test.tsx` is new and renders each tier from fixture rosters with its exact copy, "No steps were recorded.", the missing-entry line, and Cursor's prompt filling in on the same tab. `diffStore.test.ts` covers grouping, the cap and the close rules, and per-thread restore. `ActivityRail.test.tsx` covers the divider and the running dot; `open-subagent-detail.test.ts` covers opening a rail instance with the same signature. Live: Codex and Claude subagents on fixture-repo; screenshot against `23HJ-2` and the three 12e detail states.
 
 ## Tests
 

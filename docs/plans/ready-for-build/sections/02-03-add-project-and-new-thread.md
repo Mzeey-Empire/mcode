@@ -469,7 +469,7 @@ Server:
   - [ ] `ThreadOverview.tsx` is under 400 lines and renders `OVERVIEW_ENTRIES` filtered by subject.
   - [ ] Every existing test id (`workspace-menu-changes`, `thread-overview-plan`, `thread-overview-local`, `workspace-menu-branch`, `thread-overview-subagents`, PR row ids) still renders in the same order.
   - [ ] Adding an entry needs one line in `overview-registry.ts` and no shell edit.
-- **Verify:** `bun run --cwd apps/web test -- src/components/chat/ThreadOverview.branchless-pr.test.tsx src/components/chat/HeaderActions.test.tsx src/stores/__tests__/overviewStore.test.ts`; add `src/features/thread-overview/__tests__/overview-registry.test.tsx` asserting order and subject filtering. Live: open a thread in `.dev/fixture-repo`, open the overview, compare against a before screenshot.
+- **Verify:** `bun run --cwd apps/web test -- src/features/thread-overview/__tests__/overview-registry.test.tsx src/components/chat/ThreadOverview.branchless-pr.test.tsx src/components/chat/HeaderActions.test.tsx src/stores/__tests__/overviewStore.test.ts`; `overview-registry.test.tsx` is new and asserts order and subject filtering. Live: open a thread in `.dev/fixture-repo`, open the overview, compare against a before screenshot.
 
 ### S03-02 Overview card shell
 
@@ -485,7 +485,7 @@ Server:
   - [ ] Canvas padding-right is 328 only while docked; the composer never drops below 520.
   - [ ] Side menus open left of the card with an 8px gap, top-aligned to the trigger row.
   - [ ] An empty section and its divider do not render.
-- **Verify:** Component test at the `OverviewCard` seam with a fake registry (empty sections hidden, divider placement, presentation states); store test in `stores/__tests__/overviewStore.test.ts`. Live (Electron, `agent:up --desktop`): fixture thread, toggle the card, open and close the right panel, resize the window below 896 + sidebar, screenshot each state.
+- **Verify:** `bun run --cwd apps/web test -- src/features/thread-overview/__tests__/OverviewCard.test.tsx src/stores/__tests__/overviewStore.test.ts src/components/chat/ThreadOverview.branchless-pr.test.tsx src/components/chat/HeaderActions.test.tsx`. `OverviewCard.test.tsx` is a new component test at the `OverviewCard` seam with a fake registry (empty sections hidden, divider placement, presentation states); the store test is in `overviewStore.test.ts`; the two existing overview tests keep passing through this ticket (see Tests). Live (Electron, `agent:up --desktop`): fixture thread, toggle the card, open and close the right panel, resize the window below 896 + sidebar, screenshot each state.
 
 ### S03-03 New-thread start column
 
@@ -498,7 +498,7 @@ Server:
   - [ ] Heading type 32/40 600 −0.02em; slot `--color-primary` with a 2px dashed underline; slot opens the project chooser (S02-03; until then the existing chooser).
   - [ ] Composer box is 760 wide at 1440 and keeps its width when the thread starts.
   - [ ] Long project names fade (F-02), never ellipsis.
-- **Verify:** Render test for the column and slot; live screenshot at 1440×900 against `1ZHP-2`.
+- **Verify:** `bun run --cwd apps/web test -- src/features/conversation/messages/chat-view/__tests__/NewThreadStartColumn.test.tsx`, a new render test for the column and slot. Live: screenshot at 1440×900 against `1ZHP-2`.
 
 ### S03-04 Paged branch and pull request targets (backend)
 
@@ -516,7 +516,7 @@ Server:
   - [ ] Corrupt ref or non-repo returns `ok: false` with `git_failed` / `not_a_repository` and the stderr line, never `[]`.
   - [ ] `existing-worktree` returns linked-worktree branches and detached worktrees only.
   - [ ] PR page returns `total` from GitHub, pages past 30, maps unauthenticated, rate-limited and non-GitHub origin to typed errors.
-- **Verify:** Real-git tests in `apps/server/src/features/projects/git/__tests__/git-refs-list.test.ts` (prior art `git-repository-fetch.test.ts`: disposable repos with a bare `origin`, 120 branches, a diverged `feature/x` and `origin/feature/x` pair, a linked and a detached worktree, a corrupt ref). PR client tests in `apps/server/src/features/pull-requests/github/__tests__/github-pull-request-client.test.ts` with a stubbed runner (query shape, cursor, error mapping). Contract tests in `packages/contracts/src/__tests__/`. Run with `bun run --cwd apps/server test -- <files>` and `bun run --cwd packages/contracts test -- <files>`.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/git/__tests__/git-refs-list.test.ts src/features/pull-requests/github/__tests__/github-pull-request-client.test.ts` and `bun run --cwd packages/contracts test -- src/__tests__/git-refs-list.test.ts src/__tests__/pull-requests.test.ts`. The server `git-refs-list.test.ts` is a new real-git test (prior art `git-repository-fetch.test.ts`: disposable repos with a bare `origin`, 120 branches, a diverged `feature/x` and `origin/feature/x` pair, a linked and a detached worktree, a corrupt ref). The PR client tests extend `github-pull-request-client.test.ts` with a stubbed runner (query shape, cursor, error mapping). The contract `git-refs-list.test.ts` is new, for the `git.refs.list` purpose and side rule and the paged result; `pull-requests.test.ts` is extended for the `github.pullRequestTargets.list` result and `remote_not_github`.
 
 ### S03-05 Branch target picker
 
@@ -532,7 +532,7 @@ Server:
   - [ ] Git failure shows "Couldn't list branches", the git line in mono, Retry; Retry refetches.
   - [ ] `gh` not signed in shows the PR error in the PR tab instead of hiding the tab.
   - [ ] Esc closes; selecting closes and updates the trigger.
-- **Verify:** Component test at the picker seam with a fake transport (paging, grouping, error, retry); update `features/conversation/composer/execution/__tests__/Composer.checkout-dialog.test.tsx` and `Composer.footer-checkout.test.tsx`. Live: in `.dev/fixture-repo` run `for i in $(seq 1 120); do git -C .dev/fixture-repo branch "paging/b$i"; done`, open the picker, scroll to the end, read "Showing 123 of 123" (or the actual count), search, break a ref (`echo junk > .dev/fixture-repo/.git/refs/heads/broken`) to see the error, then remove it.
+- **Verify:** `bun run --cwd apps/web test -- src/features/conversation/composer/execution/__tests__/BranchTargetPicker.test.tsx src/features/conversation/composer/execution/__tests__/Composer.checkout-dialog.test.tsx src/features/conversation/composer/execution/__tests__/Composer.footer-checkout.test.tsx`. `BranchTargetPicker.test.tsx` is a new component test at the picker seam with a fake transport (paging, grouping, error, retry); update the two `Composer` checkout tests. Live: in `.dev/fixture-repo` run `for i in $(seq 1 120); do git -C .dev/fixture-repo branch "paging/b$i"; done`, open the picker, scroll to the end, read "Showing 123 of 123" (or the actual count), search, break a ref (`echo junk > .dev/fixture-repo/.git/refs/heads/broken`) to see the error, then remove it.
 
 ### S03-06 Workspace target menu and new-thread rail
 
@@ -545,7 +545,7 @@ Server:
   - [ ] Rail 652 wide, attached to the composer top, triggers 32 high, muted labels and icons (`2AXW-2`).
   - [ ] Menu matches `20LL-2`: label "Workspace", check on the current mode, Local shows the project folder in mono.
   - [ ] Choosing Existing worktree switches mode only; the branch trigger then lists worktrees; Send is disabled until one is chosen.
-- **Verify:** Component tests for the menu and rail visibility; live: switch modes on a fixture new thread, send in each mode, confirm the thread starts in the right place.
+- **Verify:** `bun run --cwd apps/web test -- src/features/conversation/composer/execution/__tests__/WorkspaceTargetMenu.test.tsx src/features/conversation/composer/execution/__tests__/NewThreadTargetRail.test.tsx src/features/conversation/composer/execution/__tests__/Composer.checkout-dialog.test.tsx`. The first two are new component tests for the menu and rail visibility; `Composer.checkout-dialog.test.tsx` mocks `ModeSelector` today and changes with it. Live: switch modes on a fixture new thread, send in each mode, confirm the thread starts in the right place.
 
 ### S03-07 Overview target rows on a new thread
 
@@ -559,7 +559,7 @@ Server:
   - [ ] Closing the card on a new thread shows the rail; reopening hides it; opening another new thread reopens the card.
   - [ ] Workspace menu: right 304 / top 120 at 1440×900; branch picker: right 304 / top 156.
   - [ ] Draft reopen restores mode, branch and Start from origin in both the card and the rail.
-- **Verify:** Integration test at the new-thread surface seam (card visible, rows, rail toggling). Live (Electron): new thread in `.dev/fixture-repo`, open both menus, screenshot against `20F4-2` and `20M5-2`, close the card and confirm the rail.
+- **Verify:** `bun run --cwd apps/web test -- src/features/conversation/messages/chat-view/__tests__/ChatViewSurface.new-thread-overview.test.tsx`, a new integration test at the new-thread surface seam (card visible, rows, rail toggling). Live (Electron): new thread in `.dev/fixture-repo`, open both menus, screenshot against `20F4-2` and `20M5-2`, close the card and confirm the rail.
 
 ### S03-08 Start from origin
 
@@ -575,7 +575,7 @@ Server:
   - [ ] No origin / branch missing on origin / network failure → startup blocked on `fetch` with a readable message; "continue" starts from local.
   - [ ] The switch is absent in Local and Existing worktree modes and on the PR tab.
   - [ ] Old drafts without the field load with the switch off.
-- **Verify:** Real-git test `apps/server/src/features/projects/git/__tests__/start-from-origin.test.ts` (checked-out behind `main`, missing remote branch, no origin), coordinator test in `apps/server/src/features/agents/turns/__tests__/thread-creation-startup.test.ts`, contract tests in `packages/contracts/src/__tests__/thread-startup.test.ts` and a new `packages/contracts/src/__tests__/create-and-send.test.ts` ("rejects mode worktree without branch", the `startFromOrigin` refines). Live: `git init --bare .dev/fixture-origin.git`, add it as `origin` of `.dev/fixture-repo` if absent, push `main`, push one extra commit from a temporary clone under `.dev/`, start a New worktree thread with the switch on, check the worktree `HEAD` equals the origin commit and local `main` did not move.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/git/__tests__/start-from-origin.test.ts src/features/agents/turns/__tests__/thread-creation-startup.test.ts`, `bun run --cwd packages/contracts test -- src/__tests__/thread-startup.test.ts src/__tests__/create-and-send.test.ts` and `bun run --cwd apps/web test -- src/stores/__tests__/threadDraftStore.test.ts src/features/conversation/composer/execution/__tests__/BranchTargetPicker.test.tsx`. Server: a new real-git test `start-from-origin.test.ts` (checked-out behind `main`, missing remote branch, no origin) and the coordinator test in `thread-creation-startup.test.ts`. Contracts: `thread-startup.test.ts` and a new `create-and-send.test.ts` ("rejects mode worktree without branch", the `startFromOrigin` refines). Web: `threadDraftStore.test.ts` loads an old draft without the field with the switch off, and S03-05's `BranchTargetPicker.test.tsx` shows the switch only in New worktree mode on the Branches tab. Live: `git init --bare .dev/fixture-origin.git`, add it as `origin` of `.dev/fixture-repo` if absent, push `main`, push one extra commit from a temporary clone under `.dev/`, start a New worktree thread with the switch on, check the worktree `HEAD` equals the origin commit and local `main` did not move.
 
 ### S02-01 Palette shell and Sources view
 
@@ -588,7 +588,7 @@ Server:
   - [ ] Palette geometry and backdrop match `2BA4-2` / `2BA3-2` via computed styles.
   - [ ] Arrow keys move the highlight (`--color-hover` row); Enter selects; Esc closes.
   - [ ] No row exists for a source that cannot complete.
-- **Verify:** Extend `components/palette/CommandPalette.test.tsx` (intent opens Sources, `~/` switches to browse). Live: click the sidebar + and screenshot against `2B65-2`.
+- **Verify:** `bun run --cwd apps/web test -- src/components/palette/CommandPalette.test.tsx src/stores/__tests__/commandPaletteStore.test.ts`. Extend `CommandPalette.test.tsx` (intent opens Sources, `~/` switches to browse); `commandPaletteStore.test.ts` asserts today's `~/` seeding for the `addProject` intent and changes with it. Live: click the sidebar + and screenshot against `2B65-2`.
 
 ### S02-02 Browse folders and ready to add
 
@@ -602,7 +602,7 @@ Server:
   - [ ] A deleted folder typed by path cannot be added; the message names the reason.
   - [ ] Re-adding a registered folder opens it (`reused: true`) without a duplicate in the sidebar.
   - [ ] Web client hides "Open in File Explorer".
-- **Verify:** Server tests next to `apps/server/src/features/projects/lifecycle/__tests__/filesystem-browser.test.ts` for `WorkspaceService.create` validation (temp dirs, a file, home, trailing slash). Web test for chip enablement. Live (Electron): browse to `.dev/fixture-repo`, add it, try the home path, use the native dialog.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/lifecycle/__tests__/workspace-service-create.test.ts` and `bun run --cwd apps/web test -- src/components/palette/CommandPalette.test.tsx src/components/palette/views/__tests__/BrowseView.test.tsx`. The server test is new, next to `filesystem-browser.test.ts`, for `WorkspaceService.create` validation (temp dirs, a file, home, trailing slash). The web tests cover chip enablement; `CommandPalette.test.tsx` drives today's `palette-add-folder` button and changes with it. Live (Electron): browse to `.dev/fixture-repo`, add it, try the home path, use the native dialog.
 
 ### S02-03 Project chooser popover
 
@@ -614,7 +614,7 @@ Server:
 - **Acceptance criteria:**
   - [ ] Empty state matches `2B5O-2` apart from the row meta ("Folder"); the row opens the palette on Sources.
   - [ ] Choosing a project switches the new thread to it and closes the chooser.
-- **Verify:** Component test for both states. Live: empty database snapshot is not available, so check the empty state in the component test and the populated state live with `.dev/fixture-repo`.
+- **Verify:** `bun run --cwd apps/web test -- src/features/projects/__tests__/ProjectChooser.test.tsx`, a new component test for both states. Live: empty database snapshot is not available, so check the empty state in the component test and the populated state live with `.dev/fixture-repo`.
 
 ### S02-04 New project and clone sources (merged)
 

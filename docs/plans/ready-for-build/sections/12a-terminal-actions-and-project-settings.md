@@ -420,7 +420,7 @@ export const ProjectIconSchema = lazySchema(() => z.object({
 | `TerminalCloseConfirm` | same | Popover under the tab ("Stop web?", "Stop and close" / "Cancel"). Replaces `TerminalKillConfirmDialog`. |
 | `ActionApprovalCard` | `apps/web/src/features/projects/actions/` | Card inside the terminal surface. |
 | `ActionRunMenu` | same | Shared by the overview ⋯ and the row-1 +. Built on F-04 menu primitives. |
-| `OverviewTerminalsSection` | `apps/web/src/components/chat/overview/` (inferred home; S03 owns the shell) | Rows, "N more" / "Show less", hover Stop. |
+| `OverviewTerminalsSection` | `apps/web/src/features/thread-overview/entries/` (S03-01's entry folder; S03 owns the shell) | Rows, "N more" / "Show less", hover Stop. |
 | `ActionIcon`, `action-icons.ts` | `apps/web/src/features/projects/actions/` | Registry: 24 tool ids → vscode-icons file names, 12 glyph ids → Lucide + tint; `defaultActionIconId(command)`; shell icons for pwsh/powershell/bash/zsh/cmd/wsl. |
 | `ActionIconPicker` | same | 32px trigger left of the name field; popover with Tools and General groups. |
 | `ProjectSettingsPanel`, `ActionsSection`, `ActionRow`, `ActionEditor`, `SettingsSaveBar`, `EnvironmentConflictBanner`, `GeneralSection` | `apps/web/src/features/projects/settings/` | Replace `ProjectEnvironmentPanel`. |
@@ -515,7 +515,7 @@ Cross-section ids: F-01..F-07 (foundation), S03-02 (overview card shell), S04-03
   - [ ] Closing an idle shell closes at once; closing one running `ping -t localhost` (Windows) or `sleep 100` asks, and Stop and close kills it.
   - [ ] The working-folder pill shows the thread's worktree folder, fades on overflow, copies the full path on click.
   - [ ] `mod+j` focuses the last active terminal, not the newest.
-- **Verify:** `apps/web/src/features/terminal/surfaces/__tests__/TerminalTabContent.test.tsx` (extend for strip, close confirm with mocked `terminalHasChildren`); live in Electron with the electorn-live-testing skill, before/after screenshots against 12a.
+- **Verify:** `bun run --cwd apps/web test -- src/features/terminal/surfaces/__tests__/TerminalTabContent.test.tsx src/features/terminal/state/__tests__/terminalStore.test.ts`. Extend `TerminalTabContent.test.tsx` for the strip, the working-folder pill, close confirm with a mocked `terminalHasChildren`, and the close failure copy; extend `terminalStore.test.ts` for the active terminal per scope that `mod+j` focuses. Live: in Electron with the electorn-live-testing skill, before/after screenshots against 12a.
 
 ### S12T-03 Terminal surface on tokens with clickable web URLs and Clear
 
@@ -528,7 +528,7 @@ Cross-section ids: F-01..F-07 (foundation), S03-02 (overview card shell), S04-03
   - [ ] Switching app theme recolours an open terminal without remount.
   - [ ] `echo http://localhost:5173/` renders a clickable link; file-path links still work.
   - [ ] After Clear and a thread switch, the terminal returns empty except new output.
-- **Verify:** `__tests__/terminalLinkProvider.test.ts` (URL cases), `__tests__/TerminalView.keyhandler.test.ts` (Ctrl K); live screenshot vs 12a in dark and light.
+- **Verify:** `bun run --cwd apps/web test -- src/features/terminal/surfaces/__tests__/terminalLinkProvider.test.ts src/features/terminal/surfaces/__tests__/TerminalView.keyhandler.test.ts src/features/terminal/surfaces/__tests__/TerminalView.theme.test.tsx src/features/terminal/surfaces/__tests__/TerminalView.clear.test.tsx`. `terminalLinkProvider.test.ts` gains the URL cases and keeps the file-path cases; `TerminalView.keyhandler.test.ts` covers Ctrl K. Two files are new: `TerminalView.theme.test.tsx` asserts that a theme switch recolours the open terminal without a remount, and `TerminalView.clear.test.tsx` asserts that Clear sends `terminal.checkpoint` with the cleared state, so a remount after a thread switch shows only new output. Live: screenshot vs 12a in dark and light.
 
 ### S12T-04 Environment document 0.1.0
 
@@ -571,7 +571,7 @@ Cross-section ids: F-01..F-07 (foundation), S03-02 (overview card shell), S04-03
   - [ ] Starting `bun --version` from the current menu opens a tab showing the echo line, the version, then a prompt, with no badge (completed).
   - [ ] `exit 1` shows the clay badge, `Exit 1` pill and Run again; Run again reruns in the same tab.
   - [ ] No `workspace.environment.action.updated` push is sent per output chunk (assert in the service test).
-- **Verify:** `apps/web/src/features/projects/environment/__tests__/ProjectActionControl.test.tsx` replaced by tests for `ActionControls`; server test from S12T-05 extended for publish counts; live Electron screenshots vs 12b running and failed.
+- **Verify:** `bun run --cwd apps/web test -- src/features/terminal/surfaces/__tests__/ActionControls.test.tsx src/features/terminal/surfaces/__tests__/TerminalTabContent.test.tsx`; `bun run --cwd apps/server test -- src/features/projects/environment/__tests__/project-action-service.test.ts src/features/projects/environment/persistence/__tests__/project-action-run-repo.test.ts`. `ActionControls.test.tsx` is new and replaces `apps/web/src/features/projects/environment/__tests__/ProjectActionControl.test.tsx`: command pill, Exit pill, Restart, Stop and Run again rerunning in the same tab. `TerminalTabContent.test.tsx` covers the action tab's badge states and the "Stop web?" close confirm. The S12T-05 service test is extended for publish counts; the repo test covers the dropped `transcript*` columns and the new `trigger`. Live: Electron screenshots vs 12b running and failed.
 
 ### S12T-07 Shared actions ask in the terminal
 
@@ -585,7 +585,7 @@ Cross-section ids: F-01..F-07 (foundation), S03-02 (overview card shell), S04-03
   - [ ] Run starts the command in the same tab; a second start does not ask.
   - [ ] Editing the command in `.mcode/environment.json` makes the next start ask again.
   - [ ] Cancel leaves the run `interrupted` and removes the tab.
-- **Verify:** `project-action-service.test.ts` (pending record, approve then run, cancel); web component test for the card; live check with a fixture-repo `.mcode/environment.json`.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/environment/__tests__/project-action-service.test.ts`; `bun run --cwd apps/web test -- src/features/projects/actions/__tests__/ActionApprovalCard.test.tsx`. The service test adds the pending record (no process, counts toward the cap), approve then run, a second start that does not ask, an edited command that asks again, and cancel leaving the run `interrupted`. `ActionApprovalCard.test.tsx` is new and covers the card copy, Run and Cancel. Live: a fixture-repo `.mcode/environment.json` with an In repo action.
 
 ### S12T-08 Detected port on action runs
 
@@ -632,7 +632,7 @@ Cross-section ids: F-01..F-07 (foundation), S03-02 (overview card shell), S04-03
   - [ ] Stop on a row removes the row and leaves the tab with its output.
   - [ ] With no running terminals the overview has no Terminals label or divider.
   - [ ] The ⋯ menu shows a badge only on actions whose run is `running`.
-- **Verify:** `apps/web/src/components/chat/ThreadOverview.branchless-pr.test.tsx` and `HeaderActions.test.tsx` updated (button name "Actions"); new `OverviewTerminalsSection` test; live screenshots vs 12i states.
+- **Verify:** `bun run --cwd apps/web test -- src/components/chat/ThreadOverview.branchless-pr.test.tsx src/components/chat/HeaderActions.test.tsx src/features/thread-overview/__tests__/OverviewTerminalsSection.test.tsx src/features/projects/actions/__tests__/ActionRunMenu.test.tsx`. Update the first two (button name "Actions"). `OverviewTerminalsSection.test.tsx` is new: three rows then "1 more" and "Show less", Stop removing the row while the tab keeps its output, and no label or divider when nothing runs. `ActionRunMenu.test.tsx` is new: a badge only on `running` runs, and New terminal and idle actions disabled at the cap. Live: screenshots vs 12i states.
 
 ### S12T-11 Startup actions replace Setup
 
@@ -670,10 +670,10 @@ Cross-section ids: F-01..F-07 (foundation), S03-02 (overview card shell), S04-03
   - [ ] Open terminal focuses the running action's terminal, else the failed one's.
   - [ ] The tail shows each started action's `$ <first script line>` once, then its command output as plain text with no escape sequences, within 32 entries and 16 KB, and survives a reload.
   - [ ] No code path creates a recovery shell, and `node tools/graph.mjs ledger-run S12T-11` passes.
-- **Verify:**
-  - Server: `bun run --cwd apps/server test -- src/features/projects/environment/__tests__/startup-action-runner.test.ts src/features/projects/environment/__tests__/workspace-environment-automatic-setup.test.ts src/features/projects/environment/__tests__/workspace-environment-service.test.ts src/features/projects/environment/__tests__/workspace-environment-upgrade.test.ts`. The runner tests use a fake `ProjectActionService` that emits exits and port updates and assert that only an exit 0 advances an entry. The four port cases (occupied port, echoed URL, IPv6, print then fail) run in `workspace-environment-automatic-setup.test.ts` through the real runner, `ProjectActionService`, detector and probe, with the command phase driven by the in-memory PTY host (`emitOutput`, plus an exit-with-code helper added beside it) and real `net.createServer` listeners on port 0 for IPv4 and `::1`. They assert the gate and queued-turn states.
-  - Contracts: `bun run --cwd packages/contracts test -- src/__tests__/thread-startup.test.ts src/models/__tests__/workspace-environment.test.ts` (record bounds and the startup count).
-  - Web: `bun run --cwd apps/web test -- src/features/thread-startup/__tests__/StartupStepsTrail.test.tsx` (the projection from entries and runs).
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/environment/__tests__/startup-action-runner.test.ts src/features/projects/environment/__tests__/workspace-environment-automatic-setup.test.ts src/features/projects/environment/__tests__/workspace-environment-service.test.ts src/features/projects/environment/__tests__/workspace-environment-upgrade.test.ts`; `bun run --cwd packages/contracts test -- src/__tests__/thread-startup.test.ts src/models/__tests__/workspace-environment.test.ts`; `bun run --cwd apps/web test -- src/features/thread-startup/__tests__/StartupStepsTrail.test.tsx`.
+  - Server: `startup-action-runner.test.ts` and `workspace-environment-upgrade.test.ts` are new. The runner tests use a fake `ProjectActionService` that emits exits and port updates and assert that only an exit 0 advances an entry. The four port cases (occupied port, echoed URL, IPv6, print then fail) run in `workspace-environment-automatic-setup.test.ts` through the real runner, `ProjectActionService`, detector and probe, with the command phase driven by the in-memory PTY host (`emitOutput`, plus an exit-with-code helper added beside it) and real `net.createServer` listeners on port 0 for IPv4 and `::1`. They assert the gate and queued-turn states.
+  - Contracts: record bounds and the startup count.
+  - Web: the projection from entries and runs.
   - Live: in `.dev/fixture-repo`, configure `install` and `check` (`bun --version`) as startup actions and start a New worktree thread. Capture the trail against 04b and the two terminal tabs. Make `install` exit 3, confirm Setup failed, fix it through Edit script, and Retry setup. Then mark a `web` action that serves and prints its URL (`bun -e "Bun.serve({ port: 4321, fetch: () => new Response('ok') }); console.log('http://localhost:4321/')"`) as a startup action and start another thread: its port pill turns live while the trail stays at Running setup, and Skip setup starts the first turn with `web` still running.
 
 ### S12T-12 Cleanup actions before worktree removal
@@ -688,7 +688,7 @@ Cross-section ids: F-01..F-07 (foundation), S03-02 (overview card shell), S04-03
   - [ ] A failing cleanup action still lets the worktree be removed; the log carries the action id and exit code.
   - [ ] An unapproved In repo cleanup action is skipped and logged.
   - [ ] Retained worktrees and Direct threads run nothing.
-- **Verify:** cleanup worker tests beside `apps/server/src/features/thread-control/cleanup/` (prior art in its `__tests__`), with a fake `TerminalCommandService`.
+- **Verify:** `bun run --cwd apps/server test -- src/features/thread-control/cleanup/__tests__/cleanup-worker.test.ts src/features/thread-control/cleanup/__tests__/cleanup-action-runner.test.ts`, both with a fake `TerminalCommandService`. `cleanup-worker.test.ts` gains the call order (cleanup actions before `removeWorktree`), removal after a failing action, and no runs for retained worktrees and Direct threads. `cleanup-action-runner.test.ts` is new: list order, the 120s bound, the logged action id and exit code, and the skipped, logged unapproved In repo action.
 
 ### S12T-13 Project settings: Actions section and save model
 
@@ -703,7 +703,7 @@ Cross-section ids: F-01..F-07 (foundation), S03-02 (overview card shell), S04-03
   - [ ] Edit, switch thread, come back: draft and save bar still there.
   - [ ] Edit, then change the file on disk, Save: banner; Keep mine saves the draft; Reload shows the disk version.
   - [ ] Storage pill disabled while dirty.
-- **Verify:** new `apps/web/src/features/projects/settings/__tests__/ProjectSettingsPanel.test.tsx` (draft persistence, conflict, validation copy) replacing `ProjectEnvironmentPanel.test.tsx`; server `workspace-environment-rpc.test.ts` for `command.forget`; live screenshots vs 12d and 12h.
+- **Verify:** `bun run --cwd apps/web test -- src/features/projects/settings/__tests__/ProjectSettingsPanel.test.tsx`; `bun run --cwd apps/server test -- src/application/transport/__tests__/workspace-environment-rpc.test.ts`. `ProjectSettingsPanel.test.tsx` is new and replaces `apps/web/src/features/projects/environment/__tests__/ProjectEnvironmentPanel.test.tsx`: draft persistence across thread switches, the conflict banner with Keep mine and Reload, the validation copy, Save off for an action with no command, and the storage pill disabled while dirty. The RPC test covers `command.forget`. Live: screenshots vs 12d and 12h.
 
 ### S12T-14 Project icon resolution and display
 
@@ -731,7 +731,7 @@ Cross-section ids: F-01..F-07 (foundation), S03-02 (overview card shell), S04-03
   - [ ] Picking `apps/desktop/build/icon.svg` in the Mcode repo updates sidebar, breadcrumb and picker without reload.
   - [ ] Reset returns to automatic; deleting the chosen file shows the missing line and automatic icon.
   - [ ] Clearing the name field and leaving it restores the folder name.
-- **Verify:** component test for `GeneralSection` and `ProjectIconPicker`; live screenshots vs 12d General states and 12k.
+- **Verify:** `bun run --cwd apps/web test -- src/features/projects/settings/__tests__/GeneralSection.test.tsx src/features/projects/icons/__tests__/ProjectIconPicker.test.tsx`; `bun run --cwd apps/server test -- src/features/projects/icons/__tests__/project-icon-service.test.ts`. Both web tests are new. `GeneralSection.test.tsx` covers the source lines, reset to automatic, the missing-file line, and a cleared name restoring the folder name. `ProjectIconPicker.test.tsx` covers the search, "Showing x of y", and saving on Enter or click. The S12T-14 service test gains the `workspace.icon.candidates` cases: exclusions, order, filter and `total`. Live: screenshots vs 12d General states and 12k.
 
 ## Tests
 

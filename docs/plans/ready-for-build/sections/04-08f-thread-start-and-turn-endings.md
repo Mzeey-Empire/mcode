@@ -647,7 +647,7 @@ Rule, in one place in the store:
 - The pause is visible: while the queue has messages, the thread is idle and auto-drain is suppressed, the queue shows a quiet "Paused" label (12/16, `--color-muted`) above its rows. Paper does not draw it, so the designer should check it.
 - The way out is an explicit send: a row's Send now (S05-10), or Continue in today's list, dispatches the first message and resumes auto-drain.
 - Retry, Resume and Retry at reset neither drain nor clear the queue. The user sends queued input when ready.
-- A reload or app restart still loses the client queue, as today. Two exceptions live on the server: S05-10 keeps steers whose delivery is unknown (`agent.listUnknownSteers`), and S06-07 persists deny-note delivery.
+- A reload or app restart still loses the client queue, as today. Two exceptions live on the server: S05-10 keeps steers whose delivery is unknown and their pending resends (`agent.listHeldSteers`), and S06-07 persists deny-note delivery.
 
 ## Components
 
@@ -773,9 +773,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] A failed git fetch writes `error.detail` with the git stderr line, for example "fatal: Could not resolve host: github.com".
   - [ ] Retry setup resets the setup step's `startedAt` and clears `endedAt`.
   - [ ] Old records without the new fields still parse and replay.
-- **Verify:**
-  - Unit: `apps/server/src/features/thread-startup/__tests__/thread-startup-state-store.test.ts` (times on each transition) and `apps/server/src/features/agents/turns/__tests__/thread-creation-startup.test.ts` (kinds, fetch phase, error detail). Add a schema test in `packages/contracts/src/__tests__` for step order with and without `fetch`.
-  - Live: `bun run --shell system agent:up`, start a New worktree thread in `.dev/fixture-repo`, then read `thread.startup.get` over the authenticated WS (`.dev/ports.json` `seedLogin`) and confirm the times and details.
+- **Verify:** `bun run --cwd apps/server test -- src/features/thread-startup/__tests__/thread-startup-state-store.test.ts src/features/agents/turns/__tests__/thread-creation-startup.test.ts`; `bun run --cwd packages/contracts test -- src/__tests__/thread-startup.test.ts` (times on each transition, including the Retry setup reset; kinds, the fetch phase and error detail; the existing schema test gains step order with and without `fetch`, and old records without the new fields). Live: `bun run --shell system agent:up`, start a New worktree thread in `.dev/fixture-repo`, then read `thread.startup.get` over the authenticated WS (`.dev/ports.json` `seedLogin`) and confirm the times and details.
 
 ### S04-02 First provider frame: "Starting thread" holds until the provider answers
 
@@ -793,10 +791,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] A first turn that errors before any frame leaves the startup `failed` with code `AGENT_START_FAILED` and `detail` holding the error text.
   - [ ] A turn that produced a frame has `providerStartedAt` set exactly once. A replayed duplicate is a no-op.
   - [ ] Existing turns read `providerStartedAt: null` without errors.
-- **Verify:**
-  - Unit: reducer tests in `packages/agent-model/src/__tests__`, the observer with the fake startup service, and the startup test seam from `thread-creation-startup.test.ts`.
-  - Conformance: `packages/providers/src/conformance/__tests__/conformance.test.ts` fixtures `opencode-core.synthetic.json` and `codex-core.captured.json`, asserting where the first frame falls.
-  - Live: start a Local thread in the fixture repo. The trail must show "Starting thread" with a ticking duration until the first streamed token.
+- **Verify:** `bun run --cwd packages/agent-model test -- src/__tests__/agent-model.test.ts`; `bun run --cwd apps/server test -- src/features/thread-startup/__tests__/startup-agent-phase-observer.test.ts src/features/agents/turns/__tests__/thread-creation-startup.test.ts`; `bun run --cwd packages/providers test -- src/conformance/__tests__/conformance.test.ts` (the reducer; the observer, new, with the fake startup service; the startup test seam; the conformance fixtures `opencode-core.synthetic.json` and `codex-core.captured.json`, asserting where the first frame falls). Live: start a Local thread in the fixture repo. The trail must show "Starting thread" with a ticking duration until the first streamed token.
 
 ### S04-03 Steps trail replaces StartupProgressCard and the preparing shell
 
@@ -826,9 +821,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] Opened worktree and skipped setup show no duration.
   - [ ] The PR review task dialog shows the trail, and `StartupProgressCard` is gone.
   - [ ] The thread surface does not jump when the placeholder thread becomes durable.
-- **Verify:**
-  - Unit: replace `StartupProgressCard.test.tsx` with `StartupStepsTrail.test.tsx`, using RTL with fixture `ThreadStartup` records for each 04f state, and pure tests for `startup-step-copy.ts`.
-  - Live: `agent:up --desktop`, then follow `.agents/skills/electorn-live-testing/SKILL.md`. In `.dev/fixture-repo` set setup to `bun install` and send from New worktree. Capture the trail mid-setup, expand the output, then capture after start, and compare with 04a and 04b.
+- **Verify:** `bun run --cwd apps/web test -- src/features/thread-startup/__tests__/StartupStepsTrail.test.tsx src/features/thread-startup/__tests__/startup-step-copy.test.ts` (both new: `StartupStepsTrail.test.tsx` replaces `StartupProgressCard.test.tsx` and renders fixture `ThreadStartup` records for each 04f state with RTL; `startup-step-copy.test.ts` tests `startup-step-copy.ts` as pure functions). Live: `agent:up --desktop`, then follow `.agents/skills/electorn-live-testing/SKILL.md`. In `.dev/fixture-repo` set setup to `bun install` and send from New worktree. Capture the trail mid-setup, expand the output, then capture after start, and compare with 04a and 04b.
 
 ### S04-04 Trail decisions and failures replace the in-chat setup card
 
@@ -856,10 +849,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] Approval needs no dialog.
   - [ ] After Edit message, the new-thread composer holds the original prompt with the same target.
   - [ ] After Keep thread, the trail shows "Cancelled" and the composer accepts a new message.
-- **Verify:**
-  - Unit: `StartupStepsTrail.test.tsx` actions for each state, and `useStartupActions` with a mock transport (prior art `apps/web/src/features/projects/environment/__tests__/ProjectAutomaticSetupControl.test.tsx`).
-  - Server: `apps/server/src/features/projects/environment/__tests__/workspace-environment-automatic-setup.test.ts` for block `detail`.
-  - Live: set the fixture setup to `bun install && exit 1` and confirm Setup failed, then Skip setup, then the agent starts. Switch storage to Shared to see Needs approval, then Run setup. Stop during setup to see Cancelled, then Edit message.
+- **Verify:** `bun run --cwd apps/web test -- src/features/thread-startup/__tests__/StartupStepsTrail.test.tsx src/features/thread-startup/__tests__/useStartupActions.test.tsx`; `bun run --cwd apps/server test -- src/features/projects/environment/__tests__/workspace-environment-automatic-setup.test.ts` (the trail's actions for each state; `useStartupActions`, new, with a mock transport, prior art `src/features/projects/environment/__tests__/ProjectAutomaticSetupControl.test.tsx`; the server test for block `detail`). Live: set the fixture setup to `bun install && exit 1` and confirm Setup failed, then Skip setup, then the agent starts. Switch storage to Shared to see Needs approval, then Run setup. Stop during setup to see Cancelled, then Edit message.
 
 ### S04-05 Startup composer: no queueing, Stop and Esc cancel startup
 
@@ -878,9 +868,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] A cancel in the agent phase before the first frame stops the provider process: the runtime snapshot goes idle and no output arrives later.
   - [ ] A second cancel is harmless.
   - [ ] Esc in an open model picker closes the picker only.
-- **Verify:**
-  - Unit: the `thread-startup-rpc` cancel matrix (new `__tests__/thread-startup-rpc.test.ts`), and composer state tests (prior art `ComposerContentSurface.send-button.test.ts`).
-  - Live: send from New worktree, press Esc during setup and confirm Cancelled. Repeat on a Local thread right after send.
+- **Verify:** `bun run --cwd apps/server test -- src/features/thread-startup/transport/__tests__/thread-startup-rpc.test.ts`; `bun run --cwd apps/web test -- src/features/conversation/composer/ComposerContentSurface.send-button.test.ts src/features/conversation/composer/__tests__/Composer.starting-thread.test.tsx` (the cancel matrix in the existing RPC test, for every phase and a second cancel; the send-button test's `setupBlocked` cases become the starting state, with no Send and a Stop; the new composer test proves the inert editor, that no `agent.send` is issued, Esc cancelling startup, and Esc in an open model picker closing only the picker). Live: send from New worktree, press Esc during setup and confirm Cancelled. Repeat on a Local thread right after send.
 
 ### S04-06 Start from origin: fetch step
 
@@ -893,9 +881,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] The fetch step appears only when the flag is on.
   - [ ] The worktree is created from the fetched ref.
   - [ ] With the network unreachable, the step shows Fetch failed with the git line, and "Start from local main" restarts without the fetch step.
-- **Verify:**
-  - Unit: `thread-creation-startup.test.ts` with a fake `fetchBranch` that resolves or rejects.
-  - Live: turn on Start from origin in the branch picker in the fixture repo and send. For the failure case, point `origin` of `.dev/fixture-repo` at an unreachable URL; only that worktree-local repo is touched.
+- **Verify:** `bun run --cwd apps/server test -- src/features/agents/turns/__tests__/thread-creation-startup.test.ts` (with a fake `fetchBranch` that resolves or rejects). Live: turn on Start from origin in the branch picker in the fixture repo and send. For the failure case, point `origin` of `.dev/fixture-repo` at an unreachable URL; only that worktree-local repo is touched.
 
 ### S04-07 Existing worktree runs setup, skipped while a thread is live there
 
@@ -911,9 +897,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] A branched start into an existing worktree never calls `admitInitialAutomaticTurn` and its first turn is dispatched, not queued.
   - [ ] Stop during an attached worktree's setup cancels the startup, and the worktree is never removed.
   - [ ] Cleanup of attached worktrees is unchanged: the worktree is never removed.
-- **Verify:**
-  - Unit: `workspace-environment-automatic-setup.test.ts` covering an attached thread and a busy sibling; `thread-creation-startup.test.ts` covering the branched skip into an attached worktree.
-  - Live: in the fixture repo, start thread A in New worktree and let it run a long turn. Start thread B in Existing worktree on A's worktree and confirm Skipped setup. After A finishes, start thread C there and confirm setup runs.
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/environment/__tests__/workspace-environment-automatic-setup.test.ts src/features/agents/turns/__tests__/thread-creation-startup.test.ts` (the first covers an attached thread, a busy sibling and two starts in one worktree; the second covers the branched skip into an attached worktree). Live: in the fixture repo, start thread A in New worktree and let it run a long turn. Start thread B in Existing worktree on A's worktree and confirm Skipped setup. After A finishes, start thread C there and confirm setup runs.
 
 ### S04-08 Setup step runs startup actions (the switch) (merged)
 
@@ -937,9 +921,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] Timings match 04g within one frame.
   - [ ] Under reduced motion, nothing translates.
   - [ ] Pressing Enter twice quickly sends once.
-- **Verify:**
-  - Unit: `first-send-motion.test.ts` for record expiry and the reduced-motion branch.
-  - Live: Electron harness screen recording at 60fps of a first send (before and after), plus a DevTools performance capture attached to the PR.
+- **Verify:** `bun run --cwd apps/web test -- src/features/thread-startup/__tests__/first-send-motion.test.ts` (new: record expiry and the reduced-motion branch). Live: Electron harness screen recording at 60fps of a first send (before and after), plus a DevTools performance capture attached to the PR.
 
 ### S08F-01 Turn failure and ending on the wire
 
@@ -964,9 +946,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] A user Stop persists `stop: { by: "user" }`; a stop through the approval fail-closed path persists `{ by: "mcode", reason: "approval_unanswerable" }`; when a user stop and a Mcode stop race, the first cause wins.
   - [ ] An old `turn.cancelled` envelope replays as a user stop, and an old `turn.errored` envelope replays as `fatal` with its message.
   - [ ] An ending of up to 8,000 characters round-trips through the conversation page to the web replica.
-- **Verify:**
-  - Unit: `packages/contracts/src/events/__tests__`, `packages/agent-model/src/__tests__` (reducer legacy path), and `apps/server/src/features/agents/recovery/__tests__/turn-recovery-service.test.ts` (cause).
-  - Live: run a turn, then `agent:down` and `agent:up` mid-turn, and inspect the canonical turn's `ending` over WS.
+- **Verify:** `bun run --cwd packages/contracts test -- src/events/__tests__/agent-event.test.ts`; `bun run --cwd packages/agent-model test -- src/__tests__/agent-model.test.ts`; `bun run --cwd apps/server test -- src/features/agents/recovery/__tests__/turn-recovery-service.test.ts` (the required `failure`; the reducer's legacy path; the interruption cause). Live: run a turn, then `agent:down` and `agent:up` mid-turn, and inspect the canonical turn's `ending` over WS.
 
 ### S08F-02 Classify Claude and Codex failures
 
@@ -980,9 +960,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] `usageLimitExceeded` gives `usage_limit` with `retryAfterMs`.
   - [ ] Claude `authentication_failed` gives `auth`.
   - [ ] A Claude `allowed_warning` does not set `RateLimited.active`.
-- **Verify:**
-  - Unit: `packages/providers/src/private/claude/__tests__/claude-event-mapper.test.ts`, `packages/providers/src/__tests__/codex/codex-event-mapper.test.ts` (the `codexErrorInfo` fixture near `:3439`), and the conformance fixture `claude-startup-error.captured.json`, which must give `auth`.
-  - Live: a Codex turn with an invalid model id (set through thread settings) shows Failed with Details.
+- **Verify:** `bun run --cwd packages/providers test -- src/private/claude/__tests__/claude-event-mapper.test.ts src/__tests__/codex/codex-event-mapper.test.ts src/conformance/__tests__/conformance.test.ts` (the Codex test's `codexErrorInfo` fixture near `:3439`; the conformance fixture `claude-startup-error.captured.json`, which must give `auth`). Live: a Codex turn with an invalid model id (set through thread settings) shows Failed with Details.
 
 ### S08F-03 Classify Cursor and Devin failures (ACP)
 
@@ -996,9 +974,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] Devin `auth_required` gives `auth`.
   - [ ] Cursor `-32000` gives `auth`.
   - [ ] A Cursor 429 retry emits `ApiRetry` with attempt and delay.
-- **Verify:**
-  - Unit: `packages/providers/src/private/devin/__tests__/devin-provider.test.ts`, `devin-acp-event-mapper.test.ts`, `packages/providers/src/private/cursor/__tests__/cursor-session-continuity.test.ts`, and the conformance fixtures `cursor-core.captured.json`.
-  - Live: none; there is no safe way to exhaust quota.
+- **Verify:** `bun run --cwd packages/providers test -- src/private/devin/__tests__/devin-provider.test.ts src/private/devin/__tests__/devin-acp-event-mapper.test.ts src/private/cursor/__tests__/cursor-session-continuity.test.ts src/conformance/__tests__/conformance.test.ts` (the last with the conformance fixture `cursor-core.captured.json`). Live: none; there is no safe way to exhaust quota.
 
 ### S08F-04 Classify Copilot and OpenCode failures, and fix OpenCode's lost errors
 
@@ -1011,8 +987,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] An OpenCode `session.error` with `ProviderAuthError` gives an errored turn with `auth` and the native message.
   - [ ] A Copilot `errorType: "quota"` gives `usage_limit`.
   - [ ] A Copilot `statusCode: 503` gives `retryable` with status 503.
-- **Verify:**
-  - Unit: `apps/server/src/features/providers/adapters/opencode/__tests__/opencode-provider.test.ts` (new failing-path test), the Copilot mapper tests under `packages/providers/src/private/copilot/__tests__`, and the conformance fixtures `copilot-core.captured.json` and `opencode-core.synthetic.json`.
+- **Verify:** `bun run --cwd apps/server test -- src/features/providers/adapters/opencode/__tests__/opencode-provider.test.ts`; `bun run --cwd packages/providers test -- src/private/copilot/__tests__/copilot-event-mapper.test.ts src/conformance/__tests__/conformance.test.ts` (a new failing-path OpenCode case; the Copilot mapper test for `session.error` (`copilot-event-mapper.ts:115`), which this ticket creates unless S05-07 has already added it; the conformance fixtures `copilot-core.captured.json` and `opencode-core.synthetic.json`).
 
 ### S08F-05 End notice and Retry
 
@@ -1048,9 +1023,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] A transport reconnect after an error keeps the paused queue.
   - [ ] Send now on the first queued row sends it and resumes auto-drain; Retry and Resume leave the queue paused.
   - [ ] A completed turn still drains the queue as today.
-- **Verify:**
-  - Unit: `turn-ending-notice.test.ts` (table), `TurnEndNotice.test.tsx`, server `turn-recovery-service.test.ts` (retry preconditions, the new attempt's `attemptOf`, and the per-attempt `consumeRetry` conflict), and `bun run --cwd apps/web test -- src/__tests__/threadStore-ending-queue.test.ts src/__tests__/virtual-items.test.ts src/__tests__/thread-lifecycle.test.ts` (the queue rule; the attempt fold in the transcript; the two recall cases rewritten to assert no refill). Prior art for the queue: `threadStore-reconnect-queue.test.ts`, `queueStore.test.ts`, `ComposerQueueList.lifecycle.test.tsx`. Prior art for the notice: `TurnFooter.test.tsx`, `PersistedNarrative.thread.test.tsx`.
-  - Live: in the fixture repo, Stop mid-turn and confirm "You stopped". Stop within the first second of a send and confirm "Stopped before {Provider} started" and an empty composer. Queue a follow-up during a turn, force a fatal (invalid model), confirm Failed with the follow-up still queued and "Paused", then Retry after fixing the model: the message shows once and the failed attempt's notice is gone. Send the follow-up with Send now.
+- **Verify:** `bun run --cwd apps/web test -- src/features/conversation/turn-ending/__tests__/turn-ending-notice.test.ts src/features/conversation/turn-ending/__tests__/TurnEndNotice.test.tsx src/__tests__/threadStore-ending-queue.test.ts src/__tests__/virtual-items.test.ts src/__tests__/thread-lifecycle.test.ts`; `bun run --cwd apps/server test -- src/features/agents/recovery/__tests__/turn-recovery-service.test.ts` (new: the section J table, the notice, and the queue rule; existing: the attempt fold in the transcript, the two recall cases rewritten to assert no refill, and on the server the retry preconditions, the new attempt's `attemptOf` and the per-attempt `consumeRetry` conflict. Prior art for the queue: `threadStore-reconnect-queue.test.ts`, `queueStore.test.ts`, `ComposerQueueList.lifecycle.test.tsx`; for the notice: `TurnFooter.test.tsx`, `PersistedNarrative.thread.test.tsx`). Live: in the fixture repo, Stop mid-turn and confirm "You stopped". Stop within the first second of a send and confirm "Stopped before {Provider} started" and an empty composer. Queue a follow-up during a turn, force a fatal (invalid model), confirm Failed with the follow-up still queued and "Paused", then Retry after fixing the model: the message shows once and the failed attempt's notice is gone. Send the follow-up with Send now.
 
 ### S08F-06 Resume interrupted turns
 
@@ -1070,9 +1043,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] When the native session is gone, the result is `seeded-session`, the provider receives the handoff, and nothing restarts fresh silently.
   - [ ] Every adapter, given `resumeRequired`, throws instead of starting fresh (one unit test per adapter).
   - [ ] `ProjectTree` no longer reads a recovery incident store.
-- **Verify:**
-  - Unit: `turn-recovery-service.test.ts` (path choice and fallback), and per-adapter resume tests in the six adapter test folders listed in Tests.
-  - Live: start a long Codex turn in the fixture repo, run `agent:down` and `agent:up`, confirm the Interrupted notice, Resume, and continued output.
+- **Verify:** `bun run --cwd apps/server test -- src/features/agents/recovery/__tests__/turn-recovery-service.test.ts src/features/providers/adapters/opencode/__tests__/opencode-provider-resume.test.ts`; `bun run --cwd packages/providers test -- src/__tests__/claude-factory.test.ts src/__tests__/codex/codex-app-server-handshake.test.ts src/private/cursor/__tests__/cursor-session-continuity.test.ts src/private/copilot/__tests__/copilot-factory.test.ts src/private/devin/__tests__/devin-provider.test.ts`; `bun run --cwd apps/web test -- src/__tests__/virtual-items.test.ts` (path choice and fallback; one `resumeRequired` case per adapter, each in the file that already tests that adapter's resume: Claude `resume`, Codex `thread/resume` and its fallback to `thread/start`, Cursor session continuity, Copilot durable resume, Devin `session/load`, OpenCode `resumeFrom`; the resumed attempt replaces the interrupted one in the transcript, and the hidden continuation message does not render). Live: start a long Codex turn in the fixture repo, run `agent:down` and `agent:up`, confirm the Interrupted notice, Resume, and continued output.
 
 ### S08F-07 Usage limit: Retry at reset and Switch model
 
@@ -1090,9 +1061,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] Cancel retry clears it everywhere.
   - [ ] A schedule overdue by more than 15 minutes at boot is dropped, and the notice shows Retry.
   - [ ] A thread delete removes its schedule.
-- **Verify:**
-  - Unit: `turn-retry-scheduler.test.ts` with a fake clock (prior art `thread-completion-service` tests), and web notice state tests.
-  - Live: call `turn.retry.schedule` over WS with `at` one minute ahead on a failed fixture turn, then watch it fire.
+- **Verify:** `bun run --cwd apps/server test -- src/features/agents/recovery/__tests__/turn-retry-scheduler.test.ts`; `bun run --cwd apps/web test -- src/features/conversation/turn-ending/__tests__/turn-ending-notice.test.ts` (the scheduler test is new and uses a fake clock, prior art `src/features/thread-control/lifecycle/__tests__/thread-completion-service.test.ts`; the notice table gains the scheduled states: Retry at the reset time, Retrying at with Cancel retry, and an overdue schedule that falls back to Retry). Live: call `turn.retry.schedule` over WS with `at` one minute ahead on a failed fixture turn, then watch it fire.
 
 ### S08F-08 Signed out: Sign in, then Retry
 
@@ -1105,9 +1074,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] Sign in invokes S09's action.
   - [ ] When the condition clears, the primary changes to Retry without a reload.
   - [ ] An auth failure whose condition is already clear shows Retry.
-- **Verify:**
-  - Unit: the notice with a mocked condition store.
-  - Live: none; signing out would touch global CLI config, which AGENTS.md forbids.
+- **Verify:** `bun run --cwd apps/web test -- src/features/conversation/turn-ending/__tests__/TurnEndNotice.test.tsx` (the signed-out notice with a mocked condition store). Live: none; signing out would touch global CLI config, which AGENTS.md forbids.
 
 ### S08F-09 Provider retrying line replaces RetryBanner
 
@@ -1120,9 +1087,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] Unknown parts are omitted, never shown as "undefined".
   - [ ] The line clears on the next non-retry event.
   - [ ] If retries run out, the S08F-05 Failed notice replaces the line.
-- **Verify:**
-  - Unit: `ProviderRetryLine.test.tsx` and the Claude `api_retry` mapper test.
-  - Live: none reliable; the conformance fixture with `api_retry` covers it.
+- **Verify:** `bun run --cwd apps/web test -- src/features/conversation/turn-ending/__tests__/ProviderRetryLine.test.tsx`; `bun run --cwd packages/providers test -- src/private/claude/__tests__/claude-event-mapper.test.ts` (the line test is new; the mapper test gains an `api_retry` case). Live: none reliable. No test or conformance fixture covers `api_retry` today, so the new mapper case is the provider proof.
 
 ### S08F-10 Rename "Errored" to "Failed" (merged)
 
