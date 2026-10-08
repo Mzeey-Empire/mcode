@@ -9,6 +9,8 @@ import type { ComposerFormController } from "../draft/useComposerFormController"
 import type { ComposerExecutionTargetController } from "../execution/useComposerExecutionTarget";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
 import type { HandoffQueuedSend } from "../queue/useHandoffQueuedSend";
+import { removeTakenDiffComments } from "../draft/draft-diff-comments";
+import { beginDraftSubmission } from "../draft/draft-submission-lifecycle";
 import { completeSuccessfulComposerSubmission } from "./complete-composer-submission";
 import { createComposerAnnotationDispatchGuard } from "./composer-submission-annotations";
 import {
@@ -99,6 +101,7 @@ export function useComposerSubmissionController({
       completeQueuedComposerSubmission({
         annotationScopeId,
         annotations: submission.currentAnnotations,
+        diffComments: submission.currentDiffComments,
         goalObjective: submission.goalObjective,
         form,
         finishEditing: queue.finishEditing,
@@ -135,8 +138,16 @@ export function useComposerSubmissionController({
       );
       annotations.clearBeforeDispatch();
       queue.consumeEditForDispatch();
+      const messageId = crypto.randomUUID();
+      // Only an existing-thread Send can be confirmed by its messageId later;
+      // new-thread and branch Sends settle on their dispatch result alone.
+      const sendsToThisThread = target.kind === "existing-thread";
+      const draftSubmission = sendsToThisThread
+        ? beginDraftSubmission(threadId, submission.currentDiffComments, messageId)
+        : null;
       let placeholderAccepted = false;
       const dispatch = dispatchComposerTarget({
+        messageId,
         threadId,
         workspaceId,
         branchFromMessageId,
@@ -161,10 +172,15 @@ export function useComposerSubmissionController({
         queue.releaseConsumedEdit();
         if (draftCleared && !placeholderAccepted) form.restoreFailedDispatch();
         annotations.restoreAfterFailure();
+        void draftSubmission?.failed();
         showDispatchFailure(error, submission.snapshot.selectedTextComments.length > 0);
         return;
       }
       annotations.stopWatching();
+      draftSubmission?.succeeded();
+      if (!sendsToThisThread && annotationScopeId) {
+        removeTakenDiffComments(annotationScopeId, submission.currentDiffComments);
+      }
       completeSuccessfulComposerSubmission({
         form,
         submission,

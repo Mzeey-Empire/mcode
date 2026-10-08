@@ -1,12 +1,24 @@
+import { create } from "zustand";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import type { McodeBrowserCapture, SelectedTextComment } from "@mcode/contracts";
+import type {
+  DraftDiffComment,
+  DraftSubmission,
+  McodeBrowserCapture,
+  PlanCommentSelection,
+  SelectedTextComment,
+} from "@mcode/contracts";
 import {
+  DiffAnnotationPayloadSchema,
+  DraftDiffCommentSchema,
+  DraftSubmissionSchema,
   MAX_ATTACHMENTS,
   MessageMentionsSchema,
+  PlanCommentSelectionSchema,
   SelectedTextCommentSchema,
 } from "@mcode/contracts";
 import type {
   ComposerDraft,
+  DiffCommentEditorDraft,
   SelectedTextCommentEditorDraft,
 } from "@/stores/composerDraftStore";
 
@@ -122,6 +134,92 @@ function parseStoredCommentEditor(
   return { ...editor, mentions: mentions.data } as SelectedTextCommentEditorDraft;
 }
 
+/** The slice of a contracts schema the parser needs. */
+interface ElementSchema<T> {
+  safeParse(value: unknown): { success: true; data: T } | { success: false };
+}
+
+/** Counts stored elements a parse dropped, so one log line reports them per draft. */
+interface DropCounter {
+  dropped: number;
+}
+
+function parseStoredElements<T>(
+  raw: unknown,
+  schema: ElementSchema<T>,
+  counter: DropCounter,
+): T[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    counter.dropped += 1;
+    return undefined;
+  }
+  const parsed: T[] = [];
+  for (const element of raw) {
+    const result = schema.safeParse(element);
+    if (result.success) parsed.push(result.data);
+    else counter.dropped += 1;
+  }
+  return parsed;
+}
+
+function parseStoredElement<T>(raw: unknown, schema: ElementSchema<T>, counter: DropCounter): T | undefined {
+  if (raw === undefined) return undefined;
+  const result = schema.safeParse(raw);
+  if (result.success) return result.data;
+  counter.dropped += 1;
+  return undefined;
+}
+
+function parseStoredDiffCommentEditor(
+  raw: unknown,
+  counter: DropCounter,
+): DiffCommentEditorDraft | undefined {
+  if (raw === undefined) return undefined;
+  const editor = raw as Partial<DiffCommentEditorDraft> | null;
+  const target = DiffAnnotationPayloadSchema().safeParse({
+    kind: "diff",
+    id: crypto.randomUUID(),
+    displayNumber: 1,
+    ...editor?.target,
+    note: "target",
+  });
+  const mentions = MessageMentionsSchema().safeParse(editor?.mentions);
+  if (!target.success || !mentions.success || typeof editor?.note !== "string"
+    || (editor.annotationId !== undefined && typeof editor.annotationId !== "string")) {
+    counter.dropped += 1;
+    return undefined;
+  }
+  const { filePath, side, line, lineContent } = target.data;
+  return {
+    target: { filePath, side, line, lineContent },
+    annotationId: editor.annotationId,
+    note: editor.note,
+    mentions: mentions.data,
+  };
+}
+
+function parseStoredNextMessageFields(candidate: Partial<ComposerDraft>): Pick<
+  ComposerDraft,
+  "diffComments" | "diffCommentEditor" | "planCommentSelection" | "submissions"
+> {
+  const counter: DropCounter = { dropped: 0 };
+  const fields = {
+    diffComments: parseStoredElements<DraftDiffComment>(candidate.diffComments, DraftDiffCommentSchema(), counter),
+    diffCommentEditor: parseStoredDiffCommentEditor(candidate.diffCommentEditor, counter),
+    planCommentSelection: parseStoredElement<PlanCommentSelection>(
+      candidate.planCommentSelection,
+      PlanCommentSelectionSchema(),
+      counter,
+    ),
+    submissions: parseStoredElements<DraftSubmission>(candidate.submissions, DraftSubmissionSchema(), counter),
+  };
+  if (counter.dropped > 0) {
+    console.warn(`[composer-draft-storage] Dropped ${counter.dropped} invalid stored draft element(s)`);
+  }
+  return fields;
+}
+
 /** Validates a stored draft; returns null when the shape cannot be trusted. */
 export function parseStoredComposerDraft(raw: unknown): ComposerDraft | null {
   if (!raw || typeof raw !== "object") return null;
@@ -153,12 +251,41 @@ export function parseStoredComposerDraft(raw: unknown): ComposerDraft | null {
     contextWindow: candidate.contextWindow,
     codexFastMode: candidate.codexFastMode,
     devinMode: candidate.devinMode,
+    ...parseStoredNextMessageFields(candidate),
   };
+}
+
+/** Why the latest draft write failed, or null after a successful write. */
+interface DraftWriteFailureState {
+  readonly failure: "storage-full" | "storage-unavailable" | null;
+}
+
+/** Latest draft write outcome; the composer shows a notice while it is a failure. */
+export const useDraftWriteFailureStore = create<DraftWriteFailureState>(() => ({ failure: null }));
+
+function isQuotaError(error: unknown): boolean {
+  const name = error instanceof Error || error instanceof DOMException ? error.name : undefined;
+  return name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED";
+}
+
+function recordDraftWriteFailure(error: unknown): void {
+  const failure = isQuotaError(error) ? "storage-full" : "storage-unavailable";
+  if (useDraftWriteFailureStore.getState().failure === null) {
+    console.warn("[composer-draft-storage] Draft not saved", error);
+  }
+  useDraftWriteFailureStore.setState({ failure });
+}
+
+function recordDraftWriteSuccess(): void {
+  if (useDraftWriteFailureStore.getState().failure !== null) {
+    useDraftWriteFailureStore.setState({ failure: null });
+  }
 }
 
 /**
  * localStorage writes can fail on quota; a failed draft write must never take
- * down the composer. Reads return null so Zustand treats it as "no state".
+ * down the composer, but it is recorded so the composer can say the draft was
+ * not saved. Reads return null so Zustand treats it as "no state".
  */
 export const composerDraftStorage = {
   getItem: (name: string): string | null => {
@@ -171,8 +298,9 @@ export const composerDraftStorage = {
   setItem: (name: string, value: string): void => {
     try {
       localStorage.setItem(name, value);
-    } catch {
-      // Quota exceeded or storage disabled: drafts stay in memory only.
+      recordDraftWriteSuccess();
+    } catch (error) {
+      recordDraftWriteFailure(error);
     }
   },
   removeItem: (name: string): void => {

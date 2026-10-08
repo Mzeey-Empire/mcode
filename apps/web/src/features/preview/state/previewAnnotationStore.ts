@@ -2,8 +2,6 @@ import { create } from "zustand";
 import type {
   BrowserPreviewBounds,
   BrowserPreviewElementStyle,
-  ComposerAnnotationPayload,
-  DiffAnnotationPayload,
   McodeBrowserCaptureV2,
   PreviewAnnotationBundle,
   PreviewAnnotationPayload,
@@ -41,42 +39,11 @@ export interface SavedPreviewAnnotation extends PreviewAnnotationPayload {
   readonly createdAt: number;
 }
 
-/** Saved local code comment with stable identity and creation ordering. */
-export interface SavedDiffAnnotation extends DiffAnnotationPayload {
-  /** Stable sort key independent of display number. */
-  readonly createdAt: number;
-}
-
-/** Input captured by a Dev diff line before it becomes a saved annotation. */
-export interface DiffAnnotationInput {
-  /** Workspace-relative file path. */
-  readonly filePath: string;
-  /** Diff side that owns the target line. */
-  readonly side: DiffAnnotationPayload["side"];
-  /** Target line number on that side. */
-  readonly line: number;
-  /** Source line text shown to the agent for context. */
-  readonly lineContent: string;
-  /** User review note. */
-  readonly note: string;
-}
-
-/** Line target for a diff comment being drafted or edited in the composer. */
-export type DiffEditTarget =
-  | ({ readonly kind: "draft" } & Omit<DiffAnnotationInput, "note">)
-  | { readonly kind: "edit"; readonly annotationId: string };
-
 interface PreviewAnnotationStore {
   /** Saved annotation sets keyed by thread id. */
   readonly byThread: Record<string, SavedPreviewAnnotation[]>;
-  /** Saved Dev code comments keyed by thread id. */
-  readonly diffByThread: Record<string, SavedDiffAnnotation[]>;
   /** Active unsaved drafts keyed by thread id. */
   readonly drafts: Record<string, PreviewDraftAnnotation | undefined>;
-  /** Diff comment line being drafted or edited, keyed by thread id. */
-  readonly diffEditTargets: Record<string, DiffEditTarget | undefined>;
-  /** Sets or clears the thread's active diff comment edit target. */
-  setDiffEditTarget(threadId: string, target: DiffEditTarget | undefined): void;
   /** Returns all saved annotations for a thread in creation order. */
   getThreadAnnotations(threadId: string): SavedPreviewAnnotation[];
   /** Returns saved annotations for a normalized page identity. */
@@ -85,17 +52,15 @@ interface PreviewAnnotationStore {
   setDraft(threadId: string, draft: PreviewDraftAnnotation | undefined): void;
   /** Saves a draft or edited annotation into the thread bundle. */
   saveAnnotation(threadId: string, draft: PreviewDraftAnnotation, id?: string): SavedPreviewAnnotation;
-  /** Saves a local diff line comment into the thread bundle. */
-  saveDiffAnnotation(threadId: string, input: DiffAnnotationInput, id?: string): SavedDiffAnnotation;
   /** Deletes one saved annotation by stable id. */
   deleteAnnotation(threadId: string, id: string): void;
   /** Deletes saved annotations for the current page identity only. */
   discardPage(threadId: string, pageIdentity: string): void;
   /** Clears the full annotation set for a thread. */
   clearThread(threadId: string): void;
-  /** Restores a validated outbound annotation bundle into a thread's saved set. */
+  /** Restores the Browser annotations of a validated outbound bundle; diff comments belong to the composer draft. */
   restoreBundle(threadId: string, bundle: PreviewAnnotationBundle | undefined): boolean;
-  /** Builds the validated outbound bundle for a thread. */
+  /** Builds the outbound bundle of a thread's Browser annotations. */
   buildBundle(threadId: string): PreviewAnnotationBundle | undefined;
 }
 
@@ -131,22 +96,10 @@ export function normalizePreviewPageIdentity(rawUrl: string): string {
   }
 }
 
-function renumberAnnotations(
-  preview: readonly SavedPreviewAnnotation[],
-  diff: readonly SavedDiffAnnotation[],
-): { preview: SavedPreviewAnnotation[]; diff: SavedDiffAnnotation[] } {
-  const ordered = [...preview, ...diff].sort((a, b) => a.createdAt - b.createdAt);
-  const numbers = new Map(ordered.map((annotation, index) => [annotation.id, index + 1]));
-  return {
-    preview: preview.map((annotation) => ({
-      ...annotation,
-      displayNumber: numbers.get(annotation.id) ?? annotation.displayNumber,
-    })),
-    diff: diff.map((annotation) => ({
-      ...annotation,
-      displayNumber: numbers.get(annotation.id) ?? annotation.displayNumber,
-    })),
-  };
+function renumberAnnotations(preview: readonly SavedPreviewAnnotation[]): SavedPreviewAnnotation[] {
+  return [...preview]
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map((annotation, index) => ({ ...annotation, displayNumber: index + 1 }));
 }
 
 function visualSummary(proposedChanges: PreviewAnnotationVisualProposal | undefined): string | undefined {
@@ -194,15 +147,7 @@ function replaceOrAppendPreviewAnnotation(
 /** Zustand store for thread-scoped Preview annotation sets. */
 export const usePreviewAnnotationStore = create<PreviewAnnotationStore>((set, get) => ({
   byThread: {},
-  diffByThread: {},
   drafts: {},
-  diffEditTargets: {},
-
-  setDiffEditTarget(threadId, target) {
-    set((state) => ({
-      diffEditTargets: { ...state.diffEditTargets, [threadId]: target },
-    }));
-  },
 
   getThreadAnnotations(threadId) {
     return get().byThread[threadId] ?? [];
@@ -225,74 +170,33 @@ export const usePreviewAnnotationStore = create<PreviewAnnotationStore>((set, ge
     const existing = get().byThread[threadId] ?? [];
     const annotation = savedPreviewAnnotation(existing, draft, id);
     const nextPreview = replaceOrAppendPreviewAnnotation(existing, annotation, id);
-    const next = renumberAnnotations(nextPreview, get().diffByThread[threadId] ?? []);
+    const next = renumberAnnotations(nextPreview);
     set((state) => ({
-      byThread: { ...state.byThread, [threadId]: next.preview },
-      diffByThread: { ...state.diffByThread, [threadId]: next.diff },
+      byThread: { ...state.byThread, [threadId]: next },
       drafts: { ...state.drafts, [threadId]: undefined },
     }));
-    return next.preview.find((row) => row.id === annotation.id) ?? annotation;
-  },
-
-  saveDiffAnnotation(threadId, input, id) {
-    const existing = get().diffByThread[threadId] ?? [];
-    const note = input.note.trim();
-    if (!note) throw new Error("code comment note is required");
-    const annotation: SavedDiffAnnotation = {
-      kind: "diff",
-      id: id ?? crypto.randomUUID(),
-      createdAt: id ? (existing.find((row) => row.id === id)?.createdAt ?? Date.now()) : Date.now(),
-      displayNumber: 1,
-      filePath: input.filePath,
-      side: input.side,
-      line: input.line,
-      lineContent: input.lineContent,
-      note,
-    };
-    const nextDiff = id
-      ? existing.map((row) => (row.id === id ? annotation : row))
-      : [...existing, annotation];
-    const next = renumberAnnotations(get().byThread[threadId] ?? [], nextDiff);
-    set((state) => ({
-      byThread: { ...state.byThread, [threadId]: next.preview },
-      diffByThread: { ...state.diffByThread, [threadId]: next.diff },
-    }));
-    return next.diff.find((row) => row.id === annotation.id) ?? annotation;
+    return next.find((row) => row.id === annotation.id) ?? annotation;
   },
 
   deleteAnnotation(threadId, id) {
-    const next = renumberAnnotations(
-      (get().byThread[threadId] ?? []).filter((row) => row.id !== id),
-      (get().diffByThread[threadId] ?? []).filter((row) => row.id !== id),
-    );
-    set((state) => ({
-      byThread: { ...state.byThread, [threadId]: next.preview },
-      diffByThread: { ...state.diffByThread, [threadId]: next.diff },
-    }));
+    const next = renumberAnnotations((get().byThread[threadId] ?? []).filter((row) => row.id !== id));
+    set((state) => ({ byThread: { ...state.byThread, [threadId]: next } }));
   },
 
   discardPage(threadId, pageIdentity) {
     const next = renumberAnnotations(
       (get().byThread[threadId] ?? []).filter((row) => row.pageIdentity !== pageIdentity),
-      get().diffByThread[threadId] ?? [],
     );
-    set((state) => ({
-      byThread: { ...state.byThread, [threadId]: next.preview },
-      diffByThread: { ...state.diffByThread, [threadId]: next.diff },
-    }));
+    set((state) => ({ byThread: { ...state.byThread, [threadId]: next } }));
   },
 
   clearThread(threadId) {
     set((state) => {
       const byThread = { ...state.byThread };
-      const diffByThread = { ...state.diffByThread };
       const drafts = { ...state.drafts };
-      const diffEditTargets = { ...state.diffEditTargets };
       delete byThread[threadId];
-      delete diffByThread[threadId];
       delete drafts[threadId];
-      delete diffEditTargets[threadId];
-      return { byThread, diffByThread, drafts, diffEditTargets };
+      return { byThread, drafts };
     });
   },
 
@@ -308,28 +212,18 @@ export const usePreviewAnnotationStore = create<PreviewAnnotationStore>((set, ge
     }
     const baseCreatedAt = Date.now();
     const preview: SavedPreviewAnnotation[] = [];
-    const diff: SavedDiffAnnotation[] = [];
     parsed.data.annotations.forEach((annotation, index) => {
-      if (isDiffAnnotationPayload(annotation)) {
-        diff.push({ ...annotation, createdAt: baseCreatedAt + index });
-      } else {
-        preview.push({ ...annotation, createdAt: baseCreatedAt + index });
-      }
+      if (!isDiffAnnotationPayload(annotation)) preview.push({ ...annotation, createdAt: baseCreatedAt + index });
     });
-    const annotations = renumberAnnotations(preview, diff);
     set((state) => ({
-      byThread: { ...state.byThread, [threadId]: annotations.preview },
-      diffByThread: { ...state.diffByThread, [threadId]: annotations.diff },
+      byThread: { ...state.byThread, [threadId]: renumberAnnotations(preview) },
       drafts: { ...state.drafts, [threadId]: undefined },
     }));
     return true;
   },
 
   buildBundle(threadId) {
-    const annotations: Array<ComposerAnnotationPayload & { createdAt: number }> = [
-      ...(get().byThread[threadId] ?? []),
-      ...(get().diffByThread[threadId] ?? []),
-    ];
+    const annotations = get().byThread[threadId] ?? [];
     if (annotations.length === 0) return undefined;
     return {
       schemaVersion: 1,

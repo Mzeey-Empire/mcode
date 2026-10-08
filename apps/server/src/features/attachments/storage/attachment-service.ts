@@ -9,9 +9,12 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeOS from "node:os";
 import { getMcodeDir } from "@mcode/shared";
-import type { AttachmentMeta, StoredAttachment } from "@mcode/contracts";
+import { DraftImageMissingError } from "./draft-image-missing-error.js";
+import type { AttachmentMeta, StoredAttachment, StagedDraftImage } from "@mcode/contracts";
 import {
+  StagedDraftImageSchema,
   getAttachmentMaxSizeForMime,
   isVirtualBrowserContextAttachment,
   MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
@@ -26,6 +29,22 @@ const MAX_GENERATED_IMAGE_SIZE = 16 * 1024 * 1024;
  * Prevents path traversal via crafted IDs containing `../` or other special characters.
  */
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+export { DraftImageMissingError };
+
+function isMissingFile(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function isMcodeTempFile(sourcePath: string): boolean {
+  return [
+    NodePath.join(getMcodeDir(), "temp", "attachments"),
+    NodePath.join(NodeOS.tmpdir(), "mcode-attachments"),
+  ].some((directory) => {
+    const relative = NodePath.relative(directory, NodePath.resolve(sourcePath));
+    return relative !== "" && !relative.startsWith("..") && !NodePath.isAbsolute(relative);
+  });
+}
 
 /** Return the stored MIME type for supported image file extensions. */
 export function imageMimeTypeFromPath(filePath: string): string | null {
@@ -69,6 +88,121 @@ function displayNameFromPath(filePath: string): string {
 /** Persists and reads file attachments for agent threads. */
 @injectable()
 export class AttachmentService {
+  private readonly draftLeases = new Map<string, number>();
+
+  /** Copy an image into durable draft storage, preserving its metadata across restarts. */
+  async stageDraft(threadId: string, attachment: AttachmentMeta): Promise<StagedDraftImage> {
+    assertSafeId("thread ID", threadId);
+    const stagingId = NodeCrypto.randomUUID();
+    const directory = NodePath.join(getAttachmentsDir(), threadId, "draft");
+    const destination = resolveStoredAttachmentPath(directory, stagingId, attachment.mimeType);
+    if (!imageMimeTypeFromPath(destination)) throw new Error("Draft attachments must be images");
+    const stat = await NodeFSPromises.stat(attachment.sourcePath);
+    if (!stat.isFile()) throw new Error("Draft image source is not a file");
+    if (stat.size > getAttachmentMaxSizeForMime(attachment.mimeType)) throw new Error("Draft image exceeds attachment size limit");
+    const image: StagedDraftImage = { stagingId, name: attachment.name, mimeType: attachment.mimeType, sizeBytes: stat.size };
+    await NodeFSPromises.mkdir(directory, { recursive: true });
+    try {
+      await NodeFSPromises.copyFile(attachment.sourcePath, destination);
+      // Retention ages a staged file from staging time; copyFile keeps the source mtime on some platforms.
+      const stagedAt = new Date();
+      await NodeFSPromises.utimes(destination, stagedAt, stagedAt);
+      await NodeFSPromises.writeFile(NodePath.join(directory, `${stagingId}.json`), JSON.stringify(image));
+    } catch (error) {
+      await NodeFSPromises.rm(destination, { force: true });
+      await NodeFSPromises.rm(NodePath.join(directory, `${stagingId}.json`), { force: true });
+      throw error;
+    }
+    if (isMcodeTempFile(attachment.sourcePath)) {
+      await NodeFSPromises.rm(attachment.sourcePath, { force: true });
+    }
+    return image;
+  }
+
+  /** Lease images before admission reads them. Releasing a lease never removes files. */
+  leaseDraftImages(threadId: string, stagingIds: readonly string[]): () => void {
+    assertSafeId("thread ID", threadId);
+    for (const id of stagingIds) assertSafeId("staging ID", id);
+    const keys = [...new Set(stagingIds)].map((id) => `${threadId}/${id}`);
+    for (const key of keys) this.draftLeases.set(key, (this.draftLeases.get(key) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const key of keys) {
+        const remaining = (this.draftLeases.get(key) ?? 1) - 1;
+        if (remaining === 0) this.draftLeases.delete(key);
+        else this.draftLeases.set(key, remaining);
+      }
+    };
+  }
+
+  /** Copy leased draft images to fresh message attachments, rolling back partial copies. */
+  async persistDraftImages(threadId: string, stagingIds: readonly string[]): Promise<Awaited<ReturnType<AttachmentService["persist"]>>> {
+    const stored: StoredAttachment[] = [];
+    const persisted: AttachmentMeta[] = [];
+    try {
+      for (const stagingId of new Set(stagingIds)) {
+        assertSafeId("staging ID", stagingId);
+        if (!this.draftLeases.has(`${threadId}/${stagingId}`)) throw new Error("Draft image must be leased before reading");
+        const attachment = await this.readDraftImage(threadId, stagingId);
+        const result = await this.persist(threadId, [attachment]).catch(async (error: unknown) => {
+          await this.removeStoredAttachments(threadId, [attachment]);
+          if (!NodeFS.existsSync(attachment.sourcePath)) throw new DraftImageMissingError(stagingId);
+          throw error;
+        });
+        stored.push(...result.stored);
+        persisted.push(...result.persisted);
+      }
+      return { stored, persisted };
+    } catch (error) {
+      await this.removeStoredAttachments(threadId, stored);
+      throw error;
+    }
+  }
+
+  private async readDraftImage(threadId: string, stagingId: string): Promise<AttachmentMeta> {
+    const directory = NodePath.join(getAttachmentsDir(), threadId, "draft");
+    try {
+      const image = StagedDraftImageSchema().parse(JSON.parse(await NodeFSPromises.readFile(NodePath.join(directory, `${stagingId}.json`), "utf8")));
+      const sourcePath = resolveStoredAttachmentPath(directory, stagingId, image.mimeType);
+      await NodeFSPromises.access(sourcePath);
+      return { id: NodeCrypto.randomUUID(), name: image.name, mimeType: image.mimeType, sizeBytes: image.sizeBytes, sourcePath };
+    } catch (error) {
+      if (isMissingFile(error)) throw new DraftImageMissingError(stagingId);
+      throw error;
+    }
+  }
+
+  /** Remove draft files older than thirty days, without racing an admission lease. */
+  removeExpiredDraftImages(now: () => number = Date.now): number {
+    const root = getAttachmentsDir();
+    if (!NodeFS.existsSync(root)) return 0;
+    const cutoff = now() - 30 * 24 * 60 * 60 * 1000;
+    let removed = 0;
+    for (const thread of NodeFS.readdirSync(root, { withFileTypes: true })) {
+      if (!thread.isDirectory()) continue;
+      removed += this.sweepDraftDirectory(thread.name, cutoff);
+    }
+    return removed;
+  }
+
+  private sweepDraftDirectory(threadId: string, cutoff: number): number {
+    const directory = NodePath.join(getAttachmentsDir(), threadId, "draft");
+    if (!NodeFS.existsSync(directory) || NodeFS.lstatSync(directory).isSymbolicLink()) return 0;
+    let removed = 0;
+    for (const file of NodeFS.readdirSync(directory, { withFileTypes: true })) {
+      if (!file.isFile()) continue;
+      const stagingId = NodePath.parse(file.name).name;
+      if (this.draftLeases.has(`${threadId}/${stagingId}`)) continue;
+      const path = NodePath.join(directory, file.name);
+      if (NodeFS.statSync(path).mtimeMs >= cutoff) continue;
+      NodeFS.unlinkSync(path);
+      if (!file.name.endsWith(".json")) removed++;
+    }
+    return removed;
+  }
+
   /** Rebuild outbound attachment metadata from Mcode-owned stored files for an explicit Retry. */
   prepareRetryAttachments(
     threadId: string,
@@ -101,6 +235,7 @@ export class AttachmentService {
     persisted: AttachmentMeta[];
   }> {
     if (attachments.length === 0) return { stored: [], persisted: [] };
+    assertSafeId("thread ID", threadId);
 
     const baseDir = NodePath.join(getAttachmentsDir(), threadId);
     await NodeFSPromises.mkdir(baseDir, { recursive: true });

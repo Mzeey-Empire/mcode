@@ -188,6 +188,7 @@ export const mockTransport: McodeTransport = {
     source: "unsupported",
     reason: "unsupported-provider",
   }),
+  confirmMessage: vi.fn().mockResolvedValue({ admitted: false }),
   clearThreadGoal: vi.fn().mockResolvedValue({
     goal: null,
     authoritative: true,

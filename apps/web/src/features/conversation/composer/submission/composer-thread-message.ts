@@ -21,6 +21,8 @@ export interface ComposerThreadMessagePayload {
   goalObjective?: string;
   orchestrationMode?: OrchestrationMode;
   selectedTextComments?: SelectedTextComment[];
+  /** Client id of the user message; a draft submission settles by it. */
+  messageId?: string;
 }
 
 /** Provider-scoped composer values, undefined for providers that do not own them. */
@@ -63,6 +65,7 @@ export async function sendComposerThreadMessage(
     payload.selectedTextComments,
     selection.approvalReviewMode,
     scoped.devinMode,
+    payload.messageId,
   );
   if (!sent) throw new Error("Message dispatch failed");
 }
@@ -70,6 +73,7 @@ export async function sendComposerThreadMessage(
 /** Adapts a prepared submit for existing-thread transport. */
 export function createPreparedThreadMessagePayload(
   submission: PreparedComposerSubmission,
+  messageId?: string,
 ): ComposerThreadMessagePayload {
   return {
     content: submission.prepared.content,
@@ -80,6 +84,7 @@ export function createPreparedThreadMessagePayload(
     previewAnnotations: submission.previewAnnotations,
     goalObjective: submission.goalObjective,
     orchestrationMode: submission.snapshot.selection.orchestrationMode,
+    messageId,
     selectedTextComments: submission.snapshot.selectedTextComments.length > 0
       ? submission.snapshot.selectedTextComments
       : undefined,

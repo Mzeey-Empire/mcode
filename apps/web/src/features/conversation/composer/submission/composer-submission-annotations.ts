@@ -9,7 +9,11 @@ export interface ComposerAnnotationDispatchGuard {
   stopWatching(): void;
 }
 
-/** Preserves annotations when transport fails unless the user changed them meanwhile. */
+/**
+ * Preserves Browser annotations when transport fails unless the user changed
+ * them meanwhile. Review comments never leave the draft on dispatch; their
+ * submission settles them instead.
+ */
 export function createComposerAnnotationDispatchGuard(
   annotationScopeId: string | undefined,
   annotations: PreviewAnnotationBundle | undefined,
@@ -44,16 +48,13 @@ const EMPTY_ANNOTATION_DISPATCH_GUARD: ComposerAnnotationDispatchGuard = {
   stopWatching: () => {},
 };
 
-/** Detects a user edit to either annotation collection after the dispatch clear. */
+/** Detects a user edit to the Browser annotations after the dispatch clear. */
 function annotationsChanged(
   state: ReturnType<typeof usePreviewAnnotationStore.getState>,
   previousState: ReturnType<typeof usePreviewAnnotationStore.getState>,
   annotationScopeId: string,
 ): boolean {
-  return (
-    state.byThread[annotationScopeId] !== previousState.byThread[annotationScopeId]
-    || state.diffByThread[annotationScopeId] !== previousState.diffByThread[annotationScopeId]
-  );
+  return state.byThread[annotationScopeId] !== previousState.byThread[annotationScopeId];
 }
 
 /** Restores a failed dispatch's annotations and its associated design-mode state. */

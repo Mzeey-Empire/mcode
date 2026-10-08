@@ -1,25 +1,35 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useDiffStore } from "@/stores/diffStore";
+import {
+  numberDiffComments,
+  readVisibleDiffComments,
+  saveDraftDiffComment,
+} from "./draft/draft-diff-comments";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 
 const SCOPE = "thread-1";
 const WORKSPACE = "workspace-1";
 
 function seedComments(count = 2) {
-  return Array.from({ length: count }, (_, index) =>
-    usePreviewAnnotationStore.getState().saveDiffAnnotation(SCOPE, {
+  for (let index = 0; index < count; index++) {
+    saveDraftDiffComment(SCOPE, {
       filePath: `src/file-${index}.ts`,
       side: "right",
       line: 10 + index,
       lineContent: `const value${index} = ${index};`,
-      note: `Note ${index}`,
-    }));
+    }, { note: `Note ${index}`, mentions: [] });
+  }
 }
 
 function renderAttachment(commentCount = 2) {
-  const comments = seedComments(commentCount);
+  seedComments(commentCount);
+  return renderStored();
+}
+
+function renderStored() {
+  const comments = numberDiffComments(readVisibleDiffComments(SCOPE), 0);
   const onFocusComposer = vi.fn();
   render(
     <DiffCommentsComposerAttachment
@@ -41,7 +51,8 @@ function openPreview() {
 
 describe("DiffCommentsComposerAttachment", () => {
   beforeEach(() => {
-    usePreviewAnnotationStore.setState({ byThread: {}, diffByThread: {}, drafts: {} });
+    localStorage.clear();
+    useComposerDraftStore.setState({ drafts: {} });
     useDiffStore.setState({
       showRightPanel: vi.fn(),
       setRightPanelTab: vi.fn(),
@@ -80,7 +91,7 @@ describe("DiffCommentsComposerAttachment", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Remove 2 comments" }));
 
-    expect(usePreviewAnnotationStore.getState().diffByThread[SCOPE]).toEqual([]);
+    expect(useComposerDraftStore.getState().drafts[SCOPE]).toBeUndefined();
   });
 
   it("deletes a single comment from its card without touching the others", () => {
@@ -90,8 +101,23 @@ describe("DiffCommentsComposerAttachment", () => {
     fireEvent.pointerEnter(screen.getByTestId("diff-comment-preview-item-1"));
     fireEvent.click(screen.getByRole("button", { name: "Delete comment 1" }));
 
-    const remaining = usePreviewAnnotationStore.getState().diffByThread[SCOPE];
+    const remaining = useComposerDraftStore.getState().drafts[SCOPE]?.diffComments;
     expect(remaining).toHaveLength(1);
     expect(remaining?.[0]?.filePath).toBe("src/file-1.ts");
+  });
+
+  it("restores saved comments in the chip after a reload", async () => {
+    seedComments(2);
+    const stored = localStorage.getItem("mcode-composer-drafts");
+    useComposerDraftStore.setState({ drafts: {} });
+    localStorage.setItem("mcode-composer-drafts", stored!);
+
+    await useComposerDraftStore.persist.rehydrate();
+    renderStored();
+
+    expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("2 comments");
+    openPreview();
+    expect(screen.getByTestId("diff-comment-preview")).toHaveTextContent("Note 0");
+    expect(screen.getByTestId("diff-comment-preview")).toHaveTextContent("Note 1");
   });
 });

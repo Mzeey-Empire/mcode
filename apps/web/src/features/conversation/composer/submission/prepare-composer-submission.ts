@@ -1,7 +1,8 @@
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
-import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { ComposerFormController } from "../draft/useComposerFormController";
+import { readVisibleDiffComments } from "../draft/draft-diff-comments";
+import { buildComposerAnnotationBundle } from "./composer-annotations";
 import { createComposerSubmission } from "./composer-submission";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
 
@@ -32,7 +33,8 @@ export async function prepareComposerSubmission({
   }
 
   const snapshot = form.readSubmission();
-  const currentAnnotations = readPreviewAnnotations(annotationScopeId);
+  const currentDiffComments = annotationScopeId ? readVisibleDiffComments(annotationScopeId) : [];
+  const currentAnnotations = buildComposerAnnotationBundle(annotationScopeId, currentDiffComments);
   const previewAnnotations = resolvePreviewAnnotations(currentAnnotations);
   if (isEmptySubmission(
     snapshot.rawInput,
@@ -58,21 +60,13 @@ export async function prepareComposerSubmission({
       goalObjective: snapshot.goalPending ? snapshot.rawInput.trim() : undefined,
       attachmentMetas: form.snapshotAttachmentMetas(),
       currentAnnotations,
+      currentDiffComments,
       previewAnnotations,
     };
   } catch (error) {
     showPreparationFailure(error);
     return null;
   }
-}
-
-/** Reads the annotation bundle attached to this Composer scope. */
-function readPreviewAnnotations(
-  annotationScopeId: string | undefined,
-): PreviewAnnotationBundle | undefined {
-  return annotationScopeId
-    ? usePreviewAnnotationStore.getState().buildBundle(annotationScopeId)
-    : undefined;
 }
 
 /** Determines whether a form snapshot has no message-bearing content. */

@@ -79,6 +79,7 @@ import {
   ConversationTailSchema,
 } from "../models/conversation-tail.js";
 import { AttachmentMetaSchema } from "../models/attachment.js";
+import { StagedDraftImageSchema } from "../models/next-message-draft.js";
 import { MAX_ATTACHMENTS } from "../models/file-types.js";
 import { ToolCallRecordSchema } from "../models/tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "../models/thought-segment.js";
@@ -296,6 +297,8 @@ export const SendMessageSchema = lazySchema(() => z.object({
     content: z.string(),
     /** Client identity for the optimistic user row, when the sender has one. */
     messageId: z.string().uuid().optional(),
+    /** Durable images leased and copied into this message during admission. */
+    stagedDraftImageIds: z.array(z.string().uuid()).max(MAX_ATTACHMENTS).optional(),
     /**
      * When set, persisted user row uses this transcript while {@link content}
      * flows to providers (injections and hidden metadata fences).
@@ -1025,6 +1028,15 @@ export const WS_METHODS = lazySchema(() => ({
     params: SendMessageSchema() as z.ZodType<SendMessageInput>,
     result: z.void(),
   },
+  /**
+   * Waits for in-flight agent.send admissions with this messageId in this server
+   * process to settle, then reports whether the thread holds that user message.
+   * After a restart no admission is in flight, so the answer is final.
+   */
+  "agent.confirmMessage": {
+    params: z.object({ threadId: z.string().min(1), messageId: z.string().uuid() }).strict(),
+    result: z.object({ admitted: z.boolean() }).strict(),
+  },
   /** Read the current restart-scoped recovery incident, if one exists. */
   "agent.recoveryIncident": {
     params: z.object({}).strict(),
@@ -1440,6 +1452,10 @@ export const WS_METHODS = lazySchema(() => ({
         ),
     }),
     result: AttachmentMetaSchema(),
+  },
+  "attachments.stageDraft": {
+    params: z.object({ threadId: z.string().min(1), attachment: AttachmentMetaSchema() }),
+    result: StagedDraftImageSchema(),
   },
   "settings.get": {
     params: z.object({}),

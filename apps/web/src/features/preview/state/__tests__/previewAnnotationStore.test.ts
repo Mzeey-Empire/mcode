@@ -5,6 +5,9 @@ import {
   usePreviewAnnotationStore,
   type PreviewDraftAnnotation,
 } from "../previewAnnotationStore";
+import { buildComposerAnnotationBundle } from "@/features/conversation/composer/submission/composer-annotations";
+import { saveDraftDiffComment } from "@/features/conversation/composer/draft/draft-diff-comments";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 
 const capture = {
   schemaVersion: 2 as const,
@@ -39,7 +42,8 @@ function draft(overrides: Partial<PreviewDraftAnnotation> = {}): PreviewDraftAnn
 
 describe("previewAnnotationStore", () => {
   beforeEach(() => {
-    usePreviewAnnotationStore.setState({ byThread: {}, diffByThread: {}, drafts: {} });
+    usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
+    useComposerDraftStore.setState({ drafts: {} });
   });
 
   it("normalizes fragments, query order, and tracking parameters", () => {
@@ -80,30 +84,32 @@ describe("previewAnnotationStore", () => {
     });
   });
 
-  it("combines Preview annotations and code comments in creation order", () => {
-    const preview = usePreviewAnnotationStore
-      .getState()
-      .saveAnnotation("thread-1", draft({ note: "Align the button" }));
-    const diff = usePreviewAnnotationStore.getState().saveDiffAnnotation("thread-1", {
+  it("numbers Review comments after Browser annotations in the outbound bundle", () => {
+    saveDraftDiffComment("thread-1", {
       filePath: "apps/web/src/App.tsx",
       side: "right",
       line: 42,
       lineContent: "return <App />;",
-      note: "Handle the loading state",
-    });
+    }, { note: "Handle the loading state", mentions: [] });
+    const preview = usePreviewAnnotationStore
+      .getState()
+      .saveAnnotation("thread-1", draft({ note: "Align the button" }));
 
-    const bundle = usePreviewAnnotationStore.getState().buildBundle("thread-1");
+    const bundle = buildComposerAnnotationBundle("thread-1");
 
     expect(preview.displayNumber).toBe(1);
-    expect(diff.displayNumber).toBe(2);
-    expect(bundle?.annotations).toMatchObject([
-      { id: preview.id, displayNumber: 1 },
+    expect(bundle?.annotations).toEqual([
+      expect.objectContaining({ id: preview.id, displayNumber: 1 }),
       {
-        id: diff.id,
         kind: "diff",
+        id: expect.any(String),
         displayNumber: 2,
         filePath: "apps/web/src/App.tsx",
+        side: "right",
         line: 42,
+        lineContent: "return <App />;",
+        note: "Handle the loading state",
+        mentions: [],
       },
     ]);
   });

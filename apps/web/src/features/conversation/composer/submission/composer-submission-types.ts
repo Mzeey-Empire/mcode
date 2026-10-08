@@ -1,5 +1,5 @@
 import type { AttachmentMeta } from "@/transport";
-import type { PreviewAnnotationBundle } from "@mcode/contracts";
+import type { DraftDiffComment, PreviewAnnotationBundle } from "@mcode/contracts";
 import type { ComposerFormSubmission } from "../draft/useComposerFormController";
 import type { ComposerSubmission } from "./composer-submission";
 
@@ -11,5 +11,7 @@ export interface PreparedComposerSubmission {
   goalObjective?: string;
   attachmentMetas: AttachmentMeta[];
   currentAnnotations?: PreviewAnnotationBundle;
+  /** Review comment revisions read into {@link currentAnnotations}; a Send freezes exactly these. */
+  currentDiffComments: readonly DraftDiffComment[];
   previewAnnotations?: PreviewAnnotationBundle;
 }

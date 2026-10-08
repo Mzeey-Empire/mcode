@@ -85,6 +85,14 @@ export class MessageRepo {
     return this.reader.findByIdInThread(threadId, messageId);
   }
 
+  /** Confirm a user message after previously admitted database writes have settled. */
+  async confirmUserMessage(threadId: string, messageId: string): Promise<boolean> {
+    if (this.reader.findByIdInThread(threadId, messageId)?.role === "user") return true;
+    // An execution can die after handing its start transaction to the independent writer.
+    await this.writer.barrier();
+    return this.reader.findByIdInThread(threadId, messageId)?.role === "user";
+  }
+
   findByIdInThreadIncludingInternal(threadId: Parameters<MessageStore["findByIdInThreadIncludingInternal"]>[0], messageId: Parameters<MessageStore["findByIdInThreadIncludingInternal"]>[1]): ReturnType<MessageStore["findByIdInThreadIncludingInternal"]> {
     return this.reader.findByIdInThreadIncludingInternal(threadId, messageId);
   }

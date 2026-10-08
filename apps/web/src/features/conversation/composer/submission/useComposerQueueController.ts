@@ -1,11 +1,15 @@
 import { useCallback, useMemo } from "react";
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
 import type { ComposerFormController } from "../draft/useComposerFormController";
-import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { useComposerQueueEditing } from "../queue/useComposerQueueEditing";
 import { useQueuedMessageDispatch } from "../queue/useQueuedMessageDispatch";
 import { createQueuedComposerPayload } from "../queue/createQueuedComposerPayload";
+import {
+  buildComposerAnnotationBundle,
+  clearComposerAnnotations,
+  restoreComposerAnnotations,
+} from "./composer-annotations";
 import { useComposerHandoffDispatch } from "./useComposerHandoffDispatch";
 
 type HandoffStatus = "generating" | "ready" | "fallback" | "error" | undefined;
@@ -28,13 +32,13 @@ export function useComposerQueueController({
   const setPreviewDesignModeActive = usePreviewDesignModeStore((state) => state.setActive);
   const clearAnnotations = useCallback(() => {
     if (!annotationScopeId) return;
-    usePreviewAnnotationStore.getState().clearThread(annotationScopeId);
+    clearComposerAnnotations(annotationScopeId);
     setPreviewDesignModeActive(annotationScopeId, false);
   }, [annotationScopeId, setPreviewDesignModeActive]);
   const restoreAnnotations = useCallback(
     (bundle: PreviewAnnotationBundle | undefined) => {
       if (!annotationScopeId) return;
-      const restored = usePreviewAnnotationStore.getState().restoreBundle(annotationScopeId, bundle);
+      const restored = restoreComposerAnnotations(annotationScopeId, bundle);
       setPreviewDesignModeActive(annotationScopeId, restored && Boolean(bundle?.annotations.length));
     },
     [annotationScopeId, setPreviewDesignModeActive],
@@ -48,9 +52,7 @@ export function useComposerQueueController({
           input: form.state.text,
           mentions: form.state.mentions,
           previewAnnotations:
-            (annotationScopeId
-              ? usePreviewAnnotationStore.getState().buildBundle(annotationScopeId)
-              : undefined) ?? restoredPreviewAnnotations,
+            buildComposerAnnotationBundle(annotationScopeId) ?? restoredPreviewAnnotations,
           selection: form.state.selection,
           goalPending: form.state.goalPending,
         }),

@@ -1,7 +1,11 @@
+import { useEffect } from "react";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
-import { isDiffAnnotationPayload, type ProviderId } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts";
+import { useNumberedDiffComments } from "./draft/draft-diff-comments";
+import { reconcileOrphanedDraftSubmissions } from "./draft/draft-submission-lifecycle";
 
 interface ComposerSurfaceStateInput {
   readonly threadId?: string;
@@ -75,23 +79,16 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
   const annotationRows = usePreviewAnnotationStore((state) =>
     annotationScopeId ? state.byThread[annotationScopeId] : undefined,
   );
-  const diffAnnotationRows = usePreviewAnnotationStore((state) =>
-    annotationScopeId ? state.diffByThread[annotationScopeId] : undefined,
-  );
-  const annotationCount =
-    (annotationRows?.length ?? 0) + (diffAnnotationRows?.length ?? 0);
+  const diffComments = useNumberedDiffComments(annotationScopeId);
+  const previewAnnotationCount = annotationRows?.length ?? 0;
+  const connected = useConnectionStore((state) => state.status === "connected");
+  // Reruns on reconnect, so a submission a dropped connection left pending settles.
+  useEffect(() => {
+    if (input.threadId && connected) void reconcileOrphanedDraftSubmissions(input.threadId);
+  }, [connected, input.threadId]);
+  const annotationCount = previewAnnotationCount + diffComments.length;
   const annotationBundleForDisplay = annotationScopeId
     ? usePreviewAnnotationStore.getState().buildBundle(annotationScopeId)
-    : undefined;
-  // Diff comments render through DiffCommentsComposerAttachment, so the chip
-  // only summarizes visual annotations.
-  const visualBundleForDisplay = annotationBundleForDisplay
-    ? {
-        ...annotationBundleForDisplay,
-        annotations: annotationBundleForDisplay.annotations.filter(
-          (annotation) => !isDiffAnnotationPayload(annotation),
-        ),
-      }
     : undefined;
   const effectiveProviderId = input.provider as ProviderId;
   const providerSurfaceState = useProviderSurfaceState(effectiveProviderId);
@@ -104,8 +101,8 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
 
   return {
     annotationScopeId,
-    annotationBundleForDisplay: visualBundleForDisplay,
-    diffCommentsForDisplay: diffAnnotationRows ?? [],
+    annotationBundleForDisplay,
+    diffCommentsForDisplay: diffComments,
     ...catalogScope,
     ...composerLocks,
     effectiveProviderId,
