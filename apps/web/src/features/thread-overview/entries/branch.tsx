@@ -5,6 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
+import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { cn } from "@/lib/utils";
 import { getTransport, type GitBranch as GitBranchRecord, type Thread } from "@/transport";
@@ -304,9 +305,14 @@ function ThreadOverviewBranchCreateAction({
   );
 }
 
+/** Preserves the parent-owned branch-menu choice across overview closes. */
+export const { Provider: BranchEntryState, useEntryState: useBranchEntryState } = createOverviewEntryState(function useBranchMenuState() {
+  return useState(false);
+});
+
 function BranchEntry({ thread }: { thread: Thread }) {
   const { branchCreation, branchlessCreatePr, hasCommitsAhead } = useOverviewContext();
-  const [branchOpen, setBranchOpen] = useState(false);
+  const [branchOpen, setBranchOpen] = useBranchEntryState();
   const checkoutLabel = resolveThreadCheckoutLabel(thread);
   return (<ThreadOverviewWhen when={!branchlessCreatePr}>
     <Popover open={branchOpen} onOpenChange={setBranchOpen}>

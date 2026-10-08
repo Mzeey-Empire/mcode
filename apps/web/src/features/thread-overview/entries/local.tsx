@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
+import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
@@ -91,9 +92,14 @@ function ThreadOverviewLocalMenu({ worktreePath, branch }: ThreadOverviewLocalMe
   );
 }
 
+/** Preserves the parent-owned local-menu choice across overview closes. */
+export const { Provider: LocalEntryState, useEntryState: useLocalEntryState } = createOverviewEntryState(function useLocalMenuState() {
+  return useState(false);
+});
+
 function LocalEntry({ thread }: { thread: Thread }) {
   const { dirPath } = useOverviewContext();
-  const [localOpen, setLocalOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useLocalEntryState();
   const { label: modeLabel, Icon: LocalModeIcon } = getThreadOverviewLocalMode(thread);
   const checkoutLabel = resolveThreadCheckoutLabel(thread);
   return (<Popover open={localOpen} onOpenChange={setLocalOpen}>

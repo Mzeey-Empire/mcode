@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { SiteFavicon } from "@/components/ui/favicon";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
+import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { getTransport, type McodeTransport, type Thread } from "@/transport";
 import { ExternalLink, GitBranch } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -146,7 +147,7 @@ function getThreadOverviewRepositoryDisplay(
   };
 }
 
-function RepositoryEntry({ thread }: { thread: Thread }) {
+function useRepositoryState(thread: Thread) {
   const { open } = useOverviewContext();
   const [loadedRepository, setLoadedRepository] = useState<LoadedRepository | null>(null);
   const { repository, status: repositoryStatus } = getThreadOverviewRepositoryDisplay(
@@ -154,8 +155,9 @@ function RepositoryEntry({ thread }: { thread: Thread }) {
     thread.id,
     open,
   );
+  const hasCurrentRepository = loadedRepository?.threadId === thread.id && loadedRepository.status === "ready";
   useEffect(() => {
-    if (!open) return;
+    if (!open || hasCurrentRepository) return;
 
     let cancelled = false;
     const loadRepository = async () => {
@@ -182,7 +184,15 @@ function RepositoryEntry({ thread }: { thread: Thread }) {
     return () => {
       cancelled = true;
     };
-  }, [open, thread.id, thread.workspace_id]);
+  }, [hasCurrentRepository, open, thread.id, thread.workspace_id]);
+  return { repository, repositoryStatus };
+}
+
+/** Preserves the repository result while the overview is closed. */
+export const { Provider: RepositoryEntryState, useEntryState: useRepositoryEntryState } = createOverviewEntryState(useRepositoryState);
+
+function RepositoryEntry() {
+  const { repository, repositoryStatus } = useRepositoryEntryState();
   const openRepository = useCallback(() => {
     if (!repository.webUrl) return;
     if (window.desktopBridge?.openExternalUrl) {
@@ -200,5 +210,5 @@ function RepositoryEntry({ thread }: { thread: Thread }) {
 
 /** Repository block in the thread overview, preserving its existing row position. */
 export function RepositoryEntryBlock({ subject }: { subject: OverviewSubject }) {
-  return subject.kind === "thread" ? <RepositoryEntry thread={subject.thread} /> : null;
+  return subject.kind === "thread" ? <RepositoryEntry /> : null;
 }

@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
+import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { executeCommand } from "@/lib/command-registry";
 import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
@@ -223,7 +224,7 @@ function hasCurrentThreadOverviewChangeSummary(
     && loaded.revision === revision;
 }
 
-function ChangesEntry({ thread }: { thread: Thread }) {
+function useChangesState(thread: Thread) {
   const { open } = useOverviewContext();
   const [loadedChangeSummary, setLoadedChangeSummary] = useState<LoadedChangeSummary | null>(null);
   const [changeSummaryStatus, setChangeSummaryStatus] = useState<LoadStatus>("idle");
@@ -254,7 +255,7 @@ function ChangesEntry({ thread }: { thread: Thread }) {
   );
   const isChangeSummaryLoading = open && !hasCurrentChangeSummary && changeSummaryStatus !== "error";
   useEffect(() => {
-    if (!open) return;
+    if (!open || hasCurrentChangeSummary) return;
 
     let cancelled = false;
     const loadChangeSummary = async () => {
@@ -284,7 +285,15 @@ function ChangesEntry({ thread }: { thread: Thread }) {
     return () => {
       cancelled = true;
     };
-  }, [cachedSnapshotKey, cachedSnapshots, diffRevision, open, setSnapshots, thread.id, thread.workspace_id]);
+  }, [cachedSnapshotKey, cachedSnapshots, diffRevision, hasCurrentChangeSummary, open, setSnapshots, thread.id, thread.workspace_id]);
+  return { changeSummary, isChangeSummaryLoading, showChangeSummary };
+}
+
+/** Preserves the loaded summary and its status while the overview is closed. */
+export const { Provider: ChangesEntryState, useEntryState: useChangesEntryState } = createOverviewEntryState(useChangesState);
+
+function ChangesEntry() {
+  const { changeSummary, isChangeSummaryLoading, showChangeSummary } = useChangesEntryState();
   const openChanges = useCallback(() => {
     executeCommand("changes.toggle");
   }, []);
@@ -329,5 +338,5 @@ function ChangesEntry({ thread }: { thread: Thread }) {
 
 /** Changes block in the thread overview, preserving its existing row position. */
 export function ChangesEntryBlock({ subject }: { subject: OverviewSubject }) {
-  return subject.kind === "thread" ? <ChangesEntry thread={subject.thread} /> : null;
+  return subject.kind === "thread" ? <ChangesEntry /> : null;
 }

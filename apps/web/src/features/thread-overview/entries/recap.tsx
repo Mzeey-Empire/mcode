@@ -3,6 +3,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
+import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { useOverviewMessages } from "@/features/thread-overview/use-overview-messages";
 import { useThreadRecap } from "@/hooks/useThreadRecap";
 import { cn } from "@/lib/utils";
@@ -177,14 +178,21 @@ function ThreadOverviewRecapRow({
   );
 }
 
-function RecapEntry({ thread }: { thread: Thread }) {
+function useRecapState(thread: Thread) {
   const { open } = useOverviewContext();
   const sourceMessages = useOverviewMessages(thread.id, open);
-  const threadRecap = useThreadRecap({
+  return useThreadRecap({
     threadId: thread.id,
     messages: sourceMessages,
     overviewOpen: open,
   });
+}
+
+/** Preserves Recap request state and refs while the overview is closed. */
+export const { Provider: RecapEntryState, useEntryState: useRecapEntryState } = createOverviewEntryState(useRecapState);
+
+function RecapEntry() {
+  const threadRecap = useRecapEntryState();
   return (<><Separator className="my-1.5" />
     <ThreadOverviewRecapRow
       recapText={threadRecap.recapText}
@@ -199,5 +207,5 @@ function RecapEntry({ thread }: { thread: Thread }) {
 
 /** Recap block in the thread overview, preserving its existing row position. */
 export function RecapEntryBlock({ subject }: { subject: OverviewSubject }) {
-  return subject.kind === "thread" ? <RecapEntry thread={subject.thread} /> : null;
+  return subject.kind === "thread" ? <RecapEntry /> : null;
 }

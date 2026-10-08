@@ -4,6 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getOverviewEntries, getOverviewHeaderActions } from "@/features/thread-overview/overview-registry";
+import { OverviewEntryStateProviders } from "@/features/thread-overview/overview-entry-state";
 import {
   OverviewContext,
   OverviewDialogs,
@@ -159,6 +160,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
   const headerActions = getOverviewHeaderActions(subject);
   const triggerButton = <ThreadOverviewTrigger ciDot={state.ciDot} open={open} />;
   return (<OverviewContext.Provider value={state}>
+    <OverviewEntryStateProviders entries={entries} subject={subject}>
     <Popover open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger render={<PopoverTrigger render={triggerButton} />} />
@@ -201,5 +203,6 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
     </Popover>
 
     <OverviewDialogs thread={thread} />
+    </OverviewEntryStateProviders>
   </OverviewContext.Provider>);
 }

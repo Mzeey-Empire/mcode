@@ -1,14 +1,14 @@
-import type { ComponentType } from "react";
-import { BranchEntryBlock } from "./entries/branch";
+import type { ComponentType, ReactNode } from "react";
+import { BranchEntryBlock, BranchEntryState } from "./entries/branch";
 import { BrowserEntryBlock } from "./entries/browser";
-import { ChangesEntryBlock } from "./entries/changes";
+import { ChangesEntryBlock, ChangesEntryState } from "./entries/changes";
 import { CommitEntryBlock } from "./entries/commit";
 import { CreateBranchEntryBlock } from "./entries/create-branch";
-import { LocalEntryBlock } from "./entries/local";
+import { LocalEntryBlock, LocalEntryState } from "./entries/local";
 import { PlansEntryBlock } from "./entries/plans";
 import { PullRequestEntryBlock } from "./entries/pull-request";
-import { RecapEntryBlock } from "./entries/recap";
-import { RepositoryEntryBlock } from "./entries/repository";
+import { RecapEntryBlock, RecapEntryState } from "./entries/recap";
+import { RepositoryEntryBlock, RepositoryEntryState } from "./entries/repository";
 import { SaveRecoveryEntryBlock } from "./entries/save-recovery";
 import { SetupEntryBlock } from "./entries/setup";
 import { SourcesEntryBlock } from "./entries/sources";
@@ -28,6 +28,8 @@ export interface OverviewEntry {
   readonly subjects: readonly OverviewSubject["kind"][];
   /** Renders null when there is nothing to show. */
   readonly Entry: ComponentType<{ subject: OverviewSubject }>;
+  /** Owns state that must survive the row unmounting when the overview closes. */
+  readonly State?: ComponentType<{ subject: OverviewSubject; children: ReactNode }>;
 }
 
 /** Header icon buttons beside the Overview label. */
@@ -42,19 +44,19 @@ export interface OverviewHeaderAction {
 export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "setup", section: "lane", order: 0, subjects: ["thread"], Entry: SetupEntryBlock },
   { id: "save-recovery", section: "activity", order: 10, subjects: ["thread"], Entry: SaveRecoveryEntryBlock },
-  { id: "changes", section: "activity", order: 20, subjects: ["thread"], Entry: ChangesEntryBlock },
-  { id: "repository", section: "activity", order: 30, subjects: ["thread"], Entry: RepositoryEntryBlock },
+  { id: "changes", section: "activity", order: 20, subjects: ["thread"], Entry: ChangesEntryBlock, State: ChangesEntryState },
+  { id: "repository", section: "activity", order: 30, subjects: ["thread"], Entry: RepositoryEntryBlock, State: RepositoryEntryState },
   { id: "plans", section: "activity", order: 40, subjects: ["thread"], Entry: PlansEntryBlock },
-  { id: "local", section: "lane", order: 50, subjects: ["thread"], Entry: LocalEntryBlock },
+  { id: "local", section: "lane", order: 50, subjects: ["thread"], Entry: LocalEntryBlock, State: LocalEntryState },
   { id: "create-branch", section: "lane", order: 60, subjects: ["thread"], Entry: CreateBranchEntryBlock },
-  { id: "branch", section: "lane", order: 70, subjects: ["thread"], Entry: BranchEntryBlock },
+  { id: "branch", section: "lane", order: 70, subjects: ["thread"], Entry: BranchEntryBlock, State: BranchEntryState },
   { id: "commit", section: "lane", order: 80, subjects: ["thread"], Entry: CommitEntryBlock },
   { id: "usage", section: "summary", order: 90, subjects: ["thread"], Entry: UsageEntryBlock },
   { id: "subagents", section: "activity", order: 100, subjects: ["thread"], Entry: SubagentsEntryBlock },
   { id: "pull-request", section: "lane", order: 110, subjects: ["thread"], Entry: PullRequestEntryBlock },
   { id: "browser", section: "activity", order: 120, subjects: ["thread"], Entry: BrowserEntryBlock },
   { id: "sources", section: "activity", order: 130, subjects: ["thread"], Entry: SourcesEntryBlock },
-  { id: "recap", section: "summary", order: 140, subjects: ["thread"], Entry: RecapEntryBlock },
+  { id: "recap", section: "summary", order: 140, subjects: ["thread"], Entry: RecapEntryBlock, State: RecapEntryState },
 ];
 
 /** Header actions in their existing visual order. */
