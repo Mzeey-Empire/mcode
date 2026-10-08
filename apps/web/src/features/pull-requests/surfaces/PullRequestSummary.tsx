@@ -14,7 +14,6 @@ import {
   CircleQuestionMark,
   CircleMinus,
   CircleX,
-  Loader2,
   MessageCircle,
   UserRound,
   type LucideIcon,
@@ -175,7 +174,8 @@ function titleCase(value: string): string {
 }
 
 function checkVisual(state: PullRequestCheckState): {
-  icon: LucideIcon;
+  /** Null while the check runs, where the row renders the shared Spinner. */
+  icon: LucideIcon | null;
   className: string;
 } {
   if (state === "passing") {
@@ -188,7 +188,7 @@ function checkVisual(state: PullRequestCheckState): {
     return { icon: CircleX, className: "text-[var(--diff-remove-strong)]" };
   }
   if (state === "pending") {
-    return { icon: Loader2, className: "animate-spin text-primary" };
+    return { icon: null, className: "text-primary" };
   }
   if (state === "neutral" || state === "skipped") {
     return { icon: CircleMinus, className: "text-muted" };
@@ -369,12 +369,16 @@ const CheckRow = memo(function CheckRow({
 
   return (
     <>
-      <CheckIcon
-        size={15}
-        data-check-state={check.state}
-        aria-hidden
-        className={cn("shrink-0", visual.className)}
-      />
+      {CheckIcon ? (
+        <CheckIcon
+          size={15}
+          data-check-state={check.state}
+          aria-hidden
+          className={cn("shrink-0", visual.className)}
+        />
+      ) : (
+        <Spinner size={16} data-check-state={check.state} className={visual.className} />
+      )}
       <span className="min-w-0 flex-1 text-fade text-ink/90">
         {check.name}
       </span>

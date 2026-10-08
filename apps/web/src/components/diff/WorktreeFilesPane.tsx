@@ -5,6 +5,7 @@ import { FilesPanel, type FilesPanelProps } from "@/components/files/FilesPanel"
 import { PullRequestFileTree } from "@/features/pull-requests";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 
 /** Props for the active-comparison Files navigator shown beside a Review diff. */
 export interface WorktreeFilesPaneProps {
@@ -105,7 +106,7 @@ export function WorktreeFilesPane({
               onClick={onRefresh}
               className="ml-1 h-7 w-7 shrink-0 text-muted"
             >
-              <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} aria-hidden="true" />
+              {refreshing ? <Spinner size={12} /> : <RefreshCw size={12} aria-hidden="true" />}
             </Button>
           ) : null}
         </div>

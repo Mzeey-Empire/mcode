@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleCheck, CircleDashed, CircleX } from "lucide-react";
+import { ArrowLeft, CircleCheck, CircleX } from "lucide-react";
 import { formatSubagentDisplayName } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -8,6 +8,7 @@ import { resolveModelDisplayLabel } from "@/lib/format-model-label";
 import { formatSubagentIdentity } from "../identity/format-subagent-identity";
 import { narrativeRowStatus } from "../roster/narrative-subagents";
 import type { ProjectedSubagentRow, SubagentDetailActivity } from "../roster/subagent-projection";
+import { Spinner } from "@/components/ui/spinner";
 
 function narrativeConfiguration(row: ProjectedSubagentRow): string {
   return [
@@ -21,7 +22,7 @@ function ActivityStatusIcon({ activity }: { readonly activity: SubagentDetailAct
     return <CircleX size={13} aria-hidden className="shrink-0 text-destructive" />;
   }
   if (!activity.isComplete) {
-    return <CircleDashed size={13} aria-hidden className="shrink-0 animate-spin text-muted motion-reduce:animate-none" />;
+    return <Spinner size={12} className="text-muted" />;
   }
   return <CircleCheck size={13} aria-hidden className="shrink-0 text-muted" />;
 }
