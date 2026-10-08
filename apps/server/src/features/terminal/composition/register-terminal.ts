@@ -16,12 +16,8 @@ import {
   spawnPtyHostChild,
 } from "../host/pty-host-child.js";
 import { TerminalBackend, TERMINAL_BACKEND_TOKEN } from "../backends/terminal-backend.js";
-import { TerminalBackendSelector } from "../backends/terminal-backend-selector.js";
 import { LegacyTerminalBackend } from "../backends/legacy/legacy-terminal-backend.js";
 import { TerminalService as LegacyTerminalService } from "../backends/legacy/terminal-service.js";
-import { ModernTerminalBackend } from "../backends/modern/modern-terminal-backend.js";
-import { ModernTerminalSessionRuntime } from "../sessions/terminal-session-runtime.js";
-import { TerminalSessionService } from "../sessions/terminal-session-service.js";
 import { TerminalCommandService } from "../commands/terminal-command-service.js";
 import { TerminalDiagnosticsService } from "../diagnostics/terminal-diagnostics-service.js";
 import { TerminalProfileService } from "../profiles/terminal-profile-service.js";
@@ -29,7 +25,7 @@ import { createTerminalProfileServiceOptions } from "../profiles/terminal-profil
 import { WorkspaceTerminalPreferencesService } from "../preferences/workspace-terminal-preferences-service.js";
 import { terminalPlatform } from "../terminal-platform.js";
 
-/** Register terminal backends, selector state, and backend diagnostics. */
+/** Register the terminal backend and diagnostics. */
 export function registerTerminalBackends(container: DependencyContainer): void {
   let terminalCommandService: TerminalCommandService | undefined;
   container.register(TerminalCommandService, {
@@ -60,9 +56,7 @@ export function registerTerminalBackends(container: DependencyContainer): void {
     { lifecycle: Lifecycle.Singleton },
   );
 
-  let modernTerminalBackend: ModernTerminalBackend | undefined;
   let ptyHost: PtyHostSupervisor | undefined;
-  let terminalBackendSelector: TerminalBackendSelector | undefined;
   container.register("PtyHost", {
     useFactory: (c: DependencyContainer) => {
       if (ptyHost) return ptyHost;
@@ -81,63 +75,14 @@ export function registerTerminalBackends(container: DependencyContainer): void {
       return ptyHost;
     },
   } as never);
-  container.register("ModernTerminalBackend", {
-    useFactory: (c: DependencyContainer) => {
-      if (modernTerminalBackend) return modernTerminalBackend;
-      const hostRuntime = c.resolve<HostRuntime>("HostRuntime");
-      const host = c.resolve<PtyHostSupervisor>("PtyHost");
-      const runtime = new ModernTerminalSessionRuntime({ host });
-      const settings = c.resolve(SettingsService);
-      const sessions = new TerminalSessionService({
-        runtime,
-        profiles: c.resolve(TerminalProfileService),
-        settings,
-        liveSettings: { apply: (next) => runtime.applySettings(next) },
-        env: c.resolve(EnvService),
-        workspaces: c.resolve(WorkspaceRepo),
-        threads: c.resolve(ThreadRepo),
-        resolveWorkingDir: (workspacePath, mode, worktreePath) =>
-          c.resolve(GitWorktreeService).resolveWorkingDir(workspacePath, mode, worktreePath),
-        hostGeneration: () => host.health().hostGeneration,
-      });
-      modernTerminalBackend = new ModernTerminalBackend(
-        sessions,
-        runtime,
-        host,
-        () => settings.get().terminal.behavior.sessionLimit,
-        hostRuntime,
-        undefined,
-        (threadId) => c.resolve(ThreadRepo).findById(threadId)?.workspace_id ?? null,
-      );
-      return modernTerminalBackend;
-    },
-  } as never);
-  container.register(
-    "TerminalBackendSelector",
-    {
-      useFactory: (c: DependencyContainer) => {
-        if (terminalBackendSelector) return terminalBackendSelector;
-        terminalBackendSelector = new TerminalBackendSelector(
-          c.resolve(LegacyTerminalBackend),
-          process.env.MCODE_TERMINAL_BACKEND === "modern"
-            ? c.resolve("ModernTerminalBackend") as ModernTerminalBackend
-            : undefined,
-        );
-        return terminalBackendSelector;
-      },
-    } as never,
-  );
   container.register<TerminalBackend>(TERMINAL_BACKEND_TOKEN, {
-    useFactory: (c) => c.resolve<TerminalBackendSelector>("TerminalBackendSelector").getSelectedBackend(),
+    useFactory: (c) => c.resolve(LegacyTerminalBackend),
   });
   container.register(
     TerminalDiagnosticsService,
     {
       useFactory: (c: DependencyContainer) => {
         const terminalService = c.resolve<TerminalBackend>(TERMINAL_BACKEND_TOKEN);
-        if (terminalService.capabilities().backend === "modern") {
-          return c.resolve<ModernTerminalBackend>("ModernTerminalBackend").getDiagnosticsService();
-        }
         const host = c.resolve<PtyHostSupervisor>("PtyHost");
         return new TerminalDiagnosticsService({
           backend: () => terminalService.capabilities().backend,

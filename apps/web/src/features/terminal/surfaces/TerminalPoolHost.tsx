@@ -216,7 +216,7 @@ function terminalPortalTarget(
 }
 
 function terminalDiagnosticsAvailable(capabilities: TerminalBackendCapabilities | null): boolean {
-  return capabilities?.contractVersion === 1 && capabilities.backend === "modern";
+  return capabilities?.backend === "legacy";
 }
 
 interface TerminalPoolPortalProps {
@@ -254,7 +254,7 @@ function TerminalPoolPortal({
         key={mountedTerm.id}
         ptyId={mountedTerm.id}
         ownerScopeId={mountedTerm.threadId}
-        sessionState={mountedTerm.state ?? "running"}
+        sessionState={mountedTerm.state === "pending" ? "starting" : mountedTerm.state ?? "running"}
         exit={mountedTerm.exit}
         diagnosticsAvailable={terminalDiagnosticsAvailable(terminalCapabilities)}
         visible={displayed}

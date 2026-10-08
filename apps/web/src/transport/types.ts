@@ -647,8 +647,8 @@ export interface McodeTransport {
   terminalDiagnosticsGetBundle?: () => Promise<import("@mcode/contracts").TerminalDiagnosticsBundle>;
   /** Fetch the bounded, content-free diagnostics bundle through the selected client. */
   terminalDiagnostics(): Promise<import("@mcode/contracts").TerminalDiagnosticsBundle>;
-  /** Create a PTY, optionally atomically replacing an exited or failed session. */
-  terminalCreate(threadId: string, replacesSessionId?: string): Promise<{ ptyId: string; shell: string }>;
+  /** Create a PTY, optionally closing an exited or failed record before starting its replacement. */
+  terminalCreate(threadId: string, replacesSessionId?: string): Promise<import("@mcode/contracts").LegacyTerminalCreateResult>;
   /** Write data (keystrokes) to a PTY. */
   terminalWrite(ptyId: string, data: string): Promise<void>;
   /** Resize a PTY to the given dimensions. */
@@ -699,13 +699,8 @@ export interface McodeTransport {
     seq: number,
     data: string,
   ): Promise<{ accepted: boolean }>;
-  /** List all active PTY sessions on the server. Used during reconnect. */
-  terminalListActive(): Promise<Array<{
-    ptyId: string;
-    threadId: string;
-    state: import("@mcode/contracts").TerminalSessionState;
-    exit?: import("@mcode/contracts").TerminalExitMetadata;
-  }>>;
+  /** List retained terminal records, including exited processes, during client hydration. */
+  terminalListActive(): Promise<import("@mcode/contracts").LegacyTerminalRecord[]>;
   /** Check whether a PTY has non-shell child processes running. */
   terminalHasChildren(ptyId: string): Promise<{ hasChildren: boolean }>;
   /** Track the last seq number received for a PTY, used during reconnect reattach. */

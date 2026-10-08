@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useTerminalStore } from "@/features/terminal/state/terminalStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   createWsTransport,
   parseLateTerminalCreateId,
@@ -74,37 +76,6 @@ const LEGACY_CAPABILITIES = {
   recovery: { replay: true, checkpoint: true, gap: true },
 };
 
-const MODERN_CREATE_RESULT = {
-  contractVersion: 1,
-  sessionId: "00000000-0000-4000-8000-000000000001",
-  scope: {
-    kind: "workspace",
-    workspaceId: "00000000-0000-4000-8000-000000000002",
-  },
-  state: "running",
-  hostGeneration: "1",
-  launch: {
-    requestedProfileId: "automatic",
-    resolvedProfile: {
-      id: "certified:windows-powershell-7",
-      name: "PowerShell 7",
-      executable: "pwsh.exe",
-      arguments: [],
-      source: "certified",
-      platform: "windows",
-    },
-    scope: {
-      kind: "workspace",
-      workspaceId: "00000000-0000-4000-8000-000000000002",
-    },
-    arguments: [],
-  },
-  createdAt: "2026-09-24T12:00:00.000Z",
-  lastCommandSeq: "0",
-  lastOutputSeq: "0",
-  exit: null,
-  tombstone: false,
-};
 
 function latestRequest(socket: TimeoutSocket, method: string): RpcRequest {
   const request = [...socket.requests].reverse().find((entry) => entry.method === method);
@@ -132,6 +103,39 @@ describe("interactive RPC timeout recovery", () => {
     transport.close();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("restores server records on the first connection and refreshes them after reconnect", async () => {
+    useTerminalStore.setState({ terminals: {}, ptyToThread: {}, terminalPanelByThread: {}, hasHydrated: false });
+    useWorkspaceStore.setState({ activeWorkspaceId: null, activeThreadId: null });
+    socket.respond(latestRequest(socket, "terminal.capabilities"), LEGACY_CAPABILITIES);
+    await vi.advanceTimersByTimeAsync(0);
+    socket.respond(latestRequest(socket, "terminal.listActive"), [
+      { ptyId: "second", threadId: "thread", shell: "bash", createdAt: "2026-10-08T12:01:00.000Z" },
+      { ptyId: "first", threadId: "thread", shell: "pwsh", state: "exited", exitCode: 7, createdAt: "2026-10-08T12:00:00.000Z" },
+      { ptyId: "workspace-shell", threadId: "workspace", shell: "zsh" },
+    ]);
+    await vi.waitFor(() => expect(useTerminalStore.getState().hasHydrated).toBe(true));
+    expect(useTerminalStore.getState().terminals.thread.map(({ id, label, state, exitCode }) =>
+      [id, label, state, exitCode])).toEqual([
+      ["first", "pwsh", "exited", 7], ["second", "bash", "running", undefined],
+    ]);
+    expect(useTerminalStore.getState().terminals.workspace.map(({ id, label }) => [id, label])).toEqual([["workspace-shell", "zsh"]]);
+
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const reconnected = TimeoutSocket.instances[1];
+    if (!reconnected) throw new Error("Expected reconnect socket");
+    reconnected.open();
+    await vi.advanceTimersByTimeAsync(0);
+    reconnected.respond(latestRequest(reconnected, "terminal.capabilities"), LEGACY_CAPABILITIES);
+    await vi.advanceTimersByTimeAsync(0);
+    reconnected.respond(latestRequest(reconnected, "terminal.listActive"), [
+      { ptyId: "second", threadId: "thread", shell: "bash", state: "exited", exitCode: 2 },
+    ]);
+    await vi.waitFor(() => expect(useTerminalStore.getState().ptyToThread).toEqual({ second: "thread" }));
+    expect(useTerminalStore.getState().terminals.thread.map(({ id, state, exitCode }) => [id, state, exitCode])).toEqual([["second", "exited", 2]]);
+    expect(useTerminalStore.getState().terminals.workspace).toBeUndefined();
   });
 
   it("checks every five seconds and reconnects after three missed reply checks", async () => {
@@ -216,15 +220,12 @@ describe("interactive RPC timeout recovery", () => {
     await expect(successfulRetry).resolves.toEqual([{ id: "fresh", name: "Fresh model" }]);
   });
 
-  it("validates both legacy and modern late create response shapes before cleanup", () => {
+  it("validates late create response shapes before cleanup", () => {
     expect(parseLateTerminalCreateId(
       "terminal.create",
       { ptyId: "pty-legacy", shell: "pwsh" },
     )).toBe("pty-legacy");
-    expect(parseLateTerminalCreateId(
-      "terminal.session.create",
-      MODERN_CREATE_RESULT,
-    )).toBe("00000000-0000-4000-8000-000000000001");
+    expect(parseLateTerminalCreateId("terminal.create", { ptyId: 7 })).toBeNull();
   });
 
   it("retries terminal capability discovery after the previous selection timed out", async () => {

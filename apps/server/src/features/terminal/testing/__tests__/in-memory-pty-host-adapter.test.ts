@@ -56,10 +56,10 @@ describe("InMemoryPtyHostAdapter", () => {
     await expect(adapter.inspectChildren(UUID, "8")).rejects.toThrow(/generation/i);
   });
 
-  it("rejects repeated startup, duplicate sessions, and invalid command sequences", async () => {
+  it("reuses a started host and rejects duplicate sessions and invalid command sequences", async () => {
     const adapter = new InMemoryPtyHostAdapter("7");
     await adapter.start();
-    await expect(adapter.start()).rejects.toThrow(/already started/i);
+    await expect(adapter.start()).resolves.toEqual({ hostGeneration: "7", state: "healthy" });
     await adapter.create(createRequest());
     await expect(adapter.create(createRequest())).rejects.toThrow(/already exists/i);
     await expect(

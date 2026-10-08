@@ -1,10 +1,8 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
-import { TerminalV1BackendCapabilitiesSchema } from "./terminal.js";
 
 /** Reports the Terminal backend and protocol features selected for one server boot. */
 export const TerminalBackendCapabilitiesSchema = lazySchema(() =>
-  z.union([
     z.object({
       contractVersion: z.literal(0),
       backend: z.literal("legacy"),
@@ -18,8 +16,6 @@ export const TerminalBackendCapabilitiesSchema = lazySchema(() =>
         .strict(),
     })
     .strict(),
-    TerminalV1BackendCapabilitiesSchema(),
-  ]),
 );
 
 /** Terminal backend capabilities selected for one server boot. */

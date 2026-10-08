@@ -564,9 +564,7 @@ function RailAddControl({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const shown = shownTabTypes(scope, openTabs);
-  const creatable = creatableTypes(scope, openTabs).filter(
-    (type) => !(terminalCapReached && type.id === "terminal"),
-  );
+  const creatable = creatableTypes(scope, openTabs);
 
   // Nothing openable hides the control entirely, even if a coming-soon teaser remains.
   if (creatable.length === 0) return null;
@@ -575,25 +573,28 @@ function RailAddControl({
   if (creatable.length === 1) {
     const only = creatable[0];
     return (
-      <RailTooltip content={`New ${only.label}`} disabled={expanded}>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted hover:text-ink"
-          aria-label={`New ${only.label}`}
-          onClick={() => onCreate(only.id as RightPanelTab)}
-        >
-          <Plus />
-          <span
-            aria-hidden
-            className={cn(
-              "absolute left-8 right-2 text-fade text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
-              expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
-            )}
+      <RailTooltip content={terminalCapReached && only.id === "terminal" ? "8 terminals are open. Close one to open another." : `New ${only.label}`} disabled={expanded && !terminalCapReached}>
+        <span className="block">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted hover:text-ink"
+            aria-label={`New ${only.label}`}
+            disabled={terminalCapReached && only.id === "terminal"}
+            onClick={() => onCreate(only.id as RightPanelTab)}
           >
-            New {only.label}
-          </span>
-        </Button>
+            <Plus />
+            <span
+              aria-hidden
+              className={cn(
+                "absolute left-8 right-2 text-fade text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+                expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
+              )}
+            >
+              New {only.label}
+            </span>
+          </Button>
+        </span>
       </RailTooltip>
     );
   }
@@ -627,26 +628,29 @@ function RailAddControl({
         {shown.map((type) => {
           const keycap = tabKeycap(type);
           return (
-            <DropdownMenuItem
-              key={type.id}
-            disabled={type.comingSoon || (terminalCapReached && type.id === "terminal")}
-            onClick={type.comingSoon || (terminalCapReached && type.id === "terminal")
-              ? undefined
-              : () => onCreate(type.id as RightPanelTab)}
-              className="flex items-center justify-between gap-3 px-2.5 py-1.5 text-xs"
-            >
-              <span className="flex items-center gap-2">
-                <type.icon size={14} className="text-muted" />
-                {type.label}
+            <RailTooltip key={type.id} content="8 terminals are open. Close one to open another." disabled={!terminalCapReached || type.id !== "terminal"}>
+              <span>
+                <DropdownMenuItem
+                  disabled={type.comingSoon || (terminalCapReached && type.id === "terminal")}
+                  onClick={type.comingSoon || (terminalCapReached && type.id === "terminal")
+                    ? undefined
+                    : () => onCreate(type.id as RightPanelTab)}
+                  className="flex items-center justify-between gap-3 px-2.5 py-1.5 text-xs"
+                >
+                  <span className="flex items-center gap-2">
+                    <type.icon size={14} className="text-muted" />
+                    {type.label}
+                  </span>
+                  {type.comingSoon ? (
+                    <Badge variant="secondary" size="sm" className="uppercase tracking-wide">
+                      Soon
+                    </Badge>
+                  ) : (
+                    keycap && <Kbd>{keycap}</Kbd>
+                  )}
+                </DropdownMenuItem>
               </span>
-              {type.comingSoon ? (
-                <Badge variant="secondary" size="sm" className="uppercase tracking-wide">
-                  Soon
-                </Badge>
-              ) : (
-                keycap && <Kbd>{keycap}</Kbd>
-              )}
-            </DropdownMenuItem>
+            </RailTooltip>
           );
         })}
       </DropdownMenuContent>
@@ -672,7 +676,7 @@ interface ActivityRailProps {
   onClose: (instanceId: string) => void;
   onReorder: (instanceId: string, direction: -1 | 1) => void;
   onCreate: (id: RightPanelTab) => void;
-  /** Whether this scope already owns its four allowed shell sessions. */
+  /** Whether this scope has reached the eight-record terminal cap. */
   readonly terminalCapReached?: boolean;
   /** PTY-backed rail labels keyed by terminal tab identity. */
   readonly terminalLabels?: Readonly<Record<string, string>>;
@@ -839,7 +843,7 @@ function RailFooter({
       )}
       {terminalCapReached && (
         <span className="sr-only" role="status">
-          Maximum of 4 terminals reached for this scope.
+          8 terminals are open. Close one to open another.
         </span>
       )}
     </>

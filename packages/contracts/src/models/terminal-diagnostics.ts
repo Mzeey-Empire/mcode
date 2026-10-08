@@ -471,7 +471,7 @@ export const TerminalDiagnosticsBundleSchema = lazySchema(() =>
     .object({
       contractVersion: z.literal(TERMINAL_CONTRACT_VERSION),
       generatedAt: TerminalTimestampSchema(),
-      backend: z.enum(["modern", "legacy"]),
+      backend: z.literal("legacy"),
       health: TerminalHealthSnapshotSchema(),
       events: z.array(TerminalDiagnosticEventSchema()).max(2_048),
       counters: z.array(TerminalDiagnosticCounterSchema()).max(64),

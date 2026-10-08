@@ -1,4 +1,4 @@
-import type {
+import type { LegacyTerminalRecord, LegacyTerminalCreateResult,
   TerminalBackendCapabilities,
   TerminalErrorCode,
   TerminalProfileInUseData,
@@ -7,7 +7,7 @@ import type {
 } from "@mcode/contracts";
 import type { WebSocket } from "ws";
 
-/** Dependency-injection token for the boot-selected Terminal backend. */
+/** Dependency-injection token for the server Terminal backend. */
 export const TERMINAL_BACKEND_TOKEN = "TerminalBackend";
 
 /** Streams legacy Terminal output and exit events to connected clients. */
@@ -17,7 +17,7 @@ export interface TerminalBackendSender {
   frame?(client: WebSocket, bytes: Uint8Array): void;
 }
 
-/** Typed failure returned by the modern Terminal management boundary. */
+/** Typed failure returned by the Terminal management boundary. */
 export class TerminalBackendError extends Error {
   readonly correlationId: string;
 
@@ -41,9 +41,7 @@ export type TerminalReattachResult =
   | { mode: "reset"; discardThrough: number };
 
 /** A Terminal create that completed after its owning WebSocket disconnected. */
-export type DisconnectedTerminalCreate =
-  | { readonly method: "terminal.create"; readonly ptyId: string }
-  | { readonly method: "terminal.session.create"; readonly sessionId: string };
+export type DisconnectedTerminalCreate = { readonly method: "terminal.create"; readonly ptyId: string };
 
 /** Exit observation for a private prepared terminal command session. */
 export interface PreparedTerminalCommandExit {
@@ -93,11 +91,11 @@ export interface PreparedTerminalCommandRequest {
   readonly expectedLaunch?: PreparedTerminalCommandExpectation;
 }
 
-/** Boot-selected Terminal backend used by server orchestration and transport. */
+/** Server Terminal backend used by server orchestration and transport. */
 export abstract class TerminalBackend {
   abstract capabilities(): TerminalBackendCapabilities;
   abstract setSender(sender: TerminalBackendSender): void;
-  abstract create(scopeId: string): Promise<{ ptyId: string; shell: string }>;
+  abstract create(scopeId: string, replacesPtyId?: string): Promise<LegacyTerminalCreateResult>;
   abstract pause(ptyId: string): void;
   abstract resume(ptyId: string): void;
   abstract onBufferedAmountTick(bufferedAmount: number): void;
@@ -112,7 +110,7 @@ export abstract class TerminalBackend {
   abstract setGracefulKill(enabled: boolean): void;
   abstract reattach(ptyId: string, lastSeq: number, cold?: boolean): TerminalReattachResult;
   abstract checkpoint(ptyId: string, seq: number, data: string): { accepted: boolean };
-  abstract listActiveSessions(): Array<{ ptyId: string; threadId: string }>;
+  abstract listActiveSessions(): LegacyTerminalRecord[];
   abstract hasChildren(ptyId: string): Promise<{ hasChildren: boolean }>;
 
   /** Starts one headless exact command session using this selected backend's capacity and tracking. */
@@ -120,28 +118,11 @@ export abstract class TerminalBackend {
     return Promise.reject(new Error("Prepared command sessions are unavailable"));
   }
 
-  /** Routes one strict Terminal v1 management operation for the owning client. */
-  routeV1(_method: string, _params: unknown, _client: WebSocket): Promise<unknown> {
-    return Promise.reject(new Error("Terminal v1 transport is unavailable"));
-  }
-
-  /** Applies one strict Terminal v1 binary frame from the owning client. */
-  handleV1Frame(_client: WebSocket, _bytes: Uint8Array): Promise<void> {
-    return Promise.reject(new Error("Terminal v1 transport is unavailable"));
-  }
-
   /** Releases controller leases and uploads owned by a disconnected client. */
   disconnectClient(_client: WebSocket): void {}
 
   /** Reclaims a Terminal that was created after its requesting WebSocket disconnected. */
-  async cleanupDisconnectedCreate(create: DisconnectedTerminalCreate, client: WebSocket): Promise<void> {
-    if (create.method === "terminal.create") {
-      await this.kill(create.ptyId);
-      return;
-    }
-    await this.routeV1("terminal.session.close", {
-      sessionId: create.sessionId,
-      reason: "user",
-    }, client);
+  async cleanupDisconnectedCreate(create: DisconnectedTerminalCreate, _client: WebSocket): Promise<void> {
+    await this.kill(create.ptyId);
   }
 }

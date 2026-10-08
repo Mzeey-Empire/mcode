@@ -1,6 +1,7 @@
+import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
 import { useToastStore } from "@/stores/toastStore";
-import { MAX_TERMINALS_PER_SCOPE, useTerminalStore } from "@/features/terminal";
+import { useTerminalStore } from "@/features/terminal";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getTransport } from "@/transport";
 
@@ -39,7 +40,7 @@ function resolveScopeWorkspace(scopeId: string): {
 export function createTerminalForScope(scopeId: string): void {
   if (creationInFlight.has(scopeId)) return;
   const existing = useTerminalStore.getState().terminals[scopeId];
-  if ((existing?.length ?? 0) >= MAX_TERMINALS_PER_SCOPE) return;
+  if ((existing?.length ?? 0) >= TERMINAL_MAX_PER_SCOPE) return;
 
   const attempt = Symbol();
   creationInFlight.set(scopeId, attempt);
@@ -50,7 +51,7 @@ export function createTerminalForScope(scopeId: string): void {
     const transport = getTransport();
     transport
       .terminalCreate(scopeId)
-      .then(({ ptyId, shell }) => {
+      .then(({ ptyId, shell, ...metadata }) => {
         release();
         try {
           // The panel record is per-thread (or the workspace fallback for the
@@ -70,11 +71,11 @@ export function createTerminalForScope(scopeId: string): void {
             return;
           }
           const current = useTerminalStore.getState().terminals[scopeId];
-          if ((current?.length ?? 0) >= MAX_TERMINALS_PER_SCOPE) {
+          if (current && current.length >= TERMINAL_MAX_PER_SCOPE && !current.some((terminal) => terminal.id === ptyId)) {
             transport.terminalKill(ptyId).catch(() => {});
             return;
           }
-          useTerminalStore.getState().addTerminal(scopeId, ptyId, shell);
+          useTerminalStore.getState().addTerminal(scopeId, ptyId, shell, metadata);
           diff.addRightPanelTerminalTab(workspaceId!, panelThreadId, ptyId);
         } catch (error) {
           // The server already spawned the PTY; a failed local attach must not

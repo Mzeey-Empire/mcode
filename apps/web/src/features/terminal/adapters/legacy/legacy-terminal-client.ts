@@ -1,4 +1,7 @@
 import {
+  LegacyTerminalRecordSchema,
+  WS_METHODS,
+  type LegacyTerminalCreateResult,
   TerminalDiagnosticsBundleSchema,
   type TerminalDiagnosticsBundle,
 } from "@mcode/contracts";
@@ -18,38 +21,43 @@ import {
   onPtyReconnectGap,
 } from "../pty-data-registry";
 
-/** Adapts the frozen version 0 Terminal RPCs to the client transport seam. */
+/** Validates and adapts version 0 Terminal RPCs to the client transport seam. */
 export class LegacyTerminalClient implements TerminalClient {
   constructor(private readonly rpc: TerminalRpcCall) {}
 
   /** Creates one legacy PTY. */
-  create(threadId: string, _replacesSessionId?: string): Promise<{ ptyId: string; shell: string }> {
-    return this.rpc("terminal.create", { threadId });
+  async create(threadId: string, replacesSessionId?: string): Promise<LegacyTerminalCreateResult> {
+    const created = WS_METHODS()["terminal.create"].result.parse(await this.rpc("terminal.create", {
+      threadId, replacesPtyId: replacesSessionId,
+    }));
+    // Older servers ignore replacesPtyId and still need the exited record removed.
+    if (replacesSessionId) await this.kill(replacesSessionId);
+    return created;
   }
 
   /** Writes input to one legacy PTY. */
-  write(ptyId: string, data: string): Promise<void> {
-    return this.rpc("terminal.write", { ptyId, data });
+  async write(ptyId: string, data: string): Promise<void> {
+    await this.rpc("terminal.write", { ptyId, data });
   }
 
   /** Resizes one legacy PTY. */
-  resize(ptyId: string, cols: number, rows: number): Promise<void> {
-    return this.rpc("terminal.resize", { ptyId, cols, rows });
+  async resize(ptyId: string, cols: number, rows: number): Promise<void> {
+    await this.rpc("terminal.resize", { ptyId, cols, rows });
   }
 
   /** Closes one legacy PTY. */
-  kill(ptyId: string): Promise<void> {
-    return this.rpc("terminal.kill", { ptyId });
+  async kill(ptyId: string): Promise<void> {
+    await this.rpc("terminal.kill", { ptyId });
   }
 
   /** Pauses output from one legacy PTY. */
-  pause(ptyId: string): Promise<void> {
-    return this.rpc("terminal.pause", { ptyId });
+  async pause(ptyId: string): Promise<void> {
+    await this.rpc("terminal.pause", { ptyId });
   }
 
   /** Resumes output from one legacy PTY. */
-  resume(ptyId: string): Promise<void> {
-    return this.rpc("terminal.resume", { ptyId });
+  async resume(ptyId: string): Promise<void> {
+    await this.rpc("terminal.resume", { ptyId });
   }
 
   /** Detaches the legacy renderer through its compatibility RPC. */
@@ -76,7 +84,7 @@ export class LegacyTerminalClient implements TerminalClient {
             ptyId: detail.ptyId,
             code: detail.code,
             state: "exited",
-            exit: { code: detail.code, signal: null, reason: "natural" },
+            exit: { code: detail.exitCode === undefined ? detail.code : detail.exitCode, signal: null, reason: "natural" },
           }))
         : undefined,
       subscription.onReconnectGap
@@ -92,33 +100,33 @@ export class LegacyTerminalClient implements TerminalClient {
   }
 
   /** Closes all legacy PTYs for one scope. */
-  killByThread(threadId: string): Promise<void> {
-    return this.rpc("terminal.killByThread", { threadId });
+  async killByThread(threadId: string): Promise<void> {
+    await this.rpc("terminal.killByThread", { threadId });
   }
 
   /** Reattaches to one legacy PTY and restores retained output. */
-  reattach(
+  async reattach(
     ptyId: string,
     lastSeq: number,
     cold?: boolean,
   ): Promise<TerminalClientReattachResult> {
-    return this.rpc("terminal.reattach", { ptyId, lastSeq, cold });
+    return WS_METHODS()["terminal.reattach"].result.parse(await this.rpc("terminal.reattach", { ptyId, lastSeq, cold }));
   }
 
   /** Stores one bounded legacy renderer checkpoint. */
-  checkpoint(ptyId: string, seq: number, data: string): Promise<{ accepted: boolean }> {
-    return withTerminalTimeout(this.rpc("terminal.checkpoint", { ptyId, seq, data }));
+  async checkpoint(ptyId: string, seq: number, data: string): Promise<{ accepted: boolean }> {
+    return WS_METHODS()["terminal.checkpoint"].result.parse(await withTerminalTimeout(this.rpc("terminal.checkpoint", { ptyId, seq, data })));
   }
 
   /** Lists all active legacy PTYs. */
   async listActive(): Promise<TerminalActiveSession[]> {
-    const sessions = await this.rpc<Array<{ ptyId: string; threadId: string }>>("terminal.listActive", {});
-    return sessions.map((session) => ({ ...session, state: "running" }));
+    const sessions = LegacyTerminalRecordSchema().array().parse(await this.rpc("terminal.listActive", {}));
+    return sessions.map((session) => ({ ...session, state: session.state ?? "running" }));
   }
 
   /** Reports whether one legacy PTY owns child processes. */
-  hasChildren(ptyId: string): Promise<{ hasChildren: boolean }> {
-    return this.rpc("terminal.hasChildren", { ptyId });
+  async hasChildren(ptyId: string): Promise<{ hasChildren: boolean }> {
+    return WS_METHODS()["terminal.hasChildren"].result.parse(await this.rpc("terminal.hasChildren", { ptyId }));
   }
 
   /** Fetches and validates the content-free diagnostics bundle at the legacy boundary. */

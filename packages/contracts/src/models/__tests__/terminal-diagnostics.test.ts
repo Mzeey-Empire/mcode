@@ -42,7 +42,7 @@ describe("Terminal v1 diagnostics", () => {
     const base = {
       contractVersion: 1,
       generatedAt: "2026-08-09T12:00:00.000Z",
-      backend: "modern",
+      backend: "legacy",
       health,
       events: [],
       counters: [],

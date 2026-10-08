@@ -191,13 +191,11 @@ export function startPushListeners(): void {
   // terminal.exit: broadcast exit event
   unsubs.push(
     pushEmitter.on("terminal.exit", (data) => {
-      const payload = data as { ptyId: string; code: number };
+      const payload = WS_CHANNELS["terminal.exit"].parse(data);
       emitPtyExit(payload);
-      // Remove the terminal from the store after a brief delay so the
-      // exit message has time to render.
-      setTimeout(() => {
-        useTerminalStore.getState().removeTerminal(payload.ptyId);
-      }, 2000);
+      useTerminalStore.getState().recordTerminalExit(payload.ptyId, {
+        code: payload.exitCode === undefined ? payload.code : payload.exitCode, signal: null, reason: "natural",
+      });
     }),
   );
 

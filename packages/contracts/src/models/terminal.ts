@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 
+/** Maximum retained terminal records per thread or workspace, including pending and exited records. */
+export const TERMINAL_MAX_PER_SCOPE = 8;
+
 /** Terminal v1 public contract version. */
 export const TERMINAL_CONTRACT_VERSION = 1 as const;
 /** Maximum unsigned 64-bit integer. */
@@ -369,7 +372,7 @@ export const TerminalV1BackendCapabilitiesSchema = lazySchema(() =>
   z
     .object({
       contractVersion: z.literal(TERMINAL_CONTRACT_VERSION),
-      backend: z.enum(["modern", "legacy"]),
+      backend: z.literal("legacy"),
       selectedAt: TerminalTimestampSchema(),
       publicFrameVersion: z.literal(1),
       recovery: z.object({ replay: z.literal(true), checkpoint: z.literal(true), gap: z.literal(true) }).strict(),
