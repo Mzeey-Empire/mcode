@@ -90,7 +90,7 @@ function DraftEditor({
           Local comment
         </span>
         {draft.outdated ? (
-          <Badge variant="ghost" size="sm">
+          <Badge variant="ghost" size="compact">
             Outdated
           </Badge>
         ) : null}
@@ -126,7 +126,7 @@ function DraftEditor({
         <Button
           type="button"
           variant="ghost"
-          size="xs"
+          size="compact"
           className="text-xs text-muted"
           onClick={removeAndRestore}
         >
@@ -135,7 +135,7 @@ function DraftEditor({
         <Button
           type="button"
           variant="secondary"
-          size="xs"
+          size="compact"
           className="text-xs"
           onClick={() => onRestoreFocus(originLineKey)}
         >
@@ -174,11 +174,11 @@ function PullRequestInlineThreadComponent({
               <span className="text-sm font-medium text-ink">
                 Review thread
               </span>
-              <Badge variant="ghost" size="sm">
+              <Badge variant="ghost" size="compact">
                 {thread.isResolved ? "Resolved" : "Open"}
               </Badge>
               {thread.isOutdated && (
-                <Badge variant="ghost" size="sm">
+                <Badge variant="ghost" size="compact">
                   Outdated
                 </Badge>
               )}
@@ -214,7 +214,7 @@ function PullRequestInlineThreadComponent({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="xs"
+                  size="compact"
                   className="text-xs text-muted"
                   onClick={() => onCreateReply(thread, row.anchorLineKey)}
                 >

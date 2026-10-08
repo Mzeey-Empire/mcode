@@ -231,7 +231,7 @@ function PullRequestReplyComposer({
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
+          size="icon-compact"
           className="absolute bottom-2 right-11 size-8 rounded-full text-muted"
           aria-label="Cancel reply"
           onClick={onCancel}
@@ -384,13 +384,13 @@ function PostCommentButton({
   return (
     <Button
       type="button"
-      size="icon-sm"
+      size="icon-compact"
       className="absolute bottom-2 right-2 size-8 rounded-full"
       aria-label={label}
       disabled={!canPost}
       onClick={() => void onPost()}
     >
-      {submitting ? <Spinner size="xs" aria-hidden /> : <ArrowUp size={14} aria-hidden />}
+      {submitting ? <Spinner size={12} aria-hidden /> : <ArrowUp size={14} aria-hidden />}
     </Button>
   );
 }

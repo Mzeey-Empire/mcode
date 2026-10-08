@@ -1,9 +1,7 @@
 import { useState, type ReactNode, Component, type ErrorInfo } from "react";
 import { ChevronRight } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import type { IconComponent } from "./constants";
-
-/** Extracted to avoid re-creating inline style objects each render. */
-const SLOW_SPIN_STYLE = { animationDuration: "2s" } as const;
 
 interface ToolCallWrapperProps {
   icon: IconComponent;
@@ -49,10 +47,6 @@ function getTriggerClass(hasContent: boolean): string {
   return `flex w-full flex-col gap-0.5 pl-3 pr-1 py-1.5 text-left text-sm ${hasContent ? "cursor-pointer hover:bg-hover/30" : "cursor-default"}`;
 }
 
-function getToolIconClass(isActive: boolean): string {
-  return `shrink-0 ${isActive ? "animate-spin text-primary/80" : "text-muted/60"}`;
-}
-
 function getToolLabelClass(isActive: boolean): string {
   return `font-medium ${isActive ? "text-ink font-medium" : "text-ink/70"}`;
 }
@@ -77,11 +71,9 @@ function ToolCallWrapperInner({
         className={getTriggerClass(hasContent)}
       >
         <div className="flex w-full items-center gap-2">
-          <Icon
-            size={13}
-            className={getToolIconClass(isActive)}
-            style={isActive ? SLOW_SPIN_STYLE : undefined}
-          />
+          {isActive
+            ? <Spinner size={12} className="text-muted" />
+            : <Icon size={13} className="shrink-0 text-muted/60" />}
           <span
             className={getToolLabelClass(isActive)}
           >

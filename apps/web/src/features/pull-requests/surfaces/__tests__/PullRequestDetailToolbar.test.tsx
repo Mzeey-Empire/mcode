@@ -125,7 +125,7 @@ describe("PullRequestDetailToolbar", () => {
       (await screen.findByRole("menuitem", { name: "Refresh" })).querySelector(
         "span",
       ),
-    ).toHaveStyle({ "--spinner-size": "13px" });
+    ).toHaveStyle({ "--spinner-size": "12px" });
   });
 
   it.each([

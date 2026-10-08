@@ -1,7 +1,8 @@
 import { ChecksPopover } from "@/components/chat/ChecksPopover";
-import { PrSplitButton } from "@/components/chat/PrSplitButton";
 import { Button } from "@/components/ui/button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import { SplitButton } from "@/components/ui/split-button";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { useOverviewUsage } from "@/features/thread-overview/use-overview-usage";
@@ -10,7 +11,7 @@ import { registerCommand } from "@/lib/command-registry";
 import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
 import type { ChecksStatus } from "@mcode/contracts";
-import { ChevronDown, GitPullRequest } from "lucide-react";
+import { ChevronDown, GitPullRequest, Plus } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type MouseEvent } from "react";
 import {
   OVERVIEW_ROW_CLASS,
@@ -146,7 +147,7 @@ function ThreadOverviewPrActionRow({
         <ThreadOverviewTooltipButton content="Ask the agent to commit and push the changes">
           <Button
             variant="ghost"
-            size="sm"
+            size="compact"
             type="button"
             data-testid="workspace-menu-commit"
             className={cn(
@@ -171,7 +172,7 @@ function ThreadOverviewPrActionRow({
       >
         <Button
           variant="ghost"
-          size="sm"
+          size="compact"
           type="button"
           data-testid="workspace-menu-create-pr"
           className={cn(
@@ -232,7 +233,7 @@ function ThreadOverviewPrActiveRow({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="compact"
             data-testid="thread-overview-pr-status"
             aria-label={`CI checks, ${getCiSummaryHeadline(checks)}`}
             aria-expanded={checksOpen}
@@ -274,15 +275,27 @@ function ThreadOverviewPrActiveRow({
 
   return (
     <div data-testid="thread-overview-pr" className="space-y-1">
-      <PrSplitButton
-        pr={pr}
-        label={rowLabel}
-        machineLabel={!detailText}
-        onCreatePr={onCreatePr}
-        onOpenPr={onOpenPr}
-        primaryButtonTestId="workspace-menu-open-pr"
-        newPrButtonTestId="workspace-menu-new-pr"
-      />
+      <SplitButton
+        variant="ghost"
+        className="w-full"
+        menuLabel="More pull request actions"
+        menuBeside="left"
+        onClick={(event) => onOpenPr(pr.url, event)}
+        actionProps={{
+          "data-testid": "workspace-menu-open-pr",
+          "aria-label": `Open pull request, ${rowLabel}`,
+          className: "flex-1 justify-start px-2",
+        }}
+        menu={
+          <DropdownMenuItem data-testid="workspace-menu-new-pr" onClick={onCreatePr}>
+            <Plus aria-hidden />
+            Create new PR
+          </DropdownMenuItem>
+        }
+      >
+        <GitPullRequest aria-hidden className="size-3.5 text-muted" />
+        <span className={cn("text-fade text-xs", !detailText && "font-mono tabular-nums")}>{rowLabel}</span>
+      </SplitButton>
       {checksSummary}
     </div>
   );

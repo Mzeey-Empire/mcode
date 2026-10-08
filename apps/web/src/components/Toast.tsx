@@ -36,7 +36,7 @@ function ToastItem({ toast }: { toast: ToastData }) {
         // gives no separation on its own. A 1px border plus elevation defines
         // the card; the level color lives in the icon chip, not a colored ring
         // (which previously read as a red box outline against the page).
-        "border border-border bg-panel shadow-lg shadow-black/25",
+        "border border-border bg-panel shadow-floating",
         // entrance animation - toasts rise from below the stack, matching
         // the bottom-right anchor on the container.
         "animate-in fade-in-0 slide-in-from-bottom-2 duration-200",
@@ -66,7 +66,7 @@ function ToastItem({ toast }: { toast: ToastData }) {
       {/* Dismiss */}
       <Button
         variant="ghost"
-        size="icon-xs"
+        size="icon-compact"
         onClick={handleDismiss}
         className="shrink-0 mt-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
         aria-label="Dismiss"

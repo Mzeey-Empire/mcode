@@ -31,8 +31,8 @@ export interface FilesPanelProps {
 function FilesPanelHeader({ title, count, onClose }: Pick<FilesPanelProps, "title" | "count" | "onClose">) {
   return <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border/35 px-3">
     <span className="text-xs font-medium text-ink/90">{title}</span>
-    <Badge variant="ghost" size="sm" className="px-1 font-mono font-normal tabular-nums text-muted">{count}</Badge>
-    {onClose ? <Button type="button" variant="ghost" size="icon-xs" className="ml-auto rounded-md text-muted" aria-label={`Hide ${title.toLowerCase()}`} onClick={onClose}><X size={13} aria-hidden /></Button> : null}
+    <Badge variant="ghost" size="compact" className="px-1 font-mono font-normal tabular-nums text-muted">{count}</Badge>
+    {onClose ? <Button type="button" variant="ghost" size="icon-compact" className="ml-auto rounded-md text-muted" aria-label={`Hide ${title.toLowerCase()}`} onClick={onClose}><X size={13} aria-hidden /></Button> : null}
   </header>;
 }
 

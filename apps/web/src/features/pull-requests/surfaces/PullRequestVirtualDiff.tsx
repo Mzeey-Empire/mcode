@@ -145,7 +145,7 @@ function FileRow({
       )}
       <Badge
         variant="ghost"
-        size="sm"
+        size="compact"
         className="shrink-0 capitalize text-muted"
       >
         {row.file.changeType}
@@ -219,7 +219,7 @@ function DiffCellDraftAction({
     <Button
       type="button"
       variant="ghost"
-      size="icon-xs"
+      size="icon-compact"
       tabIndex={-1}
       aria-label={`Draft comment on ${lineLabel.toLowerCase()}`}
       className={cn(
@@ -626,7 +626,7 @@ function PullRequestVirtualDiffComponent({
             <Button
               type="button"
               variant="ghost"
-              size="xs"
+              size="compact"
               className="shrink-0 rounded-none"
               onClick={() => onReloadPatch(row.path)}
             >

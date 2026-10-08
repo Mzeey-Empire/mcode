@@ -27,8 +27,8 @@ function formatTokens(n: number): string {
 function UsageBar({ percent, className, label }: { percent: number; className?: string; label?: string }) {
   const color =
     percent >= 0.9 ? "bg-destructive" :
-    percent >= 0.7 ? "bg-amber-500" :
-    "bg-emerald-500";
+    percent >= 0.7 ? "bg-warning" :
+    "bg-success";
   const valuenow = Math.round(Math.min(percent * 100, 100));
   return (
     <div className="h-1 w-full rounded-full bg-hover">

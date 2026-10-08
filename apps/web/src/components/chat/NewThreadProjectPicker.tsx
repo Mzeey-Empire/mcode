@@ -47,7 +47,7 @@ export function NewThreadProjectPicker({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="compact"
             data-testid="new-thread-project-picker"
             aria-expanded={open}
             className="h-[28px] gap-[6px] rounded-md px-[10px] text-xs font-medium leading-none text-ink/90 hover:bg-selected/70"
@@ -98,7 +98,7 @@ export function NewThreadProjectPicker({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="compact"
             onClick={handleAddProject}
             className="h-8 w-full justify-start gap-2 px-2 text-sm font-normal"
           >

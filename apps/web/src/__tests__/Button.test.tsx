@@ -2,32 +2,35 @@ import { describe, expect, it } from "vitest";
 import { buttonVariants } from "@/components/ui/button";
 
 describe("buttonVariants", () => {
-  it("maps legacy text sizes to the small control scale", () => {
-    for (const size of ["xs", "sm", "default"] as const) {
-      const className = buttonVariants({ size });
-      expect(className).toContain("h-8");
-      expect(className).toContain("text-sm");
-    }
+  it("maps the three text sizes to Paper's 32, 40 and 48 control heights", () => {
+    expect(buttonVariants({ size: "compact" })).toContain("h-8");
+    expect(buttonVariants({ size: "default" })).toContain("h-10");
+    expect(buttonVariants({ size: "comfortable" })).toContain("h-12");
   });
 
-  it("maps md and lg text sizes to documented control scales", () => {
-    const medium = buttonVariants({ size: "md" });
-    const large = buttonVariants({ size: "lg" });
-
-    expect(medium).toContain("h-12");
-    expect(medium).toContain("text-base");
-    expect(medium).toContain("size-6");
-    expect(large).toContain("h-14");
-    expect(large).toContain("text-lg");
-    expect(large).toContain("size-8");
+  it("keeps the call-site default at compact for dense chrome", () => {
+    expect(buttonVariants()).toBe(buttonVariants({ size: "compact" }));
   });
 
-  it("maps icon-only sizes to documented outer boxes", () => {
-    for (const size of ["icon-xs", "icon-sm", "icon"] as const) {
-      expect(buttonVariants({ size })).toContain("size-8");
-    }
+  it("maps icon-only and inline sizes to square boxes", () => {
+    expect(buttonVariants({ size: "icon-compact" })).toContain("size-8");
+    expect(buttonVariants({ size: "icon-default" })).toContain("size-10");
+    expect(buttonVariants({ size: "icon-comfortable" })).toContain("size-12");
+    expect(buttonVariants({ size: "icon-inline" })).toContain("size-7");
+    expect(buttonVariants({ size: "icon-inline-sm" })).toContain("size-6");
+  });
 
-    expect(buttonVariants({ size: "icon-md" })).toContain("size-12");
-    expect(buttonVariants({ size: "icon-lg" })).toContain("size-14");
+  it("fills the destructive variant instead of tinting it", () => {
+    const destructive = buttonVariants({ variant: "destructive" });
+    expect(destructive).toContain("bg-destructive");
+    expect(destructive).toContain("text-destructive-ink");
+    expect(destructive).not.toContain("bg-destructive/10");
+  });
+
+  it("presses with an inset ring and focuses with an offset ring, never a translation", () => {
+    const primary = buttonVariants();
+    expect(primary).toContain("active:inset-ring-2");
+    expect(primary).toContain("focus-visible:outline-offset-2");
+    expect(primary).not.toContain("translate-y-px");
   });
 });

@@ -11,7 +11,7 @@ import {
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatView } from "@/features/conversation";
 import { openSubagentDetail, openSubagentsRoster } from "@/features/subagents";
-import { ConnectionBanner } from "@/components/ConnectionBanner";
+import { Notice } from "@/components/ui/notice";
 import { useUpdateStore } from "@/stores/updateStore";
 import { useToastStore } from "@/stores/toastStore";
 import { friendlyUpdateError } from "@/lib/update-error-message";
@@ -230,7 +230,7 @@ function FloatingSidebar({
         aria-label="Close project tree"
         aria-hidden={exiting}
         inert={exiting}
-        className={`app-viewport-fixed fixed z-(--layer-modal-backdrop) bg-black/20 duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
+        className={`app-viewport-fixed fixed z-(--layer-modal-backdrop) bg-ink/10 backdrop-blur-xs duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
           exiting ? "pointer-events-none animate-out fade-out-0" : "animate-in fade-in-0"
         }`}
         onClick={() => useUiStore.getState().closeFloatingSidebar()}
@@ -240,7 +240,7 @@ function FloatingSidebar({
         data-testid="sidebar-floating"
         aria-hidden={exiting}
         inert={exiting}
-        className={`app-panel-top-inset fixed bottom-1.5 left-1.5 z-(--layer-modal) flex w-sidebar overflow-hidden rounded-lg bg-page shadow-xl ring-1 ring-border/40 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
+        className={`app-panel-top-inset fixed bottom-1.5 left-1.5 z-(--layer-modal) flex w-sidebar overflow-hidden rounded-lg bg-page shadow-floating ring-1 ring-border/40 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
           exiting
             ? "pointer-events-none animate-out fade-out-0 slide-out-to-left-4 duration-200"
             : "animate-in fade-in-0 slide-in-from-left-4 duration-250"
@@ -332,6 +332,14 @@ function RightPanelSlot({
   );
 }
 
+/** Shows a busy notice while the WebSocket reconnects or re-authenticates. */
+function ConnectionNotice() {
+  const status = useConnectionStore((s) => s.status);
+  if (status !== "reconnecting" && status !== "authFailed") return null;
+  const title = status === "authFailed" ? "Re-authenticating after server restart" : "Reconnecting to server";
+  return <div className="px-4 pt-2"><Notice tone="warning" busy title={title} /></div>;
+}
+
 function AppLayout(props: AppLayoutProps) {
   return (
     <TerminalPoolSlotProvider>
@@ -345,7 +353,7 @@ function AppLayout(props: AppLayoutProps) {
               onForward={() => props.navigateHistory("forward")}
             />
           ) : null}
-          <ConnectionBanner />
+          <ConnectionNotice />
           <div ref={props.outerRowRef} className="flex flex-1 overflow-hidden">
             {!props.sidebarFloating && (
               <DockedSidebar

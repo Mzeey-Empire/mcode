@@ -26,7 +26,7 @@ export const TerminalToolbar = memo(function TerminalToolbar({
           render={
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               onClick={toggleSplit}
               className={splitMode ? "text-ink" : "text-muted"}
               aria-label="Toggle terminal list"
@@ -44,7 +44,7 @@ export const TerminalToolbar = memo(function TerminalToolbar({
           render={
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               onClick={onAdd}
               className="text-muted hover:text-ink"
               aria-label="New terminal"
@@ -62,7 +62,7 @@ export const TerminalToolbar = memo(function TerminalToolbar({
           render={
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               onClick={onDeleteAll}
               className="text-muted hover:text-ink"
               aria-label="Kill all terminals"

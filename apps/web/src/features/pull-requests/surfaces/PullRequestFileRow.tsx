@@ -81,7 +81,7 @@ export function PullRequestFileRow({
             type="button"
             role="treeitem"
             variant="ghost"
-            size="sm"
+            size="compact"
             tabIndex={tabIndex}
             aria-label={fullLabel}
             aria-level={depth}
@@ -113,7 +113,7 @@ export function PullRequestFileRow({
             {patchLabel && (
               <Badge
                 variant={file.patchStatus === "too_large" ? "destructive" : "ghost"}
-                size="sm"
+                size="compact"
                 className="max-w-20 px-1 font-mono uppercase tracking-wide"
               >
                 {patchLabel}

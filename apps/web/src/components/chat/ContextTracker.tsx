@@ -24,7 +24,7 @@ interface ContextTrackerProps {
 /** Returns the shared color tier for the label, ring, and usage bar. */
 function colorTier(pct: number) {
   if (pct >= 90) return { text: "text-destructive", stroke: "stroke-destructive", fill: "bg-destructive" } as const;
-  if (pct >= 70) return { text: "text-amber-500", stroke: "stroke-amber-500", fill: "bg-amber-500" } as const;
+  if (pct >= 70) return { text: "text-warning", stroke: "stroke-warning", fill: "bg-warning" } as const;
   return { text: "text-ink", stroke: "stroke-primary", fill: "bg-primary" } as const;
 }
 

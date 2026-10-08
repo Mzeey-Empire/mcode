@@ -167,6 +167,11 @@ function resetTerminalSearchState(): void {
 }
 
 beforeEach(() => {
+  document.documentElement.style.setProperty("--page", "rgb(245, 245, 245)");
+  document.documentElement.style.setProperty("--ink", "rgb(24, 24, 24)");
+  document.documentElement.style.setProperty("--success", "rgb(30, 120, 50)");
+  document.documentElement.style.setProperty("--error", "rgb(140, 40, 30)");
+  document.documentElement.style.setProperty("--link", "rgb(30, 60, 150)");
   vi.clearAllMocks();
   term.options.allowProposedApi = false;
   searchHarness.load.mockReset().mockResolvedValue({ SearchAddon: searchHarness.FakeSearchAddon });

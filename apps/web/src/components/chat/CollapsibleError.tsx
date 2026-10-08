@@ -45,10 +45,10 @@ export function CollapsibleError({ error, onRetry, onDismiss }: CollapsibleError
       </Collapsible>
 
       <div className="flex justify-center gap-2">
-        <Button type="button" size="sm" variant="default" onClick={onRetry}>
+        <Button type="button" size="compact" variant="default" onClick={onRetry}>
           Retry
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={onDismiss}>
+        <Button type="button" size="compact" variant="outline" onClick={onDismiss}>
           Dismiss
         </Button>
       </div>

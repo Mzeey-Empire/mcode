@@ -203,7 +203,7 @@ function RefreshMenuItem({
 }) {
   return (
     <DropdownMenuItem disabled={refreshing} className="text-xs" onClick={onRefresh}>
-      {refreshing ? <Spinner size={13} aria-hidden /> : <RefreshCw size={13} aria-hidden />}
+      {refreshing ? <Spinner size={12} aria-hidden /> : <RefreshCw size={13} aria-hidden />}
       Refresh
     </DropdownMenuItem>
   );
@@ -367,7 +367,7 @@ export function PullRequestLifecycleActions({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               className="text-muted"
               aria-label="Pull request actions"
             >

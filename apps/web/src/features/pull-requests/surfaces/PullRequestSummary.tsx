@@ -14,7 +14,6 @@ import {
   CircleQuestionMark,
   CircleMinus,
   CircleX,
-  Loader2,
   MessageCircle,
   UserRound,
   type LucideIcon,
@@ -175,7 +174,8 @@ function titleCase(value: string): string {
 }
 
 function checkVisual(state: PullRequestCheckState): {
-  icon: LucideIcon;
+  /** Null while the check runs, where the row renders the shared Spinner. */
+  icon: LucideIcon | null;
   className: string;
 } {
   if (state === "passing") {
@@ -188,7 +188,7 @@ function checkVisual(state: PullRequestCheckState): {
     return { icon: CircleX, className: "text-[var(--diff-remove-strong)]" };
   }
   if (state === "pending") {
-    return { icon: Loader2, className: "animate-spin text-primary" };
+    return { icon: null, className: "text-primary" };
   }
   if (state === "neutral" || state === "skipped") {
     return { icon: CircleMinus, className: "text-muted" };
@@ -369,17 +369,21 @@ const CheckRow = memo(function CheckRow({
 
   return (
     <>
-      <CheckIcon
-        size={15}
-        data-check-state={check.state}
-        aria-hidden
-        className={cn("shrink-0", visual.className)}
-      />
+      {CheckIcon ? (
+        <CheckIcon
+          size={15}
+          data-check-state={check.state}
+          aria-hidden
+          className={cn("shrink-0", visual.className)}
+        />
+      ) : (
+        <Spinner size={16} data-check-state={check.state} className={visual.className} />
+      )}
       <span className="min-w-0 flex-1 text-fade text-ink/90">
         {check.name}
       </span>
       {check.isRequired === true && (
-        <Badge variant="ghost" size="sm" className="text-muted">
+        <Badge variant="ghost" size="compact" className="text-muted">
           Required
         </Badge>
       )}
@@ -480,7 +484,7 @@ function IssueCommentActions({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           className="text-xs text-muted"
           aria-expanded={prompting}
           onClick={() => onTogglePrompt(item)}
@@ -500,7 +504,7 @@ function IssueCommentActions({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           className="ml-auto text-xs text-muted"
           onClick={() => onReply(item)}
         >
@@ -530,7 +534,7 @@ function PromptFixConfirmation({
       <Button
         type="button"
         variant="secondary"
-        size="sm"
+        size="compact"
         className="text-xs"
         onClick={() => onPromptFix(item)}
       >
@@ -601,11 +605,11 @@ function ReviewThreadRow({
         <span className="text-fade font-mono text-ink/85">
           {location}
         </span>
-        <Badge variant="ghost" size="sm" className="text-muted">
+        <Badge variant="ghost" size="compact" className="text-muted">
           {item.isResolved ? "Resolved" : "Unresolved"}
         </Badge>
         {item.isOutdated && (
-          <Badge variant="ghost" size="sm" className="text-muted">
+          <Badge variant="ghost" size="compact" className="text-muted">
             Outdated
           </Badge>
         )}
@@ -753,7 +757,7 @@ function ResourceListState({
         role="status"
         className="flex items-center gap-2 py-3 text-xs text-muted"
       >
-        <Spinner size="xs" aria-hidden />
+        <Spinner size={12} aria-hidden />
         {loadingLabel}
       </p>
     );
@@ -788,7 +792,7 @@ function ResourceLoadContinuation({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="compact"
       className="mt-2 w-full text-xs text-muted"
       onClick={onLoadMore}
       disabled={loading}
@@ -832,7 +836,7 @@ function PullRequestResourceSection({
           <span>{label}</span>
           <Badge
             variant="ghost"
-            size="sm"
+            size="compact"
             className="ml-auto text-muted"
           >
             {totalCount}

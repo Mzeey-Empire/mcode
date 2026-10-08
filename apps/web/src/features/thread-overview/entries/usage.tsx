@@ -65,7 +65,7 @@ function ThreadOverviewUsageBars({
       <CollapsibleTrigger asChild>
         <Button
           variant="ghost"
-          size="sm"
+          size="compact"
           type="button"
           data-testid="thread-overview-usage"
           aria-label={`Usage, ${summary}`}

@@ -88,7 +88,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
     <Button
       type="button"
       variant="ghost"
-      size="icon-sm"
+      size="icon-compact"
       onClick={(e) => {
         e.stopPropagation();
         onRemove(id);
@@ -105,8 +105,8 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
         className={cn(
           "flex h-5 w-5 items-center justify-center rounded-full",
           "bg-ink/75 text-background",
-          "group-hover:bg-destructive group-hover:text-white",
-          "hover:bg-destructive hover:text-white",
+          "group-hover:bg-destructive group-hover:text-destructive-ink",
+          "hover:bg-destructive hover:text-destructive-ink",
         )}
         aria-hidden
       >
@@ -202,7 +202,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
                     {spill ? (
                       <Tooltip>
                         <TooltipTrigger
-                          render={<span className="absolute bottom-0.5 left-0.5 right-0.5 z-(--layer-sticky) flex justify-center rounded bg-background/85 px-0.5 text-xs font-medium text-ink/90 shadow-sm" />}
+                          render={<span className="absolute bottom-0.5 left-0.5 right-0.5 z-(--layer-sticky) flex justify-center rounded bg-background/85 px-0.5 text-xs font-medium text-ink/90" />}
                         >
                           {/* The fade mask covers its whole box, so it sits inside the pill to keep the pill fill solid. */}
                           <span className="text-fade">+ spill file</span>
@@ -216,7 +216,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
                       className="h-full w-full object-cover"
                       draggable={false}
                     />
-                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-black/25 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-ink/25 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                   </button>
                   {removeButton(att.name, att.id)}
                 </div>

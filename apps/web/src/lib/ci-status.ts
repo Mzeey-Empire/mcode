@@ -1,9 +1,10 @@
-import { CircleCheck, CircleX, Loader2, CircleMinus, type LucideIcon } from "lucide-react";
+import { CircleCheck, CircleX, CircleMinus, type LucideIcon } from "lucide-react";
 import type { ChecksStatus, CheckRun } from "@mcode/contracts";
 
 /** Visual properties for a CI aggregate state. */
 export interface CiVisual {
-  icon: LucideIcon;
+  /** Settled glyph; null while checks run, where callers render the shared Spinner. */
+  icon: LucideIcon | null;
   /** Foreground color class. */
   color: string;
   /** Border color class, used in accent chrome. */
@@ -52,7 +53,7 @@ export function getCiVisual(aggregate: ChecksStatus["aggregate"]): CiVisual {
       };
     case "pending":
       return {
-        icon: Loader2,
+        icon: null,
         color: "text-primary",
         borderColor: "border-primary/35",
         surface: "bg-primary/10",

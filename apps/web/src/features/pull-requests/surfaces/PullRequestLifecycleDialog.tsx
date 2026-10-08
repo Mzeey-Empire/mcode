@@ -502,7 +502,7 @@ function LifecycleDialogFooter({
         disabled={mutationBlocked || Boolean(unavailableReason) || Boolean(localError)}
         onClick={onSubmit}
       >
-        {submitting ? <><Spinner size="xs" aria-hidden />Applying effect</> : confirmLabel(effect, targetReadiness, bypassRequirements)}
+        {submitting ? <><Spinner size={12} aria-hidden />Applying effect</> : confirmLabel(effect, targetReadiness, bypassRequirements)}
       </Button>
     </DialogFooter>
   );

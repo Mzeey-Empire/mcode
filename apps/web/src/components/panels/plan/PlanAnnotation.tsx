@@ -60,7 +60,7 @@ export function PlanAnnotation({
   };
 
   return (
-    <div className="my-2.5 overflow-hidden rounded-lg bg-panel shadow-lg shadow-black/25 ring-1 ring-border/60 transition-shadow duration-200 focus-within:ring-primary/35 animate-wizard-float-rise">
+    <div className="my-2.5 overflow-hidden rounded-lg bg-panel ring-1 ring-border/60 transition-shadow duration-200 focus-within:ring-primary/35 animate-wizard-float-rise">
       <div className="flex items-center gap-2 px-3.5 pt-3 pb-2">
         <span className="size-1.5 shrink-0 rounded-full bg-primary/70" aria-hidden />
         <span className="min-w-0 text-fade font-mono text-caption uppercase tracking-[0.18em] text-muted/55">
@@ -90,7 +90,7 @@ export function PlanAnnotation({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             onMouseDown={(e) => {
               // Blur fires before click; block it so discard runs first.
               e.preventDefault();
@@ -103,7 +103,7 @@ export function PlanAnnotation({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             onMouseDown={(e) => {
               e.preventDefault();
             }}

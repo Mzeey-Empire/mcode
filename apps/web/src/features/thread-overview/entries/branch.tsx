@@ -245,7 +245,7 @@ function ThreadOverviewBranchRow({
   return (
     <Button
       variant="ghost"
-      size="sm"
+      size="compact"
       type="button"
       onClick={() => {
         if (isCurrent) onOpenChange(false);
@@ -288,7 +288,7 @@ function ThreadOverviewBranchCreateAction({
     <ThreadOverviewTooltipButton content={title} disabled={!canCreateCheckoutBranch}>
       <Button
         variant="ghost"
-        size="sm"
+        size="compact"
         type="button"
         disabled={!canCreateCheckoutBranch}
         data-testid="thread-overview-create-checkout-branch"
@@ -323,7 +323,7 @@ function BranchEntry({ thread }: { thread: Thread }) {
         render={
           <Button
             variant="ghost"
-            size="sm"
+            size="compact"
             type="button"
             data-testid="workspace-menu-branch"
             className={cn(

@@ -48,7 +48,7 @@ export function ReviewFileChangeRow({
             type="button"
             role="treeitem"
             variant="ghost"
-            size="sm"
+            size="compact"
             tabIndex={tabIndex}
             aria-label={`${CHANGE_TYPE_LABELS[file.changeType]} ${pathLabel}${file.binary ? ", Binary" : ""}`}
             aria-level={depth}
@@ -69,7 +69,7 @@ export function ReviewFileChangeRow({
             </span>
             <span className="min-w-0 flex-1 text-fade text-left font-mono text-xs">{name}</span>
             {file.binary ? (
-              <Badge variant="ghost" size="sm" className="max-w-20 px-1 font-mono uppercase tracking-wide">
+              <Badge variant="ghost" size="compact" className="max-w-20 px-1 font-mono uppercase tracking-wide">
                 Binary
               </Badge>
             ) : null}

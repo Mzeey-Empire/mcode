@@ -3,18 +3,19 @@ import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
 import type { RecoveryIncident, SelectedTextComment } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/ui/copy-button";
+import { Notice } from "@/components/ui/notice";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { CliErrorBanner, isCliError } from "@/components/chat/CliErrorBanner";
+import { describeCliError, isCliError } from "@/components/chat/cli-error";
 import { CollapsibleError } from "@/components/chat/CollapsibleError";
 import { ConversationHoldOverlay } from "@/components/chat/ConversationHoldOverlay";
-import { HandoffFallbackBanner } from "@/components/chat/HandoffFallbackBanner";
+import { HandoffDocDialog, useHandoffFallback } from "@/components/chat/handoff-fallback";
 import { HeaderActions } from "@/components/chat/HeaderActions";
 import { InterruptedSessionsBanner } from "@/components/chat/InterruptedSessionsBanner";
 import { NewThreadProjectPicker } from "@/components/chat/NewThreadProjectPicker";
 import { PlanQuestionWizard } from "@/components/chat/PlanQuestionWizard";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
-import { ThreadWarningBanner } from "@/components/chat/ThreadWarningBanner";
 import { McodeLogo } from "@/components/brand/McodeLogo";
 import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -157,7 +158,7 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
                 placement="bottom"
                 triggerTooltip="Change project"
                 trigger={
-                  <Button type="button" variant="link" size="sm" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus/60 sm:!text-2xl">
+                  <Button type="button" variant="link" size="compact" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus/60 sm:!text-2xl">
                     {projectName}<span className="text-ink">?</span>
                   </Button>
                 }
@@ -219,7 +220,7 @@ function CancelledStartupActions({ thread, startup }: { thread: WorkspaceThread;
       <Button
         type="button"
         variant="outline"
-        size="sm"
+        size="compact"
         onClick={() => { void startOver().catch(() => undefined); }}
       >
         Start over
@@ -227,7 +228,7 @@ function CancelledStartupActions({ thread, startup }: { thread: WorkspaceThread;
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="compact"
         onClick={() => useThreadStartupStore.getState().dismissStartup(startup.startupId)}
       >
         Keep thread
@@ -350,9 +351,44 @@ function ActiveThreadBanners({ state, recovery }: { state: ChatViewState; recove
   return (
     <>
       {recovery.incident && <div className="px-4 pt-2"><InterruptedSessionsBanner incident={recovery.incident} onDismiss={() => recovery.onDismiss(recovery.incident!.id)} onRetry={recovery.onRetry} /></div>}
-      {thread.clientWarnings?.length ? <div className="px-4 pt-2"><ThreadWarningBanner warnings={thread.clientWarnings} onDismiss={() => useWorkspaceStore.getState().dismissWarnings(thread.id)} /></div> : null}
+      {thread.clientWarnings?.length ? <div className="mx-auto w-full max-w-3xl px-4 pt-2"><Notice tone="warning" collapsible title="Post-checkout hook encountered an error" detail={<WarningOutput lines={thread.clientWarnings} />} onDismiss={() => useWorkspaceStore.getState().dismissWarnings(thread.id)} dismissLabel="Dismiss warning" /></div> : null}
     </>
   );
+}
+
+/** Command output in the Paper code inset. */
+function WarningOutput({ lines }: { lines: readonly string[] }) {
+  return <div className="space-y-2">{lines.map((line, i) => <pre key={i} className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-3 font-mono text-caption text-muted">{line}</pre>)}</div>;
+}
+
+/** Fork-thread notice for a handoff the local builder produced. */
+function HandoffFallbackNotice({ threadId }: { threadId: string }) {
+  const fallback = useHandoffFallback(threadId);
+  const [docOpen, setDocOpen] = useState(false);
+  if (!fallback) return null;
+  return (
+    <>
+      <Notice tone={fallback.copy.tone} title={fallback.copy.title} detail={fallback.copy.detail} action={{ label: "View doc", onClick: () => setDocOpen(true), emphasis: "neutral" }} onDismiss={fallback.dismiss} data-testid="handoff-fallback-notice" className="mx-4 mt-2" />
+      <HandoffDocDialog threadId={threadId} open={docOpen} onOpenChange={setDocOpen} />
+    </>
+  );
+}
+
+/** Provider CLI setup notice above the composer. */
+function CliErrorNotice({ error, onDismiss, onOpenSettings }: { error: string; onDismiss: () => void; onOpenSettings: () => void }) {
+  const { headline, installCommand, settingsHint } = describeCliError(error);
+  const detail = installCommand || settingsHint ? (
+    <div className="space-y-2">
+      {settingsHint ? <p>{settingsHint}</p> : null}
+      {installCommand ? (
+        <div className="flex items-center gap-2">
+          <code className="min-w-0 flex-1 rounded-md bg-background p-3 font-mono text-caption text-muted">{installCommand}</code>
+          <CopyButton text={installCommand} label="Copy command" />
+        </div>
+      ) : null}
+    </div>
+  ) : undefined;
+  return <Notice tone="warning" title={headline} detail={detail} action={settingsHint ? { label: "Open Settings", onClick: onOpenSettings, emphasis: "neutral" } : undefined} onDismiss={onDismiss} dismissLabel="Dismiss error" className="mx-3 mb-2" />;
 }
 
 type ConversationStage = "hold" | "transition" | "error" | "messages";
@@ -495,12 +531,12 @@ function SetupRecoveryActions({ automaticSetup }: { readonly automaticSetup: Ret
   const continuing = automaticSetup.busy === "continue";
   return (
     <>
-      <Button type="button" variant="outline" size="sm" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.retrySetup(); }}>
-        {retrying ? <Spinner size={13} aria-hidden /> : null}
+      <Button type="button" variant="outline" size="compact" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.retrySetup(); }}>
+        {retrying ? <Spinner size={12} aria-hidden /> : null}
         Retry setup
       </Button>
-      <Button type="button" variant="outline" size="sm" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.continueWithoutSetup(); }}>
-        {continuing ? <Spinner size={13} aria-hidden /> : null}
+      <Button type="button" variant="outline" size="compact" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.continueWithoutSetup(); }}>
+        {continuing ? <Spinner size={12} aria-hidden /> : null}
         Continue without setup
       </Button>
     </>
@@ -566,7 +602,7 @@ function RemoveIncompleteThreadAction({ thread, pendingStartup }: {
   };
   return (
     <>
-      <Button type="button" variant="outline" size="sm" disabled={removing} onClick={() => { void remove(); }}>
+      <Button type="button" variant="outline" size="compact" disabled={removing} onClick={() => { void remove(); }}>
         Remove incomplete thread
       </Button>
       {error && <span role="alert">{error}</span>}
@@ -712,11 +748,11 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps) {
       <ActiveThreadHeader state={state} editingThreadId={editingThreadId} onEditingThreadIdChange={onEditingThreadIdChange} onSaveTitle={interactions.onSaveTitle} />
       <ActiveThreadBanners state={state} recovery={recovery} />
       {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
-      <HandoffFallbackBanner threadId={thread.id} />
+      <HandoffFallbackNotice threadId={thread.id} />
       <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
       <TurnSavingNotice lostProgress={state.lostProgress} />
       <ChatMessageStage state={state} interactions={interactions} automaticSetup={automaticSetup} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
-      {showCliError && <CliErrorBanner error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
+      {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
       <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} setupBlocked={automaticSetup.snapshot.gate === "blocked"} />
     </div>
   );

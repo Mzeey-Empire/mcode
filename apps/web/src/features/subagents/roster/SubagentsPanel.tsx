@@ -307,7 +307,7 @@ function CanonicalDetailView({
   return (
     <section className="flex min-h-0 flex-1 flex-col" aria-label={`${identity} subagent details`}>
       <header className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
-        <Button type="button" variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to subagents" className="shrink-0">
+        <Button type="button" variant="ghost" size="icon-compact" onClick={onBack} aria-label="Back to subagents" className="shrink-0">
           <ArrowLeft size={15} aria-hidden />
         </Button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -431,13 +431,13 @@ function StopAllConfirmationDialog({
           )}
         </div>
         <DialogFooter className="!mx-0 !mb-0 gap-3 rounded-none rounded-b-xl px-6 py-4">
-          <Button ref={cancelRef} variant="outline" size="sm" onClick={onCancel} disabled={batchActive} autoFocus>
+          <Button ref={cancelRef} variant="outline" size="compact" onClick={onCancel} disabled={batchActive} autoFocus>
             Cancel
           </Button>
           <Button
             type="button"
             variant="destructive"
-            size="sm"
+            size="compact"
             onClick={onConfirm}
             disabled={batchActive}
             aria-busy={batchActive}
@@ -738,7 +738,7 @@ function SubagentRosterList({
               <section aria-labelledby="subagents-active-heading">
                 <div className="flex items-center gap-2 px-6 pb-1 pt-6">
                   <h2 id="subagents-active-heading" className="text-sm font-semibold text-ink">Active</h2>
-                  <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
+                  <Badge variant="ghost" size="compact" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
                     {activeRows.length + narrative.active.length}
                   </Badge>
                   {eligibleStopAllCount >= 2 && (
@@ -746,7 +746,7 @@ function SubagentRosterList({
                       ref={stopAll.triggerRef}
                       type="button"
                       variant="outline"
-                      size="sm"
+                      size="compact"
                       onClick={stopAll.openStopAll}
                       disabled={stopAll.batchActive}
                       aria-label="Stop all active sub-agents"
@@ -782,7 +782,7 @@ function SubagentRosterList({
               <section aria-labelledby="subagents-done-heading">
                 <div className="flex items-center gap-2 px-6 pb-1 pt-6">
                   <h2 id="subagents-done-heading" className="text-sm font-semibold text-ink">Done</h2>
-                  <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
+                  <Badge variant="ghost" size="compact" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
                     {doneRows.length + narrative.finished.length}
                   </Badge>
                 </div>

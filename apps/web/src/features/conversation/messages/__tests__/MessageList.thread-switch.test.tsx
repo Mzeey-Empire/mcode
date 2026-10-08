@@ -1095,7 +1095,9 @@ describe("MessageList thread switch", () => {
   });
 
 
-  it("virtualizes expanded tool children and restores them after scrolling and thread switches", async () => {
+  // The heaviest case in the file (about 1.4s locally). A loaded CI runner pushed it past the 5s default, and the
+  // timed-out run kept rendering into the following tests, so it carries its own bound.
+  it("virtualizes expanded tool children and restores them after scrolling and thread switches", { timeout: 15_000 }, async () => {
     vi.useFakeTimers();
     messagesValue = [{ id: "answer", sequence: 1, role: "assistant", content: "Finished commands" }];
     const tools = Array.from({ length: 180 }, (_, index) => ({

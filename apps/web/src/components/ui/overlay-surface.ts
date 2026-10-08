@@ -1,6 +1,6 @@
 /**
- * Paper's transient surface recipes. Every overlay paints its fill, border, radius and shadow
- * from here so the two themes stay in step: the shadow tokens switch to the light overlay
+ * Paper's transient surface recipes. Every overlay paints its fill, border, radius and elevation
+ * from here so the two themes stay in step: the elevation tokens switch to the light overlay
  * recipe in the light theme.
  */
 

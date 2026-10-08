@@ -511,7 +511,7 @@ function FavoriteToggle({
     <Button
       type="button"
       variant="ghost"
-      size="icon-xs"
+      size="icon-compact"
       className="h-7 w-7 shrink-0 text-muted hover:text-ink"
       aria-label={getFavoriteActionLabel(label, starred)}
       onClick={(event) => {
@@ -521,7 +521,7 @@ function FavoriteToggle({
     >
       <Star
         size={12}
-        className={cn(starred && "fill-amber-400 text-amber-400")}
+        className={cn(starred && "fill-muted text-muted")}
         aria-hidden
       />
     </Button>
@@ -855,7 +855,7 @@ function ProviderCatalogContent({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Spinner size={14} className="text-muted" />
+        <Spinner size={16} className="text-muted" />
         <span className="sr-only">Loading models</span>
       </div>
     );
@@ -978,7 +978,7 @@ function ProviderRailItem({
               "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors",
               unavailable && "cursor-not-allowed opacity-45",
               !unavailable && "text-ink hover:bg-selected/40 hover:text-ink",
-              isCurrent && "bg-selected text-ink shadow-sm",
+              isCurrent && "bg-selected text-ink",
             )}
           >
             <ProviderIcon
@@ -1025,13 +1025,13 @@ function ProviderRail({
               className={cn(
                 "flex h-10 w-10 items-center justify-center rounded-md transition-colors",
                 favoritesSelected
-                  ? "bg-selected text-ink shadow-sm"
+                  ? "bg-selected text-ink"
                   : "text-muted hover:bg-selected/40 hover:text-ink",
               )}
             >
               <Star
                 size={18}
-                className={cn(favoritesSelected && "fill-amber-400 text-amber-400")}
+                className={cn(favoritesSelected && "fill-muted text-muted")}
                 aria-hidden
               />
             </button>
@@ -1224,7 +1224,7 @@ export function ModelSelector({
         render={
           <Button
             variant="ghost"
-            size="xs"
+            size="compact"
             data-testid="model-selector-trigger"
             className="max-w-full shrink whitespace-normal text-muted transition-colors hover:bg-hover/40 hover:text-ink"
           >

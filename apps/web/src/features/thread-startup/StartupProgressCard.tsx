@@ -238,7 +238,7 @@ function StepNode({ state }: { state: ThreadStartupStepState }) {
   if (state === "running") {
     return (
       <span aria-label={label} className={cn(NODE_BASE, "border-primary/60 bg-primary/10 text-primary")}>
-        <Spinner size={11} className="motion-reduce:animate-none" />
+        <Spinner size={12} className="motion-reduce:animate-none" />
       </span>
     );
   }
@@ -364,7 +364,7 @@ function StartupControls({
     <div className="flex flex-wrap gap-2">
       {actions}
       {canCancelStartup(startupId, startup) && !cancellationUnavailable ? (
-        <Button type="button" variant="destructive" size="sm" onClick={() => { void onCancel(); }}>
+        <Button type="button" variant="destructive" size="compact" onClick={() => { void onCancel(); }}>
           Cancel
         </Button>
       ) : null}

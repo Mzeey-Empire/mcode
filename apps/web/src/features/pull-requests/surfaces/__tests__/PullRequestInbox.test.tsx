@@ -769,7 +769,7 @@ describe("PullRequestInbox", () => {
     expect(
       closed?.querySelector(".lucide-git-pull-request-closed"),
     ).toBeTruthy();
-    expect(merged).toHaveClass("text-violet-400");
+    expect(merged).toHaveClass("text-pr-merged");
     expect(merged?.querySelector(".lucide-git-merge")).toBeTruthy();
   });
 

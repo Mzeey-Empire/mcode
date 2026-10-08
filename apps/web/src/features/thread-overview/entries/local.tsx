@@ -54,7 +54,7 @@ function ThreadOverviewLocalMenu({ worktreePath, branch }: ThreadOverviewLocalMe
           </span>
           <Button
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             type="button"
             aria-label="Copy worktree path"
             disabled={!worktreePath}
@@ -79,7 +79,7 @@ function ThreadOverviewLocalMenu({ worktreePath, branch }: ThreadOverviewLocalMe
           </span>
           <Button
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             type="button"
             aria-label="Copy branch"
             onClick={() => void copyValue("branch", branch)}
@@ -110,7 +110,7 @@ function LocalEntry({ thread }: { thread: Thread }) {
       render={
         <Button
           variant="ghost"
-          size="sm"
+          size="compact"
           type="button"
           data-testid="thread-overview-local"
           aria-label={localCheckoutAriaLabel(modeLabel, dirPath)}

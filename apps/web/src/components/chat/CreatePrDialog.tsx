@@ -55,7 +55,7 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
             disabled={disabled}
             aria-label="Base branch"
             className={cn(
-              "flex h-8 w-full items-center justify-between rounded-lg border border-control-border bg-background pl-3 pr-2.5 text-sm shadow-xs transition-colors",
+              "flex h-8 w-full items-center justify-between rounded-lg border border-control-border bg-background pl-3 pr-2.5 text-sm transition-colors",
               "focus-visible:border-focus focus-visible:outline-none",
               "disabled:cursor-not-allowed disabled:opacity-50",
               open && "border-focus",
@@ -86,7 +86,7 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
               >
                 <span className="text-fade">{b.name}</span>
                 {b.isCurrent && (
-                  <Badge variant="secondary" size="sm" className="ml-2 shrink-0">current</Badge>
+                  <Badge variant="secondary" size="compact" className="ml-2 shrink-0">current</Badge>
                 )}
               </CommandItem>
             ))}
@@ -545,7 +545,7 @@ function PrDialogSidebar({
           disabled={isDisabled || !form.title.trim()}
           className="w-full gap-1.5"
         >
-          {form.state === "submitting" && <Spinner size={14} className="text-current" />}
+          {form.state === "submitting" && <Spinner size={16} className="text-current" />}
           Create PR
         </Button>
         <Button
@@ -631,7 +631,7 @@ function PrDraftGenerationButton({
   return (
     <Button
       variant="ghost"
-      size="sm"
+      size="compact"
       onClick={onRegenerate}
       disabled={disabled}
       className="h-6 gap-1.5 px-2 text-xs text-muted hover:text-ink"
@@ -656,7 +656,7 @@ function PrDescriptionField({ form, isDisabled }: Pick<PrDescriptionPanelProps, 
         disabled={isDisabled}
         placeholder="PR description"
         className={cn(
-          "flex-1 min-h-0 w-full rounded-lg border border-control-border bg-background px-3 py-2.5 text-sm shadow-xs transition-colors",
+          "flex-1 min-h-0 w-full rounded-lg border border-control-border bg-background px-3 py-2.5 text-sm transition-colors",
           "font-mono resize-none overflow-y-auto",
           "placeholder:text-muted",
           "focus-visible:border-focus focus-visible:outline-none",

@@ -8,8 +8,8 @@
 
 /* Paper ramps (style guide, "Color palette · 50–950"). Theme roles below point at
    these steps; design-tokens.test.ts fails when a step drifts from Paper. The names
-   drop Paper's `--color-` prefix so they never shadow Tailwind's default palette,
-   which feature code still uses until the F-11a sweep. */
+   drop Paper's `--color-` prefix so they never shadow Tailwind's default palette.
+   Feature code uses the semantic roles below, enforced by mcode/no-raw-color. */
 :root {
   --neutral-50: oklch(99% 0.005 260);
   --neutral-100: oklch(95.5% 0.005 260);
@@ -531,7 +531,7 @@
   }
 }
 
-/* Indeterminate progress sweep used on running-CI chrome (PrSplitButton).
+/* Indeterminate progress sweep used on running-CI chrome (the pull request overview row).
  * Belt-and-braces reduced-motion handling: callers gate .animate-ci-slide with
  * motion-reduce:hidden, and this rule also neutralises the animation in case
  * it leaks through elsewhere. */

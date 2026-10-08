@@ -36,6 +36,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { ReviewDiffView } from "./ReviewDiffView";
 import { ReviewToolbarSlotContext } from "./review-toolbar-slot";
+import { Spinner } from "@/components/ui/spinner";
 
 const PIERRE_WORKER_POOL_SIZE = 3;
 
@@ -314,7 +315,7 @@ function FileListToolbar({
           data-testid="review-refresh-progress"
           className="inline-flex h-6 w-6 items-center justify-center text-muted/55"
         >
-          <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
+          <Spinner size={12} />
         </span>
       ) : null}
       <FilesToggle filesVisible={filesVisible} onToggle={onToggleFiles} />
@@ -331,7 +332,7 @@ function FileListToolbar({
   // rows collapse into one. Standalone renders fall back to a sticky bar.
   if (toolbarSlot) return createPortal(controls, toolbarSlot);
   return (
-    <div className="sticky top-0 z-(--layer-dropdown) flex items-center gap-0.5 bg-background/95 px-2 py-1.5 shadow-[0_8px_12px_-12px_oklch(0_0_0/0.35)] backdrop-blur-sm">
+    <div className="sticky top-0 z-(--layer-dropdown) flex items-center gap-0.5 bg-background/95 px-2 py-1.5 border-b border-border backdrop-blur-sm">
       {controls}
     </div>
   );
@@ -353,7 +354,7 @@ function FilesToggle({ filesVisible, onToggle }: FilesToggleProps) {
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             aria-label={label}
             aria-pressed={filesVisible}
             data-testid="review-files-toggle"
@@ -416,7 +417,7 @@ function ReviewOptionsMenu({
             data-testid="review-option-refresh"
             className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs"
           >
-            <RefreshCw size={13} className={cn("text-muted", refreshInProgress && "animate-spin")} />
+            {refreshInProgress ? <Spinner size={12} className="text-muted" /> : <RefreshCw size={13} className="text-muted" />}
             {refreshInProgress ? "Refreshing" : "Refresh"}
           </DropdownMenuItem>
         ) : null}
@@ -468,7 +469,7 @@ function FileJumpPopover({ open, onOpenChange, files, onJumpToFile }: FileJumpPo
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 aria-label="Jump to file"
                 data-testid="review-file-jump-trigger"
                 className="h-6 w-6 text-muted/60 hover:bg-ink/10 hover:text-ink"
@@ -554,7 +555,7 @@ function RenderModeToggle({ renderMode, onToggle }: RenderModeToggleProps) {
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             onClick={onToggle}
             aria-pressed={isSideBySide}
             aria-label={label}

@@ -104,7 +104,7 @@ function SearchOptionsPopover({ options, onChange }: SearchOptionsPopoverProps) 
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             aria-label="Terminal search options"
             data-testid="terminal-search-options-trigger"
           />
@@ -258,7 +258,7 @@ function TerminalSearchControls({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           aria-label="Close terminal search"
           onClick={onClose}
         >
@@ -281,7 +281,7 @@ function TerminalSearchControls({
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             aria-label="Previous terminal match"
             disabled={navigationDisabled}
             onClick={() => onNavigate("previous")}
@@ -291,7 +291,7 @@ function TerminalSearchControls({
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             aria-label="Next terminal match"
             disabled={navigationDisabled}
             onClick={() => onNavigate("next")}
@@ -302,7 +302,7 @@ function TerminalSearchControls({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               aria-label="Retry terminal search"
               onClick={onRetry}
             >

@@ -295,7 +295,7 @@ function PullRequestCodeToolbar({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           className={cn(
             "rounded-md text-muted",
             view.fileTreeVisible && "bg-hover/60 text-ink",
@@ -312,7 +312,7 @@ function PullRequestCodeToolbar({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           aria-label={
             view.viewMode === "unified"
               ? "Use split diff layout"
@@ -331,7 +331,7 @@ function PullRequestCodeToolbar({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           className="rounded-md text-muted"
           aria-label={
             allFilesExpanded ? "Collapse all file diffs" : "Expand all file diffs"
@@ -372,7 +372,7 @@ function PullRequestFilesErrorNotice({
       <Button
         type="button"
         variant="ghost"
-        size="xs"
+        size="compact"
         className="h-7 rounded-none text-xs"
         onClick={() => void usePullRequestCodeStore.getState().loadFiles({ transport })}
       >
@@ -434,7 +434,7 @@ function PullRequestCodeDiffBody({
   if (initialLoading) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-xs text-muted">
-        <Spinner size="xs" aria-hidden />
+        <Spinner size={12} aria-hidden />
         <span role="status">Loading changed files</span>
       </div>
     );
@@ -550,7 +550,7 @@ function PullRequestFilesMoreControl({
       <Button
         type="button"
         variant="ghost"
-        size="xs"
+        size="compact"
         className="h-7 rounded-none text-xs"
         disabled={lane.status === "loading"}
         onClick={loadNextPage}
@@ -926,7 +926,7 @@ export function PullRequestCode({
   if (!viewerNodeId) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center gap-2 bg-page text-xs text-muted">
-        <Spinner size="xs" aria-hidden />
+        <Spinner size={12} aria-hidden />
         <span role="status">Loading GitHub viewer context</span>
       </div>
     );

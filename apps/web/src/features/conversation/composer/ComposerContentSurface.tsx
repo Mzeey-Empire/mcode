@@ -9,7 +9,8 @@ import { ContextTracker } from "@/components/chat/ContextTracker";
 import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPopup";
 import { PlanPreview } from "@/components/chat/PlanPreview";
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
-import { ProviderUnavailableBanner } from "@/components/chat/ProviderUnavailableBanner";
+import { providerUnavailableMessage, type ProviderUnavailableReason } from "@/components/chat/provider-unavailable";
+import { Notice } from "@/components/ui/notice";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { type useSlashCommand } from "@/components/chat/useSlashCommand";
 import { SpellcheckContextMenu } from "@/components/chat/SpellcheckContextMenu";
@@ -69,7 +70,7 @@ interface ComposerContentSurfaceProps {
     readonly isDragOver: boolean;
     readonly fetchingBranch: boolean;
     readonly effectiveProviderId: ProviderId;
-    readonly providerReason: ComponentProps<typeof ProviderUnavailableBanner>["reason"] | null;
+    readonly providerReason: ProviderUnavailableReason | null;
     readonly goalPending: boolean;
     readonly isStaleWorktree: boolean;
     readonly fileAutocomplete: FileAutocomplete;
@@ -228,18 +229,22 @@ function ComposerNewThreadSurface({
   );
 }
 
-function ComposerProviderUnavailableBanner({
+function ComposerProviderUnavailableNotice({
   model,
 }: Pick<ComposerContentSurfaceProps, "model">) {
   if (!model.providerReason) return null;
 
   return (
-    <ProviderUnavailableBanner
-      providerId={model.effectiveProviderId}
-      reason={model.providerReason}
-      onOpenSettings={() =>
-        window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "model" } }))
-      }
+    <Notice
+      tone="warning"
+      title="Provider unavailable"
+      detail={providerUnavailableMessage(model.effectiveProviderId, model.providerReason)}
+      action={{
+        label: "Open Settings",
+        onClick: () => window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "model" } })),
+      }}
+      data-testid="provider-unavailable-notice"
+      className="mb-2"
     />
   );
 }
@@ -406,10 +411,10 @@ function ComposerInlineStopButton({
       <TooltipTrigger
         render={
           <Button
-            variant="ghost"
-            size="icon-xs"
+            variant="ink"
+            shape="round"
+            size="icon-compact"
             onClick={actions.onStop}
-            className="text-destructive/60 hover:bg-destructive/10 hover:text-destructive"
             aria-label="Stop agent"
           >
             <div className="h-2.5 w-2.5 rounded-sm bg-current" />
@@ -518,13 +523,14 @@ export function isComposerSendButtonDisabled({
     || isThreadScaffold || isStopPending || (!isAgentRunning && !hasContent);
 }
 
-const SEND_BUTTON_CLASS_NAMES: Record<ComposerSendButtonVisualState, string> = {
-  scaffold: "bg-primary text-primary-ink",
-  queue: "bg-primary/60 text-primary-ink hover:bg-primary/75",
-  stop: "bg-destructive text-white hover:bg-destructive/90",
-  stopping: "bg-destructive/60 text-white",
-  send: "bg-primary text-primary-ink hover:bg-primary/90",
-  empty: "bg-hover text-muted opacity-40",
+// Send is the round primary; Stop is neutral by rule: an ink circle with a background-colour square.
+const SEND_BUTTON_VARIANT: Record<ComposerSendButtonVisualState, "default" | "ink"> = {
+  scaffold: "default",
+  queue: "default",
+  stop: "ink",
+  stopping: "ink",
+  send: "default",
+  empty: "default",
 };
 
 const SEND_BUTTON_COPY: Record<ComposerSendButtonCopy, string> = {
@@ -552,14 +558,15 @@ function ComposerSendButton({
   const sendButton = (
     <Button
       type="button"
-      size="icon-sm"
+      variant={SEND_BUTTON_VARIANT[visualState]}
+      shape="round"
+      size="icon-compact"
       onClick={onClick}
       disabled={disabled}
-      className={cn("rounded-full transition-colors", SEND_BUTTON_CLASS_NAMES[visualState])}
       aria-label={SEND_BUTTON_COPY[copy]}
     >
       {visualState === "scaffold" || visualState === "stopping" ? (
-        <Spinner size={14} className="text-current" />
+        <Spinner size={16} className="text-current" />
       ) : visualState === "stop" ? (
         <div className="h-4 w-4 rounded-sm bg-current" />
       ) : (
@@ -661,7 +668,7 @@ function ComposerInputSurface({
         "relative z-(--layer-sticky) bg-transparent ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-primary/70",
         model.isNewThread
           ? "-mt-px rounded-xl shadow-none"
-          : "rounded-xl shadow-lg shadow-black/20",
+          : "rounded-xl",
         model.isDragOver && "ring-2 ring-primary",
       )}
       onDragEnter={actions.onDragEnter}
@@ -686,7 +693,7 @@ function ComposerInputSurface({
         onSave={actions.onSaveSelectedTextComment}
         onEditorChange={actions.onSelectedTextCommentEditorChange}
       />
-      <ComposerProviderUnavailableBanner model={model} />
+      <ComposerProviderUnavailableNotice model={model} />
       <ComposerQueueEditNotice model={model} actions={actions} />
       <ComposerEditorSurface model={model} actions={actions} />
       <ComposerAttachmentSurface model={model} actions={actions} />

@@ -200,7 +200,7 @@ export function SelectedTextCommentMarkers({
                 key={marker.commentId}
                 data-testid="selected-text-comment-pending-marker"
                 aria-hidden="true"
-                className="absolute flex size-8 items-center justify-center rounded-full bg-primary/80 text-xs font-semibold leading-none text-primary-ink shadow-sm ring-1 ring-background/80 tabular-nums"
+                className="absolute flex size-8 items-center justify-center rounded-full bg-primary/80 text-xs font-semibold leading-none text-primary-ink shadow-floating ring-1 ring-background/80 tabular-nums"
                 style={{ top: marker.top, left: marker.left }}
               >
                 {marker.displayNumber}
@@ -212,11 +212,11 @@ export function SelectedTextCommentMarkers({
               key={marker.commentId}
               type="button"
               variant="ghost"
-              size="icon-sm"
+              size="icon-compact"
               data-testid="selected-text-comment-marker"
               data-selected-text-comment-marker-id={marker.commentId}
               aria-label={`Open comment ${marker.displayNumber}`}
-              className="pointer-events-auto absolute flex size-8 items-center justify-center rounded-full bg-primary/80 p-0 text-primary-ink shadow-sm ring-1 ring-background/80 hover:bg-primary focus-visible:bg-primary"
+              className="pointer-events-auto absolute flex size-8 items-center justify-center rounded-full bg-primary/80 p-0 text-primary-ink shadow-floating ring-1 ring-background/80 hover:bg-primary focus-visible:bg-primary"
               style={{ top: marker.top, left: marker.left }}
               onMouseEnter={() => setHoveredCommentId(marker.commentId)}
               onMouseLeave={() => setHoveredCommentId((current) => current === marker.commentId ? null : current)}

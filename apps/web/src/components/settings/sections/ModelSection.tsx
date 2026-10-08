@@ -676,7 +676,7 @@ function DefaultModelSettings({
             data-testid="settings-default-model-trigger"
           />
           {defaultModelStale && (
-            <p className="max-w-xs text-right text-xs text-amber-600 dark:text-amber-500">
+            <p className="max-w-xs text-right text-xs text-warning">
               This model is not in the current catalog. Sending messages may fail until you choose a listed model.
             </p>
           )}
@@ -698,7 +698,7 @@ function DefaultModelSettings({
             data-testid="settings-fallback-model-trigger"
           />
           {fallbackModelStale && (
-            <p className="max-w-xs text-right text-xs text-amber-600 dark:text-amber-500">
+            <p className="max-w-xs text-right text-xs text-warning">
               This fallback model is not in the current catalog. Consider turning fallback off or picking a listed model.
             </p>
           )}

@@ -76,7 +76,7 @@ function WorktreePickerContent({
                   <span className="max-w-1/2 shrink-0 text-fade">{worktreeBranchLabel(worktree)}</span>
                   <span aria-hidden>&middot;</span>
                   <PathText path={worktree.path} className="flex-1" />
-                  {!worktree.managed && <Badge variant="secondary" size="sm" className="shrink-0">external</Badge>}
+                  {!worktree.managed && <Badge variant="secondary" size="compact" className="shrink-0">external</Badge>}
                 </span>
               </CommandItem>
             ))}
@@ -107,9 +107,9 @@ export function WorktreePicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={
-        <Button variant="ghost" size="xs" className={cn("text-muted", triggerClassName)}>
+        <Button variant="ghost" size="compact" className={cn("text-muted", triggerClassName)}>
           <GitFork size={iconSize} className={triggerClassName ? "size-3.5" : undefined} />
-          {selectedName === null ? <Spinner size={11} className="text-current" /> : <span>{selectedName}</span>}
+          {selectedName === null ? <Spinner size={12} className="text-current" /> : <span>{selectedName}</span>}
           <ChevronDown size={Math.max(10, iconSize - 2)} className={triggerClassName ? "size-3" : undefined} />
         </Button>
       } />

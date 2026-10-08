@@ -197,7 +197,7 @@ function ThreadOverviewBrowserSection({ rows, onOpen }: ThreadOverviewBrowserSec
                 render={
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="compact"
                     type="button"
                     data-testid={`thread-overview-browser-tab-${tab.id}`}
                     aria-label={`Browser, ${title}, ${address}${isAgentControlled ? ", agent controls" : ""}`}

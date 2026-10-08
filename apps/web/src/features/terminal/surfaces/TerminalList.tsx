@@ -72,7 +72,7 @@ export const TerminalList = memo(function TerminalList({
               render={
                 <Button
                   variant="ghost"
-                  size="icon-xs"
+                  size="icon-compact"
                   onClick={toggleSplit}
                   className="text-muted"
                   aria-label="Expand sidebar"
@@ -98,7 +98,7 @@ export const TerminalList = memo(function TerminalList({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon-xs"
+                        size="icon-compact"
                         onClick={() => setActiveTerminal(threadId, terminal.id)}
                         className="bg-transparent hover:bg-transparent active:translate-y-0 active:bg-transparent"
                         aria-label={`${terminal.label}, ${stateLabel}`}
@@ -129,7 +129,7 @@ export const TerminalList = memo(function TerminalList({
             render={
               <Button
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 onClick={toggleSplit}
                 className="text-muted"
                 aria-label="Collapse sidebar"
@@ -147,7 +147,7 @@ export const TerminalList = memo(function TerminalList({
             render={
               <Button
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 onClick={onAdd}
                 className="text-muted hover:text-ink"
                 aria-label="New terminal"
@@ -165,7 +165,7 @@ export const TerminalList = memo(function TerminalList({
             render={
               <Button
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 onClick={(event) => onDeleteAll(event.currentTarget)}
                 className="text-muted hover:text-ink"
                 aria-label="Kill all terminals"
@@ -211,7 +211,7 @@ export const TerminalList = memo(function TerminalList({
                   {terminal.label}
                 </span>
                 {stateLabel !== "Running" ? (
-                  <Badge variant="secondary" size="sm" className="ml-auto">
+                  <Badge variant="secondary" size="compact" className="ml-auto">
                     {stateLabel}
                   </Badge>
                 ) : null}
@@ -219,7 +219,7 @@ export const TerminalList = memo(function TerminalList({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 className="shrink-0 bg-transparent opacity-0 transition-opacity hover:bg-transparent active:translate-y-0 active:bg-transparent focus-visible:opacity-100 group-hover:opacity-60"
                 onClick={(event) => onClose(terminal.id, event.currentTarget)}
                 aria-label={`Close ${terminal.label}`}

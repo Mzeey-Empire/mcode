@@ -48,7 +48,7 @@ export function KeyboardShortcutsSection() {
         <div className="flex gap-2">
           <Button
             variant="outline"
-            size="sm"
+            size="compact"
             disabled={!hasDesktopBridge}
             onClick={handleOpenKeybindings}
           >
@@ -56,7 +56,7 @@ export function KeyboardShortcutsSection() {
           </Button>
           <Button
             variant="outline"
-            size="sm"
+            size="compact"
             onClick={() => setShortcutHelpOpen(true)}
           >
             View All Shortcuts

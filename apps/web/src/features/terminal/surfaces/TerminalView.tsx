@@ -66,26 +66,24 @@ type XtermModules = {
 };
 
 let xtermModulesPromise: Promise<XtermModules> | null = null;
-const TERMINAL_BACKGROUND = "#0a0a0f";
-
-function resolveTerminalSearchColor(token: string): string {
+function resolveTerminalColor(token: string): string {
   const color = getComputedStyle(document.documentElement)
     .getPropertyValue(token)
     .trim();
   if (!color) {
-    throw new Error(`Terminal search color token ${token} is unavailable`);
+    throw new Error(`Terminal color token ${token} is unavailable`);
   }
   return color;
 }
 
 function resolveTerminalSearchDecorations() {
   return {
-    matchBackground: resolveTerminalSearchColor("--hover"),
-    matchBorder: resolveTerminalSearchColor("--border"),
-    matchOverviewRuler: resolveTerminalSearchColor("--primary"),
-    activeMatchBackground: resolveTerminalSearchColor("--primary"),
-    activeMatchBorder: resolveTerminalSearchColor("--focus"),
-    activeMatchColorOverviewRuler: resolveTerminalSearchColor("--focus"),
+    matchBackground: resolveTerminalColor("--hover"),
+    matchBorder: resolveTerminalColor("--border"),
+    matchOverviewRuler: resolveTerminalColor("--primary"),
+    activeMatchBackground: resolveTerminalColor("--primary"),
+    activeMatchBorder: resolveTerminalColor("--focus"),
+    activeMatchColorOverviewRuler: resolveTerminalColor("--focus"),
   };
 }
 
@@ -523,17 +521,17 @@ function TerminalStatus({
       </div>
       <div className="mt-1 flex items-center gap-2">
         {showRetry ? (
-          <Button type="button" size="xs" variant="outline" onClick={onRetry}>
+          <Button type="button" size="compact" variant="outline" onClick={onRetry}>
             {sessionEnded ? "Retry terminal" : "Reload available output"}
           </Button>
         ) : null}
         {sessionEnded ? (
-          <Button type="button" size="xs" variant="ghost" onClick={onClose}>
+          <Button type="button" size="compact" variant="ghost" onClick={onClose}>
             Close terminal
           </Button>
         ) : null}
         {diagnosticsAvailable ? (
-          <Button type="button" size="xs" variant="ghost" onClick={onCopyDiagnostics}>
+          <Button type="button" size="compact" variant="ghost" onClick={onCopyDiagnostics}>
             Copy diagnostics
           </Button>
         ) : null}
@@ -577,7 +575,7 @@ function TerminalViewFrame({
       role="region"
       aria-label="Terminal output"
       style={{
-        backgroundColor: TERMINAL_BACKGROUND,
+        backgroundColor: "var(--page)",
         visibility: shown && hydrated ? "visible" : "hidden",
       }}
     >
@@ -672,10 +670,19 @@ export const TerminalView = memo(function TerminalView({
       const term = new XTerminal({
         ...options,
         allowProposedApi: true,
+        // xterm resolves these concrete OKLCH values through its canvas colour parser.
         theme: {
-          background: TERMINAL_BACKGROUND,
-          foreground: "#e4e4e7",
-          cursor: "#e4e4e7",
+          background: resolveTerminalColor("--page"),
+          foreground: resolveTerminalColor("--ink"),
+          cursor: resolveTerminalColor("--ink"),
+          green: resolveTerminalColor("--success"),
+          brightGreen: resolveTerminalColor("--success"),
+          yellow: resolveTerminalColor("--primary"),
+          brightYellow: resolveTerminalColor("--primary"),
+          red: resolveTerminalColor("--error"),
+          brightRed: resolveTerminalColor("--error"),
+          blue: resolveTerminalColor("--link"),
+          brightBlue: resolveTerminalColor("--link"),
         },
       });
 

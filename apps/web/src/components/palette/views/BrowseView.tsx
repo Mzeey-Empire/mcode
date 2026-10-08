@@ -449,7 +449,7 @@ function BrowseResolutionWarning({
   if (loading || error || isExactDirectory !== false || isDrivesMode) return null;
 
   return (
-    <div data-testid="browse-resolution-warning" className="mx-3 mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200" role="alert">
+    <div data-testid="browse-resolution-warning" className="mx-3 mb-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning" role="alert">
       This path is not a folder. Choose a listed folder or revise the path.
     </div>
   );
@@ -535,7 +535,7 @@ function BrowseError({ error, onRetry }: { error: string | null; onRetry: () => 
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-2 text-xs" role="alert">
       <span className="text-muted">Check the path or retry the folder listing.</span>
-      <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+      <Button type="button" size="compact" variant="outline" onClick={onRetry}>
         Retry
       </Button>
     </div>
@@ -548,7 +548,7 @@ function BrowseAddError({ addError, onRetry }: { addError: string | null; onRetr
   return (
     <div data-testid="browse-add-error" className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-2 text-xs" role="alert">
       <span className="text-destructive">{addError}</span>
-      <Button type="button" size="sm" variant="ghost" onClick={onRetry}>
+      <Button type="button" size="compact" variant="ghost" onClick={onRetry}>
         Retry
       </Button>
     </div>

@@ -2,28 +2,21 @@ import type { CSSProperties, HTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";
 
-type SpinnerSize = "xs" | "sm" | "md" | "lg";
-
-const SPINNER_SIZE_PX: Record<SpinnerSize, number> = {
-  xs: 10,
-  sm: 13,
-  md: 16,
-  lg: 20,
-};
+/** Spinner diameters on the 4px scale (DESIGN.md, decision D5). */
+export type SpinnerSize = 12 | 16 | 20;
 
 type SpinnerStyle = CSSProperties & {
   "--spinner-size"?: string;
 };
 
 interface SpinnerProps extends HTMLAttributes<HTMLSpanElement> {
-  size?: SpinnerSize | number;
+  size?: SpinnerSize;
 }
 
 /** Renders the shared faded-tail loading spinner used across the app. */
-function Spinner({ size = "sm", className, style, "aria-label": ariaLabel, ...props }: SpinnerProps) {
-  const pixelSize = typeof size === "number" ? size : SPINNER_SIZE_PX[size];
+function Spinner({ size = 12, className, style, "aria-label": ariaLabel, ...props }: SpinnerProps) {
   const spinnerStyle: SpinnerStyle = {
-    "--spinner-size": `${pixelSize}px`,
+    "--spinner-size": `${size}px`,
     ...style,
   };
 
@@ -31,6 +24,7 @@ function Spinner({ size = "sm", className, style, "aria-label": ariaLabel, ...pr
     <span
       aria-hidden={ariaLabel ? undefined : true}
       aria-label={ariaLabel}
+      role={ariaLabel ? "img" : undefined}
       className={cn("spinner-tail-fade status-spin shrink-0", className)}
       style={spinnerStyle}
       {...props}

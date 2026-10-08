@@ -104,7 +104,7 @@ export function CommandPalette() {
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={(o) => !o && close()} modal="trap-focus">
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className={cn("app-viewport-fixed fixed z-(--layer-modal) bg-black/55 backdrop-blur-xs", DIALOG_FADE_CLASS)} />
+        <DialogPrimitive.Backdrop className={cn("app-viewport-fixed fixed z-(--layer-modal) bg-ink/10 backdrop-blur-xs", DIALOG_FADE_CLASS)} />
         <DialogPrimitive.Popup
           data-testid="command-palette"
           aria-label="Command palette"
@@ -204,7 +204,7 @@ function PaletteInput({
                 <Button
                   type="button"
                   variant="default"
-                  size="sm"
+                  size="compact"
                   data-testid="palette-add-folder"
                   disabled={!canAdd}
                   onMouseDown={(e) => {

@@ -143,7 +143,7 @@ function PaginationIndicator({ placement, delayMs = 0 }: { readonly placement: "
   return (
     <div className={`absolute ${positionClass} left-1/2 z-(--layer-sticky) -translate-x-1/2`}>
       <div className="rounded-md border border-border/40 bg-background/80 px-2 py-1 backdrop-blur-sm">
-        <Spinner size={14} className="text-muted/70" />
+        <Spinner size={16} className="text-muted/70" />
       </div>
     </div>
   );

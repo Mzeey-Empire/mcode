@@ -97,7 +97,7 @@ function BranchItem({ branch, selectedBranch, onSelect }: BranchItemProps) {
       )}
     >
       <span className="text-fade">{branch.name}</span>
-      {badge ? <Badge variant="secondary" size="sm" className="ml-2 shrink-0">{badge}</Badge> : null}
+      {badge ? <Badge variant="secondary" size="compact" className="ml-2 shrink-0">{badge}</Badge> : null}
     </button>
   );
 }
@@ -248,7 +248,7 @@ function BranchPickerDropdown({
       }}
     >
       <PopoverTrigger render={
-        <Button variant="ghost" size="xs" className={cn("text-muted", triggerClassName)}>
+        <Button variant="ghost" size="compact" className={cn("text-muted", triggerClassName)}>
           <GitBranch size={iconSize} className={triggerClassName ? "size-3.5" : undefined} />
           <span>From {selectedBranch}</span>
           <ChevronDown size={Math.max(10, iconSize - 2)} className={triggerClassName ? "size-3" : undefined} />
@@ -275,7 +275,7 @@ function BranchPickerDropdown({
               )}
             >
               {tab.label}
-              <Badge size="sm" className={cn("rounded-full", activeTab === tab.id ? "bg-primary/10 text-primary" : "bg-hover text-muted")}>
+              <Badge size="compact" className={cn("rounded-full", activeTab === tab.id ? "bg-primary/10 text-primary" : "bg-hover text-muted")}>
                 {tab.count}
               </Badge>
             </button>

@@ -164,7 +164,7 @@ const PullRequestSummaryPanel = memo(function PullRequestSummaryPanel({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             onClick={() => {
               if (checksLane.error) {
                 void usePullRequestDetailStore
@@ -273,7 +273,7 @@ const PullRequestTimelinePanel = memo(function PullRequestTimelinePanel({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             onClick={() => {
               const current =
                 usePullRequestDetailStore.getState().entries[identityKey];
@@ -424,7 +424,7 @@ function PullRequestDetailTabs({
           aria-controls="pull-request-detail-tabpanel"
           tabIndex={activeTab === tab ? 0 : -1}
           variant="ghost"
-          size="sm"
+          size="compact"
           className={cn(
             "relative h-full rounded-none px-0 text-xs font-medium capitalize after:absolute after:inset-x-0 after:bottom-0 after:h-px after:origin-center after:scale-x-0 after:bg-primary after:transition-transform after:duration-150 motion-reduce:after:transition-none",
             activeTab === tab
@@ -464,7 +464,7 @@ function PullRequestReviewAction({
       <Button
         type="button"
         variant="outline"
-        size="xs"
+        size="compact"
         className="shrink-0 border-border/60 bg-background/50 text-ink shadow-none hover:bg-hover/40"
         aria-describedby={
           unavailableReason ? "pull-request-review-unavailable" : undefined
@@ -515,7 +515,7 @@ function PullRequestDetailLoadingContent({
             <Button
               type="button"
               variant="outline"
-              size="sm"
+              size="compact"
               onClick={() =>
                 void usePullRequestDetailStore.getState().loadDetail(transport)
               }
@@ -524,7 +524,7 @@ function PullRequestDetailLoadingContent({
             </Button>
           </div>
         ) : (
-          <Spinner size="sm" aria-label="Loading pull request detail" />
+          <Spinner size={12} aria-label="Loading pull request detail" />
         )}
       </div>
     </>
@@ -588,7 +588,7 @@ function PullRequestDetailTabPanel({
       <Suspense
         fallback={
           <div className="flex min-h-0 flex-1 items-center justify-center">
-            <Spinner size="sm" aria-label="Loading pull request Code" />
+            <Spinner size={12} aria-label="Loading pull request Code" />
           </div>
         }
       >
@@ -672,7 +672,7 @@ function PullRequestDetailLoadedContent({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             onClick={() =>
               void usePullRequestDetailStore.getState().loadDetail(transport)
             }

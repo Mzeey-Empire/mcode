@@ -4,6 +4,7 @@ import { RefreshCw, X } from "lucide-react";
 import { WarningIcon } from "@/components/ui/icon-map";
 import { Button } from "@/components/ui/button";
 import { formatDurationMs } from "@/lib/time";
+import { Spinner } from "@/components/ui/spinner";
 
 interface InterruptedSessionsBannerProps {
   /** Exact turns interrupted by one server restart. */
@@ -33,8 +34,8 @@ export function InterruptedSessionsBanner({
   };
 
   return (
-    <div data-testid="recovery-incident-banner" role="alert" className="flex items-start gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-2.5 text-sm">
-      <WarningIcon className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+    <div data-testid="recovery-incident-banner" role="alert" className="flex items-start gap-3 rounded-md border border-warning/30 bg-warning/10 px-4 py-2.5 text-sm">
+      <WarningIcon className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <div className="min-w-0 flex-1">
         <p>{count} {count === 1 ? "turn was" : "turns were"} interrupted during the last server restart.</p>
         <ul className="mt-1 space-y-0.5 text-muted">
@@ -45,13 +46,13 @@ export function InterruptedSessionsBanner({
           ))}
         </ul>
       </div>
-      <Button variant="outline" size="sm" disabled={retrying} onClick={() => void retryAll()}>
-        <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${retrying ? "animate-spin" : ""}`} />
+      <Button variant="outline" size="compact" disabled={retrying} onClick={() => void retryAll()}>
+        {retrying ? <Spinner size={12} className="mr-1.5" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
         {retrying ? "Retrying..." : "Retry all"}
       </Button>
       <Button
         variant="ghost"
-        size="icon"
+        size="icon-compact"
         onClick={onDismiss}
         aria-label="Dismiss"
         className="h-7 w-7 text-muted hover:text-ink"

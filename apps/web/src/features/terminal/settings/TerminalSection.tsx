@@ -422,7 +422,7 @@ function WorkspaceProfileDefault({ model }: { readonly model: TerminalSectionMod
           onChange={model.selectWorkspaceProfile}
         />
         {model.workspaceOverride ? (
-          <Button variant="ghost" size="sm" disabled={model.pending} onClick={model.resetWorkspaceProfile}>
+          <Button variant="ghost" size="compact" disabled={model.pending} onClick={model.resetWorkspaceProfile}>
             Use inherited profile
           </Button>
         ) : null}
@@ -449,8 +449,8 @@ function CustomProfileRow({
         <span className="ml-2 text-muted">{profile.executable}</span>
       </span>
       <span className="flex shrink-0 gap-1">
-        <Button variant="ghost" size="xs" disabled={pending} onClick={() => onEdit(profile)}>Edit</Button>
-        <Button variant="ghost" size="xs" disabled={pending} onClick={() => onDelete(profile.id)}>Delete</Button>
+        <Button variant="ghost" size="compact" disabled={pending} onClick={() => onEdit(profile)}>Edit</Button>
+        <Button variant="ghost" size="compact" disabled={pending} onClick={() => onDelete(profile.id)}>Delete</Button>
       </span>
     </div>
   );
@@ -482,7 +482,7 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
                 {profile.name}
                 <span className="ml-2 text-muted">{profile.executable}</span>
               </span>
-              <Badge variant="secondary" size="sm">Detected</Badge>
+              <Badge variant="secondary" size="compact">Detected</Badge>
             </div>
           ))}
         </div>
@@ -504,12 +504,12 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
                 {profile.name}
                 <span className="ml-2 text-muted">{profile.executable}</span>
               </span>
-              <Badge variant="secondary" size="sm">Recovered</Badge>
+              <Badge variant="secondary" size="compact">Recovered</Badge>
             </div>
           ))}
           <Button
             variant="outline"
-            size="sm"
+            size="compact"
             disabled={model.pending || model.customProfiles.length >= 32}
             onClick={model.openNewProfileDialog}
           >

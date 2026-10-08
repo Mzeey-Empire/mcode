@@ -72,7 +72,7 @@ function SettledPermissionRequest({ icon, label, decision, optionLabel }: { icon
     <div className="flex items-center gap-2 border-l-2 border-border/30 pl-3 py-1 text-xs text-muted/70">
       {icon}
       <span className="font-medium">{label}</span>
-      <Badge variant={badgeVariantFor(decision)} size="sm" className="ml-1">
+      <Badge variant={badgeVariantFor(decision)} size="compact" className="ml-1">
         {optionLabel ?? decisionLabel(decision)}
       </Badge>
     </div>
@@ -102,8 +102,8 @@ function PendingPermissionRequest({
 }) {
   const controlsDisabled = responding || !ready;
   return (
-    <div className="border-l-2 border-amber-500/60 pl-3 py-2 flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+    <div className="border-l-2 border-primary/60 pl-3 py-2 flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-xs font-medium text-primary">
         {icon}
         <span>Permission requested: {label}</span>
       </div>
@@ -127,13 +127,13 @@ function PendingPermissionRequest({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" sideOffset={4} className="min-w-[180px]">
               <DropdownMenuItem onClick={() => onAllowMode("allow")} className="gap-2">
-                <Zap size={12} className="text-amber-500 shrink-0" />
+                <Zap size={12} className="text-primary shrink-0" />
                 <div className="flex flex-col"><span className="text-xs font-medium">Allow once</span><span className="text-xs text-muted">Prompt again next time</span></div>
                 {allowMode === "allow" && <Check size={11} className="ml-auto text-primary" />}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => onAllowMode("allow-session")} className="gap-2">
-                <Clock size={12} className="text-blue-400 shrink-0" />
+                <Clock size={12} className="text-info shrink-0" />
                 <div className="flex flex-col"><span className="text-xs font-medium">Allow in session</span><span className="text-xs text-muted">Skip prompts this session</span></div>
                 {allowMode === "allow-session" && <Check size={11} className="ml-auto text-primary" />}
               </DropdownMenuItem>
@@ -198,8 +198,8 @@ function PendingOptionsRequest({
 }) {
   const controlsDisabled = responding || !ready;
   return (
-    <div className="border-l-2 border-amber-500/60 pl-3 py-2 flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+    <div className="border-l-2 border-primary/60 pl-3 py-2 flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-xs font-medium text-primary">
         {icon}
         <span>Permission requested: {label}</span>
       </div>
@@ -264,8 +264,8 @@ function PendingQuestionRequest({
   };
 
   return (
-    <div className="border-l-2 border-amber-500/60 pl-3 py-2 flex flex-col gap-3">
-      <div className="flex items-center gap-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+    <div className="border-l-2 border-primary/60 pl-3 py-2 flex flex-col gap-3">
+      <div className="flex items-center gap-2 text-xs font-medium text-primary">
         {icon}
         <span>Answer required: {label}</span>
       </div>

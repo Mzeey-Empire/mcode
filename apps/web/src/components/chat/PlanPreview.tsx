@@ -28,7 +28,7 @@ export function PlanPreview({ workspaceId, threadId, preview }: PlanPreviewProps
   return (
     <div
       data-testid="plan-preview"
-      className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-panel/75 px-3 py-2 shadow-sm"
+      className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-panel/75 px-3 py-2"
     >
       <ListChecks size={16} className="shrink-0 text-muted" aria-hidden />
       <Tooltip>
@@ -42,7 +42,7 @@ export function PlanPreview({ workspaceId, threadId, preview }: PlanPreviewProps
       <Button
         type="button"
         variant="outline"
-        size="xs"
+        size="compact"
         onClick={viewPlan}
         className="shrink-0"
       >
@@ -54,7 +54,7 @@ export function PlanPreview({ workspaceId, threadId, preview }: PlanPreviewProps
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               aria-label="Dismiss plan preview"
               onClick={() => usePlanStore.getState().dismissLivePreview(threadId, preview.version)}
               className="shrink-0 text-muted"
