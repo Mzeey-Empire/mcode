@@ -7,6 +7,7 @@ import { openRpc } from "./rpc.js";
 import { commandOutput, promptFor, recordFence, type ProbeContext, type ProbeEnd } from "./runtime.js";
 
 const threadSchema = z.object({ thread: z.object({ id: z.string() }) });
+const modelsSchema = z.object({ data: z.array(z.object({ model: z.string(), isDefault: z.boolean() })) });
 const turnSchema = z.object({ turn: z.object({ id: z.string() }) });
 const questionSchema = z.object({ threadId: z.string(), turnId: z.string(), questions: z.array(z.object({ id: z.string(), options: z.array(z.object({ label: z.string() })).nullable().optional() })) });
 const completedSchema = z.object({ turn: z.object({ status: z.string(), items: z.array(z.object({ type: z.string(), text: z.string().optional() }).passthrough()).optional() }) });
@@ -20,10 +21,13 @@ export async function probeCodex(context: ProbeContext): Promise<ProbeEnd> {
   const version = await commandOutput(context, command, ["--version"]);
   context.version({ cliVersion: version.replace(/^codex-cli /, ""), protocolVersion: "app-server-unversioned", sdk: null });
   const state = context.providerHome.replaceAll("\\", "/");
-  const rpc = openRpc(context, context.spawn(command, ["app-server", "--stdio", "-c", `sqlite_home="${state}"`, "-c", `log_dir="${state}/logs"`, "-c", "mcp_servers={}", "-c", "web_search=\"disabled\""], { RUST_LOG: "info" }));
+  const rpc = openRpc(context, context.spawn(command, ["app-server", "--stdio", "-c", `log_dir="${state}/logs"`, "-c", "web_search=\"disabled\""], { RUST_LOG: "info" }));
   await rpc.request("initialize", { clientInfo: { name: "mcode-plan-probe", version: "1.0.0" }, capabilities: { experimentalApi: true } });
   rpc.notify("initialized", {});
-  const thread = threadSchema.parse(await rpc.request("thread/start", { cwd: context.fixtureRepo, ephemeral: true, approvalPolicy: "never", sandbox: "read-only", model: "gpt-5.4-mini", config: { windows: { sandbox: "unelevated" } } }));
+  const models = modelsSchema.parse(await rpc.request("model/list", {}));
+  const model = models.data.find((entry) => entry.isDefault)?.model;
+  if (!model) throw new Error("Account model catalog has no default model");
+  const thread = threadSchema.parse(await rpc.request("thread/start", { cwd: context.fixtureRepo, ephemeral: true, approvalPolicy: "never", sandbox: "read-only", model, config: { windows: { sandbox: "unelevated" } } }));
   let questionSeen = false;
   let processExit = false;
   let text = "";
@@ -42,7 +46,7 @@ export async function probeCodex(context: ProbeContext): Promise<ProbeEnd> {
     const answers = Object.fromEntries(question.questions.map((item) => [item.id, { answers: context.scenario === "questions-decline" ? [] : [context.scenario === "questions-free-text" ? "Use a cheerful greeting." : item.options?.[0]?.label ?? "Brief"] }]));
     rpc.reply(id, { answers });
   });
-  const result = await rpc.request("turn/start", { threadId: thread.thread.id, input: [{ type: "text", text: promptFor(context), text_elements: [] }], collaborationMode: { mode: "plan", settings: { model: "gpt-5.4-mini", reasoning_effort: "low", developer_instructions: null } }, additionalContext: [] });
+  const result = await rpc.request("turn/start", { threadId: thread.thread.id, input: [{ type: "text", text: promptFor(context), text_elements: [] }], collaborationMode: { mode: "plan", settings: { model, reasoning_effort: "low", developer_instructions: null } }, additionalContext: {} });
   turnSchema.parse(result);
   let completed: z.infer<typeof completedSchema>;
   try { completed = completedSchema.parse(await rpc.event("turn/completed")); }

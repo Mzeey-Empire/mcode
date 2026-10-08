@@ -1,0 +1,588 @@
+{
+  "format": "plan-protocol",
+  "contractVersion": 1,
+  "providerId": "claude",
+  "cliVersion": "2.1.293",
+  "protocolVersion": "claude-sdk-unversioned",
+  "sdk": {
+    "name": "@anthropic-ai/claude-agent-sdk",
+    "version": "0.3.291"
+  },
+  "provenance": "captured",
+  "scenario": "file-identity",
+  "sourceHash": "54e5ffe8367326d44b548b7c06583ae755ca03fdb09ce817b60e5603e89596c1",
+  "redaction": {
+    "reviewed": true,
+    "removedFields": [
+      "private-text",
+      "credentials",
+      "native-identifiers",
+      "machine-paths",
+      "unlisted-fields"
+    ]
+  },
+  "input": {
+    "messages": [
+      {
+        "sequence": 1,
+        "operation": "sdk/query",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "permissionMode",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "persistSession",
+            "kind": "literal",
+            "value": false
+          },
+          {
+            "at": "plansDirectory",
+            "kind": "path",
+            "value": "{fixtureRepo}/ID_1"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 2,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "system"
+          },
+          {
+            "at": "subtype",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 3,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "rate_limit_event"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 4,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "system"
+          },
+          {
+            "at": "subtype",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 5,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "message.content.0.type",
+            "kind": "literal",
+            "value": "thinking"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 6,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "message.content.0.input",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "message.content.0.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "message.content.0.type",
+            "kind": "literal",
+            "value": "tool_use"
+          },
+          {
+            "at": "message.content.0.name",
+            "kind": "literal",
+            "value": "Write"
+          },
+          {
+            "at": "message.content.0.input.file_path",
+            "kind": "path",
+            "value": "{fixtureRepo}/ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 7,
+        "operation": "sdk/preToolUse",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "tool_name",
+            "kind": "literal",
+            "value": "Write"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "tool_use_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "tool_input.file_path",
+            "kind": "path",
+            "value": "{fixtureRepo}/ID_5"
+          },
+          {
+            "at": "tool_input.content",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 8,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "rate_limit_event"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 9,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "user"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "message.content.0.type",
+            "kind": "literal",
+            "value": "tool_result"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 10,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "system"
+          },
+          {
+            "at": "subtype",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 11,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "message.content.0.type",
+            "kind": "literal",
+            "value": "thinking"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 12,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "message.content.0.input",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "message.content.0.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "message.content.0.type",
+            "kind": "literal",
+            "value": "tool_use"
+          },
+          {
+            "at": "message.content.0.name",
+            "kind": "literal",
+            "value": "ExitPlanMode"
+          },
+          {
+            "at": "message.content.0.input.plan",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 13,
+        "operation": "sdk/preToolUse",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "tool_name",
+            "kind": "literal",
+            "value": "ExitPlanMode"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "tool_use_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "tool_input.plan",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 14,
+        "operation": "sdk/canUseTool",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "toolName",
+            "kind": "literal",
+            "value": "ExitPlanMode"
+          },
+          {
+            "at": "input.plan",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "input.planFilePath",
+            "kind": "path",
+            "value": "{fixtureRepo}/ID_5"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_7"
+      },
+      {
+        "sequence": 15,
+        "operation": "probe/exit-plan",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "hasPlan",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "nonemptyPlan",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "matchesWrittenPlan",
+            "kind": "literal",
+            "value": true
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 16,
+        "operation": "sdk/canUseTool",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "message",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "behavior",
+            "kind": "literal",
+            "value": "deny"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_7"
+      },
+      {
+        "sequence": 17,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "user"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "message.content.0.type",
+            "kind": "literal",
+            "value": "tool_result"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 18,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "message.content.0.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "message.content.0.type",
+            "kind": "literal",
+            "value": "text"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 19,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "result"
+          },
+          {
+            "at": "subtype",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "result",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "is_error",
+            "kind": "literal",
+            "value": false
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 20,
+        "operation": "sdk/query",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "completed",
+            "kind": "literal",
+            "value": true
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 21,
+        "operation": "probe/file",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "path",
+            "kind": "path",
+            "value": "{fixtureRepo}/ID_5"
+          },
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "exists",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "insideRun",
+            "kind": "literal",
+            "value": true
+          }
+        ],
+        "kind": "event"
+      }
+    ],
+    "end": {
+      "kind": "completed"
+    }
+  }
+}

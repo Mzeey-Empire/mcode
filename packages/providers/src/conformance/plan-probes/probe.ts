@@ -5,7 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodeChildProcess from "node:child_process";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { z } from "zod";
-import { containedPath, hygieneSnapshot, listFiles, providerSchema, scenarioSchema, type CaptureVersion, type ProbeContext, type ProbeEnd } from "./runtime.js";
+import { containedPath, hygieneSnapshot, listFiles, providerSchema, recordChildStderr, scenarioSchema, type CaptureVersion, type ProbeContext, type ProbeEnd } from "./runtime.js";
 import { probeCodex } from "./codex.js";
 import { probeClaude } from "./claude.js";
 import { probeCopilot } from "./copilot.js";
@@ -43,6 +43,7 @@ async function capture(args: string[]): Promise<void> {
   if (!NodeFS.existsSync(NodePath.join(fixtureRepo, ".git")) || !containedPath(root, fixtureRepo)) throw new Error("Missing or escaped fixture repository");
   exclusiveDirectory(rawDirectory);
   exclusiveDirectory(providerHome);
+  NodeFS.writeFileSync(NodePath.join(rawDirectory, "stderr.log"), "", { flag: "wx" });
   const before = hygieneSnapshot();
   const fixtureBefore = listFiles(fixtureRepo);
   const children: NodeChildProcess.ChildProcessWithoutNullStreams[] = [];
@@ -67,7 +68,7 @@ async function capture(args: string[]): Promise<void> {
       const child = NodeChildProcess.spawn(command, argv, { cwd: fixtureRepo, env: { ...process.env, DISABLE_AUTOUPDATER: "1", DEVIN_NO_AUTO_UPDATE: "1", ...extraEnv }, windowsHide: true, stdio: "pipe" });
       children.push(child);
       NodeFS.appendFileSync(NodePath.join(rawDirectory, "processes.jsonl"), `${JSON.stringify({ pid: child.pid, command, args: argv, at: new Date().toISOString() })}\n`);
-      child.stderr.on("data", (chunk: Buffer) => NodeFS.appendFileSync(NodePath.join(rawDirectory, "stderr.log"), chunk));
+      recordChildStderr(child, rawDirectory, children.length);
       return child;
     },
   };

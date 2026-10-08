@@ -31,8 +31,11 @@ const acp: Record<string, Rule[]> = {
 };
 const rules: Record<z.infer<typeof providerSchema>, Record<string, Rule[]>> = {
   codex: {
+    "model/list": [...shape("data.[].model"), ...bool("data.[].isDefault")],
+    "account/updated": [], "mcpServer/startupStatus/updated": [], "remoteControl/status/changed": [], "thread/settings/updated": [], warning: [],
+    "serverRequest/resolved": [...identity("threadId", "requestId")],
     initialize: [...shape("capabilities.experimentalApi", "userAgent", "platformFamily", "platformOs")], initialized: [],
-    "thread/start": [...shape("cwd", "config", "thread"), ...bool("ephemeral"), literal("sandbox", "read-only"), literal("approvalPolicy", "never"), ...identity("thread.id")],
+    "thread/start": [...shape("cwd", "config", "thread", "sandbox"), ...bool("ephemeral"), literal("sandbox.type", "readOnly"), literal("approvalPolicy", "never"), ...identity("thread.id")],
     "thread/started": identity("thread.id"),
     "turn/start": [...identity("threadId", "turn.id"), ...shape("input.[].text", "collaborationMode", "collaborationMode.settings", "collaborationMode.settings.model", "additionalContext"), literal("collaborationMode.mode", "plan", "default"), literal("collaborationMode.settings.developer_instructions", null), literal("collaborationMode.settings.reasoning_effort", "low"), literal("turn.status", "inProgress", "completed")],
     "turn/started": [...identity("threadId", "turn.id"), literal("turn.status", "inProgress")],
@@ -43,15 +46,15 @@ const rules: Record<z.infer<typeof providerSchema>, Record<string, Rule[]>> = {
     "item/agentMessage/delta": [...identity("threadId", "turnId", "itemId"), ...shape("delta")],
     "item/reasoning/summaryTextDelta": shape("delta"), "item/reasoning/summaryPartAdded": [],
     "thread/tokenUsage/updated": [], "thread/status/changed": [], "account/rateLimits/updated": [],
-    "item/tool/requestUserInput": [...identity("threadId", "turnId", "itemId", "questions.[].id"), ...shape("questions", "questions.[].header", "questions.[].question", "questions.[].options", "questions.[].options.[].label", "questions.[].options.[].description", "answers", "answers.{}.answers", "answers.{}.answers.[]", "error"), ...bool("questions.[].isOther", "questions.[].isSecret")],
+    "item/tool/requestUserInput": [...identity("threadId", "turnId", "itemId", "questions.[].id"), ...shape("questions", "questions.[].header", "questions.[].question", "questions.[].options", "questions.[].options.[].label", "questions.[].options.[].description", "answers", "answers.{}.answers", "answers.{}.answers.[]", "error"), literal("error.code", -32800), ...bool("questions.[].isOther", "questions.[].isSecret", "isBlocking")],
     error: [...shape("message", "codexErrorInfo"), ...bool("willRetry")],
   },
   claude: {
     "sdk/query": [literal("permissionMode", "plan"), ...bool("persistSession", "completed"), pathRule("plansDirectory")],
     "sdk/message": [literal("type", "system", "assistant", "user", "result", "stream_event", "tool_progress", "tool_use_summary", "rate_limit_event"), ...shape("subtype", "message.content.[].text", "message.content.[].input", "result"), ...identity("session_id", "message.content.[].id"), literal("message.content.[].type", "text", "tool_use", "tool_result", "thinking"), literal("message.content.[].name", "ExitPlanMode", "AskUserQuestion", "Read", "Write"), ...shape("message.content.[].input.plan"), pathRule("message.content.[].input.file_path"), ...bool("is_error")],
     "sdk/preToolUse": [literal("tool_name", "Write", "Read", "ExitPlanMode", "AskUserQuestion"), ...identity("session_id", "tool_use_id"), pathRule("tool_input.file_path"), ...shape("tool_input.plan", "tool_input.questions", "tool_input.content")],
-    "sdk/canUseTool": [literal("toolName", "Write", "Read", "ExitPlanMode", "AskUserQuestion"), ...shape("input.plan", "input.questions", "input.questions.[].question", "input.questions.[].options", "message"), literal("behavior", "deny"), pathRule("input.file_path")],
-    "probe/exit-plan": bool("hasPlan", "nonemptyPlan"),
+    "sdk/canUseTool": [literal("toolName", "Write", "Read", "ExitPlanMode", "AskUserQuestion"), ...shape("input.plan", "input.questions", "input.questions.[].question", "input.questions.[].options", "message"), literal("behavior", "deny", "allow"), pathRule("input.file_path"), pathRule("input.planFilePath")],
+    "probe/exit-plan": bool("hasPlan", "nonemptyPlan", "matchesWrittenPlan"),
   },
   copilot: {
     "sdk/status": [...shape("version"), literal("protocolVersion", 3)],
@@ -63,8 +66,22 @@ const rules: Record<z.infer<typeof providerSchema>, Record<string, Rule[]>> = {
     "sdk/plan.read": [...identity("sessionId"), ...bool("exists"), ...shape("content"), pathRule("path")],
   },
   devin: acp,
-  cursor: acp,
-  opencode: {},
+  cursor: {
+    ...acp,
+    "session/set_mode": [...identity("sessionId"), literal("modeId", "plan")],
+    "session/set_model": [...identity("sessionId"), ...shape("modelId")],
+    "cursor/create_plan": [...identity("toolCallId"), ...shape("plan", "markdown", "name", "overview", "todos", "phases", "outcome.feedback"), pathRule("path"), pathRule("planPath"), literal("outcome.outcome", "cancelled", "rejected", "feedback")],
+    "cursor/ask_question": [...identity("toolCallId", "questions.[].id"), ...shape("questions", "questions.[].prompt", "questions.[].options", "questions.[].options.[].id", "questions.[].options.[].label", "outcome.reason"), ...bool("questions.[].allowMultiple"), literal("outcome.outcome", "skipped")],
+  },
+  opencode: {
+    "http/health": [literal("status", 200), ...bool("data.healthy"), ...shape("data.version")],
+    "http/session.create": [literal("status", 200), ...identity("data.id"), ...shape("data.directory")],
+    "http/prompt_async": [literal("status", 204), literal("agent", "plan"), ...shape("parts.[].text")],
+    "http/session.messages": [literal("status", 200), ...identity("data.[].info.sessionID", "data.[].info.id"), literal("data.[].info.agent", "plan"), literal("data.[].info.role", "user", "assistant"), ...shape("data.[].parts.[].type", "data.[].parts.[].text", "data.[].parts.[].tool", "data.[].parts.[].state.input", "data.[].parts.[].state.output")],
+    "http/event": [literal("type", "catalog.updated", "integration.updated", "message.part.delta", "message.part.updated", "message.updated", "plugin.added", "question.asked", "question.replied", "reference.updated", "server.connected", "server.heartbeat", "session.diff", "session.idle", "session.status", "session.updated", "permission.asked", "permission.replied", "session.error"), ...shape("properties.part.type", "properties.part.text", "properties.part.tool", "properties.part.state.input", "properties.part.state.output", "properties.error", "properties.questions", "properties.questions.[].header", "properties.questions.[].question", "properties.questions.[].options.[].label", "properties.questions.[].options.[].description"), ...identity("properties.sessionID", "properties.id", "properties.part.sessionID"), ...bool("properties.questions.[].multiple", "properties.questions.[].custom")],
+    "http/question.reply": [literal("status", 200), ...bool("data"), ...shape("answers", "answers.[].[]")],
+    "http/permission.reply": [literal("status", 200), literal("reply", "reject"), ...bool("data")],
+  },
 };
 
 const jsonTypeSchema = z.enum(["object", "array", "string", "number", "boolean", "null"]);
@@ -81,7 +98,7 @@ const endSchema = z.union([z.object({ kind: z.enum(["completed", "interrupted", 
 const versionSchema = z.string().regex(/^(?:\d+\.\d+\.\d+(?:-[a-z0-9]+)?|unknown)$/).max(60);
 const fixtureSchema = z.object({
   format: z.literal("plan-protocol"), contractVersion: z.literal(1), providerId: providerSchema,
-  cliVersion: versionSchema, protocolVersion: z.enum(["app-server-unversioned", "claude-sdk-unversioned", "copilot-sdk-unversioned", "copilot-rpc-3", "acp-1", "unmeasured"]),
+  cliVersion: versionSchema, protocolVersion: z.enum(["app-server-unversioned", "claude-sdk-unversioned", "copilot-sdk-unversioned", "copilot-rpc-3", "acp-1", "opencode-http-unversioned", "unmeasured"]),
   sdk: z.object({ name: z.enum(["@anthropic-ai/claude-agent-sdk", "@github/copilot-sdk"]), version: versionSchema }).strict().nullable(),
   provenance: z.literal("captured"), scenario: scenarioSchema, sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
   redaction: z.object({ reviewed: z.literal(true), removedFields: z.tuple([z.literal("private-text"), z.literal("credentials"), z.literal("native-identifiers"), z.literal("machine-paths"), z.literal("unlisted-fields")]) }).strict(),

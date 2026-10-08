@@ -1,0 +1,2542 @@
+{
+  "format": "plan-protocol",
+  "contractVersion": 1,
+  "providerId": "opencode",
+  "cliVersion": "1.18.28",
+  "protocolVersion": "opencode-http-unversioned",
+  "sdk": null,
+  "provenance": "captured",
+  "scenario": "file-identity",
+  "sourceHash": "31d3abd5663086b68f6521e3c9b893c2edea309c98236eb7042b6e9a58db55b6",
+  "redaction": {
+    "reviewed": true,
+    "removedFields": [
+      "private-text",
+      "credentials",
+      "native-identifiers",
+      "machine-paths",
+      "unlisted-fields"
+    ]
+  },
+  "input": {
+    "messages": [
+      {
+        "sequence": 1,
+        "operation": "http/health",
+        "direction": "sent",
+        "fields": [],
+        "kind": "request",
+        "exchange": "ID_1"
+      },
+      {
+        "sequence": 2,
+        "operation": "http/health",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "status",
+            "kind": "literal",
+            "value": 200
+          },
+          {
+            "at": "data.healthy",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "data.version",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_1"
+      },
+      {
+        "sequence": 3,
+        "operation": "http/session.create",
+        "direction": "sent",
+        "fields": [],
+        "kind": "request",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 4,
+        "operation": "http/session.create",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "status",
+            "kind": "literal",
+            "value": 200
+          },
+          {
+            "at": "data.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "data.directory",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 5,
+        "operation": "http/prompt_async",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "agent",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "parts.0.text",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_4"
+      },
+      {
+        "sequence": 6,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "server.connected"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 7,
+        "operation": "http/prompt_async",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "status",
+            "kind": "literal",
+            "value": 204
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_4"
+      },
+      {
+        "sequence": 8,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 9,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 10,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 11,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 12,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.status"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 13,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 14,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 15,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.diff"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 16,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 17,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 18,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_7"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 19,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_8"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 20,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_9"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 21,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_10"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 22,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_11"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 23,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_12"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 24,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_13"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 25,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_14"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 26,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_15"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 27,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_16"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 28,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_17"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 29,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_18"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 30,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_19"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 31,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_20"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 32,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_21"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 33,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_22"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 34,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_23"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 35,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_24"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 36,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_25"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 37,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_26"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 38,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_27"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 39,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_28"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 40,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_29"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 41,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_30"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 42,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_31"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 43,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_32"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 44,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_33"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 45,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_34"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 46,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_35"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 47,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_36"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 48,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_37"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 49,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_38"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 50,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_39"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 51,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_40"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 52,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_41"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 53,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "catalog.updated"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 54,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_42"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 55,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_43"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 56,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_44"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 57,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_45"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 58,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_46"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 59,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_47"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 60,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_48"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 61,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_49"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 62,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "plugin.added"
+          },
+          {
+            "at": "properties.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_50"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 63,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "reference.updated"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 64,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "integration.updated"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 65,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "catalog.updated"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 66,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.status"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 67,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 68,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 69,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 70,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "server.heartbeat"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 71,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 72,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.delta"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 73,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 74,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.tool",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.state.input",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 75,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.tool",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.state.input",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "properties.part.state.output",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 76,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 77,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 78,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.status"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 79,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 80,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 81,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.diff"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 82,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.status"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 83,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 84,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 85,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 86,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.delta"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 87,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 88,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.tool",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.state.input",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 89,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.tool",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.state.input",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "properties.part.state.output",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 90,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 91,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 92,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.status"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 93,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 94,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 95,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.diff"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 96,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.status"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 97,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 98,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "server.heartbeat"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 99,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 100,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 101,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.delta"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 102,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.part.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 103,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.part.updated"
+          },
+          {
+            "at": "properties.part.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "properties.part.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 104,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "message.updated"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 105,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.status"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 106,
+        "operation": "http/event",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "session.idle"
+          },
+          {
+            "at": "properties.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 107,
+        "operation": "http/session.messages",
+        "direction": "sent",
+        "fields": [],
+        "kind": "request",
+        "exchange": "ID_51"
+      },
+      {
+        "sequence": 108,
+        "operation": "http/session.messages",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "status",
+            "kind": "literal",
+            "value": 200
+          },
+          {
+            "at": "data.0.info.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "data.1.info.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "data.2.info.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "data.3.info.sessionID",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_5"
+          },
+          {
+            "at": "data.0.info.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_52"
+          },
+          {
+            "at": "data.1.info.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_53"
+          },
+          {
+            "at": "data.2.info.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_54"
+          },
+          {
+            "at": "data.3.info.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_55"
+          },
+          {
+            "at": "data.0.info.agent",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "data.1.info.agent",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "data.2.info.agent",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "data.3.info.agent",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "data.0.info.role",
+            "kind": "literal",
+            "value": "user"
+          },
+          {
+            "at": "data.1.info.role",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "data.2.info.role",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "data.3.info.role",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "data.0.parts.0.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.parts.0.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.parts.1.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.parts.2.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.parts.3.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.parts.4.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.0.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.1.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.2.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.3.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.4.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.5.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.3.parts.0.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.3.parts.1.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.3.parts.2.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.3.parts.3.type",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.0.parts.0.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.parts.1.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.parts.2.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.1.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.2.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.3.parts.1.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.3.parts.2.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.parts.3.tool",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.3.tool",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.4.tool",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.parts.3.state.input",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "data.2.parts.3.state.input",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "data.2.parts.4.state.input",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "data.1.parts.3.state.output",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.3.state.output",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.parts.4.state.output",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_51"
+      }
+    ],
+    "end": {
+      "kind": "completed"
+    }
+  }
+}

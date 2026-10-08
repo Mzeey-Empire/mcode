@@ -13,9 +13,10 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: ({ prompt }: { prompt:
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeChildProcess from "node:child_process";
 import { loadPlanProtocolFixture, parsePlanProtocolFixture, projectPlanProtocolCapture, sanitizePlanProtocolCapture } from "../plan-probes/fixture.js";
 import { providerFixtureSourceHash } from "../fixture-safety.js";
-import { containedPath } from "../plan-probes/runtime.js";
+import { containedPath, recordChildStderr } from "../plan-probes/runtime.js";
 import type { ProviderEventDraft } from "../../host-ports.js";
 import {
   DeterministicCanonicalSink,
@@ -47,7 +48,7 @@ describe("Plan protocol research evidence", () => {
   it("discovers and validates every committed capture without changing factory coverage", () => {
     const files = NodeFS.readdirSync(planFixtureDirectory);
     expect(files).toContain("s07-devin-01.captured.json");
-    expect(files).toContain("s07-codex-03.captured.json");
+    expect(files).toContain("r1-codex-plan-02.captured.json");
     for (const file of files) expect(loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, file)).provenance).toBe("captured");
     expect(ENABLED_PROVIDER_CONFORMANCE.map((provider) => provider.providerId).sort()).toEqual(["claude", "codex", "copilot", "cursor", "opencode"]);
   });
@@ -170,6 +171,23 @@ describe("Plan protocol research evidence", () => {
     expect(fixture.input.messages.find((message) => message.operation === "sdk/plan.read" && message.kind === "reply")!.fields).toContainEqual({ at: "exists", kind: "literal", value: true });
   });
 
+  it("ties Claude's full ExitPlanMode payload to the written file and the same session", () => {
+    const fixture = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, "r1-claude-file-03.captured.json"));
+    const exit = fixture.input.messages.find((message) => message.operation === "sdk/canUseTool" && message.kind === "request" && message.fields.some((field) => field.at === "toolName" && field.kind === "literal" && field.value === "ExitPlanMode"))!;
+    expect(exit.fields).toContainEqual({ at: "input.plan", kind: "shape", jsonType: "string" });
+    const exitPath = exit.fields.find((field) => field.at === "input.planFilePath");
+    const file = fixture.input.messages.find((message) => message.operation === "probe/file")!;
+    expect(file.fields).toContainEqual({ at: "exists", kind: "literal", value: true });
+    expect(file.fields).toContainEqual({ at: "insideRun", kind: "literal", value: true });
+    expect(file.fields.find((field) => field.at === "path")).toEqual({ ...exitPath, at: "path" });
+    expect(exitPath?.kind === "path" && exitPath.value.startsWith("{fixtureRepo}/")).toBe(true);
+    const write = fixture.input.messages.find((message) => message.operation === "sdk/preToolUse" && message.fields.some((field) => field.kind === "literal" && field.at === "tool_name" && field.value === "Write"))!;
+    expect(file.fields.find((field) => field.at === "sessionId")).toEqual({ ...write.fields.find((field) => field.at === "session_id"), at: "sessionId" });
+    expect(fixture.input.messages.find((message) => message.operation === "probe/exit-plan")!.fields).toEqual([
+      { at: "hasPlan", kind: "literal", value: true }, { at: "nonemptyPlan", kind: "literal", value: true }, { at: "matchesWrittenPlan", kind: "literal", value: true },
+    ]);
+  });
+
   it.each(["claude", "copilot", "devin"])("pins %s nested-fence reproduction from its actual response", (provider) => {
     const fixture = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, `s07-${provider}-fence-01.captured.json`));
     expect(fixture.input.messages.filter((message) => message.operation === "probe/fence").map((message) => message.fields)).toEqual([[
@@ -190,12 +208,87 @@ describe("Plan protocol research evidence", () => {
     expect(old.input.messages.find((message) => message.operation === "sdk/plan.read")!.fields).toContainEqual({ at: "exists", kind: "literal", value: false });
   });
 
-  it("pins Devin's acknowledged plan mode and preserves Codex's unanswered initialize", () => {
+  it("pins Devin's acknowledged plan mode", () => {
     const devin = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, "s07-devin-01.captured.json"));
     expect(devin.input.messages.find((message) => message.kind === "reply" && message.operation === "session/set_config_option")!.fields).toContainEqual({ at: "configOptions.0.currentValue", kind: "literal", value: "plan" });
-    const codex = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, "s07-codex-03.captured.json"));
-    expect(codex.input.end).toEqual({ kind: "timeout" });
-    expect(codex.input.messages.filter((message) => message.operation === "initialize").map((message) => message.kind)).toEqual(["request"]);
+  });
+
+  it("preserves stderr from failed children and creates a file for silent children", async () => {
+    const root = NodePath.resolve(import.meta.dirname, "../../../.conformance-raw");
+    const directory = NodeFS.mkdtempSync(NodePath.join(root, "stderr-test-"));
+    try {
+      for (const [index, script] of ["process.stderr.write('probe diagnostic'); process.exitCode = 1", "process.exitCode = 1"].entries()) {
+        const child = NodeChildProcess.spawn(process.execPath, ["-e", script], { windowsHide: true, stdio: "pipe" });
+        recordChildStderr(child, directory, index);
+        const exit = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+        expect(exit).toBe(1);
+      }
+      expect(NodeFS.readFileSync(NodePath.join(directory, "child-0.stderr.log"), "utf8")).toBe("probe diagnostic");
+      expect(NodeFS.readFileSync(NodePath.join(directory, "child-1.stderr.log"), "utf8")).toBe("");
+      expect(NodeFS.readFileSync(NodePath.join(directory, "stderr.log"), "utf8")).toBe("probe diagnostic");
+    } finally { NodeFS.rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it("pins an acknowledged Codex collaboration mode followed by plan deltas and a completed plan", () => {
+    const fixture = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, "r1-codex-plan-02.captured.json"));
+    const start = fixture.input.messages.filter((message) => message.operation === "turn/start");
+    expect(start.map((message) => message.kind)).toEqual(["request", "reply"]);
+    expect(start[0]!.fields).toContainEqual({ at: "collaborationMode.mode", kind: "literal", value: "plan" });
+    expect(start[0]!.fields).toContainEqual({ at: "additionalContext", kind: "shape", jsonType: "object" });
+    expect(start[1]!.fields).toContainEqual({ at: "turn.status", kind: "literal", value: "inProgress" });
+    expect(fixture.input.messages.filter((message) => message.operation === "item/plan/delta").flatMap((message) => message.fields)).toContainEqual({ at: "delta", kind: "shape", jsonType: "string" });
+    expect(fixture.input.messages.filter((message) => message.operation === "item/completed").flatMap((message) => message.fields)).toContainEqual({ at: "item.type", kind: "literal", value: "plan" });
+    expect(fixture.input.end).toEqual({ kind: "completed" });
+  });
+
+  it.each(["questions", "questions-free-text", "questions-decline", "questions-cancel", "questions-interrupt", "questions-process-exit"])("pins Codex %s without inventing cancellation replies", (scenario) => {
+    const fixture = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, `r1-codex-${scenario}.captured.json`));
+    const messages = fixture.input.messages.filter((message) => message.operation === "item/tool/requestUserInput");
+    const interrupted = scenario === "questions-interrupt" || scenario === "questions-process-exit";
+    expect(messages.map((message) => message.kind)).toEqual(interrupted ? ["request"] : ["request", "reply"]);
+    expect(messages[0]!.fields).toContainEqual({ at: "questions.0.question", kind: "shape", jsonType: "string" });
+    if (interrupted) {
+      expect(fixture.input.end.kind).toBe(scenario === "questions-interrupt" ? "interrupted" : "process-exit");
+      const interrupts = fixture.input.messages.filter((message) => message.operation === "turn/interrupt");
+      expect(interrupts.map((message) => message.kind)).toEqual(scenario === "questions-interrupt" ? ["request", "reply"] : []);
+    } else {
+      expect(messages[1]).toMatchObject({ exchange: "exchange" in messages[0]! ? messages[0].exchange : null });
+      const answerStrings = messages[1]!.fields.filter((field) => /^answers\.ID_\d+\.answers\.0$/.test(field.at));
+      expect(answerStrings.length).toBe(scenario === "questions" || scenario === "questions-free-text" ? 1 : 0);
+      if (scenario === "questions-cancel") expect(messages[1]!.fields).toContainEqual({ at: "error.code", kind: "literal", value: -32800 });
+      expect(fixture.input.end).toEqual({ kind: "completed" });
+    }
+  });
+
+  it.each(["r1-codex-fence", "r1-cursor-fence-02", "r1-opencode-fence"])("pins successful nested fences in %s", (run) => {
+    const fixture = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, `${run}.captured.json`));
+    expect(fixture.input.messages.filter((message) => message.operation === "probe/fence").map((message) => message.fields)).toEqual([[
+      { at: "exact", kind: "literal", value: true }, { at: "openerExact", kind: "literal", value: true },
+      { at: "nestedFenceIntact", kind: "literal", value: true }, { at: "closerExact", kind: "literal", value: true },
+    ]]);
+  });
+
+  it.each([["plan-02", "cancelled"], ["rejected", "rejected"], ["feedback", "feedback"]])("pins Cursor's plan key and tested %s candidate reply", (run, outcome) => {
+    const fixture = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, `r1-cursor-${run}.captured.json`));
+    const messages = fixture.input.messages.filter((message) => message.operation === "cursor/create_plan");
+    expect(messages.map((message) => message.kind)).toEqual(["request", "reply"]);
+    expect(messages[0]!.fields).toContainEqual({ at: "plan", kind: "shape", jsonType: "string" });
+    expect(messages[0]!.fields.some((field) => field.at === "markdown")).toBe(false);
+    expect(messages[1]!.fields).toContainEqual({ at: "outcome.outcome", kind: "literal", value: outcome });
+    expect(fixture.input.messages.find((message) => message.operation === "session/prompt" && message.kind === "reply")!.fields).toContainEqual({ at: "stopReason", kind: "literal", value: "end_turn" });
+  });
+
+  it("pins OpenCode's accepted plan agent and a native question followed by an answer and idle", () => {
+    const fixture = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, "r1-opencode-questions.captured.json"));
+    const prompt = fixture.input.messages.filter((message) => message.operation === "http/prompt_async");
+    expect(prompt.map((message) => message.kind)).toEqual(["request", "reply"]);
+    expect(prompt[0]!.fields).toContainEqual({ at: "agent", kind: "literal", value: "plan" });
+    expect(prompt[1]!.fields).toContainEqual({ at: "status", kind: "literal", value: 204 });
+    const events = fixture.input.messages.filter((message) => message.operation === "http/event").flatMap((message) => message.fields);
+    expect(events).toContainEqual({ at: "type", kind: "literal", value: "question.asked" });
+    expect(events).toContainEqual({ at: "properties.questions.0.options.0.label", kind: "shape", jsonType: "string" });
+    expect(fixture.input.messages.filter((message) => message.operation === "http/question.reply").map((message) => message.kind)).toEqual(["request", "reply"]);
+    expect(events).toContainEqual({ at: "type", kind: "literal", value: "session.idle" });
   });
 });
 

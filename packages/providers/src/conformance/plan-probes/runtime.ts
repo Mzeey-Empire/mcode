@@ -9,7 +9,7 @@ import { z } from "zod";
 /** Providers and scenarios accepted by the research runner, not factory capabilities. */
 export const providerSchema = z.enum(["claude", "codex", "cursor", "copilot", "devin", "opencode"]);
 /** Research scenario names shared by capture metadata and the command boundary. */
-export const scenarioSchema = z.enum(["plan", "questions", "file-identity", "fence", "questions-free-text", "questions-decline", "questions-cancel", "questions-interrupt", "questions-process-exit"]);
+export const scenarioSchema = z.enum(["plan", "plan-rejected", "plan-feedback", "questions", "file-identity", "fence", "questions-free-text", "questions-decline", "questions-cancel", "questions-interrupt", "questions-process-exit"]);
 /** A raw envelope stays local until explicitly reviewed and projected. */
 export interface RawMessage {
   kind: "request" | "reply" | "event";
@@ -41,9 +41,11 @@ export interface ProbeContext {
 export const FENCE_TEXT = "````mcode-plan\n# Fixture plan\n\n1. Add a greeting.\n\n```ts\nconst greeting = 'hello';\n```\n````";
 /** Prompts do not authorize edits outside the fixture or provider run directory. */
 export function promptFor(context: ProbeContext): string {
-  const boundary = `Work only in ${context.fixtureRepo}. Do not run commands or change source files. Any plan file must be under ${context.providerHome}. Do not use subagents.`;
+  const planRoot = context.provider === "opencode" ? NodePath.join(context.fixtureRepo, ".opencode/plans") : context.providerHome;
+  const boundary = `Work only in ${context.fixtureRepo}. Do not run commands or change source files. Any plan file must be under ${planRoot}. Do not use subagents.`;
   if (context.scenario === "fence") return `${boundary}\nReply with exactly this text, preserving every backtick and newline:\n${FENCE_TEXT}`;
-  if (context.scenario.startsWith("questions")) return `${boundary}\nUse your native question tool to ask me to choose a greeting style, with Brief and Detailed options. Wait for the answer before writing a short plan. Do not choose for me.`;
+  if (context.scenario.startsWith("questions")) return `${boundary}\nUse your native question tool${context.provider === "cursor" ? " (ask_question)" : ""} to ask me to choose a greeting style, with Brief and Detailed options. Wait for the answer before writing a short plan. Do not choose for me.`;
+  if (context.scenario === "file-identity") return `${boundary}\nPlan greet.ts exporting greet(): string returning 'Hello fixture'. Write the plan to your native session plan file if one exists inside the permitted roots, then use your native exit-plan tool if available. Do not implement. Include one step and a test.`;
   return `${boundary}\nPlan a new greet.ts exporting greet(): string returning 'Hello fixture'. No clarification or repository inspection is needed. Do not ask questions. Do not implement it. Use your native plan output and exit-plan tool if available. Include a title, one step, and a test. Keep it under 150 words.`;
 }
 /** Content equality is measured before private response text is removed. */
@@ -79,7 +81,17 @@ export async function commandOutput(context: ProbeContext, command: string, args
   child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
   return new Promise((resolve, reject) => {
     child.once("error", reject);
-    child.once("exit", (code) => code === 0 ? resolve(stdout.trim()) : reject(new Error(`Command exited ${code}`)));
+    child.once("close", (code) => code === 0 ? resolve(stdout.trim()) : reject(new Error(`Command exited ${code}`)));
+  });
+}
+
+/** Preserve even empty child stderr streams, independently of exit status. */
+export function recordChildStderr(child: NodeChildProcess.ChildProcessWithoutNullStreams, rawDirectory: string, index: number): void {
+  const file = NodePath.join(rawDirectory, `child-${index}.stderr.log`);
+  NodeFS.writeFileSync(file, "", { flag: "wx" });
+  child.stderr.on("data", (chunk: Buffer) => {
+    NodeFS.appendFileSync(file, chunk);
+    NodeFS.appendFileSync(NodePath.join(rawDirectory, "stderr.log"), chunk);
   });
 }
 
