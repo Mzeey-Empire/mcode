@@ -7,6 +7,8 @@
 //   node graph.mjs render       write ../tickets.md
 //   node graph.mjs issues       write issue bodies to ./out/<id>.md (needs ./issue-map.json for numbers, optional)
 //   node graph.mjs titles       print ticket titles as JSON (used by publish.mjs)
+//   node graph.mjs route <id>   print a ticket's lane, risk and design flag (build-ticket skill, step 4)
+//   node graph.mjs gate <id>    run a ticket's ledger proofs, Verify tests, typecheck and lint (step 7)
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -499,6 +501,118 @@ async function ledgerRun(ticket, { rgOnly }) {
   return { code };
 }
 
+// The build-ticket skill's route table (.agents/skills/build-ticket/SKILL.md, step 4).
+function routeRow({ lane, risk }) {
+  if (lane === "frontend") return risk === "high" ? "You write; the Codex review panel reviews." : "You write; the Codex reviewer reviews.";
+  if (lane === "backend") return risk === "high" ? "Codex writes; you review, then the second Claude reviewer." : "Codex writes; you review.";
+  if (lane === "cleanup") return "Codex writes; the gate's ledger proofs, then you, review.";
+  if (lane === "mixed") return "Codex writes the contract, server and adapter part, then you write the UI part. You review the Codex part; the Codex review panel reviews the UI part.";
+  return null;
+}
+
+function route(id) {
+  const r = graph.routes?.[id];
+  if (!(id in graph.blockers) || !r) {
+    console.error(`no route for ${id}: unknown or merged ticket, or graph.json has no routes entry`);
+    return 1;
+  }
+  console.log(`${id}  lane: ${r.lane}  risk: ${r.risk}  design: ${r.design}`);
+  console.log(`why: ${r.why}`);
+  console.log(`route: ${routeRow(r)}`);
+  return 0;
+}
+
+function verifyCommands(id, tickets) {
+  const t = tickets.get(id);
+  const lines = readFileSync(join(sectionsDir, t.file), "utf8").split(/\r?\n/);
+  const commands = [];
+  for (let i = t.line + 1; i < lines.length && !/^#{1,3} /.test(lines[i]); i += 1) {
+    if (!lines[i].includes("**Verify:**")) continue;
+    for (const m of lines[i].matchAll(/`([^`]*)`/g)) if (/^bun run --cwd \S+ (test|typecheck)\b/.test(m[1])) commands.push(m[1]);
+  }
+  return commands;
+}
+
+async function runWords(words, cwd) {
+  const { spawnSync } = await import("node:child_process");
+  const [exe, ...args] = words;
+  let result = spawnSync(exe, args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (result.error?.code === "ENOENT" && process.platform === "win32") {
+    result = spawnSync(`${exe}.cmd`, args, { cwd, encoding: "utf8", shell: true, maxBuffer: 64 * 1024 * 1024 });
+  }
+  return result;
+}
+
+// The gate a ticket's branch must pass before review: its ledger proofs, the tests its Verify line
+// names, and typecheck and lint for every workspace it touched. The plan folder itself is read-only.
+async function gate(id, tickets) {
+  if (!(id in graph.blockers)) {
+    console.error(`unknown or merged ticket ${id}`);
+    return 1;
+  }
+  const repoRoot = join(root, "..", "..", "..");
+  const results = [];
+  const step = async (label, words) => {
+    const r = await runWords(words, repoRoot);
+    const ok = !r.error && r.status === 0;
+    results.push({ label, ok });
+    console.log(`${ok ? "PASS" : "FAIL"}  ${label}`);
+    if (!ok) console.log(`${r.error?.message ?? ""}${r.stdout ?? ""}${r.stderr ?? ""}`.trim().split("\n").slice(-30).map((l) => `     ${l}`).join("\n"));
+    return ok;
+  };
+
+  const base = await runWords(["git", "merge-base", "HEAD", "origin/main"], repoRoot);
+  if (base.status !== 0) {
+    console.error("cannot find the merge base with origin/main; fetch origin first");
+    return 1;
+  }
+  const diff = await runWords(["git", "diff", "--name-only", "--diff-filter=d", base.stdout.trim()], repoRoot);
+  const changed = diff.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (changed.length === 0) {
+    console.error("no changes against origin/main; nothing to gate");
+    return 1;
+  }
+  const planEdits = changed.filter((f) => f.startsWith("docs/plans/ready-for-build/"));
+  results.push({ label: "plan folder unchanged", ok: planEdits.length === 0 });
+  console.log(`${planEdits.length ? "FAIL" : "PASS"}  plan folder unchanged${planEdits.length ? `: ${planEdits.join(", ")}` : ""}`);
+
+  console.log(`\n# Ledger proofs owned by ${id}`);
+  if (ledgerRows().some((row) => (row.owner.match(ID_PATTERN) ?? []).includes(id))) {
+    const { code } = await ledgerRun(id, { rgOnly: false });
+    results.push({ label: "ledger proofs", ok: code === 0 });
+  } else {
+    console.log(`${id} owns no ledger rows`);
+  }
+
+  console.log(`\n# Tests from the ticket's Verify line`);
+  const verify = verifyCommands(id, tickets);
+  if (verify.length === 0) console.log("the Verify line names no bun test or typecheck command; rely on the workspace checks below");
+  for (const cmd of verify) {
+    const words = splitWords(cmd);
+    if (words) {
+      await step(cmd, words);
+    } else {
+      results.push({ label: cmd, ok: false });
+      console.log(`FAIL  ${cmd} uses a shell operator`);
+    }
+  }
+
+  console.log(`\n# Typecheck and lint for touched workspaces`);
+  const workspaces = [...new Set(changed.map((f) => f.match(/^(apps|packages)\/[^/]+/)?.[0]).filter(Boolean))];
+  for (const ws of workspaces) {
+    const pkgPath = join(repoRoot, ws, "package.json");
+    if (existsSync(pkgPath) && JSON.parse(readFileSync(pkgPath, "utf8")).scripts?.typecheck) await step(`bun run --cwd ${ws} typecheck`, ["bun", "run", "--cwd", ws, "typecheck"]);
+  }
+  const lintable = changed.filter((f) => /\.(m?[jt]sx?)$/.test(f) && !f.startsWith("docs/"));
+  if (lintable.length && (await step("bun run --cwd packages/oxlint-plugin build", ["bun", "run", "--cwd", "packages/oxlint-plugin", "build"]))) {
+    await step(`bunx --no-install oxlint (${lintable.length} changed files)`, ["bunx", "--no-install", "oxlint", ...lintable]);
+  }
+
+  const failed = results.filter((r) => !r.ok);
+  console.log(`\ngate ${id}: ${results.length - failed.length} passed, ${failed.length} failed`);
+  return failed.length ? 1 : 0;
+}
+
 const command = process.argv[2] ?? "check";
 if (command === "ledger") {
   const problems = ledgerCheck();
@@ -526,6 +640,10 @@ if (command === "check") {
 } else if (command === "render") {
   render(tickets, waves);
   console.log("tickets.md written");
+} else if (command === "route") {
+  process.exit(route(process.argv[3]));
+} else if (command === "gate") {
+  process.exit(await gate(process.argv[3], tickets));
 } else if (command === "titles") {
   // Ticket titles for tools/publish.mjs.
   console.log(JSON.stringify(Object.fromEntries(allIds().map((id) => [id, { file: tickets.get(id).file, title: tickets.get(id).title }]))));

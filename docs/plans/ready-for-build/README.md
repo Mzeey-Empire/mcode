@@ -32,6 +32,8 @@ Ledger commands, run from this folder:
 
 - `node tools/graph.mjs ledger` fails when a ledger row lacks exactly one active owning ticket or a runnable proof command.
 - `node tools/graph.mjs ledger-run <ticket>` runs every proof that ticket owns, without a shell: an `rg` proof passes when it prints nothing, a `bun`, `node` or `git` proof passes on exit 0. It prints pass, fail, error and skip counts. It exits 0 only when every selected proof ran and passed, 1 on any failure or error, and 2 when proofs were skipped. Before a ticket starts, it lists what the ticket must delete. After the ticket, it must pass. `--rg-only` skips the test proofs, says so, and exits 2, so it never stands in for the full gate.
+- `node tools/graph.mjs route <ticket>` prints the ticket's lane (frontend, backend, mixed, cleanup), risk and design flag from `graph.json` `routes`, and the matching row of the build-ticket route table.
+- `node tools/graph.mjs gate <ticket>`, run on the ticket's branch, fails if the branch edits this folder, then runs the ticket's ledger proofs, the test commands on its Verify line, typecheck for every touched workspace, and oxlint on the changed files. It exits 0 only when everything passes.
 
 ## Paper
 
@@ -59,6 +61,8 @@ Every ticket names its boards by name and node id, for example `05a Â· Running Â
 **Release groups.** S07-04 to S07-07 replace the old plan panel; land them in one release so comments and Implement never go missing between merges. Hold earlier PRs in the group behind the release branch or merge them in one sequence.
 
 ## How to build a ticket
+
+From a Claude thread, `/build-ticket <ticket id or issue number>` (`.agents/skills/build-ticket/SKILL.md`) runs these steps and routes the writing and review between Claude and Codex. By hand:
 
 1. Read the GitHub issue, its parent epic, and every issue it is blocked by (see `docs/agents/issue-tracker.md`).
 2. Read the section brief and the boards. State the scope, the locked decisions, and the dependencies before editing code.

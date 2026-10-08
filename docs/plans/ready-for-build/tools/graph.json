@@ -470,7 +470,8 @@
     "S09-04": [
       "S01-02",
       "F-06",
-      "F-07a"
+      "F-07a",
+      "S05-03"
     ],
     "S09-05": [
       "S09-04"
@@ -481,7 +482,8 @@
     "S10-01": [],
     "S10-02": [],
     "S10-03": [
-      "S10-02"
+      "S10-02",
+      "S10-12"
     ],
     "S10-04": [
       "S10-01",
@@ -731,5 +733,949 @@
     "S12T-01": "Chooses the one terminal backend to keep (decision T11) and deletes the other backend, its selector and env option, its tests and docs. Defines `TERMINAL_MAX_PER_SCOPE = 8`.",
     "S07-03": "Narrowed: durable versions, save and snapshot, writer coordination and one working read consumer. Comment operations and re-anchoring move to S07-06, the Implement operation to S07-07, plan-phase classification to S07-09. `planTurn` and `prepareImplement` signatures are set in S07-01.",
     "S07-07": "Implement is a durable request (immutable version, revision and text, target thread, admission identity, recoverable status). Reserve turn admission before changing plan status; mark Accepted only with successful admission, with conditional compensation. Replays return the same target and message, including the new-thread path (S07-08)."
+  },
+  "routes": {
+    "F-01a": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "CSS token values and theme roles in apps/web, with no data or security surface."
+    },
+    "F-01b": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Scripted class-name codemod and old-variable deletion with no visual change."
+    },
+    "F-02": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "New fade truncation utility, PathText component and lint rule across the web UI."
+    },
+    "F-03": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Button primitives and a size codemod in apps/web."
+    },
+    "F-04a": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Menu row primitive plus migration of the existing dropdown users."
+    },
+    "F-04b": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "open",
+      "why": "Picker primitive whose base is left open: build on cmdk only if a check shows it pages and filters externally, otherwise unspecified."
+    },
+    "F-04c": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Moves the model picker and editor list onto the existing primitives with props and behavior kept."
+    },
+    "F-05": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Right panel shell layout, rail and header slots in the web client."
+    },
+    "F-06": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "One provider icon component and disc stack replacing four icon maps."
+    },
+    "F-07a": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Shared overlay surface recipe and side placement over Base UI."
+    },
+    "F-07b": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Client toast store and lane that replace the old toast."
+    },
+    "F-08": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Lucide icon map, one stroke rule and Phosphor removal in the web client."
+    },
+    "F-09": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Tooltip restyle and the Kbd move."
+    },
+    "F-10": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Status mark, spinner, badge and notice primitives plus the visible Errored-to-Failed rename."
+    },
+    "F-11a": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Sweeps raw colours and shadows onto tokens behind new lint rules, with no new behavior."
+    },
+    "F-11b": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Sweeps arbitrary text sizes, z-index and easing onto tokens behind new lint rules."
+    },
+    "F-12": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Form control restyle and a new RadioGroup."
+    },
+    "S01-01": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Window chrome, header strip and menu removal through the renderer and Electron shell wiring."
+    },
+    "S01-02": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Sidebar frame, width store and drop well in the web client."
+    },
+    "S01-03": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "New attention contract, a seen-marker migration with backfill and a transactional acknowledge on the server."
+    },
+    "S01-04": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Client row-state derivation and the three-line sidebar row on S01-03's data."
+    },
+    "S01-05": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Install-when-idle arming in the Electron main process can restart the app over running agents, plus the ten-state button."
+    },
+    "S02-01": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Palette chrome and Sources view in the web client."
+    },
+    "S02-02": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Server folder validation decides which paths may become projects (too broad, missing, a file), plus the browse view."
+    },
+    "S02-03": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Project chooser popover that reuses existing actions."
+    },
+    "S03-01": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Prefactor that moves overview blocks into registered modules with no visible change."
+    },
+    "S03-02": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Overview card shell, store rewrite and layout in the web client."
+    },
+    "S03-03": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "New-thread start column and composer width."
+    },
+    "S03-04": {
+      "lane": "backend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "New paged ref and pull request listing RPCs over read-only git and GitHub calls."
+    },
+    "S03-05": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Branch target picker on S03-04's RPCs, deleting the old client caches and the RPCs' last callers."
+    },
+    "S03-06": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Workspace target menu and new-thread rail."
+    },
+    "S03-07": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Registers new-thread overview rows built from existing components."
+    },
+    "S03-08": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Fetches origin and creates the worktree from the fetched start point without moving local branches, plus the picker switch."
+    },
+    "S04-01": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Changes the persisted startup record and coordinator flow, and old records must still parse and replay."
+    },
+    "S04-02": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "New provider-started event and provider_started_at migration, moving startup completion out of admission."
+    },
+    "S04-03": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Steps trail UI on the S04-01 record, replacing the old card and preparing shell."
+    },
+    "S04-04": {
+      "lane": "frontend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Inline Run setup approves a repo setup script with the gate fingerprint, a permission decision, plus retry and skip actions."
+    },
+    "S04-05": {
+      "lane": "mixed",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Extends the startup cancel RPC to every phase and adds the startingThread composer state."
+    },
+    "S04-06": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Runs a git fetch inside startup and creates the worktree from the fetched ref."
+    },
+    "S04-07": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Runs setup scripts in a user's existing worktree with per-path serialization and must never remove it."
+    },
+    "S04-09": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "First-send motion with WAAPI in the web client."
+    },
+    "S05-01": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Deletes dead transcript renderers and the orphan task panel with no visible change."
+    },
+    "S05-02": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Status line labels and clock derived in the web client."
+    },
+    "S05-03": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Changes event mapping in the Claude, Codex and OpenCode adapters."
+    },
+    "S05-04": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Collapsed tool rows in the web client; the shared task-list constant is trivial contract plumbing."
+    },
+    "S05-05": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Prose typography and caret in the web client."
+    },
+    "S05-06": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Reasoning contract, a narrative migration and three adapter re-routes, plus the Thought row."
+    },
+    "S05-07": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Adds reasoning capture to the Claude, Copilot and OpenCode adapters."
+    },
+    "S05-08": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Subagent chips and overview row that consume the S12P-08 roster."
+    },
+    "S05-09": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Composer tray and task progress selector in the web client."
+    },
+    "S05-10": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Steer contract, server precondition and Claude and Codex steer paths where a queued message must never be lost or sent twice, plus tray rows."
+    },
+    "S05-11": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Overview rows over existing data with render and RPC limits."
+    },
+    "S05-12": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Neutral Stop and Jump to latest restyle."
+    },
+    "S05-13": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Task snapshots in the Devin and OpenCode adapters, moving a shared ACP helper out of Cursor."
+    },
+    "S06-00": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Fail-closed handling of unreadable permission requests and the Cursor deny fix."
+    },
+    "S06-01": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Approval v2 contract, ApprovalService and fail-closed deny across all six adapters."
+    },
+    "S06-02": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Client hydration of pending approvals from S06-01's listPending on connect and reconnect."
+    },
+    "S06-03": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Receipt migration and a receipt builder on every adapter resolve path, plus the receipt row."
+    },
+    "S06-04": {
+      "lane": "frontend",
+      "risk": "high",
+      "design": "settled",
+      "why": "The approval dock is where users allow or deny tool use, including number-key choices."
+    },
+    "S06-05": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Diff sources in five adapters decide what the user sees before approving an edit, plus the patch preview."
+    },
+    "S06-06": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Per-adapter rules decide how much a session approval grants."
+    },
+    "S06-07": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "approval_notes migration with crash-safe delivery state across adapters, plus the Delivery unknown queue row."
+    },
+    "S06-08": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Subagent origin on approval requests from the Claude and Codex adapters, plus the dock chip."
+    },
+    "S06-09": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Access-mode picker row restyle on the menu primitive."
+    },
+    "S07-00": {
+      "lane": "backend",
+      "risk": "normal",
+      "design": "open",
+      "why": "Protocol investigation that captures provider traces into fixtures and a research note, with no product change."
+    },
+    "S07-01": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Plan capture seam and fence parser across all six adapters, keeping historic plan messages readable; the web part is a fence filter."
+    },
+    "S07-02": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Codex native plan mode and question responder that must settle questions across app-server exit and restart."
+    },
+    "S07-03": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Rebuild migration of the plans table with revisioned writes and legacy readers."
+    },
+    "S07-04": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Plan panel read view and overview row on plan.snapshot."
+    },
+    "S07-05": {
+      "lane": "frontend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Client autosave and conflict handling for the user's plan text, which must never be silently replaced."
+    },
+    "S07-06": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "plan_comments migration, stamping inside admission and a new persisted draft field, plus the comment layer and chip."
+    },
+    "S07-07": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "plan_implement_requests migration, reservation and restart recovery around turn admission, plus the split button and shortcut."
+    },
+    "S07-08": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Creates and compensates threads through createAndSend with a server-only setup skip and crash recovery; the UI is a menu item."
+    },
+    "S07-08b": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Creates a detached worktree at the source commit and removes it on compensation or recovery, plus the menu item and waiting state."
+    },
+    "S07-09": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "threads.plan_phase migration and turn classification, plus the question dock and sidebar states."
+    },
+    "S07-11": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Slash command and Plan chip behavior in the Lexical composer."
+    },
+    "S07-12": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Claude plan permission mode and a native plan-file rewrite with unsafe-path refusal."
+    },
+    "S07-13": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Copilot write policy for one plan.md path and Cursor plan responses."
+    },
+    "S07-14": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Devin and OpenCode plan modes, deleting OpenCode's plan file from the worktree when unchanged."
+    },
+    "S08-01": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Work fold, meta line and actions row as new virtual items."
+    },
+    "S08-02": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Changes bar and turn menu over existing snapshot data."
+    },
+    "S08-03": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Writes files in the user's worktree with pinned recovery refs, a migration and startup recovery."
+    },
+    "S08-04": {
+      "lane": "frontend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Revert and Undo UI that triggers worktree writes and must replay one requestId after a reconnect."
+    },
+    "S08-06": {
+      "lane": "backend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Adds one hidden context line at turn admission and stamps agent_notified_at once."
+    },
+    "S08-08": {
+      "lane": "mixed",
+      "risk": "normal",
+      "design": "settled",
+      "why": "afterSequence on read-only cumulative diff RPCs, plus the Since you looked view."
+    },
+    "S08F-01": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "ending_json migration and a required failure and stop cause at every adapter emit site."
+    },
+    "S08F-02": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Failure classifiers in the Claude and Codex adapters."
+    },
+    "S08F-03": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Failure classification in the Cursor and Devin adapters, changing Devin's stop outcomes."
+    },
+    "S08F-04": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Failure classification in the Copilot and OpenCode adapters, fixing OpenCode's settle."
+    },
+    "S08F-05": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Retry attempts on the server and a rule that endings never drop queued user input, plus the end notice."
+    },
+    "S08F-06": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "turn.resume with resumeRequired in all six adapters after restarts, plus the Interrupted notice."
+    },
+    "S08F-07": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Scheduled retry table and scheduler that must survive restart, plus the usage-limit notice."
+    },
+    "S08F-08": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Signed-out notice wired to S09's provider condition and Sign in action."
+    },
+    "S08F-09": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Provider retrying line from existing threadStore state."
+    },
+    "S09-02": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Client thread-event detector that produces toasts."
+    },
+    "S09-03": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "OS notification bridge and click routing as Electron shell wiring."
+    },
+    "S09-04": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Provider status contract with per-adapter auth detection that reads credential files, plus the bell popover."
+    },
+    "S09-05": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "The server runs npm install -g for provider CLIs on the user's machine, plus the update row."
+    },
+    "S09-06": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "provider_model_sightings migration and baseline rule, plus the announcement row."
+    },
+    "S10-01": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Deletes dead Review components and store fields with no visible change."
+    },
+    "S10-02": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Temp-index git reads that must leave the user's real index byte-identical; the web part is a probe hook."
+    },
+    "S10-03": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "attempt_of and diff_summaries migrations with typed comparison results, plus the Review state bodies."
+    },
+    "S10-04": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Review header rows, view menu and turn-follow logic in the web client."
+    },
+    "S10-05": {
+      "lane": "mixed",
+      "risk": "normal",
+      "design": "settled",
+      "why": "BranchComparison contract and server commit search over read-only git, plus the two pickers."
+    },
+    "S10-06": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Diff file header and band presentation in Pierre."
+    },
+    "S10-07": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Files navigator hosts and scroll spy in the web client."
+    },
+    "S10-08": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Commits and pushes in the user's repo with a migration and crash reconciliation."
+    },
+    "S10-09": {
+      "lane": "frontend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Commit sheet decides which files get committed and pushed and must replay one requestId after a reconnect."
+    },
+    "S10-10": {
+      "lane": "frontend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Revert file UI that writes to the worktree through S08's operation."
+    },
+    "S10-11": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Persisted composer draft rules and server image staging with a retention sweep, where a mistake loses the user's comments."
+    },
+    "S10-12": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Writes refs under refs/mcode in the user's repo, a store_identity migration and restart snapshots."
+    },
+    "S10-13": {
+      "lane": "mixed",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Adds an ignoreWhitespace flag to the comparison reads, plus the row-2 control (decision B4)."
+    },
+    "S11-01": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Pure code move that splits PreviewPanel with no behavior change."
+    },
+    "S11-02": {
+      "lane": "backend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Pure scheme resolver in the desktop navigation code."
+    },
+    "S11-03": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Per-project browser partitions with attach and adopt checks in the Electron main process."
+    },
+    "S11-04": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Browser header rows, page tabs and capture overlay in the renderer."
+    },
+    "S11-05": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Device toolbar row on the existing viewport canvas."
+    },
+    "S11-06": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Control reducer and broker refusal decide when the agent may act in the browser, plus the control pill."
+    },
+    "S11-07": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Agent-acting overlays driven by an existing hook."
+    },
+    "S11-08": {
+      "lane": "backend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Desktop history and thumbnail store behind a bridge, with no UI."
+    },
+    "S11-09": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "New page tiles and recent pages over existing action and history data."
+    },
+    "S11-10": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Certificate exceptions in the Electron main process, plus the plain-words error pages."
+    },
+    "S11-11": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Overview Browser row over existing stores."
+    },
+    "S11-12": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Design picker state machine and markers in the renderer."
+    },
+    "S11-13": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "v2 annotation fence and admission page attachments change persisted message content behind a v1 reader, plus the notes tile."
+    },
+    "S11-14": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Sent notes tile and snapshot viewer for v1 and v2 messages."
+    },
+    "S11-15": {
+      "lane": "frontend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Persists Browser notes and staged snapshots in the draft store, where a mistake loses notes."
+    },
+    "S11-16": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Deletes the style inspector and its v2 payload fields, keeping the v1 reader (decision B5)."
+    },
+    "S12P-01": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Rail and row-1 tab model in the web store, plus the panel ADR."
+    },
+    "S12P-02": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Deletes the Coordination panel, its client wiring and the thread.control WS methods (decision S8)."
+    },
+    "S12P-03": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Authenticated, scoped image route and the shared path validator for Files and project icons."
+    },
+    "S12P-04": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Files tool tree, tabs and code view on the S12P-03 backend."
+    },
+    "S12P-05": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Find bar over decoded text in the client."
+    },
+    "S12P-06": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Markdown and image views in the Files tool."
+    },
+    "S12P-07": {
+      "lane": "frontend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Adds file line comments to the persisted composer draft, where a mistake loses the user's comments."
+    },
+    "S12P-08": {
+      "lane": "backend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Roster contract, server projection and push; the web store is plumbing for the existing rows."
+    },
+    "S12P-09": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Subagent reporting changes in the Claude, Cursor and Devin adapters."
+    },
+    "S12P-10": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Subagent mapping in the Copilot and OpenCode adapters, with both outcomes of the OpenCode capture specified."
+    },
+    "S12P-11": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "open",
+      "why": "Generalizing the Codex child-thread recorder for Copilot is a recommendation behind a half-day spike, with a possible split."
+    },
+    "S12P-12": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Subagents list UI on the roster."
+    },
+    "S12P-13": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Subagent detail rail tab per tier."
+    },
+    "S12T-01": {
+      "lane": "backend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Deletes the modern terminal backend and keeps exited records with a server cap and listing (decision T11)."
+    },
+    "S12T-02": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Terminal tab rows, strip and close confirm."
+    },
+    "S12T-03": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Terminal theme from tokens, URL links and Clear."
+    },
+    "S12T-04": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Versioned encoding of the repo's .mcode/environment.json, which must keep older versions and unknown keys intact."
+    },
+    "S12T-05": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Action terminals and process phases that must keep the approval gate for changed repo scripts."
+    },
+    "S12T-06": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "A migration drops the run transcript columns, plus action tabs in the Terminal UI."
+    },
+    "S12T-07": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Pending approval records for repo actions, plus the in-terminal Run card."
+    },
+    "S12T-08": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Port detector, loopback probe and a port_json migration, plus the port pill."
+    },
+    "S12T-09": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Action icon mapping and picker in the web client."
+    },
+    "S12T-10": {
+      "lane": "frontend",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Actions menu and overview Terminals section."
+    },
+    "S12T-11": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Migrates setup into startup actions with approvals and a runner that gates the first turn, plus the trail consumer."
+    },
+    "S12T-12": {
+      "lane": "backend",
+      "risk": "high",
+      "design": "settled",
+      "why": "Runs repo cleanup scripts before worktree removal, skipping unapproved ones."
+    },
+    "S12T-13": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "Settings drafts that save over .mcode/environment.json with conflict handling, plus a new forget-approval RPC."
+    },
+    "S12T-14": {
+      "lane": "mixed",
+      "risk": "high",
+      "design": "settled",
+      "why": "icon_path migration and icon path validation, plus icon display across the shell."
+    },
+    "S12T-15": {
+      "lane": "mixed",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Icon candidates RPC, plus the General section UI."
+    },
+    "F-99": {
+      "lane": "cleanup",
+      "risk": "normal",
+      "design": "settled",
+      "why": "Runs every ledger proof, deletes leftovers and adds knip to CI."
+    }
   }
 }

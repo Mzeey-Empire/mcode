@@ -592,7 +592,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
 
 ### S09-04 Provider status contract and the bell
 
-- **Blocked by:** S01-02 Sidebar frame, resize, footer strip, empty workspace drop; F-06 Provider icon and disc stack; F-07a Overlay surfaces and side placement.
+- **Blocked by:** S01-02 Sidebar frame, resize, footer strip, empty workspace drop; F-06 Provider icon and disc stack; F-07a Overlay surfaces and side placement; S05-03 In-turn state signals per adapter.
 - **Boards:** 09c (`25RF-2`), 09d (`2DPF-2`), footer state 9 (`2CF0-2`)
 - **Delivers:** The bell opens a Providers popover that lists only providers that need something: signed out with Sign in, and rate limited with its reset time. A provider with nothing to report has no row and no usage is shown (N2). With no rows, the popover shows its header only, the bell has no dot, and its tooltip is just its name. The dot shows while any row exists. Signing in clears the row. The 08f "Sign in" end notice calls the same action.
 - **Build notes:** contract and service (E) with `auth` and `rateLimit`, and no `usage` field; the bell never calls `provider.getUsage`. Per-adapter `describeStatus` for the auth column of the table. The rate-limit store keeps the latest active `RateLimited` per provider in memory (E). `providers.signIn` opens a Terminal tab in the right panel scoped to the project and no thread, or an external terminal with no project open (N6). Popover values from `25ZO-2` (380 wide, radius 18, padding 6, header 36, rows padding 8/6/8/10, action pill 28 radius full); the rate-limited row reuses that row with no action pill.

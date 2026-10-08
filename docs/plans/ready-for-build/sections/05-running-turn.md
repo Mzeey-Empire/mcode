@@ -226,26 +226,72 @@ Steering adds the user's message to the turn that is running, without stopping i
   params: z.object({
     threadId: z.string().min(1).max(256),
     turnExecutionId: z.string().min(1).max(256),   // the running turn the user saw; a precondition
-    messageId: z.string().uuid(),                  // client id: a replay returns the first result
+    messageId: z.string().uuid(),                  // client id, one per Send now click: the operation identity
     // plus the message fields agent.send takes (content, mentions, attachments), with the same schemas and bounds
   }).strict(),
-  result: z.object({ messageId: z.string() }).strict(),
+  result: z.discriminatedUnion("status", [
+    z.object({ status: z.literal("delivered"), messageId: z.string() }),        // the provider took it; the transcript holds it
+    z.object({ status: z.literal("delivery_unknown"), messageId: z.string() }), // sent, no answer; never resent on its own
+    z.object({ status: z.literal("closed"), messageId: z.string() }),           // another window already settled it
+  ]),
 }
-// Failures: turn_not_running (the turn ended or another turn runs), steer_unsupported.
+// Failures, all meaning the provider never took the message:
+// turn_not_running (the turn ended or another turn runs), steer_unsupported, steer_rejected { detail }.
+
+"agent.listUnknownSteers": { params: z.object({}).strict(),
+  result: z.array(z.object({ messageId, threadId, content, mentions, attachments })).max(500) },  // agent.send's field schemas
+"agent.settleUnknownSteer": {
+  params: z.object({ messageId: z.string().uuid(), action: z.enum(["send-again", "remove"]) }).strict(),
+  result: z.object({ status: z.enum(["requeued", "removed", "closed"]) }) },
 
 // packages/contracts/src/providers/interfaces.ts, next to sendTurn (:178)
-steerTurn?(input: Pick<TurnRequest, "threadId" | "message" | "attachments"> & { turnExecutionId: string }): Promise<void>;
+steerTurn?(input: Pick<TurnRequest, "threadId" | "message" | "attachments"> & { turnExecutionId: string; steerId: string }):
+  Promise<
+    | { outcome: "accepted" }                                                     // the provider took the input
+    | { outcome: "rejected"; reason: "turn_not_running" | "provider"; detail: string } // refused before taking it
+    | { outcome: "unknown"; detail: string }                                      // sent, no answer
+  >;
 ```
 
-- Server: `TurnRuntimeController.steer` checks that `turnExecutionId` is the thread's running turn and that the adapter declares `turn-steer`, then calls `steerTurn`. It does not take the mutation reservation the running turn already holds. The steered text persists as a user message inside the running turn, so the transcript shows it at the point it was sent and it survives a reload (inferred: no canonical event carries a mid-turn user message today; the ticket adds one with the canonical writer).
-- A failed steer never loses the message: the client keeps the row queued and shows the error on it. A turn that ended first returns `turn_not_running`, and the row then behaves as an idle Send now.
+**Delivery is durable** (decision P8 applied to steering). The provider can take the input before Mcode records it or hears back. Claude's adapter only places the message on Mcode's prompt queue, and the SDK pulls it later (`onPromptConsumed`, `claude-provider.ts:212-223,255-262`). A Codex `turn/steer` response can be lost with the connection. Treating that as an ordinary failed steer would leave a message the provider already holds queued for a second send. So each steer is a row, written before the adapter call, and Mcode never sends a steered message twice on its own:
+
+```sql
+CREATE TABLE turn_steers (
+  message_id TEXT PRIMARY KEY NOT NULL,   -- client id from agent.steer: the operation identity
+  thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+  turn_execution_id TEXT NOT NULL,        -- the running turn it was aimed at
+  inputs_hash TEXT NOT NULL,              -- sha256 of the validated message fields; a replay must match
+  payload TEXT NOT NULL,                  -- JSON message fields, so an uncertain steer survives a reload
+  state TEXT NOT NULL,                    -- pending | delivered | rejected | delivery_unknown | closed
+  rejection TEXT,                         -- JSON {code, detail} when rejected
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+```
+
+`TurnRuntimeController.steer` runs in this order. It never takes the mutation reservation the running turn already holds.
+
+1. **Replay.** A row for `messageId` must match `inputs_hash`, else a validation error. `delivered`, `delivery_unknown` and `closed` return themselves, and `rejected` returns its stored failure. A `pending` row whose call is in flight in this process joins that call. A `pending` row with nothing in flight first becomes `delivery_unknown` (step 6). A replay never calls the adapter again.
+2. **Preconditions.** `turnExecutionId` must be the thread's running execution, and the adapter must declare `turn-steer`. Otherwise return `turn_not_running` or `steer_unsupported`. These change nothing and are not stored; a replay recomputes them.
+3. **Record.** Insert the row as `pending` with the payload. This write commits before the adapter call.
+4. **Deliver.** Call `steerTurn` with `steerId = messageId`. Where the provider takes a client id for the input, the adapter passes it: Codex `clientUserMessageId` on `turn/steer` (cached `v2/turn.rs:311`), and Claude `SDKUserMessage.uuid`. Neither is proven to deduplicate, so the guarantee rests on this row, not on them. The outcome settles the row:
+   - `accepted`: the provider took the input. For Codex, `turn/steer` answered with the turn id. For Claude, the SDK pulled the message from the prompt queue, the strongest signal it gives (inferred; S05-10 records whether the SDK offers a stronger one). One write sets `delivered` and persists the steered text as a user message inside the running turn, so the transcript shows it where it was sent and it survives a reload (inferred: no canonical event carries a mid-turn user message today; the ticket adds one with the canonical writer). Return `delivered`.
+   - `rejected`: the provider refused before taking the input. Codex rejects a mismatched or ended `expectedTurnId`; Claude finds no live query or another active turn, checked before the push. Store `rejected` and return `turn_not_running` or `steer_rejected`.
+   - `unknown`: the request went out and no answer came back (timeout, lost transport, an adapter error after sending). Store `delivery_unknown` and return it.
+5. **Transcript.** Only the `delivered` write adds the message to the transcript. The transcript never shows a message the provider may not hold, and a `delivery_unknown` steer has no bubble; its queue item is its only copy, as for a deny note.
+6. **Unrecorded attempt.** At start, every `pending` row becomes `delivery_unknown`, because the provider may hold the message. Within a run, a replay that finds a `pending` row with nothing in flight does the same.
+7. **Client.** The queue item keeps its `messageId` while the call is unanswered and resends it after a reconnect. The queue dispatcher never drains an item whose steer is unanswered or `delivery_unknown`, so a turn that ends during the call cannot send the message again as the next turn. `delivered` and `closed` remove the item. `turn_not_running` and `steer_rejected` leave it queued with the error, and it then behaves as an idle Send now, because the provider never took it.
+8. **Delivery unknown.** The queue tray shows the item as "Delivery unknown" with Send again and Remove, the row decision P8 set for deny notes. On connect and reconnect the web calls `agent.listUnknownSteers()` and adds each one to its thread's tray, or updates the item with that `messageId`, so the message survives a reload. Send again calls `agent.settleUnknownSteer { action: "send-again" }`, which sets `closed` with `WHERE state = 'delivery_unknown'`. On `requeued` the client turns the item into an ordinary queued message with a new id; on `closed` another window settled it first, and the item is dropped. Remove works the same way and returns `removed`. Settled rows older than 30 days are deleted at startup, beside `removeExpiredSnapshots`.
+
+S05-10 lands before S06-07 (S05-10 blocks S08F-05, which blocks S06-07). So S05-10 adds the queue item's `deliveryUnknown` flag, the dispatcher skip and the Delivery unknown row, and S06-07 reuses them for deny notes.
+
 - Removed: the Claude-only `PROVIDERS_WITH_SEND_NOW` gate (`model-registry.ts:396-415`) and the head-of-queue move (`useQueuedMessageDispatch.ts:56-63`). Nothing called "Send now" sends next.
 
 Per adapter. Evidence is the code as it is today; where a provider's native protocol is not vendored in this worktree, the source is named.
 
 | Provider | Native steer | How Mcode sends a turn today | `turn-steer` |
 |---|---|---|---|
-| Claude | Yes, inferred: an `SDKUserMessage` with `priority: "now"` pushed into the live query. T3 Code steers this way (cached source `.opensrc/repos/github.com/pingdotgg/t3code/main/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts:7518-7550`, declared at `:200-202`) on SDK `^0.3.276`; Mcode pins `^0.3.212` (`packages/providers/package.json:18`), so confirm the field exists or bump the SDK in the ticket. The steer aborts the current stream or tool, and the query ends that segment with `terminal_reason` `aborted_streaming` or `aborted_tools`, which must not read as an interrupted turn (same file, `:2426-2430`). | One long-lived `query()` fed by a prompt queue (`claude-provider.ts:200-279`); each turn pushes a message (`:1405`, `:1906`) built without `priority` (`:282-292`). Pushing mid-turn without `priority` would queue the message for after the turn (inferred). | supported after S05-10 |
+| Claude | Yes, inferred: an `SDKUserMessage` with `priority: "now"` pushed into the live query. T3 Code steers this way (cached source `.opensrc/repos/github.com/pingdotgg/t3code/main/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts:7518-7550`, declared at `:200-202`) on SDK `^0.3.276`; Mcode pins `^0.3.212` (`packages/providers/package.json:18`). The 0.3.212 package installed in the main checkout declares `priority?: 'now' | 'next' | 'later'` and `uuid?: UUID` on `SDKUserMessage` (`sdk.d.ts:4472,4496`; this worktree has no `node_modules`), so the fields exist at the type level; the ticket proves the runtime behavior or bumps the SDK. The steer aborts the current stream or tool, and the query ends that segment with `terminal_reason` `aborted_streaming` or `aborted_tools`, which must not read as an interrupted turn (same file, `:2426-2430`). | One long-lived `query()` fed by a prompt queue (`claude-provider.ts:200-279`); each turn pushes a message (`:1405`, `:1906`) built without `priority` (`:282-292`). Pushing mid-turn without `priority` would queue the message for after the turn (inferred). | supported after S05-10 |
 | Codex | Yes: app-server `turn/steer` with `expectedTurnId` (cached source `.opensrc/repos/github.com/openai/codex/main/codex-rs/app-server-protocol/src/protocol/common.rs:1056-1061`, params at `v2/turn.rs:308-333`). | `turn/start` (`codex-app-server.ts:1191`) and `turn/interrupt` (`:1136`); the adapter already tracks `activeTurnId` (`:963`, `:1088`), which `expectedTurnId` needs. It never calls `turn/steer`. | supported after S05-10 on CLIs that accept `turn/steer`; the ticket measures the minimum version and records it next to `CODEX_MIN_VERSION` (`codex-provider.ts:98`); older CLIs declare it unsupported |
 | Cursor | No: ACP has one `session/prompt` per turn and no way to add input to it. T3 Code declares Cursor and its generic ACP adapter unable to steer (cached `CursorAdapterV2.ts:106`, `AcpAdapterV2.ts:562`). | One ACP prompt per turn (`cursor-turn-executor.ts:161`). | unsupported: Send now hidden while a turn runs |
 | Copilot | Unknown: SDK `^0.2.2` (`packages/providers/package.json:20`) is not vendored here, and no evidence shows it accepting input into a running turn. | `session.send` per turn (`copilot-provider.ts:222`). | unsupported until a captured trace proves it |
@@ -450,23 +496,30 @@ Capability declarations to extend: Claude `claude-provider.ts:471-475`, Codex `c
 
 - **Blocked by:** S05-09 Composer tray with the task row; F-03 Button primitives.
 - **Boards:** 05e `28ZH-2` (`296A-2`)
-- **Delivers:** Queued follow-ups sit under the task row with arrow-up Send now, pencil Edit, x Remove. While a Claude or Codex turn runs, Send now steers the message into that turn, and it shows in the transcript where it was sent. For Cursor, Copilot, Devin and OpenCode, Send now is hidden while a turn runs. While the thread is idle, Send now sends the message at once, for every provider.
+- **Delivers:** Queued follow-ups sit under the task row with arrow-up Send now, pencil Edit, x Remove. While a Claude or Codex turn runs, Send now steers the message into that turn, and it shows in the transcript where it was sent. For Cursor, Copilot, Devin and OpenCode, Send now is hidden while a turn runs. While the thread is idle, Send now sends the message at once, for every provider. A steer whose delivery Mcode cannot confirm stays in the tray as "Delivery unknown" with Send again and Remove, survives a reload, and is never sent again on its own (decision P8).
 - **Build notes:** a vertical slice (R2, section 6).
-  - Web: restyle rows; drop header, Continue, Clear all, Zap and drag reorder (R3). Edit keeps `onLoadIntoComposer`; Remove keeps `removeFromQueue`. Send now while idle dispatches now (existing `sendNow`). While running, it calls `agent.steer` with the running `turnExecutionId` and shows only when the thread's provider declares `turn-steer` (from the provider descriptor the client already loads). Delete the Claude-only gate and the head-of-queue move. Rewrite the `ComposerQueueList` docstring to match.
-  - Contracts: the `turn-steer` capability, `agent.steer`, and the optional `steerTurn` on the provider interface.
-  - Server: `TurnRuntimeController.steer` with the running-turn precondition and no new reservation; the steered message persists in the running turn.
-  - Claude: push the message with `priority: "now"`; treat `aborted_streaming` and `aborted_tools` results after a steer as part of the same turn. Confirm the SDK field on the pinned version or bump the SDK, and record the decision in the PR.
-  - Codex: `turn/steer` with `expectedTurnId` from `activeTurnId`; measure the minimum CLI version and declare `turn-steer` only at or above it.
+  - Web: restyle rows; drop header, Continue, Clear all, Zap and drag reorder (R3). Edit keeps `onLoadIntoComposer`; Remove keeps `removeFromQueue`. Send now while idle dispatches now (existing `sendNow`). While running, it calls `agent.steer` with the running `turnExecutionId` and a new `messageId`, and shows only when the thread's provider declares `turn-steer` (from the provider descriptor the client already loads). Delete the Claude-only gate and the head-of-queue move. Rewrite the `ComposerQueueList` docstring to match.
+  - Web, delivery (section 6, steps 7 and 8): keep the `messageId` until a result arrives and resend it after a reconnect; the queue item's `deliveryUnknown` flag, the dispatcher skip for unanswered and unknown steers, the Delivery unknown row with Send again and Remove, and `agent.listUnknownSteers` on connect and reconnect. S06-07 reuses the flag, the skip and the row.
+  - Contracts: the `turn-steer` capability, `agent.steer` with its result union, `agent.listUnknownSteers`, `agent.settleUnknownSteer`, and the optional `steerTurn` with `steerId` and its outcome on the provider interface.
+  - Server: the `turn_steers` table and migration, and `TurnRuntimeController.steer` in section 6's order: replay, preconditions, the `pending` row before the adapter call, then `delivered` (with the in-turn user message, in one write), `rejected` or `delivery_unknown`. At startup every `pending` row becomes `delivery_unknown`, and settled rows older than 30 days are deleted. No new reservation. Add a test-only fault hook that stops after the adapter accepts and before the `delivered` write, with a sentinel the service does not catch; the test then builds a fresh service on the same database file to stand in for a restart.
+  - Claude: push the message with `priority: "now"` and `uuid` set to the `messageId`; treat `aborted_streaming` and `aborted_tools` results after a steer as part of the same turn. Report `accepted` when the SDK pulls the message from the prompt queue, unless the SDK offers a stronger acknowledgement. Prove the fields at runtime on the pinned version or bump the SDK, and record the decision in the PR.
+  - Codex: `turn/steer` with `expectedTurnId` from `activeTurnId` and `clientUserMessageId` set to the `messageId`; a JSON-RPC error is `rejected`, and a request with no answer is `unknown`. Measure the minimum CLI version and declare `turn-steer` only at or above it.
   - Cursor, Copilot, Devin, OpenCode: declare `turn-steer` `unsupported`.
 - **Deletes:** ledger row 12.
 - **Acceptance criteria:**
   - [ ] Three actions, keyboard reachable, tooltips name them.
   - [ ] During a running Claude or Codex turn, Send now steers: the provider receives the text inside the same turn, no second turn starts, the queue does not reorder, and the message appears in the transcript at its place and after a reload.
   - [ ] During a running Cursor, Copilot, Devin or OpenCode turn, the row shows Edit and Remove only.
-  - [ ] A steer that loses a race with the turn's end returns `turn_not_running`; the message stays queued and is never lost or sent twice.
+  - [ ] A steer that loses a race with the turn's end returns `turn_not_running`; the message stays queued and then sends once as the next turn, because the provider never took it.
+  - [ ] Lost response: a fake adapter accepts and the RPC response is dropped. The client resends the same `messageId` after reconnecting and gets `delivered`. The adapter was called once and the transcript holds one copy.
+  - [ ] Duplicate request: two `agent.steer` calls with the same `messageId`, one while the first is in flight and one after it settles, call the adapter once and return the same result. The same `messageId` with other content is a validation error.
+  - [ ] Crash after delivery: the fault hook stops the server after the adapter accepts and before the `delivered` write. After restart the row is `delivery_unknown`, `agent.listUnknownSteers` returns it, and the tray shows "Delivery unknown" with Send again and Remove. The turn ending does not drain it, and nothing sends it until Send again, which sends it once.
+  - [ ] No answer: an adapter that sends and then times out returns `delivery_unknown`, and the message is never drained or resent on its own.
+  - [ ] A turn that ends while its steer is unanswered does not send the item as the next turn.
+  - [ ] Send again in two windows produces one message; the second window gets `closed` and drops its copy. Remove keeps the item gone after a reconnect.
   - [ ] A Codex CLI below the measured minimum declares `turn-steer` unsupported and hides Send now while running.
   - [ ] While the thread is idle, Send now sends the message for every provider and resumes auto-drain (S08F-05 relies on this).
-- **Verify:** `bun run --cwd apps/web test -- src/components/chat/__tests__/ComposerQueueList.lifecycle.test.tsx src/features/conversation/composer/queue/useQueuedMessageDispatch.test.tsx`; `bun run --cwd apps/server test -- src/features/agents/transport/__tests__/agent-rpc-route.test.ts` (the `agent.steer` route and its preconditions); `bun run --cwd packages/providers test -- src/__tests__/codex/codex-provider-lifecycle.test.ts src/private/claude/__tests__/claude-provider-stream-mapping.test.ts` (the `turn/steer` request with `expectedTurnId`; the `priority: "now"` push and an aborted segment that does not end the turn). Live: queue a follow-up during a Codex turn in `.dev/fixture-repo` and press Send now; the agent picks it up in the same turn. Repeat on Claude. On a Cursor turn, confirm Send now is absent while running and present once the turn ends.
+- **Verify:** `bun run --cwd apps/web test -- src/components/chat/__tests__/ComposerQueueList.lifecycle.test.tsx src/features/conversation/composer/queue/useQueuedMessageDispatch.test.tsx`; `bun run --cwd apps/server test -- src/features/agents/transport/__tests__/agent-rpc-route.test.ts src/features/agents/orchestration/__tests__/turn-steer-delivery.test.ts` (the `agent.steer` route and its preconditions; the second is new and covers replay, the lost response, the crash after delivery with a fresh service on the same database file, the unanswered request, and Send again and Remove); `bun run --cwd packages/providers test -- src/__tests__/codex/codex-provider-lifecycle.test.ts src/private/claude/__tests__/claude-provider-stream-mapping.test.ts` (the `turn/steer` request with `expectedTurnId`; the `priority: "now"` push and an aborted segment that does not end the turn). Live: queue a follow-up during a Codex turn in `.dev/fixture-repo` and press Send now; the agent picks it up in the same turn. Repeat on Claude. On a Cursor turn, confirm Send now is absent while running and present once the turn ends.
 
 ### S05-11 Overview Changes, Tasks and Usage rows
 

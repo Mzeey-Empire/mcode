@@ -148,13 +148,14 @@ Exact values, read with `get_jsx` / `get_computed_styles`. Tokens come from F-01
 
 ### 1. Turn revert operation (shared by Revert this turn and S10 Revert file)
 
-**Semantics (default, matches the drawn Components copy "Reverting removes those edits too"):** every scope path returns to its content in the target range's `ref_before` tree, as a git checkout of that tree writes it. A path the range added is deleted, and a path it removed is recreated. A rename restores the old path and deletes the new one. Later edits to those paths, whether by later turns or by the user, are overwritten only after the confirm names them. The operation writes the working tree only: **it never touches the index, commits or branches.** The alternative is a three-way inverse that keeps later edits that don't overlap. It is rejected for v1 (Q1).
+**Semantics (default, matches the drawn Components copy "Reverting removes those edits too"):** every scope path returns to its content in the target range's `ref_before` tree, as a git checkout of that tree writes it. A path the range added is deleted, and a path it removed is recreated. A rename restores the old path and deletes the new one, across a whole chain: `a → b → c` restores `a` and deletes `c` in one operation, because the scope is always rename-closed (preview step 2). Later edits to those paths, whether by later turns or by the user, are overwritten only after the confirm names them. The operation writes the working tree only: **it never touches the index, commits or branches.** The alternative is a three-way inverse that keeps later edits that don't overlap. It is rejected for v1 (Q1).
 
 **Target range.** Every preview and apply reads one range from S10-03's `turnSnapshotRange(threadId, messageId, fromMessageId?)` (section 10, Backend §3), never a single snapshot row:
 
 - A turn is every attempt of one user turn (E2). `messageId` may name any attempt's assistant message; it resolves to the whole turn. A turn retried after a failure that edited files starts at the first attempt, so Revert this turn restores the first attempt's pre-state, including paths only the failed attempt touched.
 - Without `fromMessageId` the range is `messageId`'s turn. With it (file scope only, Revert file from All turns, V7) the range is every turn from `fromMessageId`'s through `messageId`'s, in message order, each turn whole. A `fromMessageId` that comes after `messageId` is a validation error.
 - The range's `ref_before` is its first row's `ref_before`, its `ref_after` the last row's `ref_after`, and its attributed groups the union over its rows. A turn that was never retried is a one-row range, so its behavior is unchanged.
+- A turn whose range is incomplete (a finished attempt's snapshot row expired or was never written, section 10, Backend §3) is never read as a shorter range. Revert treats it as expired: `snapshot_missing`.
 
 **Two identities, kept apart.** Every Revert or Undo click carries a client-generated `requestId`. It is the operation's identity: the server persists it with the bound parameters and the outcome, and replays only that request. The `previewToken` is only a precondition. It proves the files are still in the state the user confirmed. A new click gets a new `requestId`, so Revert, Undo, then Revert again is three operations, even though the third preview hashes to the same token as the first.
 
@@ -184,7 +185,7 @@ export const RevertFilePlanSchema = lazySchema(() => z.object({
 
 export const TurnRevertUnavailableSchema = z.enum([
   "not_git",            // workspace is not a git repo: no snapshots exist
-  "snapshot_missing",   // row expired (30 days) or never written
+  "snapshot_missing",   // row expired (30 days) or never written, for any finished attempt of the target turn
   "snapshot_pruned",    // ref_before/ref_after objects gone (gc)
   "worktree_missing",   // resolved cwd no longer exists
   "no_attributed_files",
@@ -268,10 +269,12 @@ New `SnapshotService` methods, reusing the existing pathspec batching (`literalP
 
 **Preview algorithm:**
 
-1. Resolve the target range (above). A missing snapshot row for `messageId` or `fromMessageId` gives `snapshot_missing`. A non-git workspace gives `not_git`. Resolve `cwd`; if it doesn't exist, return `worktree_missing`.
-2. Scope:
-   - Turn scope: the range's attributed groups.
-   - File scope: the one group containing `path`. A path that no row of the range attributes is rejected as a validation error, so the RPC can never write a path the range did not touch.
+1. Resolve the target range (above). A missing snapshot row for `messageId` or `fromMessageId`, or an incomplete range for either turn, gives `snapshot_missing`. A non-git workspace gives `not_git`. Resolve `cwd`; if it doesn't exist, return `worktree_missing`.
+2. Scope. The scope is rename-closed: it holds every path joined to a seed path by a rename, so a revert never removes a rename's new name without restoring its old one.
+   - Seeds. Turn scope: every path the range attributes. File scope: `path`, which a row of the range must attribute; any other path is a validation error, so the RPC never starts from a path the range did not touch.
+   - Rename links come from two sources. The first is each attributed group of each row (`[path, oldPath]`, `snapshot-attribution.ts:35-38`). The second is the renames git reports over the range, `git diff --name-status -z -M --diff-filter=R <ref_before> <ref_after>`, the same pairs the Turn view shows as one file. The git pairs matter on their own: a git-fallback row's `files_changed` comes from `git diff --name-only` (`snapshot-service.ts:263`), which lists a rename by its new name only (checked on git 2.41), so that row never names the old path. Copies are not links, because a copy leaves its source in place.
+   - The scope is the closure of the seeds over those links. For `a → b` in Turn 1 and `b → c` in Turn 3, the groups are `[b, a]` and `[c, b]`, which `collectAttributedWorkspacePathGroups` keeps apart (`snapshot-attribution.ts:58-68`). The closure of `c` is `{a, b, c}`: apply recreates `a`, deletes `c`, and classifies `b`, absent at both ends, as `already_reverted`. The same holds for two renames inside one attempt, across the attempts of a retried turn, and for a single git-detected rename in one turn.
+   - Every later step uses the closed scope: classification (step 4), `unattributedChangeCount` (step 5), the `previewToken` (step 7), the `pre` and `planned` capture and the recovery pin (Apply step 3), and through them Undo and recovery. A path in the closure that no row attributes is still restored, because it is the other side of a rename in the range's own diff. The plan entry for the final name carries the original name as `previousPath`.
 3. Check that `cat-file -e` succeeds for the range's `ref_before` and `ref_after`; otherwise return `snapshot_pruned`.
 4. Read `before = blobIdsAt(ref_before)`, `after = blobIdsAt(ref_after)` and `current = currentBlobIds(ref_after)`, all from the range's refs. Classify each path:
    - `already_reverted` when current equals before.
@@ -279,7 +282,7 @@ New `SnapshotService` methods, reusing the existing pathspec batching (`literalP
    - `changed_later` otherwise. `changedBy` is `later_turn` when a snapshot of a turn after the range, on a thread with the same resolved `cwd`, attributes the path; otherwise it is `outside`. Rows inside the range, such as earlier attempts of a retried turn or the other turns of an All turns range, are never "later".
 
    Gitignored paths (`check-ignore`) and gitlinks go to `skipped`. A path whose before-state is a file but which is now a folder holding files outside the scope goes to `skipped` as `folder_in_the_way`, because recreating it would delete unrelated work.
-5. `unattributedChangeCount` is `git diff --name-only ref_before ref_after` over the range, minus the attributed paths. It is 0 when no row of the range has file effects.
+5. `unattributedChangeCount` is `git diff --name-only ref_before ref_after` over the range, minus the attributed paths and the scope. It is 0 when no row of the range has file effects.
 6. Busy check: return `busy` when any thread whose resolved working directory equals `cwd` has an active turn or thread startup, or when a revert is in flight for that `cwd`.
 7. `previewToken` hashes the repo identity, `cwd`, the range's snapshot ids in order, the scope and `workingTreeState` of every scope path.
 
@@ -360,7 +363,14 @@ CREATE INDEX idx_turn_reverts_unfinished ON turn_reverts(state) WHERE state IN (
 
 S01-03's client caller receives the response. S08-08 subscribes to it through the hook or store field that S01-03 exposes; S01-03 names it.
 
-**Comparison:** `snapshot.getCumulativeDiff` and `snapshot.getCumulativeDiffStats` take an optional `afterSequence: number`. When it is present they use only snapshots whose message sequence is greater than it, and keep the same 10,000-file cap (`snapshot-rpc.ts:103-144`). `TurnSnapshotStore.listByThread` joins `messages` for `message_sequence`. No new comparison engine. S08-08 owns both changes.
+**Comparison:** `snapshot.getCumulativeDiff` and `snapshot.getCumulativeDiffStats` take an optional `afterSequence: number`. With it they select whole turns, never single rows (E2):
+
+- A turn is in when its latest attempt's assistant message sequence is greater than `afterSequence`. Then every row of its S10-03 range is in (`turnSnapshotRange`), including an attempt that settled before the baseline.
+- A turn is one unit here as it is in the Turn view, the changes bar and revert. Filtering rows instead would start a retried turn at its replacement whenever the user looked between a failure and its Retry, and drop the failed attempt's edits that the Turn view shows.
+- An incomplete turn is skipped, as an expired one is (section 10, Backend §3, Retention).
+- The selected rows then go through the All turns path (`snapshot-rpc.ts:103-144`): from the first selected row's `ref_before` to the last one's `ref_after`, over the union of their attributed paths, with the same 10,000-file cap.
+
+`TurnSnapshotStore.listByThread` joins `messages` for `message_sequence`. No new comparison engine. S08-08 owns both changes.
 
 ### 3. Agent notice (default on, Q3)
 
@@ -510,6 +520,11 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
   - [ ] Retried turn: attempt 1 edits `a.ts` and `b.ts` and fails; its replacement edits `b.ts` and `c.ts`. Revert this turn, given either attempt's message id, restores all three to attempt 1's `ref_before`, and `a.ts` is not `changed_later`. Undo restores the bytes from after the replacement.
   - [ ] Range: Turns 1 and 3 edit `a.ts`. A file scope with `fromMessageId` = Turn 1 and `messageId` = Turn 3 restores `a.ts` to Turn 1's `ref_before`. A hand edit after Turn 3 makes it `changed_later`/`outside`; a Turn 4 that edits it makes it `changed_later`/`later_turn`. `reverted_paths` lists `a.ts` on the Turn 1 and Turn 3 rows only. Undo restores byte-exact.
   - [ ] A `fromMessageId` after `messageId`, and a path no turn in the range attributes, are validation errors. Replaying a `requestId` with a different `fromMessageId` is rejected.
+  - [ ] Rename chain across turns: Turn 1 renames `a.ts` to `b.ts` and Turn 3 renames `b.ts` to `c.ts`, each with file effects. A file scope on `c.ts` with `fromMessageId` = Turn 1 previews `a.ts` as `recreate` and `c.ts` as `delete` (with `previousPath: "a.ts"`), and both paths are in the `previewToken` hash and the `prepared` row. Apply leaves `a.ts` with its bytes from before Turn 1 and no `b.ts` or `c.ts`. Undo restores `c.ts` and removes `a.ts`. A file scope on `a.ts` resolves the same set.
+  - [ ] Rename chain inside one turn: the same two renames across the two attempts of a retried turn, and again inside one attempt, give the same result for Revert this turn and for a file scope on `c.ts`.
+  - [ ] Git-fallback rename: a turn without file effects renames `a.ts` to `c.ts`, so its `files_changed` lists only `c.ts`. Revert this turn and a file scope on `c.ts` both recreate `a.ts` and delete `c.ts`.
+  - [ ] Recovery over a chain: simulated process death after the first path write of the cross-turn chain revert, then `recoverUnfinished()`, puts `a.ts` and `c.ts` back byte-exact and writes one interrupted receipt.
+  - [ ] Incomplete range: attempt 1 of a retried turn is past the 30-day cutoff and its row is deleted while the replacement's row remains. Revert this turn, a file scope on it, and a range whose `fromMessageId` names it all return `unavailable: snapshot_missing` and write nothing.
   - [ ] Apply, Undo, then Apply again on the same turn, each with a new `requestId`, reverts a second time in a real repo. Replaying any of the three `requestId`s returns that request's own stored outcome and writes nothing.
   - [ ] A lost response: the same `requestId` sent again returns the first outcome. The same `requestId` with different parameters is rejected.
   - [ ] A content change, a mode-only change (executable bit, POSIX only; git ignores it on Windows) or a file-to-symlink change after preview returns `stale` with a fresh preview.
@@ -595,12 +610,12 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
 - **Boards:** 10b `2DV5-2` (picker anatomy). The 08e scope picker was not drawn.
 - **Delivers:**
   - Review's view picker lists Turn, **Since you looked**, All turns in group 1.
-  - It is available when this visit's baseline exists and a later snapshot has changes. Otherwise it is dimmed with the tooltip "Nothing new since you looked".
+  - It is available when this visit's baseline exists and a turn after it has changes. Otherwise it is dimmed with the tooltip "Nothing new since you looked".
   - Row 2 shows the covered turns as plain text, "Turns 3–5" or "Turn 5", with no picker.
   - The diff shows only the changes from turns after the baseline.
 - **Build notes:**
   - Server and contracts: `snapshot.getCumulativeDiff` and `snapshot.getCumulativeDiffStats` accept `afterSequence`, and `snapshot.listByThread` returns `message_sequence` (Backend §2). Both read through S10-03's typed comparison result.
-  - `afterSequence` selects whole turns (E2): a turn is in when its latest attempt's message sequence is greater than the baseline, and then every row of its S10-03 range is in. So the view never starts a retried turn at its replacement.
+  - `afterSequence` selects whole turns by the Backend §2 rule, the only selection rule; the client never filters rows on its own. Availability uses the same rule on `snapshot.listByThread`: a row whose `message_sequence` is greater than the baseline and whose `files_changed` is non-empty or whose `attempt_count` is above 1. A count above 1 means an earlier attempt of that turn changed files, even when the latest attempt changed none.
   - Web: `DiffViewMode` gains `"since-looked"`. Comparison key `since-looked:<baseline>`. The baseline is `previous.sequence` from the first marker-advancing response of S01-03's `thread.acknowledgeSeen` in this visit, stored before the response clears the badge, held in memory per thread and cleared in `clearThread`. This ticket adds no seen marker, column or `markViewed` change. Ordinals come from `lib/turn-ordinals.ts`. The ADR-0011 default view is unchanged (Q6). Add a CONTEXT.md entry "Since you looked".
 - **Deletes:** None.
 - **Acceptance criteria:**
@@ -608,6 +623,8 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
   - [ ] The baseline is set from the acknowledgement response before the Finished badge clears. A no-op acknowledgement does not set or move it.
   - [ ] Watching turn 6 finish does not change the baseline.
   - [ ] Cumulative stats with `afterSequence` cover only the later turns' attributed paths.
+  - [ ] Looked between a failed attempt and its Retry: attempt 1 edits `a.ts` and fails; the user acknowledges through its sequence, so the next visit's baseline sits between the two attempts. The replacement then edits `b.ts` and completes. On return, Since you looked is available and lists `a.ts` and `b.ts`. `getCumulativeDiffStats({ afterSequence })` counts both files from attempt 1's `ref_before`, and `getCumulativeDiff` returns patches for both.
+  - [ ] The same fixture where the replacement edits nothing: Since you looked is still available and shows `a.ts`.
   - [ ] The view is unavailable after an app restart with no new turns.
 - **Verify:** `bun run --cwd apps/web test -- src/lib/__tests__/review-views.test.ts src/__tests__/diffStore.test.ts` and `bun run --cwd apps/server test -- src/features/projects/diffs/transport/__tests__/snapshot-rpc.test.ts`. Live: queue two follow-ups and switch threads until both finish. Return: the sidebar shows Finished (S01). Review › Since you looked lists both turns' files.
 
@@ -624,7 +641,7 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
   - `apps/web/src/components/chat/__tests__/TurnChangeSummary.test.tsx`
   - `apps/web/src/features/conversation/narrative/__tests__/TurnFooter.test.tsx`
   - `apps/web/src/features/conversation/messages/__tests__/MessageList.thread-switch.test.tsx`
-- **Revert fixtures:** files that are modified, added, deleted, renamed, binary, gitignored, symlinked, executable, CRLF under `core.autocrlf=true`, mixed line endings, and under a repo-local clean/smudge filter. A file-to-folder and a folder-to-file transition. A later snapshot touching one path. A by-hand edit. A read-only file to force a write failure (Windows: an open handle). A retried turn (a failed attempt that edited files, then its replacement) and a three-turn range for the All turns file scope.
+- **Revert fixtures:** files that are modified, added, deleted, renamed, binary, gitignored, symlinked, executable, CRLF under `core.autocrlf=true`, mixed line endings, and under a repo-local clean/smudge filter. A file-to-folder and a folder-to-file transition. A later snapshot touching one path. A by-hand edit. A read-only file to force a write failure (Windows: an open handle). A retried turn (a failed attempt that edited files, then its replacement) and a three-turn range for the All turns file scope. A rename chain `a → b → c` across two turns, across two attempts and inside one attempt, and a git-fallback rename with no file effects.
 - **Request and recovery cases:** apply, undo, apply with new `requestId`s; a replayed `requestId` after a lost response; a reused `requestId` with other parameters; mode-only and type-only changes after preview; the fault hook stopping after prepare, after the first path write and inside the commit write, both as an error and as simulated process death followed by `recoverUnfinished()` on a fresh service; a path edited between the crash and recovery, including an EOL-only edit and an edit a clean filter hides; a recovery ref deleted before restart.
 - **Must-not-break checks:** the index and HEAD are untouched, no writes happen outside attributed paths, the recovery row (with `pre` and `planned` raw states) and ref exist before any write, rollback and Undo are byte-exact, recovery never writes a path whose raw state equals neither recorded state, and replay never writes twice.
 - **Runtime:** use `.dev/fixture-repo` only (AGENTS.md "Test data").
@@ -673,6 +690,7 @@ Q7: 08a draws collapse-all with no folders; the default hides it. Q8: the meanin
 
 - A turn on the git fallback attributes concurrent user edits made during the turn. Revert undoes those too.
 - Gitignored files can't be reverted from snapshots.
+- Git detects renames by similarity. A rename that git does not detect and no file effect records reverts as a separate delete and add, which is also how Review shows it.
 - Non-git workspaces have no revert in v1.
 - The forward revert writes git's checkout of `ref_before`, so a filtered or mixed-line-ending file comes back as a fresh checkout would write it. Undo and rollback are byte-exact.
 - A later edit that leaves a path byte-identical to its planned state, for example deleting a file the revert had already deleted, cannot be told apart from the operation's own write. Recovery puts the pre-state back.

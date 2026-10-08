@@ -647,7 +647,7 @@ Rule, in one place in the store:
 - The pause is visible: while the queue has messages, the thread is idle and auto-drain is suppressed, the queue shows a quiet "Paused" label (12/16, `--color-muted`) above its rows. Paper does not draw it, so the designer should check it.
 - The way out is an explicit send: a row's Send now (S05-10), or Continue in today's list, dispatches the first message and resumes auto-drain.
 - Retry, Resume and Retry at reset neither drain nor clear the queue. The user sends queued input when ready.
-- A reload or app restart still loses the client queue, as today; S06-07 persists deny-note delivery on the server separately.
+- A reload or app restart still loses the client queue, as today. Two exceptions live on the server: S05-10 keeps steers whose delivery is unknown (`agent.listUnknownSteers`), and S06-07 persists deny-note delivery.
 
 ## Components
 

@@ -139,6 +139,7 @@ const sectionEntries = Object.entries(graph.sections);
 
 regenerate();
 const program = create("epic:program", "epic: Ready for build, Paper sections 01 to 12", join(out, "epic-program.md"), ["epic"]);
+regenerate();
 create("epic:scoping:model-picker", "epic: Model picker extras (needs scoping)", join(out, "epic-scoping-model-picker.md"), ["epic"]);
 create("epic:scoping:projectless-chat", "epic: Start a chat without a project (needs scoping)", join(out, "epic-scoping-projectless-chat.md"), ["epic"]);
 regenerate();
