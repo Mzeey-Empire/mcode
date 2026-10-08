@@ -10,4 +10,4 @@ export const FIELD_SURFACE_CLASS =
  * Read-only text fields drop to the panel fill. Only editable elements use this:
  * `:read-only` matches every button, so a select trigger must not carry it.
  */
-export const FIELD_READ_ONLY_CLASS = "read-only:bg-panel read-only:hover:border-control-border";
+export const FIELD_READ_ONLY_CLASS = "read-only:bg-panel read-only:hover:not-aria-invalid:border-control-border";

@@ -22,7 +22,7 @@ function Checkbox({
       checked={mixed ? false : checked}
       indeterminate={mixed}
       className={cn(
-        "peer flex size-5 shrink-0 items-center justify-center rounded-badge border border-control-border bg-selected text-primary-ink transition-colors duration-(--duration-fast) ease-(--ease-standard) hover:border-muted hover:bg-hover focus-ring aria-invalid:border-error data-[checked]:border-primary data-[checked]:bg-primary data-[checked]:hover:border-primary-hover data-[checked]:hover:bg-primary-hover data-[indeterminate]:border-primary data-[indeterminate]:bg-primary data-[indeterminate]:hover:border-primary-hover data-[indeterminate]:hover:bg-primary-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "peer flex size-5 shrink-0 items-center justify-center rounded-badge border border-control-border bg-selected text-primary-ink transition-colors duration-(--duration-fast) ease-(--ease-standard) hover:not-aria-invalid:border-muted hover:bg-hover focus-ring aria-invalid:border-error data-[checked]:not-aria-invalid:border-primary data-[checked]:bg-primary data-[checked]:hover:not-aria-invalid:border-primary-hover data-[checked]:hover:bg-primary-hover data-[indeterminate]:not-aria-invalid:border-primary data-[indeterminate]:bg-primary data-[indeterminate]:hover:not-aria-invalid:border-primary-hover data-[indeterminate]:hover:bg-primary-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className,
       )}
       {...props}
