@@ -282,6 +282,7 @@ describe("WorkspaceService.delete - two-phase orchestration", () => {
       mockAttachmentService,
       createThreadDeletionTeardownServiceMock(),
       mockGitExecutor,
+      { killByThread: vi.fn().mockResolvedValue(undefined) },
     );
   });
 
@@ -704,6 +705,7 @@ describe("WorkspaceService.delete - runtime teardown", () => {
       mockAttachmentService,
       mockThreadDeletion,
       mockGitExecutor,
+      { killByThread: vi.fn().mockResolvedValue(undefined) },
     );
   });
 
@@ -757,6 +759,7 @@ describe("Workspace delete - cross-workspace fork lineage", () => {
       mockAttachmentService,
       createThreadDeletionTeardownServiceMock(),
       mockGitExecutor,
+      { killByThread: vi.fn().mockResolvedValue(undefined) },
     );
   });
 
@@ -1018,6 +1021,7 @@ describe("Workspace delete - zero-worktree fast path", () => {
       mockAttachmentService,
       createThreadDeletionTeardownServiceMock(),
       mockGitExecutor,
+      { killByThread: vi.fn().mockResolvedValue(undefined) },
     );
   });
 
