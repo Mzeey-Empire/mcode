@@ -1,4 +1,5 @@
-import { isPlanFenceOpener } from "@mcode/shared";
+// The @mcode/shared barrel loads winston, which blanks the renderer; import the browser-safe subpath.
+import { isPlanFenceOpener } from "@mcode/shared/plan-fence";
 
 /** Protocol fences rendered outside the transcript, including historic stored plans. */
 export const HIDDEN_PLAN_FENCE_INFO = ["plan-questions", "mcode-plan", "plan-output"];

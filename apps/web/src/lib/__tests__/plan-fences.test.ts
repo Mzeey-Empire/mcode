@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
 import { stripPlanFences } from "../plan-fences";
-import { PlanFenceParser } from "@mcode/shared";
+import { PlanFenceParser } from "@mcode/shared/plan-fence";
 
 describe("plan fences", () => {
   it("renders historic prose without the JSON fence", () => {
