@@ -1,8 +1,6 @@
 import { useCallback, useRef, useState, type MutableRefObject } from "react";
 import type { LexicalEditor } from "lexical";
 import type { MessageMention, SelectedTextComment } from "@mcode/contracts";
-import { cn } from "@/lib/utils";
-import { POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import type { SelectedTextCommentSource } from "../selected-text-projection";
 import {
@@ -179,7 +177,11 @@ function useSelectedTextCommentEditorActions({
   return { handleChange, save, deleteComment };
 }
 
-/** Renders the prototype compact ComposerEditor and comment dismissal policy. */
+/**
+ * Renders the prototype compact ComposerEditor and comment dismissal policy. The container
+ * paints the surface and runs the warning shake (see `COMMENT_EDITOR_SHAKE_CLASS`), so the
+ * same editor sits in a transcript popover or framed inside a composer card.
+ */
 export function SelectedTextCommentEditor({
   source,
   comment,
@@ -252,11 +254,8 @@ export function SelectedTextCommentEditor({
       role="dialog"
       aria-label="Comment on selected text"
       style={{ maxHeight }}
-      className={cn(
-        "relative overflow-hidden",
-        POPOVER_SURFACE_CLASS,
-        isShaking && "animate-preview-annotation-shake",
-      )}
+      className="relative overflow-hidden"
+      data-shaking={isShaking || undefined}
     >
       <div className="flex items-center gap-1.5 px-2 py-1">
         <div className="min-w-0 flex-1 overflow-hidden">

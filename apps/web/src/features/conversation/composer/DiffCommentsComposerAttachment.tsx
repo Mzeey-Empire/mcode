@@ -77,7 +77,6 @@ export function DiffCommentsComposerAttachment({
         testId="diff-comment-attachment"
         chipTestId="diff-comment-chip"
         previewTestId="diff-comment-preview"
-        commentCount={comments.length}
         onRemove={() => {
           comments.forEach((comment) =>
             usePreviewAnnotationStore.getState().deleteAnnotation(scopeId, comment.id));

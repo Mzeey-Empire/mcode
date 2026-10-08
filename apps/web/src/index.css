@@ -843,7 +843,9 @@ diffs-container:has([data-jump-highlight="true"]) {
   60% { transform: translateX(-3px); }
   80% { transform: translateX(3px); }
 }
-.animate-preview-annotation-shake {
+/* A comment editor flags `data-shaking`; its frame (popover or composer card) shakes as one. */
+.animate-preview-annotation-shake,
+[data-comment-editor-frame]:has([data-shaking]) {
   animation: preview-annotation-shake 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -852,7 +854,8 @@ diffs-container:has([data-jump-highlight="true"]) {
     width: 100% !important;
     opacity: 0.5;
   }
-  .animate-preview-annotation-shake {
+  .animate-preview-annotation-shake,
+  [data-comment-editor-frame]:has([data-shaking]) {
     animation: none;
   }
 }

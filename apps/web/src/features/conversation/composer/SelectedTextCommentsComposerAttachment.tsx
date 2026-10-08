@@ -1,9 +1,9 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { MessageCircle, Pencil, X } from "lucide-react";
 import type { SelectedTextComment } from "@mcode/contracts";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { Button } from "@/components/ui/button";
-import { POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
+import { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SelectedTextCommentEditor } from "../messages/selection/SelectedTextCommentEditor";
 
@@ -268,7 +268,7 @@ export function ComposerCommentPreviewItem<T extends ComposerCommentCardData>({
       {editor ? (
         <>
           {content}
-          <div className="mt-2">{editor}</div>
+          <div className="mt-2 overflow-hidden rounded-composer border border-border" data-comment-editor-frame>{editor}</div>
         </>
       ) : (
         <>
@@ -364,44 +364,6 @@ function getDockedEditor(
   return comments.some((comment) => comment.id === editor.commentId) ? undefined : editor;
 }
 
-function useSentPreviewPlacement({
-  commentCount,
-  isPreviewOpen,
-  previewRef,
-  previewRootRef,
-  readOnly,
-}: {
-  readonly commentCount: number;
-  readonly isPreviewOpen: boolean;
-  readonly previewRef: { readonly current: HTMLDivElement | null };
-  readonly previewRootRef: { readonly current: HTMLDivElement | null };
-  readonly readOnly: boolean;
-}): "above" | "below" {
-  const [placement, setPlacement] = useState<"above" | "below">("above");
-  useLayoutEffect(() => {
-    if (!readOnly || !isPreviewOpen) return;
-    const root = previewRootRef.current;
-    const preview = previewRef.current;
-    const viewport = root?.closest('[data-testid="message-list"]')?.querySelector<HTMLElement>(".overflow-y-auto");
-    if (!root || !preview || !viewport) return;
-    const rootBounds = root.getBoundingClientRect();
-    const viewportBounds = viewport.getBoundingClientRect();
-    const gap = 4;
-    const availableAbove = rootBounds.top - viewportBounds.top - gap;
-    const availableBelow = viewportBounds.bottom - rootBounds.bottom - gap;
-    setPlacement(availableAbove >= preview.getBoundingClientRect().height || availableAbove >= availableBelow ? "above" : "below");
-  }, [commentCount, isPreviewOpen, previewRef, previewRootRef, readOnly]);
-  return placement;
-}
-
-function previewPlacementClass(readOnly: boolean, sentPreviewPlacement: "above" | "below"): string {
-  return readOnly && sentPreviewPlacement === "below" ? "top-[calc(100%+0.25rem)]" : "bottom-[calc(100%+0.25rem)]";
-}
-
-function previewHorizontalPlacementClass(readOnly: boolean): string {
-  return readOnly ? "right-0 left-auto" : "left-0";
-}
-
 /** Props for the shared comment-attachment chrome: pill plus hover preview. */
 export interface ComposerCommentAttachmentShellProps {
   /** Pill text, e.g. "2 annotations" or "1 comment". */
@@ -411,15 +373,13 @@ export interface ComposerCommentAttachmentShellProps {
   readonly testId: string;
   readonly chipTestId: string;
   readonly previewTestId: string;
-  /** Item count feeding sent-preview placement; unused when mutable. */
-  readonly commentCount: number;
   readonly onRemove?: () => void;
   readonly children: ReactNode;
 }
 
 /**
  * Shared chrome for composer comment attachments: a bordered pill that opens a
- * hover/focus preview panel above it. Extracted so diff comments and
+ * hover/focus preview popover above it. Extracted so diff comments and
  * selected-text comments render identically.
  */
 export function ComposerCommentAttachmentShell({
@@ -429,77 +389,49 @@ export function ComposerCommentAttachmentShell({
   testId,
   chipTestId,
   previewTestId,
-  commentCount,
   onRemove,
   children,
 }: ComposerCommentAttachmentShellProps) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const previewId = useId();
-  const previewRootRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
-  const sentPreviewPlacement = useSentPreviewPlacement({
-    commentCount,
-    isPreviewOpen,
-    previewRef,
-    previewRootRef,
-    readOnly,
-  });
-  const previewCloseTimerRef = useRef<number | undefined>(undefined);
-  useEffect(() => () => {
-    if (previewCloseTimerRef.current !== undefined) window.clearTimeout(previewCloseTimerRef.current);
-  }, []);
-  // vlist translates each transcript row, so every row is its own stacking
-  // context and the preview cannot out-z-index later rows from inside one.
-  useLayoutEffect(() => {
-    if (!isPreviewOpen) return;
-    const row = previewRootRef.current?.closest("[data-transcript-key]")?.parentElement;
-    if (!(row instanceof HTMLElement)) return;
-    row.style.zIndex = "50";
-    return () => { row.style.zIndex = ""; };
-  }, [isPreviewOpen]);
-  const openPreview = () => {
-    if (previewCloseTimerRef.current !== undefined) window.clearTimeout(previewCloseTimerRef.current);
-    setIsPreviewOpen(true);
-  };
-  const schedulePreviewClose = () => {
-    if (previewCloseTimerRef.current !== undefined) window.clearTimeout(previewCloseTimerRef.current);
-    previewCloseTimerRef.current = window.setTimeout(() => {
-      if (!previewRootRef.current?.contains(document.activeElement)) setIsPreviewOpen(false);
-    }, 100);
-  };
-  const closePreviewAfterFocusLeaves = () => {
-    queueMicrotask(schedulePreviewClose);
+  const handleOpenChange = (open: boolean, details: PopoverRootChangeEventDetails) => {
+    // The preview holds card actions and editors. Leaving it with the pointer must not drop
+    // a card the user is working in, and a dirty editor's first outside press only warns.
+    const keepsFocus = previewRef.current?.contains(document.activeElement) ?? false;
+    if (!open && details.reason === "trigger-hover" && keepsFocus) return;
+    if (!open && details.reason === "outside-press" && details.event.defaultPrevented) return;
+    setIsPreviewOpen(open);
   };
 
   return (
     <section
-      className={readOnly ? "relative z-10 flex justify-end pt-2" : "px-3 pt-2"}
+      className={readOnly ? "flex justify-end pt-2" : "px-3 pt-2"}
       aria-label={sectionAriaLabel}
       data-selected-text-exclude={readOnly ? true : undefined}
       data-testid={testId}
     >
-      <div
-        ref={previewRootRef}
-        className="relative inline-flex max-w-full"
-        onPointerLeave={schedulePreviewClose}
-        onBlur={closePreviewAfterFocusLeaves}
-      >
+      <Popover open={isPreviewOpen} onOpenChange={handleOpenChange}>
         <div className="inline-flex h-8 max-w-full items-center overflow-hidden rounded-lg border border-border bg-background focus-within:border-focus focus-within:ring-3 focus-within:ring-focus/50" data-testid={chipTestId}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
+          <PopoverTrigger
+            openOnHover
+            delay={0}
+            closeDelay={100}
             aria-label={`${label}. Preview available.`}
             aria-controls={previewId}
-            aria-expanded={isPreviewOpen}
-            onPointerEnter={openPreview}
-            onFocus={openPreview}
-            onClick={openPreview}
-            className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-ink hover:bg-hover focus-visible:z-10"
+            onFocus={() => setIsPreviewOpen(true)}
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-ink hover:bg-hover focus-visible:z-10"
+              />
+            }
           >
             <MessageCircle size={16} aria-hidden />
             <span className="min-w-0 text-fade">{label}</span>
-          </Button>
+          </PopoverTrigger>
           {!readOnly && onRemove && (
             <Button
               type="button"
@@ -513,21 +445,20 @@ export function ComposerCommentAttachmentShell({
             </Button>
           )}
         </div>
-        {isPreviewOpen && (
-          <div
-            ref={previewRef}
-            id={previewId}
-            aria-label={`${label} preview`}
-            className={`absolute ${previewPlacementClass(readOnly, sentPreviewPlacement)} ${previewHorizontalPlacementClass(readOnly)} z-50 w-[min(38rem,calc(100vw-1.5rem))] p-3 ${POPOVER_SURFACE_CLASS}`}
-            data-testid={previewTestId}
-            onPointerEnter={openPreview}
-            onFocus={openPreview}
-            onPointerLeave={schedulePreviewClose}
-          >
-            <ol className="min-w-0">{children}</ol>
-          </div>
-        )}
-      </div>
+        <PopoverContent
+          ref={previewRef}
+          id={previewId}
+          aria-label={`${label} preview`}
+          side="top"
+          align={readOnly ? "end" : "start"}
+          collisionAvoidance={{ side: "flip", align: "shift" }}
+          initialFocus={false}
+          className="w-[min(38rem,calc(100vw-1.5rem))] p-3"
+          data-testid={previewTestId}
+        >
+          <ol className="min-w-0">{children}</ol>
+        </PopoverContent>
+      </Popover>
     </section>
   );
 }
@@ -581,7 +512,6 @@ export function SelectedTextCommentsComposerAttachment({
           testId="selected-text-comment-attachment"
           chipTestId="selected-text-comment-chip"
           previewTestId="selected-text-comment-preview"
-          commentCount={comments.length}
           onRemove={onRemove}
         >
           {comments.map((comment) => (
@@ -611,15 +541,17 @@ export function SelectedTextCommentsComposerAttachment({
         <section className="px-3 pt-2" aria-label="Selected text comment editor" data-testid="selected-text-comment-docked-editor">
           <div className="rounded-xl border border-border bg-hover/30 p-2">
             <p className="mb-2 text-xs text-muted">Source unavailable</p>
-            <SelectedTextCommentEditor
-              source={dockedEditor.source}
-              draft={dockedEditor}
-              nextDisplayNumber={comments.length + 1}
-              onSave={onSave}
-              onDraftChange={onEditorChange}
-              onClose={() => onEditorChange(undefined)}
-              onAnnouncement={setAnnouncement}
-            />
+            <div className="overflow-hidden rounded-composer border border-border" data-comment-editor-frame>
+              <SelectedTextCommentEditor
+                source={dockedEditor.source}
+                draft={dockedEditor}
+                nextDisplayNumber={comments.length + 1}
+                onSave={onSave}
+                onDraftChange={onEditorChange}
+                onClose={() => onEditorChange(undefined)}
+                onAnnouncement={setAnnouncement}
+              />
+            </div>
           </div>
         </section>
       )}

@@ -3,8 +3,6 @@ import type { LexicalEditor } from "lexical";
 import { MessageCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MessageMention } from "@mcode/contracts";
-import { cn } from "@/lib/utils";
-import { POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import { basename } from "@/lib/path";
 import { canSaveSelectedTextComment } from "@/features/conversation/messages/selection/comment-editor-model";
 import {
@@ -55,7 +53,9 @@ export interface DiffCommentEditorProps {
  * Diff line comment editor rendered inline at the annotated line. Uses the
  * same compact ComposerEditor, controls, and dismissal policy as the
  * transcript "Add comment" feature; persistence lands in
- * `previewAnnotationStore.diffByThread`.
+ * `previewAnnotationStore.diffByThread`. The diff row frames it: the editor sits
+ * in the row's flow rather than floating, because the virtualizer unmounts rows
+ * that a floating anchor would point at.
  */
 export function DiffCommentEditor({
   threadId,
@@ -120,11 +120,8 @@ export function DiffCommentEditor({
       ref={rootRef}
       role="dialog"
       aria-label={`Comment on ${target.filePath} line ${target.line}`}
-      className={cn(
-        "relative overflow-hidden",
-        POPOVER_SURFACE_CLASS,
-        isShaking && "animate-preview-annotation-shake",
-      )}
+      className="relative overflow-hidden"
+      data-shaking={isShaking || undefined}
     >
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
         <MessageCircle size={12} className="shrink-0 text-muted" aria-hidden />
