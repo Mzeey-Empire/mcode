@@ -26,4 +26,18 @@ describe("cn", () => {
   it("lets a later line clamp replace an earlier one", () => {
     expect(cn("text-fade-lines-2", "text-fade-lines-3")).toBe("text-fade-lines-3");
   });
+
+  it("lets a later radius replace an earlier radius role", () => {
+    expect(cn("rounded-menu", "rounded-lg")).toBe("rounded-lg");
+    expect(cn("rounded-md", "rounded-dialog")).toBe("rounded-dialog");
+  });
+
+  it("lets a later size replace an earlier spacing role", () => {
+    expect(cn("min-h-control-compact px-3", "min-h-10")).toBe("px-3 min-h-10");
+    expect(cn("h-8", "h-row-default")).toBe("h-row-default");
+  });
+
+  it("keeps text-fade as its own group beside the text-fade spacing role", () => {
+    expect(cn("text-fade", "pr-text-fade")).toBe("text-fade pr-text-fade");
+  });
 });

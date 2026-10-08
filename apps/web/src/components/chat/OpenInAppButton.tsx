@@ -6,7 +6,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { registerCommand } from "@/lib/command-registry";
-import { formatKeybinding } from "@/lib/keybinding-manager";
+import { keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import { resolveDefaultOpenInApp, FILE_EXPLORER_ID } from "@/lib/resolveDefaultOpenInApp";
 import { cn } from "@/lib/utils";
@@ -84,7 +84,7 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
     });
   }, [disabled, openDefault, resolvedLabel]);
 
-  const shortcut = formatKeybinding("mod+o", isMac);
+  const shortcut = keybindingKeycaps("mod+o", isMac);
 
   return (
     <div className="relative inline-flex">
@@ -104,8 +104,8 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
               </Button>
             }
           />
-          <TooltipContent side="bottom" className="text-xs">
-            {disabled ? "No workspace to open" : `Open in ${resolvedLabel} (${shortcut})`}
+          <TooltipContent side="bottom" shortcut={disabled ? undefined : shortcut}>
+            {disabled ? "No workspace to open" : `Open in ${resolvedLabel}`}
           </TooltipContent>
         </Tooltip>
 

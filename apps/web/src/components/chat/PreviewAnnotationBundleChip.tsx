@@ -136,7 +136,6 @@ export function PreviewAnnotationBundleChip({
         align="end"
         sideOffset={8}
         className="w-[min(32rem,calc(100vw-1.6rem))] max-w-none items-stretch rounded-xl bg-panel p-3 text-ink ring-1 ring-inset ring-border/70"
-        arrowClassName="bg-panel fill-panel"
       >
         <div className="max-h-80 min-w-0 divide-y divide-border/45 overflow-y-auto">
           {bundle.annotations.map((item) => {

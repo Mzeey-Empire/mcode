@@ -3979,7 +3979,7 @@ export function PreviewPanel({
                     "--tooltip-arrow-bg": BUBBLE_SURFACE_INSET,
                   } as React.CSSProperties
                 }
-                arrowClassName="fill-[#202020]"
+                arrowClassName="fill-[#202020] stroke-white/10"
               >
                 <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-xs text-neutral-300">
                   {targetLabel}

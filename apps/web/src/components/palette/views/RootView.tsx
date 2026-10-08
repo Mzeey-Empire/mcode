@@ -12,7 +12,7 @@ import {
   type PaletteGroup,
 } from "../CommandPalette.logic";
 import { CommandPaletteResults } from "../CommandPaletteResults";
-import { Kbd } from "../Kbd";
+import { Kbd } from "@/components/ui/kbd";
 
 // Commands that should not appear in the palette listing.
 // `palette.open` and `commandPalette.toggle` are both bound to opening the palette

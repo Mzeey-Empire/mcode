@@ -8,7 +8,7 @@ import { resolveThreadDirPath } from "@/lib/worktree";
 import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
+import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import type { Thread } from "@/transport";
 /** Props for {@link HeaderActions}. */
@@ -40,7 +40,7 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
   }, [thread.workspace_id, thread.id]);
 
   // Live keycap for the right-panel toggle, shown in the button's tooltip.
-  const panelShortcut = formatKeybinding(
+  const panelShortcut = keybindingKeycaps(
     getKeybindingForCommand("rightPanel.toggle")?.key ?? "mod+alt+b",
     isMac,
   );
@@ -80,9 +80,8 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
             </Button>
           }
         />
-        <TooltipContent side="bottom" className="text-xs">
-          Toggle panel{" "}
-          <span className="text-ink">{panelShortcut}</span>
+        <TooltipContent side="bottom" shortcut={panelShortcut}>
+          Toggle panel
         </TooltipContent>
       </Tooltip>
     </div>

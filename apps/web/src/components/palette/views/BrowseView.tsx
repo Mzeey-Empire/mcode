@@ -6,7 +6,7 @@ import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getTransport } from "@/transport";
 import { isMac } from "@/lib/platform";
-import { Kbd } from "../Kbd";
+import { Kbd } from "@/components/ui/kbd";
 import {
   splitBrowseQuery,
   filterBrowseEntries,

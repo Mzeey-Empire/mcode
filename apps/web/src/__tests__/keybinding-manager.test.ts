@@ -6,6 +6,7 @@ import {
   getKeybindings,
   getKeybindingForCommand,
   formatKeybinding,
+  keybindingKeycaps,
   clearKeybindings,
   type Keybinding,
 } from "@/lib/keybinding-manager";
@@ -178,5 +179,23 @@ describe("formatKeybinding", () => {
   it("formats Escape", () => {
     const formatted = formatKeybinding("Escape", true);
     expect(formatted).toBe("Esc");
+  });
+
+  it("joins Windows keys with a plus", () => {
+    expect(formatKeybinding("mod+alt+b", false)).toBe("Ctrl+Alt+B");
+  });
+});
+
+describe("keybindingKeycaps", () => {
+  it("splits modifiers and key into keycaps (Windows style)", () => {
+    expect(keybindingKeycaps("mod+shift+alt+b", false)).toEqual(["Ctrl", "Shift", "Alt", "B"]);
+  });
+
+  it("uses Mac symbols for modifiers", () => {
+    expect(keybindingKeycaps("mod+shift+n", true)).toEqual(["⌘", "⇧", "N"]);
+  });
+
+  it("names special keys", () => {
+    expect(keybindingKeycaps("Escape", false)).toEqual(["Esc"]);
   });
 });

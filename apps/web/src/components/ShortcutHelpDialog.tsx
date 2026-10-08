@@ -11,7 +11,7 @@ import {
   formatKeybinding,
 } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
-import { Kbd } from "@/components/palette/Kbd";
+import { Kbd } from "@/components/ui/kbd";
 
 /** Single shortcut entry as rendered in the dialog. */
 interface ShortcutRow {

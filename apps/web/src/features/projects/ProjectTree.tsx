@@ -2127,7 +2127,7 @@ function ThreadRowPreview({
   return (
     <Tooltip>
       <TooltipTrigger render={row} />
-      <TooltipContent side="right" align="start" sideOffset={8} variant="surface" className="max-w-none p-3">
+      <TooltipContent side="right" align="start" sideOffset={8} className="max-w-none p-3">
         <SidebarThreadPreview workspaceName={workspaceName} thread={thread} />
       </TooltipContent>
     </Tooltip>
