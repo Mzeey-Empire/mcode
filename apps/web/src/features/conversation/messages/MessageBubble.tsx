@@ -155,14 +155,14 @@ function GoalReceipt({
       data-testid="goal-receipt"
       className={cn(
         "inline-flex items-center gap-1.5 font-mono text-xs font-medium uppercase tracking-[0.18em]",
-        tone === "muted" ? "text-muted-foreground" : "text-primary",
+        tone === "muted" ? "text-muted" : "text-primary",
         className,
       )}
     >
       <Target size={13} className="shrink-0" aria-hidden="true" />
       <span>{label}</span>
       {suffix && (
-        <span className="font-normal normal-case tracking-normal tabular-nums text-muted-foreground/75">
+        <span className="font-normal normal-case tracking-normal tabular-nums text-muted/75">
           {suffix}
         </span>
       )}
@@ -196,7 +196,7 @@ function GoalPill({ label, condition, hint }: { label: string; condition?: strin
     </span>
   );
   const hintEl = hint ? (
-    <span className="shrink-0 font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground/70">
+    <span className="shrink-0 font-mono text-xs uppercase tracking-[0.18em] text-muted/70">
       {hint}
     </span>
   ) : null;
@@ -231,7 +231,7 @@ function GoalPill({ label, condition, hint }: { label: string; condition?: strin
             aria-expanded="true"
             aria-label="Collapse goal condition"
             dir="auto"
-            className="cursor-pointer text-left font-serif text-sm italic leading-snug text-foreground [overflow-wrap:anywhere] hover:text-foreground/80"
+            className="cursor-pointer text-left font-serif text-sm italic leading-snug text-ink [overflow-wrap:anywhere] hover:text-ink/80"
           >
             &ldquo;{condition}&rdquo;
           </button>
@@ -263,7 +263,7 @@ function GoalPill({ label, condition, hint }: { label: string; condition?: strin
                   aria-expanded="false"
                   aria-label="Expand full goal condition"
                   dir="auto"
-                  className="min-w-0 cursor-pointer truncate text-left font-serif text-sm italic leading-snug text-foreground hover:text-foreground/80"
+                  className="min-w-0 cursor-pointer truncate text-left font-serif text-sm italic leading-snug text-ink hover:text-ink/80"
                 >
                   &ldquo;{condition}&rdquo;
                 </button>
@@ -328,16 +328,16 @@ function ImageThumbnail({
   const image = useRetriableAttachmentImage(src);
 
   const frame = cn(
-    "relative overflow-hidden rounded-xl bg-muted/40 ring-1 ring-border/40",
+    "relative overflow-hidden rounded-xl bg-hover/40 ring-1 ring-border/40",
     single ? "max-w-[240px]" : "max-w-[140px]",
   );
 
   if (image.failed) {
     return (
       <div className={frame}>
-        <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2.5">
-          <ImageIcon size={14} className="shrink-0 text-muted-foreground" />
-          <span className="truncate text-xs text-muted-foreground">{name}</span>
+        <div className="flex items-center gap-2 rounded-xl bg-hover/50 px-3 py-2.5">
+          <ImageIcon size={14} className="shrink-0 text-muted" />
+          <span className="truncate text-xs text-muted">{name}</span>
         </div>
       </div>
     );
@@ -358,7 +358,7 @@ function ImageThumbnail({
         style={{ imageOrientation: "from-image" }}
       />
       {image.retrying ? (
-        <span className="absolute inset-0 flex items-center justify-center text-muted-foreground/70">
+        <span className="absolute inset-0 flex items-center justify-center text-muted/70">
           <ImageIcon size={14} className="animate-pulse" aria-hidden />
         </span>
       ) : null}
@@ -408,7 +408,7 @@ function CopyButton({ content }: { content: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/60 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover/msg:opacity-100"
+      className="flex h-7 w-7 items-center justify-center rounded-md bg-hover/60 text-muted opacity-0 transition-all hover:bg-hover hover:text-ink group-hover/msg:opacity-100"
       aria-label="Copy message"
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -425,7 +425,7 @@ function BranchButton({ onClick }: { onClick: () => void }) {
           <button
             type="button"
             onClick={onClick}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/60 text-muted-foreground opacity-0 scale-90 transition-all duration-150 hover:bg-primary/10 hover:text-primary group-hover/msg:opacity-100 group-hover/msg:scale-100"
+            className="flex h-7 w-7 items-center justify-center rounded-md bg-hover/60 text-muted opacity-0 scale-90 transition-all duration-150 hover:bg-primary/10 hover:text-primary group-hover/msg:opacity-100 group-hover/msg:scale-100"
             aria-label="Fork from this message"
           >
             <GitFork size={14} />
@@ -452,8 +452,8 @@ function QuoteBlock({
 }) {
   if (!available) {
     return (
-      <div className="mb-1.5 rounded-md border-l-2 border-muted-foreground/20 bg-muted/20 px-2.5 py-1.5 select-none">
-        <p className="text-xs text-muted-foreground/40 italic">Original message unavailable</p>
+      <div className="mb-1.5 rounded-md border-l-2 border-muted/20 bg-hover/20 px-2.5 py-1.5 select-none">
+        <p className="text-xs text-muted/40 italic">Original message unavailable</p>
       </div>
     );
   }
@@ -465,10 +465,10 @@ function QuoteBlock({
     <button
       type="button"
       onClick={onClick}
-      className="mb-1.5 w-full cursor-pointer rounded-md border-l-2 border-primary/40 bg-muted/30 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/50 select-none"
+      className="mb-1.5 w-full cursor-pointer rounded-md border-l-2 border-primary/40 bg-hover/30 px-2.5 py-1.5 text-left transition-colors hover:bg-hover/50 select-none"
     >
       <p className="text-xs font-semibold text-primary/60 leading-none mb-0.5">{label}</p>
-      <p className="text-xs text-muted-foreground/60 truncate italic">{displayText}</p>
+      <p className="text-xs text-muted/60 truncate italic">{displayText}</p>
     </button>
   );
 }
@@ -613,7 +613,7 @@ function UserMessageFooter({
         interactive={interactive}
         onBranch={onBranch}
       />
-      <div className="flex items-center gap-2 font-mono text-xs tabular-nums text-muted-foreground/55">
+      <div className="flex items-center gap-2 font-mono text-xs tabular-nums text-muted/55">
         {userGoal && <GoalReceipt label="Sent as goal" tone="muted" />}
         <span>{formattedTime}</span>
       </div>
@@ -627,7 +627,7 @@ function UserMessageText({ message, displayText, userGoal }: { message: Message;
   const hasMentions = !userGoal && Boolean(message.mentions?.length);
   return (
     <div
-      className="overflow-hidden break-words rounded-lg rounded-br-md bg-accent px-3 py-1.5 text-sm text-accent-foreground"
+      className="overflow-hidden break-words rounded-lg rounded-br-md bg-selected px-3 py-1.5 text-sm text-ink"
       data-selected-text-content
       data-selected-text-eligible="true"
     >
@@ -682,7 +682,7 @@ function UserMessageFeedback({
         <div className="flex justify-end" role="note" aria-label={`Parent agent provenance: ${provenanceDetails}`} data-testid="parent-agent-provenance">
           <Tooltip>
             <TooltipTrigger
-              render={<span className="font-mono text-xs text-muted-foreground/70">Parent agent</span>}
+              render={<span className="font-mono text-xs text-muted/70">Parent agent</span>}
             />
             <TooltipContent>{provenanceDetails}</TooltipContent>
           </Tooltip>
@@ -800,7 +800,7 @@ function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) 
     return (
       <div className="flex items-start gap-2.5 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm">
         <ErrorIcon size={14} className="mt-0.5 shrink-0 text-destructive/60" />
-        <p className="text-muted-foreground leading-relaxed">{agentError}</p>
+        <p className="text-muted leading-relaxed">{agentError}</p>
       </div>
     );
   }
@@ -808,7 +808,7 @@ function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) 
     return (
       <div className="flex items-start gap-2.5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm" role="alert">
         <WarningIcon size={14} className="mt-0.5 shrink-0 text-destructive" />
-        <div><p className="font-medium">Security warning</p><p className="text-muted-foreground leading-relaxed">{message.content}</p></div>
+        <div><p className="font-medium">Security warning</p><p className="text-muted leading-relaxed">{message.content}</p></div>
       </div>
     );
   }
@@ -820,7 +820,7 @@ function TimelineNote({ text }: { text: string }) {
   return (
     <div className="flex items-center gap-3 py-2" role="note">
       <div className="h-px flex-1 bg-border" aria-hidden="true" />
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-xs text-muted">
         <RotateCcw size={12} aria-hidden="true" />
         <span>{text}</span>
       </div>
@@ -860,7 +860,7 @@ function AssistantResponseText({
   const isStreaming = textIsStreaming ?? agentDisplayState?.phase === "streaming";
   const renderDelta = textIsStreaming !== undefined || isStreaming || agentDisplayState?.phase === "finalizing";
   return (
-    <div className="text-sm text-foreground" data-testid="assistant-response-text" data-selected-text-content data-selected-text-eligible={isAgentResponseComplete ? "true" : "false"}>
+    <div className="text-sm text-ink" data-testid="assistant-response-text" data-selected-text-content data-selected-text-eligible={isAgentResponseComplete ? "true" : "false"}>
       {renderDelta ? (
         <DeltaBlock text={message.content} isStreaming={isStreaming} showCursor={isStreaming} />
       ) : (
@@ -946,7 +946,7 @@ function AssistantMessageMetadata({
     message.cost_usd != null ? `$${message.cost_usd.toFixed(4)}` : null,
     formattedTime,
   ].filter(Boolean).join(" · ");
-  return <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground/55" data-testid="agent-message-metadata">{metadata}</span>;
+  return <span className="ml-auto font-mono text-xs tabular-nums text-muted/55" data-testid="agent-message-metadata">{metadata}</span>;
 }
 
 /** Renders an assistant message, including its live response state. */

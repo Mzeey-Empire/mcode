@@ -37,7 +37,7 @@ export function InterruptedSessionsBanner({
       <WarningIcon className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
       <div className="min-w-0 flex-1">
         <p>{count} {count === 1 ? "turn was" : "turns were"} interrupted during the last server restart.</p>
-        <ul className="mt-1 space-y-0.5 text-muted-foreground">
+        <ul className="mt-1 space-y-0.5 text-muted">
           {incident.entries.map((entry) => (
             <li key={entry.executionId} data-testid={`recovery-incident-entry-${entry.executionId}`}>
               {entry.workspaceName} · {entry.threadTitle} · {formatDurationMs(entry.durationMs)}
@@ -54,7 +54,7 @@ export function InterruptedSessionsBanner({
         size="icon"
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+        className="h-7 w-7 text-muted hover:text-ink"
       >
         <X className="h-4 w-4" />
       </Button>

@@ -23,11 +23,11 @@ export function UpdateIndicator() {
     return (
       <div className="space-y-1.5 px-1.5 py-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1.5 text-[11px] text-muted">
             <Spinner size={11} className="text-primary" />
             Downloading update
           </span>
-          <span className="shrink-0 font-mono text-[10px] tabular-nums text-foreground/45">
+          <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink/45">
             {status.percent}%
           </span>
         </div>
@@ -62,10 +62,10 @@ export function UpdateIndicator() {
 
     return (
       <div className="flex items-center justify-between gap-2 px-1.5 py-1">
-        <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted">
           <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
           <span className="truncate">Update available</span>
-          <span className="shrink-0 font-mono text-[10px] tabular-nums text-foreground/40">
+          <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink/40">
             v{status.version}
           </span>
         </span>
@@ -80,7 +80,7 @@ export function UpdateIndicator() {
           <button
             onClick={dismiss}
             aria-label="Dismiss update notice"
-            className="rounded px-1 py-0.5 text-[11px] text-muted-foreground/60 transition-colors hover:text-foreground"
+            className="rounded px-1 py-0.5 text-[11px] text-muted/60 transition-colors hover:text-ink"
           >
             ×
           </button>

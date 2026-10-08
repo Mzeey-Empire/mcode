@@ -582,7 +582,7 @@ export function PullRequestDiffViewport({
       {!commentsComplete && (
         <p
           role="status"
-          className="flex items-center gap-2 bg-page/70 px-3 py-1.5 text-xs text-muted-foreground"
+          className="flex items-center gap-2 bg-page/70 px-3 py-1.5 text-xs text-muted"
         >
           <MessageSquare size={12} aria-hidden className="text-primary/75" />
           {commentsBounded
@@ -593,7 +593,7 @@ export function PullRequestDiffViewport({
       {memoryPausedPaths.size > 0 && (
         <p
           role="status"
-          className="flex items-center gap-2 bg-page/70 px-3 py-1.5 text-xs text-muted-foreground"
+          className="flex items-center gap-2 bg-page/70 px-3 py-1.5 text-xs text-muted"
         >
           <ErrorIcon size={12} aria-hidden className="text-primary/75" />
           Syntax highlighting paused for memory. Plain-text diff remains

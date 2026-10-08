@@ -115,8 +115,8 @@ describe('Sidebar "Edit settings.json" button', () => {
     const searchThreads = screen.getByRole("button", {
       name: "Search threads",
     });
-    expect(newThread).not.toHaveClass("bg-secondary");
-    expect(searchThreads).not.toHaveClass("bg-secondary");
+    expect(newThread).not.toHaveClass("bg-button-secondary");
+    expect(searchThreads).not.toHaveClass("bg-button-secondary");
   });
 
   it("keeps New thread and Search threads ahead of Pull requests without a duplicate Chat action", () => {

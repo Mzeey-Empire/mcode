@@ -38,22 +38,22 @@ interface FileActionBarProps {
 
 /**
  * Compact icon-button shared by every action. Muted at rest, brightens on hover.
- * Hover uses a foreground overlay rather than a muted tint: these buttons sit on
- * the opaque `bg-muted` header bar, where a `muted/xx` layer composites back to
- * muted and shows no change.
+ * Hover uses an ink overlay: these buttons sit on the opaque `bg-hover` header
+ * bar, where a `hover/xx` layer composites back to the same fill and shows no
+ * change.
  */
 const ACTION_BUTTON_CLASS = [
-  "h-6 w-6 shrink-0 p-0 text-muted-foreground/70",
-  "transition-colors hover:bg-foreground/10 hover:text-foreground",
-  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring/55",
+  "h-6 w-6 shrink-0 p-0 text-muted/70",
+  "transition-colors hover:bg-ink/10 hover:text-ink",
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus/55",
 ].join(" ");
 
 /**
  * Active segment of the Diff/Preview toggle. `bg-background` reads as a distinct
- * recessed (dark theme) / raised (light theme) segment against the muted bar in
+ * recessed (dark theme) / raised (light theme) segment against the hover fill in
  * either theme — a `muted/xx` fill would be invisible here.
  */
-const ACTION_BUTTON_ACTIVE = "bg-background text-foreground";
+const ACTION_BUTTON_ACTIVE = "bg-background text-ink";
 
 /**
  * Horizontal toolbar of per-file actions that lives in the file header bar:

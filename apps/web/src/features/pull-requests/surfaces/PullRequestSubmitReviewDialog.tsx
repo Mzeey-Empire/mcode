@@ -414,20 +414,20 @@ function ReviewDialogHeader() {
 function ReviewRemoteEffect({ detail, draftCount }: { detail: PullRequestDetail; draftCount: number }) {
   return (
     <div className="bg-page/65 px-4 py-3">
-      <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Remote effect</p>
-      <p className="mt-2 text-sm font-medium text-foreground/90">
+      <p className="font-mono text-xs uppercase tracking-widest text-muted">Remote effect</p>
+      <p className="mt-2 text-sm font-medium text-ink/90">
         {detail.identity.owner}/{detail.identity.repository} #{detail.identity.number}
       </p>
-      <p className="mt-2 flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground">
+      <p className="mt-2 flex min-w-0 items-center gap-2 font-mono text-xs text-muted">
         <GitBranch size={13} aria-hidden />
         <span className="truncate">{detail.base.name}</span>
         <span aria-hidden className="opacity-45">←</span>
-        <span className="truncate text-foreground/85">{detail.head.name}</span>
+        <span className="truncate text-ink/85">{detail.head.name}</span>
         {detail.head.oid ? (
           <span className="ml-auto shrink-0 tabular-nums">{detail.head.oid.slice(0, 8)}</span>
         ) : null}
       </p>
-      <p className="mt-2 text-xs text-muted-foreground">
+      <p className="mt-2 text-xs text-muted">
         {draftCount} review {draftCount === 1 ? "draft" : "drafts"}
       </p>
     </div>
@@ -438,7 +438,7 @@ function ReviewOutcomeField({ review }: { review: ReviewSubmission }) {
   const disabled = review.mutationBlocked || review.summary?.outdated;
   return (
     <div className="space-y-1.5">
-      <label htmlFor="pull-request-review-event" className="text-xs text-muted-foreground">
+      <label htmlFor="pull-request-review-event" className="text-xs text-muted">
         Review outcome
       </label>
       <Select
@@ -463,7 +463,7 @@ function ReviewBodyField({ review }: { review: ReviewSubmission }) {
   const disabled = review.mutationBlocked || review.summary?.outdated;
   return (
     <div className="space-y-1.5">
-      <label htmlFor="pull-request-review-body" className="text-xs text-muted-foreground">
+      <label htmlFor="pull-request-review-body" className="text-xs text-muted">
         Overall review, optional
       </label>
       <Textarea
@@ -484,7 +484,7 @@ function ReviewSubmissionNotices({ review }: { review: ReviewSubmission }) {
     <>
       {review.summary?.outdated ? <OutdatedReviewNotice review={review} /> : null}
       {review.unavailableReason && !review.summary?.outdated ? (
-        <p role="status" className="flex items-start gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted-foreground">
+        <p role="status" className="flex items-start gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted">
           <ErrorIcon size={13} aria-hidden className="mt-0.5 shrink-0 text-primary/80" />
           {review.unavailableReason}
         </p>
@@ -504,7 +504,7 @@ function ReviewSubmissionNotices({ review }: { review: ReviewSubmission }) {
 
 function OutdatedReviewNotice({ review }: { review: ReviewSubmission }) {
   return (
-    <div className="flex items-center gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted">
       <ErrorIcon size={13} aria-hidden className="shrink-0 text-primary/80" />
       <span className="min-w-0 flex-1">The overall review targets an older snapshot.</span>
       <Button type="button" variant="ghost" size="xs" disabled={review.mutationBlocked} onClick={review.startFresh}>

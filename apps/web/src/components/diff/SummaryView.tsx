@@ -269,7 +269,7 @@ function SummaryDots() {
       {[0, 150, 300].map((delay) => (
         <div
           key={delay}
-          className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-pulse"
+          className="h-1 w-1 rounded-full bg-muted/40 animate-pulse"
           style={{ animationDelay: `${delay}ms` }}
         />
       ))}
@@ -300,7 +300,7 @@ function RegeneratingSummary({
         <div role="status" aria-live="polite" aria-busy="true">
           <SummaryDots />
         </div>
-        <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground/40">
+        <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted/40">
           Regenerating
         </span>
         <CancelSummaryButton onCancel={onCancel} />
@@ -309,7 +309,7 @@ function RegeneratingSummary({
         <MarkdownContent content={summary.content} />
       </div>
       <div className="flex items-center justify-between border-t border-border/30 pt-3">
-        <SummaryModel className="text-[11px] text-muted-foreground truncate max-w-[200px]" model={summary.model} />
+        <SummaryModel className="text-[11px] text-muted truncate max-w-[200px]" model={summary.model} />
         <SummaryTiming summary={summary} />
       </div>
     </div>
@@ -325,7 +325,7 @@ function InitialSummaryLoading({ onCancel }: { readonly onCancel: () => void }) 
       aria-busy="true"
     >
       <SummaryDots />
-      <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground/40">
+      <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted/40">
         Summarizing
       </span>
       <CancelSummaryButton onCancel={onCancel} />
@@ -339,7 +339,7 @@ function CancelSummaryButton({ onCancel }: { readonly onCancel: () => void }) {
       variant="ghost"
       size="xs"
       onClick={onCancel}
-      className="gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+      className="gap-1 text-[11px] text-muted hover:text-ink"
     >
       <X size={12} />
       Cancel
@@ -349,7 +349,7 @@ function CancelSummaryButton({ onCancel }: { readonly onCancel: () => void }) {
 
 function SummaryTiming({ summary }: { readonly summary: SummaryRecord }) {
   return (
-    <span className="text-[11px] text-muted-foreground">
+    <span className="text-[11px] text-muted">
       <SummaryTimestamp createdAt={summary.createdAt} />
       {" · "}{summary.turnCount} {summary.turnCount === 1 ? "turn" : "turns"}
     </span>
@@ -395,7 +395,7 @@ function RenderedSummary({
         <MarkdownContent content={summary.content} />
       </div>
       <div className="flex items-center justify-between border-t border-border/30 pt-3">
-        <span className="flex items-center gap-1 text-[11px] text-muted-foreground min-w-0">
+        <span className="flex items-center gap-1 text-[11px] text-muted min-w-0">
           <SummaryModel className="truncate max-w-[140px]" model={summary.model} />
           <span className="shrink-0">
             {" · "}
@@ -411,7 +411,7 @@ function RenderedSummary({
                   variant="ghost"
                   size="icon-xs"
                   onClick={actions.onCopy}
-                  className="h-6 w-6 text-muted-foreground/50 hover:text-foreground/70"
+                  className="h-6 w-6 text-muted/50 hover:text-ink/70"
                   aria-label="Copy summary to clipboard"
                 >
                   {copied ? <Check size={12} /> : <Copy size={12} />}
@@ -426,7 +426,7 @@ function RenderedSummary({
             variant="ghost"
             size="xs"
             onClick={actions.onGenerate}
-            className="gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+            className="gap-1 text-[11px] text-muted hover:text-ink"
           >
             <RefreshCw size={12} />
             Regenerate
@@ -442,7 +442,7 @@ function NewTurnsNotice({ newTurnCount }: { readonly newTurnCount: number }) {
   return (
     <div className="flex items-center gap-2 border-b border-border/30 pb-2">
       <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
-      <span className="font-mono text-[10.5px] text-muted-foreground/60">
+      <span className="font-mono text-[10.5px] text-muted/60">
         {newTurnCount} new {newTurnCount === 1 ? "turn" : "turns"} since summary
       </span>
     </div>
@@ -462,8 +462,8 @@ function EmptySummary({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-14">
-      <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted-foreground/20">Σ</span>
-      <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/40">
+      <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted/20">Σ</span>
+      <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/40">
         no summary
       </p>
       <SummaryError error={error} />
@@ -472,7 +472,7 @@ function EmptySummary({
         size="xs"
         onClick={onGenerate}
         disabled={!hasFileChanges || !activeThreadId}
-        className="mt-1 text-[11px] text-muted-foreground hover:text-foreground"
+        className="mt-1 text-[11px] text-muted hover:text-ink"
         aria-describedby={!hasFileChanges ? "generate-hint" : undefined}
       >
         {error ? "Try again" : "Generate"}

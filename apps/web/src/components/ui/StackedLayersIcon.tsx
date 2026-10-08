@@ -5,7 +5,7 @@ export const STACKED_LAYERS_ACTIVE_ICON_CLASS =
 
 /** Tailwind classes for a completed or idle stacked-layers glyph. */
 export const STACKED_LAYERS_IDLE_ICON_CLASS =
-  "w-3.5 h-3.5 shrink-0 text-muted-foreground/60";
+  "w-3.5 h-3.5 shrink-0 text-muted/60";
 
 /**
  * Returns icon size and color classes for running vs idle sub-agent rows.
@@ -32,7 +32,7 @@ interface StackedLayersIconProps extends SVGProps<SVGSVGElement> {
  * Used as the sub-agent glyph in the narrative timeline and persisted
  * tool record renderers. Reads as a packaged sub-context (not a branch,
  * not a robot). Stroke and fill follow `currentColor` so callers can
- * tint via Tailwind (`text-primary`, `text-muted-foreground`, etc).
+ * tint via Tailwind (`text-primary`, `text-muted`, etc).
  *
  * Pass `animated` to enable the running-agent shimmer animation defined
  * in `index.css` under `.stacked-layers-animated`.

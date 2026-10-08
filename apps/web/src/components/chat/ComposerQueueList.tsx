@@ -119,12 +119,12 @@ export function ComposerQueueList({
   return (
     <section
       aria-label="Queued messages"
-      className="mb-2 overflow-hidden rounded-xl bg-muted/30 ring-1 ring-inset ring-border/40"
+      className="mb-2 overflow-hidden rounded-xl bg-hover/30 ring-1 ring-inset ring-border/40"
     >
       {/* Header strip: small-caps mono, quiet, dev-tool feel.
           Continue is primary (only when idle); Clear all is quiet on the side. */}
       <header className="flex items-center justify-between border-b border-border/40 px-3 py-1.5">
-        <span className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground/70">
+        <span className="font-mono text-xs uppercase tracking-[0.18em] text-muted/70">
           Queued
         </span>
         <div className="flex items-center gap-1.5">
@@ -143,7 +143,7 @@ export function ComposerQueueList({
             type="button"
             onClick={() => clearQueue(threadId)}
             aria-label="Clear all queued messages"
-            className="flex items-center gap-1 rounded-sm px-1 py-0.5 font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground/50 transition-colors hover:bg-destructive/8 hover:text-destructive"
+            className="flex items-center gap-1 rounded-sm px-1 py-0.5 font-mono text-xs uppercase tracking-[0.16em] text-muted/50 transition-colors hover:bg-destructive/8 hover:text-destructive"
           >
             <Trash2 size={9} />
             Clear all
@@ -237,8 +237,8 @@ const QueueRow = memo(function QueueRow({
       className={cn(
         "group flex items-center gap-2 px-2 py-1.5 transition-colors",
         "border-t border-border/30 first:border-t-0",
-        !isDragging && "hover:bg-accent/40",
-        isDragging && "bg-accent",
+        !isDragging && "hover:bg-selected/40",
+        isDragging && "bg-selected",
       )}
     >
       <DragGrip listeners={listeners} />
@@ -273,7 +273,7 @@ function QueueRowPreview({ msg, onEdit }: Pick<QueueRowProps, "msg" | "onEdit">)
             className="min-w-0 flex-1 cursor-text text-left"
           >
             {previewText
-              ? <span className="block truncate text-xs leading-snug text-foreground/90">{previewText}</span>
+              ? <span className="block truncate text-xs leading-snug text-ink/90">{previewText}</span>
               : <span className="sr-only">{emptyMessageLabel}</span>}
           </button>
         }
@@ -311,7 +311,7 @@ function QueueAttachmentCount({ attachments }: Pick<QueuedMessage, "attachments"
 
   return (
     <span
-      className="flex shrink-0 items-center gap-0.5 font-mono text-xs tabular-nums text-muted-foreground/55"
+      className="flex shrink-0 items-center gap-0.5 font-mono text-xs tabular-nums text-muted/55"
       aria-label={`${attachments.length} ${attachmentLabel}`}
     >
       <Paperclip size={9} />
@@ -358,7 +358,7 @@ function DragGrip({ listeners }: { listeners: DraggableSyntheticListeners }) {
     <button
       type="button"
       aria-label="Reorder message (drag, or press space then arrow keys)"
-      className="cursor-grab text-muted-foreground/25 transition-colors hover:text-muted-foreground/70 focus:text-muted-foreground/70 focus:outline-none active:cursor-grabbing"
+      className="cursor-grab text-muted/25 transition-colors hover:text-muted/70 focus:text-muted/70 focus:outline-none active:cursor-grabbing"
       {...listeners}
     >
       <GripVertical size={11} />
@@ -381,7 +381,7 @@ function RowAction({ label, hint, tone, onClick, children }: RowActionProps) {
       ? "hover:bg-primary/10 hover:text-primary"
       : tone === "destructive"
         ? "hover:bg-destructive/10 hover:text-destructive"
-        : "hover:bg-muted hover:text-foreground";
+        : "hover:bg-hover hover:text-ink";
   return (
     <Tooltip>
       <TooltipTrigger
@@ -391,7 +391,7 @@ function RowAction({ label, hint, tone, onClick, children }: RowActionProps) {
             onClick={onClick}
             aria-label={label}
             className={cn(
-              "rounded-sm p-1 text-muted-foreground/60 transition-colors",
+              "rounded-sm p-1 text-muted/60 transition-colors",
               toneClass,
             )}
           >

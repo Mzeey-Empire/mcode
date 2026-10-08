@@ -41,9 +41,9 @@ function AnnotationSnapshotThumbnail({ src }: { readonly src: string }) {
   const image = useRetriableAttachmentImage(src);
 
   return (
-    <span className="relative block aspect-video w-28 shrink-0 overflow-hidden rounded-md bg-muted/35 ring-1 ring-inset ring-border/60">
+    <span className="relative block aspect-video w-28 shrink-0 overflow-hidden rounded-md bg-hover/35 ring-1 ring-inset ring-border/60">
       {image.failed ? (
-        <span className="flex h-full w-full items-center justify-center text-muted-foreground">
+        <span className="flex h-full w-full items-center justify-center text-muted">
           <ImageIcon size={16} aria-hidden />
         </span>
       ) : (
@@ -61,7 +61,7 @@ function AnnotationSnapshotThumbnail({ src }: { readonly src: string }) {
             onLoad={image.onLoad}
           />
           {image.retrying ? (
-            <span className="absolute inset-0 flex items-center justify-center text-muted-foreground/70">
+            <span className="absolute inset-0 flex items-center justify-center text-muted/70">
               <ImageIcon size={14} className="animate-pulse" aria-hidden />
             </span>
           ) : null}
@@ -107,7 +107,7 @@ export function PreviewAnnotationBundleChip({
             tabIndex={0}
             aria-label={`${accessibleLabel}. Details available.`}
             className={cn(
-              "group relative inline-flex max-w-full items-center gap-2 rounded-lg bg-accent px-2 py-1 text-xs font-medium text-accent-foreground ring-1 ring-inset ring-accent-foreground/10 transition-colors duration-150 hover:bg-accent/90 hover:ring-accent-foreground/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-foreground/25 motion-reduce:transition-none",
+              "group relative inline-flex max-w-full items-center gap-2 rounded-lg bg-selected px-2 py-1 text-xs font-medium text-ink ring-1 ring-inset ring-ink/10 transition-colors duration-150 hover:bg-selected/90 hover:ring-ink/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/25 motion-reduce:transition-none",
               className,
             )}
           >
@@ -123,7 +123,7 @@ export function PreviewAnnotationBundleChip({
                   event.stopPropagation();
                   onRemove();
                 }}
-                className="pointer-events-none absolute -right-2 -top-2 size-5 rounded-full bg-accent text-accent-foreground/70 opacity-0 ring-1 ring-inset ring-accent-foreground/15 transition-opacity duration-150 hover:bg-accent-foreground/10 hover:text-accent-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 motion-reduce:transition-none"
+                className="pointer-events-none absolute -right-2 -top-2 size-5 rounded-full bg-selected text-ink/70 opacity-0 ring-1 ring-inset ring-ink/15 transition-opacity duration-150 hover:bg-ink/10 hover:text-ink focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 motion-reduce:transition-none"
               >
                 <X size={12} aria-hidden />
               </Button>
@@ -135,8 +135,8 @@ export function PreviewAnnotationBundleChip({
         side="top"
         align="end"
         sideOffset={8}
-        className="w-[min(32rem,calc(100vw-1.6rem))] max-w-none items-stretch rounded-xl bg-popover p-3 text-popover-foreground ring-1 ring-inset ring-border/70"
-        arrowClassName="bg-popover fill-popover"
+        className="w-[min(32rem,calc(100vw-1.6rem))] max-w-none items-stretch rounded-xl bg-panel p-3 text-ink ring-1 ring-inset ring-border/70"
+        arrowClassName="bg-panel fill-panel"
       >
         <div className="max-h-80 min-w-0 divide-y divide-border/45 overflow-y-auto">
           {bundle.annotations.map((item) => {
@@ -155,23 +155,23 @@ export function PreviewAnnotationBundleChip({
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/80 text-xs font-semibold tabular-nums text-primary-foreground/90">
+                    <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/80 text-xs font-semibold tabular-nums text-primary-ink/90">
                       {item.displayNumber}
                     </span>
                     {isComment ? (
-                      <FileCodeCorner size={14} className="shrink-0 text-muted-foreground" aria-hidden />
+                      <FileCodeCorner size={14} className="shrink-0 text-muted" aria-hidden />
                     ) : (
-                      <ImageIcon size={14} className="shrink-0 text-muted-foreground" aria-hidden />
+                      <ImageIcon size={14} className="shrink-0 text-muted" aria-hidden />
                     )}
-                    <span className="shrink-0 text-xs font-medium text-popover-foreground">
+                    <span className="shrink-0 text-xs font-medium text-ink">
                       {isComment ? "Comment" : "Annotation"}
                     </span>
-                    <span aria-hidden className="text-muted-foreground/45">·</span>
-                    <span className="min-w-0 truncate font-mono text-[1.1rem] font-normal text-muted-foreground">
+                    <span aria-hidden className="text-muted/45">·</span>
+                    <span className="min-w-0 truncate font-mono text-[1.1rem] font-normal text-muted">
                       {feedbackTargetLabel(item)}
                     </span>
                   </div>
-                  <p className="mt-2 min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-popover-foreground">
+                  <p className="mt-2 min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-ink">
                     {feedbackDetail(item)}
                   </p>
                 </div>

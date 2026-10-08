@@ -100,7 +100,7 @@ export function PullRequestFilters({
           <Search
             size={14}
             aria-hidden
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/70"
           />
           <Input
             size="sm"
@@ -206,7 +206,7 @@ export function PullRequestFilters({
       </div>
 
       {activeCount > 0 && (
-        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted">
           <p aria-live="polite" className="min-w-0 flex-1 truncate">
             {descriptions.join(" · ")}
           </p>

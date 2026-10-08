@@ -90,7 +90,7 @@ export function PullRequestChangedFilesPane({
             <Search
               size={13}
               aria-hidden
-              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/70"
+              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted/70"
             />
             <Input
               size="sm"

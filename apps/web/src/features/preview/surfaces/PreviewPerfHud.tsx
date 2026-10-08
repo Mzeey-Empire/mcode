@@ -35,14 +35,14 @@ export function PreviewPerfHud() {
       data-testid="preview-perf-hud"
       className="pointer-events-auto fixed right-2 bottom-2 z-50 max-w-[18rem] rounded-md border border-border/40 bg-background/95 px-2 py-1.5 font-mono text-[10px] leading-tight shadow"
     >
-      <div className="mb-1 font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+      <div className="mb-1 font-semibold uppercase tracking-[0.12em] text-muted">
         preview perf
       </div>
       <dl className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-0">
         {(Object.entries(counters) as Array<[keyof BrowserPerfCounters, number]>).map(
           ([k, v]) => (
             <div key={k} className="contents">
-              <dt className="truncate text-muted-foreground">{k}</dt>
+              <dt className="truncate text-muted">{k}</dt>
               <dd className="tabular-nums">{v}</dd>
             </div>
           ),

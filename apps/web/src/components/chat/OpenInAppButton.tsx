@@ -95,7 +95,7 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
               <Button
                 variant="ghost"
                 size="icon-xs"
-                className="text-foreground/70 hover:text-foreground hover:bg-muted/40 rounded-r-none"
+                className="text-ink/70 hover:text-ink hover:bg-hover/40 rounded-r-none"
                 onClick={openDefault}
                 disabled={disabled}
                 aria-label={`Open in ${resolvedLabel}`}
@@ -115,7 +115,7 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
             disabled={disabled}
             className={cn(
               "inline-flex h-8 items-center px-1.5 text-xs border-l border-border/20 rounded-r transition-colors outline-none",
-              "text-foreground/70 hover:text-foreground hover:bg-muted/40 focus-visible:ring-1 focus-visible:ring-ring",
+              "text-ink/70 hover:text-ink hover:bg-hover/40 focus-visible:ring-1 focus-visible:ring-focus",
               "disabled:opacity-50 disabled:pointer-events-none",
             )}
           >

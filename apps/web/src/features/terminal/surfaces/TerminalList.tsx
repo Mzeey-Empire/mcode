@@ -39,8 +39,8 @@ function shellRowClass(isActive: boolean): string {
   return cn(
     "group flex w-full min-h-8 items-center gap-0.5 pr-1 transition-colors",
     isActive
-      ? "bg-muted/50 text-foreground"
-      : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
+      ? "bg-hover/50 text-ink"
+      : "text-muted hover:bg-hover/30 hover:text-ink",
   );
 }
 
@@ -65,7 +65,7 @@ export const TerminalList = memo(function TerminalList({
 
   if (collapsed) {
     return (
-      <div className="flex w-[38px] flex-shrink-0 flex-col border-r border-border/40 bg-muted/20">
+      <div className="flex w-[38px] flex-shrink-0 flex-col border-r border-border/40 bg-hover/20">
         <div className="flex h-[34px] items-center justify-center border-b border-border/40">
           <Tooltip>
             <TooltipTrigger
@@ -74,7 +74,7 @@ export const TerminalList = memo(function TerminalList({
                   variant="ghost"
                   size="icon-xs"
                   onClick={toggleSplit}
-                  className="text-muted-foreground"
+                  className="text-muted"
                   aria-label="Expand sidebar"
                 />
               }
@@ -121,7 +121,7 @@ export const TerminalList = memo(function TerminalList({
   }
 
   return (
-    <div className="flex w-[148px] flex-shrink-0 flex-col border-r border-border/40 bg-muted/20">
+    <div className="flex w-[148px] flex-shrink-0 flex-col border-r border-border/40 bg-hover/20">
       {/* Header: collapse toggle + actions, left-aligned */}
       <div className="flex h-[34px] items-center gap-0.5 border-b border-border/40 px-1.5">
         <Tooltip>
@@ -131,7 +131,7 @@ export const TerminalList = memo(function TerminalList({
                 variant="ghost"
                 size="icon-xs"
                 onClick={toggleSplit}
-                className="text-muted-foreground"
+                className="text-muted"
                 aria-label="Collapse sidebar"
               />
             }
@@ -149,7 +149,7 @@ export const TerminalList = memo(function TerminalList({
                 variant="ghost"
                 size="icon-xs"
                 onClick={onAdd}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted hover:text-ink"
                 aria-label="New terminal"
               />
             }
@@ -167,7 +167,7 @@ export const TerminalList = memo(function TerminalList({
                 variant="ghost"
                 size="icon-xs"
                 onClick={(event) => onDeleteAll(event.currentTarget)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted hover:text-ink"
                 aria-label="Kill all terminals"
               />
             }

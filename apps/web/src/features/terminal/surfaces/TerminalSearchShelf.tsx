@@ -80,7 +80,7 @@ function SearchOptionCheckbox({
   onCheckedChange,
 }: SearchOptionCheckboxProps) {
   return (
-    <label className="flex min-h-8 cursor-pointer items-center gap-2 rounded-md px-1 text-xs text-foreground hover:bg-muted/60">
+    <label className="flex min-h-8 cursor-pointer items-center gap-2 rounded-md px-1 text-xs text-ink hover:bg-hover/60">
       <Checkbox
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next === true)}
@@ -113,7 +113,7 @@ function SearchOptionsPopover({ options, onChange }: SearchOptionsPopoverProps) 
         <SlidersHorizontal aria-hidden />
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={6} className="w-64 p-2">
-        <div className="mb-1 px-1 text-xs font-medium text-muted-foreground">
+        <div className="mb-1 px-1 text-xs font-medium text-muted">
           Search options
         </div>
         <div className="flex flex-col items-stretch gap-0">
@@ -166,7 +166,7 @@ function SearchMatchStatus({
 
   return (
     <output
-      className="min-w-0 flex-1 truncate whitespace-nowrap text-xs tabular-nums text-muted-foreground"
+      className="min-w-0 flex-1 truncate whitespace-nowrap text-xs tabular-nums text-muted"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -438,7 +438,7 @@ export function TerminalSearchShelf({
 
   return (
     <div
-      className="w-full min-w-0 shrink-0 border-t border-border bg-background px-3 py-2 text-foreground"
+      className="w-full min-w-0 shrink-0 border-t border-border bg-background px-3 py-2 text-ink"
       data-testid="terminal-search-shelf"
       data-terminal-search-open="true"
     >

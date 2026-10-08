@@ -1232,7 +1232,7 @@ describe("getCiStatusRingStyle", () => {
     });
 
     expect(style.background).toBe(
-      "conic-gradient(var(--diff-remove-strong) 0% 25%, var(--primary) 25% 50%, var(--diff-add-strong) 50% 75%, var(--muted-foreground) 75% 100%)",
+      "conic-gradient(var(--diff-remove-strong) 0% 25%, var(--primary) 25% 50%, var(--diff-add-strong) 50% 75%, var(--muted) 75% 100%)",
     );
   });
 });

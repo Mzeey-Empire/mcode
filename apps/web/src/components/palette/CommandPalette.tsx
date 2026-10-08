@@ -110,7 +110,7 @@ export function CommandPalette() {
           className={cn("fixed left-1/2 top-[clamp(4rem,14vh,8rem)] z-50 w-full -translate-x-1/2 px-4 outline-none duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 motion-reduce:animate-none", paletteDetails.widthClass)}
         >
           <Command
-            className="overflow-hidden rounded-xl bg-popover shadow-lg ring-1 ring-foreground/10"
+            className="overflow-hidden rounded-xl bg-panel shadow-lg ring-1 ring-ink/10"
             // We do all filtering/ranking ourselves (filterCommandPaletteGroups,
             // BrowseView's leaf prefix filter, ProjectsView's substring filter),
             // so disable cmdk's built-in filter. Letting it run against the raw
@@ -179,7 +179,7 @@ function PaletteInput({
         browseMode ? "h-[60px] px-[20px]" : "h-12 px-4",
       )}
     >
-      <SearchIcon className={cn("size-4 shrink-0 text-muted-foreground/75", browseMode ? "mr-3" : "mr-2.5")} />
+      <SearchIcon className={cn("size-4 shrink-0 text-muted/75", browseMode ? "mr-3" : "mr-2.5")} />
       <CommandPrimitive.Input
         autoFocus
         data-slot="palette-input"
@@ -191,7 +191,7 @@ function PaletteInput({
         className={cn(
           // Reserve right padding for the browse action so the typed path
           // remains visible beneath long folder names.
-          "flex w-full bg-transparent outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed disabled:opacity-50",
+          "flex w-full bg-transparent outline-none placeholder:text-muted/70 disabled:cursor-not-allowed disabled:opacity-50",
           browseMode ? "h-[60px] pe-[148px] font-mono text-[14px]" : "h-12 text-sm",
         )}
       />

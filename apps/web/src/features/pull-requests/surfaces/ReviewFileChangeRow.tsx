@@ -57,7 +57,7 @@ export function ReviewFileChangeRow({
             aria-selected={active}
             className={cn(
               "relative mx-1 h-8 w-[calc(100%-0.5rem)] justify-start gap-1.5 rounded-md px-2 font-normal",
-              active ? "bg-muted/70 text-foreground" : "text-foreground/75 hover:bg-muted/40",
+              active ? "bg-hover/70 text-ink" : "text-ink/75 hover:bg-hover/40",
             )}
             style={{ paddingLeft: `${Math.max(8, depth * 12 - 4)}px` }}
             onClick={() => onActivate(file.path)}

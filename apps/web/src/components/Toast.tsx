@@ -32,11 +32,11 @@ function ToastItem({ toast }: { toast: ToastData }) {
       role={toast.level === "info" ? "status" : "alert"}
       className={cn(
         "group pointer-events-auto flex w-80 items-start gap-2.5 rounded-lg px-3 py-2.5",
-        // --popover equals --background in the light theme, so a neutral fill
+        // --panel equals --background in the light theme, so a neutral fill
         // gives no separation on its own. A 1px border plus elevation defines
         // the card; the level color lives in the icon chip, not a colored ring
         // (which previously read as a red box outline against the page).
-        "border border-border bg-popover shadow-lg shadow-black/25",
+        "border border-border bg-panel shadow-lg shadow-black/25",
         // entrance animation - toasts rise from below the stack, matching
         // the bottom-right anchor on the container.
         "animate-in fade-in-0 slide-in-from-bottom-2 duration-200",
@@ -55,9 +55,9 @@ function ToastItem({ toast }: { toast: ToastData }) {
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-foreground leading-snug">{toast.title}</p>
+        <p className="text-xs font-medium text-ink leading-snug">{toast.title}</p>
         {toast.message && (
-          <p className="mt-0.5 text-xs text-muted-foreground leading-snug line-clamp-2">
+          <p className="mt-0.5 text-xs text-muted leading-snug line-clamp-2">
             {toast.message}
           </p>
         )}
@@ -68,7 +68,7 @@ function ToastItem({ toast }: { toast: ToastData }) {
         variant="ghost"
         size="icon-xs"
         onClick={handleDismiss}
-        className="shrink-0 mt-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100"
+        className="shrink-0 mt-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
         aria-label="Dismiss"
       >
         <X />

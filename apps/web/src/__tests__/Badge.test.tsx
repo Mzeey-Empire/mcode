@@ -21,6 +21,6 @@ describe("Badge", () => {
     const { container } = render(<Badge variant="secondary" size="sm">Tag</Badge>);
     const badge = container.firstElementChild!;
     expect(badge.className).toContain("h-4");
-    expect(badge.className).toContain("bg-secondary");
+    expect(badge.className).toContain("bg-button-secondary");
   });
 });

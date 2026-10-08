@@ -46,7 +46,7 @@ function WorktreePickerContent({
   onClose: () => void;
 }) {
   if (loading) {
-    return <div className="flex items-center justify-center py-4"><Spinner size={16} className="text-muted-foreground" /></div>;
+    return <div className="flex items-center justify-center py-4"><Spinner size={16} className="text-muted" /></div>;
   }
   return (
     <Command filter={worktreeFilter(worktrees)}>
@@ -66,12 +66,12 @@ function WorktreePickerContent({
                 className={cn(
                   "flex flex-col items-start px-3 py-1.5 text-xs",
                   normalizeWorktreePath(worktree.path) === normalizedSelected
-                    ? "bg-accent text-foreground"
-                    : "text-popover-foreground",
+                    ? "bg-selected text-ink"
+                    : "text-ink",
                 )}
               >
                 <span className="font-medium">{worktree.name}</span>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-muted">
                   {worktreeBranchLabel(worktree)} &middot; {truncatePath(worktree.path)}
                   {!worktree.managed && <Badge variant="secondary" size="sm" className="ml-1">external</Badge>}
                 </span>
@@ -104,7 +104,7 @@ export function WorktreePicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={
-        <Button variant="ghost" size="xs" className={cn("text-muted-foreground", triggerClassName)}>
+        <Button variant="ghost" size="xs" className={cn("text-muted", triggerClassName)}>
           <GitFork size={iconSize} className={triggerClassName ? "size-3.5" : undefined} />
           {selectedName === null ? <Spinner size={11} className="text-current" /> : <span>{selectedName}</span>}
           <ChevronDown size={Math.max(10, iconSize - 2)} className={triggerClassName ? "size-3" : undefined} />

@@ -28,7 +28,7 @@ import {
 
 const textEncoder = new TextEncoder();
 const composerShellClass =
-  "relative rounded-xl bg-muted/50 ring-1 ring-inset ring-border/60 transition-shadow focus-within:ring-2 focus-within:ring-primary/70";
+  "relative rounded-xl bg-hover/50 ring-1 ring-inset ring-border/60 transition-shadow focus-within:ring-2 focus-within:ring-primary/70";
 const composerTextareaClass =
   "min-h-12 max-h-32 resize-none border-0 bg-transparent px-3 pb-3 pt-3 text-sm shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent";
 
@@ -232,7 +232,7 @@ function PullRequestReplyComposer({
           type="button"
           variant="ghost"
           size="icon-sm"
-          className="absolute bottom-2 right-11 size-8 rounded-full text-muted-foreground"
+          className="absolute bottom-2 right-11 size-8 rounded-full text-muted"
           aria-label="Cancel reply"
           onClick={onCancel}
         >
@@ -323,7 +323,7 @@ function TimelineCommentMetadata({
             <p
               id="pull-request-comment-status"
               role={composer.localError ? "alert" : "status"}
-              className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+              className="min-w-0 flex-1 truncate text-xs text-muted"
             >
               {commentStatus}
             </p>
@@ -361,7 +361,7 @@ function CommentByteCount({
         "shrink-0 font-mono text-xs tabular-nums",
         byteCount > PULL_REQUEST_MUTATION_BODY_MAX_BYTES
           ? "text-destructive"
-          : "text-muted-foreground/70",
+          : "text-muted/70",
       )}
     >
       {byteCount.toLocaleString()} /{" "}
@@ -415,7 +415,7 @@ function CommentComposerStatus({
   return (
     <>
       {status ? (
-        <p id={statusId} role={localError ? "alert" : "status"} className="mt-2 text-xs text-muted-foreground">
+        <p id={statusId} role={localError ? "alert" : "status"} className="mt-2 text-xs text-muted">
           {status}
         </p>
       ) : null}

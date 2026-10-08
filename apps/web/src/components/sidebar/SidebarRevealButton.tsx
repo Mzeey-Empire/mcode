@@ -72,10 +72,10 @@ export function SidebarRevealButton() {
         aria-label="Expand sidebar"
         className={cn(
           "group inline-flex size-7 shrink-0 items-center justify-center rounded-md",
-          "text-muted-foreground transition-[color,transform,background-color]",
-          "hover:bg-muted hover:text-foreground",
+          "text-muted transition-[color,transform,background-color]",
+          "hover:bg-hover hover:text-ink",
           "active:translate-y-px",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/50",
         )}
       >
         <PanelRevealIcon className="transition-transform duration-200 group-hover:translate-x-px" />

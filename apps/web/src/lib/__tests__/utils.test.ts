@@ -3,11 +3,11 @@ import { cn } from "../utils";
 
 describe("cn", () => {
   it("keeps the text colour beside a Paper type role", () => {
-    expect(cn("text-muted-foreground", "text-caption")).toBe("text-muted-foreground text-caption");
+    expect(cn("text-muted", "text-caption")).toBe("text-muted text-caption");
   });
 
   it("lets a later type role replace an earlier font size", () => {
-    expect(cn("text-sm text-foreground", "text-body-small")).toBe("text-foreground text-body-small");
+    expect(cn("text-sm text-ink", "text-body-small")).toBe("text-ink text-body-small");
   });
 
   it("lets type-link replace an earlier font size and keep the link colour", () => {

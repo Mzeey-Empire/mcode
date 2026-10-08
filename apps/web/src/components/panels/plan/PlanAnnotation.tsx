@@ -60,12 +60,12 @@ export function PlanAnnotation({
   };
 
   return (
-    <div className="my-2.5 overflow-hidden rounded-lg bg-card shadow-lg shadow-black/25 ring-1 ring-border/60 transition-shadow duration-200 focus-within:ring-primary/35 animate-wizard-float-rise">
+    <div className="my-2.5 overflow-hidden rounded-lg bg-panel shadow-lg shadow-black/25 ring-1 ring-border/60 transition-shadow duration-200 focus-within:ring-primary/35 animate-wizard-float-rise">
       <div className="flex items-center gap-2 px-3.5 pt-3 pb-2">
         <span className="size-1.5 shrink-0 rounded-full bg-primary/70" aria-hidden />
-        <span className="min-w-0 truncate font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/55">
-          Note <span className="text-muted-foreground/30">·</span>{" "}
-          <span className="text-muted-foreground/75 normal-case tracking-normal">{sectionTitle}</span>
+        <span className="min-w-0 truncate font-mono text-[9px] uppercase tracking-[0.18em] text-muted/55">
+          Note <span className="text-muted/30">·</span>{" "}
+          <span className="text-muted/75 normal-case tracking-normal">{sectionTitle}</span>
         </span>
       </div>
       <label htmlFor={fieldId} className="sr-only">
@@ -80,11 +80,11 @@ export function PlanAnnotation({
         onKeyDown={handleKeyDown}
         placeholder="What should change in this section?"
         rows={2}
-        className="block min-h-[4rem] w-full resize-y border-none bg-transparent px-3.5 pb-3 text-[13px] leading-[1.7] text-foreground outline-none placeholder:text-muted-foreground/45"
+        className="block min-h-[4rem] w-full resize-y border-none bg-transparent px-3.5 pb-3 text-[13px] leading-[1.7] text-ink outline-none placeholder:text-muted/45"
       />
-      <div className="flex items-center justify-between gap-2 bg-muted/25 px-3.5 py-2.5">
-        <p className="min-w-0 font-mono text-[9px] leading-snug tracking-[0.14em] text-muted-foreground/55">
-          Click away to stash <span className="text-muted-foreground/30">·</span> {SAVE_HINT}
+      <div className="flex items-center justify-between gap-2 bg-hover/25 px-3.5 py-2.5">
+        <p className="min-w-0 font-mono text-[9px] leading-snug tracking-[0.14em] text-muted/55">
+          Click away to stash <span className="text-muted/30">·</span> {SAVE_HINT}
         </p>
         <div className="flex shrink-0 items-center gap-1.5">
           <Button
@@ -96,7 +96,7 @@ export function PlanAnnotation({
               e.preventDefault();
             }}
             onClick={onDiscard}
-            className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/70 hover:text-foreground"
+            className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted/70 hover:text-ink"
           >
             Discard
           </Button>

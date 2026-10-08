@@ -43,7 +43,7 @@ function ProgressCircle({
     status === "completed"
       ? "stroke-[var(--diff-add-strong)]"
       : status === "pending"
-        ? "stroke-muted-foreground/30"
+        ? "stroke-muted/30"
         : "stroke-primary";
 
   return (
@@ -61,7 +61,7 @@ function ProgressCircle({
         r={radius}
         fill="none"
         strokeWidth="2"
-        className="stroke-muted-foreground/20"
+        className="stroke-muted/20"
       />
       <circle
         cx="8"
@@ -201,10 +201,10 @@ export function TaskBubble({
               onKeyDown={(event) => {
                 if (event.key === "Escape") closePreview();
               }}
-              className="h-8 gap-2 rounded-full bg-card/75 px-3 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="h-8 gap-2 rounded-full bg-panel/75 px-3 focus-visible:ring-[3px] focus-visible:ring-focus/50"
             >
               <ProgressCircle settled={settled} total={total} status={aggregate} />
-              <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">
+              <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap font-mono text-xs tabular-nums text-muted">
                 {settled}/{total} steps
                 {fileEffects && <FileEffectFacts summary={fileEffects} />}
               </span>

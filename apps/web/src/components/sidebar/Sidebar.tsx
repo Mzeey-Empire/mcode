@@ -39,7 +39,7 @@ interface SidebarProps {
 function SidebarTitle({ settingsOpen, onCloseSettings, onCollapse }: { settingsOpen: boolean | undefined; onCloseSettings: (() => void) | undefined; onCollapse: () => void }) {
   if (IS_DESKTOP && !settingsOpen) return null;
   return <div className="flex h-11 items-center justify-between border-b border-border/40 pl-2 pr-2.5">
-    {settingsOpen ? <div className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={onCloseSettings} aria-label="Back to chat" className="text-muted-foreground"><ArrowLeft size={15} /></Button><span className="text-sm font-semibold text-muted-foreground">Settings</span></div> : <><McodeLogo /><Button variant="ghost" size="icon-sm" onClick={onCollapse} aria-label="Collapse sidebar" className="text-muted-foreground"><PanelCollapseIcon className="transition-transform duration-200 group-hover/button:-translate-x-px" /></Button></>}
+    {settingsOpen ? <div className="flex items-center gap-2"><Button variant="ghost" size="icon-sm" onClick={onCloseSettings} aria-label="Back to chat" className="text-muted"><ArrowLeft size={15} /></Button><span className="text-sm font-semibold text-muted">Settings</span></div> : <><McodeLogo /><Button variant="ghost" size="icon-sm" onClick={onCollapse} aria-label="Collapse sidebar" className="text-muted"><PanelCollapseIcon className="transition-transform duration-200 group-hover/button:-translate-x-px" /></Button></>}
   </div>;
 }
 
@@ -51,16 +51,16 @@ function SidebarBody({ settingsOpen, settingsSection, onSettingsSection, primary
   const settingsNavProps = getSettingsNavProps(settingsOpen, settingsSection, onSettingsSection);
   return <div data-testid="sidebar-body" className="flex min-h-0 flex-1 flex-col overflow-hidden">
     {settingsNavProps ? <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain"><SettingsNav {...settingsNavProps} /></div> : <><div className="grid shrink-0 gap-0.5 px-1.5 py-2">
-      <Button data-testid="sidebar-new-thread" variant="ghost" size="sm" className="h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal text-muted-foreground shadow-none hover:text-foreground" onClick={onNewThread}><SquarePen size={15} aria-hidden />New thread</Button>
-      <Button variant="ghost" size="sm" className="h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal text-muted-foreground hover:text-foreground" onClick={onOpenThreadSearch}><Search size={15} aria-hidden />Search threads</Button>
-      <Button variant="ghost" size="sm" aria-current={primarySurface === "pullRequests" ? "page" : undefined} className={cn("h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal shadow-none", primarySurface === "pullRequests" ? "bg-accent/55 text-foreground" : "text-muted-foreground hover:text-foreground")} onClick={onOpenPullRequests}><GitPullRequest size={15} aria-hidden />Pull requests</Button>
+      <Button data-testid="sidebar-new-thread" variant="ghost" size="sm" className="h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal text-muted shadow-none hover:text-ink" onClick={onNewThread}><SquarePen size={15} aria-hidden />New thread</Button>
+      <Button variant="ghost" size="sm" className="h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal text-muted hover:text-ink" onClick={onOpenThreadSearch}><Search size={15} aria-hidden />Search threads</Button>
+      <Button variant="ghost" size="sm" aria-current={primarySurface === "pullRequests" ? "page" : undefined} className={cn("h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal shadow-none", primarySurface === "pullRequests" ? "bg-selected/55 text-ink" : "text-muted hover:text-ink")} onClick={onOpenPullRequests}><GitPullRequest size={15} aria-hidden />Pull requests</Button>
     </div><ProjectTree /></>}
   </div>;
 }
 
 function SidebarFooter({ settingsOpen, onOpenSettings, onEditSettings }: { settingsOpen: boolean | undefined; onOpenSettings: () => void; onEditSettings: () => void }) {
   return <div className="border-t border-border/40 p-3 space-y-1"><UpdateIndicator />
-    {settingsOpen ? IS_DESKTOP && <Button variant="ghost" className="flex w-full items-center gap-2 rounded p-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground" onClick={onEditSettings}><Braces size={14} />Edit settings.json<ExternalLink size={11} /></Button> : <Button variant="ghost" className="flex w-full items-center gap-2 rounded p-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground" onClick={onOpenSettings}><Settings size={16} />Settings</Button>}
+    {settingsOpen ? IS_DESKTOP && <Button variant="ghost" className="flex w-full items-center gap-2 rounded p-1.5 text-sm text-muted hover:bg-selected hover:text-ink" onClick={onEditSettings}><Braces size={14} />Edit settings.json<ExternalLink size={11} /></Button> : <Button variant="ghost" className="flex w-full items-center gap-2 rounded p-1.5 text-sm text-muted hover:bg-selected hover:text-ink" onClick={onOpenSettings}><Settings size={16} />Settings</Button>}
   </div>;
 }
 

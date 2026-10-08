@@ -111,10 +111,10 @@ function PullRequestInboxHeading({
         reserveSidebarReveal && "max-lg:pl-14 max-lg:pt-4",
       )}
     >
-      <h1 id="pull-request-surface-title" className="text-xl font-medium tracking-tight text-foreground">
+      <h1 id="pull-request-surface-title" className="text-xl font-medium tracking-tight text-ink">
         Pull requests
       </h1>
-      <p className="mt-1 text-sm text-muted-foreground">
+      <p className="mt-1 text-sm text-muted">
         Review and track work across {viewerLogin ?? "GitHub"}.
       </p>
     </div>
@@ -163,8 +163,8 @@ function PullRequestInboxToolbar({
           className={cn(
             "relative h-8 rounded-none px-2 text-xs font-medium capitalize after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:origin-center after:bg-primary after:transition-transform after:duration-200 after:ease-out motion-reduce:after:transition-none",
             relationship === tab
-              ? "text-foreground after:scale-x-100"
-              : "text-muted-foreground after:scale-x-0 hover:text-foreground",
+              ? "text-ink after:scale-x-100"
+              : "text-muted after:scale-x-0 hover:text-ink",
           )}
         >
           {tab}
@@ -186,7 +186,7 @@ function PullRequestInboxToolbar({
         size="icon-xs"
         aria-label="Refresh pull requests"
         onClick={onRefresh}
-        className="ml-1 text-muted-foreground"
+        className="ml-1 text-muted"
       >
         {status === "refreshing" ? <Spinner size="sm" /> : <RefreshCw size={13} aria-hidden />}
       </Button>
@@ -211,7 +211,7 @@ function PullRequestStateFilter({
       aria-pressed={selected}
       className={cn(
         "h-8 px-2 text-xs font-normal capitalize",
-        selected ? "bg-muted/70 text-foreground" : "text-muted-foreground hover:text-foreground",
+        selected ? "bg-hover/70 text-ink" : "text-muted hover:text-ink",
       )}
       onClick={() => onSelect([state])}
     >
@@ -290,7 +290,7 @@ function PullRequestInboxNotices({
     <>
       {teamLimitation ? (
         <div className="mx-auto w-full max-w-[720px] px-5">
-          <p className="mb-2 flex items-start gap-2 bg-muted/35 px-2.5 py-2 text-xs text-muted-foreground">
+          <p className="mb-2 flex items-start gap-2 bg-hover/35 px-2.5 py-2 text-xs text-muted">
             <ErrorIcon size={13} aria-hidden className="mt-0.5 shrink-0 text-primary/80" />
             {teamLimitationMessage(teamLimitation)}
           </p>
@@ -298,7 +298,7 @@ function PullRequestInboxNotices({
       ) : null}
       {stale && error ? (
         <div className="mx-auto w-full max-w-[720px] px-5">
-          <div className="mb-2 flex items-center gap-2 bg-destructive/10 px-2.5 py-2 text-xs text-muted-foreground">
+          <div className="mb-2 flex items-center gap-2 bg-destructive/10 px-2.5 py-2 text-xs text-muted">
             <span className="min-w-0 flex-1 truncate">Stale data. {error.message}</span>
             <Button type="button" variant="ghost" size="xs" onClick={onRefresh} className="h-6">Retry</Button>
           </div>
@@ -326,13 +326,13 @@ function PullRequestInboxBody({
   children: ReactNode;
 }) {
   if (loadingEmpty) {
-    return <div className="flex flex-1 items-center justify-center text-muted-foreground"><Spinner size="sm" aria-label="Loading pull requests" /></div>;
+    return <div className="flex flex-1 items-center justify-center text-muted"><Spinner size="sm" aria-label="Loading pull requests" /></div>;
   }
   if (errorEmpty) {
-    return <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"><ErrorIcon size={22} aria-hidden className="text-destructive/70" /><p className="text-sm text-foreground">{error?.message ?? "Pull request read failed"}</p><Button type="button" variant="outline" size="sm" onClick={onRefresh}>Retry</Button></div>;
+    return <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"><ErrorIcon size={22} aria-hidden className="text-destructive/70" /><p className="text-sm text-ink">{error?.message ?? "Pull request read failed"}</p><Button type="button" variant="outline" size="sm" onClick={onRefresh}>Retry</Button></div>;
   }
   if (!hasRows) {
-    return <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground"><span aria-hidden className="font-mono text-3xl opacity-35">∅</span><p className="font-mono text-xs uppercase tracking-widest">{emptyLabel}</p></div>;
+    return <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted"><span aria-hidden className="font-mono text-3xl opacity-35">∅</span><p className="font-mono text-xs uppercase tracking-widest">{emptyLabel}</p></div>;
   }
   return children;
 }
@@ -340,7 +340,7 @@ function PullRequestInboxBody({
 function PullRequestInboxLoadMore({ status, onLoadMore }: { status: PullRequestInboxStatus; onLoadMore: () => void }) {
   return (
     <div className="mx-auto w-full max-w-[720px] shrink-0 px-5 py-2">
-      <Button type="button" variant="ghost" size="sm" onClick={onLoadMore} disabled={status === "refreshing"} className="w-full text-xs text-muted-foreground">
+      <Button type="button" variant="ghost" size="sm" onClick={onLoadMore} disabled={status === "refreshing"} className="w-full text-xs text-muted">
         Load more
       </Button>
     </div>
@@ -739,7 +739,7 @@ export function PullRequestInbox({
         role="presentation"
         data-testid="pull-request-group-header"
         data-group={item.label}
-        className="flex h-10 items-center px-5 text-xs font-medium text-muted-foreground"
+        className="flex h-10 items-center px-5 text-xs font-medium text-muted"
       >
         <span>{item.label}</span>
       </div>

@@ -152,7 +152,7 @@ function CommitEventBody({ item }: { item: TimelineEventOfKind<"commit"> }) {
       <code className="shrink-0 font-mono text-primary/90">
         {item.oid.slice(0, 8)}
       </code>
-      <span className="truncate text-foreground/80">{item.messageHeadline}</span>
+      <span className="truncate text-ink/80">{item.messageHeadline}</span>
     </div>
   );
 }
@@ -180,12 +180,12 @@ function ReviewThreadEventBody({
   return (
     <div className="mt-2 bg-page/45 px-3 py-2.5">
       <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
-        <span className="truncate font-mono text-foreground/85">{location}</span>
-        <Badge variant="ghost" size="sm" className="text-muted-foreground">
+        <span className="truncate font-mono text-ink/85">{location}</span>
+        <Badge variant="ghost" size="sm" className="text-muted">
           {item.isResolved ? "Resolved" : "Unresolved"}
         </Badge>
         {item.isOutdated && (
-          <Badge variant="ghost" size="sm" className="text-muted-foreground">
+          <Badge variant="ghost" size="sm" className="text-muted">
             Outdated
           </Badge>
         )}
@@ -193,8 +193,8 @@ function ReviewThreadEventBody({
       <div className="mt-2 space-y-2.5">
         {item.comments.map((comment) => (
           <div key={comment.providerNodeId} className="pl-3">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span className="text-foreground/75">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+              <span className="text-ink/75">
                 {comment.author?.login ?? "Unknown actor"}
               </span>
               <time dateTime={comment.createdAt} className="font-mono tabular-nums">
@@ -206,7 +206,7 @@ function ReviewThreadEventBody({
         ))}
       </div>
       {item.totalCount > item.comments.length && (
-        <p className="mt-2 font-mono text-xs text-muted-foreground">
+        <p className="mt-2 font-mono text-xs text-muted">
           Showing {item.comments.length} of {item.totalCount} thread comments.
         </p>
       )}
@@ -220,7 +220,7 @@ function ReadinessEventBody({
   item: TimelineEventOfKind<"readiness">;
 }) {
   return (
-    <p className="mt-1.5 text-xs text-muted-foreground">
+    <p className="mt-1.5 text-xs text-muted">
       Readiness is now {item.readiness === "ready" ? "ready for review" : "draft"}.
     </p>
   );
@@ -228,9 +228,9 @@ function ReadinessEventBody({
 
 function ChecksEventBody({ item }: { item: TimelineEventOfKind<"checks"> }) {
   return (
-    <p className="mt-1.5 text-xs text-muted-foreground">
+    <p className="mt-1.5 text-xs text-muted">
       {titleCase(item.checks.state)}, {item.totalCount} checks at head{" "}
-      <code className="font-mono text-foreground/75">
+      <code className="font-mono text-ink/75">
         {item.headOid.slice(0, 8)}
       </code>
     </p>
@@ -241,10 +241,10 @@ function MergedEventBody({ item }: { item: TimelineEventOfKind<"merged"> }) {
   if (!item.commitOid && !item.refName) return null;
 
   return (
-    <p className="mt-1.5 text-xs text-muted-foreground">
+    <p className="mt-1.5 text-xs text-muted">
       {item.refName ? `Into ${item.refName}` : "Merge commit"}
       {item.commitOid ? (
-        <code className="ml-2 font-mono text-foreground/75">
+        <code className="ml-2 font-mono text-ink/75">
           {item.commitOid.slice(0, 8)}
         </code>
       ) : null}
@@ -341,7 +341,7 @@ const TimelineRow = memo(
             aria-hidden
             data-timeline-marker={item.kind}
             className={cn(
-              "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full border border-border/70 bg-page text-muted-foreground transition-colors duration-150 group-hover:border-foreground/25 group-hover:text-foreground motion-reduce:transition-none",
+              "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full border border-border/70 bg-page text-muted transition-colors duration-150 group-hover:border-ink/25 group-hover:text-ink motion-reduce:transition-none",
               item.kind === "commit" &&
                 "border-primary/40 bg-primary/8 text-primary group-hover:border-primary/65 group-hover:text-primary",
             )}
@@ -351,13 +351,13 @@ const TimelineRow = memo(
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-start gap-2">
               <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
-                <span className="font-medium text-foreground/90">
+                <span className="font-medium text-ink/90">
                   {item.actor?.login ?? "System"}
                 </span>
-                <span className="text-foreground/75">{eventTitle(item)}</span>
+                <span className="text-ink/75">{eventTitle(item)}</span>
                 <time
                   dateTime={item.occurredAt}
-                  className="font-mono tabular-nums text-muted-foreground"
+                  className="font-mono tabular-nums text-muted"
                 >
                   {formatRelative(item.occurredAt)}
                 </time>
@@ -371,7 +371,7 @@ const TimelineRow = memo(
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label="Open event"
-                        className="-mt-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[color,background-color,opacity] duration-150 hover:bg-muted/50 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
+                        className="-mt-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-[color,background-color,opacity] duration-150 hover:bg-hover/50 hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/50 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
                         onClick={(event) => {
                           if (!item.url || !safePullRequestHttpUrl(item.url))
                             event.preventDefault();
@@ -407,7 +407,7 @@ function TimelineStaleNotice({ stale }: { stale: boolean }) {
   return (
     <p
       role="status"
-      className="flex items-center gap-2 bg-primary/8 px-4 py-2 text-xs text-muted-foreground"
+      className="flex items-center gap-2 bg-primary/8 px-4 py-2 text-xs text-muted"
     >
       <ErrorIcon size={13} aria-hidden className="shrink-0 text-primary/80" />
       Stale data. Showing the last successful Timeline.
@@ -433,7 +433,7 @@ function TimelineOlderActivityControl({
       type="button"
       variant="ghost"
       size="sm"
-      className="mx-4 my-2 text-xs text-muted-foreground"
+      className="mx-4 my-2 text-xs text-muted"
       disabled={loadingOlder}
       onClick={onLoad}
     >
@@ -451,7 +451,7 @@ function TimelineEmptyState({
 }) {
   if (initialLoading) {
     return (
-      <div className="flex items-center justify-center gap-2 px-4 py-12 text-xs text-muted-foreground">
+      <div className="flex items-center justify-center gap-2 px-4 py-12 text-xs text-muted">
         <Spinner size="xs" aria-hidden />
         <span role="status">Loading Timeline activity</span>
       </div>
@@ -461,7 +461,7 @@ function TimelineEmptyState({
     return (
       <div className="px-4 py-12 text-center">
         <ErrorIcon aria-hidden className="mx-auto size-4 text-destructive/70" />
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="mt-2 text-xs text-muted">
           Timeline activity is unavailable.
         </p>
       </div>
@@ -469,10 +469,10 @@ function TimelineEmptyState({
   }
   return (
     <div className="px-4 py-12 text-center">
-      <span aria-hidden className="font-mono text-lg text-muted-foreground/45">
+      <span aria-hidden className="font-mono text-lg text-muted/45">
         ∅
       </span>
-      <p className="mt-1 text-xs text-muted-foreground">No remote activity</p>
+      <p className="mt-1 text-xs text-muted">No remote activity</p>
     </div>
   );
 }
@@ -558,13 +558,13 @@ function TimelineNewerActivityNotice({
 
   return (
     <div className="mx-4 mb-2 bg-page/55 px-3 py-2.5">
-      <p className="text-xs text-muted-foreground">Newer activity remains.</p>
+      <p className="text-xs text-muted">Newer activity remains.</p>
       {onLoadNewer && (
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="mt-1 w-full text-xs text-muted-foreground"
+          className="mt-1 w-full text-xs text-muted"
           disabled={loadingNewer}
           onClick={onLoadNewer}
         >
@@ -586,7 +586,7 @@ function TimelineBoundedDataNotice({
     <p
       role="status"
       data-bounded-reason={boundedData.reason}
-      className="mx-4 mb-2 flex items-start gap-2 bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+      className="mx-4 mb-2 flex items-start gap-2 bg-hover/30 px-3 py-2 text-xs text-muted"
     >
       <ErrorIcon
         size={13}

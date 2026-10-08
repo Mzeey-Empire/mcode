@@ -30,10 +30,10 @@ describe("icon-map", () => {
   });
 
   it("mirrors directional icons in right-to-left layouts only", () => {
-    const back = render(<iconMap.BackIcon className="text-muted" />).container.querySelector("svg");
+    const back = render(<iconMap.BackIcon className="text-hover" />).container.querySelector("svg");
     const send = render(<iconMap.SendIcon />).container.querySelector("svg");
 
-    expect(back).toHaveClass("rtl:-scale-x-100", "text-muted");
+    expect(back).toHaveClass("rtl:-scale-x-100", "text-hover");
     expect(send).not.toHaveClass("rtl:-scale-x-100");
   });
 });

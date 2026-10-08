@@ -6,7 +6,7 @@ export function FileEffectFacts({ summary }: { summary: TurnFileEffectSummary })
   const fileLabel = `${summary.fileCount} ${summary.fileCount === 1 ? "file" : "files"} changed`;
   return (
     <>
-      <span className="text-muted-foreground/45" aria-hidden>·</span>
+      <span className="text-muted/45" aria-hidden>·</span>
       <span>{fileLabel}</span>
       {summary.additions > 0 && (
         <span className="text-[var(--diff-add-strong)]">+{summary.additions}</span>

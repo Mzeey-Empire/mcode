@@ -36,7 +36,7 @@ export function PathLabel({ path, home, className }: Props) {
         render={
           <span
             className={cn(
-              "block min-w-0 truncate font-mono text-[11.5px] text-muted-foreground/70 tabular-nums",
+              "block min-w-0 truncate font-mono text-[11.5px] text-muted/70 tabular-nums",
               className,
             )}
             style={{ direction: "rtl", unicodeBidi: "plaintext", textAlign: "left" }}

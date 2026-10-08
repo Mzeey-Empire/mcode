@@ -140,7 +140,7 @@ export function ShortcutHelpDialog() {
       >
         {/* Sticky header — editorial label-then-title pattern matching the palette. */}
         <div className="flex flex-col gap-1 border-b border-border/40 px-6 py-5">
-          <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/60">
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/60">
             Reference
           </span>
           <DialogTitle className="font-heading text-lg leading-tight tracking-tight">
@@ -156,7 +156,7 @@ export function ShortcutHelpDialog() {
               if (!rows || rows.length === 0) return null;
               return (
                 <section key={category} className="flex flex-col gap-2.5">
-                  <h3 className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/70">
+                  <h3 className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/70">
                     {category}
                   </h3>
                   <ul className="flex flex-col">
@@ -165,7 +165,7 @@ export function ShortcutHelpDialog() {
                         key={row.key}
                         className="flex items-center justify-between gap-4 border-t border-border/30 py-2.5 first:border-t-0"
                       >
-                        <span className="text-sm text-foreground/90">
+                        <span className="text-sm text-ink/90">
                           {row.title}
                         </span>
                         <ShortcutPieces row={row} />
@@ -180,10 +180,10 @@ export function ShortcutHelpDialog() {
 
         {/* Footer rail — mirrors the palette's bottom hint area. */}
         <div className="flex items-center justify-between border-t border-border/40 px-6 py-3">
-          <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/60">
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/60">
             {totalCount === 0 ? "No shortcuts" : `${totalCount} shortcuts`}
           </span>
-          <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/70">
+          <span className="flex items-center gap-1.5 text-[11.5px] text-muted/70">
             <Kbd>Esc</Kbd>
             <span>to close</span>
           </span>
@@ -211,7 +211,7 @@ function ShortcutPieces({ row }: { row: ShortcutRow }) {
             {!isLast && (
               <span
                 aria-hidden
-                className="text-[11px] leading-none text-muted-foreground/40"
+                className="text-[11px] leading-none text-muted/40"
               >
                 {separator}
               </span>

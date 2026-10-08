@@ -49,7 +49,7 @@ function PopoverContent({
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(
-            "pointer-events-auto w-72 rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-md outline-none",
+            "pointer-events-auto w-72 rounded-lg border border-border bg-panel p-4 text-ink shadow-md outline-none",
             className,
           )}
           {...props}

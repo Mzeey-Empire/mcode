@@ -46,7 +46,7 @@ function TurnFooterStatus({ label }: { label: string | undefined }) {
   if (label === undefined) return null;
 
   return (
-    <span data-testid="turn-outcome" role="status" className="normal-case text-foreground/65">
+    <span data-testid="turn-outcome" role="status" className="normal-case text-ink/65">
       {label}
     </span>
   );
@@ -98,7 +98,7 @@ export function TurnFooter({
   if (!hasFooterContent(labels, durationMs, label, visibleApprovalReview)) return null;
 
   return (
-    <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 pl-4 font-mono uppercase text-xs tracking-[0.08em] text-muted-foreground/45">
+    <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 pl-4 font-mono uppercase text-xs tracking-[0.08em] text-muted/45">
       <TurnFooterStatus label={label} />
       <ApprovalReviewStatus approvalReview={visibleApprovalReview} />
       <TurnFooterCounts labels={labels} />

@@ -57,7 +57,7 @@ function StatusBadge({ status }: StatusBadgeProps) {
     errored:
       "bg-[var(--diff-remove)]/15 text-[var(--diff-remove)]",
     cancelled:
-      "bg-muted-foreground/18 text-muted-foreground",
+      "bg-muted/18 text-muted",
   };
   return (
     <span
@@ -75,7 +75,7 @@ function ApprovalReviewDetailRow({ toolCall }: { toolCall: ToolCall }) {
   return (
     <li className="flex min-w-0 max-w-full flex-col gap-1 py-1">
       <div className={`${NARRATIVE_TOOL_ROW} text-sm`}>
-        <DEFAULT_ICON className="size-3.5 shrink-0 text-muted-foreground/75" />
+        <DEFAULT_ICON className="size-3.5 shrink-0 text-muted/75" />
         <span className={narrativeToolDetailClass("md")}>{detail}</span>
         {status !== "completed" ? <StatusBadge status={status} /> : null}
       </div>
@@ -101,8 +101,8 @@ export function ToolCallDetailRow({ toolCall: tc }: { toolCall: ToolCall }) {
   return (
     <li className="flex min-w-0 max-w-full flex-col gap-1 py-1">
       <div className={`${NARRATIVE_TOOL_ROW} text-sm`}>
-        <Icon className="size-3.5 shrink-0 text-muted-foreground/75" />
-        <span className="shrink-0 font-medium text-foreground/65">{label}</span>
+        <Icon className="size-3.5 shrink-0 text-muted/75" />
+        <span className="shrink-0 font-medium text-ink/65">{label}</span>
         <Tooltip>
           <TooltipTrigger
             render={<span className={narrativeToolDetailClass("md")}>{detail}</span>}
@@ -178,10 +178,10 @@ function ToolGroupDetails({
       <NarrativeSummaryLine
         open={open}
         onToggle={onToggle}
-        icon={<LeadingIcon className="h-3 w-3 shrink-0 text-muted-foreground/55" />}
+        icon={<LeadingIcon className="h-3 w-3 shrink-0 text-muted/55" />}
         badge={worstBadge ? <StatusBadge status={worstBadge} /> : undefined}
       >
-        <span className="min-w-0 flex-1 truncate font-medium text-foreground/75">
+        <span className="min-w-0 flex-1 truncate font-medium text-ink/75">
           {summaryText}
         </span>
       </NarrativeSummaryLine>

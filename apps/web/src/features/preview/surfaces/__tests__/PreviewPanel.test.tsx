@@ -880,7 +880,7 @@ describe("PreviewPanel: full panel state", () => {
       "mt-1",
       "rounded-md",
       "border",
-      "bg-muted/10",
+      "bg-hover/10",
     );
     expect(screen.getByTestId("browser-header").parentElement).toHaveClass(
       "relative",

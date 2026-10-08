@@ -72,8 +72,8 @@ export function KeyboardShortcutsSection() {
               key={cmd.id}
               className="flex items-center justify-between rounded-md px-1 py-1.5 text-sm"
             >
-              <span className="text-foreground/80">{cmd.title}</span>
-              <kbd className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              <span className="text-ink/80">{cmd.title}</span>
+              <kbd className="rounded bg-hover px-2 py-0.5 text-xs font-medium text-muted">
                 {formatKeybinding(binding.key, isMac)}
               </kbd>
             </div>

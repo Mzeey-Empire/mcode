@@ -47,7 +47,7 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
 
   return (
     <div className="flex items-center justify-end gap-1">
-      <div className="flex items-center gap-0.5 bg-muted/20 rounded-md px-1 py-0.5">
+      <div className="flex items-center gap-0.5 bg-hover/20 rounded-md px-1 py-0.5">
         <OpenInAppButton
           dirPath={resolveThreadDirPath(thread, workspacePath)}
           threadId={thread.id}
@@ -72,8 +72,8 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
               data-testid="header-panel-toggle"
               className={
                 panelVisible
-                  ? "cursor-pointer text-foreground bg-muted/40"
-                  : "cursor-pointer text-foreground/70 hover:text-foreground hover:bg-muted/40"
+                  ? "cursor-pointer text-ink bg-hover/40"
+                  : "cursor-pointer text-ink/70 hover:text-ink hover:bg-hover/40"
               }
             >
               <PanelRight size={14} />
@@ -82,7 +82,7 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
         />
         <TooltipContent side="bottom" className="text-xs">
           Toggle panel{" "}
-          <span className="text-foreground">{panelShortcut}</span>
+          <span className="text-ink">{panelShortcut}</span>
         </TooltipContent>
       </Tooltip>
     </div>

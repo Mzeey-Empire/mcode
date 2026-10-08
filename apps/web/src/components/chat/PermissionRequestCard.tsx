@@ -69,7 +69,7 @@ function decisionLabel(decision: PermissionDecision): string {
 
 function SettledPermissionRequest({ icon, label, decision, optionLabel }: { icon: ReactNode; label: string; decision: PermissionDecision; optionLabel?: string }) {
   return (
-    <div className="flex items-center gap-2 border-l-2 border-border/30 pl-3 py-1 text-xs text-muted-foreground/70">
+    <div className="flex items-center gap-2 border-l-2 border-border/30 pl-3 py-1 text-xs text-muted/70">
       {icon}
       <span className="font-medium">{label}</span>
       <Badge variant={badgeVariantFor(decision)} size="sm" className="ml-1">
@@ -107,7 +107,7 @@ function PendingPermissionRequest({
         {icon}
         <span>Permission requested: {label}</span>
       </div>
-      <pre className={cn("text-xs leading-relaxed text-muted-foreground/80", "bg-muted/30 rounded px-2 py-1.5", "max-h-[120px] overflow-y-auto scrollbar-on-hover", "whitespace-pre-wrap break-all font-mono")}>
+      <pre className={cn("text-xs leading-relaxed text-muted/80", "bg-hover/30 rounded px-2 py-1.5", "max-h-[120px] overflow-y-auto scrollbar-on-hover", "whitespace-pre-wrap break-all font-mono")}>
         {inputPreview}
       </pre>
       <div className="flex items-center gap-2">
@@ -115,32 +115,32 @@ function PendingPermissionRequest({
           <button
             disabled={controlsDisabled}
             onClick={() => onRespond(allowMode)}
-            className={cn("inline-flex h-6 items-center gap-1 pl-2 pr-2 text-xs font-medium", "bg-primary text-primary-foreground", "hover:bg-primary/90 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}
+            className={cn("inline-flex h-6 items-center gap-1 pl-2 pr-2 text-xs font-medium", "bg-primary text-primary-ink", "hover:bg-primary/90 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}
           >
             {allowMode === "allow" ? <Check size={11} /> : <Clock size={11} />}
             {allowMode === "allow" ? "Allow" : "Allow in session"}
           </button>
-          <div className="w-px bg-primary-foreground/20 self-stretch" />
+          <div className="w-px bg-primary-ink/20 self-stretch" />
           <DropdownMenu>
-            <DropdownMenuTrigger disabled={controlsDisabled} aria-label="Change allow mode" className={cn("inline-flex h-6 w-6 items-center justify-center", "bg-primary text-primary-foreground", "hover:bg-primary/90 transition-colors", "outline-none focus-visible:ring-2 focus-visible:ring-ring/50", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}>
+            <DropdownMenuTrigger disabled={controlsDisabled} aria-label="Change allow mode" className={cn("inline-flex h-6 w-6 items-center justify-center", "bg-primary text-primary-ink", "hover:bg-primary/90 transition-colors", "outline-none focus-visible:ring-2 focus-visible:ring-focus/50", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}>
               <ChevronDown size={11} className="opacity-80" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" sideOffset={4} className="min-w-[180px]">
               <DropdownMenuItem onClick={() => onAllowMode("allow")} className="gap-2">
                 <Zap size={12} className="text-amber-500 shrink-0" />
-                <div className="flex flex-col"><span className="text-xs font-medium">Allow once</span><span className="text-xs text-muted-foreground">Prompt again next time</span></div>
+                <div className="flex flex-col"><span className="text-xs font-medium">Allow once</span><span className="text-xs text-muted">Prompt again next time</span></div>
                 {allowMode === "allow" && <Check size={11} className="ml-auto text-primary" />}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => onAllowMode("allow-session")} className="gap-2">
                 <Clock size={12} className="text-blue-400 shrink-0" />
-                <div className="flex flex-col"><span className="text-xs font-medium">Allow in session</span><span className="text-xs text-muted-foreground">Skip prompts this session</span></div>
+                <div className="flex flex-col"><span className="text-xs font-medium">Allow in session</span><span className="text-xs text-muted">Skip prompts this session</span></div>
                 {allowMode === "allow-session" && <Check size={11} className="ml-auto text-primary" />}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <button disabled={controlsDisabled} onClick={() => onRespond("deny")} className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "text-muted-foreground/70 hover:text-destructive", "hover:bg-destructive/10 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}>
+        <button disabled={controlsDisabled} onClick={() => onRespond("deny")} className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "text-muted/70 hover:text-destructive", "hover:bg-destructive/10 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}>
           <X size={11} />
           Deny
         </button>
@@ -163,7 +163,7 @@ function OptionButton({
     <button
       disabled={disabled}
       onClick={() => onRespond("allow", option.id)}
-      className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "bg-primary text-primary-foreground", "hover:bg-primary/90 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}
+      className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "bg-primary text-primary-ink", "hover:bg-primary/90 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}
     >
       {option.label}
     </button>
@@ -203,7 +203,7 @@ function PendingOptionsRequest({
         {icon}
         <span>Permission requested: {label}</span>
       </div>
-      <pre className={cn("text-xs leading-relaxed text-muted-foreground/80", "bg-muted/30 rounded px-2 py-1.5", "max-h-[120px] overflow-y-auto scrollbar-on-hover", "whitespace-pre-wrap break-all font-mono")}>
+      <pre className={cn("text-xs leading-relaxed text-muted/80", "bg-hover/30 rounded px-2 py-1.5", "max-h-[120px] overflow-y-auto scrollbar-on-hover", "whitespace-pre-wrap break-all font-mono")}>
         {inputPreview}
       </pre>
       <div className="flex flex-wrap items-center gap-2">
@@ -272,11 +272,11 @@ function PendingQuestionRequest({
       {questions.map((question, questionIndex) => (
         <fieldset key={`${question.header}-${questionIndex}`} className="flex flex-col gap-1.5">
           <legend className="text-xs font-medium">{question.header}</legend>
-          <p className="text-sm text-foreground/90">{question.question}</p>
+          <p className="text-sm text-ink/90">{question.question}</p>
           {question.options.map((option) => {
             const checked = (selected[questionIndex] ?? []).includes(option.label);
             return (
-              <label key={option.label} className="flex cursor-pointer items-start gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/40">
+              <label key={option.label} className="flex cursor-pointer items-start gap-2 rounded px-1 py-0.5 text-sm hover:bg-hover/40">
                 <input
                   type={question.multiple ? "checkbox" : "radio"}
                   name={`question-${requestId}-${questionIndex}`}
@@ -286,7 +286,7 @@ function PendingQuestionRequest({
                 />
                 <span>
                   {option.label}
-                  {option.description && <span className="block text-xs text-muted-foreground">{option.description}</span>}
+                  {option.description && <span className="block text-xs text-muted">{option.description}</span>}
                 </span>
               </label>
             );
@@ -309,12 +309,12 @@ function PendingQuestionRequest({
         <button
           disabled={controlsDisabled || !answers}
           onClick={() => answers && onRespond("allow", answers)}
-          className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "bg-primary text-primary-foreground hover:bg-primary/90 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}
+          className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "bg-primary text-primary-ink hover:bg-primary/90 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}
         >
           <Check size={11} />
           Submit answers
         </button>
-        <button disabled={controlsDisabled} onClick={() => onRespond("deny")} className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "text-muted-foreground/70 hover:text-destructive", "hover:bg-destructive/10 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}>
+        <button disabled={controlsDisabled} onClick={() => onRespond("deny")} className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "text-muted/70 hover:text-destructive", "hover:bg-destructive/10 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}>
           <X size={11} />
           Deny
         </button>
@@ -389,7 +389,7 @@ export function PermissionRequestCard({
   );
 
   if (settled && decision) {
-    return <SettledPermissionRequest icon={<Icon size={13} className="shrink-0 text-muted-foreground/50" />} label={label} decision={decision} optionLabel={optionLabel} />;
+    return <SettledPermissionRequest icon={<Icon size={13} className="shrink-0 text-muted/50" />} label={label} decision={decision} optionLabel={optionLabel} />;
   }
   if (questions) {
     return <PendingQuestionRequest requestId={requestId} icon={<Icon size={13} className="shrink-0" />} label={label} questions={questions} responding={responding} ready={ready} error={error} onRespond={respond} />;

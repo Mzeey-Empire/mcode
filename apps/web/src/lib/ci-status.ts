@@ -65,11 +65,11 @@ export function getCiVisual(aggregate: ChecksStatus["aggregate"]): CiVisual {
         // CircleMinus (not CircleCheck) so a muted tick never reads as "passed" when
         // no checks are configured — the shape itself signals absence rather than success.
         icon: CircleMinus,
-        color: "text-muted-foreground",
+        color: "text-muted",
         borderColor: "border-border",
-        surface: "bg-muted/30",
-        chromeClass: "text-muted-foreground bg-muted/20 border-border",
-        hoverSurface: "hover:bg-muted/30",
+        surface: "bg-hover/30",
+        chromeClass: "text-muted bg-hover/20 border-border",
+        hoverSurface: "hover:bg-hover/30",
         label: "No checks",
       };
   }

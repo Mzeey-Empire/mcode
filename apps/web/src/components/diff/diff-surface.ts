@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 
 /** Card shell shared by turn summaries and per-file diff cards. */
 export const DIFF_CARD_SURFACE =
-  "overflow-hidden rounded-lg border border-border/40 bg-muted/30";
+  "overflow-hidden rounded-lg border border-border/40 bg-hover/30";
 
 /**
  * Merges the shared diff card surface with optional extra classes.

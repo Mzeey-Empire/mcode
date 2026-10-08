@@ -137,10 +137,10 @@ function renderLongPopup() {
 }
 
 describe("SlashCommandPopup selection indicator", () => {
-  it("selected row has bg-accent class", () => {
+  it("selected row has bg-selected class", () => {
     renderPopup(0);
     const selectedRow = screen.getByRole("option", { name: /foo/ });
-    expect(selectedRow.className).toContain("bg-accent");
+    expect(selectedRow.className).toContain("bg-selected");
   });
 
   it("selected row has no border-l class", () => {

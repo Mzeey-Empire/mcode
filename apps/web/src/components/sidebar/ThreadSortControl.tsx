@@ -48,7 +48,7 @@ export function ThreadSortControl({
             className={
               isNonDefault
                 ? "h-8 gap-1.5 px-2 text-primary"
-                : "h-8 gap-1.5 px-2 text-muted-foreground"
+                : "h-8 gap-1.5 px-2 text-muted"
             }
             aria-label={`Sort threads: ${SORT_LABELS[sortField]}, ${directionLabel(sortField, sortDirection)}`}
           >
@@ -63,9 +63,9 @@ export function ThreadSortControl({
         side="bottom"
         align="end"
         sideOffset={4}
-        className="w-44 rounded-md border border-border bg-popover p-1 shadow-lg"
+        className="w-44 rounded-md border border-border bg-panel p-1 shadow-lg"
       >
-        <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">
+        <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted">
           Sort threads by
         </div>
         {SORT_OPTIONS.map((opt) => (
@@ -75,7 +75,7 @@ export function ThreadSortControl({
             size="xs"
             key={opt.field}
             className={`h-8 w-full justify-between px-2 text-sm font-normal ${
-              sortField === opt.field ? "text-primary" : "text-muted-foreground"
+              sortField === opt.field ? "text-primary" : "text-muted"
             }`}
             onClick={() => {
               setSortField(opt.field);
@@ -93,7 +93,7 @@ export function ThreadSortControl({
           type="button"
           variant="ghost"
           size="xs"
-          className="h-8 w-full justify-start gap-1.5 px-2 text-sm font-normal text-muted-foreground"
+          className="h-8 w-full justify-start gap-1.5 px-2 text-sm font-normal text-muted"
           onClick={toggleSortDirection}
         >
           {directionLabel(sortField, sortDirection)}

@@ -12,7 +12,7 @@ export function ShowMoreButton({ totalCount, visibleCount, expanded, onToggle }:
     <button
       type="button"
       onClick={onToggle}
-      className="mt-1 text-xs text-muted-foreground/70 hover:text-foreground transition-colors"
+      className="mt-1 text-xs text-muted/70 hover:text-ink transition-colors"
     >
       {expanded ? "Show less" : `Show ${totalCount - visibleCount} more`}
     </button>

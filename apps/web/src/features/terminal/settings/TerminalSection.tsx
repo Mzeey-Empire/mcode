@@ -34,7 +34,7 @@ const profileName = (profileId: TerminalProfileReference): string => {
 };
 
 const terminalFieldClassName =
-  "bg-transparent shadow-none focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
+  "bg-transparent shadow-none focus-visible:ring-3 focus-visible:ring-focus/50 dark:bg-selected/30";
 
 interface ProfileDialogProps {
   open: boolean;
@@ -180,7 +180,7 @@ function terminalProfileUnavailable(
 
 function PreferencesStatus({ pending, error }: { pending: boolean; error: string | null }) {
   if (error) return <p role="alert" className="mb-3 text-xs text-destructive">{error}</p>;
-  if (pending) return <p role="status" className="mb-3 text-xs text-muted-foreground" aria-live="polite">Saving Terminal preferences…</p>;
+  if (pending) return <p role="status" className="mb-3 text-xs text-muted" aria-live="polite">Saving Terminal preferences…</p>;
   return null;
 }
 
@@ -408,7 +408,7 @@ function ProfileRecoveryNotices({ model }: { readonly model: TerminalSectionMode
 
 function WorkspaceProfileDefault({ model }: { readonly model: TerminalSectionModel }) {
   if (!model.activeWorkspaceId) {
-    return <p className="border-b border-border/50 px-1 py-3 text-xs text-muted-foreground">Open a project to set a project default.</p>;
+    return <p className="border-b border-border/50 px-1 py-3 text-xs text-muted">Open a project to set a project default.</p>;
   }
 
   return (
@@ -451,7 +451,7 @@ function CustomProfileRow({
     <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 px-3 py-2 text-xs">
       <span className="min-w-0 truncate">
         {profile.name}
-        <span className="ml-2 text-muted-foreground">{profile.executable}</span>
+        <span className="ml-2 text-muted">{profile.executable}</span>
       </span>
       <span className="flex shrink-0 gap-1">
         <Button variant="ghost" size="xs" disabled={pending} onClick={() => onEdit(profile)}>Edit</Button>
@@ -479,13 +479,13 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
     <>
       <SettingRow label="Certified profiles" hint="Detected profiles are read-only.">
         <div className="grid min-w-52 gap-2 sm:min-w-64">
-          {model.profilesLoading && !model.profilesLoaded ? <p className="text-xs text-muted-foreground">Loading profiles…</p> : null}
-          {!model.profilesLoading && model.certifiedProfiles.length === 0 ? <p className="text-xs text-muted-foreground">No certified profiles detected.</p> : null}
+          {model.profilesLoading && !model.profilesLoaded ? <p className="text-xs text-muted">Loading profiles…</p> : null}
+          {!model.profilesLoading && model.certifiedProfiles.length === 0 ? <p className="text-xs text-muted">No certified profiles detected.</p> : null}
           {model.certifiedProfiles.map((profile) => (
             <div key={profile.id} className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border/50 px-3 py-2 text-xs">
               <span className="min-w-0 truncate">
                 {profile.name}
-                <span className="ml-2 text-muted-foreground">{profile.executable}</span>
+                <span className="ml-2 text-muted">{profile.executable}</span>
               </span>
               <Badge variant="secondary" size="sm">Detected</Badge>
             </div>
@@ -507,7 +507,7 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
             <div key={`recovered-${profile.id}`} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 px-3 py-2 text-xs">
               <span className="min-w-0 truncate">
                 {profile.name}
-                <span className="ml-2 text-muted-foreground">{profile.executable}</span>
+                <span className="ml-2 text-muted">{profile.executable}</span>
               </span>
               <Badge variant="secondary" size="sm">Recovered</Badge>
             </div>
@@ -530,8 +530,8 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
 function TerminalProfilesSection({ model }: { readonly model: TerminalSectionModel }) {
   return (
     <section aria-labelledby="terminal-profiles-heading">
-      <h2 id="terminal-profiles-heading" className="mb-1 px-1 text-sm font-semibold text-foreground">Profiles and defaults</h2>
-      <p className="mb-2 px-1 text-xs text-muted-foreground">Defaults apply to new terminals.</p>
+      <h2 id="terminal-profiles-heading" className="mb-1 px-1 text-sm font-semibold text-ink">Profiles and defaults</h2>
+      <p className="mb-2 px-1 text-xs text-muted">Defaults apply to new terminals.</p>
       <GlobalProfileDefault model={model} />
       <ProfileRecoveryNotices model={model} />
       <WorkspaceProfileDefault model={model} />
@@ -558,7 +558,7 @@ function TerminalPresentationSection({ model }: { readonly model: TerminalSectio
   const presentation = model.terminalSettings.presentation;
   return (
     <section aria-labelledby="terminal-presentation-heading">
-      <h2 id="terminal-presentation-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-foreground">Presentation</h2>
+      <h2 id="terminal-presentation-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-ink">Presentation</h2>
       <SettingRow label="Font family" configKey="terminal.presentation.fontFamily" hint="Changes apply to new and open terminals.">
         <Input
           aria-label="Terminal font family"
@@ -605,7 +605,7 @@ function TerminalBehaviorSection({ model }: { readonly model: TerminalSectionMod
   const behavior = model.terminalSettings.behavior;
   return (
     <section aria-labelledby="terminal-behavior-heading">
-      <h2 id="terminal-behavior-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-foreground">Behavior</h2>
+      <h2 id="terminal-behavior-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-ink">Behavior</h2>
       <SettingRow label="Scrollback lines" configKey="terminal.behavior.scrollback" hint="Lines to retain in the buffer.">
         <RangeControl ariaLabel="Scrollback lines" min={100} max={5000} step={100} value={behavior.scrollback} onCommit={(value) => model.updateBehavior("scrollback", value)} />
       </SettingRow>
@@ -637,7 +637,7 @@ function TerminalAccessibilitySection({ model }: { readonly model: TerminalSecti
   const accessibility = model.terminalSettings.accessibility;
   return (
     <section aria-labelledby="terminal-accessibility-heading">
-      <h2 id="terminal-accessibility-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-foreground">Accessibility</h2>
+      <h2 id="terminal-accessibility-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-ink">Accessibility</h2>
       <SettingRow label="Screen reader" configKey="terminal.accessibility.screenReaderMode" hint="Automatic uses the terminal default.">
         <SegControl
           options={[

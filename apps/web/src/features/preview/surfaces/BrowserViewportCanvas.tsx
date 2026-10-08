@@ -261,7 +261,7 @@ function BrowserViewportDragHandle({
       aria-valuetext={isCorner ? `${state.confirmed.width} by ${state.confirmed.height} pixels` : undefined}
       data-position={position}
       className={cn(
-        "pointer-events-auto absolute z-30 flex touch-none select-none items-center justify-center text-muted-foreground opacity-75 outline-none transition-colors hover:bg-accent/70 hover:text-foreground hover:opacity-100 focus-visible:bg-accent/70 focus-visible:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring",
+        "pointer-events-auto absolute z-30 flex touch-none select-none items-center justify-center text-muted opacity-75 outline-none transition-colors hover:bg-selected/70 hover:text-ink hover:opacity-100 focus-visible:bg-selected/70 focus-visible:text-ink focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus",
         details.className,
       )}
       {...handlers}
@@ -278,7 +278,7 @@ function canvasClassName(
   className: string | undefined,
 ): string {
   const overflow = presentation === "actual" ? "overflow-auto" : "overflow-hidden";
-  return cn("pointer-events-none relative h-full min-h-0", responsive && "bg-muted/30", responsive && overflow, className);
+  return cn("pointer-events-none relative h-full min-h-0", responsive && "bg-hover/30", responsive && overflow, className);
 }
 
 function stageSize(

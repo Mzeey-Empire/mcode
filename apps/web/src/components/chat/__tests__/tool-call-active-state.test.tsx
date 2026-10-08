@@ -9,16 +9,16 @@ describe("ToolCallWrapper active state", () => {
     expect(document.querySelector(".animate-shimmer-text")).not.toBeInTheDocument();
   });
 
-  it("applies text-foreground and font-medium to the label when active", () => {
+  it("applies text-ink and font-medium to the label when active", () => {
     render(<ToolCallWrapper icon={FileText} label="Reading file" isActive />);
     const label = screen.getByText("Reading file");
-    expect(label.className).toContain("text-foreground");
+    expect(label.className).toContain("text-ink");
     expect(label.className).toContain("font-medium");
   });
 
-  it("applies text-foreground/70 to the label when inactive", () => {
+  it("applies text-ink/70 to the label when inactive", () => {
     render(<ToolCallWrapper icon={FileText} label="Reading file" isActive={false} />);
     const label = screen.getByText("Reading file");
-    expect(label.className).toContain("text-foreground/70");
+    expect(label.className).toContain("text-ink/70");
   });
 });

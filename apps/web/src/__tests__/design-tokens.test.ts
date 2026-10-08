@@ -11,28 +11,28 @@ const indexCss = NodeFS.readFileSync(NodePath.resolve(here, "../index.css"), "ut
 const PX_PER_REM = 10;
 
 /**
- * Paper role name to the code variables that carry it until F-01b renames them
- * to Paper's names. Dark values come from `--color-<role>`, light values from
+ * Paper role name to the matching code variables. Dark values come from
+ * `--color-<role>`, light values from
  * `--color-light-<role>`.
  */
 const ROLE_VARIABLES: Readonly<Record<string, readonly string[]>> = {
   page: ["--page"],
   background: ["--background"],
-  panel: ["--card", "--popover"],
-  hover: ["--muted"],
-  selected: ["--secondary", "--accent"],
+  panel: ["--panel"],
+  hover: ["--hover"],
+  selected: ["--selected", "--button-secondary"],
   border: ["--border"],
   "control-border": ["--control-border"],
-  ink: ["--foreground", "--card-foreground", "--popover-foreground", "--secondary-foreground", "--accent-foreground"],
-  muted: ["--muted-foreground"],
+  ink: ["--ink"],
+  muted: ["--muted"],
   primary: ["--primary"],
   "primary-hover": ["--primary-hover"],
-  "primary-ink": ["--primary-foreground"],
+  "primary-ink": ["--primary-ink"],
   destructive: ["--destructive"],
   "destructive-ink": ["--destructive-ink"],
   "button-secondary-hover": ["--button-secondary-hover"],
   "button-destructive-hover": ["--button-destructive-hover"],
-  focus: ["--ring"],
+  focus: ["--focus"],
   link: ["--link"],
   success: ["--success"],
   error: ["--error"],
@@ -49,8 +49,8 @@ const ROLE_VARIABLES: Readonly<Record<string, readonly string[]>> = {
  */
 const LIGHT_DEVIATIONS: Readonly<Record<string, { readonly role: string; readonly token: string }>> = {
   // decisions.md D4: Paper's light selected equals page and hover, so a selected row
-  // vanished. Only selection moves; the secondary button (--secondary) keeps Paper's pair.
-  "--accent": { role: "selected", token: "--color-neutral-200" },
+  // vanished. Only selection moves; the secondary button (--button-secondary) keeps Paper's pair.
+  "--selected": { role: "selected", token: "--color-neutral-200" },
 };
 
 const TYPE_ROLES = ["body", "prose", "body-small", "caption", "label", "button", "code"] as const;
@@ -147,9 +147,9 @@ describe("design tokens match the Paper export", () => {
 
   it("keeps the primary label, focus ring and light secondary hover distinct as the style guide requires", () => {
     expect(code(themes.dark, "--primary")).toBe("oklch(72% 0.170 75)");
-    expect(code(themes.dark, "--primary-foreground")).toBe("oklch(16% 0.005 260)");
-    expect(code(themes.light, "--ring")).toBe("oklch(52% 0.170 264)");
-    expect(code(themes.light, "--secondary")).not.toBe(code(themes.light, "--button-secondary-hover"));
+    expect(code(themes.dark, "--primary-ink")).toBe("oklch(16% 0.005 260)");
+    expect(code(themes.light, "--focus")).toBe("oklch(52% 0.170 264)");
+    expect(code(themes.light, "--button-secondary")).not.toBe(code(themes.light, "--button-secondary-hover"));
   });
 
   it.each(TYPE_ROLES)("gives the %s type role Paper's size, line height and weight", (role) => {

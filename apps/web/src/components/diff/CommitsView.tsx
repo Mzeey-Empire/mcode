@@ -58,7 +58,7 @@ export function CommitsView() {
 
   if (!activeWorkspace?.is_git_repo) {
     return (
-      <div className="flex h-full items-center justify-center text-xs text-muted-foreground/50">
+      <div className="flex h-full items-center justify-center text-xs text-muted/50">
         No git history
       </div>
     );
@@ -70,7 +70,7 @@ export function CommitsView() {
         {[0, 150, 300].map((delay) => (
           <div
             key={delay}
-            className="h-1 w-1 rounded-full bg-muted-foreground/25 animate-pulse"
+            className="h-1 w-1 rounded-full bg-muted/25 animate-pulse"
             style={{ animationDelay: `${delay}ms` }}
           />
         ))}
@@ -81,10 +81,10 @@ export function CommitsView() {
   if (!commits || commits.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-14">
-        <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted-foreground/15">
+        <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted/15">
           ◌
         </span>
-        <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/40">
+        <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/40">
           No commits found
         </p>
       </div>

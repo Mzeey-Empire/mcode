@@ -63,10 +63,10 @@ export function PanelEmptyState({
           rather than clip, unlike justify-center). */}
       <div className="m-auto w-full max-w-sm">
         <header className="mb-5 text-center">
-          <h2 className="text-lg font-semibold tracking-tight text-foreground">
+          <h2 className="text-lg font-semibold tracking-tight text-ink">
             Open a tool
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-muted">
             Pick one to open it in this panel.
           </p>
         </header>
@@ -85,18 +85,18 @@ export function PanelEmptyState({
                 aria-label={type.comingSoon ? `${type.label} (coming soon)` : `Open ${type.label}`}
                 onClick={type.comingSoon ? undefined : () => onOpen(type.id as RightPanelTab)}
                 className={cn(
-                  "h-auto w-full justify-start gap-3 whitespace-normal bg-card px-3 py-3 text-left transition-colors",
+                  "h-auto w-full justify-start gap-3 whitespace-normal bg-panel px-3 py-3 text-left transition-colors",
                   type.comingSoon
                     ? "cursor-default"
-                    : "hover:border-primary/50 hover:bg-card/80",
+                    : "hover:border-primary/50 hover:bg-panel/80",
                 )}
               >
-                <span className="grid size-9 flex-none place-items-center rounded-md bg-muted/40 text-muted-foreground">
+                <span className="grid size-9 flex-none place-items-center rounded-md bg-hover/40 text-muted">
                   <Icon size={18} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-foreground">{type.label}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{type.blurb}</span>
+                  <span className="block text-sm font-medium text-ink">{type.label}</span>
+                  <span className="block truncate text-xs text-muted">{type.blurb}</span>
                 </span>
                 {type.comingSoon ? <SoonBadge /> : keycap && <Kbd>{keycap}</Kbd>}
               </Button>

@@ -39,9 +39,9 @@ interface ComposerAddMenuLabelProps {
 function ComposerAddMenuLabel({ title, description }: ComposerAddMenuLabelProps) {
   return (
     <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
-      <span className="shrink-0 text-sm font-medium leading-none text-foreground">{title}</span>
+      <span className="shrink-0 text-sm font-medium leading-none text-ink">{title}</span>
       <span
-        className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs font-normal leading-none text-muted-foreground"
+        className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs font-normal leading-none text-muted"
         style={{
           maskImage: "linear-gradient(to right, black calc(100% - 1.5rem), transparent)",
         }}
@@ -159,7 +159,7 @@ export function ComposerAddMenu({
       data-testid="composer-add"
       disabled={disabled}
       onClick={toggleMenu}
-      className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+      className="size-8 shrink-0 rounded-lg text-muted hover:bg-hover/40 hover:text-ink disabled:pointer-events-none disabled:opacity-50"
     >
       <Plus size={16} aria-hidden />
     </Button>
@@ -185,7 +185,7 @@ export function ComposerAddMenu({
           <div ref={menuRef} className="p-1" onKeyDown={handleMenuKeyDown}>
             <div
               role="presentation"
-              className="px-2 pb-1 pt-0.5 text-xs font-medium text-muted-foreground"
+              className="px-2 pb-1 pt-0.5 text-xs font-medium text-muted"
             >
               Attach
             </div>
@@ -195,9 +195,9 @@ export function ComposerAddMenu({
               variant="ghost"
               size="sm"
               onClick={handleAttachFiles}
-              className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent/70"
+              className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-left hover:bg-selected/70"
             >
-              <FilePlusCorner size={15} className="shrink-0 text-muted-foreground" aria-hidden />
+              <FilePlusCorner size={15} className="shrink-0 text-muted" aria-hidden />
               <ComposerAddMenuLabel
                 title="Files"
                 description="Images, PDFs, documents, and code"
@@ -208,7 +208,7 @@ export function ComposerAddMenu({
                 <div role="separator" className="mx-2 my-1 h-px bg-border/60" />
                 <div
                   role="presentation"
-                  className="px-2 pb-1 pt-0.5 text-xs font-medium text-muted-foreground"
+                  className="px-2 pb-1 pt-0.5 text-xs font-medium text-muted"
                 >
                   Capabilities
                 </div>
@@ -225,12 +225,12 @@ export function ComposerAddMenu({
                       onClick={() => handleAttachCapability(capability.id)}
                       disabled={attached}
                       aria-checked={attached}
-                      className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent/70 disabled:bg-accent/45 disabled:opacity-100"
+                      className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-left hover:bg-selected/70 disabled:bg-selected/45 disabled:opacity-100"
                     >
                       <Icon
                         size={15}
                         className={
-                          attached ? "shrink-0 text-primary" : "shrink-0 text-muted-foreground"
+                          attached ? "shrink-0 text-primary" : "shrink-0 text-muted"
                         }
                         aria-hidden
                       />

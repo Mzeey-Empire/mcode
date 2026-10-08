@@ -238,7 +238,7 @@ describe("PullRequestIssueCommentComposer", () => {
     expect(textbox.parentElement).toHaveClass(
       "relative",
       "rounded-xl",
-      "bg-muted/50",
+      "bg-hover/50",
       "ring-1",
       "ring-inset",
       "ring-border/60",
