@@ -50,7 +50,7 @@ export function SubagentIdentityGlyph({
         "flex shrink-0 items-center justify-center rounded-md",
         paletteIndex !== undefined
           ? "subagent-identity-glyph"
-          : "bg-muted/65 text-muted-foreground ring-1 ring-inset ring-border/60",
+          : "bg-hover/65 text-muted ring-1 ring-inset ring-border/60",
         className,
       )}
       style={paletteIndex !== undefined

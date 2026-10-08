@@ -76,7 +76,7 @@ describe("MarkdownContent link handling", () => {
     const { container } = render(<MarkdownContent content="[click me](https://example.com)" />);
     const link = container.querySelector("a");
 
-    expect(link?.className).not.toContain("bg-muted");
+    expect(link?.className).not.toContain("bg-hover");
     expect(link?.className).not.toContain("ring-1");
     expect(link?.className).toContain("hover:underline");
   });
@@ -465,12 +465,12 @@ describe("MarkdownContent variant styling", () => {
   });
 
   describe("variant='assistant' (default)", () => {
-    it("renders inline code with bg-muted", () => {
+    it("renders inline code with bg-hover", () => {
       const { container } = render(
         <MarkdownContent content="Use `foo` here" />,
       );
       const code = container.querySelector("code");
-      expect(code?.className).toContain("bg-muted");
+      expect(code?.className).toContain("bg-hover");
     });
 
     it("renders explicit skill, plugin, command, and sub-agent references as entity tokens", () => {
@@ -490,7 +490,7 @@ describe("MarkdownContent variant styling", () => {
 
       expect(command).toHaveTextContent("review");
       expect(command).toHaveClass("text-primary");
-      expect(command).not.toHaveClass("bg-muted", "ring-1", "rounded-md");
+      expect(command).not.toHaveClass("bg-hover", "ring-1", "rounded-md");
       expect(command?.querySelector("[data-entity-icon='command']")).toHaveClass("text-current");
     });
 
@@ -526,7 +526,7 @@ describe("MarkdownContent variant styling", () => {
         <MarkdownContent content="Use `foo` here" variant="user" />,
       );
       const code = container.querySelector("code");
-      expect(code?.className).toContain("bg-foreground/10");
+      expect(code?.className).toContain("bg-ink/10");
     });
 
     it("renders links with primary text", () => {

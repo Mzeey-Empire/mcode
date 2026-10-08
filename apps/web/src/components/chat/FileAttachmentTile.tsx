@@ -43,7 +43,7 @@ export function FileAttachmentTile({
     ) : kind === "office" ? (
       <FileText size={18} className="shrink-0 text-blue-600 dark:text-blue-400" aria-hidden />
     ) : (
-      <File size={18} className="shrink-0 text-muted-foreground" aria-hidden />
+      <File size={18} className="shrink-0 text-muted" aria-hidden />
     );
 
   const isComposer = variant === "composer";
@@ -55,7 +55,7 @@ export function FileAttachmentTile({
           <div
             className={cn(
               "relative overflow-hidden rounded-xl",
-              "border border-border/60 bg-muted/45 ring-1 ring-primary/15",
+              "border border-border/60 bg-hover/45 ring-1 ring-primary/15",
               "shadow-sm shadow-black/5 dark:shadow-black/20",
               isComposer ? "h-[72px] w-[140px]" : "min-h-[72px] w-full max-w-[260px]",
               className,
@@ -70,9 +70,9 @@ export function FileAttachmentTile({
             >
               <div className="flex min-w-0 items-center gap-2">
                 {icon}
-                <span className="truncate text-xs font-medium text-foreground">{name}</span>
+                <span className="truncate text-xs font-medium text-ink">{name}</span>
               </div>
-              <span className="pl-[26px] text-xs tabular-nums text-muted-foreground">
+              <span className="pl-[26px] text-xs tabular-nums text-muted">
                 {formatAttachmentByteSize(sizeBytes)}
               </span>
             </div>

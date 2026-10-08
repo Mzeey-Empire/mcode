@@ -1122,7 +1122,7 @@ function LoadingPulse() {
       {[0, 150, 300].map((delay) => (
         <div
           key={delay}
-          className="h-1 w-1 rounded-full bg-muted-foreground/25 animate-pulse"
+          className="h-1 w-1 rounded-full bg-muted/25 animate-pulse"
           style={{ animationDelay: `${delay}ms` }}
         />
       ))}

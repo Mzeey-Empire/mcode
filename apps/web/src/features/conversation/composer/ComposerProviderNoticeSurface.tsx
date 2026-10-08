@@ -226,7 +226,7 @@ function ComposerNoticeTrigger({
             type="button"
             variant="ghost"
             size="xs"
-            className="h-7 gap-1 px-1.5 text-xs text-muted-foreground hover:bg-transparent"
+            className="h-7 gap-1 px-1.5 text-xs text-muted hover:bg-transparent"
             onMouseDown={(event) => event.preventDefault()}
             onClick={onOpen}
             aria-label="Review provider notices"
@@ -267,7 +267,7 @@ function ComposerNoticeOverlay({
       className="composer-provider-notice-surface max-h-56 overflow-y-auto"
       data-testid="composer-provider-notice"
     >
-      <div className="flex min-w-0 items-center overflow-hidden rounded-t-xl hover:bg-muted/60 focus-within:bg-muted/60">
+      <div className="flex min-w-0 items-center overflow-hidden rounded-t-xl hover:bg-hover/60 focus-within:bg-hover/60">
         <Button
           type="button"
           variant="ghost"
@@ -279,12 +279,12 @@ function ComposerNoticeOverlay({
           onClick={onDetailsChange}
         >
           <Icon
-            className={notice.tone === "attention" ? "size-3.5 text-amber-500" : "size-3.5 text-muted-foreground"}
+            className={notice.tone === "attention" ? "size-3.5 text-amber-500" : "size-3.5 text-muted"}
             aria-hidden="true"
           />
           <span className="min-w-0 flex-1 truncate">{notice.title}</span>
           <ChevronDown
-            className={`size-3.5 text-muted-foreground transition-transform ${detailsOpen ? "rotate-180" : ""}`}
+            className={`size-3.5 text-muted transition-transform ${detailsOpen ? "rotate-180" : ""}`}
             aria-hidden="true"
           />
         </Button>
@@ -293,7 +293,7 @@ function ComposerNoticeOverlay({
             type="button"
             variant="ghost"
             size="xs"
-            className="h-7 px-1.5 text-xs text-muted-foreground hover:bg-transparent dark:hover:bg-transparent"
+            className="h-7 px-1.5 text-xs text-muted hover:bg-transparent dark:hover:bg-transparent"
             onMouseDown={(event) => event.preventDefault()}
             onClick={onShowAnother}
           >
@@ -307,7 +307,7 @@ function ComposerNoticeOverlay({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                className="mr-1 rounded-md text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
+                className="mr-1 rounded-md text-muted hover:bg-transparent hover:text-ink dark:hover:bg-transparent"
                 aria-label="Dismiss notice"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={onDismiss}
@@ -321,8 +321,8 @@ function ComposerNoticeOverlay({
       </div>
       {detailsOpen && (
         <div id="composer-provider-notice-details" className="border-t border-border/60 px-3 py-2.5 text-xs">
-          <p className="break-words text-muted-foreground">{notice.details}</p>
-          {notice.location && <p className="mt-1 break-all font-mono text-muted-foreground">{notice.location}</p>}
+          <p className="break-words text-muted">{notice.details}</p>
+          {notice.location && <p className="mt-1 break-all font-mono text-muted">{notice.location}</p>}
         </div>
       )}
     </ComposerOverlaySurface>

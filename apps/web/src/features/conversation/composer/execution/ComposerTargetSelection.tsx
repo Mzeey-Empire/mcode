@@ -60,7 +60,7 @@ export function ComposerTargetSelection(props: ComposerTargetSelectionProps) {
           iconSize={target.iconSize}
         />
       )}
-      <Suspense fallback={<div className={target.triggerClassName ? "h-7 w-28 animate-pulse rounded-md bg-accent" : "h-7"} />}>
+      <Suspense fallback={<div className={target.triggerClassName ? "h-7 w-28 animate-pulse rounded-md bg-selected" : "h-7"} />}>
         <LazyWorktreePicker
           worktrees={target.worktrees}
           selectedPath={target.selectedPath}

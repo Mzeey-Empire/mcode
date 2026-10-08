@@ -113,7 +113,7 @@ export function SearchableGroupedPicker({
             )}
           >
             <span className="min-w-0 flex-1 truncate text-left">{loading ? "Loading…" : selectedLabel}</span>
-            <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <ChevronDown className="size-4 shrink-0 text-muted" aria-hidden />
           </Button>
         }
       />

@@ -37,7 +37,7 @@ const patchLabels: Partial<Record<PullRequestFile["patchStatus"], string>> = {
 function changeTone(changeType: PullRequestFile["changeType"]): string {
   if (changeType === "added") return "text-[var(--diff-add-strong)]";
   if (changeType === "deleted") return "text-[var(--diff-remove-strong)]";
-  return "text-muted-foreground/70";
+  return "text-muted/70";
 }
 
 /** Props for one accessible file row in the pull request Change stack. */
@@ -92,8 +92,8 @@ export function PullRequestFileRow({
             className={cn(
               "relative mx-1 h-8 w-[calc(100%-0.5rem)] justify-start gap-1.5 rounded-md px-2 font-normal",
               active
-                ? "bg-muted/70 text-foreground"
-                : "text-foreground/75 hover:bg-muted/40",
+                ? "bg-hover/70 text-ink"
+                : "text-ink/75 hover:bg-hover/40",
             )}
             style={{ paddingLeft: `${Math.max(8, depth * 12 - 4)}px` }}
             onClick={() => onActivate(file.path)}

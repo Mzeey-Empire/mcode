@@ -80,12 +80,12 @@ function resolveTerminalSearchColor(token: string): string {
 
 function resolveTerminalSearchDecorations() {
   return {
-    matchBackground: resolveTerminalSearchColor("--muted"),
+    matchBackground: resolveTerminalSearchColor("--hover"),
     matchBorder: resolveTerminalSearchColor("--border"),
     matchOverviewRuler: resolveTerminalSearchColor("--primary"),
     activeMatchBackground: resolveTerminalSearchColor("--primary"),
-    activeMatchBorder: resolveTerminalSearchColor("--ring"),
-    activeMatchColorOverviewRuler: resolveTerminalSearchColor("--ring"),
+    activeMatchBorder: resolveTerminalSearchColor("--focus"),
+    activeMatchColorOverviewRuler: resolveTerminalSearchColor("--focus"),
   };
 }
 
@@ -514,7 +514,7 @@ function TerminalStatus({
 
   return (
     <div
-      className="mx-3 mt-2 rounded border border-border/70 bg-muted/30 px-2 py-1 text-xs text-muted-foreground"
+      className="mx-3 mt-2 rounded border border-border/70 bg-hover/30 px-2 py-1 text-xs text-muted"
       data-testid="terminal-status"
     >
       <div role="status" aria-live="polite" aria-atomic="true">

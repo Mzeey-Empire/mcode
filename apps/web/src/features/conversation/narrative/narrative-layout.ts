@@ -18,7 +18,7 @@ export const NARRATIVE_TOOL_ROW =
 export function narrativeToolDetailClass(size: "sm" | "md"): string {
   const tone =
     size === "md"
-      ? "text-sm text-muted-foreground/80"
-      : "text-xs text-muted-foreground/65";
+      ? "text-sm text-muted/80"
+      : "text-xs text-muted/65";
   return `font-mono ${tone} truncate flex-1 min-w-0 [overflow-wrap:anywhere]`;
 }

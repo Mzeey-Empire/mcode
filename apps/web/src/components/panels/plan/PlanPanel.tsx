@@ -40,7 +40,7 @@ function planCommentsReducer(
 }
 
 function PlanVersionBanner({ plan, latestVersion, threadId, onShowLatest }: { plan: PlanRecord; latestVersion: number; threadId: string; onShowLatest: (threadId: string, version: null) => void }) {
-  return <div className="flex min-w-0 flex-shrink-0 items-center gap-2 border-b border-border bg-primary/5 px-3 py-1.5 font-mono text-[10px] tracking-[0.14em] text-muted-foreground">
+  return <div className="flex min-w-0 flex-shrink-0 items-center gap-2 border-b border-border bg-primary/5 px-3 py-1.5 font-mono text-[10px] tracking-[0.14em] text-muted">
     <span className="min-w-0 truncate">Viewing v{plan.version} of {latestVersion} · read-only</span>
     <span className="min-w-0 flex-1" aria-hidden />
     <Button type="button" variant="link" size="xs" onClick={() => onShowLatest(threadId, null)} className="h-auto shrink-0 p-0 font-mono text-[10px] tracking-[0.14em]">Back to latest</Button>
@@ -50,7 +50,7 @@ function PlanVersionBanner({ plan, latestVersion, threadId, onShowLatest }: { pl
 function PlanFeedbackBar({ commentCount, feedbackBarRef, onSendFeedback }: { commentCount: number; feedbackBarRef: RefObject<HTMLDivElement | null>; onSendFeedback: () => void }) {
   const hasComments = commentCount > 0;
   return <div ref={feedbackBarRef} className="flex min-w-0 flex-shrink-0 items-center gap-2 border-t border-border bg-background px-3 py-2">
-    {hasComments ? <><span className="font-mono text-[10px] tabular-nums tracking-[0.14em] text-muted-foreground/70">{commentCount} {commentCount === 1 ? "note" : "notes"} saved</span><span className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground/45">·</span><span className="min-w-0 truncate font-mono text-[10px] tracking-[0.14em] text-muted-foreground/60">Send feedback to request a revised plan</span><span className="min-w-0 flex-1" aria-hidden /><Button type="button" variant="outline" size="xs" onClick={onSendFeedback} className="font-mono text-[10px] uppercase tracking-[0.16em]">Send feedback</Button></> : <><span className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground/45">Saved notes appear here</span><span className="min-w-0 flex-1" aria-hidden /><Button type="button" variant="outline" size="xs" disabled className="font-mono text-[10px] uppercase tracking-[0.16em]">Send feedback</Button></>}
+    {hasComments ? <><span className="font-mono text-[10px] tabular-nums tracking-[0.14em] text-muted/70">{commentCount} {commentCount === 1 ? "note" : "notes"} saved</span><span className="font-mono text-[10px] tracking-[0.14em] text-muted/45">·</span><span className="min-w-0 truncate font-mono text-[10px] tracking-[0.14em] text-muted/60">Send feedback to request a revised plan</span><span className="min-w-0 flex-1" aria-hidden /><Button type="button" variant="outline" size="xs" onClick={onSendFeedback} className="font-mono text-[10px] uppercase tracking-[0.16em]">Send feedback</Button></> : <><span className="font-mono text-[10px] tracking-[0.14em] text-muted/45">Saved notes appear here</span><span className="min-w-0 flex-1" aria-hidden /><Button type="button" variant="outline" size="xs" disabled className="font-mono text-[10px] uppercase tracking-[0.16em]">Send feedback</Button></>}
   </div>;
 }
 
@@ -200,14 +200,14 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
           <Tooltip>
             <TooltipTrigger
               render={
-                <h1 className="truncate text-[15px] font-semibold leading-snug tracking-tight text-foreground">
+                <h1 className="truncate text-[15px] font-semibold leading-snug tracking-tight text-ink">
                   {activePlan.title}
                 </h1>
               }
             />
             <TooltipContent>{activePlan.title}</TooltipContent>
           </Tooltip>
-          <p className="mt-1.5 font-mono text-[10px] leading-relaxed tracking-[0.14em] text-muted-foreground/70">
+          <p className="mt-1.5 font-mono text-[10px] leading-relaxed tracking-[0.14em] text-muted/70">
             Click a heading to annotate. Stash by clicking away, or save to close.
           </p>
         </header>

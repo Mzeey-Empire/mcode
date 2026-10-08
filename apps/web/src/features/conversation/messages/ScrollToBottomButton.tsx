@@ -20,7 +20,7 @@ export function ScrollToBottomButton({ hasNewContent, onScrollToBottom }: Scroll
       className={`pointer-events-auto h-7 w-7 rounded-md border backdrop-blur-sm transition-colors ${
         hasNewContent
           ? "border-primary/40 bg-primary/15 text-primary hover:bg-primary/25"
-          : "border-border/40 bg-background/80 text-muted-foreground/70 hover:bg-muted/40 hover:text-foreground"
+          : "border-border/40 bg-background/80 text-muted/70 hover:bg-hover/40 hover:text-ink"
       }`}
       aria-label={hasNewContent ? "New messages below" : "Scroll to bottom"}
     >

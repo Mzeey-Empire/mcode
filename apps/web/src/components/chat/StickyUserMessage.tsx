@@ -129,7 +129,7 @@ export function StickyUserMessage({
     >
       <div className="w-full" style={{ paddingRight: contentPaddingRight }}>
       <div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>
-        <div className="pointer-events-auto flex items-start gap-0.5 overflow-hidden rounded-lg bg-accent text-sm text-accent-foreground">
+        <div className="pointer-events-auto flex items-start gap-0.5 overflow-hidden rounded-lg bg-selected text-sm text-ink">
           <Button
             type="button"
             variant="ghost"
@@ -138,7 +138,7 @@ export function StickyUserMessage({
             aria-expanded={expandable ? expanded : undefined}
             aria-describedby={expandable ? STICKY_PREVIEW_HINT_ID : undefined}
             aria-label={previewAriaLabel}
-            className="h-auto min-w-0 flex-1 cursor-pointer justify-start px-3 py-1.5 text-left font-normal text-accent-foreground transition-colors hover:bg-foreground/5 hover:text-accent-foreground"
+            className="h-auto min-w-0 flex-1 cursor-pointer justify-start px-3 py-1.5 text-left font-normal text-ink transition-colors hover:bg-ink/5 hover:text-ink"
           >
             <p
               className={cn(
@@ -158,7 +158,7 @@ export function StickyUserMessage({
                 </span>
                 <span
                   aria-hidden
-                  className="mt-1 inline-flex items-center gap-0.5 font-mono text-xs uppercase tracking-[0.14em] text-muted-foreground"
+                  className="mt-1 inline-flex items-center gap-0.5 font-mono text-xs uppercase tracking-[0.14em] text-muted"
                 >
                   <ChevronDown
                     size={11}
@@ -167,7 +167,7 @@ export function StickyUserMessage({
                   />
                   {expanded ? "Collapse" : "Expand"}
                   {!expanded && (
-                    <span className="normal-case tracking-normal text-muted-foreground/70">
+                    <span className="normal-case tracking-normal text-muted/70">
                       · Double-click to jump
                     </span>
                   )}
@@ -184,7 +184,7 @@ export function StickyUserMessage({
                   variant="ghost"
                   size="icon-sm"
                   onClick={onJumpToMessage}
-                  className="mt-0.5 mr-0.5 size-11 shrink-0 text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  className="mt-0.5 mr-0.5 size-11 shrink-0 text-muted hover:bg-ink/5 hover:text-ink"
                   aria-label="Jump to your message"
                 >
                   <ArrowUp size={15} aria-hidden />

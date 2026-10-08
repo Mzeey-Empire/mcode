@@ -414,11 +414,11 @@ describe("PullRequestSummary", () => {
     expect(commentsTrigger.parentElement).toHaveClass("border-t");
     expect(checksTrigger.parentElement).not.toHaveClass(
       "rounded-xl",
-      "bg-card/30",
+      "bg-panel/30",
     );
     expect(commentsTrigger.parentElement).not.toHaveClass(
       "rounded-xl",
-      "bg-card/30",
+      "bg-panel/30",
     );
 
     const issueComment = await screen.findByRole("article", {
@@ -427,8 +427,8 @@ describe("PullRequestSummary", () => {
     const reviewThread = screen.getByRole("article", {
       name: "Review thread on apps/web/src/app/App.tsx:42",
     });
-    expect(issueComment).toHaveClass("rounded-lg", "bg-card/45");
-    expect(reviewThread).toHaveClass("rounded-lg", "bg-card/45");
+    expect(issueComment).toHaveClass("rounded-lg", "bg-panel/45");
+    expect(reviewThread).toHaveClass("rounded-lg", "bg-panel/45");
     expect(issueComment).not.toHaveClass("border");
     expect(reviewThread).not.toHaveClass("border");
   });

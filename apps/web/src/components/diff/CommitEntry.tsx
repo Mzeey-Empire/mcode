@@ -63,19 +63,19 @@ export function CommitEntry({ commit, threadId }: CommitEntryProps) {
   const initials = getInitials(commit.author);
 
   return (
-    <div className={`border-b border-border/15 ${expanded ? "bg-muted/[0.04]" : ""}`}>
+    <div className={`border-b border-border/15 ${expanded ? "bg-hover/[0.04]" : ""}`}>
       <button
         type="button"
         onClick={toggleExpanded}
-        className="group flex w-full items-baseline gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/[0.08]"
+        className="group flex w-full items-baseline gap-3 px-3 py-2.5 text-left transition-colors hover:bg-hover/[0.08]"
       >
         {/* Leading SHA — typographic anchor */}
-        <span className="shrink-0 font-mono text-[11px] text-foreground/55 group-hover:text-foreground/75 transition-colors tabular-nums">
+        <span className="shrink-0 font-mono text-[11px] text-ink/55 group-hover:text-ink/75 transition-colors tabular-nums">
           {commit.shortSha}
         </span>
 
         {/* Commit message */}
-        <span className="flex-1 min-w-0 truncate text-[11.5px] text-foreground/80">
+        <span className="flex-1 min-w-0 truncate text-[11.5px] text-ink/80">
           {commit.message}
         </span>
 
@@ -83,7 +83,7 @@ export function CommitEntry({ commit, threadId }: CommitEntryProps) {
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="shrink-0 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-[2px] bg-muted/60 px-1 font-mono text-[8.5px] tracking-tight text-muted-foreground/75" />
+              <span className="shrink-0 inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-[2px] bg-hover/60 px-1 font-mono text-[8.5px] tracking-tight text-muted/75" />
             }
           >
             {initials}
@@ -93,19 +93,19 @@ export function CommitEntry({ commit, threadId }: CommitEntryProps) {
 
         {/* File count — quiet typographic label */}
         {files !== null && files.length > 0 && (
-          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/55">
+          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted/55">
             {files.length} file{files.length === 1 ? "" : "s"}
           </span>
         )}
 
         {/* Relative time */}
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/45">
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted/45">
           {relativeTime(commit.date)}
         </span>
 
         <span
           aria-hidden="true"
-          className={`shrink-0 font-mono text-[11px] leading-none text-muted-foreground/35 transition-transform duration-150 ${
+          className={`shrink-0 font-mono text-[11px] leading-none text-muted/35 transition-transform duration-150 ${
             expanded ? "rotate-90" : ""
           }`}
         >
@@ -120,13 +120,13 @@ export function CommitEntry({ commit, threadId }: CommitEntryProps) {
               {[0, 150, 300].map((delay) => (
                 <div
                   key={delay}
-                  className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-pulse"
+                  className="h-1 w-1 rounded-full bg-muted/40 animate-pulse"
                   style={{ animationDelay: `${delay}ms` }}
                 />
               ))}
             </div>
           ) : files.length === 0 ? (
-            <p className="px-7 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/40">
+            <p className="px-7 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted/40">
               No files changed
             </p>
           ) : (

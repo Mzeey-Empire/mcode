@@ -73,11 +73,11 @@ export function PrSplitButton({
               aria-label={`Pull request, ${label}`}
               className={cn(
                 "h-8 w-full justify-between gap-3 px-2 text-left",
-                menuOpen && "bg-muted text-foreground",
+                menuOpen && "bg-hover text-ink",
               )}
             >
               <span className="flex min-w-0 items-center gap-2">
-                <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
+                <GitPullRequest className="size-3.5 shrink-0 text-muted" />
                 <span
                   className={cn(
                     "truncate text-xs font-medium",
@@ -101,7 +101,7 @@ export function PrSplitButton({
                   size={13}
                   aria-hidden
                   className={cn(
-                    "shrink-0 text-muted-foreground transition-transform duration-150",
+                    "shrink-0 text-muted transition-transform duration-150",
                     menuOpen && "rotate-180",
                   )}
                 />
@@ -119,13 +119,13 @@ export function PrSplitButton({
                     size="sm"
                     type="button"
                     data-testid={openActionTestId}
-                    className="h-8 w-full cursor-pointer justify-start gap-2 px-2 text-left text-xs text-foreground/75 hover:bg-muted/40 hover:text-foreground"
+                    className="h-8 w-full cursor-pointer justify-start gap-2 px-2 text-left text-xs text-ink/75 hover:bg-hover/40 hover:text-ink"
                     onClick={(event) => {
                       setMenuOpen(false);
                       onOpenPr(pr.url, event);
                     }}
                   >
-                    <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
+                    <ExternalLink className="size-3.5 shrink-0 text-muted" />
                     <span className="font-medium">{openPrLabel(pr)}</span>
                   </Button>
                 }
@@ -137,13 +137,13 @@ export function PrSplitButton({
               size="sm"
               type="button"
               data-testid={newPrButtonTestId}
-              className="h-8 w-full cursor-pointer justify-start gap-2 px-2 text-left text-xs text-foreground/75 hover:bg-muted/40 hover:text-foreground"
+              className="h-8 w-full cursor-pointer justify-start gap-2 px-2 text-left text-xs text-ink/75 hover:bg-hover/40 hover:text-ink"
               onClick={() => {
                 setMenuOpen(false);
                 onCreatePr();
               }}
             >
-              <Plus className="size-3.5 shrink-0 text-muted-foreground" />
+              <Plus className="size-3.5 shrink-0 text-muted" />
               <span className="font-medium">Create new PR</span>
             </Button>
           </div>

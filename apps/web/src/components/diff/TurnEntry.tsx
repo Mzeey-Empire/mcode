@@ -28,31 +28,31 @@ export function TurnEntry({ snapshot, turnNumber, defaultExpanded = false }: Tur
 
 
   return (
-    <div className={`border-b border-border/15 ${expanded ? "bg-muted/[0.04]" : ""}`}>
+    <div className={`border-b border-border/15 ${expanded ? "bg-hover/[0.04]" : ""}`}>
       <button
         type="button"
         aria-expanded={expanded}
         aria-controls={contentId}
         onClick={() => setExpanded((prev) => !prev)}
-        className="group flex w-full items-baseline gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/[0.08]"
+        className="group flex w-full items-baseline gap-3 px-3 py-2.5 text-left transition-colors hover:bg-hover/[0.08]"
       >
         {/* Oversized ordinal — the bold detail */}
-        <span className="shrink-0 font-mono text-[15px] font-medium tabular-nums text-foreground/45 group-hover:text-foreground/70 transition-colors">
+        <span className="shrink-0 font-mono text-[15px] font-medium tabular-nums text-ink/45 group-hover:text-ink/70 transition-colors">
           {ordinal}
         </span>
 
-        <span className="flex-1 truncate text-[11.5px] text-foreground/65">
+        <span className="flex-1 truncate text-[11.5px] text-ink/65">
           Turn {turnNumber}
         </span>
 
         {/* File count — quiet typographic label, no chip */}
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/55">
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted/55">
           {fileCount} file{fileCount === 1 ? "" : "s"}
         </span>
 
         <span
           aria-hidden="true"
-          className={`shrink-0 font-mono text-[11px] leading-none text-muted-foreground/35 transition-transform duration-150 ${
+          className={`shrink-0 font-mono text-[11px] leading-none text-muted/35 transition-transform duration-150 ${
             expanded ? "rotate-90" : ""
           }`}
         >

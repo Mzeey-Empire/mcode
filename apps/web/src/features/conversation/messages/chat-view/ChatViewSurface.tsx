@@ -149,7 +149,7 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
       <div key={projectName ?? "projectless"} data-testid="new-thread-welcome" className="animate-fade-up-in flex w-full max-w-[80rem] flex-col items-center gap-7 text-center">
         <McodeLogo variant="newThread" markOnly />
-        <h1 aria-label={projectName ? `What should we build in ${projectName}?` : undefined} className="text-balance text-2xl font-medium tracking-[-0.025em] text-foreground sm:text-[28px]">
+        <h1 aria-label={projectName ? `What should we build in ${projectName}?` : undefined} className="text-balance text-2xl font-medium tracking-[-0.025em] text-ink sm:text-[28px]">
           {projectName ? (
             <>
               What should we build in{" "}
@@ -157,8 +157,8 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
                 placement="bottom"
                 triggerTooltip="Change project"
                 trigger={
-                  <Button type="button" variant="link" size="sm" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-ring/60 sm:!text-[28px]">
-                    {projectName}<span className="text-foreground">?</span>
+                  <Button type="button" variant="link" size="sm" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus/60 sm:!text-[28px]">
+                    {projectName}<span className="text-ink">?</span>
                   </Button>
                 }
               />
@@ -167,9 +167,9 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
         </h1>
         <div data-testid="new-thread-starters" className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(18rem,100%),1fr))] gap-3">
           {NEW_THREAD_STARTERS.map(({ label, prompt, icon: Icon }) => (
-            <Button key={label} type="button" variant="outline" onClick={() => onPromptSelect(prompt)} className="group h-auto min-h-24 flex-col items-start justify-between rounded-xl border-border/70 bg-transparent px-4 py-4 text-left shadow-none hover:border-primary/35 hover:bg-accent/45">
+            <Button key={label} type="button" variant="outline" onClick={() => onPromptSelect(prompt)} className="group h-auto min-h-24 flex-col items-start justify-between rounded-xl border-border/70 bg-transparent px-4 py-4 text-left shadow-none hover:border-primary/35 hover:bg-selected/45">
               <Icon className="size-4 text-primary transition-transform duration-200 group-hover:-translate-y-0.5 motion-reduce:transform-none" aria-hidden />
-              <span className="w-full max-w-[18ch] text-wrap text-sm font-medium leading-5 text-foreground/90">{label}</span>
+              <span className="w-full max-w-[18ch] text-wrap text-sm font-medium leading-5 text-ink/90">{label}</span>
             </Button>
           ))}
         </div>
@@ -301,7 +301,7 @@ function ThreadPreparingShell({
       <div className="flex flex-1 flex-col justify-center px-4 py-8 sm:px-8">
         <div className={`${PRIMARY_CONTENT_RAIL_CLASS} flex flex-col items-stretch gap-6`}>
           <div className="flex justify-end">
-            <div className="min-w-0 max-w-[min(82%,56rem)] rounded-xl border border-border/50 bg-muted/15 px-4 py-3 text-sm text-foreground/90"><p className="whitespace-pre-wrap break-words">{pendingStartup?.queuedMessage || thread.title}</p></div>
+            <div className="min-w-0 max-w-[min(82%,56rem)] rounded-xl border border-border/50 bg-hover/15 px-4 py-3 text-sm text-ink/90"><p className="whitespace-pre-wrap break-words">{pendingStartup?.queuedMessage || thread.title}</p></div>
           </div>
           <PreparingStartupContent thread={thread} pendingStartup={pendingStartup} startup={startup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} thread={thread} startup={startup} pendingStartup={pendingStartup} />} />
         </div>
@@ -316,7 +316,7 @@ function MissingThreadSurface({ sidebarCollapsed }: { sidebarCollapsed: boolean 
   return (
     <div className="flex h-full flex-col bg-background">
       {sidebarCollapsed && <div className="flex h-11 items-center border-b border-border/40 pl-2"><SidebarRevealButton /></div>}
-      <div className="flex flex-1 items-center justify-center"><div className="text-center"><h2 className="text-lg font-medium text-foreground">Select a thread</h2><p className="mt-1 text-sm text-muted-foreground">Choose a thread from the sidebar or create a new one.</p></div></div>
+      <div className="flex flex-1 items-center justify-center"><div className="text-center"><h2 className="text-lg font-medium text-ink">Select a thread</h2><p className="mt-1 text-sm text-muted">Choose a thread from the sidebar or create a new one.</p></div></div>
     </div>
   );
 }
@@ -673,12 +673,12 @@ function ActiveThreadComposer({ state, interactions, pendingSelectedTextComment,
 
 /** Shows the selected conversation's non-provider hydration failure. */
 function ConversationErrorState({ error }: { error: string }) {
-  return <div data-testid="conversation-error" role="alert" className="flex h-full items-center justify-center px-4"><div className="max-w-md space-y-1 text-center"><p className="font-medium text-foreground">Could not load conversation</p><p className="text-sm text-muted-foreground">{error}</p></div></div>;
+  return <div data-testid="conversation-error" role="alert" className="flex h-full items-center justify-center px-4"><div className="max-w-md space-y-1 text-center"><p className="font-medium text-ink">Could not load conversation</p><p className="text-sm text-muted">{error}</p></div></div>;
 }
 
 /** Keeps a cold switch target visible without rendering stale transcript content. */
 function ConversationTransitionState({ threadId, threadTitle }: { threadId: string; threadTitle: string }) {
-  return <div data-testid="conversation-transition-shell" data-thread-id={threadId} role="status" aria-label={`Loading ${threadTitle}`} className="flex h-full items-center justify-center px-4"><div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner size={16} /><span>{threadTitle}</span></div></div>;
+  return <div data-testid="conversation-transition-shell" data-thread-id={threadId} role="status" aria-label={`Loading ${threadTitle}`} className="flex h-full items-center justify-center px-4"><div className="flex items-center gap-2 text-sm text-muted"><Spinner size={16} /><span>{threadTitle}</span></div></div>;
 }
 
 /** Renders the fully active conversation surface. */

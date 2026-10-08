@@ -29,7 +29,7 @@ export function CommandPaletteResults({ groups, onSelect, footer }: Props) {
         <CommandGroup
           key={group.heading}
           heading={
-            <span className="px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/70">
+            <span className="px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/70">
               {group.heading}
             </span>
           }
@@ -44,7 +44,7 @@ export function CommandPaletteResults({ groups, onSelect, footer }: Props) {
             >
               <span className="flex-1 truncate">{item.title}</span>
               {item.description && (
-                <span className="ml-2 truncate font-mono text-[11px] text-muted-foreground/60">
+                <span className="ml-2 truncate font-mono text-[11px] text-muted/60">
                   {item.description}
                 </span>
               )}

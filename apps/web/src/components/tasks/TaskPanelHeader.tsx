@@ -50,8 +50,8 @@ function TaskStatusVisualization({
               : task.status === "in_progress"
                 ? "bg-primary animate-pulse"
                 : task.status === "cancelled"
-                  ? "bg-muted-foreground/35"
-                  : "bg-muted-foreground/20"
+                  ? "bg-muted/35"
+                  : "bg-muted/20"
           }`}
         />
       ))}
@@ -84,7 +84,7 @@ export function TaskPanelHeader({ tasks }: TaskPanelHeaderProps) {
   return (
     <div className="flex-none border-b border-border/20 px-3 py-2.5">
       <div className="flex items-center gap-3">
-        <span className="shrink-0 text-xs font-medium text-foreground/80">Tasks</span>
+        <span className="shrink-0 text-xs font-medium text-ink/80">Tasks</span>
         {/* Task status visualization — slim ticks (vertical bars) read as a typographic ledger */}
         <div className="flex min-w-0 flex-1 items-center" aria-hidden>
           <TaskStatusVisualization tasks={tasks} hasActive={hasActive} percent={pct} />
@@ -97,13 +97,13 @@ export function TaskPanelHeader({ tasks }: TaskPanelHeaderProps) {
               ? "text-primary/85"
               : allDone
                 ? "text-[var(--diff-add-strong)]/75"
-                : "text-muted-foreground/55"
+                : "text-muted/55"
           }`}
         >
           <span className="sr-only">{label}</span>
           <span aria-hidden="true">
             <span className="font-medium">{settled}</span>
-            <span className="text-muted-foreground/30">/</span>
+            <span className="text-muted/30">/</span>
             {total}
           </span>
         </span>

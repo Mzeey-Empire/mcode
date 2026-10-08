@@ -67,7 +67,7 @@ export function AgentSection() {
       </SettingRow>
 
       <div className="mt-6 mb-1 flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted/50">
           Guardrails
         </span>
         <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-amber-400/90">

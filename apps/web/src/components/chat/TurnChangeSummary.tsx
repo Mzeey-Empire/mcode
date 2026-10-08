@@ -208,21 +208,21 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
     <div className="my-1">
       <div className={diffCardSurfaceClass()}>
         {/* Header row: toggle and "View diff" are siblings to avoid nested buttons */}
-        <div className="flex w-full items-center justify-between px-2.5 py-1.5 text-xs text-muted-foreground">
+        <div className="flex w-full items-center justify-between px-2.5 py-1.5 text-xs text-muted">
           <button
             type="button"
             onClick={handleToggle}
             aria-expanded={expanded}
             aria-controls={expanded ? contentId : undefined}
-            className="flex min-w-0 items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground/80"
+            className="flex min-w-0 items-center gap-1.5 text-muted transition-colors hover:text-ink/80"
           >
             <ChevronRight
               aria-hidden="true"
               size={12}
-              className={`shrink-0 text-muted-foreground/55 transition-transform ${expanded ? "rotate-90" : ""}`}
+              className={`shrink-0 text-muted/55 transition-transform ${expanded ? "rotate-90" : ""}`}
             />
-            <FileText size={13} className="shrink-0 text-muted-foreground/60" />
-            <span className="font-medium text-foreground/80">
+            <FileText size={13} className="shrink-0 text-muted/60" />
+            <span className="font-medium text-ink/80">
               {fileCount} file{fileCount !== 1 ? "s" : ""} changed
             </span>
           </button>
@@ -232,7 +232,7 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
               variant="outline"
               size="xs"
               onClick={handleViewDiff}
-              className="gap-1 border-border/60 text-muted-foreground/80 shadow-none hover:text-foreground"
+              className="gap-1 border-border/60 text-muted/80 shadow-none hover:text-ink"
             >
               View diff
               <ExternalLink size={10} />
@@ -267,7 +267,7 @@ function SummaryTotals({ totals }: { readonly totals: { additions: number; delet
         <span className="text-[var(--diff-add-strong)]">+{totals.additions}</span>
       )}
       {totals.additions > 0 && totals.deletions > 0 && (
-        <span className="px-1 text-muted-foreground/40">|</span>
+        <span className="px-1 text-muted/40">|</span>
       )}
       {totals.deletions > 0 && (
         <span className="text-[var(--diff-remove-strong)]">−{totals.deletions}</span>
@@ -310,7 +310,7 @@ function ChangedFileList({ rootFiles, dirs, hiddenCount, diffStats, onJump, onVi
           variant="ghost"
           size="xs"
           onClick={onViewAll}
-          className="mt-0.5 w-full justify-center text-muted-foreground/60 hover:text-foreground/80"
+          className="mt-0.5 w-full justify-center text-muted/60 hover:text-ink/80"
         >
           +{hiddenCount} more file{hiddenCount !== 1 ? "s" : ""}
         </Button>
@@ -328,7 +328,7 @@ function DirNode({ dir, diffStats, onJump }: { dir: FileTreeDir; diffStats: Map<
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground/80"
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-xs font-medium text-muted transition-colors hover:text-ink/80"
       >
         <ChevronRight
           aria-hidden
@@ -381,11 +381,11 @@ function ChangedFileRow({ filePath, stat, onJump }: ChangedFileRowProps) {
             type="button"
             onClick={() => onJump(filePath)}
             aria-label={`${CHANGE_TYPE_LABELS[changeType]} ${filePath}`}
-            className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-xs transition-colors hover:bg-muted/40"
+            className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-xs transition-colors hover:bg-hover/40"
           >
             <span className="flex min-w-0 items-center gap-2 overflow-hidden">
               <FileTypeIcon filePath={filePath} size={14} className="shrink-0" />
-              <span className="font-medium text-foreground/80 truncate">{name}</span>
+              <span className="font-medium text-ink/80 truncate">{name}</span>
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
               {stat && (

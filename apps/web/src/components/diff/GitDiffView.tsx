@@ -27,8 +27,8 @@ interface GitDiffViewProps {
 function EmptyState({ label }: { label: string }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 py-14">
-      <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted-foreground/15">⊘</span>
-      <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/40">{label}</p>
+      <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted/15">⊘</span>
+      <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/40">{label}</p>
     </div>
   );
 }
@@ -38,7 +38,7 @@ function LoadingPulse() {
   return (
     <div className="flex items-center justify-center gap-1.5 py-10">
       {[0, 150, 300].map((delay) => (
-        <div key={delay} className="h-1 w-1 rounded-full bg-muted-foreground/25 animate-pulse" style={{ animationDelay: `${delay}ms` }} />
+        <div key={delay} className="h-1 w-1 rounded-full bg-muted/25 animate-pulse" style={{ animationDelay: `${delay}ms` }} />
       ))}
     </div>
   );

@@ -202,7 +202,7 @@ function SubagentTranscriptNotice({
   if (unavailableDetailId !== participantId || !message) return null;
 
   return (
-    <span data-testid="subagent-transcript-unavailable" role="status" className="text-xs text-muted-foreground">
+    <span data-testid="subagent-transcript-unavailable" role="status" className="text-xs text-muted">
       {message}
     </span>
   );
@@ -231,7 +231,7 @@ function SubagentParticipant({
           onSubagentSelect,
           onUnavailableDetail,
         )}
-        className="min-w-0 shrink gap-1 rounded-full px-2 text-left transition-colors duration-150 motion-reduce:transition-none hover:bg-muted/30"
+        className="min-w-0 shrink gap-1 rounded-full px-2 text-left transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30"
         aria-label={`${view.hasDetailTarget ? "Open" : "Show"} ${view.title} subagent details`}
         aria-describedby={`subagent-status-${participant.id}`}
       >
@@ -242,7 +242,7 @@ function SubagentParticipant({
           className="size-4"
           size={12}
         />
-        <span className="min-w-0 truncate text-xs font-medium text-foreground/85">
+        <span className="min-w-0 truncate text-xs font-medium text-ink/85">
           {view.title}
         </span>
       </Button>
@@ -254,7 +254,7 @@ function SubagentParticipant({
         unavailableDetailId={unavailableDetailId}
         message={view.unavailableMessage}
       />
-      <span className="shrink-0 text-xs text-muted-foreground">
+      <span className="shrink-0 text-xs text-muted">
         {lifecycleLabel(lifecycle)}
       </span>
     </span>
@@ -274,7 +274,7 @@ function AggregateSubagentButton({
       variant="ghost"
       size="sm"
       onClick={() => onOpenSubagents?.(target)}
-      className="shrink-0 justify-start rounded-full px-2 text-left text-xs text-muted-foreground hover:bg-muted/30"
+      className="shrink-0 justify-start rounded-full px-2 text-left text-xs text-muted hover:bg-hover/30"
       aria-label={`Open full Subagents roster, ${label}`}
     >
       <span className="whitespace-nowrap">{label}</span>

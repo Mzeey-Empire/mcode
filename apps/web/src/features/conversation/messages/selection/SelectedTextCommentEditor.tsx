@@ -252,7 +252,7 @@ export function SelectedTextCommentEditor({
       aria-label="Comment on selected text"
       style={{ maxHeight }}
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-border/70 bg-popover text-popover-foreground shadow-lg",
+        "relative overflow-hidden rounded-2xl border border-border/70 bg-panel text-ink shadow-lg",
         isShaking && "animate-preview-annotation-shake",
       )}
     >

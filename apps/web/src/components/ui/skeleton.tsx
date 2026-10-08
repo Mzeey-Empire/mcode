@@ -7,7 +7,7 @@ function Skeleton({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       data-slot="skeleton"
-      className={cn("rounded-md bg-muted", className)}
+      className={cn("rounded-md bg-hover", className)}
       {...props}
     />
   );

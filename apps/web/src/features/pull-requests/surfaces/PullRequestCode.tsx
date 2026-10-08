@@ -271,15 +271,15 @@ function PullRequestCodeToolbar({
       data-layout={filesDocked ? "wide" : "compact"}
       className="flex h-11 shrink-0 items-center gap-2 border-b border-border/35 bg-page px-3"
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs text-muted-foreground">
+      <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs text-muted">
         <GitBranch size={14} aria-hidden className="shrink-0" />
-        <span className="min-w-0 truncate text-foreground/80">
+        <span className="min-w-0 truncate text-ink/80">
           {detail.head.name}
         </span>
         <ChevronRight
           size={13}
           aria-hidden
-          className="shrink-0 text-muted-foreground/55"
+          className="shrink-0 text-muted/55"
         />
         <span className="min-w-0 truncate">{detail.base.name}</span>
       </div>
@@ -293,8 +293,8 @@ function PullRequestCodeToolbar({
           variant="ghost"
           size="icon-xs"
           className={cn(
-            "rounded-md text-muted-foreground",
-            view.fileTreeVisible && "bg-muted/60 text-foreground",
+            "rounded-md text-muted",
+            view.fileTreeVisible && "bg-hover/60 text-ink",
           )}
           aria-label={
             view.fileTreeVisible ? "Hide changed files" : "Show changed files"
@@ -314,7 +314,7 @@ function PullRequestCodeToolbar({
               ? "Use split diff layout"
               : "Use unified diff layout"
           }
-          className="rounded-md text-muted-foreground"
+          className="rounded-md text-muted"
           onClick={toggleViewMode}
         >
           {view.viewMode === "unified" ? (
@@ -328,7 +328,7 @@ function PullRequestCodeToolbar({
           type="button"
           variant="ghost"
           size="icon-xs"
-          className="rounded-md text-muted-foreground"
+          className="rounded-md text-muted"
           aria-label={
             allFilesExpanded ? "Collapse all file diffs" : "Expand all file diffs"
           }
@@ -361,7 +361,7 @@ function PullRequestFilesErrorNotice({
   return (
     <div
       role="alert"
-      className="flex min-h-8 items-center gap-2 bg-destructive/8 px-3 text-xs text-muted-foreground"
+      className="flex min-h-8 items-center gap-2 bg-destructive/8 px-3 text-xs text-muted"
     >
       <ErrorIcon size={13} aria-hidden className="text-destructive/75" />
       <span className="min-w-0 flex-1 truncate">{error.message}</span>
@@ -384,7 +384,7 @@ function PullRequestCommentsPaginationNotice({ stalled }: { stalled: boolean }) 
   return (
     <p
       role="status"
-      className="flex min-h-8 items-center gap-2 bg-primary/6 px-3 text-xs text-muted-foreground"
+      className="flex min-h-8 items-center gap-2 bg-primary/6 px-3 text-xs text-muted"
     >
       <ErrorIcon size={13} aria-hidden className="text-primary/75" />
       Review thread loading stopped because GitHub repeated a page cursor. Some
@@ -429,7 +429,7 @@ function PullRequestCodeDiffBody({
     (code.filesLane?.status === "loading" && code.filesLane.fetchedAt === null);
   if (initialLoading) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
+      <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-xs text-muted">
         <Spinner size="xs" aria-hidden />
         <span role="status">Loading changed files</span>
       </div>
@@ -448,11 +448,11 @@ function PullRequestCodeDiffBody({
           <div>
             <span
               aria-hidden
-              className="font-mono text-xl text-muted-foreground/40"
+              className="font-mono text-xl text-muted/40"
             >
               ∅
             </span>
-            <p role="status" className="mt-1 text-xs text-muted-foreground">
+            <p role="status" className="mt-1 text-xs text-muted">
               No changed files match this view.
             </p>
           </div>
@@ -500,7 +500,7 @@ function PullRequestFilesBoundedNotice({
   return (
     <p
       role="status"
-      className="shrink-0 bg-primary/6 px-3 py-1.5 text-xs text-muted-foreground"
+      className="shrink-0 bg-primary/6 px-3 py-1.5 text-xs text-muted"
     >
       {boundedFilesMessage(boundedData)}
     </p>
@@ -539,7 +539,7 @@ function PullRequestFilesMoreControl({
 
   return (
     <div
-      className="flex min-h-8 shrink-0 items-center gap-2 bg-background px-3 text-xs text-muted-foreground"
+      className="flex min-h-8 shrink-0 items-center gap-2 bg-background px-3 text-xs text-muted"
       style={marginRight === undefined ? undefined : { marginRight }}
     >
       <span className="min-w-0 flex-1 truncate">{message}</span>
@@ -647,7 +647,7 @@ function PullRequestCodeFilesPane({
       wideWidth={FILES_PANEL_WIDE_WIDTH}
       getMaxWidth={getFloatingFilesPanelMaxWidth}
       onWidthChange={onWidthChange}
-      className="absolute inset-y-0 right-0 z-30 h-full bg-popover shadow-lg animate-in slide-in-from-right-2 duration-150 motion-reduce:animate-none"
+      className="absolute inset-y-0 right-0 z-30 h-full bg-panel shadow-lg animate-in slide-in-from-right-2 duration-150 motion-reduce:animate-none"
       onActivate={onActivate}
       onQueryChange={onQueryChange}
     />
@@ -876,7 +876,7 @@ export function PullRequestCode({
 
   if (!viewerNodeId) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center gap-2 bg-page text-xs text-muted-foreground">
+      <div className="flex min-h-0 flex-1 items-center justify-center gap-2 bg-page text-xs text-muted">
         <Spinner size="xs" aria-hidden />
         <span role="status">Loading GitHub viewer context</span>
       </div>

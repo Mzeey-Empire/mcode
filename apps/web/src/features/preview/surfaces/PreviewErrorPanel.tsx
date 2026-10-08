@@ -63,21 +63,21 @@ export function PreviewErrorPanel({
       <div className="flex max-w-md flex-col items-center gap-3">
         <p
           data-testid="preview-error-headline"
-          className="text-[2.4rem] font-semibold leading-[2.8rem] tracking-[-0.01em] text-foreground"
+          className="text-[2.4rem] font-semibold leading-[2.8rem] tracking-[-0.01em] text-ink"
         >
           {error.message}
         </p>
         {error.detail ? (
           <p
             data-testid="preview-error-detail"
-            className="text-balance text-sm leading-relaxed text-muted-foreground"
+            className="text-balance text-sm leading-relaxed text-muted"
           >
             {error.detail}
           </p>
         ) : null}
       </div>
       {diagnosticLine ? (
-        <p className="max-w-md truncate font-mono text-[11px] text-muted-foreground/70">
+        <p className="max-w-md truncate font-mono text-[11px] text-muted/70">
           {diagnosticLine}
         </p>
       ) : null}

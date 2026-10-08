@@ -31,7 +31,7 @@ function FilterCheckbox({
       size="xs"
       role="checkbox"
       aria-checked={checked}
-      className="h-8 w-full justify-start gap-2 px-2 text-sm font-normal text-muted-foreground"
+      className="h-8 w-full justify-start gap-2 px-2 text-sm font-normal text-muted"
       onClick={onChange}
     >
       <span
@@ -73,10 +73,10 @@ export function ThreadFilterDropdown({
             variant="ghost"
             size={showLabel ? "xs" : "icon-xs"}
             className={cn(
-              "h-8 gap-1.5 text-muted-foreground",
+              "h-8 gap-1.5 text-muted",
               hasActiveFilters
                 ? "bg-primary/10 text-primary"
-                : "hover:text-foreground",
+                : "hover:text-ink",
             )}
             aria-label={
               hasActiveFilters
@@ -98,9 +98,9 @@ export function ThreadFilterDropdown({
         side="bottom"
         align="end"
         sideOffset={4}
-        className="w-44 rounded-md border border-border bg-popover p-1 shadow-lg"
+        className="w-44 rounded-md border border-border bg-panel p-1 shadow-lg"
       >
-        <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">
+        <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted">
           Status
         </div>
         {STATUS_OPTIONS.map((opt) => (
@@ -114,7 +114,7 @@ export function ThreadFilterDropdown({
         {providers.length > 0 && (
           <>
             <div className="mx-1 my-1 h-px bg-border/50" />
-            <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">
+            <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted">
               Provider
             </div>
             {providers.map((p) => (
@@ -134,7 +134,7 @@ export function ThreadFilterDropdown({
               type="button"
               variant="ghost"
               size="xs"
-              className="h-8 w-full justify-start px-2 text-sm font-normal text-muted-foreground"
+              className="h-8 w-full justify-start px-2 text-sm font-normal text-muted"
               onClick={() => {
                 clearFilters();
                 setOpen(false);

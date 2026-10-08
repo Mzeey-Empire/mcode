@@ -43,7 +43,7 @@ export function BranchPicker(props: BranchPickerProps) {
 
 function LockedBranchPicker({ selectedBranch, triggerClassName, iconSize = 12 }: BranchPickerProps) {
   return (
-    <span className={cn("flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground", triggerClassName)}>
+    <span className={cn("flex items-center gap-1 px-2 py-1 text-xs text-muted", triggerClassName)}>
       <GitBranch size={iconSize} className={triggerClassName ? "size-3.5" : undefined} />
       {selectedBranch}
     </span>
@@ -92,8 +92,8 @@ function BranchItem({ branch, selectedBranch, onSelect }: BranchItemProps) {
       className={cn(
         "flex w-full items-center justify-between rounded px-3 py-1.5 text-xs",
         branch.name === selectedBranch
-          ? "bg-accent text-foreground"
-          : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
+          ? "bg-selected text-ink"
+          : "text-ink hover:bg-selected/50 hover:text-ink",
       )}
     >
       <span className="truncate">{branch.name}</span>
@@ -119,8 +119,8 @@ function PullRequestItem({ pullRequest, selectedBranch, fetchingBranch, onSelect
       className={cn(
         "flex w-full items-center justify-between rounded px-3 py-1.5 text-xs",
         pullRequest.branch === selectedBranch
-          ? "bg-accent text-foreground"
-          : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
+          ? "bg-selected text-ink"
+          : "text-ink hover:bg-selected/50 hover:text-ink",
       )}
     >
       <div className="flex flex-col items-start gap-0.5 truncate">
@@ -128,17 +128,17 @@ function PullRequestItem({ pullRequest, selectedBranch, fetchingBranch, onSelect
           <GitPullRequest size={10} />
           #{pullRequest.number} {pullRequest.title}
         </span>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-muted">
           {pullRequest.branch} &middot; {pullRequest.author}
         </span>
       </div>
-      {isFetching ? <Spinner size={12} className="text-muted-foreground" /> : null}
+      {isFetching ? <Spinner size={12} className="text-muted" /> : null}
     </button>
   );
 }
 
 function LoadingBranchList() {
-  return <div className="flex items-center justify-center py-4"><Spinner size={16} className="text-muted-foreground" /></div>;
+  return <div className="flex items-center justify-center py-4"><Spinner size={16} className="text-muted" /></div>;
 }
 
 function BranchList({ branches, emptyMessage, selectedBranch, onSelect }: {
@@ -147,7 +147,7 @@ function BranchList({ branches, emptyMessage, selectedBranch, onSelect }: {
   selectedBranch: string;
   onSelect: (branchName: string) => void;
 }) {
-  if (branches.length === 0) return <p className="px-2 py-3 text-center text-xs text-muted-foreground">{emptyMessage}</p>;
+  if (branches.length === 0) return <p className="px-2 py-3 text-center text-xs text-muted">{emptyMessage}</p>;
   return <>{branches.map((branch) => <BranchItem key={`${branch.type}-${branch.name}`} branch={branch} selectedBranch={selectedBranch} onSelect={onSelect} />)}</>;
 }
 
@@ -165,7 +165,7 @@ function PullRequestList({
   onSelect: (branch: string, prNumber: number) => void;
 }) {
   if (prsLoading) return <LoadingBranchList />;
-  if (pullRequests.length === 0) return <p className="px-2 py-3 text-center text-xs text-muted-foreground">No pull requests match</p>;
+  if (pullRequests.length === 0) return <p className="px-2 py-3 text-center text-xs text-muted">No pull requests match</p>;
   return <>{pullRequests.map((pullRequest) => <PullRequestItem key={`pr-${pullRequest.number}`} pullRequest={pullRequest} selectedBranch={selectedBranch} fetchingBranch={fetchingBranch} onSelect={onSelect} />)}</>;
 }
 
@@ -248,7 +248,7 @@ function BranchPickerDropdown({
       }}
     >
       <PopoverTrigger render={
-        <Button variant="ghost" size="xs" className={cn("text-muted-foreground", triggerClassName)}>
+        <Button variant="ghost" size="xs" className={cn("text-muted", triggerClassName)}>
           <GitBranch size={iconSize} className={triggerClassName ? "size-3.5" : undefined} />
           <span>From {selectedBranch}</span>
           <ChevronDown size={Math.max(10, iconSize - 2)} className={triggerClassName ? "size-3" : undefined} />
@@ -258,7 +258,7 @@ function BranchPickerDropdown({
       <PopoverContent align="end" side="top" sideOffset={4} className="w-[280px] p-0">
         {/* Search */}
         <div className="p-1.5 pb-0">
-          <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." size="sm" className="text-popover-foreground" />
+          <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." size="sm" className="text-ink" />
         </div>
 
         {/* Tabs */}
@@ -270,12 +270,12 @@ function BranchPickerDropdown({
               className={cn(
                 "flex items-center gap-1 rounded-t px-2.5 py-1 text-xs font-medium transition-colors",
                 activeTab === tab.id
-                  ? "border-b-2 border-primary text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
+                  ? "border-b-2 border-primary text-ink"
+                  : "text-muted hover:text-ink",
               )}
             >
               {tab.label}
-              <Badge size="sm" className={cn("rounded-full", activeTab === tab.id ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+              <Badge size="sm" className={cn("rounded-full", activeTab === tab.id ? "bg-primary/10 text-primary" : "bg-hover text-muted")}>
                 {tab.count}
               </Badge>
             </button>

@@ -42,12 +42,12 @@ export function DiffStat({ additions, deletions, bar = false, zeroDash = false, 
       {additions > 0 ? (
         <span className="text-[var(--diff-add-strong)]">+{additions}</span>
       ) : (
-        zeroDash && <span className="text-muted-foreground/40">—</span>
+        zeroDash && <span className="text-muted/40">—</span>
       )}
       {deletions > 0 ? (
         <span className="text-[var(--diff-remove-strong)]">−{deletions}</span>
       ) : (
-        zeroDash && <span className="text-muted-foreground/40">—</span>
+        zeroDash && <span className="text-muted/40">—</span>
       )}
     </span>
   );

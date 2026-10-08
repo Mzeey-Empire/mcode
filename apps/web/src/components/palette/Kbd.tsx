@@ -22,7 +22,7 @@ export function Kbd({
           ? // currentColor-derived border so the chip stays legible inside colored buttons.
             // The `border-current/30` syntax uses Tailwind 4's color-mix with currentColor.
             "border border-current/30 text-current"
-          : "text-muted-foreground/60 border border-border/40",
+          : "text-muted/60 border border-border/40",
       )}
     >
       {children}

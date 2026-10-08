@@ -206,13 +206,13 @@ describe("StartupProgressCard", () => {
     const activity = screen.getByTestId("startup-activity");
     const base = screen.getByTestId("startup-activity-base");
     const overlay = screen.getByTestId("startup-activity-shimmer");
-    expect(activity).toHaveClass("text-sm", "text-muted-foreground");
+    expect(activity).toHaveClass("text-sm", "text-muted");
     expect(base).toBeVisible();
     expect(screen.getByTestId("startup-activity-icon")).toHaveAttribute("data-slot", "worktree-mode-icon");
     expect(screen.getByTestId("startup-activity-icon")).toHaveClass("text-current");
     expect(base.querySelector("span")).toHaveClass("text-current");
     expect(overlay).toHaveAttribute("aria-hidden", "true");
-    expect(overlay).toHaveClass("text-foreground", "startup-activity-shimmer", "motion-reduce:animate-none");
+    expect(overlay).toHaveClass("text-ink", "startup-activity-shimmer", "motion-reduce:animate-none");
     expect(screen.getByTestId("startup-activity-shimmer-icon")).toHaveClass("text-current");
     expect(overlay.querySelector("[data-startup-activity-shimmer-text]")).toHaveClass("text-current");
     expect(overlay.querySelector("[data-startup-activity-shimmer-text]")).toHaveAttribute("data-startup-activity-shimmer-text", "Preparing checkout");

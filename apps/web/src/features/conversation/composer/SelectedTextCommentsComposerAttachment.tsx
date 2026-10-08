@@ -116,7 +116,7 @@ function CommentPreviewActions<T extends { readonly id: string; readonly display
                 size="icon-xs"
                 aria-label={`Edit comment ${comment.displayNumber}`}
                 onClick={() => onEdit(comment)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted hover:text-ink"
               >
                 <Pencil size={14} aria-hidden />
               </Button>
@@ -135,7 +135,7 @@ function CommentPreviewActions<T extends { readonly id: string; readonly display
                 size="icon-xs"
                 aria-label={`Delete comment ${comment.displayNumber}`}
                 onClick={() => onDelete(comment)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted hover:text-ink"
               >
                 <X size={14} aria-hidden />
               </Button>
@@ -239,10 +239,10 @@ export function ComposerCommentPreviewItem<T extends ComposerCommentCardData>({
   }, []);
   const content = (
     <div className="relative z-10 min-w-0 space-y-1 px-1 py-1.5 pointer-events-none">
-      <p className="text-xs text-muted-foreground">{`${item.displayNumber}. ${item.sourceLabel}:`}</p>
+      <p className="text-xs text-muted">{`${item.displayNumber}. ${item.sourceLabel}:`}</p>
       <QuotePreview quote={item.quote} />
-      {sourceUnavailable && <p className="text-xs text-muted-foreground">Source unavailable</p>}
-      <p className="pt-1 text-xs text-muted-foreground">User comment:</p>
+      {sourceUnavailable && <p className="text-xs text-muted">Source unavailable</p>}
+      <p className="pt-1 text-xs text-muted">User comment:</p>
       <p className="whitespace-pre-wrap break-words text-sm leading-5">{item.note}</p>
     </div>
   );
@@ -254,7 +254,7 @@ export function ComposerCommentPreviewItem<T extends ComposerCommentCardData>({
         if (sourceUnavailable) openSourceButtonRef(element);
       }}
       tabIndex={sourceUnavailable ? 0 : undefined}
-      className="relative min-w-0 border-b border-border/60 py-2 pr-12 first:pt-1 last:border-b-0 last:pb-1 focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="relative min-w-0 border-b border-border/60 py-2 pr-12 first:pt-1 last:border-b-0 last:pb-1 focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus/50"
       data-testid={testId}
       onPointerEnter={showActions}
       onPointerLeave={(event) => {
@@ -483,7 +483,7 @@ export function ComposerCommentAttachmentShell({
         onPointerLeave={schedulePreviewClose}
         onBlur={closePreviewAfterFocusLeaves}
       >
-        <div className="inline-flex h-8 max-w-full items-center overflow-hidden rounded-lg border border-border bg-background focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50" data-testid={chipTestId}>
+        <div className="inline-flex h-8 max-w-full items-center overflow-hidden rounded-lg border border-border bg-background focus-within:border-focus focus-within:ring-3 focus-within:ring-focus/50" data-testid={chipTestId}>
           <Button
             type="button"
             variant="ghost"
@@ -494,7 +494,7 @@ export function ComposerCommentAttachmentShell({
             onPointerEnter={openPreview}
             onFocus={openPreview}
             onClick={openPreview}
-            className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-foreground hover:bg-muted focus-visible:z-10"
+            className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-ink hover:bg-hover focus-visible:z-10"
           >
             <MessageCircle size={16} aria-hidden />
             <span className="min-w-0 truncate">{label}</span>
@@ -506,7 +506,7 @@ export function ComposerCommentAttachmentShell({
               size="icon-xs"
               aria-label={`Remove ${label}`}
               onClick={onRemove}
-              className="rounded-none border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:z-10"
+              className="rounded-none border-0 bg-transparent text-muted hover:bg-hover hover:text-ink focus-visible:z-10"
             >
               <X size={16} aria-hidden />
             </Button>
@@ -517,7 +517,7 @@ export function ComposerCommentAttachmentShell({
             ref={previewRef}
             id={previewId}
             aria-label={`${label} preview`}
-            className={`absolute ${previewPlacementClass(readOnly, sentPreviewPlacement)} ${previewHorizontalPlacementClass(readOnly)} z-50 w-[min(38rem,calc(100vw-1.5rem))] rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-md`}
+            className={`absolute ${previewPlacementClass(readOnly, sentPreviewPlacement)} ${previewHorizontalPlacementClass(readOnly)} z-50 w-[min(38rem,calc(100vw-1.5rem))] rounded-xl border border-border bg-panel p-3 text-ink shadow-md`}
             data-testid={previewTestId}
             onPointerEnter={openPreview}
             onFocus={openPreview}
@@ -608,8 +608,8 @@ export function SelectedTextCommentsComposerAttachment({
       )}
       {dockedEditor && (
         <section className="px-3 pt-2" aria-label="Selected text comment editor" data-testid="selected-text-comment-docked-editor">
-          <div className="rounded-xl border border-border bg-muted/30 p-2">
-            <p className="mb-2 text-xs text-muted-foreground">Source unavailable</p>
+          <div className="rounded-xl border border-border bg-hover/30 p-2">
+            <p className="mb-2 text-xs text-muted">Source unavailable</p>
             <SelectedTextCommentEditor
               source={dockedEditor.source}
               draft={dockedEditor}

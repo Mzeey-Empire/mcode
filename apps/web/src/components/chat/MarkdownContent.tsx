@@ -295,13 +295,13 @@ function MarkdownLinkAnchor({
             ) : (
               <SiteFavicon
                 src={faviconUrl}
-                fallback={<Globe size={12} aria-hidden className="shrink-0 text-muted-foreground" />}
+                fallback={<Globe size={12} aria-hidden className="shrink-0 text-muted" />}
                 frameTestId="markdown-link-favicon-frame"
                 imageTestId="markdown-link-favicon"
               />
             )}
             <span className="min-w-0 truncate">{label}</span>
-            {safeHref ? <ExternalLink size={12} aria-hidden className="shrink-0 text-muted-foreground" /> : null}
+            {safeHref ? <ExternalLink size={12} aria-hidden className="shrink-0 text-muted" /> : null}
           </a>
         }
       />
@@ -366,7 +366,7 @@ function makeStaticComponents(variant: "assistant" | "user", workspacePath: stri
       </MarkdownLink>
     ),
     blockquote: ({ children }: { children?: React.ReactNode }) => (
-      <blockquote className="border-l-2 border-border pl-3 my-2 text-muted-foreground italic">
+      <blockquote className="border-l-2 border-border pl-3 my-2 text-muted italic">
         {children}
       </blockquote>
     ),
@@ -381,8 +381,8 @@ function makeStaticComponents(variant: "assistant" | "user", workspacePath: stri
       <th
         className={
           isUser
-            ? "border border-border bg-foreground/10 px-3 py-1.5 text-left text-sm font-semibold"
-            : "border border-border bg-muted/50 px-3 py-1.5 text-left text-sm font-semibold"
+            ? "border border-border bg-ink/10 px-3 py-1.5 text-left text-sm font-semibold"
+            : "border border-border bg-hover/50 px-3 py-1.5 text-left text-sm font-semibold"
         }
       >
         {children}
@@ -453,7 +453,7 @@ function InlineWorkspaceFileCode({
       tone={isUser ? "user" : "assistant"}
       role="link"
       tabIndex={0}
-      className="cursor-pointer text-link hover:underline focus-visible:outline-none focus-visible:ring-ring"
+      className="cursor-pointer text-link hover:underline focus-visible:outline-none focus-visible:ring-focus"
       onClick={(event) => handleLinkClick(event, previewUrl)}
       onKeyDown={(event) => { if (event.key === "Enter") handleLinkClick(event, previewUrl); }}
     />
@@ -463,8 +463,8 @@ function InlineWorkspaceFileCode({
 
 function InlineMarkdownCode({ children, rawContent, isUser, workspacePath }: InlineMarkdownCodeProps) {
   const codeClass = isUser
-    ? "bg-foreground/10 rounded px-1.5 py-0.5 text-sm font-mono"
-    : "bg-muted rounded px-1.5 py-0.5 text-sm font-mono";
+    ? "bg-ink/10 rounded px-1.5 py-0.5 text-sm font-mono"
+    : "bg-hover rounded px-1.5 py-0.5 text-sm font-mono";
   const text = rawContent.trim();
 
   if (HTTP_URL_RE.test(text)) return <InlineUrlCode codeClass={codeClass} text={text}>{children}</InlineUrlCode>;
@@ -500,7 +500,7 @@ function FencedMarkdownCode({
   const code = String(children).replace(/\n$/, "");
   if (rawFence === "mermaid") {
     return (
-      <Suspense fallback={<pre className="bg-muted/30 rounded-lg p-4 overflow-x-auto"><code>{code}</code></pre>}>
+      <Suspense fallback={<pre className="bg-hover/30 rounded-lg p-4 overflow-x-auto"><code>{code}</code></pre>}>
         <LazyMermaidBlock code={code} isStreaming={isStreaming} />
       </Suspense>
     );

@@ -30,10 +30,10 @@ export function DiffPreview({ lines }: DiffPreviewProps) {
   );
 
   return (
-    <div className="p-4 text-sm leading-relaxed text-foreground/85">
+    <div className="p-4 text-sm leading-relaxed text-ink/85">
       <Suspense
         fallback={
-          <span className="text-muted-foreground text-sm">Loading preview…</span>
+          <span className="text-muted text-sm">Loading preview…</span>
         }
       >
         <PreviewMarkdown content={content} addedLines={addedLines} />

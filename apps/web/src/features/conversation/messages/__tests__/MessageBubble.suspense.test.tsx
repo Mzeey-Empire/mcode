@@ -43,7 +43,7 @@ function makeMessage(content: string, role: "user" | "assistant" = "user"): Mess
 describe("MessageBubble while MarkdownContent is suspended", () => {
   it("keeps the user text visible in the bubble instead of rendering it empty", () => {
     const { container } = render(<MessageBubble message={makeMessage("hello there")} />);
-    const bubble = container.querySelector(".bg-accent");
+    const bubble = container.querySelector(".bg-selected");
     expect(bubble).not.toBeNull();
     expect(bubble?.textContent).toContain("hello there");
   });

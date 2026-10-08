@@ -230,7 +230,7 @@ export function TerminalPanel() {
       >
         {/* Drag handle */}
         <div
-          className="h-1 cursor-row-resize bg-transparent hover:bg-muted-foreground/20"
+          className="h-1 cursor-row-resize bg-transparent hover:bg-muted/20"
           onMouseDown={onDragStart}
         />
 
@@ -244,7 +244,7 @@ export function TerminalPanel() {
 
         {/* Terminal views + optional split list */}
         {terminals.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted">
             <TerminalIcon className="h-10 w-10 opacity-40" />
             <p className="text-sm">No terminals</p>
             <Button variant="outline" size="sm" onClick={createTerminal}>

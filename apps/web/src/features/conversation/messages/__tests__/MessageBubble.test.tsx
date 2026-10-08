@@ -258,7 +258,7 @@ describe("MessageBubble user messages", () => {
     const command = container.querySelector('[data-entity-token="skill"]');
     expect(command).toHaveTextContent("impeccable");
     expect(command).toHaveClass("text-primary");
-    expect(command).not.toHaveClass("bg-muted", "ring-1", "rounded-md");
+    expect(command).not.toHaveClass("bg-hover", "ring-1", "rounded-md");
     expect(command?.querySelector("[data-entity-icon='skill']")).toHaveClass("text-current");
     expect(container.querySelector('[data-entity-token="agent"]')).toHaveTextContent("@reviewer_qa");
     expect(container.querySelector('[data-entity-token="file"]')).toHaveTextContent("@App.ts");
@@ -437,8 +437,8 @@ describe("MessageBubble user messages", () => {
       "1 annotation",
     );
     expect(getByTestId("sent-preview-annotation-bundle-chip")).toHaveClass(
-      "bg-accent",
-      "text-accent-foreground",
+      "bg-selected",
+      "text-ink",
     );
     expect(queryByText("bundle")).not.toBeInTheDocument();
   });
@@ -493,8 +493,8 @@ describe("MessageBubble user messages", () => {
       "object-contain",
     );
     expect(document.querySelector('[data-slot="tooltip-arrow"]')).toHaveClass(
-      "bg-popover",
-      "fill-popover",
+      "bg-panel",
+      "fill-panel",
     );
   });
 

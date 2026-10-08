@@ -50,7 +50,7 @@ export function PreviewAnnotationHeader({
     <>
       <div
         data-testid="preview-annotation-header"
-        className="flex h-10 flex-none items-center gap-2 border-b border-border/60 bg-background px-2 text-foreground"
+        className="flex h-10 flex-none items-center gap-2 border-b border-border/60 bg-background px-2 text-ink"
       >
         <Tooltip>
           <TooltipTrigger
@@ -60,7 +60,7 @@ export function PreviewAnnotationHeader({
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Exit Design"
-                className="text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                className="text-muted hover:bg-hover/60 hover:text-ink"
                 onClick={onExit}
               >
                 <X size={15} aria-hidden />
@@ -78,7 +78,7 @@ export function PreviewAnnotationHeader({
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Discard page annotations"
-                  className="text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                  className="text-muted hover:bg-hover/60 hover:text-ink"
                   onClick={() => setDiscardDialogOpen(true)}
                 >
                   <Trash2 size={15} aria-hidden />
@@ -95,7 +95,7 @@ export function PreviewAnnotationHeader({
                 className="flex min-w-0 flex-1 items-center"
                 data-testid="preview-annotation-title"
               >
-                <span className="min-w-0 truncate text-sm text-muted-foreground">
+                <span className="min-w-0 truncate text-sm text-muted">
                   {titleLabel}
                 </span>
               </div>
@@ -116,7 +116,7 @@ export function PreviewAnnotationHeader({
           <Send size={14} aria-hidden />
           Send
           {hasAnnotations ? (
-            <span className="ml-0.5 rounded-full bg-primary-foreground/15 px-1 text-xs leading-4">
+            <span className="ml-0.5 rounded-full bg-primary-ink/15 px-1 text-xs leading-4">
               {bundleCount}
             </span>
           ) : null}

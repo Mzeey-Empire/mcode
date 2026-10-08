@@ -378,7 +378,7 @@ describe("narrative tool row layout classes", () => {
     const panel = screen.getByRole("region", { name: "Shell output" });
     const exitCode = screen.getByText("exit code 1");
     expect(panel).toContainElement(exitCode);
-    expect(exitCode).toHaveClass("text-muted-foreground");
+    expect(exitCode).toHaveClass("text-muted");
     expect(exitCode).toHaveAttribute("role", "status");
     expect(exitCode.closest("footer")).toHaveClass("justify-end");
   });

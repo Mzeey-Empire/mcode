@@ -18,7 +18,7 @@ export function AgentRenderer({ toolCall, isActive }: ToolRendererProps) {
     >
       <div className="space-y-1.5">
         {prompt && (
-          <pre className="rounded bg-muted/30 p-2 text-xs leading-relaxed text-muted-foreground font-mono whitespace-pre-wrap">
+          <pre className="rounded bg-hover/30 p-2 text-xs leading-relaxed text-muted font-mono whitespace-pre-wrap">
             {prompt}
           </pre>
         )}
@@ -27,12 +27,12 @@ export function AgentRenderer({ toolCall, isActive }: ToolRendererProps) {
             <button
               type="button"
               onClick={() => setShowResult((p) => !p)}
-              className="text-xs text-muted-foreground/70 hover:text-foreground transition-colors"
+              className="text-xs text-muted/70 hover:text-ink transition-colors"
             >
               {showResult ? "Hide result" : "Show result"}
             </button>
             {showResult && (
-              <pre className="mt-1 max-h-64 overflow-auto rounded bg-muted/30 p-2 text-xs leading-relaxed text-muted-foreground font-mono whitespace-pre-wrap">
+              <pre className="mt-1 max-h-64 overflow-auto rounded bg-hover/30 p-2 text-xs leading-relaxed text-muted font-mono whitespace-pre-wrap">
                 {toolCall.output}
               </pre>
             )}

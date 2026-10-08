@@ -388,7 +388,7 @@ function ComposerThreadScaffoldStatus({
   if (!isThreadScaffold) return null;
 
   return (
-    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+    <span className="flex items-center gap-1.5 text-xs text-muted">
       Preparing thread…
     </span>
   );
@@ -518,12 +518,12 @@ export function isComposerSendButtonDisabled({
 }
 
 const SEND_BUTTON_CLASS_NAMES: Record<ComposerSendButtonVisualState, string> = {
-  scaffold: "bg-primary text-primary-foreground",
-  queue: "bg-primary/60 text-primary-foreground hover:bg-primary/75",
+  scaffold: "bg-primary text-primary-ink",
+  queue: "bg-primary/60 text-primary-ink hover:bg-primary/75",
   stop: "bg-destructive text-white hover:bg-destructive/90",
   stopping: "bg-destructive/60 text-white",
-  send: "bg-primary text-primary-foreground hover:bg-primary/90",
-  empty: "bg-muted text-muted-foreground opacity-40",
+  send: "bg-primary text-primary-ink hover:bg-primary/90",
+  empty: "bg-hover text-muted opacity-40",
 };
 
 const SEND_BUTTON_COPY: Record<ComposerSendButtonCopy, string> = {
@@ -704,7 +704,7 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
       <ComposerNewThreadSurface {...props} />
       <ComposerInputSurface {...props} />
       {props.model.queuedSend && (
-        <p className="px-1 pt-1 text-xs text-muted-foreground/60">
+        <p className="px-1 pt-1 text-xs text-muted/60">
           queued · sends when handoff lands
         </p>
       )}

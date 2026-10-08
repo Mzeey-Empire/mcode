@@ -2,7 +2,7 @@ import { clsx, type ClassValue } from "clsx"
 import { extendTailwindMerge } from "tailwind-merge"
 
 // tailwind-merge reads an unknown `text-*` class as a colour, so without these
-// entries `cn("text-muted-foreground", "text-caption")` would drop the colour.
+// entries `cn("text-muted", "text-caption")` would drop the colour.
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {

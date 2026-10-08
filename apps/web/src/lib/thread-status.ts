@@ -116,8 +116,8 @@ export function getStatusDisplay(
       // No agent running, not completed, not errored = idle / ready for input
       return {
         label: "",
-        color: "text-muted-foreground",
-        dotClass: "bg-muted-foreground/35",
+        color: "text-muted",
+        dotClass: "bg-muted/35",
         shape: "solid",
       };
   }

@@ -153,10 +153,10 @@ function AutomaticSetupHeader({ state }: { readonly state: AutomaticSetupAttempt
     <header className="flex items-start justify-between gap-3">
       <div>
         <h2 className="text-sm font-medium">{presentation.heading}</h2>
-        {presentation.detail ? <p className="mt-1 text-xs text-muted-foreground">{presentation.detail}</p> : null}
+        {presentation.detail ? <p className="mt-1 text-xs text-muted">{presentation.detail}</p> : null}
       </div>
       {state === "running" ? (
-        <span role="status" className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <span role="status" className="flex shrink-0 items-center gap-1.5 text-xs text-muted">
           <Spinner size={13} aria-hidden />
           Running
         </span>
@@ -171,8 +171,8 @@ function AutomaticSetupOutput({ attempt }: { readonly attempt: AutomaticSetupAtt
   const output = attempt?.output || (state === "running" ? "Waiting for setup output…" : "Waiting for setup to start…");
   return (
     <div aria-label="Environment setup terminal" className="mt-3 max-h-64 overflow-auto rounded-md border border-border/60 bg-background/60 p-3 font-mono text-xs leading-5">
-      {script ? <pre className="whitespace-pre-wrap break-words text-foreground">$ {script}</pre> : null}
-      <pre className="whitespace-pre-wrap break-words text-muted-foreground">{output}</pre>
+      {script ? <pre className="whitespace-pre-wrap break-words text-ink">$ {script}</pre> : null}
+      <pre className="whitespace-pre-wrap break-words text-muted">{output}</pre>
     </div>
   );
 }
@@ -227,7 +227,7 @@ function AutomaticSetupAttemptCard({ attempt, busy, error, onContinue, onRetry }
     <section aria-label="Environment setup" className="mb-4 border-y border-border/60 py-4">
       <AutomaticSetupHeader state={state} />
       <AutomaticSetupOutput attempt={attempt} />
-      {attempt?.outputTruncated ? <p className="mt-2 text-xs text-muted-foreground">Output was truncated.</p> : null}
+      {attempt?.outputTruncated ? <p className="mt-2 text-xs text-muted">Output was truncated.</p> : null}
       {error ? <p role="alert" className="mt-2 text-xs text-destructive">{error}</p> : null}
       {failed ? <AutomaticSetupRecoveryActions busy={busy} onContinue={onContinue} onRetry={onRetry} /> : null}
     </section>

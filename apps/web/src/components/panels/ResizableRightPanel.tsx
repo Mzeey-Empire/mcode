@@ -180,7 +180,7 @@ export function ResizableRightPanel({
         >
           <span
             aria-hidden
-            className="pointer-events-none w-px shrink-0 bg-border/45 transition-colors group-hover:bg-border group-focus-visible:w-0.5 group-focus-visible:bg-ring group-active:w-0.5 group-active:bg-muted-foreground/60"
+            className="pointer-events-none w-px shrink-0 bg-border/45 transition-colors group-hover:bg-border group-focus-visible:w-0.5 group-focus-visible:bg-focus group-active:w-0.5 group-active:bg-muted/60"
           />
         </div>
       )}

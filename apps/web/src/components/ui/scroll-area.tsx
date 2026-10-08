@@ -32,7 +32,7 @@ function ScrollArea({
         ref={viewportRef}
         data-slot="scroll-area-viewport"
         className={cn(
-          "rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1",
+          "rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-focus/50 focus-visible:outline-1",
           horizontalScrollbar ? "min-h-0 flex-1" : "size-full",
           viewportClassName,
         )}
