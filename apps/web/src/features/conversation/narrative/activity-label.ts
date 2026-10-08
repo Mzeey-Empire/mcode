@@ -1,5 +1,6 @@
 import type { ToolCall } from "@/transport/types";
 import { resolveToolName, TOOL_PHASE_LABELS } from "@/components/chat/tool-renderers/constants";
+import { stripPlanFences } from "@/lib/plan-fences";
 import type { ThoughtSegment } from "./types";
 
 const LABEL_LIMIT = 120;
@@ -11,14 +12,20 @@ function shortLabel(value: unknown): string | undefined {
   return text.length > LABEL_LIMIT ? `${text.slice(0, LABEL_LIMIT - 1)}…` : text;
 }
 
+/** A hidden plan's headings must not surface as the live label; the cheap check skips the scan for ordinary prose. */
+function withoutHiddenPlan(text: string): string {
+  return text.includes("plan") ? stripPlanFences(text, true) : text;
+}
+
 /** Extracts a complete Markdown heading from the current open narration segment. */
 export function currentActivityHeading(segments: readonly ThoughtSegment[]): string | undefined {
   const current = segments.at(-1);
   if (!current || current.endedAt !== undefined) return undefined;
+  const text = withoutHiddenPlan(current.text);
   // Bound work on long streams and exclude a cut-off first line.
-  const tail = current.text.slice(-4096);
+  const tail = text.slice(-4096);
   const lines = tail.split("\n");
-  if (current.text.length > tail.length) lines.shift();
+  if (text.length > tail.length) lines.shift();
   let heading: string | undefined;
   for (const [index, line] of lines.entries()) {
     const bold = line.match(/^\s*\*\*([^*]+)\*\*\s*$/);

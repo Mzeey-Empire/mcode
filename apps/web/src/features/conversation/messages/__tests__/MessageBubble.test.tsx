@@ -87,6 +87,9 @@ describe("hidden plan messages", () => {
   it("hides an unfinished plan fence while it streams and shows it once the message is finished uncaptured", () => {
     const message = { ...makeMessage("````mcode-plan\n# Truncated plan"), role: "assistant" as const };
     expect(render(<MessageBubble message={message} textIsStreaming />).container.innerHTML).toBe("");
+    // A thought can end the text stream at a boundary while the turn still streams the fence.
+    expect(render(<MessageBubble message={message} textIsStreaming={false} agentDisplayState={{ phase: "streaming" }} />)
+      .container.textContent).not.toContain("Truncated plan");
     expect(render(<MessageBubble message={message} />).container.textContent).toContain("Truncated plan");
   });
 });

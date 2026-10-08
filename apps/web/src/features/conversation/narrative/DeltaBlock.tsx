@@ -32,6 +32,11 @@ interface DeltaBlockProps {
    * cursor at its end. Defaults to true.
    */
   showCursor?: boolean;
+  /**
+   * When true, an unclosed plan fence stays hidden because more text may still close it.
+   * Defaults to `isStreaming`; the turn can still be running after the text's own stream ended.
+   */
+  textMayContinue?: boolean;
 }
 
 /**
@@ -378,8 +383,8 @@ function StreamingBody({ text }: { text: string }) {
   );
 }
 
-export function DeltaBlock({ text, isStreaming = true, showCursor = true }: DeltaBlockProps) {
-  const visibleText = useMemo(() => stripPlanFences(text, isStreaming), [text, isStreaming]);
+export function DeltaBlock({ text, isStreaming = true, showCursor = true, textMayContinue = isStreaming }: DeltaBlockProps) {
+  const visibleText = useMemo(() => stripPlanFences(text, textMayContinue), [text, textMayContinue]);
   const displayed = useTypewriter(visibleText, isStreaming);
   const rootRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
