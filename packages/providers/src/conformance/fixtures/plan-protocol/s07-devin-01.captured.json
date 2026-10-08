@@ -1,0 +1,771 @@
+{
+  "format": "plan-protocol",
+  "contractVersion": 1,
+  "providerId": "devin",
+  "cliVersion": "3000.11.3",
+  "protocolVersion": "acp-1",
+  "sdk": null,
+  "provenance": "captured",
+  "scenario": "plan",
+  "sourceHash": "aecce61c03b4c350139536c1a30ab2ea660e2e65897b49bfce52001208c4483d",
+  "redaction": {
+    "reviewed": true,
+    "removedFields": [
+      "private-text",
+      "credentials",
+      "native-identifiers",
+      "machine-paths",
+      "unlisted-fields"
+    ]
+  },
+  "input": {
+    "messages": [
+      {
+        "sequence": 1,
+        "operation": "initialize",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "clientCapabilities",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "protocolVersion",
+            "kind": "literal",
+            "value": 1
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_1"
+      },
+      {
+        "sequence": 2,
+        "operation": "initialize",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "agentCapabilities",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "authMethods",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "protocolVersion",
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "at": "agentInfo.version",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_1"
+      },
+      {
+        "sequence": 3,
+        "operation": "session/new",
+        "direction": "sent",
+        "fields": [],
+        "kind": "request",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 4,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "config_option_update"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 5,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "current_mode_update"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 6,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "available_commands_update"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 7,
+        "operation": "session/new",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "configOptions",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "modes",
+            "kind": "shape",
+            "jsonType": "object"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 8,
+        "operation": "session/set_config_option",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "configId",
+            "kind": "literal",
+            "value": "mode"
+          },
+          {
+            "at": "value",
+            "kind": "literal",
+            "value": "plan"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_4"
+      },
+      {
+        "sequence": 9,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "config_option_update"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 10,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "current_mode_update"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 11,
+        "operation": "session/set_config_option",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "configOptions",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "configOptions.0.id",
+            "kind": "literal",
+            "value": "mode"
+          },
+          {
+            "at": "configOptions.0.currentValue",
+            "kind": "literal",
+            "value": "plan"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_4"
+      },
+      {
+        "sequence": 12,
+        "operation": "session/prompt",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "prompt.0.text",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_5"
+      },
+      {
+        "sequence": 13,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "session_info_update"
+          },
+          {
+            "at": "update.title",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 14,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "agent_thought_chunk"
+          },
+          {
+            "at": "update.content",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "update.content.text",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 15,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "usage_update"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 16,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.toolCallId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "tool_call"
+          },
+          {
+            "at": "update.rawInput",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "update.title",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 17,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.toolCallId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "tool_call_update"
+          },
+          {
+            "at": "update.status",
+            "kind": "literal",
+            "value": "in_progress"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 18,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.toolCallId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "tool_call_update"
+          },
+          {
+            "at": "update.content",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "update.status",
+            "kind": "literal",
+            "value": "in_progress"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 19,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.toolCallId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "tool_call_update"
+          },
+          {
+            "at": "update.status",
+            "kind": "literal",
+            "value": "completed"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 20,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "session_info_update"
+          },
+          {
+            "at": "update.title",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 21,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "agent_thought_chunk"
+          },
+          {
+            "at": "update.content",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "update.content.text",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 22,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "usage_update"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 23,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.toolCallId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_7"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "tool_call"
+          },
+          {
+            "at": "update.rawInput",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "update.title",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 24,
+        "operation": "session/request_permission",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "toolCall.toolCallId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_7"
+          },
+          {
+            "at": "toolCall",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "options",
+            "kind": "shape",
+            "jsonType": "array"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_8"
+      },
+      {
+        "sequence": 25,
+        "operation": "session/request_permission",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "outcome.outcome",
+            "kind": "literal",
+            "value": "cancelled"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_8"
+      },
+      {
+        "sequence": 26,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.toolCallId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_7"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "tool_call_update"
+          },
+          {
+            "at": "update.content",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "update.status",
+            "kind": "literal",
+            "value": "failed"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 27,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "agent_thought_chunk"
+          },
+          {
+            "at": "update.content",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "update.content.text",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 28,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "agent_message_chunk"
+          },
+          {
+            "at": "update.content",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "update.content.text",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 29,
+        "operation": "session/update",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "sessionId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "update.sessionUpdate",
+            "kind": "literal",
+            "value": "usage_update"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 30,
+        "operation": "session/prompt",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "stopReason",
+            "kind": "literal",
+            "value": "end_turn"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_5"
+      },
+      {
+        "sequence": 31,
+        "operation": "probe/process-exit",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "code",
+            "kind": "shape",
+            "jsonType": "number"
+          },
+          {
+            "at": "signal",
+            "kind": "shape",
+            "jsonType": "null"
+          }
+        ],
+        "kind": "event"
+      }
+    ],
+    "end": {
+      "kind": "completed"
+    }
+  }
+}

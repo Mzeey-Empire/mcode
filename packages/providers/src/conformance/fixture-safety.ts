@@ -45,7 +45,7 @@ const SECRET_VALUE = /(?:bearer\s+|authorization\s*=|password\s*=|api[_-]?key\s*
 const SHA256 = /^[a-f0-9]{64}$/;
 
 /** Computes the deterministic SHA-256 recorded for sanitized fixture input. */
-export function providerFixtureSourceHash(input: ProviderFixtureManifest["input"]): string {
+export function providerFixtureSourceHash(input: unknown): string {
   return NodeCrypto.createHash("sha256").update(canonicalJson(input)).digest("hex");
 }
 

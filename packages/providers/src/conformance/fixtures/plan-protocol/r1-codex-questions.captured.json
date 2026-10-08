@@ -1,0 +1,714 @@
+{
+  "format": "plan-protocol",
+  "contractVersion": 1,
+  "providerId": "codex",
+  "cliVersion": "0.161.0",
+  "protocolVersion": "app-server-unversioned",
+  "sdk": null,
+  "provenance": "captured",
+  "scenario": "questions",
+  "sourceHash": "d26009d7afc3f561f4871cab4e18c0b8263da9de52309449e6636222e8a2f6ca",
+  "redaction": {
+    "reviewed": true,
+    "removedFields": [
+      "private-text",
+      "credentials",
+      "native-identifiers",
+      "machine-paths",
+      "unlisted-fields"
+    ]
+  },
+  "input": {
+    "messages": [
+      {
+        "sequence": 1,
+        "operation": "initialize",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "capabilities.experimentalApi",
+            "kind": "shape",
+            "jsonType": "boolean"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_1"
+      },
+      {
+        "sequence": 2,
+        "operation": "initialize",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "userAgent",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "platformFamily",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "platformOs",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_1"
+      },
+      {
+        "sequence": 3,
+        "operation": "model/list",
+        "direction": "sent",
+        "fields": [],
+        "kind": "request",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 4,
+        "operation": "model/list",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "data.0.model",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.1.model",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.2.model",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.3.model",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.4.model",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.5.model",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.6.model",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "data.0.isDefault",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "data.1.isDefault",
+            "kind": "literal",
+            "value": false
+          },
+          {
+            "at": "data.2.isDefault",
+            "kind": "literal",
+            "value": false
+          },
+          {
+            "at": "data.3.isDefault",
+            "kind": "literal",
+            "value": false
+          },
+          {
+            "at": "data.4.isDefault",
+            "kind": "literal",
+            "value": false
+          },
+          {
+            "at": "data.5.isDefault",
+            "kind": "literal",
+            "value": false
+          },
+          {
+            "at": "data.6.isDefault",
+            "kind": "literal",
+            "value": false
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 5,
+        "operation": "thread/start",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "cwd",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "config",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "sandbox",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "ephemeral",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "approvalPolicy",
+            "kind": "literal",
+            "value": "never"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_3"
+      },
+      {
+        "sequence": 6,
+        "operation": "thread/start",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "cwd",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "thread",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "sandbox",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "sandbox.type",
+            "kind": "literal",
+            "value": "readOnly"
+          },
+          {
+            "at": "approvalPolicy",
+            "kind": "literal",
+            "value": "never"
+          },
+          {
+            "at": "thread.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_3"
+      },
+      {
+        "sequence": 7,
+        "operation": "thread/started",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "thread.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 8,
+        "operation": "turn/start",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "input.0.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "collaborationMode",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "collaborationMode.settings",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "collaborationMode.settings.model",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "additionalContext",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "collaborationMode.mode",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "collaborationMode.settings.developer_instructions",
+            "kind": "literal",
+            "value": null
+          },
+          {
+            "at": "collaborationMode.settings.reasoning_effort",
+            "kind": "literal",
+            "value": "low"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_5"
+      },
+      {
+        "sequence": 9,
+        "operation": "turn/start",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "turn.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "turn.status",
+            "kind": "literal",
+            "value": "inProgress"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_5"
+      },
+      {
+        "sequence": 10,
+        "operation": "turn/started",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "turn.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "turn.status",
+            "kind": "literal",
+            "value": "inProgress"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 11,
+        "operation": "item/started",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "item.type",
+            "kind": "literal",
+            "value": "userMessage"
+          },
+          {
+            "at": "item.content",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "item.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_7"
+          },
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "turnId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 12,
+        "operation": "item/completed",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "item.type",
+            "kind": "literal",
+            "value": "userMessage"
+          },
+          {
+            "at": "item.content",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "item.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_7"
+          },
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "turnId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 13,
+        "operation": "item/tool/requestUserInput",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "turnId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "itemId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_8"
+          },
+          {
+            "at": "questions.0.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_9"
+          },
+          {
+            "at": "questions",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "questions.0.header",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "questions.0.question",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "questions.0.options",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "questions.0.options.0.label",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "questions.0.options.1.label",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "questions.0.options.0.description",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "questions.0.options.1.description",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "questions.0.isOther",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "questions.0.isSecret",
+            "kind": "literal",
+            "value": false
+          },
+          {
+            "at": "isBlocking",
+            "kind": "literal",
+            "value": true
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_10"
+      },
+      {
+        "sequence": 14,
+        "operation": "item/tool/requestUserInput",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "answers",
+            "kind": "shape",
+            "jsonType": "object"
+          },
+          {
+            "at": "answers.ID_9.answers",
+            "kind": "shape",
+            "jsonType": "array"
+          },
+          {
+            "at": "answers.ID_9.answers.0",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_10"
+      },
+      {
+        "sequence": 15,
+        "operation": "serverRequest/resolved",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "requestId",
+            "kind": "identity",
+            "jsonType": "number",
+            "alias": "ID_11"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 16,
+        "operation": "item/started",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "item.type",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "item.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "item.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_12"
+          },
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "turnId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 17,
+        "operation": "item/plan/delta",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "turnId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "itemId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_12"
+          },
+          {
+            "at": "delta",
+            "kind": "shape",
+            "jsonType": "string"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 18,
+        "operation": "item/completed",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "item.type",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "item.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "item.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_12"
+          },
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "turnId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 19,
+        "operation": "turn/completed",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "threadId",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_4"
+          },
+          {
+            "at": "turn.id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_6"
+          },
+          {
+            "at": "turn.status",
+            "kind": "literal",
+            "value": "completed"
+          },
+          {
+            "at": "turn.error",
+            "kind": "shape",
+            "jsonType": "null"
+          },
+          {
+            "at": "turn.items",
+            "kind": "shape",
+            "jsonType": "array"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 20,
+        "operation": "probe/questions",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "observed",
+            "kind": "literal",
+            "value": true
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 21,
+        "operation": "probe/process-exit",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "code",
+            "kind": "shape",
+            "jsonType": "number"
+          },
+          {
+            "at": "signal",
+            "kind": "shape",
+            "jsonType": "null"
+          }
+        ],
+        "kind": "event"
+      }
+    ],
+    "end": {
+      "kind": "completed"
+    }
+  }
+}

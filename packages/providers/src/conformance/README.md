@@ -1,5 +1,7 @@
 # Provider conformance fixtures
 
+Plan protocol research uses the separate strict fixture format in `fixtures/plan-protocol/`, loaded by `plan-probes/fixture.ts`. These captures do not claim factory capability coverage or replay proposed adapter behavior. See [the investigation note](../../../../docs/research/plan-provider-protocols.md) for direct probe commands, reviewed evidence, storage boundaries, and unknown capabilities.
+
 Keep raw Provider captures in `packages/providers/.conformance-raw/`. Git ignores this directory because raw captures can contain private data.
 
 Use this procedure after a Provider-specific capture tool writes normalized JSONL rows:
