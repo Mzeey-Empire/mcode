@@ -1062,16 +1062,22 @@ export class ClaudeProvider
       typeof input.plan === "string" ? input.plan.trim() : "";
     if (planMarkdown.length > 256 * 1024) {
       logger.warn("Ignoring oversized native plan capture", { threadId, length: planMarkdown.length });
-    } else if (planMarkdown) {
+      return {
+        behavior: "deny" as const,
+        message: "The plan is too long for the client to capture. Shorten it and call ExitPlanMode again.",
+      };
+    }
+    if (planMarkdown) {
       this.planAnswerThreads.delete(threadId);
       const routing = this.runtime.get(`mcode-${threadId}`)?.executionRouting;
       if (routing) this.canonicalEventPublisher.capturePlan(routing, { markdown: planMarkdown, source: "native" });
       this.emit("plan_captured", { threadId, markdown: planMarkdown, source: "native" });
     }
+    // The plan record anchors to the turn's assistant message, so ask for the short summary the chat shows.
     return {
       behavior: "deny" as const,
       message:
-        "The client captured your proposed plan. Stop here and wait for the user to review it.",
+        "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it.",
     };
   }
 

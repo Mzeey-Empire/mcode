@@ -87,18 +87,6 @@ describe("CodexLiveEventReducer", () => {
     expect(result.writer).toContainEqual({ kind: "plan-capture-outcome", outcome: "captured" });
   });
 
-  it("retains an earlier summary when a textless native capture arrives at turn end", () => {
-    const reducer = new CodexLiveEventReducer(execution, "output");
-    reduceEvent(reducer, "turnStarted");
-    reduceEvent(reducer, "message", { content: "Earlier summary.", tokens: null });
-    const result = reducer.reduce(event("message", { content: "", tokens: null }), { markdown: "# Native plan", source: "native" });
-    if (result.kind !== "reduced") throw new Error(result.reason);
-    expect(result.writer[0]).toMatchObject({ kind: "assistant-body", content: "Earlier summary." });
-    expect(result.publication.event).toMatchObject({ type: "message", content: "Earlier summary." });
-    expect(result.writer).toContainEqual({ kind: "plan-captured", output: {
-      title: "Native plan", contentMd: "# Native plan", sectionsJson: "[]", changeSummary: null,
-    } });
-  });
   it.each(["claude", "cursor"])("materializes %s native capture through the worker, ahead of its fence", (providerId) => {
     const state = new ProviderExecutionEventState(providerId, execution, { precedingMessageId: "user", planFeature: "output" });
     state.startFromAdmission();

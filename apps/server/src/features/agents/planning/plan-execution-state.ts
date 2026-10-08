@@ -111,7 +111,7 @@ export class PlanExecutionState {
 function extractMarkdown(content: string): PlanPersistenceReady | null {
   const headings = [...markdownHeadings(content)];
   const titleHeading = headings.find((heading) => heading.level === 1);
-  const title = titleHeading?.title ?? headings[0]?.title ?? content.split("\n").find((line) => line.trim())?.trim();
+  const title = titleHeading?.title ?? headings[0]?.title ?? firstProseLine(content);
   return title ? { title: title.slice(0, 200), contentMd: content,
     sectionsJson: planNavigation(headings.filter((heading) => heading !== titleHeading)), changeSummary: null } : null;
 }
@@ -129,7 +129,22 @@ function planNavigation(headings: Array<{ title: string; level: number }>): stri
   return JSON.stringify(sections);
 }
 
+function firstProseLine(content: string): string | undefined {
+  for (const line of proseLines(content)) if (line.trim()) return line.trim();
+  return undefined;
+}
+
 function* markdownHeadings(content: string): Generator<{ title: string; level: number }> {
+  for (const line of proseLines(content)) {
+    const match = /^ {0,3}(#{1,3})[ \t]+(.+)/.exec(line);
+    if (!match) continue;
+    const title = match[2].replace(/\s+#+\s*$/, "").trim().slice(0, 200);
+    if (title) yield { title, level: match[1].length };
+  }
+}
+
+/** Lines outside code fences, so code never supplies a title or section. */
+function* proseLines(content: string): Generator<string> {
   let fence: { marker: string; length: number } | null = null;
   for (const line of content.split("\n")) {
     const code = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
@@ -138,10 +153,6 @@ function* markdownHeadings(content: string): Generator<{ title: string; level: n
       else if (code[1][0] === fence.marker && code[1].length >= fence.length && !code[2].trim()) fence = null;
       continue;
     }
-    if (fence) continue;
-    const match = /^ {0,3}(#{1,3})[ \t]+(.+)/.exec(line);
-    if (!match) continue;
-    const title = match[2].replace(/\s+#+\s*$/, "").trim().slice(0, 200);
-    if (title) yield { title, level: match[1].length };
+    if (!fence) yield line;
   }
 }

@@ -142,4 +142,11 @@ describe("PlanExecutionState", () => {
     expect(copy.consumeAssistantMessage("Summary")?.title).toBe("Login plan");
     expect(state.consumeAssistantMessage("Summary")).toBeNull();
   });
+
+  it("never takes a code fence line as the title of a heading-less plan", () => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    state.handlePlanCapture({ markdown: "```mermaid\ngraph TD\n```\nShip the change.", source: "native" });
+    expect(state.consumeAssistantMessage("Summary")?.title).toBe("Ship the change.");
+  });
 });

@@ -165,9 +165,9 @@ describe("AgentService container composition", () => {
     const markdown = "# Answered plan\n\n## Build\nUse passkeys.";
     const provider = fakeCodexProvider(async (request) => {
       try {
-        const content = source === "fence" ? "Summary.\n````mcode-plan\n" + markdown + "\n````" : "";
+        const content = source === "fence" ? "Summary.\n````mcode-plan\n" + markdown + "\n````" : "Summary.";
         let sequence = 0;
-        if (content) await submitCodexEvent(workerRuntime!, request, ++sequence, { type: "textDelta", threadId: request.threadId,
+        await submitCodexEvent(workerRuntime!, request, ++sequence, { type: "textDelta", threadId: request.threadId,
           turnExecutionId: request.turnExecutionId, delta: content, isFinalResponse: true });
         await submitCodexEvent(workerRuntime!, request, ++sequence, { type: "message", threadId: request.threadId,
           turnExecutionId: request.turnExecutionId, content, tokens: null }, source === "native" ? { markdown, source } : undefined);

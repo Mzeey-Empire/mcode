@@ -31,7 +31,7 @@ const factories = [
 ];
 
 describe.each(["claude", "cursor"] as const)("%s native plan lifecycle", (providerId) => {
-  it("delivers textless captures before completion and rejects captures after retirement", async () => {
+  it("drops a capture with no assistant message instead of inventing one, and rejects captures after retirement", async () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const publisher = providerId === "cursor"
       ? new CursorCanonicalEventPublisher({ submit }) : new CanonicalLiveEventPublisher(providerId, { submit });
@@ -44,8 +44,8 @@ describe.each(["claude", "cursor"] as const)("%s native plan lifecycle", (provid
     const emitted = submit.mock.calls.flatMap(([batch]) => batch.events.flatMap((draft) =>
       draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent"
         ? [ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent)] : []));
-    expect(emitted.map((runtime) => runtime.event.type)).toEqual(["turnStarted", "message", "turnComplete"]);
-    expect(emitted[1]).toMatchObject({ event: { content: "", turnExecutionId: routing.executionId }, planCapture: capture });
+    expect(emitted.map((runtime) => runtime.event.type)).toEqual(["turnStarted", "turnComplete"]);
+    expect(emitted.flatMap((runtime) => runtime.planCapture ? [runtime.planCapture] : [])).toEqual([]);
     publisher.capturePlan(routing, capture);
     publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.Message, threadId: routing.threadId, content: "Late", tokens: null }), []);
     await publisher.waitForExecution(routing);

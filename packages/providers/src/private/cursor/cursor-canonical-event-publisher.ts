@@ -34,7 +34,11 @@ export class CursorCanonicalEventPublisher {
   /** Retain plan evidence within the exact Cursor execution until its assistant message. */
   capturePlan(routing: CursorCanonicalEventRouting, capture: NonNullable<ProviderRuntimeEvent["planCapture"]>): void {
     const queue = this.queues.get(this.queueKey(routing));
-    if (!this.admissionStopped && queue && !queue.failure) queue.planCapture = capture;
+    if (!this.admissionStopped && queue && !queue.failure) {
+      queue.planCapture = capture;
+      return;
+    }
+    logger.warn("Native plan capture arrived outside a live execution", { executionId: routing.executionId });
   }
 
   /** Queues one Cursor runtime event for durable canonical delivery. */
@@ -52,8 +56,9 @@ export class CursorCanonicalEventPublisher {
     }
     const queue = this.queueFor(routing);
     if (queue.planCapture && runtimeEvent.event.type === AgentEventType.TurnComplete) {
-      this.publish(routing, { event: { type: AgentEventType.Message, threadId: routing.threadId,
-        turnExecutionId: routing.executionId, content: "", tokens: null } }, sourceIdentities);
+      // The plan record needs an assistant message to anchor to; a textless turn has none.
+      logger.warn("Native plan capture had no assistant message to attach to", { executionId: routing.executionId });
+      queue.planCapture = undefined;
     }
     if (queue.failure) return;
     if (queue.pendingEventCount >= MAX_PENDING_EVENTS_PER_EXECUTION) {

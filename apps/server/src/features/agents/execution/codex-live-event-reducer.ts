@@ -346,7 +346,7 @@ export class CodexLiveEventReducer {
   }
 
   private message(event: MessageEvent, capture?: ProviderRuntimeEvent["planCapture"]): CodexLiveWriterIntent[] {
-    this.captureMessagePlan(event, capture);
+    if (capture) this.plan?.handlePlanCapture(capture);
     this.assistant.bufferBody(event.content, event.model ?? null, event.attachments ?? []);
     const body = this.assistant.materializationInput(event.model ?? null);
     this.assistant.resetStreamingText();
@@ -365,17 +365,6 @@ export class CodexLiveEventReducer {
       }
     }
     return writer;
-  }
-
-  private captureMessagePlan(event: MessageEvent, capture: ProviderRuntimeEvent["planCapture"]): void {
-    if (!capture) return;
-    this.plan?.handlePlanCapture(capture);
-    if (event.content) return;
-    // A textless native capture gets a synthetic message at turn end, which must preserve the earlier summary.
-    const previous = this.assistant.materializationInput(event.model ?? null);
-    event.content = previous.content || "The provider returned a proposed plan.";
-    event.attachments = previous.attachments;
-    if (previous.model) event.model = previous.model;
   }
 
   private attachment(event: Extract<AgentEvent, { type: "generatedAttachment" }>): CodexLiveWriterIntent[] {
