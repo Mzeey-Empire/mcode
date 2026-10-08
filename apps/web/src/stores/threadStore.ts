@@ -1850,7 +1850,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         group,
       };
     });
-    useTaskStore.getState().setTaskGroup(threadId, group, tasks);
+    useTaskStore.getState().setGroupTasks(threadId, group, tasks);
   };
 
   const projectTaskCreate = (
@@ -1875,7 +1875,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     };
     const existing = useTaskStore.getState().tasksByThread[threadId] ?? [];
     const groupTasks = existing.filter((item) => item.group === group && item.id !== task.id);
-    useTaskStore.getState().setTaskGroup(threadId, group, [...groupTasks, task]);
+    useTaskStore.getState().setGroupTasks(threadId, group, [...groupTasks, task]);
   };
 
   const taskUpdateTarget = (
@@ -1918,11 +1918,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (!target) return;
     const groupTasks = tasks.filter((task) => task.group === target.group);
     if (toolInput.status === "deleted") {
-      useTaskStore.getState().setTaskGroup(threadId, target.group, groupTasks.filter((task) => task !== target));
+      useTaskStore.getState().setGroupTasks(threadId, target.group, groupTasks.filter((task) => task !== target));
       return;
     }
     const patched = patchedTaskItem(target, toolInput);
-    useTaskStore.getState().setTaskGroup(threadId, target.group, groupTasks.map((task) => task === target ? patched : task));
+    useTaskStore.getState().setGroupTasks(threadId, target.group, groupTasks.map((task) => task === target ? patched : task));
   };
 
   const projectTaskToolUse = (
@@ -1939,7 +1939,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (toolName === "update_plan") {
       const group = taskGroupFor(toolCalls, parentToolCallId);
       const tasks = updatePlanTasksFromToolInput(toolInput).map((task) => ({ ...task, group }));
-      if (tasks.length > 0) useTaskStore.getState().setTaskGroup(threadId, group, tasks);
+      if (tasks.length > 0) useTaskStore.getState().setGroupTasks(threadId, group, tasks);
     }
   };
 
@@ -2052,7 +2052,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const tasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
     const target = tasks.find((task) => task.id === toolCallId);
     if (!target || target.harnessTaskId === harnessTaskId) return;
-    useTaskStore.getState().setTaskGroup(
+    useTaskStore.getState().setGroupTasks(
       threadId,
       target.group,
       tasks.filter((task) => task.group === target.group)

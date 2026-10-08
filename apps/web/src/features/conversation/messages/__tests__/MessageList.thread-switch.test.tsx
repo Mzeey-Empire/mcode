@@ -183,9 +183,6 @@ vi.mock("../MessageBubble", () => ({
     </div>
   ),
 }));
-vi.mock("@/components/chat/ToolCallCard", () => ({ ToolCallCard: () => null }));
-vi.mock("@/components/chat/StreamingIndicator", () => ({ StreamingIndicator: () => null }));
-vi.mock("@/components/chat/StreamingCard", () => ({ StreamingCard: () => null }));
 vi.mock("@/components/chat/TurnChangeSummary", () => ({
   TurnChangeSummary: ({ filesChanged }: { filesChanged: string[] }) => (
     <div data-testid="turn-change-summary">{filesChanged.join(",")}</div>

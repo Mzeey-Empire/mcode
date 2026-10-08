@@ -172,7 +172,7 @@ describe("handleTurnPersisted", () => {
         createMockThread({ id: otherThreadId, status: "active" }),
       ],
     });
-    useTaskStore.getState().setTaskGroup(THREAD_ID, "Tasks", [{
+    useTaskStore.getState().setGroupTasks(THREAD_ID, "Tasks", [{
       id: "task-1",
       content: "Inspect terminal cleanup",
       status: "in_progress",

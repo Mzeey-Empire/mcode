@@ -18,27 +18,7 @@ vi.mock("@/features/terminal", () => ({
   ),
 }));
 
-import { StreamingIndicator } from "../StreamingIndicator";
 import { TerminalStatusIndicator } from "../TerminalStatusIndicator";
-
-describe("StreamingIndicator", () => {
-  it("renders a pulse dot while streaming", () => {
-    render(<StreamingIndicator startTime={Date.now()} />);
-    const dot = document.querySelector(".animate-pulse");
-    expect(dot).toBeInTheDocument();
-  });
-
-  it("does not use animate-shimmer-text", () => {
-    render(<StreamingIndicator startTime={Date.now()} />);
-    expect(document.querySelector(".animate-shimmer-text")).not.toBeInTheDocument();
-  });
-
-  it("shows a phase label", () => {
-    render(<StreamingIndicator startTime={Date.now()} />);
-    // No active tool calls => default "Thinking..." label
-    expect(screen.getByText("Thinking...")).toBeInTheDocument();
-  });
-});
 
 describe("TerminalStatusIndicator", () => {
   it("renders a pulse dot when terminals are active", () => {

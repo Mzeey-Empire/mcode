@@ -50,7 +50,7 @@ interface TaskState {
   /** Replace all tasks for a thread (top-level TodoWrite). */
   setTasks: (threadId: string, tasks: readonly TaskItem[]) => void;
   /** Replace only tasks belonging to a specific group, preserving other groups. */
-  setTaskGroup: (threadId: string, group: string, tasks: readonly TaskItem[]) => void;
+  setGroupTasks: (threadId: string, group: string, tasks: readonly TaskItem[]) => void;
   /** Clear tasks for a thread (e.g. on deletion). */
   clearTasks: (threadId: string) => void;
   /** Apply new-turn lifecycle rules to the composer Task bubble. */
@@ -85,7 +85,7 @@ export const useTaskStore = create<TaskState>((set) => ({
         pendingTaskBubbleReplacementByThread: pending,
       };
     }),
-  setTaskGroup: (threadId, group, tasks) =>
+  setGroupTasks: (threadId, group, tasks) =>
     set((s) => {
       const existing = s.tasksByThread[threadId] ?? [];
       const otherGroups = existing.filter((t) => t.group !== group);
@@ -150,8 +150,8 @@ if (import.meta.env.DEV && typeof window !== "undefined") {
     get state() { return useTaskStore.getState(); },
     setTasks: (threadId: string, tasks: readonly TaskItem[]) =>
       useTaskStore.getState().setTasks(threadId, tasks),
-    setTaskGroup: (threadId: string, group: string, tasks: readonly TaskItem[]) =>
-      useTaskStore.getState().setTaskGroup(threadId, group, tasks),
+    setGroupTasks: (threadId: string, group: string, tasks: readonly TaskItem[]) =>
+      useTaskStore.getState().setGroupTasks(threadId, group, tasks),
     clear: (threadId: string) => useTaskStore.getState().clearTasks(threadId),
   };
 }
