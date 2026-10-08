@@ -6,7 +6,7 @@ import type { Database } from "bun:sqlite";
 import { AgentEventSchema, CanonicalAgentProgressFrameSchema, ProviderRuntimeExtensionSchema, MessageSchema, ParentNarrativeRecoveryItemSchema, encodeCanonicalSubagentDetailTarget, type ProviderRuntimeExtension, type AgentEvent, type CanonicalAgentProgressFrame,
   type AcceptedCanonicalAgentEventEnvelope,
   type ParentNarrativeRecoveryItem } from "@mcode/contracts";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
@@ -121,7 +121,12 @@ function familyDraft(sequence: number, type: AgentEvent["type"], fields: Record<
       extension: ProviderRuntimeExtensionSchema().parse({ kind: "codex-collaboration", providerId: "codex", ...extension }) } } } } };
 }
 
-describe("accepted parent progress with the actual SQLite writer", () => {
+// Saves go through a real SQLite writer and retry transient failures after 1 s. On a loaded CI runner a
+// correct save outlasts the 1 s poll and 5 s test defaults, so both bounds cover that latency here.
+describe("accepted parent progress with the actual SQLite writer", { timeout: 30_000 }, () => {
+  beforeAll(() => { vi.setConfig({ expect: { poll: { timeout: 10_000 } } }); });
+  afterAll(() => { vi.resetConfig(); });
+
   let directory: string;
   let db: Database;
   let reader: Database;
