@@ -29,7 +29,7 @@ function event(overrides: Partial<TerminalDiagnosticEvent> = {}): TerminalDiagno
 describe("TerminalDiagnosticsService", () => {
   it("deduplicates events and replaces caller correlation text", () => {
     const service = new TerminalDiagnosticsService({
-      backend: () => "modern",
+      backend: () => "legacy",
       health: () => HEALTH,
       now: () => new Date("2026-08-11T12:01:00.000Z"),
       createCorrelationId: () => "corr-generated",
@@ -57,7 +57,7 @@ describe("TerminalDiagnosticsService", () => {
     let now = new Date("2026-08-11T12:10:00.000Z");
     let id = 0;
     const service = new TerminalDiagnosticsService({
-      backend: () => "modern",
+      backend: () => "legacy",
       health: () => HEALTH,
       now: () => now,
       createCorrelationId: () => `corr-${id}`,
@@ -86,7 +86,7 @@ describe("TerminalDiagnosticsService", () => {
 
   it("evicts expired events even when they arrive after recent events", () => {
     const service = new TerminalDiagnosticsService({
-      backend: () => "modern",
+      backend: () => "legacy",
       health: () => HEALTH,
       now: () => new Date("2026-08-11T12:10:00.000Z"),
     });

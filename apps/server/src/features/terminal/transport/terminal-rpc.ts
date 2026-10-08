@@ -197,12 +197,8 @@ export async function routeTerminalRpc(
   method: WsMethodName,
   params: any,
   deps: TerminalRouterDeps,
-  client: WebSocket | undefined,
+  _client: WebSocket | undefined,
 ): Promise<unknown> {
-  if (method.startsWith("terminal.session.")) {
-    if (!client) throw new Error("Terminal v1 client identity is unavailable");
-    return deps.terminalService.routeV1(method, params, client);
-  }
   if (isTerminalManagementMethod(method)) {
     return await routeTerminalManagement(method, params, deps);
   }

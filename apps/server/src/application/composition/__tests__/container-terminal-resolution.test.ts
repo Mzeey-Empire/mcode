@@ -22,13 +22,11 @@ describe("server container terminal composition", () => {
   let database: Database | undefined;
   let temporaryDirectory: string | undefined;
   const previousDatabasePath = process.env.MCODE_DB_PATH;
-  const previousBackend = process.env.MCODE_TERMINAL_BACKEND;
 
   beforeEach(async () => {
     container.reset();
     temporaryDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-container-terminal-"));
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
-    process.env.MCODE_TERMINAL_BACKEND = "legacy";
     await setupContainer(temporaryDirectory);
     container.register<HostRuntime>("HostRuntime", { useValue: SENTINEL_HOST_RUNTIME });
     database = container.resolve<Database>("Database");
@@ -43,8 +41,6 @@ describe("server container terminal composition", () => {
     container.reset();
     if (previousDatabasePath === undefined) delete process.env.MCODE_DB_PATH;
     else process.env.MCODE_DB_PATH = previousDatabasePath;
-    if (previousBackend === undefined) delete process.env.MCODE_TERMINAL_BACKEND;
-    else process.env.MCODE_TERMINAL_BACKEND = previousBackend;
     if (temporaryDirectory) NodeFS.rmSync(temporaryDirectory, { recursive: true, force: true });
     temporaryDirectory = undefined;
   });

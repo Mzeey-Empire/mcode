@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { AttachmentMetaSchema, TERMINAL_BINARY_MAGIC, WebSocketResponseSchema } from "@mcode/contracts";
+import { AttachmentMetaSchema, WebSocketResponseSchema } from "@mcode/contracts";
 import { getMcodeDir } from "@mcode/shared";
 import { createWsServer } from "../ws-server.js";
 
@@ -34,12 +34,12 @@ describe("transport admission and shutdown drain", () => {
     }
   });
 
-  async function startServer(handler: HttpHandler, terminalFrame: () => Promise<void> = async () => undefined, shutdown: () => void = () => undefined) {
+  async function startServer(handler: HttpHandler, shutdown: () => void = () => undefined) {
     const server = createWsServer({
       authToken: "test-token",
       shutdown,
       agentService: { runtimeAccess: () => ({ activeCount: () => 0 }) },
-      terminalService: { disconnectClient: () => undefined, handleV1Frame: terminalFrame },
+      terminalService: { disconnectClient: () => undefined },
       resolveBrowserAutomationHostAuthorization: () => null,
       reliabilityHarness: { enabled: true, handleRequest: handler },
       browserAutomationMcpHandler: { handle: handler },
@@ -108,25 +108,6 @@ describe("transport admission and shutdown drain", () => {
     });
     await expect(httpRequest(server, "/mcp")).resolves.toEqual({ status: 200, body: "already sent" });
     await server.stopAdmissionAndDrain();
-  });
-
-  it("drains an admitted Terminal binary operation and refuses a subsequent frame", async () => {
-    const started = deferred();
-    const finish = deferred();
-    const frames = vi.fn(async () => { started.resolve(); await finish.promise; });
-    const server = await startServer(async () => undefined, frames);
-    const client = await openClient(server);
-    client.send(Buffer.from(TERMINAL_BINARY_MAGIC));
-    await started.promise;
-    let drained = false;
-    const drain = server.stopAdmissionAndDrain().then(() => { drained = true; });
-    const closed = new Promise<number>((resolve) => client.once("close", resolve));
-    client.send(Buffer.from(TERMINAL_BINARY_MAGIC));
-    await expect(closed).resolves.toBe(1012);
-    expect(frames).toHaveBeenCalledTimes(1);
-    expect(drained).toBe(false);
-    finish.resolve();
-    await drain;
   });
 
   it("rejects a pending upload payload after admission closes", async () => {

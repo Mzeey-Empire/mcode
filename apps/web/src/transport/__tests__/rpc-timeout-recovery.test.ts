@@ -74,37 +74,6 @@ const LEGACY_CAPABILITIES = {
   recovery: { replay: true, checkpoint: true, gap: true },
 };
 
-const MODERN_CREATE_RESULT = {
-  contractVersion: 1,
-  sessionId: "00000000-0000-4000-8000-000000000001",
-  scope: {
-    kind: "workspace",
-    workspaceId: "00000000-0000-4000-8000-000000000002",
-  },
-  state: "running",
-  hostGeneration: "1",
-  launch: {
-    requestedProfileId: "automatic",
-    resolvedProfile: {
-      id: "certified:windows-powershell-7",
-      name: "PowerShell 7",
-      executable: "pwsh.exe",
-      arguments: [],
-      source: "certified",
-      platform: "windows",
-    },
-    scope: {
-      kind: "workspace",
-      workspaceId: "00000000-0000-4000-8000-000000000002",
-    },
-    arguments: [],
-  },
-  createdAt: "2026-09-24T12:00:00.000Z",
-  lastCommandSeq: "0",
-  lastOutputSeq: "0",
-  exit: null,
-  tombstone: false,
-};
 
 function latestRequest(socket: TimeoutSocket, method: string): RpcRequest {
   const request = [...socket.requests].reverse().find((entry) => entry.method === method);
@@ -216,15 +185,12 @@ describe("interactive RPC timeout recovery", () => {
     await expect(successfulRetry).resolves.toEqual([{ id: "fresh", name: "Fresh model" }]);
   });
 
-  it("validates both legacy and modern late create response shapes before cleanup", () => {
+  it("validates late create response shapes before cleanup", () => {
     expect(parseLateTerminalCreateId(
       "terminal.create",
       { ptyId: "pty-legacy", shell: "pwsh" },
     )).toBe("pty-legacy");
-    expect(parseLateTerminalCreateId(
-      "terminal.session.create",
-      MODERN_CREATE_RESULT,
-    )).toBe("00000000-0000-4000-8000-000000000001");
+    expect(parseLateTerminalCreateId("terminal.create", { ptyId: 7 })).toBeNull();
   });
 
   it("retries terminal capability discovery after the previous selection timed out", async () => {

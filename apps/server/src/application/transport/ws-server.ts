@@ -13,8 +13,6 @@ import {
 } from "../../features/terminal/backends/terminal-backend.js";
 import {
   BinaryUploadHeaderSchema,
-  TERMINAL_BINARY_MAGIC,
-  TERMINAL_V1_METHODS,
   WebSocketRequestSchema,
   WS_METHODS,
   type BinaryUploadHeader,
@@ -536,10 +534,6 @@ function sendShutdownResponse(ws: WebSocket, id: string | number | null): void {
 
 /** Routes a binary terminal frame or a binary file-upload frame. */
 async function handleBinaryWsMessage(bytes: Buffer, context: WsMessageContext): Promise<void> {
-  if (isTerminalBinaryFrame(bytes)) {
-    await handleTerminalBinaryFrame(bytes, context);
-    return;
-  }
   const header = context.pendingBinaryHeader;
   context.pendingBinaryHeader = null;
   if (!header) {
@@ -547,27 +541,6 @@ async function handleBinaryWsMessage(bytes: Buffer, context: WsMessageContext): 
     return;
   }
   await handleFileUploadFrame(header, bytes, context.ws);
-}
-
-/** Checks whether a binary frame uses the terminal v1 magic prefix. */
-function isTerminalBinaryFrame(bytes: Buffer): boolean {
-  return bytes[0] === TERMINAL_BINARY_MAGIC[0] && bytes[1] === TERMINAL_BINARY_MAGIC[1];
-}
-
-/** Sends a terminal v1 frame to the terminal service. */
-async function handleTerminalBinaryFrame(bytes: Buffer, context: WsMessageContext): Promise<void> {
-  try {
-    await context.deps.terminalService.handleV1Frame(context.ws, bytes);
-  } catch (error) {
-    logger.warn("Terminal v1 frame rejected", { error: describeError(error) });
-    closeForTerminalRetry(error, context.ws);
-  }
-}
-
-/** Closes a connection when a terminal error requires a non-safe retry. */
-function closeForTerminalRetry(error: unknown, ws: WebSocket): void {
-  if (!(error instanceof TerminalBackendError) || error.retry === "SAFE_RETRY" || ws.readyState !== WebSocket.OPEN) return;
-  ws.close(4002, `Terminal ${error.retry.toLowerCase()} required`);
 }
 
 /** Handles a clipboard file-upload frame after its text header. */
@@ -686,7 +659,7 @@ function parseTerminalCreateMethod(raw: string): TerminalCreateMethod | null {
 }
 
 function isTerminalCreateMethod(method: string): method is TerminalCreateMethod {
-  return method === "terminal.create" || method === "terminal.session.create";
+  return method === "terminal.create";
 }
 
 /** Delivers an RPC response and reclaims a Terminal create only when response delivery fails. */
@@ -731,14 +704,9 @@ function disconnectedTerminalCreateFromResponse(
   response: WebSocketResponse,
 ): DisconnectedTerminalCreate | null {
   if (response.error || response.result === undefined) return null;
-  if (method === "terminal.create") {
-    const parsed = WS_METHODS()[method].result.safeParse(response.result);
-    const ptyId = parsed.success ? readStringField(parsed.data, "ptyId") : null;
-    return ptyId ? { method, ptyId } : null;
-  }
-  const parsed = TERMINAL_V1_METHODS[method].result.safeParse(response.result);
-  const sessionId = parsed.success ? readStringField(parsed.data, "sessionId") : null;
-  return sessionId ? { method, sessionId } : null;
+  const parsed = WS_METHODS()[method].result.safeParse(response.result);
+  const ptyId = parsed.success ? readStringField(parsed.data, "ptyId") : null;
+  return ptyId ? { method, ptyId } : null;
 }
 
 function readStringField(value: unknown, field: "ptyId" | "sessionId"): string | null {

@@ -369,7 +369,7 @@ export const TerminalV1BackendCapabilitiesSchema = lazySchema(() =>
   z
     .object({
       contractVersion: z.literal(TERMINAL_CONTRACT_VERSION),
-      backend: z.enum(["modern", "legacy"]),
+      backend: z.literal("legacy"),
       selectedAt: TerminalTimestampSchema(),
       publicFrameVersion: z.literal(1),
       recovery: z.object({ replay: z.literal(true), checkpoint: z.literal(true), gap: z.literal(true) }).strict(),

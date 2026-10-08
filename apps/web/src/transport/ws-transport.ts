@@ -73,14 +73,13 @@ import type {
 import type { PaginatedMessages, ConversationPage, ConversationNewerPage, ConversationNewerPageRequest, ConversationOlderPage, ConversationOlderPageRequest, ConversationTail, CanonicalSubagentRoster, CanonicalSubagentStopResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability, GoalLookupResult } from "@mcode/contracts";
 import {
   TERMINAL_DATA_TAG,
-  TERMINAL_BINARY_MAGIC,
   decodeTerminalDataFrame,
 } from "@mcode/contracts";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { PermissionRequest } from "@mcode/contracts";
 import { setAttachmentTransportWsUrl } from "@/lib/attachment-url";
-import { TerminalClientSelector } from "@/features/terminal/adapters/terminal-client-selector";
+import { LegacyTerminalClient } from "@/features/terminal/adapters/legacy/legacy-terminal-client";
 import type {
   TerminalActiveSession,
   TerminalClient,
@@ -309,15 +308,11 @@ export class RpcTimeoutError extends Error {
 
 /** Extracts the exact Terminal ID from a late successful create response. */
 export function parseLateTerminalCreateId(
-  method: "terminal.create" | "terminal.session.create",
+  method: "terminal.create",
   result: unknown,
 ): string | null {
-  if (method === "terminal.create") {
-    const parsed = WS_METHODS()["terminal.create"].result.safeParse(result);
-    return parsed.success ? readTerminalCreateId(parsed.data, "ptyId") : null;
-  }
-  const parsed = WS_METHODS()["terminal.session.create"].result.safeParse(result);
-  return parsed.success ? readTerminalCreateId(parsed.data, "sessionId") : null;
+  const parsed = WS_METHODS()[method].result.safeParse(result);
+  return parsed.success ? readTerminalCreateId(parsed.data, "ptyId") : null;
 }
 
 function readTerminalCreateId(value: unknown, field: "ptyId" | "sessionId"): string | null {
@@ -422,7 +417,6 @@ export function createWsTransport(
 
   async function reattachActiveTerminals(): Promise<void> {
     await terminalSelectionPromise;
-    const terminalClient = terminalClientSelector.getSelected();
     const activePtys = await terminalClient.listActive();
     const [terminalStoreModule, workspaceStoreModule] = await Promise.all([
       import("@/features/terminal/state/terminalStore"),
@@ -483,10 +477,6 @@ export function createWsTransport(
 
   function handleBinaryMessage(data: ArrayBuffer): void {
     const view = new Uint8Array(data);
-    if (view[0] === TERMINAL_BINARY_MAGIC[0] && view[1] === TERMINAL_BINARY_MAGIC[1]) {
-      terminalClientSelector.handleFrame(view);
-      return;
-    }
     if (view[0] === TERMINAL_DATA_TAG) {
       emitTerminalDataFrame(view);
       return;
@@ -821,27 +811,13 @@ export function createWsTransport(
     });
   }
 
-  const terminalClientSelector = new TerminalClientSelector(
+  const terminalClient = new LegacyTerminalClient(
     <T>(method: string, params: Record<string, unknown>) =>
       rpc<T>(method, params, terminalRpcOptions(method)),
-    (frame) => {
-      // Drop terminal frames while the socket is down; reattach resyncs output.
-      if (ws.readyState === WebSocket.OPEN) ws.send(frame);
-    },
-    async (scopeId) => {
-      const { useWorkspaceStore } = await import("@/features/projects/state/workspaceStore");
-      const state = useWorkspaceStore.getState();
-      const thread = state.threads.find((candidate) => candidate.id === scopeId);
-      if (thread) return { kind: "thread", workspaceId: thread.workspace_id, threadId: thread.id };
-      if (state.workspaces.some((workspace) => workspace.id === scopeId)) {
-        return { kind: "workspace", workspaceId: scopeId };
-      }
-      throw new Error("Terminal scope is unavailable");
-    },
   );
 
   function terminalRpcOptions(method: string): RpcOptions | undefined {
-    if (method !== "terminal.create" && method !== "terminal.session.create") {
+    if (method !== "terminal.create") {
       return undefined;
     }
     const cleanupReservation = Symbol();
@@ -865,22 +841,13 @@ export function createWsTransport(
   }
 
   function cleanupLateTerminalCreate(method: string, result: unknown): void {
-    if (method !== "terminal.create" && method !== "terminal.session.create") return;
+    if (method !== "terminal.create") return;
     const terminalId = parseLateTerminalCreateId(method, result);
     if (!terminalId) return;
     const reportCleanupFailure = (error: unknown) => {
       console.warn("[terminal] Could not clean up a terminal created after its request timed out", error);
     };
-    if (method === "terminal.create") {
-      void rpc<void>("terminal.kill", { ptyId: terminalId }, {
-        timeoutMs: TERMINAL_LATE_CREATE_CLEANUP_TIMEOUT_MS,
-      }).catch(reportCleanupFailure);
-      return;
-    }
-    void rpc<void>("terminal.session.close", {
-      sessionId: terminalId,
-      reason: "user",
-    }, {
+    void rpc<void>("terminal.kill", { ptyId: terminalId }, {
       timeoutMs: TERMINAL_LATE_CREATE_CLEANUP_TIMEOUT_MS,
     }).catch(reportCleanupFailure);
   }
@@ -889,7 +856,6 @@ export function createWsTransport(
     const capabilities = await rpc<TerminalBackendCapabilities>("terminal.capabilities", {}, {
       timeoutMs: TERMINAL_CAPABILITIES_TIMEOUT_MS,
     });
-    terminalClientSelector.select(capabilities);
     return capabilities;
   }
 
@@ -910,7 +876,7 @@ export function createWsTransport(
     operation: (client: TerminalClient) => Promise<T>,
   ): Promise<T> {
     await terminalCapabilities();
-    return operation(terminalClientSelector.getSelected());
+    return operation(terminalClient);
   }
 
   /**
@@ -1395,11 +1361,11 @@ export function createWsTransport(
     terminalPause: (ptyId) => withTerminalClient((client) => client.pause(ptyId)),
     terminalResume: (ptyId) => withTerminalClient((client) => client.resume(ptyId)),
     terminalSubscribe: (ptyId, subscription: TerminalClientSubscription) =>
-      terminalClientSelector.getSelected().subscribe(ptyId, subscription),
+      terminalClient.subscribe(ptyId, subscription),
     terminalDetachForSwitch: (ptyId, checkpoint) =>
       withTerminalClient((client) => client.detachForSwitch(ptyId, checkpoint)),
     terminalNotifyReconnectGap: (ptyId) => {
-      terminalClientSelector.getSelected().notifyReconnectGap(ptyId);
+      terminalClient.notifyReconnectGap(ptyId);
     },
     terminalKillByThread: (threadId) =>
       withTerminalClient((client) => client.killByThread(threadId)),
@@ -1415,7 +1381,7 @@ export function createWsTransport(
       withTerminalClient((client) => client.diagnostics()),
     ptySetLastSeq: (ptyId, seq) => {
       ptyLastSeqMap.set(ptyId, seq);
-      terminalClientSelector.getSelected().acknowledgeOutput?.(ptyId, seq);
+      terminalClient.acknowledgeOutput?.(ptyId, seq);
     },
     ptyDeleteLastSeq: (ptyId) => { ptyLastSeqMap.delete(ptyId); },
 
