@@ -2102,13 +2102,13 @@ describe("AgentService Ended finalization", () => {
         terminalOutcome: "interrupted",
       });
     });
-    // The thread row is written after the checkpoint, so a slow runner can still read "active" here.
+    // The thread row and its broadcast land after the checkpoint, so a slow runner can still see "active" here.
     await vi.waitFor(() => {
       expect(threadRepo.findById(thread.id)?.status).toBe("interrupted");
-    });
-    expect(broadcast).toHaveBeenCalledWith("thread.status", {
-      threadId: thread.id,
-      status: "interrupted",
+      expect(broadcast).toHaveBeenCalledWith("thread.status", {
+        threadId: thread.id,
+        status: "interrupted",
+      });
     });
   });
 
@@ -2259,11 +2259,12 @@ describe("AgentService Ended finalization", () => {
         },
       },
     });
-    expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
+    // turn.persisted is broadcast after the checkpoint settles; wait for it rather than racing it.
+    await vi.waitFor(() => expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
       threadId: thread.id,
       messageId: assistant?.id,
       outcome: "completed",
       executionId,
-    }));
+    })));
   });
 });
