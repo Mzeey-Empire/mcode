@@ -262,7 +262,6 @@ function ComposerNoticeOverlay({
   return (
     <ComposerOverlaySurface
       anchorRect={anchorRect}
-      estimatedHeight={detailsOpen ? 152 : 40}
       attached
       className="composer-provider-notice-surface max-h-56 overflow-y-auto"
       data-testid="composer-provider-notice"

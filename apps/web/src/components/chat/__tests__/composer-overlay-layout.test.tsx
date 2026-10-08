@@ -1,5 +1,5 @@
 import { createRef } from "react";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ComposerOverlayLayout, ComposerOverlaySurface } from "../ComposerOverlaySurface";
 
@@ -13,7 +13,7 @@ describe("composer overlay layout", () => {
     const { rerender } = render(
       <ComposerOverlayLayout>
         <div data-testid="editor">
-          <ComposerOverlaySurface ref={ref} anchorRect={anchorRect} estimatedHeight={40} attached>
+          <ComposerOverlaySurface ref={ref} anchorRect={anchorRect} attached>
             Notice
           </ComposerOverlaySurface>
         </div>
@@ -33,12 +33,12 @@ describe("composer overlay layout", () => {
     function Composers({ details }: { details: boolean }) {
       return <>
         <ComposerOverlayLayout>
-          <ComposerOverlaySurface anchorRect={anchorRect} estimatedHeight={40} attached>
+          <ComposerOverlaySurface anchorRect={anchorRect} attached>
             First notice{details && <p>Expanded details</p>}
           </ComposerOverlaySurface>
         </ComposerOverlayLayout>
         <ComposerOverlayLayout>
-          <ComposerOverlaySurface anchorRect={anchorRect} estimatedHeight={40} attached>
+          <ComposerOverlaySurface anchorRect={anchorRect} attached>
             Second notice
           </ComposerOverlaySurface>
         </ComposerOverlayLayout>
@@ -52,22 +52,24 @@ describe("composer overlay layout", () => {
     expect(within(second).getByText("Second notice")).toBeTruthy();
   });
 
-  it("preserves fixed positioning outside the composer layout", () => {
-    render(<ComposerOverlaySurface anchorRect={anchorRect} estimatedHeight={40} attached>
+  it("floats above its anchor as a popover outside the composer layout", async () => {
+    render(<ComposerOverlaySurface anchorRect={anchorRect} attached>
       Standalone notice
     </ComposerOverlaySurface>);
     const surface = screen.getByText("Standalone notice");
-    expect(surface.parentElement).toBe(document.body);
-    expect(surface.style.position).toBe("fixed");
+    expect(surface).toHaveAttribute("data-slot", "popover-content");
+    await waitFor(() => expect(surface.parentElement).toHaveAttribute("data-side", "top"));
   });
 
-  it("keeps non-attached popups out of the composer layout", () => {
+  it("keeps non-attached popups out of the composer layout without taking focus", () => {
     render(<ComposerOverlayLayout>
-      <ComposerOverlaySurface anchorRect={anchorRect} estimatedHeight={40}>
+      <input aria-label="Editor" autoFocus />
+      <ComposerOverlaySurface anchorRect={anchorRect}>
         Floating picker
       </ComposerOverlaySurface>
     </ComposerOverlayLayout>);
-    expect(screen.getByText("Floating picker").parentElement).toBe(document.body);
+    expect(screen.getByText("Floating picker")).toHaveAttribute("data-slot", "popover-content");
     expect(screen.getByTestId("composer-overlay-host").childElementCount).toBe(0);
+    expect(screen.getByRole("textbox", { name: "Editor" })).toHaveFocus();
   });
 });
