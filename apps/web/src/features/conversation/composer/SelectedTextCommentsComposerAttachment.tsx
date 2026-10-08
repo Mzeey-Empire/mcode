@@ -364,6 +364,38 @@ function getDockedEditor(
   return comments.some((comment) => comment.id === editor.commentId) ? undefined : editor;
 }
 
+/** Open state for the comment preview, guarding the cards and editors it holds. */
+function usePreviewOpenState(previewRef: { readonly current: HTMLDivElement | null }) {
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const suppressFocusOpenRef = useRef(false);
+  const handleOpenChange = (open: boolean, details: PopoverRootChangeEventDetails) => {
+    if (open) {
+      setIsPreviewOpen(true);
+      return;
+    }
+    // Leaving the preview with the pointer must not drop a card the user is working in. An open
+    // editor owns outside presses: it warns or closes itself on pointerdown, so the preview only
+    // closes once no editor is left inside it.
+    const preview = previewRef.current;
+    if (details.reason === "trigger-hover" && preview?.contains(document.activeElement)) return;
+    if (details.reason === "outside-press" && preview?.querySelector("[data-comment-editor-frame]")) return;
+    // Escape hands focus back to the chip, which must not reopen the preview it just closed.
+    if (details.reason === "escape-key") suppressFocusOpenRef.current = true;
+    setIsPreviewOpen(false);
+  };
+  const openFromFocus = () => {
+    if (suppressFocusOpenRef.current) {
+      suppressFocusOpenRef.current = false;
+      return;
+    }
+    setIsPreviewOpen(true);
+  };
+  const allowFocusOpen = () => {
+    suppressFocusOpenRef.current = false;
+  };
+  return { isPreviewOpen, handleOpenChange, openFromFocus, allowFocusOpen };
+}
+
 /** Props for the shared comment-attachment chrome: pill plus hover preview. */
 export interface ComposerCommentAttachmentShellProps {
   /** Pill text, e.g. "2 annotations" or "1 comment". */
@@ -392,17 +424,9 @@ export function ComposerCommentAttachmentShell({
   onRemove,
   children,
 }: ComposerCommentAttachmentShellProps) {
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const previewId = useId();
   const previewRef = useRef<HTMLDivElement>(null);
-  const handleOpenChange = (open: boolean, details: PopoverRootChangeEventDetails) => {
-    // The preview holds card actions and editors. Leaving it with the pointer must not drop
-    // a card the user is working in, and a dirty editor's first outside press only warns.
-    const keepsFocus = previewRef.current?.contains(document.activeElement) ?? false;
-    if (!open && details.reason === "trigger-hover" && keepsFocus) return;
-    if (!open && details.reason === "outside-press" && details.event.defaultPrevented) return;
-    setIsPreviewOpen(open);
-  };
+  const { isPreviewOpen, handleOpenChange, openFromFocus, allowFocusOpen } = usePreviewOpenState(previewRef);
 
   return (
     <section
@@ -419,7 +443,8 @@ export function ComposerCommentAttachmentShell({
             closeDelay={100}
             aria-label={`${label}. Preview available.`}
             aria-controls={previewId}
-            onFocus={() => setIsPreviewOpen(true)}
+            onFocus={openFromFocus}
+            onBlur={allowFocusOpen}
             render={
               <Button
                 type="button"

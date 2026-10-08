@@ -336,6 +336,45 @@ describe("SelectedTextCommentsComposerAttachment", () => {
     expect(screen.queryByRole("button", { name: "Edit comment 1" })).toBeNull();
   });
 
+  it("keeps a dirty card editor open when the first outside press only warns", async () => {
+    const user = userEvent.setup();
+    const editor = {
+      source: comments[0]!.source,
+      commentId: comments[0]!.id,
+      note: "Unsaved edit",
+      mentions: [],
+      escapeWarned: false,
+      outsideWarned: false,
+      anchor: "card" as const,
+    };
+    const { onEditorChange } = renderAttachment({ comments: [comments[0]!], editor });
+
+    await user.hover(screen.getByRole("button", { name: "1 annotation. Preview available." }));
+    const note = await screen.findByRole("textbox", { name: "Comment note" });
+
+    await user.click(document.body);
+
+    expect(onEditorChange).toHaveBeenLastCalledWith(expect.objectContaining({ outsideWarned: true }));
+    expect(screen.getByTestId("selected-text-comment-preview")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Comment note" })).toBe(note);
+  });
+
+  it("stays closed after Escape returns focus to the chip", async () => {
+    const user = userEvent.setup();
+    renderAttachment({ comments: [comments[0]!] });
+
+    await user.tab();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Open source for comment 1" })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    const chip = screen.getByRole("button", { name: "1 annotation. Preview available." });
+    await waitFor(() => expect(chip).toHaveFocus());
+    await waitFor(() => expect(screen.queryByTestId("selected-text-comment-preview")).toBeNull());
+    expect(chip).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("returns focus to an unavailable source card after its editor closes", async () => {
     const editor = {
       source: comments[0]!.source,
