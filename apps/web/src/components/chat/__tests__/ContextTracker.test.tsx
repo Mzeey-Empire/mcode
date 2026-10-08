@@ -29,7 +29,7 @@ describe("ContextTracker", () => {
 
   it.each([
     { name: "normal", tokensIn: 69, ringClass: "stroke-primary", barClass: "bg-primary" },
-    { name: "warning", tokensIn: 70, ringClass: "stroke-amber-500", barClass: "bg-amber-500" },
+    { name: "warning", tokensIn: 70, ringClass: "stroke-warning", barClass: "bg-warning" },
     { name: "critical", tokensIn: 90, ringClass: "stroke-destructive", barClass: "bg-destructive" },
   ])("uses the $name color tier for the ring and usage bar", async ({ tokensIn, ringClass, barClass }) => {
     const user = userEvent.setup();

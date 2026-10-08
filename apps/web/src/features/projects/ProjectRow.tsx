@@ -156,7 +156,7 @@ function ProjectRowEnrichment({
         <TooltipTrigger
           render={
             <span
-              className={cn("h-1.5 w-1.5 shrink-0 rounded-full", enrichment.isClean ? "bg-green-600/70" : "bg-amber-600/70")}
+              className={cn("h-1.5 w-1.5 shrink-0 rounded-full", enrichment.isClean ? "bg-success/70" : "bg-warning/70")}
               aria-label={workingTreeLabel}
             />
           }

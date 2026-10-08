@@ -403,7 +403,7 @@ describe("ProjectAction controls", () => {
 
     render(<ProjectActionTerminalView threadId="thread-1" actionId="build" />);
 
-    expect(screen.getByText("green output")).toHaveClass("text-emerald-500");
+    expect(screen.getByText("green output")).toHaveClass("text-success");
     expect(screen.getByLabelText("Build output").textContent).not.toContain("\u001b[");
   });
 

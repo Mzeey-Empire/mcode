@@ -449,7 +449,7 @@ function BrowseResolutionWarning({
   if (loading || error || isExactDirectory !== false || isDrivesMode) return null;
 
   return (
-    <div data-testid="browse-resolution-warning" className="mx-3 mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200" role="alert">
+    <div data-testid="browse-resolution-warning" className="mx-3 mb-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning" role="alert">
       This path is not a folder. Choose a listed folder or revise the path.
     </div>
   );

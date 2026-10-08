@@ -8,7 +8,7 @@ export function ConnectionBanner() {
   if (status !== "reconnecting" && status !== "authFailed") return null;
 
   return (
-    <div className="flex items-center justify-center gap-2 bg-yellow-600/90 px-4 py-1.5 text-xs font-medium text-white">
+    <div className="flex items-center justify-center gap-2 bg-warning/15 px-4 py-1.5 text-xs font-medium text-warning">
       <Spinner size={14} className="text-current" />
       {status === "authFailed"
         ? "Re-authenticating after server restart..."

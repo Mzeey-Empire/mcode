@@ -37,7 +37,7 @@ export function getNotificationDot(
   // instead of a dot so it reads distinctly from the running-state amber dot.
   if (hasPendingPermission) {
     return {
-      dotClass: "ring-2 ring-inset ring-amber-500 bg-transparent",
+      dotClass: "ring-2 ring-inset ring-primary bg-transparent",
       animate: true,
       shape: "ring",
     };
@@ -47,11 +47,11 @@ export function getNotificationDot(
   }
   switch (thread.status) {
     case "completed":
-      return { dotClass: "bg-[var(--diff-add-strong)]/85", animate: false, shape: "solid" };
+      return { dotClass: "bg-success/85", animate: false, shape: "solid" };
     case "errored":
-      return { dotClass: "bg-[var(--diff-remove-strong)]/90", animate: false, shape: "solid" };
+      return { dotClass: "bg-error/90", animate: false, shape: "solid" };
     case "interrupted":
-      return { dotClass: "bg-amber-500/85", animate: true, shape: "solid" };
+      return { dotClass: "bg-primary", animate: true, shape: "solid" };
     default:
       return null;
   }
@@ -74,8 +74,8 @@ export function getStatusDisplay(
   if (hasPendingPermission) {
     return {
       label: "",
-      color: "text-amber-500",
-      dotClass: "ring-2 ring-inset ring-amber-500 bg-transparent status-pulse",
+      color: "text-primary",
+      dotClass: "ring-2 ring-inset ring-primary bg-transparent status-pulse",
       shape: "ring",
     };
   }
@@ -94,22 +94,22 @@ export function getStatusDisplay(
     case "errored":
       return {
         label: "Errored",
-        color: "text-[var(--diff-remove-strong)]/80",
-        dotClass: "bg-[var(--diff-remove-strong)]/85",
+        color: "text-error/80",
+        dotClass: "bg-error/85",
         shape: "solid",
       };
     case "completed":
       return {
         label: "",
-        color: "text-[var(--diff-add-strong)]/80",
-        dotClass: "bg-[var(--diff-add-strong)]/80",
+        color: "text-success/80",
+        dotClass: "bg-success/80",
         shape: "solid",
       };
     case "interrupted":
       return {
         label: "Interrupted",
-        color: "text-amber-500/90",
-        dotClass: "bg-amber-500/85 status-pulse",
+        color: "text-primary",
+        dotClass: "bg-primary status-pulse",
         shape: "solid",
       };
     default:

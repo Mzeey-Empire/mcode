@@ -487,7 +487,7 @@ function BrowserPageRailGlyph({
       <MousePointer2
         data-testid="browser-agent-control-indicator"
         size={17}
-        className="text-amber-500"
+        className="text-primary"
         aria-hidden
       />
     );

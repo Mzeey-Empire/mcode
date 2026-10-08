@@ -70,9 +70,9 @@ export function LocalPortsEmptyState({
                 <span className="flex h-9 w-12 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-background">
                   <span className="flex flex-col gap-0.5" aria-hidden>
                     <span className="flex gap-0.5">
-                      <span className="h-1 w-1 rounded-full bg-red-400/70" />
-                      <span className="h-1 w-1 rounded-full bg-amber-400/70" />
-                      <span className="h-1 w-1 rounded-full bg-emerald-400/70" />
+                      <span className="h-1 w-1 rounded-full bg-muted/70" />
+                      <span className="h-1 w-1 rounded-full bg-muted/70" />
+                      <span className="h-1 w-1 rounded-full bg-muted/70" />
                     </span>
                     <span className="h-3 w-8 rounded-[1px] bg-hover" />
                   </span>
@@ -93,7 +93,7 @@ export function LocalPortsEmptyState({
                         data-online={p.online ? "true" : "false"}
                         className={cn(
                           "size-2 shrink-0 rounded-full",
-                          p.online ? "bg-emerald-500" : "bg-muted/40",
+                          p.online ? "bg-success" : "bg-muted/40",
                         )}
                         aria-label={p.online ? "Online" : "Offline"}
                       />

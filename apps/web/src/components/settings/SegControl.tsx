@@ -55,7 +55,7 @@ export function SegControl({ options, value, onChange, className }: SegControlPr
               className={cn(
                 "inline-flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-all duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
                 isActive
-                  ? "bg-background text-ink shadow-sm"
+                  ? "bg-background text-ink"
                   : "text-muted hover:text-ink",
                 opt.disabled && "cursor-not-allowed opacity-30",
               )}

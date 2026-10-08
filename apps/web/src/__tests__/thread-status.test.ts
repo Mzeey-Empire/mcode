@@ -50,21 +50,21 @@ describe("getStatusDisplay", () => {
   it("isActuallyRunning=true returns no label and pulsing primary dot", () => {
     const result = getStatusDisplay(makeThread(), true);
     expect(result.label).toBe("");
-    expect(result.color).toContain("primary");
+    expect(result.color).toBe("text-primary/90");
     expect(result.dotClass).toContain("bg-primary");
     expect(result.dotClass).toContain("status-pulse");
   });
 
-  it("errored status returns Errored with diff-remove-strong color", () => {
+  it("errored status returns Errored with error color", () => {
     const result = getStatusDisplay(makeThread({ status: "errored" }), false);
     expect(result.label).toBe("Errored");
-    expect(result.color).toContain("--diff-remove-strong");
+    expect(result.color).toContain("error");
   });
 
-  it("completed status returns no label with diff-add-strong dot", () => {
+  it("completed status returns no label with success dot", () => {
     const result = getStatusDisplay(makeThread({ status: "completed" }), false);
     expect(result.label).toBe("");
-    expect(result.dotClass).toContain("--diff-add-strong");
+    expect(result.dotClass).toContain("success");
   });
 
   it("default status returns empty label", () => {
@@ -75,16 +75,16 @@ describe("getStatusDisplay", () => {
   it("shows amber ring with pulse when thread has a pending permission and is running", () => {
     const result = getStatusDisplay(makeThread(), true, true);
     expect(result.shape).toBe("ring");
-    expect(result.dotClass).toContain("ring-amber-500");
+    expect(result.dotClass).toContain("ring-primary");
     expect(result.dotClass).toContain("status-pulse");
     expect(result.dotClass).toContain("bg-transparent");
-    expect(result.color).toBe("text-amber-500");
+    expect(result.color).toBe("text-primary");
   });
 
   it("returns ring shape when thread has pending permission even if not running", () => {
     const result = getStatusDisplay(makeThread({ status: "active" }), false, true);
     expect(result.shape).toBe("ring");
-    expect(result.dotClass).toContain("ring-amber-500");
+    expect(result.dotClass).toContain("ring-primary");
   });
 
   it("returns solid shape when running without a pending permission", () => {
@@ -107,11 +107,11 @@ describe("getStatusDisplay", () => {
     expect(result.shape).toBe("solid");
   });
 
-  it("interrupted status returns Interrupted label and amber dot with pulse", () => {
+  it("interrupted status returns Interrupted label and primary dot with pulse", () => {
     const result = getStatusDisplay(makeThread({ status: "interrupted" }), false);
     expect(result.label).toBe("Interrupted");
-    expect(result.color).toContain("amber");
-    expect(result.dotClass).toContain("amber");
+    expect(result.color).toContain("primary");
+    expect(result.dotClass).toContain("primary");
     expect(result.dotClass).toContain("status-pulse");
     expect(result.shape).toBe("solid");
   });
@@ -131,24 +131,24 @@ describe("getNotificationDot", () => {
     expect(result!.animate).toBe(true);
   });
 
-  it("returns diff-add-strong for completed thread", () => {
+  it("returns success for completed thread", () => {
     const result = getNotificationDot(makeThread({ status: "completed" }), false);
     expect(result).not.toBeNull();
-    expect(result!.dotClass).toContain("--diff-add-strong");
+    expect(result!.dotClass).toContain("success");
     expect(result!.animate).toBe(false);
   });
 
-  it("returns diff-remove-strong for errored thread", () => {
+  it("returns error for errored thread", () => {
     const result = getNotificationDot(makeThread({ status: "errored" }), false);
     expect(result).not.toBeNull();
-    expect(result!.dotClass).toContain("--diff-remove-strong");
+    expect(result!.dotClass).toContain("error");
     expect(result!.animate).toBe(false);
   });
 
-  it("returns amber pulse for interrupted thread (including PR rows)", () => {
+  it("returns primary pulse for interrupted thread (including PR rows)", () => {
     const result = getNotificationDot(makeThread({ status: "interrupted", pr_number: 42 }), false);
     expect(result).not.toBeNull();
-    expect(result!.dotClass).toContain("amber");
+    expect(result!.dotClass).toContain("primary");
     expect(result!.animate).toBe(true);
   });
 
@@ -166,7 +166,7 @@ describe("getNotificationDot", () => {
     const result = getNotificationDot(makeThread(), true, true);
     expect(result).not.toBeNull();
     expect(result!.shape).toBe("ring");
-    expect(result!.dotClass).toContain("ring-amber-500");
+    expect(result!.dotClass).toContain("ring-primary");
     expect(result!.dotClass).toContain("bg-transparent");
     expect(result!.animate).toBe(true);
   });

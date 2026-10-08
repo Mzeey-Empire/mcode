@@ -48,7 +48,7 @@ interface ComposerOverlaySurfaceProps
 }
 
 function surfaceToneClass(tone: "default" | "dark"): string | undefined {
-  return tone === "dark" ? "border-white/10 bg-[#1e1e1e] text-neutral-100" : undefined;
+  return tone === "dark" ? "border-border bg-panel text-ink" : undefined;
 }
 
 function floatingWidth(anchorWidth: number, minWidth: number, maxWidth: number | undefined): number {

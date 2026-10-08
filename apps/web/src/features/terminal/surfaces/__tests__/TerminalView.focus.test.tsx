@@ -255,6 +255,12 @@ function makeLine(text: string): BufferLine {
 
 describe("TerminalView lifecycle (ADR-0010)", () => {
   beforeEach(() => {
+    document.documentElement.style.setProperty("--page", "oklch(95.5% 0.005 260)");
+    document.documentElement.style.setProperty("--ink", "oklch(19% 0.005 260)");
+    document.documentElement.style.setProperty("--success", "oklch(52% 0.120 145)");
+    document.documentElement.style.setProperty("--primary", "oklch(52% 0.170 75)");
+    document.documentElement.style.setProperty("--error", "oklch(52% 0.140 25)");
+    document.documentElement.style.setProperty("--link", "oklch(50% 0.160 260)");
     bufferActive.viewportY = 42;
     bufferActive.length = 100;
     term.options.disableStdin = false;
@@ -352,6 +358,19 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     await settle();
 
     expect(lastTerminalOptions).toMatchObject({
+      theme: {
+        background: "oklch(95.5% 0.005 260)",
+        foreground: "oklch(19% 0.005 260)",
+        cursor: "oklch(19% 0.005 260)",
+        green: "oklch(52% 0.120 145)",
+        brightGreen: "oklch(52% 0.120 145)",
+        yellow: "oklch(52% 0.170 75)",
+        brightYellow: "oklch(52% 0.170 75)",
+        red: "oklch(52% 0.140 25)",
+        brightRed: "oklch(52% 0.140 25)",
+        blue: "oklch(50% 0.160 260)",
+        brightBlue: "oklch(50% 0.160 260)",
+      },
       scrollback: 2500,
       fontFamily: "Test Sans",
       fontSize: 19,
