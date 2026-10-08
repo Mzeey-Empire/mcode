@@ -1,0 +1,251 @@
+{
+  "format": "plan-protocol",
+  "contractVersion": 1,
+  "providerId": "claude",
+  "cliVersion": "2.1.293",
+  "protocolVersion": "claude-sdk-unversioned",
+  "sdk": {
+    "name": "@anthropic-ai/claude-agent-sdk",
+    "version": "0.3.291"
+  },
+  "provenance": "captured",
+  "scenario": "fence",
+  "sourceHash": "e509a7e1f05b080a3e491c205c10069259d4c55f2e053c4260dbe3dd73633773",
+  "redaction": {
+    "reviewed": true,
+    "removedFields": [
+      "private-text",
+      "credentials",
+      "native-identifiers",
+      "machine-paths",
+      "unlisted-fields"
+    ]
+  },
+  "input": {
+    "messages": [
+      {
+        "sequence": 1,
+        "operation": "sdk/query",
+        "direction": "sent",
+        "fields": [
+          {
+            "at": "permissionMode",
+            "kind": "literal",
+            "value": "plan"
+          },
+          {
+            "at": "persistSession",
+            "kind": "literal",
+            "value": false
+          },
+          {
+            "at": "plansDirectory",
+            "kind": "path",
+            "value": "{providerHome}/ID_1"
+          }
+        ],
+        "kind": "request",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 2,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "system"
+          },
+          {
+            "at": "subtype",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 3,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "rate_limit_event"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 4,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "system"
+          },
+          {
+            "at": "subtype",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 5,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "message.content.0.type",
+            "kind": "literal",
+            "value": "thinking"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 6,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "assistant"
+          },
+          {
+            "at": "message.content.0.text",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "message.content.0.type",
+            "kind": "literal",
+            "value": "text"
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 7,
+        "operation": "sdk/message",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "type",
+            "kind": "literal",
+            "value": "result"
+          },
+          {
+            "at": "subtype",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "result",
+            "kind": "shape",
+            "jsonType": "string"
+          },
+          {
+            "at": "session_id",
+            "kind": "identity",
+            "jsonType": "string",
+            "alias": "ID_3"
+          },
+          {
+            "at": "is_error",
+            "kind": "literal",
+            "value": false
+          }
+        ],
+        "kind": "event"
+      },
+      {
+        "sequence": 8,
+        "operation": "sdk/query",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "completed",
+            "kind": "literal",
+            "value": true
+          }
+        ],
+        "kind": "reply",
+        "exchange": "ID_2"
+      },
+      {
+        "sequence": 9,
+        "operation": "probe/fence",
+        "direction": "received",
+        "fields": [
+          {
+            "at": "exact",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "openerExact",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "nestedFenceIntact",
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "at": "closerExact",
+            "kind": "literal",
+            "value": true
+          }
+        ],
+        "kind": "event"
+      }
+    ],
+    "end": {
+      "kind": "completed"
+    }
+  }
+}
