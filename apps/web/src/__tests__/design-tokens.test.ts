@@ -152,6 +152,14 @@ describe("design tokens match the Paper export", () => {
     expect(theme.get(`--text-${role}--font-weight`)).toBe(paper(`--weight-${role}`));
   });
 
+  it("gives the type-link utility Paper's link size, line height and weight", () => {
+    const body = /^@utility type-link \{\r?\n([\s\S]*?)^\}/m.exec(indexCss)?.[1] ?? "";
+    const declarations = new Map([...body.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [name!, value!.trim()]));
+    expect(toPx(declarations.get("font-size")!)).toBe(toPx(paper("--text-link")));
+    expect(toPx(declarations.get("line-height")!)).toBe(toPx(paper("--leading-link")));
+    expect(declarations.get("font-weight")).toBe(paper("--weight-link"));
+  });
+
   it("uses Paper's body and body-small line heights for text-base and text-sm", () => {
     expect([toPx(theme.get("--text-sm")!), toPx(theme.get("--text-sm--line-height")!)]).toEqual([14, 20]);
     expect([toPx(theme.get("--text-base")!), toPx(theme.get("--text-base--line-height")!)]).toEqual([16, 24]);
@@ -164,7 +172,9 @@ describe("design tokens match the Paper export", () => {
     for (const size of SIZE_TOKENS) {
       expect(toPx(theme.get(`--spacing-${size}`)!), size).toBe(toPx(paper(`--size-${size}`)));
     }
-    expect(toPx(theme.get("--spacing-text-fade")!)).toBe(toPx(paper("--spacing-text-fade")));
+    for (const spacing of ["compact-row", "group", "task-stage", "workspace", "text-fade"]) {
+      expect(toPx(theme.get(`--spacing-${spacing}`)!), spacing).toBe(toPx(paper(`--spacing-${spacing}`)));
+    }
     for (const container of ["sidebar", "right-rail", "right-rail-expanded"]) {
       expect(toPx(theme.get(`--container-${container}`)!), container).toBe(toPx(paper(`--container-${container}`)));
     }

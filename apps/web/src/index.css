@@ -265,8 +265,7 @@
   --text-4xl--line-height: 4.8rem;
   --text-5xl: 4.8rem;
   --text-5xl--line-height: 5.6rem;
-  /* Paper type roles. Paper's link role (16/24/500) has no entry: `text-link`
-     already resolves to the link colour, and Tailwind lets the colour win. */
+  /* Paper type roles. The link role is the `type-link` utility below. */
   --text-body: 1.6rem;
   --text-body--line-height: 2.4rem;
   --text-body--font-weight: 400;
@@ -332,6 +331,10 @@
   --radius-control: 1rem;
   --radius-composer: 1.4rem;
   --radius-dialog: 1.8rem;
+  --spacing-compact-row: 0.8rem;
+  --spacing-group: 1.6rem;
+  --spacing-task-stage: 3.2rem;
+  --spacing-workspace: 3.2rem;
   --spacing-text-fade: 2.4rem;
   --spacing-control-compact: 3.2rem;
   --spacing-control-default: 4rem;
@@ -352,6 +355,14 @@
   --shadow-popover: var(--elevation-popover);
   --shadow-floating: var(--elevation-floating);
   --shadow-dialog: var(--elevation-dialog);
+}
+
+/* Paper's link type role. It cannot be `text-link`: Tailwind resolves that to
+   the link colour and ignores a `--text-link` font size. */
+@utility type-link {
+  font-size: 1.6rem;
+  line-height: 2.4rem;
+  font-weight: 500;
 }
 
 @utility font-code {

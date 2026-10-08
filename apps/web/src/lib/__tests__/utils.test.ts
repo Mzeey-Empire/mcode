@@ -10,6 +10,10 @@ describe("cn", () => {
     expect(cn("text-sm text-foreground", "text-body-small")).toBe("text-foreground text-body-small");
   });
 
+  it("lets type-link replace an earlier font size and keep the link colour", () => {
+    expect(cn("text-sm text-link", "type-link")).toBe("text-link type-link");
+  });
+
   it("treats font-code as a font family", () => {
     expect(cn("font-mono", "font-code")).toBe("font-code");
   });
