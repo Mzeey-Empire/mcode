@@ -91,9 +91,7 @@ export function beginDraftSubmission(
       const found = await findServerMessages(threadId, [messageId]);
       if (!found) {
         inFlightMessageIds.delete(messageId);
-        for (const delay of CONFIRMATION_RETRY_DELAYS_MS) {
-          setTimeout(() => void reconcileOrphanedDraftSubmissions(threadId), delay);
-        }
+        retryReconcileLater(threadId, 0);
         return;
       }
       settle(threadId, messageId, found.has(messageId) ? "success" : "failure");
@@ -105,17 +103,26 @@ export function beginDraftSubmission(
  * Settles submissions left pending by an earlier session. A thread holding
  * the message means it was admitted; otherwise every element returns.
  */
-export async function reconcileOrphanedDraftSubmissions(threadId: string): Promise<void> {
+export async function reconcileOrphanedDraftSubmissions(threadId: string, attempt = 0): Promise<void> {
   const orphaned = (useComposerDraftStore.getState().drafts[threadId]?.submissions ?? [])
     .map((submission) => submission.messageId)
     .filter((messageId) => !inFlightMessageIds.has(messageId));
   if (orphaned.length === 0) return;
   const found = await findServerMessages(threadId, orphaned);
-  // Unreachable server: keep the submissions pending rather than guess.
-  if (!found) return;
+  // Unreachable server: keep the submissions pending rather than guess, and look again later.
+  if (!found) {
+    retryReconcileLater(threadId, attempt);
+    return;
+  }
   useComposerDraftStore.getState().updateNextMessage(threadId, (draft) => reconcilePendingSubmissions(
     draft,
     (messageId) => !orphaned.includes(messageId),
     (messageId) => found.has(messageId),
   ));
+}
+
+function retryReconcileLater(threadId: string, attempt: number): void {
+  const delay = CONFIRMATION_RETRY_DELAYS_MS[attempt];
+  if (delay === undefined) return;
+  setTimeout(() => void reconcileOrphanedDraftSubmissions(threadId, attempt + 1), delay);
 }

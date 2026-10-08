@@ -220,10 +220,13 @@ describe("draft submission lifecycle", () => {
   });
 
   it("keeps the submission pending when a failed Send cannot be confirmed, then settles it after reconnect", async () => {
+    vi.useFakeTimers();
     const handle = startSend();
     getMessages.mockRejectedValueOnce(new Error("socket closed"));
 
     await handle.failed();
+    vi.clearAllTimers();
+    vi.useRealTimers();
 
     expect(pendingComments()).toEqual([]);
     expect(useComposerDraftStore.getState().drafts[THREAD_ID]?.submissions).toHaveLength(1);
@@ -236,9 +239,13 @@ describe("draft submission lifecycle", () => {
 
   /** Leaves a pending submission no live Send owns, as a restart does. */
   async function orphanSend(): Promise<void> {
+    vi.useFakeTimers();
     const handle = startSend();
     getMessages.mockRejectedValueOnce(new Error("offline"));
     await handle.failed();
+    // Drop the scheduled confirmation retries; each test drives reconcile itself.
+    vi.clearAllTimers();
+    vi.useRealTimers();
     getMessages.mockReset();
   }
 
@@ -269,6 +276,22 @@ describe("draft submission lifecycle", () => {
       const handle = startSend();
       getMessages.mockRejectedValueOnce(new Error("timeout"));
       await handle.failed();
+      getMessages.mockResolvedValueOnce({ messages: [message(MESSAGE_ID, 9)], hasMore: false });
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(useComposerDraftStore.getState().drafts[THREAD_ID]).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a restored submission whose first confirmation read fails", async () => {
+    await orphanSend();
+    vi.useFakeTimers();
+    try {
+      getMessages.mockRejectedValueOnce(new Error("timeout"));
+      await reconcileOrphanedDraftSubmissions(THREAD_ID);
       getMessages.mockResolvedValueOnce({ messages: [message(MESSAGE_ID, 9)], hasMore: false });
 
       await vi.advanceTimersByTimeAsync(5_000);
