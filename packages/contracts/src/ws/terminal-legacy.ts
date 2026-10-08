@@ -26,7 +26,7 @@ export type LegacyTerminalCreateResult = Omit<LegacyTerminalRecord, "threadId" |
 /** Version 0 Terminal RPC definitions with additive record metadata. */
 export const LegacyTerminalMethods = lazySchema(() => ({
   "terminal.create": {
-    params: z.object({ threadId: z.string() }),
+    params: z.object({ threadId: z.string(), replacesPtyId: z.string().optional() }),
     result: z.object({ ptyId: z.string(), ...terminalMetadata(), shell: z.string().max(64) }),
   },
   "terminal.write": {

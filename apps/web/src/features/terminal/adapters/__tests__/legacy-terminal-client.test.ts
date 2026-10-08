@@ -40,20 +40,21 @@ describe("LegacyTerminalClient", () => {
     await expect(new LegacyTerminalClient(rpc).listActive()).rejects.toThrow();
   });
 
-  it("frees the exited record before requesting its replacement", async () => {
+  it("requests a replacement before closing the exited record for older servers", async () => {
     const rpc = vi.fn<TerminalRpcCall>()
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce({ ptyId: "new", shell: "pwsh", cwd: "/repo" });
+      .mockResolvedValueOnce({ ptyId: "new", shell: "pwsh", cwd: "/repo" })
+      .mockResolvedValueOnce(undefined);
     await expect(new LegacyTerminalClient(rpc).create("thread", "old")).resolves.toEqual({ ptyId: "new", shell: "pwsh", cwd: "/repo" });
     expect(rpc.mock.calls).toEqual([
-      ["terminal.kill", { ptyId: "old" }], ["terminal.create", { threadId: "thread" }],
+      ["terminal.create", { threadId: "thread", replacesPtyId: "old" }],
+      ["terminal.kill", { ptyId: "old" }],
     ]);
   });
 
-  it("does not create a replacement if closing the old record fails", async () => {
-    const rpc = vi.fn<TerminalRpcCall>().mockRejectedValue(new Error("close failed"));
+  it("does not close the old record if creating its replacement fails", async () => {
+    const rpc = vi.fn<TerminalRpcCall>().mockRejectedValue(new Error("create failed"));
     await expect(new LegacyTerminalClient(rpc).create("thread", "old")).rejects.toThrow();
-    expect(rpc.mock.calls).toEqual([["terminal.kill", { ptyId: "old" }]]);
+    expect(rpc.mock.calls).toEqual([["terminal.create", { threadId: "thread", replacesPtyId: "old" }]]);
   });
 
   it("accepts additive create metadata but rejects an invalid state", async () => {

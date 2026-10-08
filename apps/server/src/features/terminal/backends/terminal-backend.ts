@@ -95,7 +95,7 @@ export interface PreparedTerminalCommandRequest {
 export abstract class TerminalBackend {
   abstract capabilities(): TerminalBackendCapabilities;
   abstract setSender(sender: TerminalBackendSender): void;
-  abstract create(scopeId: string): Promise<LegacyTerminalCreateResult>;
+  abstract create(scopeId: string, replacesPtyId?: string): Promise<LegacyTerminalCreateResult>;
   abstract pause(ptyId: string): void;
   abstract resume(ptyId: string): void;
   abstract onBufferedAmountTick(bufferedAmount: number): void;

@@ -210,6 +210,98 @@ describe("TerminalService host ownership", () => {
     }
   });
 
+  it("keeps a retried first shell before the second shell in the server listing", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-08T12:00:00.000Z"));
+      const first = await service.create(scope, launch);
+      vi.setSystemTime(new Date("2026-10-08T12:01:00.000Z"));
+      const second = await service.create(scope, launch);
+      host.emitExit(first.ptyId, 7);
+      vi.setSystemTime(new Date("2026-10-08T12:02:00.000Z"));
+      const replacement = await service.create(scope, launch, first.ptyId);
+      expect(replacement.createdAt).toBe("2026-10-08T12:00:00.000Z");
+      expect(service.listActiveSessions()).toEqual([
+        {
+          ptyId: replacement.ptyId, threadId: scope, shell: "pwsh", cwd: process.cwd(),
+          kind: "shell", state: "running", exitCode: null, createdAt: "2026-10-08T12:00:00.000Z",
+        },
+        {
+          ptyId: second.ptyId, threadId: scope, shell: "pwsh", cwd: process.cwd(),
+          kind: "shell", state: "running", exitCode: null, createdAt: "2026-10-08T12:01:00.000Z",
+        },
+      ]);
+      expect(() => service.reattach(first.ptyId, -1)).toThrow(/PTY not found/);
+      await service.kill(first.ptyId);
+      expect(service.listActiveSessions().map(({ ptyId }) => ptyId)).toEqual([replacement.ptyId, second.ptyId]);
+    } finally {
+      vi.useRealTimers();
+      await service.shutdown();
+    }
+  });
+
+  it("replaces an exited shell when all eight scope slots are occupied", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    try {
+      const first = await service.create(scope, launch);
+      await Promise.all(Array.from({ length: 7 }, () => service.create(scope, launch)));
+      host.emitExit(first.ptyId, 0);
+      const replacement = await service.create(scope, launch, first.ptyId);
+      expect(service.listActiveSessions().map(({ state }) => state)).toEqual([
+        "running", "running", "running", "running", "running", "running", "running", "running",
+      ]);
+      expect(service.listActiveSessions().map(({ ptyId }) => ptyId)).toContain(replacement.ptyId);
+      expect(() => service.reattach(first.ptyId, -1)).toThrow(/PTY not found/);
+      await expect(service.create(scope, launch)).rejects.toThrow(/Maximum PTY limit/);
+    } finally {
+      await service.shutdown();
+    }
+  });
+
+  it("ignores a running shell as a replacement without killing it", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    try {
+      const first = await service.create(scope, launch);
+      const second = await service.create(scope, launch, first.ptyId);
+      expect(service.listActiveSessions().map(({ ptyId, state }) => [ptyId, state])).toEqual([
+        [first.ptyId, "running"], [second.ptyId, "running"],
+      ]);
+      await service.write(first.ptyId, "echo still running\r");
+      await expect(service.hasChildren(first.ptyId)).resolves.toEqual({ hasChildren: false });
+    } finally {
+      await service.shutdown();
+    }
+  });
+
+  it.each(["other scope", "unknown"])("ignores an %s replacement id", async (kind) => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    const otherScope = "00000000-0000-4000-8000-000000000002";
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-08T12:00:00.000Z"));
+      const first = await service.create(otherScope, launch);
+      host.emitExit(first.ptyId, 7);
+      vi.setSystemTime(new Date("2026-10-08T12:01:00.000Z"));
+      const second = await service.create(scope, launch, kind === "other scope" ? first.ptyId : "unknown");
+      expect(second.createdAt).toBe("2026-10-08T12:01:00.000Z");
+      expect(service.listActiveSessions().map(({ ptyId, state, exitCode }) => [ptyId, state, exitCode])).toEqual([
+        [first.ptyId, "exited", 7], [second.ptyId, "running", null],
+      ]);
+    } finally {
+      vi.useRealTimers();
+      await service.shutdown();
+    }
+  });
+
   it("counts exited shells toward eight records, and close frees a slot", async () => {
     const host = new InMemoryPtyHostAdapter("1");
     const { service, launch } = createService({ host });

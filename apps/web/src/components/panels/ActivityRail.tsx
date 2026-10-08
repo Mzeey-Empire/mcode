@@ -676,7 +676,7 @@ interface ActivityRailProps {
   onClose: (instanceId: string) => void;
   onReorder: (instanceId: string, direction: -1 | 1) => void;
   onCreate: (id: RightPanelTab) => void;
-  /** Whether this scope already owns its four allowed shell sessions. */
+  /** Whether this scope has reached the eight-record terminal cap. */
   readonly terminalCapReached?: boolean;
   /** PTY-backed rail labels keyed by terminal tab identity. */
   readonly terminalLabels?: Readonly<Record<string, string>>;

@@ -45,7 +45,7 @@ export class LegacyTerminalBackend extends TerminalBackend {
   }
 
   /** Creates one legacy PTY for a thread or workspace scope. */
-  async create(scopeId: string): Promise<LegacyTerminalCreateResult> {
+  async create(scopeId: string, replacesPtyId?: string): Promise<LegacyTerminalCreateResult> {
     const thread = this.threads.findById(scopeId);
     const profile = await this.profiles.resolveLaunchProfile({
       workspaceId: thread?.workspace_id ?? scopeId,
@@ -56,7 +56,7 @@ export class LegacyTerminalBackend extends TerminalBackend {
       requestedProfileId: profile.requestedProfileId,
       resolvedProfile: profile.resolvedProfile,
       headless: false,
-    });
+    }, replacesPtyId);
   }
 
   /** Pauses legacy PTY output for a client request. */

@@ -114,10 +114,10 @@ const terminalManagementHandlers: TerminalManagementHandlers = {
 const terminalClassicHandlers: TerminalClassicHandlers = {
   "terminal.capabilities": (deps) => deps.terminalService.capabilities(),
   "terminal.create": async (deps, params) => {
-    if (!serverWorkTrace) return deps.terminalService.create(params.threadId);
+    if (!serverWorkTrace) return deps.terminalService.create(params.threadId, params.replacesPtyId);
     const started = NodePerfHooks.performance.now();
     try {
-      return await deps.terminalService.create(params.threadId);
+      return await deps.terminalService.create(params.threadId, params.replacesPtyId);
     } finally {
       serverWorkTrace.record("terminal-create", params.threadId, undefined, NodePerfHooks.performance.now() - started);
     }

@@ -147,8 +147,8 @@ export class TerminalService {
    * @param scopeId - A thread id, or a workspace id for the threadless shell.
    * @returns The unique PTY session ID.
    */
-  async create(scopeId: string, launch: LegacyTerminalLaunch): Promise<LegacyTerminalCreateResult> {
-    const { cwd } = this.preparePtyCreation(scopeId, launch);
+  async create(scopeId: string, launch: LegacyTerminalLaunch, replacesPtyId?: string): Promise<LegacyTerminalCreateResult> {
+    const { cwd, createdAt } = this.preparePtyCreation(scopeId, launch, replacesPtyId);
     const id = uuid();
     this.reserveCreation(scopeId, id);
     const shell = launch.executable;
@@ -167,7 +167,7 @@ export class TerminalService {
     this.replayBuffers.set(id, new TerminalReplayBuffer(
       replayCapBytesForScrollback(terminalSettings.behavior.scrollback),
     ));
-    const session = this.createPtySession(id, scopeId, shell, cwd, hostGeneration, launch);
+    const session = this.createPtySession(id, scopeId, shell, cwd, hostGeneration, launch, createdAt);
     this.sessions = new Map([...this.sessions, [id, session]]);
     const updatedSet = new Set(this.threadIndex.get(scopeId) ?? []);
     updatedSet.add(id);
@@ -204,17 +204,27 @@ export class TerminalService {
   private preparePtyCreation(
     scopeId: string,
     launch: LegacyTerminalLaunch,
-  ): { readonly cwd: string } {
+    replacesPtyId?: string,
+  ): { readonly cwd: string; readonly createdAt: string | undefined } {
     const cwd = this.resolveWorkingDirectory(scopeId);
     if (!NodePath.isAbsolute(cwd) || !NodeFS.existsSync(cwd) || !NodeFS.statSync(cwd).isDirectory()) {
       throw new Error(`Invalid working directory: ${cwd}`);
     }
+    const createdAt = this.removeExitedReplacement(scopeId, replacesPtyId);
     const threadPtys = this.threadIndex.get(scopeId);
     if ((threadPtys?.size ?? 0) + (this.pendingCreations.get(scopeId)?.size ?? 0) >= TERMINAL_MAX_PER_SCOPE) {
       throw new Error(`Maximum PTY limit (${TERMINAL_MAX_PER_SCOPE}) reached for scope ${scopeId}`);
     }
     this.assertHeadlessCapacity(launch);
-    return { cwd };
+    return { cwd, createdAt };
+  }
+
+  private removeExitedReplacement(scopeId: string, replacesPtyId?: string): string | undefined {
+    const session = replacesPtyId === undefined ? undefined : this.sessions.get(replacesPtyId);
+    if (!session || session.threadId !== scopeId || session.headless || session.status !== "exited") return undefined;
+    // Free the cap slot and preserve its reload order without closing a live process.
+    this.removePty(session.id);
+    return session.createdAt;
   }
 
   private assertHeadlessCapacity(launch: LegacyTerminalLaunch): void {
@@ -251,13 +261,14 @@ export class TerminalService {
     cwd: string,
     hostGeneration: string,
     launch: LegacyTerminalLaunch | undefined,
+    createdAt = new Date().toISOString(),
   ): PtySession {
     let resolveCloseBarrier!: () => void;
     const closeBarrier = new Promise<void>((resolve) => { resolveCloseBarrier = resolve; });
     return {
       id, threadId: scopeId, shell, cwd, hostGeneration,
       status: "creating",
-      createdAt: new Date().toISOString(),
+      createdAt,
       exitCode: null,
       creationPromise: Promise.resolve(true),
       closePromise: null,
@@ -629,6 +640,7 @@ export class TerminalService {
   listActiveSessions(): LegacyTerminalRecord[] {
     return [...this.sessions.values()]
       .filter((session) => !session.headless)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((session) => this.sessionRecord(session));
   }
 

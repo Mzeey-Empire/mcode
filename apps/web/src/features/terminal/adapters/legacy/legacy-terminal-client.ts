@@ -27,8 +27,12 @@ export class LegacyTerminalClient implements TerminalClient {
 
   /** Creates one legacy PTY. */
   async create(threadId: string, replacesSessionId?: string): Promise<LegacyTerminalCreateResult> {
+    const created = WS_METHODS()["terminal.create"].result.parse(await this.rpc("terminal.create", {
+      threadId, replacesPtyId: replacesSessionId,
+    }));
+    // Older servers ignore replacesPtyId and still need the exited record removed.
     if (replacesSessionId) await this.kill(replacesSessionId);
-    return WS_METHODS()["terminal.create"].result.parse(await this.rpc("terminal.create", { threadId }));
+    return created;
   }
 
   /** Writes input to one legacy PTY. */
