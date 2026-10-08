@@ -2102,7 +2102,10 @@ describe("AgentService Ended finalization", () => {
         terminalOutcome: "interrupted",
       });
     });
-    expect(threadRepo.findById(thread.id)?.status).toBe("interrupted");
+    // The thread row is written after the checkpoint, so a slow runner can still read "active" here.
+    await vi.waitFor(() => {
+      expect(threadRepo.findById(thread.id)?.status).toBe("interrupted");
+    });
     expect(broadcast).toHaveBeenCalledWith("thread.status", {
       threadId: thread.id,
       status: "interrupted",
