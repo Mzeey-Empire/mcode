@@ -5,7 +5,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { DraftDiffComment, MessageMention } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
 import { basename } from "@/lib/path";
-import { canSaveSelectedTextComment } from "@/features/conversation/messages/selection/comment-editor-model";
 import {
   CommentEditorComposer,
   CommentEditorControls,
@@ -13,6 +12,7 @@ import {
 } from "@/features/conversation/messages/selection/comment-editor-primitives";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import {
+  canSaveDiffComment,
   deleteDraftDiffComment,
   saveDraftDiffComment,
   setDraftDiffCommentEditor,
@@ -88,7 +88,7 @@ export function DiffCommentEditor({
   const initialMentions = useRef(mentions).current;
 
   const isDirty = isEdited(note, mentions, annotation);
-  const canSave = canSaveSelectedTextComment(note, mentions);
+  const canSave = canSaveDiffComment(note, mentions);
 
   const { isShaking, resetWarnings } = useCommentDismissal({
     rootRef,

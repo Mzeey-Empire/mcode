@@ -937,6 +937,45 @@ describe("Composer checkout confirmation", () => {
     expect(usePreviewDesignModeStore.getState().modes[thread.id]).toBe(false);
   });
 
+  it("says a draft was not saved while storage is full and keeps the composer working", async () => {
+    const workspace = createMockWorkspace({ id: "ws-1", is_git_repo: true });
+    const thread = createMockThread({ id: "thread-quota", workspace_id: "ws-1" });
+    useWorkspaceStore.setState({
+      workspaces: [workspace],
+      activeWorkspaceId: workspace.id,
+      threads: [thread],
+      activeThreadId: thread.id,
+      branches: [branch("main", true)],
+      newThreadMode: "direct",
+      newThreadBranch: "main",
+      selectedWorktree: null,
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    render(<Composer threadId={thread.id} workspaceId="ws-1" />);
+
+    act(() => {
+      useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
+        ...draft,
+        diffComments: [makeDraftDiffComment()],
+      }));
+    });
+
+    expect(await screen.findByText("Draft not saved · Storage is full")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Message Mcode"), "Still typing");
+    expect(lastComposerText).toBe("Still typing");
+
+    setItem.mockRestore();
+    act(() => {
+      useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({ ...draft, diffComments: [] }));
+    });
+
+    await waitFor(() => expect(screen.queryByText("Draft not saved · Storage is full")).not.toBeInTheDocument());
+  });
+
   it("restores the draft when existing-thread transport fails", async () => {
     const workspace = createMockWorkspace({ id: "ws-1", is_git_repo: true });
     const thread = createMockThread({ id: "thread-restore-draft", workspace_id: "ws-1" });

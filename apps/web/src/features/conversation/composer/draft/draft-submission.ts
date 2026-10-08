@@ -18,6 +18,8 @@ export interface NextMessageDraft {
   readonly planCommentSelection?: PlanCommentSelection;
   /** Sends whose admission has not settled. */
   readonly submissions?: readonly DraftSubmission[];
+  /** Open Review comment editor; only which comment it edits matters here. */
+  readonly diffCommentEditor?: { readonly annotationId?: string };
 }
 
 /** Line target of a Review comment. */
@@ -164,6 +166,17 @@ function settleSuccessfulPlanSelection(
   };
 }
 
+/** An unsaved edit of a comment that was just sent keeps its text as a new comment. */
+function keepEditorOfSentComment<E extends { readonly annotationId?: string }>(
+  editor: E | undefined,
+  remaining: readonly DraftDiffComment[],
+): E | undefined {
+  if (editor?.annotationId === undefined) return editor;
+  return remaining.some((comment) => comment.id === editor.annotationId)
+    ? editor
+    : { ...editor, annotationId: undefined };
+}
+
 /**
  * Settles one Send. Success deletes each submitted element still at its
  * submitted revision and keeps newer revisions. Failure only drops the
@@ -183,11 +196,13 @@ export function settleDraftSubmission<T extends NextMessageDraft>(
       .filter((element) => element.field === "diffComments")
       .map((element) => `${element.id}:${element.revision}`),
   );
+  const diffComments = (draft.diffComments ?? []).filter(
+    (comment) => !sent.has(`${comment.id}:${comment.revision}`),
+  );
   return {
     ...draft,
-    diffComments: (draft.diffComments ?? []).filter(
-      (comment) => !sent.has(`${comment.id}:${comment.revision}`),
-    ),
+    diffComments,
+    diffCommentEditor: keepEditorOfSentComment(draft.diffCommentEditor, diffComments),
     planCommentSelection: settleSuccessfulPlanSelection(draft.planCommentSelection, submission),
     submissions,
   };

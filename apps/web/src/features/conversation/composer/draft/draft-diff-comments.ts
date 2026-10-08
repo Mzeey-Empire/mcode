@@ -1,5 +1,13 @@
 import { useMemo } from "react";
-import type { DiffAnnotationPayload, DraftDiffComment } from "@mcode/contracts";
+import { useShallow } from "zustand/shallow";
+import {
+  MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS,
+  type DiffAnnotationPayload,
+  type DraftDiffComment,
+  type MessageMention,
+} from "@mcode/contracts";
+import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
+import { canSaveSelectedTextComment } from "@/features/conversation/messages/selection/comment-editor-model";
 import {
   useComposerDraftStore,
   type ComposerDraft,
@@ -32,15 +40,47 @@ export function readVisibleDiffComments(threadId: string): DraftDiffComment[] {
   return draft ? visibleDiffComments(draft) : [];
 }
 
-/** Subscribes to the visible Review comments of one thread. */
-export function useVisibleDiffComments(threadId: string | undefined): readonly DraftDiffComment[] {
-  const draft = useComposerDraftStore((state) => (threadId ? state.drafts[threadId] : undefined));
-  return useMemo(() => (draft ? visibleDiffComments(draft) : EMPTY_COMMENTS), [draft]);
+/**
+ * True when a Review comment fits the payload budget. Mirrors
+ * `DiffAnnotationPayloadSchema`, which counts the note plus its serialized
+ * mentions, so the editor never saves a comment that would fail at Send.
+ */
+export function canSaveDiffComment(note: string, mentions: readonly MessageMention[]): boolean {
+  return canSaveSelectedTextComment(note, mentions)
+    && note.length + JSON.stringify(mentions).length <= MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS;
 }
 
-/** Subscribes to the open Review comment editor of one thread. */
-export function useDiffCommentEditor(threadId: string | undefined): DiffCommentEditorDraft | undefined {
-  return useComposerDraftStore((state) => (threadId ? state.drafts[threadId]?.diffCommentEditor : undefined));
+/**
+ * Subscribes to a thread's visible Review comments, numbered after its
+ * Browser annotations. Selects only the comment and submission fields, so
+ * typing in the open editor does not re-render the diff.
+ */
+export function useNumberedDiffComments(threadId: string | undefined): readonly DraftDiffComment[] {
+  const comments = useComposerDraftStore((state) => (threadId ? state.drafts[threadId]?.diffComments : undefined));
+  const submissions = useComposerDraftStore((state) => (threadId ? state.drafts[threadId]?.submissions : undefined));
+  const previewCount = usePreviewAnnotationStore((state) => (threadId ? state.byThread[threadId]?.length ?? 0 : 0));
+  return useMemo(() => {
+    if (!comments?.length) return EMPTY_COMMENTS;
+    return numberDiffComments(visibleDiffComments({ diffComments: comments, submissions }), previewCount);
+  }, [comments, previewCount, submissions]);
+}
+
+/** Where the open Review comment editor sits, without its text. */
+export type DiffCommentEditorAnchor =
+  | ({ readonly kind: "draft" } & DiffCommentTarget)
+  | { readonly kind: "edit"; readonly annotationId: string };
+
+/** Subscribes to the open editor's anchor, which keystrokes leave unchanged. */
+export function useDiffCommentEditorAnchor(threadId: string | undefined): DiffCommentEditorAnchor | undefined {
+  const [annotationId, filePath, side, line, lineContent] = useComposerDraftStore(useShallow((state) => {
+    const editor = threadId ? state.drafts[threadId]?.diffCommentEditor : undefined;
+    return [editor?.annotationId, editor?.target.filePath, editor?.target.side, editor?.target.line, editor?.target.lineContent] as const;
+  }));
+  return useMemo(() => {
+    if (annotationId) return { kind: "edit", annotationId };
+    if (filePath === undefined || side === undefined || line === undefined || lineContent === undefined) return undefined;
+    return { kind: "draft", filePath, side, line, lineContent };
+  }, [annotationId, filePath, line, lineContent, side]);
 }
 
 function updateThread(threadId: string, update: (draft: ComposerDraft) => ComposerDraft): void {
@@ -55,7 +95,8 @@ export function saveDraftDiffComment(
   annotationId?: string,
 ): void {
   updateThread(threadId, (draft) => ({
-    ...saveDiffComment(draft, target, { note: content.note.trim(), mentions: content.mentions }, annotationId),
+    // Stored as typed: trimming would shift every mention range.
+    ...saveDiffComment(draft, target, content, annotationId),
     diffCommentEditor: undefined,
   }));
 }

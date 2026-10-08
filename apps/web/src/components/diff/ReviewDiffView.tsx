@@ -16,10 +16,9 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   editDraftDiffComment,
   setDraftDiffCommentEditor,
-  useDiffCommentEditor,
-  useVisibleDiffComments,
+  useDiffCommentEditorAnchor,
+  useNumberedDiffComments,
 } from "@/features/conversation/composer/draft/draft-diff-comments";
-import type { DiffCommentTarget } from "@/features/conversation/composer/draft/draft-submission";
 import type { ReviewFileChange } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { loadFileDiff } from "@/lib/load-file-diff";
@@ -281,9 +280,8 @@ export function ReviewDiffView({
     () => new Set((bulkDiffExpand?.expand ?? defaultFilesExpanded) ? files.map((f) => f.path) : []),
   );
   const [previewPaths, setPreviewPaths] = useState<ReadonlySet<string>>(new Set());
-  const savedAnnotations = useVisibleDiffComments(threadId);
-  const commentEditor = useDiffCommentEditor(threadId);
-  const editTarget = useMemo(() => toEditTarget(commentEditor), [commentEditor]);
+  const savedAnnotations = useNumberedDiffComments(threadId);
+  const editTarget = useDiffCommentEditorAnchor(threadId);
 
   const basePath = useWorkspaceStore((s) => {
     const thread = s.threads.find((t) => t.id === threadId);
@@ -697,18 +695,6 @@ function DiffStatusRow({ status }: { readonly status: "loading" | "empty" | "bin
       {status === "binary" ? "Binary file changed" : "No diff content"}
     </p>
   );
-}
-
-/** Line a new comment is being drafted on, or the saved comment being edited. */
-type CommentEditTarget =
-  | ({ readonly kind: "draft" } & DiffCommentTarget)
-  | { readonly kind: "edit"; readonly annotationId: string };
-
-function toEditTarget(editor: ReturnType<typeof useDiffCommentEditor>): CommentEditTarget | undefined {
-  if (!editor) return undefined;
-  return editor.annotationId
-    ? { kind: "edit", annotationId: editor.annotationId }
-    : { kind: "draft", ...editor.target };
 }
 
 /** Saved comment chip; click to swap it for the inline editor. */

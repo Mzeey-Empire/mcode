@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import type { MessageMention, PlanCommentSelection } from "@mcode/contracts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Message, MessageMention, PlanCommentSelection } from "@mcode/contracts";
+import { getTransport } from "@/transport";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
+import { saveDraftDiffComment, setDraftDiffCommentEditor } from "./draft-diff-comments";
+import { beginDraftSubmission, reconcileOrphanedDraftSubmissions } from "./draft-submission-lifecycle";
 import {
   freezeDraftSubmission,
   readSendableDraftContent,
@@ -10,6 +14,8 @@ import {
   visibleDiffComments,
   type NextMessageDraft,
 } from "./draft-submission";
+
+vi.mock("@/transport", () => ({ getTransport: vi.fn() }));
 
 const MESSAGE_ID = "11111111-1111-4111-8111-111111111111";
 const target = { filePath: "src/state.ts", side: "right" as const, line: 11, lineContent: "const state = next;" };
@@ -167,5 +173,97 @@ describe("plan-comment selection", () => {
     const comments = ["a", "b", "c"].map((id) => ({ id, open: true }));
 
     expect(reconcilePlanCommentSelection(selection, comments)).toBe(selection);
+  });
+});
+
+describe("settling with an open editor", () => {
+  it("keeps an unsaved edit of a sent comment as a new comment", () => {
+    const sent = send(draftWithComments("sent"));
+    const id = sent.draft.diffComments![0]!.id;
+    const editing = { ...sent.draft, diffCommentEditor: { annotationId: id, note: "unsaved edit" } };
+
+    const settled = settleDraftSubmission(editing, MESSAGE_ID, "success");
+
+    expect(settled.diffComments).toEqual([]);
+    expect(settled.diffCommentEditor).toEqual({ annotationId: undefined, note: "unsaved edit" });
+  });
+});
+
+describe("draft submission lifecycle", () => {
+  const THREAD_ID = "thread-lifecycle";
+  const getMessages = vi.fn();
+
+  function message(id: string, sequence: number): Message {
+    return { id, sequence } as Message;
+  }
+
+  function pendingComments(): string[] {
+    const draft = useComposerDraftStore.getState().drafts[THREAD_ID];
+    return visibleDiffComments(draft ?? {}).map((comment) => comment.note);
+  }
+
+  function startSend(messageId = MESSAGE_ID) {
+    saveDraftDiffComment(THREAD_ID, target, { note: "review note", mentions: [] });
+    const comments = useComposerDraftStore.getState().drafts[THREAD_ID]!.diffComments!;
+    return beginDraftSubmission(THREAD_ID, comments, messageId)!;
+  }
+
+  beforeEach(() => {
+    useComposerDraftStore.setState({ drafts: {} });
+    getMessages.mockReset();
+    vi.mocked(getTransport).mockReturnValue({ getMessages } as unknown as ReturnType<typeof getTransport>);
+  });
+
+  it("keeps the submission pending when a failed Send cannot be confirmed, then settles it after reconnect", async () => {
+    const handle = startSend();
+    getMessages.mockRejectedValueOnce(new Error("socket closed"));
+
+    await handle.failed();
+
+    expect(pendingComments()).toEqual([]);
+    expect(useComposerDraftStore.getState().drafts[THREAD_ID]?.submissions).toHaveLength(1);
+
+    getMessages.mockResolvedValueOnce({ messages: [message(MESSAGE_ID, 7)], hasMore: false });
+    await reconcileOrphanedDraftSubmissions(THREAD_ID);
+
+    expect(useComposerDraftStore.getState().drafts[THREAD_ID]).toBeUndefined();
+  });
+
+  /** Leaves a pending submission no live Send owns, as a restart does. */
+  async function orphanSend(): Promise<void> {
+    const handle = startSend();
+    getMessages.mockRejectedValueOnce(new Error("offline"));
+    await handle.failed();
+    getMessages.mockReset();
+  }
+
+  it("pages back through history before deciding a restarted Send was lost", async () => {
+    await orphanSend();
+    getMessages
+      .mockResolvedValueOnce({ messages: [message("newer-a", 200), message("newer-b", 201)], hasMore: true })
+      .mockResolvedValueOnce({ messages: [message(MESSAGE_ID, 120)], hasMore: true });
+
+    await reconcileOrphanedDraftSubmissions(THREAD_ID);
+
+    expect(getMessages).toHaveBeenNthCalledWith(2, THREAD_ID, 100, 200);
+    expect(useComposerDraftStore.getState().drafts[THREAD_ID]).toBeUndefined();
+  });
+
+  it("returns every element when the whole history lacks the message", async () => {
+    await orphanSend();
+    getMessages.mockResolvedValueOnce({ messages: [message("other", 3)], hasMore: false });
+
+    await reconcileOrphanedDraftSubmissions(THREAD_ID);
+
+    expect(pendingComments()).toEqual(["review note"]);
+  });
+
+  it("keeps an open editor while settling", () => {
+    const handle = startSend();
+    setDraftDiffCommentEditor(THREAD_ID, { target, note: "next thought", mentions: [] });
+
+    handle.succeeded();
+
+    expect(useComposerDraftStore.getState().drafts[THREAD_ID]?.diffCommentEditor?.note).toBe("next thought");
   });
 });

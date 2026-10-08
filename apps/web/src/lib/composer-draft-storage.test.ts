@@ -5,7 +5,7 @@ import {
   type McodeBrowserCapture,
   type MessageMention,
 } from "@mcode/contracts";
-import { draftHasNoSendableContent, type ComposerDraft } from "@/stores/composerDraftStore";
+import { draftHasNoSendableContent, useComposerDraftStore, type ComposerDraft } from "@/stores/composerDraftStore";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import {
   composerDraftStorage,
@@ -200,6 +200,25 @@ describe("composer-draft-storage", () => {
     expect(draftHasNoSendableContent({ ...empty, diffComments: [diffComment] })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, planCommentSelection: nextMessageFields.planCommentSelection })).toBe(false);
     expect(draftHasNoSendableContent({ ...empty, submissions: nextMessageFields.submissions })).toBe(false);
+  });
+});
+
+describe("persisted next-message drafts", () => {
+  it("restores a draft holding only a plan-comment selection after a reload", async () => {
+    localStorage.clear();
+    useComposerDraftStore.setState({ drafts: {} });
+    useComposerDraftStore.getState().updateNextMessage("thread-plan", (draft) => ({
+      ...draft,
+      planCommentSelection: nextMessageFields.planCommentSelection,
+    }));
+    const stored = localStorage.getItem("mcode-composer-drafts");
+    useComposerDraftStore.setState({ drafts: {} });
+    localStorage.setItem("mcode-composer-drafts", stored!);
+
+    await useComposerDraftStore.persist.rehydrate();
+
+    expect(useComposerDraftStore.getState().drafts["thread-plan"]?.planCommentSelection)
+      .toEqual(nextMessageFields.planCommentSelection);
   });
 });
 

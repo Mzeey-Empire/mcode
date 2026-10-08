@@ -1,9 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import type { ProviderId } from "@mcode/contracts";
-import { numberDiffComments, useVisibleDiffComments } from "./draft/draft-diff-comments";
+import { useNumberedDiffComments } from "./draft/draft-diff-comments";
 import { reconcileOrphanedDraftSubmissions } from "./draft/draft-submission-lifecycle";
 
 interface ComposerSurfaceStateInput {
@@ -78,15 +79,13 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
   const annotationRows = usePreviewAnnotationStore((state) =>
     annotationScopeId ? state.byThread[annotationScopeId] : undefined,
   );
-  const visibleDiffComments = useVisibleDiffComments(input.threadId);
+  const diffComments = useNumberedDiffComments(input.threadId);
   const previewAnnotationCount = annotationRows?.length ?? 0;
-  const diffComments = useMemo(
-    () => numberDiffComments(visibleDiffComments, previewAnnotationCount),
-    [previewAnnotationCount, visibleDiffComments],
-  );
+  const connected = useConnectionStore((state) => state.status === "connected");
+  // Reruns on reconnect, so a submission a dropped connection left pending settles.
   useEffect(() => {
-    if (input.threadId) void reconcileOrphanedDraftSubmissions(input.threadId);
-  }, [input.threadId]);
+    if (input.threadId && connected) void reconcileOrphanedDraftSubmissions(input.threadId);
+  }, [connected, input.threadId]);
   const annotationCount = previewAnnotationCount + diffComments.length;
   const annotationBundleForDisplay = annotationScopeId
     ? usePreviewAnnotationStore.getState().buildBundle(annotationScopeId)
