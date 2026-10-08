@@ -69,7 +69,7 @@ export function ReviewFileChangeRow({
             </span>
             <span className="min-w-0 flex-1 text-fade text-left font-mono text-xs">{name}</span>
             {file.binary ? (
-              <Badge variant="ghost" size="sm" className="max-w-20 px-1 font-mono uppercase tracking-wide">
+              <Badge variant="ghost" size="compact" className="max-w-20 px-1 font-mono uppercase tracking-wide">
                 Binary
               </Badge>
             ) : null}

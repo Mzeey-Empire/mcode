@@ -383,7 +383,7 @@ const CheckRow = memo(function CheckRow({
         {check.name}
       </span>
       {check.isRequired === true && (
-        <Badge variant="ghost" size="sm" className="text-muted">
+        <Badge variant="ghost" size="compact" className="text-muted">
           Required
         </Badge>
       )}
@@ -605,11 +605,11 @@ function ReviewThreadRow({
         <span className="text-fade font-mono text-ink/85">
           {location}
         </span>
-        <Badge variant="ghost" size="sm" className="text-muted">
+        <Badge variant="ghost" size="compact" className="text-muted">
           {item.isResolved ? "Resolved" : "Unresolved"}
         </Badge>
         {item.isOutdated && (
-          <Badge variant="ghost" size="sm" className="text-muted">
+          <Badge variant="ghost" size="compact" className="text-muted">
             Outdated
           </Badge>
         )}
@@ -836,7 +836,7 @@ function PullRequestResourceSection({
           <span>{label}</span>
           <Badge
             variant="ghost"
-            size="sm"
+            size="compact"
             className="ml-auto text-muted"
           >
             {totalCount}

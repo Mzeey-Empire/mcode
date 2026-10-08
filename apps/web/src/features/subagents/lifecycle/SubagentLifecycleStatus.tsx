@@ -27,7 +27,7 @@ export function SubagentLifecycleStatus({
   return (
     <Badge
       variant="ghost"
-      size="sm"
+      size="compact"
       data-testid="subagent-lifecycle-status"
       className={cn(
         "h-4 gap-1.5 px-0 font-mono font-normal text-muted hover:bg-transparent dark:hover:bg-transparent",

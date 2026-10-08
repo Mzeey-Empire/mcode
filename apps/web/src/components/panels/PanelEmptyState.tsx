@@ -22,7 +22,7 @@ function tabKeycap(type: PanelTabType): string | null {
 /** "Soon" tag for tab types that are not openable yet (deferred features). */
 function SoonBadge() {
   return (
-    <Badge variant="secondary" size="sm" className="uppercase tracking-wide">
+    <Badge variant="secondary" size="compact" className="uppercase tracking-wide">
       Soon
     </Badge>
   );

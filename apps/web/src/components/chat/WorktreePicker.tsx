@@ -76,7 +76,7 @@ function WorktreePickerContent({
                   <span className="max-w-1/2 shrink-0 text-fade">{worktreeBranchLabel(worktree)}</span>
                   <span aria-hidden>&middot;</span>
                   <PathText path={worktree.path} className="flex-1" />
-                  {!worktree.managed && <Badge variant="secondary" size="sm" className="shrink-0">external</Badge>}
+                  {!worktree.managed && <Badge variant="secondary" size="compact" className="shrink-0">external</Badge>}
                 </span>
               </CommandItem>
             ))}

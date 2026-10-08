@@ -145,7 +145,7 @@ function FileRow({
       )}
       <Badge
         variant="ghost"
-        size="sm"
+        size="compact"
         className="shrink-0 capitalize text-muted"
       >
         {row.file.changeType}

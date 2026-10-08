@@ -204,7 +204,7 @@ function ShellToolCallTranscript({
       )}
 
       <footer className="flex justify-end px-3 py-2">
-        <Badge variant="ghost" size="sm" className="gap-1 px-0 font-normal text-muted" role="status">
+        <Badge variant="ghost" size="compact" className="gap-1 px-0 font-normal text-muted" role="status">
           {failureLabel ? <X aria-hidden="true" /> : isRunning ? <Clock aria-hidden="true" /> : <Check aria-hidden="true" />}
           {failureLabel ?? (isRunning ? "Running" : "Success")}
         </Badge>

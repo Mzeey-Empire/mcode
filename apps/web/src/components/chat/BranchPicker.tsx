@@ -97,7 +97,7 @@ function BranchItem({ branch, selectedBranch, onSelect }: BranchItemProps) {
       )}
     >
       <span className="text-fade">{branch.name}</span>
-      {badge ? <Badge variant="secondary" size="sm" className="ml-2 shrink-0">{badge}</Badge> : null}
+      {badge ? <Badge variant="secondary" size="compact" className="ml-2 shrink-0">{badge}</Badge> : null}
     </button>
   );
 }
@@ -275,7 +275,7 @@ function BranchPickerDropdown({
               )}
             >
               {tab.label}
-              <Badge size="sm" className={cn("rounded-full", activeTab === tab.id ? "bg-primary/10 text-primary" : "bg-hover text-muted")}>
+              <Badge size="compact" className={cn("rounded-full", activeTab === tab.id ? "bg-primary/10 text-primary" : "bg-hover text-muted")}>
                 {tab.count}
               </Badge>
             </button>

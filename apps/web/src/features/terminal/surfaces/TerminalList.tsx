@@ -211,7 +211,7 @@ export const TerminalList = memo(function TerminalList({
                   {terminal.label}
                 </span>
                 {stateLabel !== "Running" ? (
-                  <Badge variant="secondary" size="sm" className="ml-auto">
+                  <Badge variant="secondary" size="compact" className="ml-auto">
                     {stateLabel}
                   </Badge>
                 ) : null}

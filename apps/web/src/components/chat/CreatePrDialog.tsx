@@ -86,7 +86,7 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
               >
                 <span className="text-fade">{b.name}</span>
                 {b.isCurrent && (
-                  <Badge variant="secondary" size="sm" className="ml-2 shrink-0">current</Badge>
+                  <Badge variant="secondary" size="compact" className="ml-2 shrink-0">current</Badge>
                 )}
               </CommandItem>
             ))}
