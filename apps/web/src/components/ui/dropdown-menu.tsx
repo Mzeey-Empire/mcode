@@ -59,7 +59,7 @@ function DropdownMenuContent({
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
           className={cn(
-            "pointer-events-auto min-w-[8rem] overflow-hidden",
+            "pointer-events-auto max-h-(--available-height) min-w-[8rem] overflow-y-auto",
             MENU_LIST_CLASS,
             POPOVER_SURFACE_CLASS,
             POPOVER_FADE_CLASS,

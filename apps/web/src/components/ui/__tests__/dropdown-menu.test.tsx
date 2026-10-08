@@ -57,6 +57,23 @@ describe("DropdownMenuItem", () => {
     expect(current.className).not.toMatch(/bg-selected/);
   });
 
+  it("keeps a checked row's trailing detail beside the check", async () => {
+    const user = userEvent.setup();
+    render(
+      <DropdownMenu>
+        <DropdownMenuTrigger>Device</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem label="iPhone 15 Pro" checked trailing="393 × 852" />
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
+    await user.click(screen.getByRole("button", { name: "Device" }));
+    const row = await screen.findByRole("menuitemradio", { name: /^iPhone 15 Pro/ });
+    expect(row).toHaveTextContent("393 × 852");
+    expect(row.querySelector("svg")).not.toBeNull();
+    expect(row.className).toContain("shrink-0");
+  });
+
   it("keeps a disabled row focusable, uninvocable, and described by its reason", async () => {
     const { user, onPick } = await openMenu();
     const commit = screen.getByRole("menuitem", { name: "Commit" });

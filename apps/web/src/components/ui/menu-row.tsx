@@ -10,7 +10,7 @@ import { FOCUS_RING_CLASS } from "./focus-ring"
  * `data-highlighted`, while the plain context menu relies on `:hover`.
  */
 export const MENU_ROW_CLASS = cn(
-  "relative flex h-row-default w-full min-w-0 cursor-pointer select-none items-center gap-2 rounded-menu px-3 text-left text-body-small text-ink outline-none",
+  "relative flex h-row-default w-full min-w-0 shrink-0 cursor-pointer select-none items-center gap-2 rounded-menu px-3 text-left text-body-small text-ink outline-none",
   FOCUS_RING_CLASS,
 )
 
@@ -33,7 +33,7 @@ export interface MenuRowContent {
   readonly shortcut?: string
   /** Status shown on the right, such as a run indicator or a "Soon" badge. */
   readonly trailing?: ReactNode
-  /** Marks the current choice with a check on the right instead of a fill. */
+  /** Marks the current choice with a check on the right, after any trailing detail, instead of a fill. */
   readonly checked?: boolean
   /** Paints the label and icon in the error colour for actions that destroy something. */
   readonly destructive?: boolean
@@ -53,9 +53,8 @@ export function MenuRowBody({
   checked,
   destructive,
 }: MenuRowContent) {
-  const trailingContent = checked
-    ? <MenuRowCheck />
-    : trailing ?? (shortcut ? <span aria-hidden className="text-caption text-muted">{shortcut}</span> : null)
+  const detail = trailing ?? (shortcut ? <span aria-hidden className="text-caption text-muted">{shortcut}</span> : null)
+  const trailingContent = checked ? <>{detail}<MenuRowCheck /></> : detail
   return (
     <>
       {icon ? (
