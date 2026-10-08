@@ -28,7 +28,7 @@ describe("task bubble lifecycle", () => {
   });
 
   it("clears settled parent tasks on new send", () => {
-    useTaskStore.getState().setTaskGroup(THREAD, "Tasks", [
+    useTaskStore.getState().setGroupTasks(THREAD, "Tasks", [
       task("done", "completed"),
       task("dropped", "cancelled"),
     ]);
@@ -39,12 +39,12 @@ describe("task bubble lifecycle", () => {
   });
 
   it("keeps unsettled old tasks until first parent-task update replaces them", () => {
-    useTaskStore.getState().setTaskGroup(THREAD, "Tasks", [task("old", "pending")]);
+    useTaskStore.getState().setGroupTasks(THREAD, "Tasks", [task("old", "pending")]);
 
     useTaskStore.getState().prepareTaskBubbleForNewTurn(THREAD);
     expect(useTaskStore.getState().taskBubbleByThread[THREAD]).toEqual([task("old", "pending")]);
 
-    useTaskStore.getState().setTaskGroup(THREAD, "Tasks", [task("new", "in_progress")]);
+    useTaskStore.getState().setGroupTasks(THREAD, "Tasks", [task("new", "in_progress")]);
 
     expect(useTaskStore.getState().taskBubbleByThread[THREAD]).toEqual([
       task("new", "in_progress"),
@@ -53,7 +53,7 @@ describe("task bubble lifecycle", () => {
   });
 
   it("clears unsettled old tasks when the new turn ends without parent-task updates", () => {
-    useTaskStore.getState().setTaskGroup(THREAD, "Tasks", [task("old", "pending")]);
+    useTaskStore.getState().setGroupTasks(THREAD, "Tasks", [task("old", "pending")]);
 
     useTaskStore.getState().prepareTaskBubbleForNewTurn(THREAD);
     useTaskStore.getState().clearTaskBubbleIfAwaitingReplacement(THREAD);

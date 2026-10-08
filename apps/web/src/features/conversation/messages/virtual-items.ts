@@ -278,14 +278,6 @@ export type ChatVirtualItem =
       agentDisplayState?: AgentDisplayState;
       textIsStreaming?: boolean;
     }
-  | { key: string; type: "active-tools"; toolCalls: readonly ToolCall[] }
-  | {
-      key: string;
-      type: "indicator";
-      startTime: number | undefined;
-      activeToolCalls: readonly ToolCall[];
-    }
-  | { key: string; type: "streaming"; text: string }
   | {
       key: string;
       type: "turn-changes";
@@ -593,18 +585,6 @@ function sameMessageVirtualItem(left: ChatVirtualItem, right: ChatVirtualItem): 
   return left.type === "message" && right.type === "message" && sameMessage(left.message, right.message) && left.textIsStreaming === right.textIsStreaming && sameAgentDisplayState(left.agentDisplayState, right.agentDisplayState);
 }
 
-function sameActiveToolsItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "active-tools" && right.type === "active-tools" && left.toolCalls === right.toolCalls;
-}
-
-function sameIndicatorItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "indicator" && right.type === "indicator" && left.startTime === right.startTime && sameArrayItems(left.activeToolCalls, right.activeToolCalls);
-}
-
-function sameStreamingItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "streaming" && right.type === "streaming" && left.text === right.text;
-}
-
 function sameTurnChangesItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
   return left.type === "turn-changes" && right.type === "turn-changes" && [left.messageId === right.messageId, left.filesChanged === right.filesChanged, left.isLatestTurn === right.isLatestTurn].every(Boolean);
 }
@@ -653,9 +633,6 @@ function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualIte
 
 const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualItem, right: ChatVirtualItem) => boolean> = {
   message: sameMessageVirtualItem,
-  "active-tools": sameActiveToolsItem,
-  indicator: sameIndicatorItem,
-  streaming: sameStreamingItem,
   "turn-changes": sameTurnChangesItem,
   "permission-request": samePermissionRequestItem,
   "narrative-flow": sameNarrativeFlowItem,

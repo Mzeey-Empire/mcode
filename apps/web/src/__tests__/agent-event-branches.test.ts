@@ -1189,10 +1189,10 @@ describe("handleAgentEvent branches", () => {
     // groups. An update whose group resolves to "Tasks" (no parent Agent call)
     // matches neither sub-agent group, so the ambiguous collision must be a no-op
     // rather than silently mutating an arbitrary one of the two.
-    useTaskStore.getState().setTaskGroup("thread-1", "Sub-agent A", [
+    useTaskStore.getState().setGroupTasks("thread-1", "Sub-agent A", [
       { id: "sa-1", harnessTaskId: "1", content: "child A", status: "pending", group: "Sub-agent A" },
     ]);
-    useTaskStore.getState().setTaskGroup("thread-1", "Sub-agent B", [
+    useTaskStore.getState().setGroupTasks("thread-1", "Sub-agent B", [
       { id: "sb-1", harnessTaskId: "1", content: "child B", status: "pending", group: "Sub-agent B" },
     ]);
 

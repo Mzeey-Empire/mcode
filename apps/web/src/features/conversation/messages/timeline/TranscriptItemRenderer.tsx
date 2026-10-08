@@ -1,8 +1,5 @@
 import { memo, type ComponentType, type RefObject } from "react";
 import { PermissionRequestCard } from "@/components/chat/PermissionRequestCard";
-import { StreamingCard } from "@/components/chat/StreamingCard";
-import { StreamingIndicator } from "@/components/chat/StreamingIndicator";
-import { ToolCallCard } from "@/components/chat/ToolCallCard";
 import { TurnChangeSummary } from "@/components/chat/TurnChangeSummary";
 import { NarrativeFlow, type SubagentRosterTarget } from "@/features/conversation/narrative";
 import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeIndicator";
@@ -68,22 +65,6 @@ function MessageTranscriptItemRenderer({
       />
     </div>
   );
-}
-
-/** Renders active tool calls. */
-function ActiveToolsTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
-  return <ToolCallCard toolCalls={(item as Extract<ChatVirtualItem, { type: "active-tools" }>).toolCalls} />;
-}
-
-/** Renders the legacy streaming indicator. */
-function IndicatorTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
-  const indicator = item as Extract<ChatVirtualItem, { type: "indicator" }>;
-  return <StreamingIndicator startTime={indicator.startTime} activeToolCalls={indicator.activeToolCalls} />;
-}
-
-/** Renders legacy streamed text. */
-function StreamingTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
-  return <StreamingCard text={(item as Extract<ChatVirtualItem, { type: "streaming" }>).text} />;
 }
 
 /** Renders the persisted turn-change summary. */
@@ -179,9 +160,6 @@ function NarrativeIndicatorTranscriptItemRenderer({ item }: TranscriptItemRender
 
 const TRANSCRIPT_ITEM_COMPONENTS: Record<ChatVirtualItem["type"], TranscriptItemComponent> = {
   message: MessageTranscriptItemRenderer,
-  "active-tools": ActiveToolsTranscriptItemRenderer,
-  indicator: IndicatorTranscriptItemRenderer,
-  streaming: StreamingTranscriptItemRenderer,
   "turn-changes": TurnChangesTranscriptItemRenderer,
   "permission-request": PermissionRequestTranscriptItemRenderer,
   "narrative-flow": NarrativeFlowTranscriptItemRenderer,
