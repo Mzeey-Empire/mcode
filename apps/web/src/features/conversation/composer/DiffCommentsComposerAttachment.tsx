@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { SavedDiffAnnotation } from "@/features/preview/state/previewAnnotationStore";
-import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
+import type { DraftDiffComment } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
+import {
+  clearVisibleDiffComments,
+  deleteDraftDiffComment,
+  editDraftDiffComment,
+} from "./draft/draft-diff-comments";
 import {
   ComposerCommentAttachmentShell,
   ComposerCommentPreviewItem,
@@ -9,14 +13,14 @@ import {
 } from "./SelectedTextCommentsComposerAttachment";
 
 interface DiffCommentCard extends ComposerCommentCardData {
-  readonly annotation: SavedDiffAnnotation;
+  readonly annotation: DraftDiffComment;
 }
 
 /** Props for the aggregate diff-comment attachment in the composer. */
 export interface DiffCommentsComposerAttachmentProps {
-  /** Saved diff line comments attached to the active composer draft. */
-  readonly comments: readonly SavedDiffAnnotation[];
-  /** Scope that owns the annotations: the thread id, or the workspace for drafts. */
+  /** Saved Review comments in the thread's composer draft, numbered for display. */
+  readonly comments: readonly DraftDiffComment[];
+  /** Thread whose composer draft owns the comments. */
   readonly scopeId: string;
   /** Workspace whose right panel hosts the Review surface. */
   readonly workspaceId: string;
@@ -66,7 +70,7 @@ export function DiffCommentsComposerAttachment({
     focusAfterDeleteRef.current = nextFocusTarget?.id;
     setAnnouncement("Comment deleted.");
     if (!nextFocusTarget) onFocusComposer();
-    usePreviewAnnotationStore.getState().deleteAnnotation(scopeId, item.id);
+    deleteDraftDiffComment(scopeId, item.id);
   };
 
   return (
@@ -78,10 +82,7 @@ export function DiffCommentsComposerAttachment({
         chipTestId="diff-comment-chip"
         previewTestId="diff-comment-preview"
         commentCount={comments.length}
-        onRemove={() => {
-          comments.forEach((comment) =>
-            usePreviewAnnotationStore.getState().deleteAnnotation(scopeId, comment.id));
-        }}
+        onRemove={() => clearVisibleDiffComments(scopeId)}
       >
         {comments.map((annotation) => {
           const item: DiffCommentCard = {
@@ -100,12 +101,7 @@ export function DiffCommentsComposerAttachment({
               sourceUnavailable={false}
               multipleComments={comments.length > 1}
               onOpenSource={openSource}
-              onEdit={(item) =>
-                usePreviewAnnotationStore.getState().setDiffEditTarget(scopeId, {
-                  kind: "edit",
-                  annotationId: item.annotation.id,
-                })
-              }
+              onEdit={(item) => editDraftDiffComment(scopeId, item.annotation)}
               onDelete={handleDelete}
               openSourceButtonRef={(element) => {
                 if (element) openSourceButtonsRef.current.set(annotation.id, element);

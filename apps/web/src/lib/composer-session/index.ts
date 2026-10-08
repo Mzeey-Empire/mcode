@@ -1,5 +1,9 @@
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import type { ComposerDraft, SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
+import {
+  isNextMessageOnlyDraft,
+  type ComposerDraft,
+  type SelectedTextCommentEditorDraft,
+} from "@/stores/composerDraftStore";
 import type {
   ApprovalReviewMode,
   ContextWindowMode,
@@ -242,7 +246,7 @@ export function resolveComposerSession(input: ResolveComposerSessionInput): Comp
   if (!threadId) return buildDefaultComposerSession(globalDefaults);
 
   const saved = getDraft(threadId);
-  if (saved) return buildSavedComposerSession(saved, threadSettings);
+  if (saved && !isNextMessageOnlyDraft(saved)) return buildSavedComposerSession(saved, threadSettings);
 
   return buildThreadComposerSession(threadRow, globalDefaults);
 }

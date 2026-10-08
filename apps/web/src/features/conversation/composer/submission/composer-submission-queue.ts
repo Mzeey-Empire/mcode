@@ -1,9 +1,10 @@
-import type { MessageMention, PreviewAnnotationBundle } from "@mcode/contracts";
+import type { DraftDiffComment, MessageMention, PreviewAnnotationBundle } from "@mcode/contracts";
 import { collectBrowserCaptureSpillPaths, releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { useQueueStore } from "@/stores/queueStore";
+import { removeQueuedDiffComments } from "../draft/draft-diff-comments";
 import type { ComposerAgentSelection, ComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
 import type { HandoffQueuedSend } from "../queue/useHandoffQueuedSend";
@@ -25,6 +26,8 @@ export interface QueueComposerSubmissionOptions {
 export interface CompleteQueuedComposerSubmissionOptions {
   annotationScopeId?: string;
   annotations?: PreviewAnnotationBundle;
+  /** Review comments the queued message took with it. */
+  diffComments: readonly DraftDiffComment[];
   goalObjective?: string;
   form: ComposerFormController;
   finishEditing(): void;
@@ -69,12 +72,13 @@ export function queueComposerSubmission({
 export function completeQueuedComposerSubmission({
   annotationScopeId,
   annotations,
+  diffComments,
   goalObjective,
   form,
   finishEditing,
 }: CompleteQueuedComposerSubmissionOptions): void {
   form.clear("dispatch");
-  clearQueuedAnnotations(annotationScopeId, annotations);
+  clearQueuedAnnotations(annotationScopeId, annotations, diffComments);
   if (goalObjective) form.setGoalPending(false);
   finishEditing();
   form.focus();
@@ -122,8 +126,10 @@ function optionalCodexFastMode(selection: ComposerAgentSelection): boolean | und
 function clearQueuedAnnotations(
   annotationScopeId: string | undefined,
   annotations: PreviewAnnotationBundle | undefined,
+  diffComments: readonly DraftDiffComment[],
 ): void {
   if (!annotationScopeId || !annotations) return;
   usePreviewAnnotationStore.getState().clearThread(annotationScopeId);
+  removeQueuedDiffComments(annotationScopeId, diffComments);
   usePreviewDesignModeStore.getState().setActive(annotationScopeId, false);
 }

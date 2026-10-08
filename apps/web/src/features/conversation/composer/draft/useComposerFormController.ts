@@ -24,6 +24,7 @@ import {
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   draftHasNoSendableContent,
+  isNextMessageOnlyDraft,
   useComposerDraftStore,
   type ComposerDraft,
   type SelectedTextCommentEditorDraft,
@@ -294,10 +295,7 @@ export function useComposerFormController({
   const clearComposerRecallFromStop = useThreadStore(
     (state) => state.clearComposerRecallFromStop,
   );
-  const clearDraft = useComposerDraftStore((state) => state.clearDraft);
-  const removeDraftAfterAttachmentTransfer = useComposerDraftStore(
-    (state) => state.removeDraftAfterAttachmentTransfer,
-  );
+  const clearSentComposerFields = useComposerDraftStore((state) => state.clearSentComposerFields);
   const previewReferenceQueueSignal = usePreviewReferenceQueueStore((state) => state.signal);
   const previewReferenceScopeId = threadId ?? workspaceId;
   // Target fields are draft payload for draft owners; subscribing keeps the
@@ -482,7 +480,7 @@ export function useComposerFormController({
       setSelectedTextCommentEditor(undefined);
       const currentOwner = ownerRef.current;
       if (reason === "dispatch" && currentOwner.kind === "thread") {
-        clearDraft(currentOwner.id);
+        clearSentComposerFields(currentOwner.id, { releaseAttachments: true });
       }
       if (reason === "dispatch" && currentOwner.kind === "draft") {
         useThreadDraftStore.getState().removeDraft(currentOwner.id);
@@ -490,7 +488,7 @@ export function useComposerFormController({
       }
       return currentAttachments;
     },
-    [clearDraft, collectAndClearAttachments, replaceDraft],
+    [clearSentComposerFields, collectAndClearAttachments, replaceDraft],
   );
 
   const discardSubmittedDraftClear = useCallback(() => {
@@ -508,7 +506,7 @@ export function useComposerFormController({
     const submittedOwner = ownerRef.current;
     let draftEntity: ThreadDraft | undefined;
     if (submittedOwner.kind === "thread") {
-      removeDraftAfterAttachmentTransfer(submittedOwner.id);
+      clearSentComposerFields(submittedOwner.id, { releaseAttachments: false });
     }
     if (submittedOwner.kind === "draft") {
       // Consume the draft row now; the payload rides along in
@@ -525,7 +523,7 @@ export function useComposerFormController({
       draftEntity,
     };
     return true;
-  }, [detachAttachments, removeDraftAfterAttachmentTransfer, replaceDraft]);
+  }, [clearSentComposerFields, detachAttachments, replaceDraft]);
 
   const restoreFailedDispatch = useCallback(() => {
     const submittedDraftClear = submittedDraftClearRef.current;
@@ -826,7 +824,8 @@ export function useComposerFormController({
   }, [clearComposerRecallFromStop, composerRecallFromStop, threadId]);
 
   useEffect(() => {
-    const hasDraft = threadId ? getDraft(threadId) != null : false;
+    const savedDraft = threadId ? getDraft(threadId) : undefined;
+    const hasDraft = savedDraft !== undefined && !isNextMessageOnlyDraft(savedDraft);
     const isRunning = threadId ? useThreadStore.getState().runningThreadIds.has(threadId) : false;
     const reconciliation = reconcileComposerThreadModel({
       activeThreadModel: activeThread?.model,

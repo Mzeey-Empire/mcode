@@ -14,9 +14,12 @@ import { ChevronRight, MessageCircle } from "lucide-react";
 import { inlineDiffCacheKey, useDiffStore, type SelectedFile } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
-  usePreviewAnnotationStore,
-  type SavedDiffAnnotation,
-} from "@/features/preview/state/previewAnnotationStore";
+  editDraftDiffComment,
+  setDraftDiffCommentEditor,
+  useDiffCommentEditor,
+  useVisibleDiffComments,
+} from "@/features/conversation/composer/draft/draft-diff-comments";
+import type { DiffCommentTarget } from "@/features/conversation/composer/draft/draft-submission";
 import type { ReviewFileChange } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { loadFileDiff } from "@/lib/load-file-diff";
@@ -38,7 +41,6 @@ type DiffRowMeta =
 
 type DiffItem = CodeViewItem<DiffRowMeta>;
 
-const EMPTY_ANNOTATIONS: SavedDiffAnnotation[] = [];
 const EMPTY_PATCHES: Record<string, string> = {};
 
 /** Comparison sources whose old/new contents can be read from git refs. */
@@ -279,9 +281,9 @@ export function ReviewDiffView({
     () => new Set((bulkDiffExpand?.expand ?? defaultFilesExpanded) ? files.map((f) => f.path) : []),
   );
   const [previewPaths, setPreviewPaths] = useState<ReadonlySet<string>>(new Set());
-  const savedAnnotations =
-    usePreviewAnnotationStore((s) => s.diffByThread[threadId]) ?? EMPTY_ANNOTATIONS;
-  const editTarget = usePreviewAnnotationStore((s) => s.diffEditTargets[threadId]);
+  const savedAnnotations = useVisibleDiffComments(threadId);
+  const commentEditor = useDiffCommentEditor(threadId);
+  const editTarget = useMemo(() => toEditTarget(commentEditor), [commentEditor]);
 
   const basePath = useWorkspaceStore((s) => {
     const thread = s.threads.find((t) => t.id === threadId);
@@ -504,19 +506,22 @@ export function ReviewDiffView({
       if (!hovered) return;
       const fileDiff = fileDiffs[filePath];
       const side = hovered.side === "deletions" ? "left" : "right";
-      usePreviewAnnotationStore.getState().setDiffEditTarget(threadId, {
-        kind: "draft",
-        filePath,
-        side,
-        line: hovered.lineNumber,
-        lineContent: fileDiff ? lineContentAt(fileDiff, side, hovered.lineNumber) : "",
+      setDraftDiffCommentEditor(threadId, {
+        target: {
+          filePath,
+          side,
+          line: hovered.lineNumber,
+          lineContent: fileDiff ? lineContentAt(fileDiff, side, hovered.lineNumber) : "",
+        },
+        note: "",
+        mentions: [],
       });
     },
     [fileDiffs, threadId],
   );
 
   const closeEditor = useCallback(() => {
-    usePreviewAnnotationStore.getState().setDiffEditTarget(threadId, undefined);
+    setDraftDiffCommentEditor(threadId, undefined);
   }, [threadId]);
 
   const renderCommentRow = (meta: Extract<DiffRowMeta, { kind: "draft" | "saved" }>) => {
@@ -563,12 +568,7 @@ export function ReviewDiffView({
     return (
       <SavedAnnotationChip
         annotation={saved}
-        onEdit={() =>
-          usePreviewAnnotationStore.getState().setDiffEditTarget(threadId, {
-            kind: "edit",
-            annotationId: saved.id,
-          })
-        }
+        onEdit={() => editDraftDiffComment(threadId, saved)}
       />
     );
   };
@@ -697,6 +697,18 @@ function DiffStatusRow({ status }: { readonly status: "loading" | "empty" | "bin
       {status === "binary" ? "Binary file changed" : "No diff content"}
     </p>
   );
+}
+
+/** Line a new comment is being drafted on, or the saved comment being edited. */
+type CommentEditTarget =
+  | ({ readonly kind: "draft" } & DiffCommentTarget)
+  | { readonly kind: "edit"; readonly annotationId: string };
+
+function toEditTarget(editor: ReturnType<typeof useDiffCommentEditor>): CommentEditTarget | undefined {
+  if (!editor) return undefined;
+  return editor.annotationId
+    ? { kind: "edit", annotationId: editor.annotationId }
+    : { kind: "draft", ...editor.target };
 }
 
 /** Saved comment chip; click to swap it for the inline editor. */

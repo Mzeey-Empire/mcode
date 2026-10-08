@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
-import type { SavedDiffAnnotation } from "@/features/preview/state/previewAnnotationStore";
+import type { DraftDiffComment } from "@mcode/contracts";
 import { getModelContextWindow } from "@mcode/shared/model-context";
 import type {
   ContextWindowMode,
@@ -33,6 +33,7 @@ import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore
 import { cn } from "@/lib/utils";
 import { ComposerAgentControls } from "./controls/ComposerAgentControls";
 import { ComposerNewThreadContext } from "./execution/ComposerNewThreadContext";
+import { useDraftWriteFailureStore } from "@/lib/composer-draft-storage";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
 
@@ -77,7 +78,7 @@ interface ComposerContentSurfaceProps {
     readonly slashCommand: SlashCommand;
     readonly attachmentBundle?: ComponentProps<typeof PreviewAnnotationBundleChip>["bundle"];
     readonly annotationScopeId?: string;
-    readonly diffComments: readonly SavedDiffAnnotation[];
+    readonly diffComments: readonly DraftDiffComment[];
     readonly attachments: ComponentProps<typeof AttachmentPreview>["attachments"];
     readonly selectedTextComments: readonly SelectedTextComment[];
     readonly selectedTextCommentEditor?: SelectedTextCommentEditorDraft;
@@ -695,6 +696,22 @@ function ComposerInputSurface({
 }
 
 /** Renders the composer content rail, input surface, and queued-send hint. */
+const DRAFT_WRITE_FAILURE_DETAIL = {
+  "storage-full": "Storage is full",
+  "storage-unavailable": "Storage unavailable",
+} as const;
+
+/** Says the draft was not saved; the next successful write clears it. */
+function DraftWriteFailureNotice() {
+  const failure = useDraftWriteFailureStore((state) => state.failure);
+  if (!failure) return null;
+  return (
+    <p role="status" className="px-1 pt-1 text-xs text-muted-foreground">
+      Draft not saved · {DRAFT_WRITE_FAILURE_DETAIL[failure]}
+    </p>
+  );
+}
+
 export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   return (
     <>
@@ -708,6 +725,7 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
           queued · sends when handoff lands
         </p>
       )}
+      <DraftWriteFailureNotice />
     </>
   );
 }
