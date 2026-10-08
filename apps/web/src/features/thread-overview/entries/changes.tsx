@@ -255,7 +255,7 @@ function useChangesState(thread: Thread) {
   );
   const isChangeSummaryLoading = open && !hasCurrentChangeSummary && changeSummaryStatus !== "error";
   useEffect(() => {
-    if (!open || hasCurrentChangeSummary) return;
+    if (!open) return;
 
     let cancelled = false;
     const loadChangeSummary = async () => {
@@ -285,7 +285,7 @@ function useChangesState(thread: Thread) {
     return () => {
       cancelled = true;
     };
-  }, [cachedSnapshotKey, cachedSnapshots, diffRevision, hasCurrentChangeSummary, open, setSnapshots, thread.id, thread.workspace_id]);
+  }, [cachedSnapshotKey, cachedSnapshots, diffRevision, open, setSnapshots, thread.id, thread.workspace_id]);
   return { changeSummary, isChangeSummaryLoading, showChangeSummary };
 }
 

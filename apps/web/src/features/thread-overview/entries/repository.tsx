@@ -155,9 +155,8 @@ function useRepositoryState(thread: Thread) {
     thread.id,
     open,
   );
-  const hasCurrentRepository = loadedRepository?.threadId === thread.id && loadedRepository.status === "ready";
   useEffect(() => {
-    if (!open || hasCurrentRepository) return;
+    if (!open) return;
 
     let cancelled = false;
     const loadRepository = async () => {
@@ -184,7 +183,7 @@ function useRepositoryState(thread: Thread) {
     return () => {
       cancelled = true;
     };
-  }, [hasCurrentRepository, open, thread.id, thread.workspace_id]);
+  }, [open, thread.id, thread.workspace_id]);
   return { repository, repositoryStatus };
 }
 

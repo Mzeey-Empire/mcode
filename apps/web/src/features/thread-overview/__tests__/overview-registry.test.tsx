@@ -104,7 +104,7 @@ describe("overview registry", () => {
     expect(body.querySelectorAll('[data-slot="separator"]')).toHaveLength(2);
   });
 
-  it("keeps loaded Changes and repository results across a real popover close and reopen", async () => {
+  it("shows loaded Changes and repository results on reopen while refreshing them silently", async () => {
     mockLoadedEntries();
     render(<ThreadOverview thread={thread} threadPaneWidth={600} />);
     expect(mockTransport.getWorkingTreeFiles).not.toHaveBeenCalled();
@@ -119,12 +119,12 @@ describe("overview registry", () => {
 
     await closeOverview();
     fireEvent.click(screen.getByTestId("header-workspace-menu"));
-    expect.soft(mockTransport.getWorkingTreeFiles).toHaveBeenCalledTimes(1);
-    expect.soft(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("thread-overview-change-loading")).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "7 additions, 2 deletions");
     expect(screen.getByText("example/repo")).toBeInTheDocument();
+    await waitFor(() => expect(mockTransport.getWorkingTreeFiles).toHaveBeenCalledTimes(2));
+    expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(2);
   });
 
   it("retries a failed repository load on reopen", async () => {
@@ -167,7 +167,7 @@ describe("overview registry", () => {
     expect(screen.getByTestId("thread-overview-change-loading")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "11 additions, 3 deletions"));
-    expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(1);
+    expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(2);
     expect(mockTransport.getReviewDiffStats).toHaveBeenCalledTimes(invalidation === "revision" ? 2 : 1);
     expect(mockTransport.getSnapshotDiffStats).toHaveBeenCalledTimes(invalidation === "snapshot" ? 1 : 0);
   });
