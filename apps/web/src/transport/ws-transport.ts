@@ -100,6 +100,13 @@ const PROVIDER_MODEL_LIST_TIMEOUT_MS = 10_000;
 /** Deadline for choosing the Terminal backend before Terminal UI can continue. */
 const TERMINAL_CAPABILITIES_TIMEOUT_MS = 10_000;
 /** Deadline for a user-requested Terminal creation. */
+/**
+ * Upper bound for agent.confirmMessage. The server waits for any admission of
+ * the message still running, which can include worktree setup, so this is
+ * long; a lost response must still end, or the draft would wait forever.
+ */
+const CONFIRM_MESSAGE_TIMEOUT_MS = 120_000;
+
 const TERMINAL_CREATE_TIMEOUT_MS = 20_000;
 /** Deadline for closing a Terminal returned after its create request timed out. */
 const TERMINAL_LATE_CREATE_CLEANUP_TIMEOUT_MS = 10_000;
@@ -1265,7 +1272,9 @@ export function createWsTransport(
     clearThreadGoal: (threadId) =>
       rpc<GoalLookupResult>("thread.goal.clear", { threadId }),
     confirmMessage: (threadId, messageId) =>
-      rpc<{ admitted: boolean }>("agent.confirmMessage", { threadId, messageId }),
+      rpc<{ admitted: boolean }>("agent.confirmMessage", { threadId, messageId }, {
+        timeoutMs: CONFIRM_MESSAGE_TIMEOUT_MS,
+      }),
     readThreadControl: (identity, messageLimit) =>
       rpc<import("@mcode/contracts").ThreadControlReadResult>("thread.control.read", {
         identity,
