@@ -966,7 +966,7 @@ function InspectorRow({
 }) {
   return (
     <div className="grid grid-cols-[5.25rem_minmax(0,1fr)] items-center gap-2 text-xs text-neutral-300">
-      <span className="truncate text-neutral-300/90">{label}</span>
+      <span className="text-fade text-neutral-300/90">{label}</span>
       {children}
     </div>
   );
@@ -1496,7 +1496,7 @@ function ExpandableQuadGroup({
               : undefined;
         return (
           <Fragment key={entry.key}>
-            <span className="truncate text-neutral-300/[0.85]">{entry.label}</span>
+            <span className="text-fade text-neutral-300/[0.85]">{entry.label}</span>
             <div className="flex items-center justify-center">
               {link ? (
                 <VisualLinkButton
@@ -1953,7 +1953,7 @@ function previewSurfaceClassName(
   return cn(
     "relative min-h-[min(40vh,20rem)] min-w-0 flex-1 basis-0",
     "z-0 rounded-tl-md",
-    responsiveViewportSize ? "overflow-auto bg-muted/20" : "overflow-hidden",
+    responsiveViewportSize ? "overflow-auto bg-hover/20" : "overflow-hidden",
     webviewLayerInteractive && "pointer-events-none",
     showLocalPorts && "overflow-y-auto",
   );
@@ -2150,7 +2150,7 @@ function RuntimePreviewContent({
     );
   }
   return (
-    <div data-testid={`web-runtime-${state}`} className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+    <div data-testid={`web-runtime-${state}`} className="flex h-full items-center justify-center px-6 text-center text-sm text-muted">
       {state === "disabled"
         ? "Web preview automation is disabled. Set MCODE_WEB_AUTOMATION=1 and restart agent:up to enable it."
         : "Web preview is unavailable until an HTTP(S) same-origin target is loaded."}
@@ -2486,7 +2486,7 @@ function WebRuntimePreview({
         onClose={onCloseViewportToolbar}
         onUserViewportChange={invalidateViewportObservation}
       />
-      <div ref={surfaceRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/10">
+      <div ref={surfaceRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-hover/10">
         <BrowserViewportCanvas
           coordinator={viewportCoordinator}
           state={viewportState}
@@ -3508,7 +3508,7 @@ export function PreviewPanel({
   if (!hasDesktopPreview) {
     return (
       <div
-        className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center text-sm text-muted-foreground"
+        className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center text-sm text-muted"
         data-testid="preview-panel-unavailable"
       >
         <Globe className="size-8 opacity-50" aria-hidden />
@@ -3957,7 +3957,7 @@ export function PreviewPanel({
                     aria-label={`Edit annotation ${annotation.displayNumber}`}
                   >
                     <span
-                      className="relative flex size-7 items-center justify-center rounded-full bg-primary/80 text-primary-foreground/90 shadow-sm ring-1 ring-background/80 transition-transform duration-150 group-hover/marker:scale-105 group-focus-visible/marker:scale-105"
+                      className="relative flex size-7 items-center justify-center rounded-full bg-primary/80 text-primary-ink/90 shadow-sm ring-1 ring-background/80 transition-transform duration-150 group-hover/marker:scale-105 group-focus-visible/marker:scale-105"
                       aria-hidden
                     >
                       <span className="absolute -bottom-0.5 left-1.5 size-2 rotate-45 rounded-sm bg-primary/80" />
@@ -4114,7 +4114,7 @@ export function PreviewPanel({
                 <div
                   className="flex items-center justify-between border-b border-white/[0.08] bg-white/[0.04] px-4 py-1.5 text-xs text-neutral-200"
                 >
-                  <span className="max-w-[15rem] truncate font-semibold leading-5">
+                  <span className="max-w-[15rem] text-fade font-semibold leading-5">
                     {annotationBubbleTargetLabel(visibleOpenBubbleBase)}
                   </span>
                   <GripVertical

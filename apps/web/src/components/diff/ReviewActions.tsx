@@ -12,7 +12,7 @@ interface ReviewActionsProps {
 }
 
 const ACTION_CLASS =
-  "h-6 gap-1.5 px-2 text-xs text-foreground/70 hover:bg-muted/40 hover:text-foreground";
+  "h-6 gap-1.5 px-2 text-xs text-ink/70 hover:bg-hover/40 hover:text-ink";
 
 /**
  * Commit-or-push and Create-PR actions for the Review toolbar, mirroring the

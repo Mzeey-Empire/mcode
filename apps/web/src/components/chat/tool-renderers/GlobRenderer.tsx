@@ -35,9 +35,9 @@ export function GlobRenderer({ toolCall, isActive }: ToolRendererProps) {
             const isDir = f.endsWith("/");
             const IconEl = isDir ? Folder : File;
             return (
-              <div key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <div key={i} className="flex items-center gap-1.5 text-xs text-muted">
                 <IconEl size={12} className="shrink-0 opacity-60" />
-                <span className="truncate">{f}</span>
+                <span className="text-fade">{f}</span>
               </div>
             );
           })}

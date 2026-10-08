@@ -105,31 +105,25 @@
      slightly elevated against the page chrome. Replaces inter-panel divider lines. */
   --page: var(--neutral-100);
   --background: var(--neutral-50);
-  --foreground: var(--neutral-800);
-  --card: var(--neutral-50);
-  --card-foreground: var(--neutral-800);
-  --popover: var(--neutral-50);
-  --popover-foreground: var(--neutral-800);
+  --ink: var(--neutral-800);
+  --panel: var(--neutral-50);
   --primary: var(--amber-700);
   --primary-hover: var(--amber-800);
-  --primary-foreground: var(--neutral-50);
-  --secondary: var(--neutral-100);
-  --secondary-foreground: var(--neutral-800);
-  --muted: var(--neutral-100);
-  --muted-foreground: var(--neutral-400);
+  --primary-ink: var(--neutral-50);
+  --button-secondary: var(--neutral-100);
+  --hover: var(--neutral-100);
+  --muted: var(--neutral-400);
   /* Paper's light selected is neutral-100, the same as page and hover, so a
      selected sidebar row would vanish (decisions.md D4). Only selection moves:
      the secondary button keeps neutral-100 so its neutral-200 hover still shows. */
-  --accent: var(--neutral-200);
-  --accent-foreground: var(--neutral-800);
+  --selected: var(--neutral-200);
   --destructive: var(--clay-600);
   --destructive-ink: var(--neutral-50);
   --button-secondary-hover: var(--neutral-200);
   --button-destructive-hover: var(--clay-700);
   --border: var(--neutral-200);
   --control-border: var(--neutral-300);
-  --input: var(--neutral-200);
-  --ring: var(--blue-600);
+  --focus: var(--blue-600);
   /* Links stay blue so the amber accent is reserved for actions and live state
      (One Lamp Rule). */
   --link: var(--blue-700);
@@ -185,28 +179,22 @@
   /* --page is darker than --background so floating panels appear lifted off the chrome. */
   --page: var(--neutral-950);
   --background: var(--neutral-900);
-  --foreground: var(--neutral-100);
-  --card: var(--neutral-800);
-  --card-foreground: var(--neutral-100);
-  --popover: var(--neutral-800);
-  --popover-foreground: var(--neutral-100);
+  --ink: var(--neutral-100);
+  --panel: var(--neutral-800);
   --primary: var(--amber-500);
   --primary-hover: var(--amber-600);
-  --primary-foreground: var(--neutral-900);
-  --secondary: var(--neutral-600);
-  --secondary-foreground: var(--neutral-100);
-  --muted: var(--neutral-700);
-  --muted-foreground: var(--neutral-300);
-  --accent: var(--neutral-600);
-  --accent-foreground: var(--neutral-100);
+  --primary-ink: var(--neutral-900);
+  --button-secondary: var(--neutral-600);
+  --hover: var(--neutral-700);
+  --muted: var(--neutral-300);
+  --selected: var(--neutral-600);
   --destructive: var(--clay-500);
   --destructive-ink: var(--neutral-900);
   --button-secondary-hover: var(--neutral-500);
   --button-destructive-hover: var(--clay-400);
   --border: var(--neutral-500);
   --control-border: var(--neutral-400);
-  --input: var(--neutral-600);
-  --ring: var(--blue-500);
+  --focus: var(--blue-500);
   --link: var(--blue-400);
   --success: var(--sage-400);
   --error: var(--clay-400);
@@ -292,28 +280,22 @@
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   --color-page: var(--page);
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
+  --color-ink: var(--ink);
+  --color-panel: var(--panel);
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
+  --color-primary-ink: var(--primary-ink);
+  --color-button-secondary: var(--button-secondary);
+  --color-hover: var(--hover);
   --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
+  --color-selected: var(--selected);
   --color-destructive: var(--destructive);
   --color-destructive-ink: var(--destructive-ink);
   --color-button-secondary-hover: var(--button-secondary-hover);
   --color-button-destructive-hover: var(--button-destructive-hover);
   --color-border: var(--border);
   --color-control-border: var(--control-border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-focus: var(--focus);
   --color-link: var(--link);
   --color-success: var(--success);
   --color-error: var(--error);
@@ -369,6 +351,42 @@
 @utility font-code {
   font-family: --theme(--font-mono);
   font-variant-ligatures: none;
+}
+
+/* Overflowing text fades its last 24px instead of ending in an ellipsis.
+   The mask only applies while the element overflows: a scroll timeline is
+   inactive when its scroller has nothing to scroll, so the animation that
+   carries the mask does not apply to text that fits. That needs a scroll
+   container, which is why this uses `overflow: hidden` and not `clip`.
+   Without scroll-driven animation support the text clips with no fade; the
+   animation sits behind @supports because a timeline-less 0s animation with
+   fill `both` would pin the mask on text that fits. */
+@utility text-fade {
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+  @supports (animation-timeline: scroll()) {
+    animation: text-fade-inline linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
+
+/* Vertical clamp to N lines that ends in a 24px bottom fade when clamped. */
+@utility text-fade-lines-* {
+  overflow: hidden;
+  max-height: calc(--value(integer) * 1lh);
+  @supports (animation-timeline: scroll()) {
+    animation: text-fade-block linear both;
+    animation-timeline: scroll(self block);
+  }
+}
+
+@keyframes text-fade-inline {
+  from, to { mask-image: linear-gradient(to right, black calc(100% - var(--spacing-text-fade)), transparent); }
+}
+
+@keyframes text-fade-block {
+  from, to { mask-image: linear-gradient(to bottom, black calc(100% - var(--spacing-text-fade)), transparent); }
 }
 
 
@@ -535,7 +553,7 @@
   background-image: linear-gradient(
     90deg,
     transparent,
-    color-mix(in oklch, var(--foreground), transparent 88%),
+    color-mix(in oklch, var(--ink), transparent 88%),
     transparent
   );
   transform: translateX(-120%);
@@ -771,9 +789,9 @@ diffs-container:has([data-jump-highlight="true"]) {
    left to right with a staggered delay. Triggered as a one-shot when
    the user accepts every recommended option in a single gesture. */
 @keyframes wizard-accept-flash {
-  0%   { color: var(--color-foreground); }
+  0%   { color: var(--color-ink); }
   40%  { color: var(--color-primary); }
-  100% { color: var(--color-foreground); }
+  100% { color: var(--color-ink); }
 }
 .animate-wizard-accept-flash {
   animation: wizard-accept-flash 400ms cubic-bezier(0.25, 1, 0.5, 1) both;
@@ -806,7 +824,7 @@ diffs-container:has([data-jump-highlight="true"]) {
 }
 
 .animate-shimmer-text {
-  color: var(--muted-foreground);
+  color: var(--muted);
   animation: text-pulse 1.8s ease-in-out infinite;
 }
 
@@ -881,7 +899,7 @@ diffs-container:has([data-jump-highlight="true"]) {
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-focus/50;
   }
   /* lucide-react writes stroke-width="2" as an attribute on every icon. Author
      CSS outranks presentation attributes, so this one rule gives direct Lucide
@@ -896,7 +914,7 @@ diffs-container:has([data-jump-highlight="true"]) {
     height: 100%;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-ink;
     margin: 0;
     overflow: hidden;
     height: 100%;
@@ -955,7 +973,7 @@ input[type="range"].settings-range::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--foreground);
+  background: var(--ink);
   border: 2px solid var(--background);
   margin-top: -5px;
   cursor: pointer;
@@ -966,13 +984,13 @@ input[type="range"].settings-range::-webkit-slider-thumb:hover {
 }
 input[type="range"].settings-range::-webkit-slider-thumb:active {
   transform: scale(1.05);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 20%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 20%, transparent);
 }
 input[type="range"].settings-range:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--focus);
 }
 input[type="range"].settings-range:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--focus);
 }
 input[type="range"].settings-range::-moz-range-track {
   height: 4px;
@@ -984,7 +1002,7 @@ input[type="range"].settings-range::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--foreground);
+  background: var(--ink);
   border: 2px solid var(--background);
   cursor: pointer;
 }

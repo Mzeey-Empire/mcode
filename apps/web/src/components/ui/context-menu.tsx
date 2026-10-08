@@ -53,7 +53,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     <div
       ref={ref}
       style={{ position: "fixed", left: x, top: y, zIndex: 50 }}
-      className="min-w-[160px] rounded-lg border border-border bg-card p-1 shadow-xl"
+      className="min-w-[160px] rounded-lg border border-border bg-panel p-1 shadow-xl"
     >
       {items.map((item, i) =>
         item.divider ? (
@@ -70,7 +70,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
               "flex w-full items-center rounded-md px-3 py-1.5 text-sm",
               item.destructive
                 ? "text-destructive hover:bg-destructive/10"
-                : "text-foreground hover:bg-accent"
+                : "text-ink hover:bg-selected"
             )}
           >
             {item.label}

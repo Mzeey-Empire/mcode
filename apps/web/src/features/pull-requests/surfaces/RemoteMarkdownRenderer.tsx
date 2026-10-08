@@ -50,7 +50,7 @@ const GITHUB_ALERTS: Record<
   note: {
     label: "Note",
     icon: Info,
-    className: "border-border/60 bg-muted/15 text-muted-foreground",
+    className: "border-border/60 bg-hover/15 text-muted",
   },
   tip: {
     label: "Tip",
@@ -104,7 +104,7 @@ const REMOTE_MARKDOWN_COMPONENTS: Components = {
       return (
         <Suspense
           fallback={
-            <pre className="overflow-x-auto rounded-sm bg-muted/30 p-3 font-mono text-xs">
+            <pre className="overflow-x-auto rounded-sm bg-hover/30 p-3 font-mono text-xs">
               <code>{code}</code>
             </pre>
           }
@@ -154,12 +154,12 @@ const REMOTE_MARKDOWN_COMPONENTS: Components = {
     return (
       <summary
         {...props}
-        className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-foreground/90 transition-colors hover:bg-muted/20 [&::-webkit-details-marker]:hidden"
+        className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-ink/90 transition-colors hover:bg-hover/20 [&::-webkit-details-marker]:hidden"
       >
         <ChevronRight
           size={13}
           aria-hidden
-          className="shrink-0 text-muted-foreground transition-transform group-open/disclosure:rotate-90"
+          className="shrink-0 text-muted transition-transform group-open/disclosure:rotate-90"
         />
         <span>{children}</span>
       </summary>
@@ -175,7 +175,7 @@ const REMOTE_MARKDOWN_COMPONENTS: Components = {
       return (
         <blockquote
           {...props}
-          className="rounded-md border border-border/50 bg-muted/15 px-4 py-3 text-muted-foreground"
+          className="rounded-md border border-border/50 bg-hover/15 px-4 py-3 text-muted"
         >
           {children}
         </blockquote>
@@ -195,7 +195,7 @@ const REMOTE_MARKDOWN_COMPONENTS: Components = {
           <AlertIcon size={14} aria-hidden />
           <span>{alert.label}</span>
         </div>
-        <div className="mt-3 space-y-3 text-foreground/90">{children}</div>
+        <div className="mt-3 space-y-3 text-ink/90">{children}</div>
       </aside>
     );
   },
@@ -218,7 +218,7 @@ const RemoteMarkdownRenderer = memo(function RemoteMarkdownRenderer({
         "[&_li]:my-1",
         "[&_a]:text-link [&_a]:underline [&_a]:underline-offset-2",
         "[&_hr]:my-5 [&_hr]:border-border/50",
-        "[&_code]:rounded-sm [&_code]:bg-muted/35 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs",
+        "[&_code]:rounded-sm [&_code]:bg-hover/35 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs",
         "[&_[data-code-block]_code]:rounded-none [&_[data-code-block]_code]:bg-transparent [&_[data-code-block]_code]:p-0",
         "[&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:border-collapse",
         "[&_th]:border [&_th]:border-border/40 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left",

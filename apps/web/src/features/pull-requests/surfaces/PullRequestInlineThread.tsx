@@ -78,15 +78,15 @@ function DraftEditor({
 
   return (
     <div
-      className="rounded-lg bg-muted/55 p-3 ring-1 ring-inset ring-border/60"
+      className="rounded-lg bg-hover/55 p-3 ring-1 ring-inset ring-border/60"
       data-draft-id={draft.localId}
     >
       <div className="flex min-w-0 items-center gap-2">
         <MessageCircle
           aria-hidden
-          className="size-4 shrink-0 text-muted-foreground"
+          className="size-4 shrink-0 text-muted"
         />
-        <span className="text-sm font-medium text-foreground">
+        <span className="text-sm font-medium text-ink">
           Local comment
         </span>
         {draft.outdated ? (
@@ -94,7 +94,7 @@ function DraftEditor({
             Outdated
           </Badge>
         ) : null}
-        <span className="ml-auto min-w-0 truncate font-mono text-xs text-muted-foreground">
+        <span className="ml-auto min-w-0 text-fade font-mono text-xs text-muted">
           {targetLabel}
         </span>
       </div>
@@ -127,7 +127,7 @@ function DraftEditor({
           type="button"
           variant="ghost"
           size="xs"
-          className="text-xs text-muted-foreground"
+          className="text-xs text-muted"
           onClick={removeAndRestore}
         >
           Discard
@@ -164,14 +164,14 @@ function PullRequestInlineThreadComponent({
           <article
             key={thread.providerNodeId}
             data-provider-node-id={thread.providerNodeId}
-            className="overflow-hidden rounded-lg bg-muted/45 ring-1 ring-inset ring-border/60"
+            className="overflow-hidden rounded-lg bg-hover/45 ring-1 ring-inset ring-border/60"
           >
             <div className="flex min-w-0 items-center gap-2 px-3 py-2.5">
               <MessageCircle
                 aria-hidden
-                className="size-4 shrink-0 text-muted-foreground"
+                className="size-4 shrink-0 text-muted"
               />
-              <span className="text-sm font-medium text-foreground">
+              <span className="text-sm font-medium text-ink">
                 Review thread
               </span>
               <Badge variant="ghost" size="sm">
@@ -182,15 +182,15 @@ function PullRequestInlineThreadComponent({
                   Outdated
                 </Badge>
               )}
-              <span className="ml-auto min-w-0 truncate font-mono text-xs text-muted-foreground">
+              <span className="ml-auto min-w-0 text-fade font-mono text-xs text-muted">
                 {threadTargetLabel(thread)}
               </span>
             </div>
             <div className="divide-y divide-border/40 border-t border-border/40">
               {thread.comments.map((comment) => (
                 <div className="px-3 py-3" key={comment.providerNodeId}>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground/80">
+                  <div className="flex items-center gap-2 text-xs text-muted">
+                    <span className="font-medium text-ink/80">
                       {comment.author?.login ?? "Unknown actor"}
                     </span>
                     <time
@@ -205,7 +205,7 @@ function PullRequestInlineThreadComponent({
               ))}
             </div>
             {thread.totalCount > thread.comments.length && (
-              <p className="border-t border-border/40 px-3 py-2 text-xs text-muted-foreground">
+              <p className="border-t border-border/40 px-3 py-2 text-xs text-muted">
                 Showing {thread.comments.length} of {thread.totalCount} comments.
               </p>
             )}
@@ -215,7 +215,7 @@ function PullRequestInlineThreadComponent({
                   type="button"
                   variant="ghost"
                   size="xs"
-                  className="text-xs text-muted-foreground"
+                  className="text-xs text-muted"
                   onClick={() => onCreateReply(thread, row.anchorLineKey)}
                 >
                   Draft reply

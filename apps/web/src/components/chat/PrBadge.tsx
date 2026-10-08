@@ -30,7 +30,7 @@ export function PrBadge({ pr }: PrBadgeProps) {
         render={
           <button
             onClick={handleClick}
-            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted hover:bg-selected hover:text-ink"
             aria-label={`View pull request number ${pr.number}, ${pr.state}`}
           >
             <Icon size={12} className={cn("shrink-0", color)} />

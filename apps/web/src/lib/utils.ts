@@ -1,13 +1,15 @@
 import { clsx, type ClassValue } from "clsx"
-import { extendTailwindMerge } from "tailwind-merge"
+import { extendTailwindMerge, validators } from "tailwind-merge"
 
 // tailwind-merge reads an unknown `text-*` class as a colour, so without these
-// entries `cn("text-muted-foreground", "text-caption")` would drop the colour.
-const twMerge = extendTailwindMerge({
+// entries `cn("text-muted", "text-caption")` would drop the colour,
+// and `cn("text-fade", "text-xs")` would drop the fade.
+const twMerge = extendTailwindMerge<"text-fade">({
   extend: {
     classGroups: {
       "font-size": [{ text: ["body", "prose", "body-small", "caption", "label", "button", "code"] }, "type-link"],
       "font-family": [{ font: ["code"] }],
+      "text-fade": ["text-fade", { "text-fade-lines": [validators.isInteger] }],
     },
   },
 })

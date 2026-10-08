@@ -763,7 +763,7 @@ describe("PullRequestInbox", () => {
 
     expect(open).toHaveClass("text-[var(--diff-add-strong)]");
     expect(open?.querySelector(".lucide-git-pull-request")).toBeTruthy();
-    expect(draft).toHaveClass("text-muted-foreground/75");
+    expect(draft).toHaveClass("text-muted/75");
     expect(draft?.querySelector(".lucide-git-pull-request-draft")).toBeTruthy();
     expect(closed).toHaveClass("text-destructive/85");
     expect(

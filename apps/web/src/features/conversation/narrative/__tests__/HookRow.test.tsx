@@ -35,7 +35,7 @@ describe("HookRow", () => {
 
     expect(row).toHaveClass("text-sm");
     expect(row).toHaveClass("px-2", "py-1", "rounded-md");
-    expect(screen.getByText("SessionStart:startup")).toHaveClass("text-foreground/80");
+    expect(screen.getByText("SessionStart:startup")).toHaveClass("text-ink/80");
   });
 
   it("renders expanded output at narrative text size", async () => {
@@ -110,7 +110,7 @@ describe("HookRow", () => {
     const row = screen.getByRole("button", { name: /SessionStart:startup/ });
 
     expect(row).toHaveClass("min-w-0", "overflow-hidden");
-    expect(screen.getByText(/SessionStart:startup/)).toHaveClass("min-w-0", "truncate");
+    expect(screen.getByText(/SessionStart:startup/)).toHaveClass("min-w-0", "text-fade");
     expect(wrapper.scrollWidth).toBeLessThanOrEqual(wrapper.clientWidth);
   });
 });

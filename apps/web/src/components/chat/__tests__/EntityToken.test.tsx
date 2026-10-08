@@ -38,7 +38,7 @@ describe("EntityToken inline references", () => {
     const token = container.querySelector('[data-entity-token="plugin"]');
 
     expect(token).toHaveClass("text-primary");
-    expect(token).not.toHaveClass("h-5", "rounded-md", "px-1.5", "bg-muted/80");
+    expect(token).not.toHaveClass("h-5", "rounded-md", "px-1.5", "bg-hover/80");
     expect(token).toHaveTextContent("impeccable");
     expect(token?.querySelector(".lucide-plug")).toBeInTheDocument();
   });
@@ -59,7 +59,7 @@ describe("EntityToken inline references", () => {
         "h-5",
         "rounded-md",
         "px-1.5",
-        "bg-muted",
+        "bg-hover",
         "bg-background",
         "ring-1",
       );

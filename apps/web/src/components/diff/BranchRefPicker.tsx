@@ -126,7 +126,7 @@ const REF_SECTIONS: ReadonlyArray<{ type: GitBranch["type"]; heading: string }> 
 ];
 
 /**
- * Truncate a long ref name in the middle rather than at the tail. Branch names
+ * Shorten a long ref name in the middle rather than at the tail. Branch names
  * put the distinctive part last (`…/docstrings/2bbc811`), so tail-ellipsis makes
  * long siblings identical; keeping both ends tells them apart at a glance.
  */
@@ -159,13 +159,13 @@ function RefName({
         render={
           <span
             className={cn(
-              "min-w-0 flex-1 truncate whitespace-nowrap font-mono text-[11px]",
-              active ? "text-foreground" : "text-foreground/80",
+              "min-w-0 flex-1 text-fade whitespace-nowrap font-mono text-[11px]",
+              active ? "text-ink" : "text-ink/80",
             )}
           />
         }
       >
-        {prefix && <span className="text-muted-foreground/50">{prefix}</span>}
+        {prefix && <span className="text-muted/50">{prefix}</span>}
         {middleTruncate(rest, prefix ? 22 : 29)}
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs">{name}</TooltipContent>
@@ -204,13 +204,13 @@ function RefCombobox({
             aria-haspopup="dialog"
             className={cn(
               "h-6 min-w-0 max-w-[164px] flex-1 shrink justify-between gap-1.5 rounded-md px-2 font-mono text-xs font-medium",
-              "text-foreground shadow-none hover:bg-foreground/[0.06] aria-expanded:bg-foreground/[0.06]",
+              "text-ink shadow-none hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.06]",
             )}
           >
-            <span className={cn("min-w-0 truncate", !value && "text-muted-foreground")}>
+            <span className={cn("min-w-0 text-fade", !value && "text-muted")}>
               {value ?? "select ref"}
             </span>
-            <ChevronDown size={11} className="shrink-0 text-muted-foreground/65" />
+            <ChevronDown size={11} className="shrink-0 text-muted/65" />
           </Button>
         }
       >
@@ -247,9 +247,9 @@ function RefCombobox({
                       >
                         <RefName name={ref.name} type={ref.type} active={active} />
                         {active ? (
-                          <Check size={11} className="shrink-0 text-muted-foreground" />
+                          <Check size={11} className="shrink-0 text-muted" />
                         ) : (
-                          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/45">
+                          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted/45">
                             {ref.shortSha}
                           </span>
                         )}
@@ -277,12 +277,12 @@ function CurrentRefChip({ value }: { value: string | null }) {
             aria-label={`Current branch: ${value ?? "unknown"}`}
             className={cn(
               "flex h-6 min-w-0 shrink items-center rounded-md px-2 font-mono text-xs font-medium",
-              "text-muted-foreground",
+              "text-muted",
             )}
           />
         }
       >
-        <span className={cn("max-w-[142px] truncate", !value && "text-muted-foreground")}>
+        <span className={cn("max-w-[142px] text-fade", !value && "text-muted")}>
           {value ?? "current"}
         </span>
       </TooltipTrigger>
@@ -302,7 +302,7 @@ interface BranchRefPickerProps {
 }
 
 function BranchRefPickerPlaceholder({ children }: { children: string }) {
-  return <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/40">{children}</span>;
+  return <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/40">{children}</span>;
 }
 
 function BranchRefPickerContent({ comparison, onSelect }: { comparison: BranchComparison | null; onSelect: (target: string) => void }) {
@@ -310,7 +310,7 @@ function BranchRefPickerContent({ comparison, onSelect }: { comparison: BranchCo
   return <div className="flex min-w-0 max-w-[min(46vw,390px)] items-center gap-1 overflow-hidden" data-testid="branch-ref-picker" role="group" aria-label="Branch comparison range">
     <CurrentRefChip value={comparison?.base ?? null} />
     <div className="flex min-w-0 flex-1 items-center gap-0.5 border-l border-border/25 pl-1">
-      <span aria-hidden="true" data-testid="branch-range-arrow" className="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground/50"><ArrowRight size={12} /></span>
+      <span aria-hidden="true" data-testid="branch-range-arrow" className="inline-flex size-5 shrink-0 items-center justify-center text-muted/50"><ArrowRight size={12} /></span>
       <RefCombobox value={comparison?.target ?? null} refs={refs} onSelect={onSelect} />
     </div>
   </div>;

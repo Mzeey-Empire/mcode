@@ -27,7 +27,7 @@ export function ComposerCapabilityChip({
   return (
     <span
       data-testid={testId}
-      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent/70 pl-2.5 text-xs font-semibold text-foreground ring-1 ring-inset ring-primary/30"
+      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-selected/70 pl-2.5 text-xs font-semibold text-ink ring-1 ring-inset ring-primary/30"
     >
       <Icon size={14} className="text-primary" aria-hidden />
       <span>{label}</span>
@@ -40,7 +40,7 @@ export function ComposerCapabilityChip({
               size="icon-xs"
               onClick={onRemove}
               aria-label={removeLabel}
-              className="rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="rounded-lg text-muted hover:bg-selected hover:text-ink"
             >
               <X size={13} aria-hidden />
             </Button>

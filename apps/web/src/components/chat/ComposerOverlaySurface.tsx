@@ -43,7 +43,7 @@ interface ComposerOverlaySurfaceProps
 
 function surfaceToneClass(tone: "default" | "dark", attached: boolean): string {
   if (tone === "dark") return "border-white/10 bg-[#1e1e1e] text-neutral-100";
-  return attached ? "text-popover-foreground" : "bg-popover text-popover-foreground";
+  return attached ? "text-ink" : "bg-panel text-ink";
 }
 
 /** Shared overlay with in-flow composer placement and fixed placement in other contexts. */
@@ -90,7 +90,7 @@ export const ComposerOverlaySurface = forwardRef<HTMLDivElement, ComposerOverlay
         className={cn(
           "composer-autocomplete-surface overflow-hidden animate-composer-popup-enter",
           attached
-            ? "rounded-t-xl bg-popover ring-1 ring-inset ring-border/60"
+            ? "rounded-t-xl bg-panel ring-1 ring-inset ring-border/60"
             : "rounded-xl border border-border/70",
           surfaceToneClass(tone, attached),
           className,

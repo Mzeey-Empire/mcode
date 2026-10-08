@@ -82,9 +82,9 @@ function cellTone(cell: PullRequestDiffCell): string {
   if (cell.type === "remove") {
     return "bg-[var(--diff-remove-bg)] text-[var(--diff-remove-text)]";
   }
-  if (cell.type === "empty") return "bg-muted/[0.04] text-muted-foreground";
-  if (cell.type === "metadata") return "bg-page/75 text-muted-foreground";
-  return "text-foreground/75 hover:bg-muted/[0.08]";
+  if (cell.type === "empty") return "bg-hover/[0.04] text-muted";
+  if (cell.type === "metadata") return "bg-page/75 text-muted";
+  return "text-ink/75 hover:bg-hover/[0.08]";
 }
 
 function FileRow({
@@ -110,8 +110,8 @@ function FileRow({
       data-diff-focus-key={row.key}
       tabIndex={focusActive ? 0 : -1}
       className={cn(
-        "h-10 w-full justify-start rounded-none border-y border-border/35 bg-background/75 px-3 text-left font-normal hover:bg-muted/30",
-        active && "bg-muted/50",
+        "h-10 w-full justify-start rounded-none border-y border-border/35 bg-background/75 px-3 text-left font-normal hover:bg-hover/30",
+        active && "bg-hover/50",
       )}
       onFocus={() => onFocusActive(row.key)}
       onKeyDown={(event) => {
@@ -125,28 +125,28 @@ function FileRow({
         <ChevronDown
           size={13}
           aria-hidden
-          className="shrink-0 text-muted-foreground"
+          className="shrink-0 text-muted"
         />
       ) : (
         <ChevronRight
           size={13}
           aria-hidden
-          className="shrink-0 text-muted-foreground"
+          className="shrink-0 text-muted"
         />
       )}
       <FileTypeIcon filePath={row.file.path} size={14} className="shrink-0" />
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground/90">
+      <span className="min-w-0 flex-1 text-fade font-mono text-xs text-ink/90">
         {row.file.path}
       </span>
       {row.file.previousPath && (
-        <span className="hidden max-w-56 truncate font-mono text-xs text-muted-foreground lg:inline">
+        <span className="hidden max-w-56 text-fade font-mono text-xs text-muted lg:inline">
           from {row.file.previousPath}
         </span>
       )}
       <Badge
         variant="ghost"
         size="sm"
-        className="shrink-0 capitalize text-muted-foreground"
+        className="shrink-0 capitalize text-muted"
       >
         {row.file.changeType}
       </Badge>
@@ -161,7 +161,7 @@ function FileRow({
         </span>
       ) : null}
       {(row.threadCount > 0 || row.draftCount > 0) && (
-        <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+        <span className="shrink-0 font-mono text-xs tabular-nums text-muted">
           {row.threadCount + row.draftCount} notes
         </span>
       )}
@@ -223,7 +223,7 @@ function DiffCellDraftAction({
       tabIndex={-1}
       aria-label={`Draft comment on ${lineLabel.toLowerCase()}`}
       className={cn(
-        "pointer-events-none absolute left-0.5 top-0.5 z-10 size-6 rounded-md bg-foreground text-background opacity-0 shadow-none transition-opacity duration-100 hover:bg-foreground hover:text-background dark:hover:bg-foreground group-hover/cell:pointer-events-auto group-hover/cell:opacity-100 group-focus-within/cell:pointer-events-auto group-focus-within/cell:opacity-100 motion-reduce:transition-none",
+        "pointer-events-none absolute left-0.5 top-0.5 z-10 size-6 rounded-md bg-ink text-background opacity-0 shadow-none transition-opacity duration-100 hover:bg-ink hover:text-background dark:hover:bg-ink group-hover/cell:pointer-events-auto group-hover/cell:opacity-100 group-focus-within/cell:pointer-events-auto group-focus-within/cell:opacity-100 motion-reduce:transition-none",
         active && "pointer-events-auto opacity-100",
       )}
       onClick={(event) => {
@@ -307,7 +307,7 @@ const DiffCell = memo(function DiffCell({
       <span
         aria-hidden
         data-testid="pull-request-diff-gutter"
-        className="inline-grid w-10 shrink-0 select-none grid-cols-[0.75rem_1fr] items-center bg-page/35 pr-1.5 tabular-nums text-muted-foreground/70"
+        className="inline-grid w-10 shrink-0 select-none grid-cols-[0.75rem_1fr] items-center bg-page/35 pr-1.5 tabular-nums text-muted/70"
       >
         <span className="text-center text-current">{change.marker}</span>
         <span className="text-right">{cell.lineNumber ?? ""}</span>
@@ -618,7 +618,7 @@ function PullRequestVirtualDiffComponent({
     }
     if (row.kind === "notice") {
       return gridCell(
-        <div className="flex items-center gap-2 bg-background/45 px-4 py-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 bg-background/45 px-4 py-2 text-xs text-muted">
           <p role="status" className="min-w-0 flex-1">
             {row.message}
           </p>
@@ -708,7 +708,7 @@ function PullRequestVirtualDiffComponent({
       {isNarrow && mode === "split" && (
         <p
           role="status"
-          className="bg-page/65 px-3 py-2 text-xs text-muted-foreground"
+          className="bg-page/65 px-3 py-2 text-xs text-muted"
         >
           Split view needs a wider pane. Showing unified diff.
         </p>
@@ -729,11 +729,11 @@ function PullRequestVirtualDiffComponent({
           <div className="px-4 py-12 text-center">
             <span
               aria-hidden
-              className="font-mono text-lg text-muted-foreground/40"
+              className="font-mono text-lg text-muted/40"
             >
               ∅
             </span>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-muted">
               No files selected
             </p>
           </div>

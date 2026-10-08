@@ -166,7 +166,7 @@ export function getFileIconColor(filePath: string): string {
     if (extMatch) return extMatch;
   }
 
-  return "text-muted-foreground";
+  return "text-muted";
 }
 
 /**

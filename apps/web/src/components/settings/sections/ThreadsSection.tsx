@@ -63,7 +63,7 @@ function RetentionDaysControl({
           }}
           className="w-20 font-mono tabular-nums"
         />
-        <span className="text-sm text-muted-foreground">days</span>
+        <span className="text-sm text-muted">days</span>
       </div>
       <div className="flex items-center gap-2">
         <Switch
@@ -83,7 +83,7 @@ function RetentionDaysControl({
         />
         <label
           htmlFor="completed-thread-retention-never"
-          className="text-sm text-foreground"
+          className="text-sm text-ink"
         >
           <span aria-hidden>Never</span>
           <span className="sr-only">Never delete completed threads automatically</span>

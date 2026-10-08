@@ -23,12 +23,12 @@ export function SettingsGroup({
       <div className="mb-3 px-1">
         <h2
           id={headingId}
-          className="text-base leading-5 font-semibold tracking-tight text-foreground"
+          className="text-base leading-5 font-semibold tracking-tight text-ink"
         >
           {title}
         </h2>
         {description && (
-          <p className="mt-1 max-w-[65ch] text-xs text-muted-foreground">
+          <p className="mt-1 max-w-[65ch] text-xs text-muted">
             {description}
           </p>
         )}

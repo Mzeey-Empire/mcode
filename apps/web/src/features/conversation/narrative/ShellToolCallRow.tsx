@@ -50,7 +50,7 @@ function shellFailureLabel(toolCall: ToolCall, isCancelled: boolean): string | n
 function shellIconClassName(toolCall: ToolCall, isRunning: boolean): string {
   if (toolCall.isError) return "text-[var(--diff-remove)]";
   if (isRunning) return "text-primary";
-  return "text-muted-foreground/70";
+  return "text-muted/70";
 }
 
 function shellToolCallStatus(toolCall: ToolCall): ShellToolCallStatus {
@@ -120,29 +120,29 @@ function ShellToolCallHeader({
       variant="ghost"
       size="sm"
       onClick={onToggle}
-      className={`${NARRATIVE_TOOL_ROW} h-auto w-full justify-start rounded-md px-0 py-1 text-left font-normal transition-colors duration-150 hover:bg-muted/30 aria-expanded:bg-transparent active:translate-y-0 motion-reduce:transition-none dark:hover:bg-muted/30 dark:aria-expanded:bg-transparent`}
+      className={`${NARRATIVE_TOOL_ROW} h-auto w-full justify-start rounded-md px-0 py-1 text-left font-normal transition-colors duration-150 hover:bg-hover/30 aria-expanded:bg-transparent active:translate-y-0 motion-reduce:transition-none dark:hover:bg-hover/30 dark:aria-expanded:bg-transparent`}
       aria-expanded={open}
       aria-controls={controlsId}
     >
       <Terminal className={`h-3.5 w-3.5 shrink-0 ${iconClassName}`} />
-      <span className="relative shrink-0 text-sm font-medium text-foreground/75">
+      <span className="relative shrink-0 text-sm font-medium text-ink/75">
         {isRunning ? "Running command" : "Ran command"}
         {isRunning && (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 text-foreground startup-activity-shimmer startup-activity-shimmer-text"
+            className="pointer-events-none absolute inset-0 text-ink startup-activity-shimmer startup-activity-shimmer-text"
             data-startup-activity-shimmer-text="Running command"
           />
         )}
       </span>
       {duration && (
-        <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground/65">
+        <span className="shrink-0 font-mono text-xs tabular-nums text-muted/65">
           in {duration}
         </span>
       )}
       <CommandDetail command={command} detail={detail} tooltipId={`${panelId}-command`} />
       <ChevronRight
-        className={`h-3 w-3 shrink-0 text-muted-foreground/45 transition-transform duration-150 motion-reduce:transition-none ${
+        className={`h-3 w-3 shrink-0 text-muted/45 transition-transform duration-150 motion-reduce:transition-none ${
           open ? "rotate-90" : ""
         }`}
       />
@@ -165,24 +165,24 @@ function ShellToolCallTranscript({
 }) {
   const outputClassName = toolCall.isError
     ? "text-[var(--diff-remove)]"
-    : "text-foreground/75";
+    : "text-ink/75";
 
   return (
     <section
       id={panelId}
       aria-label="Shell output"
-      className="mt-1 min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-muted/25"
+      className="mt-1 min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-hover/25"
     >
-      <header className="border-b border-border/50 px-3 py-2 text-sm font-medium text-foreground/75">
+      <header className="border-b border-border/50 px-3 py-2 text-sm font-medium text-ink/75">
         {command ? "Shell" : "plaintext"}
       </header>
       {command && (
         <div className="group/copy relative flex min-w-0 items-start gap-2 px-3 py-2 pr-12 font-mono text-xs leading-5">
-          <span aria-hidden="true" className="select-none text-muted-foreground/70">$</span>
-          <code className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground/85 [overflow-wrap:anywhere]">
+          <span aria-hidden="true" className="select-none text-muted/70">$</span>
+          <code className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-xs leading-5 text-ink/85 [overflow-wrap:anywhere]">
             {command}
           </code>
-          <CopyButton text={command} label="Copy command" className="absolute right-2 top-1 text-muted-foreground opacity-0 group-hover/copy:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
+          <CopyButton text={command} label="Copy command" className="absolute right-2 top-1 text-muted opacity-0 group-hover/copy:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
         </div>
       )}
 
@@ -199,12 +199,12 @@ function ShellToolCallTranscript({
               {toolCall.output}
             </pre>
           </ScrollArea>
-          <CopyButton text={toolCall.output} label="Copy output" className="absolute right-3 top-1 bg-muted text-muted-foreground opacity-0 group-hover/copy:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
+          <CopyButton text={toolCall.output} label="Copy output" className="absolute right-3 top-1 bg-hover text-muted opacity-0 group-hover/copy:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
         </div>
       )}
 
       <footer className="flex justify-end px-3 py-2">
-        <Badge variant="ghost" size="sm" className="gap-1 px-0 font-normal text-muted-foreground" role="status">
+        <Badge variant="ghost" size="sm" className="gap-1 px-0 font-normal text-muted" role="status">
           {failureLabel ? <X aria-hidden="true" /> : isRunning ? <Clock aria-hidden="true" /> : <Check aria-hidden="true" />}
           {failureLabel ?? (isRunning ? "Running" : "Success")}
         </Badge>

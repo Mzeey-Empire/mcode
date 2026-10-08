@@ -83,7 +83,7 @@ export function WorktreeFilesPane({
             <Search
               size={13}
               aria-hidden
-              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/70"
+              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted/70"
             />
             <Input
               size="sm"
@@ -103,7 +103,7 @@ export function WorktreeFilesPane({
               aria-label="Refresh comparison"
               disabled={refreshing}
               onClick={onRefresh}
-              className="ml-1 h-7 w-7 shrink-0 text-muted-foreground"
+              className="ml-1 h-7 w-7 shrink-0 text-muted"
             >
               <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} aria-hidden="true" />
             </Button>
@@ -113,7 +113,7 @@ export function WorktreeFilesPane({
     >
       {loading ? (
         <div className="flex flex-1 items-center justify-center" role="status">
-          <span className="font-mono text-[1.05rem] uppercase tracking-[0.18em] text-muted-foreground/50">
+          <span className="font-mono text-[1.05rem] uppercase tracking-[0.18em] text-muted/50">
             Loading files
           </span>
         </div>
@@ -123,10 +123,10 @@ export function WorktreeFilesPane({
         </p>
       ) : filteredFiles.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
-          <span aria-hidden className="font-mono text-2xl text-muted-foreground/15">
+          <span aria-hidden className="font-mono text-2xl text-muted/15">
             ⊘
           </span>
-          <p className="font-mono text-[1.05rem] uppercase tracking-[0.18em] text-muted-foreground/40">
+          <p className="font-mono text-[1.05rem] uppercase tracking-[0.18em] text-muted/40">
             {files.length === 0 ? "No changed files" : "No matching files"}
           </p>
         </div>

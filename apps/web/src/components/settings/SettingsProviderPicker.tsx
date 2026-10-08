@@ -45,7 +45,7 @@ interface SettingsProviderPickerProps {
 function NeutralProviderGlyph({ children }: { children: ReactNode }) {
   return (
     <span
-      className="flex size-4 shrink-0 items-center justify-center text-muted-foreground [&_svg]:size-3.5"
+      className="flex size-4 shrink-0 items-center justify-center text-muted [&_svg]:size-3.5"
       aria-hidden
     >
       {children}
@@ -101,9 +101,9 @@ export function SettingsProviderPicker({
           >
             <span className="flex min-w-0 flex-1 items-center gap-2">
               {selected?.icon != null && <NeutralProviderGlyph>{selected.icon}</NeutralProviderGlyph>}
-              <span className="truncate text-left">{selected?.label ?? value}</span>
+              <span className="text-fade text-left">{selected?.label ?? value}</span>
             </span>
-            <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <ChevronDown className="size-4 shrink-0 text-muted" aria-hidden />
           </Button>
         }
       />
@@ -140,7 +140,7 @@ export function SettingsProviderPicker({
                 >
                   <span className="flex min-w-0 flex-1 items-center gap-2">
                     {opt.icon != null && <NeutralProviderGlyph>{opt.icon}</NeutralProviderGlyph>}
-                    <span className="truncate">{opt.label}</span>
+                    <span className="text-fade">{opt.label}</span>
                   </span>
                   {value === opt.value && <Check className="size-3.5 shrink-0" aria-hidden />}
                 </CommandItem>

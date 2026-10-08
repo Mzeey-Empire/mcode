@@ -189,7 +189,7 @@ export function FileList({
 
   if (files.length === 0) {
     return (
-      <p className="px-3 py-1 text-[11px] text-muted-foreground">No files changed</p>
+      <p className="px-3 py-1 text-[11px] text-muted">No files changed</p>
     );
   }
 
@@ -312,7 +312,7 @@ function FileListToolbar({
           role="status"
           aria-label="Refreshing comparison"
           data-testid="review-refresh-progress"
-          className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground/55"
+          className="inline-flex h-6 w-6 items-center justify-center text-muted/55"
         >
           <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
         </span>
@@ -360,8 +360,8 @@ function FilesToggle({ filesVisible, onToggle }: FilesToggleProps) {
             className={cn(
               "h-6 w-6 transition-colors",
               filesVisible
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground/50 hover:bg-muted/40 hover:text-foreground/70",
+                ? "bg-hover text-ink"
+                : "text-muted/50 hover:bg-hover/40 hover:text-ink/70",
             )}
             onClick={onToggle}
           >
@@ -404,7 +404,7 @@ function ReviewOptionsMenu({
       <DropdownMenuTrigger
         aria-label="Review options"
         data-testid="review-options-menu"
-        className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground/50 outline-none transition-colors hover:bg-muted/40 hover:text-foreground/70 focus-visible:ring-1 focus-visible:ring-ring"
+        className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded text-muted/50 outline-none transition-colors hover:bg-hover/40 hover:text-ink/70 focus-visible:ring-1 focus-visible:ring-focus"
       >
         <MoreIcon size={13} />
       </DropdownMenuTrigger>
@@ -416,7 +416,7 @@ function ReviewOptionsMenu({
             data-testid="review-option-refresh"
             className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs"
           >
-            <RefreshCw size={13} className={cn("text-muted-foreground", refreshInProgress && "animate-spin")} />
+            <RefreshCw size={13} className={cn("text-muted", refreshInProgress && "animate-spin")} />
             {refreshInProgress ? "Refreshing" : "Refresh"}
           </DropdownMenuItem>
         ) : null}
@@ -428,7 +428,7 @@ function ReviewOptionsMenu({
           data-testid="review-option-word-wrap"
           className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs data-disabled:cursor-not-allowed"
         >
-          <TextWrap size={13} className="text-muted-foreground" />
+          <TextWrap size={13} className="text-muted" />
           {lineWrap ? "Disable word wrap" : "Enable word wrap"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -438,9 +438,9 @@ function ReviewOptionsMenu({
           className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs"
         >
           {allExpanded ? (
-            <ChevronsDownUp size={13} className="text-muted-foreground" />
+            <ChevronsDownUp size={13} className="text-muted" />
           ) : (
-            <ChevronsUpDown size={13} className="text-muted-foreground" />
+            <ChevronsUpDown size={13} className="text-muted" />
           )}
           {allExpanded ? "Collapse all" : "Expand all"}
         </DropdownMenuItem>
@@ -471,7 +471,7 @@ function FileJumpPopover({ open, onOpenChange, files, onJumpToFile }: FileJumpPo
                 size="icon-xs"
                 aria-label="Jump to file"
                 data-testid="review-file-jump-trigger"
-                className="h-6 w-6 text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground"
+                className="h-6 w-6 text-muted/60 hover:bg-ink/10 hover:text-ink"
               >
                 <FileSearch size={13} aria-hidden="true" />
               </Button>
@@ -525,9 +525,9 @@ function FileJumpItem({ filePath, onSelect }: FileJumpItemProps) {
     >
       <FileTypeIcon filePath={filePath} size={14} className="mt-0.5" />
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-mono text-[11px] text-foreground/85">{basename}</span>
+        <span className="block text-fade font-mono text-[11px] text-ink/85">{basename}</span>
         {parent && (
-          <span className="block truncate font-mono text-[10px] text-muted-foreground/65">
+          <span className="block text-fade font-mono text-[10px] text-muted/65">
             {parent}/
           </span>
         )}
@@ -561,8 +561,8 @@ function RenderModeToggle({ renderMode, onToggle }: RenderModeToggleProps) {
             className={cn(
               "h-6 w-6 transition-colors",
               isSideBySide
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground/50 hover:bg-muted/40 hover:text-foreground/70",
+                ? "bg-hover text-ink"
+                : "text-muted/50 hover:bg-hover/40 hover:text-ink/70",
             )}
           >
             <Columns2 size={13} />

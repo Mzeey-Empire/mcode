@@ -37,7 +37,7 @@ export function SegControl({ options, value, onChange, className }: SegControlPr
       <div
         role="radiogroup"
         className={cn(
-          "inline-flex gap-0.5 rounded-md border border-border bg-muted/40 p-0.5",
+          "inline-flex gap-0.5 rounded-md border border-border bg-hover/40 p-0.5",
           className,
         )}
       >
@@ -53,10 +53,10 @@ export function SegControl({ options, value, onChange, className }: SegControlPr
               tabIndex={isActive ? 0 : -1}
               onClick={() => onChange(opt.value)}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-all duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                "inline-flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-all duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
                 isActive
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
+                  ? "bg-background text-ink shadow-sm"
+                  : "text-muted hover:text-ink",
                 opt.disabled && "cursor-not-allowed opacity-30",
               )}
             >

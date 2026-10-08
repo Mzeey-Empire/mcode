@@ -30,7 +30,7 @@ function ComposerStatusMode({
 }: ComposerStatusStripProps) {
   if (!isGitRepo && isNewThread) {
     return (
-      <span className="flex h-6 items-center rounded-md px-1.5 py-0.5 text-xs text-muted-foreground/40">
+      <span className="flex h-6 items-center rounded-md px-1.5 py-0.5 text-xs text-muted/40">
         Not a git repo
       </span>
     );

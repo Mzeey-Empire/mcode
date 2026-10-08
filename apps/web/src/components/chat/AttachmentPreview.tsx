@@ -104,7 +104,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
       <span
         className={cn(
           "flex h-5 w-5 items-center justify-center rounded-full",
-          "bg-foreground/75 text-background",
+          "bg-ink/75 text-background",
           "group-hover:bg-destructive group-hover:text-white",
           "hover:bg-destructive hover:text-white",
         )}
@@ -152,16 +152,16 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
               <BrowserCaptureTooltip key={att.id} title={spill?.title}>
                 <div
                   className={cn(
-                    "group relative flex-shrink-0 overflow-hidden rounded-lg border border-border/60 bg-muted/60 transition-all duration-150",
-                    "hover:border-primary/40 hover:bg-muted/80",
+                    "group relative flex-shrink-0 overflow-hidden rounded-lg border border-border/60 bg-hover/60 transition-all duration-150",
+                    "hover:border-primary/40 hover:bg-hover/80",
                   )}
                 >
                   <div className="flex h-[72px] w-[140px] flex-col justify-center gap-0.5 px-3 py-1">
                     <div className="flex min-h-0 items-center gap-2">
                       <FileText size={18} className="shrink-0 text-primary" />
-                      <span className="truncate text-xs font-medium text-foreground">Page context</span>
+                      <span className="text-fade text-xs font-medium text-ink">Page context</span>
                     </div>
-                    <span className="block max-w-[120px] truncate pl-[26px] text-xs leading-tight text-muted-foreground">
+                    <span className="block max-w-[120px] text-fade pl-[26px] text-xs leading-tight text-muted">
                       {spill ? spill.line : "No image"}
                     </span>
                     {removeButton(att.name, att.id)}
@@ -184,8 +184,8 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
                     type="button"
                     className={cn(
                       "relative flex h-full w-full cursor-pointer overflow-hidden rounded-lg border p-0 text-left outline-none",
-                      "border-border/60 bg-muted/60 transition-[border-color,background-color,filter]",
-                      "hover:border-primary/45 hover:bg-muted/80 hover:brightness-[1.04]",
+                      "border-border/60 bg-hover/60 transition-[border-color,background-color,filter]",
+                      "hover:border-primary/45 hover:bg-hover/80 hover:brightness-[1.04]",
                       "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                     )}
                     aria-label={`Preview image ${att.name}`}
@@ -202,9 +202,10 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
                     {spill ? (
                       <Tooltip>
                         <TooltipTrigger
-                          render={<span className="absolute bottom-0.5 left-0.5 right-0.5 z-10 truncate rounded bg-background/85 px-0.5 text-center text-xs font-medium text-foreground/90 shadow-sm" />}
+                          render={<span className="absolute bottom-0.5 left-0.5 right-0.5 z-10 flex justify-center rounded bg-background/85 px-0.5 text-xs font-medium text-ink/90 shadow-sm" />}
                         >
-                          + spill file
+                          {/* The fade mask covers its whole box, so it sits inside the pill to keep the pill fill solid. */}
+                          <span className="text-fade">+ spill file</span>
                         </TooltipTrigger>
                         <TooltipContent>{spill.title}</TooltipContent>
                       </Tooltip>
@@ -228,7 +229,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
               key={att.id}
               className={cn(
                 "group relative flex-shrink-0 overflow-hidden rounded-lg transition-all duration-150",
-                "border border-transparent hover:border-primary/40 hover:bg-muted/50",
+                "border border-transparent hover:border-primary/40 hover:bg-hover/50",
               )}
             >
               <FileAttachmentTile

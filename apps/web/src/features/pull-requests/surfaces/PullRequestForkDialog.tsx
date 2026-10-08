@@ -153,7 +153,7 @@ function preparationError(caught: unknown): PullRequestError {
 
 function PullRequestForkPreparing() {
   return (
-    <div className="flex min-h-56 items-center justify-center gap-2 text-xs text-muted-foreground">
+    <div className="flex min-h-56 items-center justify-center gap-2 text-xs text-muted">
       <Spinner size="xs" aria-hidden />
       <span role="status">Finding the matching project and worktree</span>
     </div>
@@ -177,8 +177,8 @@ function PullRequestForkError({
   const selectedWorkspace = candidates.find((candidate) => candidate.id === selectedWorkspaceId);
   return (
     <div className="space-y-4 px-5 py-5">
-      <div role="alert" className="flex items-start gap-2 bg-destructive/8 px-3 py-2.5 text-xs"><ErrorIcon size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" /><p className="text-foreground/85">{errorCopy(error)}</p></div>
-      {error.code === "workspace_mapping_ambiguous" && candidates.length > 0 ? <div className="space-y-1.5"><label className="text-xs text-muted-foreground" htmlFor="fork-workspace">Project</label><Select value={selectedWorkspaceId} onValueChange={setSelectedWorkspaceId}><SelectTrigger id="fork-workspace" className="w-full"><SelectValue>{selectedWorkspace ? selectedWorkspace.name : "Choose a project"}</SelectValue></SelectTrigger><SelectContent>{candidates.map((candidate: PullRequestWorkspaceCandidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.name}</SelectItem>)}</SelectContent></Select></div> : null}
+      <div role="alert" className="flex items-start gap-2 bg-destructive/8 px-3 py-2.5 text-xs"><ErrorIcon size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" /><p className="text-ink/85">{errorCopy(error)}</p></div>
+      {error.code === "workspace_mapping_ambiguous" && candidates.length > 0 ? <div className="space-y-1.5"><label className="text-xs text-muted" htmlFor="fork-workspace">Project</label><Select value={selectedWorkspaceId} onValueChange={setSelectedWorkspaceId}><SelectTrigger id="fork-workspace" className="w-full"><SelectValue>{selectedWorkspace ? selectedWorkspace.name : "Choose a project"}</SelectValue></SelectTrigger><SelectContent>{candidates.map((candidate: PullRequestWorkspaceCandidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.name}</SelectItem>)}</SelectContent></Select></div> : null}
       <div className="flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button>{error.code === "workspace_mapping_missing" ? <Button onClick={() => { onClose(); requestAnimationFrame(() => { useCommandPaletteStore.getState().open({ intent: "addProject" }); }); }}>Add project</Button> : <Button disabled={error.code === "workspace_mapping_ambiguous" && !selectedWorkspaceId} onClick={() => onPrepare(selectedWorkspaceId ?? undefined)}>Retry</Button>}</div>
     </div>
   );
@@ -218,7 +218,7 @@ function PullRequestForkComposer({
     );
   }
   return (
-    <div className="min-h-0 bg-background"><div className="flex items-center gap-2 border-b border-border/35 px-5 py-2 text-xs text-muted-foreground"><span className="font-medium text-foreground/85">{target.mode === "existing-worktree" ? "Existing worktree" : "New worktree"}</span><span aria-hidden>·</span><span className="min-w-0 truncate font-mono">{target.branch}</span>{mode === "background" ? <span className="ml-auto shrink-0">The pull request stays open</span> : null}</div><Composer isNewThread workspaceId={target.workspaceId} onThreadPreparing={onThreadPreparing} onThreadCreationFailed={onThreadCreationFailed} onThreadCreated={onThreadCreated} /></div>
+    <div className="min-h-0 bg-background"><div className="flex items-center gap-2 border-b border-border/35 px-5 py-2 text-xs text-muted"><span className="font-medium text-ink/85">{target.mode === "existing-worktree" ? "Existing worktree" : "New worktree"}</span><span aria-hidden>·</span><span className="min-w-0 text-fade font-mono">{target.branch}</span>{mode === "background" ? <span className="ml-auto shrink-0">The pull request stays open</span> : null}</div><Composer isNewThread workspaceId={target.workspaceId} onThreadPreparing={onThreadPreparing} onThreadCreationFailed={onThreadCreationFailed} onThreadCreated={onThreadCreated} /></div>
   );
 }
 

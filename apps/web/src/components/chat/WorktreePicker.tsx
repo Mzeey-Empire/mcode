@@ -8,6 +8,7 @@ import { normalizeWorktreePath, worktreeBranchLabel } from "@/lib/worktree";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { Spinner } from "@/components/ui/spinner";
+import { PathText } from "@/components/ui/path-text";
 
 interface WorktreePickerProps {
   worktrees: WorktreeInfo[];
@@ -46,7 +47,7 @@ function WorktreePickerContent({
   onClose: () => void;
 }) {
   if (loading) {
-    return <div className="flex items-center justify-center py-4"><Spinner size={16} className="text-muted-foreground" /></div>;
+    return <div className="flex items-center justify-center py-4"><Spinner size={16} className="text-muted" /></div>;
   }
   return (
     <Command filter={worktreeFilter(worktrees)}>
@@ -66,14 +67,16 @@ function WorktreePickerContent({
                 className={cn(
                   "flex flex-col items-start px-3 py-1.5 text-xs",
                   normalizeWorktreePath(worktree.path) === normalizedSelected
-                    ? "bg-accent text-foreground"
-                    : "text-popover-foreground",
+                    ? "bg-selected text-ink"
+                    : "text-ink",
                 )}
               >
-                <span className="font-medium">{worktree.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {worktreeBranchLabel(worktree)} &middot; {truncatePath(worktree.path)}
-                  {!worktree.managed && <Badge variant="secondary" size="sm" className="ml-1">external</Badge>}
+                <span className="max-w-full text-fade font-medium">{worktree.name}</span>
+                <span className="flex w-full min-w-0 items-baseline gap-1 text-xs text-muted">
+                  <span className="max-w-1/2 shrink-0 text-fade">{worktreeBranchLabel(worktree)}</span>
+                  <span aria-hidden>&middot;</span>
+                  <PathText path={worktree.path} className="flex-1" />
+                  {!worktree.managed && <Badge variant="secondary" size="sm" className="shrink-0">external</Badge>}
                 </span>
               </CommandItem>
             ))}
@@ -104,7 +107,7 @@ export function WorktreePicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={
-        <Button variant="ghost" size="xs" className={cn("text-muted-foreground", triggerClassName)}>
+        <Button variant="ghost" size="xs" className={cn("text-muted", triggerClassName)}>
           <GitFork size={iconSize} className={triggerClassName ? "size-3.5" : undefined} />
           {selectedName === null ? <Spinner size={11} className="text-current" /> : <span>{selectedName}</span>}
           <ChevronDown size={Math.max(10, iconSize - 2)} className={triggerClassName ? "size-3" : undefined} />
@@ -122,12 +125,6 @@ export function WorktreePicker({
       </PopoverContent>
     </Popover>
   );
-}
-
-function truncatePath(path: string): string {
-  const parts = path.replace(/\\/g, "/").split("/");
-  if (parts.length <= 4) return path;
-  return ".../" + parts.slice(-3).join("/");
 }
 
 export default WorktreePicker;

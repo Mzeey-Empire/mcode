@@ -46,10 +46,10 @@ export class AppErrorBoundary extends Component<
   render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-6 text-center text-foreground">
+        <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-6 text-center text-ink">
           <div className="space-y-2">
             <h1 className="text-2xl font-semibold">Mcode ran into a problem</h1>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted">
               Reload the app to continue.
             </p>
           </div>

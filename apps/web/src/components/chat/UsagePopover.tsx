@@ -31,7 +31,7 @@ function UsageBar({ percent, className, label }: { percent: number; className?: 
     "bg-emerald-500";
   const valuenow = Math.round(Math.min(percent * 100, 100));
   return (
-    <div className="h-1 w-full rounded-full bg-muted">
+    <div className="h-1 w-full rounded-full bg-hover">
       <div
         role="progressbar"
         aria-valuemin={0}
@@ -57,8 +57,8 @@ function QuotaRow({ category }: { category: QuotaCategory }) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-muted-foreground">{category.label}</span>
-        <span className={percent >= 0.8 ? "text-destructive" : "text-foreground/70"}>
+        <span className="text-muted">{category.label}</span>
+        <span className={percent >= 0.8 ? "text-destructive" : "text-ink/70"}>
           {category.isUnlimited ? "unlimited" : usedDisplay}
         </span>
       </div>
@@ -69,7 +69,7 @@ function QuotaRow({ category }: { category: QuotaCategory }) {
             label={resetText ? `${category.label} usage. ${resetText}` : `${category.label} usage`}
           />
           {resetText ? (
-            <div className="font-mono text-xs tabular-nums text-muted-foreground/70">
+            <div className="font-mono text-xs tabular-nums text-muted/70">
               {resetText}
             </div>
           ) : null}
@@ -95,14 +95,14 @@ function UsageProviderHeader({
       <div>
         <div className="text-sm font-medium capitalize">{providerId}</div>
         {model ? (
-          <div className="text-xs text-muted-foreground">
+          <div className="text-xs text-muted">
             {model}
             {contextEntry?.costMultiplier != null && ` · ${contextEntry.costMultiplier}×`}
           </div>
         ) : null}
       </div>
       {usageStatus === "stale" ? (
-        <div className="text-right font-mono text-xs uppercase tracking-wider text-muted-foreground/60">STALE</div>
+        <div className="text-right font-mono text-xs uppercase tracking-wider text-muted/60">STALE</div>
       ) : null}
     </div>
   );
@@ -116,12 +116,12 @@ function UsageQuotaSection({ usageInfo }: { usageInfo: ProviderUsageInfo | undef
       : usageInfo?.usageStatus === "ready-empty"
         ? "No capped quota reported"
         : "Usage unavailable";
-    return <div className="text-xs text-muted-foreground">{unavailableMessage}</div>;
+    return <div className="text-xs text-muted">{unavailableMessage}</div>;
   }
 
   return (
     <div className="space-y-2">
-      <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Quota</div>
+      <div className="text-xs font-medium uppercase tracking-wider text-muted/60">Quota</div>
       {categories.map((category) => <QuotaRow key={category.label} category={category} />)}
     </div>
   );
@@ -133,7 +133,7 @@ function UsageRefreshStatus({ usageInfo }: { usageInfo: ProviderUsageInfo | unde
   const detail = status === "stale"
     ? `Could not refresh. Showing last update from ${usageInfo.fetchedAt ?? "this session"}.`
     : "Usage unavailable.";
-  return <div className="text-xs text-muted-foreground">{detail}{usageInfo.diagnostic ? ` ${usageInfo.diagnostic}` : ""}</div>;
+  return <div className="text-xs text-muted">{detail}{usageInfo.diagnostic ? ` ${usageInfo.diagnostic}` : ""}</div>;
 }
 
 function ContextUsage({ contextEntry }: { contextEntry: ThreadContextUsage | undefined }) {
@@ -142,10 +142,10 @@ function ContextUsage({ contextEntry }: { contextEntry: ThreadContextUsage | und
   if (tokensIn === 0 || !contextWindow) return null;
   return (
     <div className="space-y-1 border-t border-border pt-2">
-      <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Context window</div>
+      <div className="text-xs font-medium uppercase tracking-wider text-muted/60">Context window</div>
       <div className="flex items-center justify-between text-xs">
-        <span className="text-muted-foreground">Used</span>
-        <span className="text-foreground/70">{formatTokens(tokensIn)} / {formatTokens(contextWindow)}</span>
+        <span className="text-muted">Used</span>
+        <span className="text-ink/70">{formatTokens(tokensIn)} / {formatTokens(contextWindow)}</span>
       </div>
       <UsageBar percent={tokensIn / contextWindow} label={`Context usage: ${formatTokens(tokensIn)} of ${formatTokens(contextWindow)} tokens`} />
     </div>
@@ -154,9 +154,9 @@ function ContextUsage({ contextEntry }: { contextEntry: ThreadContextUsage | und
 
 function UsageMetric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded bg-muted/40 px-2 py-1.5">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-xs text-foreground/80">{formatTokens(value)}</div>
+    <div className="rounded bg-hover/40 px-2 py-1.5">
+      <div className="text-xs text-muted">{label}</div>
+      <div className="text-xs text-ink/80">{formatTokens(value)}</div>
     </div>
   );
 }
@@ -173,10 +173,10 @@ function CacheUsageMetrics({ contextEntry }: { contextEntry: ThreadContextUsage 
 function LastTurnUsage({ contextEntry }: { contextEntry: ThreadContextUsage | undefined }) {
   const tokensIn = contextEntry?.lastTokensIn ?? 0;
   const tokensOut = contextEntry?.tokensOut ?? 0;
-  if (tokensIn === 0 && tokensOut === 0) return <div className="border-t border-border pt-2 text-xs text-muted-foreground">No turn data yet</div>;
+  if (tokensIn === 0 && tokensOut === 0) return <div className="border-t border-border pt-2 text-xs text-muted">No turn data yet</div>;
   return (
     <div className="space-y-2 border-t border-border pt-2">
-      <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60">Last turn</div>
+      <div className="text-xs font-medium uppercase tracking-wider text-muted/60">Last turn</div>
       <div className="grid grid-cols-2 gap-1.5">
         <UsageMetric label="in" value={tokensIn} />
         <UsageMetric label="out" value={tokensOut} />
@@ -205,8 +205,8 @@ function UsagePopoverDetails({
       <UsageRefreshStatus usageInfo={usageInfo} />
       {sessionCost != null ? (
         <div className="flex items-center justify-between border-t border-border pt-2 text-xs">
-          <span className="text-muted-foreground">Session cost</span>
-          <span className="text-foreground/70">${sessionCost.toFixed(4)}</span>
+          <span className="text-muted">Session cost</span>
+          <span className="text-ink/70">${sessionCost.toFixed(4)}</span>
         </div>
       ) : null}
       <ContextUsage contextEntry={contextEntry} />

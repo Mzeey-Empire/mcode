@@ -43,7 +43,7 @@ function OptionTileHeading({
         className={cn(
           "text-sm leading-snug",
           flashing && "animate-wizard-accept-flash",
-          selected ? "font-medium text-foreground" : "text-foreground/80",
+          selected ? "font-medium text-ink" : "text-ink/80",
         )}
         style={flashing ? { ["--tile-index" as string]: index } : undefined}
       >
@@ -88,7 +88,7 @@ function OptionTileDetails({
   }
   if (isOtherTile || !option.description) return null;
   return (
-    <p className={cn("text-xs mt-1 leading-relaxed", selected ? "text-muted-foreground/80" : "text-muted-foreground/45")}>
+    <p className={cn("text-xs mt-1 leading-relaxed", selected ? "text-muted/80" : "text-muted/45")}>
       {option.description}
     </p>
   );
@@ -131,9 +131,9 @@ export function OptionTile({
       className={cn(
         "group relative w-full text-left animate-wizard-tile",
         "px-3 py-2.5 cursor-pointer",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/40",
+        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus/40",
         "transition-colors duration-150 ease-out",
-        selected ? "bg-primary/[0.06]" : "hover:bg-foreground/[0.025]",
+        selected ? "bg-primary/[0.06]" : "hover:bg-ink/[0.025]",
       )}
     >
       <div className="flex items-baseline gap-2">
@@ -147,7 +147,7 @@ export function OptionTile({
             "transition-[opacity,transform] duration-200 ease-out",
             selected
               ? "opacity-100 translate-x-0 text-primary"
-              : "opacity-0 -translate-x-1 text-muted-foreground/30",
+              : "opacity-0 -translate-x-1 text-muted/30",
           )}
         >
           ▸

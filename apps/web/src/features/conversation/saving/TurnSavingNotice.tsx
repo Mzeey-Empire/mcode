@@ -6,7 +6,7 @@ import { getTransport } from "@/transport";
 /** Discloses confirmed progress loss after a server restart, separately from save status. */
 export function TurnSavingNotice({ lostProgress }: { lostProgress: boolean }) {
   if (!lostProgress) return null;
-  return <div className="mx-3 mb-2 rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground" data-testid="turn-saving-notice">
+  return <div className="mx-3 mb-2 rounded-lg border border-border px-4 py-2 text-sm text-muted" data-testid="turn-saving-notice">
     <p role="alert">Mcode restarted. Progress that had not been saved was lost.</p>
   </div>;
 }
@@ -38,7 +38,7 @@ export function TurnSaveRecovery({ statuses }: { statuses: readonly TurnSavingSt
         onClick={() => { void retrySave(threadId); }}>
         {retrying.has(threadId) ? "Retrying save…" : "Retry save"}
       </Button>
-      {errors[threadId] ? <p role="alert" className="px-3 text-xs text-muted-foreground">{errors[threadId]}</p> : null}
+      {errors[threadId] ? <p role="alert" className="px-3 text-xs text-muted">{errors[threadId]}</p> : null}
     </div>)}
   </div>;
 }

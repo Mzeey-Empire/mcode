@@ -94,7 +94,7 @@ function PlatformCommandEditor({ idPrefix, command, onChange, firstControlRef }:
           </Button>
         ))}
       </div>
-      <div id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0} className="outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <div id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0} className="outline-none focus-visible:ring-3 focus-visible:ring-focus/50">
         <Textarea
           ref={platform === "default" ? firstControlRef : undefined}
           id={`${idPrefix}-script-${platform}`}
@@ -135,7 +135,7 @@ function ActionEditor({ action, onChange, onRemove, nameRef }: ActionEditorProps
     <section className="space-y-4" aria-labelledby={`${action.id}-heading`}>
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
         <div>
-          <label htmlFor={`${action.id}-name`} className="mb-1 block text-xs font-medium text-muted-foreground">Name</label>
+          <label htmlFor={`${action.id}-name`} className="mb-1 block text-xs font-medium text-muted">Name</label>
           <Input
             ref={nameRef}
             id={`${action.id}-name`}
@@ -312,7 +312,7 @@ function EnvironmentStorageSection({
     <section aria-labelledby="project-environment-storage-title" className="space-y-3">
       <div className="space-y-1">
         <h2 id="project-environment-storage-title" className="text-sm font-semibold">Environment storage</h2>
-        <p className="text-xs text-muted-foreground">Choose where Mcode saves this Project’s Setup and actions.</p>
+        <p className="text-xs text-muted">Choose where Mcode saves this Project’s Setup and actions.</p>
       </div>
       <div role="radiogroup" aria-label="Environment storage" className="mt-3 grid gap-2">
         <EnvironmentStorageOption
@@ -356,7 +356,7 @@ function EnvironmentStorageOption({
   const label = mode === "system" ? "System storage" : "Shared storage";
   return (
     <Button type="button" role="radio" aria-checked={selected} aria-label={label} aria-describedby={descriptionId} variant={selected ? "secondary" : "outline"} disabled={disabled} className="h-auto justify-start px-3 py-3 text-left" onClick={onClick}>
-      <span className="flex min-w-0 flex-col gap-1"><span>{label}</span><span id={descriptionId} className="text-xs font-normal text-muted-foreground">{description}</span></span>
+      <span className="flex min-w-0 flex-col gap-1"><span>{label}</span><span id={descriptionId} className="text-xs font-normal text-muted">{description}</span></span>
     </Button>
   );
 }
@@ -384,7 +384,7 @@ function EnvironmentSetupSection({
   return (
     <section aria-labelledby="project-environment-setup-title" className="space-y-3 border-t border-border/60 pt-6">
       <div className="flex items-center justify-between gap-3">
-        <div><h2 id="project-environment-setup-title" className="text-base font-semibold">Setup</h2><p className="mt-1 text-xs text-muted-foreground">Optional setup command configuration for this Project.</p></div>
+        <div><h2 id="project-environment-setup-title" className="text-base font-semibold">Setup</h2><p className="mt-1 text-xs text-muted">Optional setup command configuration for this Project.</p></div>
         <Button ref={firstTaskRef} type="button" variant="outline" size="sm" onClick={() => onSetSetup(!setupEnabled)}>{setupEnabled ? "Remove Setup" : "Add Setup"}</Button>
       </div>
       <EnvironmentSetupEditor setup={setupEnabled ? draft.setup : undefined} setupScriptRef={setupScriptRef} onDraftChange={onDraftChange} />
@@ -421,7 +421,7 @@ function EnvironmentActionsSection({
   return (
     <section aria-labelledby="project-environment-actions-title" className="space-y-3 border-t border-border/60 pt-6">
       <div className="flex items-center justify-between gap-3">
-        <div><h2 id="project-environment-actions-title" className="text-base font-semibold">Project actions</h2><p className="mt-1 text-xs text-muted-foreground">Save named commands for this Project.</p></div>
+        <div><h2 id="project-environment-actions-title" className="text-base font-semibold">Project actions</h2><p className="mt-1 text-xs text-muted">Save named commands for this Project.</p></div>
         <Button type="button" variant="outline" size="sm" aria-label="Add action" onClick={onAddAction}><Plus size={15} aria-hidden /> Add action</Button>
       </div>
       <EnvironmentActionList actions={actions} firstActionNameRef={firstActionNameRef} onUpdateAction={onUpdateAction} onRemoveAction={onRemoveAction} />
@@ -435,7 +435,7 @@ function EnvironmentActionList({
   onUpdateAction,
   onRemoveAction,
 }: Omit<Parameters<typeof EnvironmentActionsSection>[0], "onAddAction">) {
-  if (actions.length === 0) return <p className="text-xs text-muted-foreground">No project actions configured.</p>;
+  if (actions.length === 0) return <p className="text-xs text-muted">No project actions configured.</p>;
   return (
     <div className="space-y-8">
       {actions.map((action, index) => <ActionEditor key={action.id} action={action} onChange={(next) => onUpdateAction(action.id, next)} onRemove={() => onRemoveAction(action.id)} nameRef={index === actions.length - 1 ? firstActionNameRef : undefined} />)}
@@ -447,7 +447,7 @@ function EnvironmentMessages({ error, status }: { error: string[] | null; status
   return (
     <>
       {error ? <div className="max-h-32 overflow-y-auto rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs" role="alert" tabIndex={0} aria-label="Project environment errors">{error.map((message, index) => <p key={`${message}-${index}`}>{message}</p>)}</div> : null}
-      {status ? <p className="text-xs text-muted-foreground" role="status">{status}</p> : null}
+      {status ? <p className="text-xs text-muted" role="status">{status}</p> : null}
     </>
   );
 }
@@ -536,10 +536,10 @@ export function ProjectEnvironmentPanel({ workspaceId, threadId, active = true }
         <div className="space-y-7">
           <header className="space-y-1">
             <h1 id="project-environment-title" className="text-base font-semibold">Project settings</h1>
-            <p className="text-xs text-muted-foreground">{projectName}</p>
+            <p className="text-xs text-muted">{projectName}</p>
           </header>
           <EnvironmentMessages error={error} status={status} />
-          {loading ? <p className="text-xs text-muted-foreground">Loading environment...</p> : (
+          {loading ? <p className="text-xs text-muted">Loading environment...</p> : (
             <>
             <EnvironmentStorageSection
               storageMode={storageMode}
@@ -583,7 +583,7 @@ export function ProjectEnvironmentPanel({ workspaceId, threadId, active = true }
             <DialogTitle>Share this Project environment?</DialogTitle>
             <DialogDescription className="space-y-4">
               <p>
-                Save this Project environment in <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">.mcode/environment.json</code> in the {threadId ? "current checkout" : "base checkout"}.
+                Save this Project environment in <code className="rounded bg-hover px-1 py-0.5 font-mono text-xs text-ink">.mcode/environment.json</code> in the {threadId ? "current checkout" : "base checkout"}.
               </p>
               <p>Before a Setup command or Project action runs from this file, Mcode asks for your approval.</p>
             </DialogDescription>

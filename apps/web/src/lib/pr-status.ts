@@ -15,6 +15,6 @@ export function getPrVisual(state: string | null | undefined): PrStateVisual {
     case "closed":
       return { Icon: GitPullRequest, color: "text-destructive/70" };
     default:
-      return { Icon: GitPullRequest, color: "text-muted-foreground/60" };
+      return { Icon: GitPullRequest, color: "text-muted/60" };
   }
 }

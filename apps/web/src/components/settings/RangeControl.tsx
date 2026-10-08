@@ -60,12 +60,12 @@ export function RangeControl({
           onTouchEnd={() => { if (local !== null) commit(local); }}
           className="settings-range w-full"
         />
-        <div className="flex justify-between text-xs text-muted-foreground mt-1">
+        <div className="flex justify-between text-xs text-muted mt-1">
           <span>{min}</span>
           <span>{max}</span>
         </div>
       </div>
-      <span className="min-w-[2.5rem] text-right font-mono text-xs text-foreground">
+      <span className="min-w-[2.5rem] text-right font-mono text-xs text-ink">
         {formatted}
       </span>
     </div>

@@ -160,10 +160,8 @@ describe("composer capabilities", () => {
       const descriptionElement = screen.getByText(description);
       const titleElement = descriptionElement.previousElementSibling;
 
-      expect(descriptionElement).toHaveClass("flex-1", "overflow-hidden", "whitespace-nowrap");
-      expect(descriptionElement).toHaveStyle({
-        maskImage: "linear-gradient(to right, black calc(100% - 1.5rem), transparent)",
-      });
+      expect(descriptionElement).toHaveClass("flex-1", "text-fade");
+      expect(descriptionElement.getAttribute("style") ?? "").not.toMatch(/mask-image/i);
       expect(titleElement).toHaveClass("shrink-0");
       expect(descriptionElement.parentElement).toHaveClass("items-baseline", "overflow-hidden");
       expect(descriptionElement.parentElement).not.toHaveClass("flex-col");

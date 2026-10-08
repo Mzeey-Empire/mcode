@@ -78,12 +78,12 @@ export function CliErrorBanner({ error, onDismiss, onOpenSettings }: CliErrorBan
 
         <div className="min-w-0 flex-1 space-y-2">
           {/* Headline */}
-          <p className="text-xs font-semibold text-foreground/90">{headline}</p>
+          <p className="text-xs font-semibold text-ink/90">{headline}</p>
 
           {/* Install command */}
           {installCmd && (
             <div className="flex items-center gap-2">
-              <code className="flex-1 rounded bg-muted/60 px-2.5 py-1 font-mono text-xs text-foreground/80 border border-border/40">
+              <code className="flex-1 rounded bg-hover/60 px-2.5 py-1 font-mono text-xs text-ink/80 border border-border/40">
                 {installCmd}
               </code>
               <Tooltip>
@@ -95,7 +95,7 @@ export function CliErrorBanner({ error, onDismiss, onOpenSettings }: CliErrorBan
                       aria-label="Copy command"
                       className={cn(
                         "flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border/40",
-                        "text-muted-foreground/60 transition-colors hover:border-amber-500/40",
+                        "text-muted/60 transition-colors hover:border-amber-500/40",
                         "hover:bg-amber-500/10 hover:text-amber-500/80",
                       )}
                     >
@@ -110,7 +110,7 @@ export function CliErrorBanner({ error, onDismiss, onOpenSettings }: CliErrorBan
 
           {/* Settings hint */}
           {settingsHint && (
-            <p className="text-xs text-muted-foreground/70">
+            <p className="text-xs text-muted/70">
               {settingsHint.replace(/(?:in |at )?Settings > [^.\n]+\.?/, "").trim()}{" "}
               <button
                 type="button"
@@ -129,7 +129,7 @@ export function CliErrorBanner({ error, onDismiss, onOpenSettings }: CliErrorBan
           type="button"
           onClick={onDismiss}
           aria-label="Dismiss error"
-          className="shrink-0 rounded p-0.5 text-muted-foreground/40 transition-colors hover:bg-muted/40 hover:text-muted-foreground/70"
+          className="shrink-0 rounded p-0.5 text-muted/40 transition-colors hover:bg-hover/40 hover:text-muted/70"
         >
           <X size={13} />
         </button>

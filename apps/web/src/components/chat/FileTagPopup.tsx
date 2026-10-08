@@ -59,20 +59,20 @@ function splitPath(path: string): { dir: string; name: string } {
 function getSuggestionRowClass(isDark: boolean, selected: boolean): string {
   const selectionClass = isDark
     ? selected ? "bg-white/[0.12] text-neutral-100" : "hover:bg-white/[0.06] hover:text-neutral-100"
-    : selected ? "bg-accent text-accent-foreground" : "hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:outline-none";
+    : selected ? "bg-selected text-ink" : "hover:bg-selected hover:text-ink focus-visible:bg-selected focus-visible:text-ink focus-visible:outline-none";
   return cn("group h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors duration-100", isDark && "focus-visible:outline-none", selectionClass);
 }
 
 function SuggestionRowIcon({ item, isFile, isDark }: { item: MentionSuggestion; isFile: boolean; isDark: boolean }) {
-  return <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-md ring-1 ring-inset", isDark ? "bg-white/[0.06] text-neutral-400 ring-white/10" : "bg-muted/65 text-muted-foreground ring-border/60")}><EntityIcon kind={item.kind} filePath={isFile ? item.path : undefined} size={14} className="flex items-center justify-center" /></span>;
+  return <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-md ring-1 ring-inset", isDark ? "bg-white/[0.06] text-neutral-400 ring-white/10" : "bg-hover/65 text-muted ring-border/60")}><EntityIcon kind={item.kind} filePath={isFile ? item.path : undefined} size={14} className="flex items-center justify-center" /></span>;
 }
 
 function AgentSuggestionRowText({ item, name, isDark }: { item: Extract<MentionSuggestion, { kind: "agent" }>; name: string; isDark: boolean }) {
-  return <span className="flex min-w-0 flex-1 items-baseline gap-1"><span className={cn("shrink-0 font-medium", isDark ? "text-neutral-100" : "")}>{name}</span>{item.description ? <span className={cn("min-w-0 truncate", isDark ? "text-neutral-400 group-hover:text-neutral-300 group-aria-selected:text-neutral-300" : "text-muted-foreground group-hover:text-accent-foreground/70 group-focus-visible:text-accent-foreground/70 group-aria-selected:text-accent-foreground/70")}>{item.description}</span> : null}</span>;
+  return <span className="flex min-w-0 flex-1 items-baseline gap-1"><span className={cn("shrink-0 font-medium", isDark ? "text-neutral-100" : "")}>{name}</span>{item.description ? <span className={cn("min-w-0 text-fade", isDark ? "text-neutral-400 group-hover:text-neutral-300 group-aria-selected:text-neutral-300" : "text-muted group-hover:text-ink/70 group-focus-visible:text-ink/70 group-aria-selected:text-ink/70")}>{item.description}</span> : null}</span>;
 }
 
 function FileSuggestionRowText({ dir, name, isDark }: { dir: string; name: string; isDark: boolean }) {
-  return <span className="min-w-0 flex-1 truncate"><span className={cn(isDark ? "text-neutral-400 group-hover:text-neutral-300 group-aria-selected:text-neutral-300" : "text-muted-foreground group-hover:text-accent-foreground/70 group-focus-visible:text-accent-foreground/70 group-aria-selected:text-accent-foreground/70")}>{dir}</span><span className={cn("font-medium", isDark ? "text-neutral-100" : "")}>{name}</span></span>;
+  return <span className="min-w-0 flex-1 text-fade"><span className={cn(isDark ? "text-neutral-400 group-hover:text-neutral-300 group-aria-selected:text-neutral-300" : "text-muted group-hover:text-ink/70 group-focus-visible:text-ink/70 group-aria-selected:text-ink/70")}>{dir}</span><span className={cn("font-medium", isDark ? "text-neutral-100" : "")}>{name}</span></span>;
 }
 
 /** Hook for keyboard navigation within the file tag popup. */
@@ -239,7 +239,7 @@ export function FileTagPopup({
                 data-group-header
                 className={cn(
                   "sticky top-0 z-10 bg-inherit px-2 py-1 text-xs font-medium",
-                  tone === "dark" ? "text-neutral-400" : "text-muted-foreground/70",
+                  tone === "dark" ? "text-neutral-400" : "text-muted/70",
                 )}
               >
                 {item.group}
@@ -289,7 +289,7 @@ export function FileTagPopup({
         "composer-autocomplete-surface absolute bottom-full left-0 mb-1 w-full overflow-hidden rounded-xl border border-border/70 animate-composer-popup-enter",
         tone === "dark"
           ? "border-white/10 bg-[#1e1e1e] text-neutral-100"
-          : "bg-popover text-popover-foreground",
+          : "bg-panel text-ink",
         className,
       )}
     >

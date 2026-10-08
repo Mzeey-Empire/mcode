@@ -97,7 +97,7 @@ export function PullRequestMutationError({
         aria-hidden
         className="mt-0.5 shrink-0 text-destructive"
       />
-      <p className="min-w-0 flex-1 leading-5 text-foreground/85">
+      <p className="min-w-0 flex-1 leading-5 text-ink/85">
         {errorMessage(error)}
       </p>
       {retry ? (

@@ -217,21 +217,21 @@ function LifecycleSnapshot({
   const repository = `${detail.identity.owner}/${detail.identity.repository}`;
   return (
     <div className="bg-page/65 px-4 py-3">
-      <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+      <p className="font-mono text-xs uppercase tracking-widest text-muted">
         Remote effect
       </p>
-      <p className="mt-2 text-sm font-medium text-foreground/90">
+      <p className="mt-2 text-sm font-medium text-ink/90">
         {repository} #{detail.identity.number}
       </p>
-      <div className="mt-2 flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground">
+      <div className="mt-2 flex min-w-0 items-center gap-2 font-mono text-xs text-muted">
         <GitBranch size={13} aria-hidden />
-        <span className="truncate">{detail.base.name}</span>
+        <span className="text-fade">{detail.base.name}</span>
         <span aria-hidden className="opacity-45">←</span>
-        <span className="truncate text-foreground/85">{detail.head.name}</span>
+        <span className="text-fade text-ink/85">{detail.head.name}</span>
         {detail.head.oid ? <span className="ml-auto shrink-0 tabular-nums">{detail.head.oid.slice(0, 8)}</span> : null}
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Effect: <span className="text-foreground/85">{title}</span>
+      <p className="mt-2 text-xs text-muted">
+        Effect: <span className="text-ink/85">{title}</span>
       </p>
     </div>
   );
@@ -246,17 +246,17 @@ function ReadinessDetails({
 }) {
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-      <dt className="text-muted-foreground">Current</dt>
-      <dd className="capitalize text-foreground/85">{current}</dd>
-      <dt className="text-muted-foreground">After confirmation</dt>
-      <dd className="capitalize text-foreground/85">{target}</dd>
+      <dt className="text-muted">Current</dt>
+      <dd className="capitalize text-ink/85">{current}</dd>
+      <dt className="text-muted">After confirmation</dt>
+      <dd className="capitalize text-ink/85">{target}</dd>
     </dl>
   );
 }
 
 function LifecycleReason({ reason }: { reason: string }) {
   return (
-    <p role="status" className="flex items-start gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted-foreground">
+    <p role="status" className="flex items-start gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted">
       <ErrorIcon size={13} aria-hidden className="mt-0.5 shrink-0 text-primary/80" />
       {reason}
     </p>
@@ -276,7 +276,7 @@ function MergeMethodField({
 }) {
   return (
     <div className="space-y-1.5">
-      <label htmlFor="pull-request-merge-method" className="text-xs text-muted-foreground">
+      <label htmlFor="pull-request-merge-method" className="text-xs text-muted">
         Merge method
       </label>
       <Select
@@ -312,10 +312,10 @@ function MergeBypassOption({
 }) {
   if (!allowed) {
     return (
-      <div className="flex items-start gap-3 border-t border-border/45 pt-4 text-muted-foreground">
+      <div className="flex items-start gap-3 border-t border-border/45 pt-4 text-muted">
         <ShieldOff size={15} aria-hidden className="mt-0.5 shrink-0" />
         <span className="min-w-0">
-          <span className="block text-xs font-medium text-foreground/80">Admin bypass unavailable</span>
+          <span className="block text-xs font-medium text-ink/80">Admin bypass unavailable</span>
           <span className="mt-0.5 block text-xs leading-5">
             GitHub does not allow this account to bypass merge requirements.
           </span>
@@ -334,10 +334,10 @@ function MergeBypassOption({
         onCheckedChange={onCheckedChange}
       />
       <span className="min-w-0">
-        <label id="pull-request-bypass-requirements-label" htmlFor="pull-request-bypass-requirements" className="block cursor-pointer text-xs font-medium text-foreground/90">
+        <label id="pull-request-bypass-requirements-label" htmlFor="pull-request-bypass-requirements" className="block cursor-pointer text-xs font-medium text-ink/90">
           Merge without waiting for requirements
         </label>
-        <span id="pull-request-bypass-requirements-description" className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+        <span id="pull-request-bypass-requirements-description" className="mt-0.5 block text-xs leading-5 text-muted">
           Use administrator permission to bypass branch protection rules.
         </span>
       </span>
@@ -363,7 +363,7 @@ function MergeCommitFields({
   return (
     <>
       <div className="space-y-1.5">
-        <label htmlFor="pull-request-merge-headline" className="text-xs text-muted-foreground">
+        <label htmlFor="pull-request-merge-headline" className="text-xs text-muted">
           Commit headline, optional
         </label>
         <Input
@@ -375,7 +375,7 @@ function MergeCommitFields({
         />
       </div>
       <div className="space-y-1.5">
-        <label htmlFor="pull-request-merge-body" className="text-xs text-muted-foreground">
+        <label htmlFor="pull-request-merge-body" className="text-xs text-muted">
           Commit body, optional
         </label>
         <Textarea
@@ -414,10 +414,10 @@ function MergeDetails({
   return (
     <>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        <dt className="text-muted-foreground">Checks</dt>
-        <dd className="capitalize text-foreground/85">{detail.checks.state}</dd>
-        <dt className="text-muted-foreground">Mergeability</dt>
-        <dd className="capitalize text-foreground/85">{detail.mergeability}</dd>
+        <dt className="text-muted">Checks</dt>
+        <dd className="capitalize text-ink/85">{detail.checks.state}</dd>
+        <dt className="text-muted">Mergeability</dt>
+        <dd className="capitalize text-ink/85">{detail.mergeability}</dd>
       </dl>
       <MergeMethodField
         detail={detail}

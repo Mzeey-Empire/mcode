@@ -50,9 +50,9 @@ export function NewThreadProjectPicker({
             size="sm"
             data-testid="new-thread-project-picker"
             aria-expanded={open}
-            className="h-[28px] gap-[6px] rounded-md px-[10px] text-xs font-medium leading-none text-foreground/90 hover:bg-accent/70"
+            className="h-[28px] gap-[6px] rounded-md px-[10px] text-xs font-medium leading-none text-ink/90 hover:bg-selected/70"
           >
-            <Folder size={14} className="size-3.5 text-muted-foreground" aria-hidden />
+            <Folder size={14} className="size-3.5 text-muted" aria-hidden />
             Choose project
           </Button>
         )
@@ -88,8 +88,8 @@ export function NewThreadProjectPicker({
                 }}
                 className="gap-2.5 px-2 py-1.5 text-sm"
               >
-                <Folder size={13} className="text-muted-foreground" aria-hidden />
-                <span className="truncate">{workspace.name}</span>
+                <Folder size={13} className="text-muted" aria-hidden />
+                <span className="text-fade">{workspace.name}</span>
               </CommandItem>
             ))}
           </CommandList>
@@ -102,7 +102,7 @@ export function NewThreadProjectPicker({
             onClick={handleAddProject}
             className="h-8 w-full justify-start gap-2 px-2 text-sm font-normal"
           >
-            <Plus size={13} className="text-muted-foreground" aria-hidden />
+            <Plus size={13} className="text-muted" aria-hidden />
             New project
           </Button>
         </div>

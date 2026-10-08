@@ -3,11 +3,11 @@ import { cn } from "../utils";
 
 describe("cn", () => {
   it("keeps the text colour beside a Paper type role", () => {
-    expect(cn("text-muted-foreground", "text-caption")).toBe("text-muted-foreground text-caption");
+    expect(cn("text-muted", "text-caption")).toBe("text-muted text-caption");
   });
 
   it("lets a later type role replace an earlier font size", () => {
-    expect(cn("text-sm text-foreground", "text-body-small")).toBe("text-foreground text-body-small");
+    expect(cn("text-sm text-ink", "text-body-small")).toBe("text-ink text-body-small");
   });
 
   it("lets type-link replace an earlier font size and keep the link colour", () => {
@@ -16,5 +16,14 @@ describe("cn", () => {
 
   it("treats font-code as a font family", () => {
     expect(cn("font-mono", "font-code")).toBe("font-code");
+  });
+
+  it("keeps the text fade beside a font size and a text colour", () => {
+    expect(cn("text-fade", "text-xs", "text-muted")).toBe("text-fade text-xs text-muted");
+    expect(cn("text-fade-lines-2 text-sm", "text-ink")).toBe("text-fade-lines-2 text-sm text-ink");
+  });
+
+  it("lets a later line clamp replace an earlier one", () => {
+    expect(cn("text-fade-lines-2", "text-fade-lines-3")).toBe("text-fade-lines-3");
   });
 });

@@ -247,7 +247,7 @@ function RailStatus({
             ? "changes-fresh-ring text-primary"
             : active
               ? "text-current"
-              : "text-muted-foreground",
+              : "text-muted",
         )}
       >
         {label}
@@ -298,15 +298,15 @@ function RailTab({
             "relative h-8 w-full overflow-hidden px-2 text-xs transition-colors",
             expanded ? "flex-row justify-start gap-2" : "flex-col gap-0",
             active
-              ? "bg-card text-primary"
-              : "text-foreground/70 hover:bg-card/60 hover:text-foreground",
+              ? "bg-panel text-primary"
+              : "text-ink/70 hover:bg-panel/60 hover:text-ink",
           )}
         >
           <Icon size={17} />
           <span
             aria-hidden
             className={cn(
-              "absolute left-8 right-8 truncate text-left font-medium text-foreground transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+              "absolute left-8 right-8 text-fade text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
               expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
             )}
           >
@@ -341,7 +341,7 @@ function RailTab({
           onClick={() => onClose(id)}
           className={cn(
             RAIL_TRAILING_CONTROL_CLASS,
-            "text-muted-foreground opacity-0 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none hover:bg-card hover:text-foreground",
+            "text-muted opacity-0 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none hover:bg-panel hover:text-ink",
             expanded
               ? "focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
               : "pointer-events-none",
@@ -426,7 +426,7 @@ function BrowserPageRailTab({
           <span
             aria-hidden
             className={cn(
-              "absolute left-8 right-8 truncate text-left font-medium text-foreground transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+              "absolute left-8 right-8 text-fade text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
               expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
             )}
           >
@@ -456,7 +456,7 @@ function BrowserPageRailTab({
           }}
           className={cn(
             RAIL_TRAILING_CONTROL_CLASS,
-            "text-muted-foreground opacity-0 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none hover:bg-card hover:text-foreground",
+            "text-muted opacity-0 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none hover:bg-panel hover:text-ink",
             expanded
               ? "focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
               : "pointer-events-none",
@@ -470,9 +470,9 @@ function BrowserPageRailTab({
 }
 
 function browserPageRailClass(active: boolean, browserActive: boolean): string {
-  if (active && browserActive) return "bg-card text-primary";
-  if (active) return "bg-card/60 text-foreground";
-  return "text-foreground/70 hover:bg-card/60 hover:text-foreground";
+  if (active && browserActive) return "bg-panel text-primary";
+  if (active) return "bg-panel/60 text-ink";
+  return "text-ink/70 hover:bg-panel/60 hover:text-ink";
 }
 
 function BrowserPageRailGlyph({
@@ -524,7 +524,7 @@ function BrowserPageGroup({
       data-testid="rail-browser-pages"
       role="group"
       aria-label="Browser pages"
-      className="flex w-full flex-col items-stretch gap-0.5 rounded-lg bg-foreground/[0.03] py-0.5"
+      className="flex w-full flex-col items-stretch gap-0.5 rounded-lg bg-ink/[0.03] py-0.5"
     >
       {tabSet.tabs.map((page) => (
         <BrowserPageRailTab
@@ -579,7 +579,7 @@ function RailAddControl({
         <Button
           variant="ghost"
           size="sm"
-          className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted-foreground hover:text-foreground"
+          className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted hover:text-ink"
           aria-label={`New ${only.label}`}
           onClick={() => onCreate(only.id as RightPanelTab)}
         >
@@ -587,7 +587,7 @@ function RailAddControl({
           <span
             aria-hidden
             className={cn(
-              "absolute left-8 right-2 truncate text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+              "absolute left-8 right-2 text-fade text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
               expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
             )}
           >
@@ -606,14 +606,14 @@ function RailAddControl({
             <Button
               variant="ghost"
               size="sm"
-              className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted-foreground hover:text-foreground"
+              className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted hover:text-ink"
               aria-label="New tab"
             >
               <Plus />
               <span
                 aria-hidden
                 className={cn(
-                  "absolute left-8 right-2 truncate text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+                  "absolute left-8 right-2 text-fade text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
                   expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
                 )}
               >
@@ -636,7 +636,7 @@ function RailAddControl({
               className="flex items-center justify-between gap-3 px-2.5 py-1.5 text-xs"
             >
               <span className="flex items-center gap-2">
-                <type.icon size={14} className="text-muted-foreground" />
+                <type.icon size={14} className="text-muted" />
                 {type.label}
               </span>
               {type.comingSoon ? (
@@ -704,7 +704,7 @@ function RailHeader({
           variant="ghost"
           size="sm"
           onClick={onTogglePanel}
-          className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted-foreground/70 transition-colors hover:bg-transparent hover:text-foreground"
+          className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted/70 transition-colors hover:bg-transparent hover:text-ink"
           aria-label="Close panel"
           data-testid="rail-panel-toggle"
           data-preview-design-keep-open="true"
@@ -713,7 +713,7 @@ function RailHeader({
           <span
             aria-hidden
             className={cn(
-              "absolute left-8 right-8 truncate text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+              "absolute left-8 right-8 text-fade text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
               expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
             )}
           >
@@ -728,7 +728,7 @@ function RailHeader({
           onClick={onToggleMaximized}
           className={cn(
             RAIL_TRAILING_CONTROL_CLASS,
-            "text-muted-foreground/70 transition-[color,opacity] motion-reduce:duration-0 motion-reduce:transition-none hover:bg-card hover:text-foreground",
+            "text-muted/70 transition-[color,opacity] motion-reduce:duration-0 motion-reduce:transition-none hover:bg-panel hover:text-ink",
             expanded ? "opacity-100" : "pointer-events-none opacity-0",
           )}
           aria-label={maximized ? "Restore panel" : "Maximize panel"}

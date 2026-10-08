@@ -41,7 +41,7 @@ export function ProjectCommandApprovalDialog({ approval, script, onApprove, onCa
           </DialogDescription>
         </DialogHeader>
         <ScrollArea
-          className="max-h-64 rounded-md bg-muted"
+          className="max-h-64 rounded-md bg-hover"
           viewportProps={{ tabIndex: 0, "aria-label": "Resolved shared command" }}
         >
           <pre className="p-3 font-mono text-xs whitespace-pre-wrap break-words">{script}</pre>

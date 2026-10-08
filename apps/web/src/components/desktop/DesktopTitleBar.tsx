@@ -251,7 +251,7 @@ export function DesktopTitleBar({
                   ref={(node) => {
                     triggerRefs.current[name] = node;
                   }}
-                  className="h-8 rounded-md px-2 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  className="h-8 rounded-md px-2 text-xs text-muted outline-none hover:bg-selected hover:text-ink focus-visible:ring-2 focus-visible:ring-focus"
                   aria-keyshortcuts={`Alt+${mnemonic.toUpperCase()}`}
                 >
                   {label}
@@ -269,7 +269,7 @@ export function DesktopTitleBar({
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Application menu"
-                className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex size-8 items-center justify-center rounded-md text-muted outline-none hover:bg-selected hover:text-ink focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <MenuIcon size={16} aria-hidden />
               </DropdownMenuTrigger>

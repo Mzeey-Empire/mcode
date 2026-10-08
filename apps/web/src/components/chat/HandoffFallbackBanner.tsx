@@ -123,7 +123,7 @@ function HandoffDocViewer({ threadId }: { threadId: string }) {
   const viewState = state.threadId === threadId ? state : { threadId, phase: "loading" as const };
 
   if (viewState.phase === "loading") {
-    return <p className="text-muted-foreground text-sm py-4">Loading...</p>;
+    return <p className="text-muted text-sm py-4">Loading...</p>;
   }
   if (viewState.phase === "error") {
     return <p className="text-destructive text-sm py-4">{viewState.message}</p>;
@@ -133,7 +133,7 @@ function HandoffDocViewer({ threadId }: { threadId: string }) {
   return (
     <div className="flex flex-col gap-3 overflow-hidden">
       {/* Metadata strip: key fields at a glance without wading into the doc body */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground border-b pb-3">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted border-b pb-3">
         <div><span className="font-mono">ladderStep:</span> {meta.ladderStep}</div>
         <div><span className="font-mono">mode:</span> {meta.mode}</div>
         <div><span className="font-mono">generatedBy:</span> {meta.generatedBy}</div>
@@ -170,12 +170,12 @@ export function HandoffFallbackBanner({ threadId }: Props) {
       <div
         role="status"
         data-testid="handoff-fallback-banner"
-        className="flex items-start gap-3 border-b border-border bg-muted/40 px-4 py-2 text-sm"
+        className="flex items-start gap-3 border-b border-border bg-hover/40 px-4 py-2 text-sm"
       >
-        <ErrorIcon className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
+        <ErrorIcon className="h-4 w-4 shrink-0 text-muted mt-0.5" aria-hidden />
         <span className="flex-1 min-w-0">
-          <span className="font-medium text-foreground/80">{copy.title}</span>
-          <span className="block text-xs text-muted-foreground mt-0.5">{copy.sub}</span>
+          <span className="font-medium text-ink/80">{copy.title}</span>
+          <span className="block text-xs text-muted mt-0.5">{copy.sub}</span>
         </span>
         <div className="flex items-center gap-2 shrink-0">
           <Button
@@ -210,7 +210,7 @@ export function HandoffFallbackBanner({ threadId }: Props) {
             variant="ghost"
             onClick={() => setHandoffStatus(threadId, "ready")}
             aria-label="Dismiss"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            className="h-7 w-7 text-muted hover:text-ink"
           >
             <X className="h-4 w-4" />
           </Button>

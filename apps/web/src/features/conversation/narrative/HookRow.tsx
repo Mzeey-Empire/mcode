@@ -56,7 +56,7 @@ function HookStatusIcon({ isRunning, isBlocked }: { isRunning: boolean; isBlocke
   }
   return (
     <span aria-label="hook completed" className="flex w-3 h-3 items-center justify-center shrink-0">
-      <Webhook className="w-3 h-3 text-muted-foreground/55" />
+      <Webhook className="w-3 h-3 text-muted/55" />
     </span>
   );
 }
@@ -108,14 +108,14 @@ function HookOutput({
 
   return (
     <AnimatedCollapsible open={isOpen}>
-      <pre className="mt-1 ml-6 max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 bg-muted/25 px-3 py-2 font-mono text-sm leading-5 [overflow-wrap:anywhere]">
+      <pre className="mt-1 ml-6 max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 bg-hover/25 px-3 py-2 font-mono text-sm leading-5 [overflow-wrap:anywhere]">
         {fullLines.map((line, index) => (
           <span
             key={`${index}-${line}`}
             className={
               isBlocked || (hasPassed && exitCode !== 0)
                 ? "block text-sm text-[var(--diff-remove)]"
-                : "block text-sm text-foreground/75"
+                : "block text-sm text-ink/75"
             }
           >
             {line}
@@ -165,20 +165,20 @@ export function HookRow({ hook }: HookRowProps) {
       >
 
         {/* Hook name */}
-        <span className="min-w-0 truncate text-foreground/80 flex-1">
+        <span className="min-w-0 text-fade text-ink/80 flex-1">
           {hook.hookName}
         </span>
 
         {/* Trigger label */}
         {hook.toolName && (
-          <span className="min-w-0 truncate font-mono text-xs text-muted-foreground/65">
+          <span className="min-w-0 text-fade font-mono text-xs text-muted/65">
             on {hook.toolName}
           </span>
         )}
 
         {/* Duration or elapsed timer - hide for sub-5ms instant hooks */}
         {duration && (
-          <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground/65">
+          <span className="shrink-0 font-mono text-xs tabular-nums text-muted/65">
             {duration}
           </span>
         )}

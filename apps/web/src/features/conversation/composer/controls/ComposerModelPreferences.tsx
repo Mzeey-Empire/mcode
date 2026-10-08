@@ -154,21 +154,21 @@ function ComposerModelPreferencesTrigger({
               event.stopPropagation();
               onClick();
             }}
-            className="gap-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
           >
             {state.hasCodexFast && state.codexFastMode && (
               <Zap
                 size={12}
                 aria-hidden="true"
                 data-testid="composer-fast-mode-icon"
-                className="shrink-0 text-foreground/80"
+                className="shrink-0 text-ink/80"
               />
             )}
             <span className="text-sm">{state.preferenceLabel}</span>
             {state.reasoningLevels.length > 0 && state.has1M && state.contextWindow === "1m" && (
               <span
                 data-testid="composer-1m-badge"
-                className="rounded-sm bg-foreground/5 px-1 py-px text-xs font-medium uppercase tracking-wide text-foreground/80 ring-1 ring-inset ring-foreground/10 tabular-nums"
+                className="rounded-sm bg-ink/5 px-1 py-px text-xs font-medium uppercase tracking-wide text-ink/80 ring-1 ring-inset ring-ink/10 tabular-nums"
               >
                 1M
               </span>
@@ -193,7 +193,7 @@ function ComposerReasoningOptions({
 
   return (
     <>
-      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground/60 select-none">Reasoning effort</div>
+      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">Reasoning effort</div>
       {state.reasoningLevels.map((reasoning) => (
         <button
           key={reasoning}
@@ -206,12 +206,12 @@ function ComposerReasoningOptions({
           className={cn(
             "flex w-full items-center justify-between rounded px-3 py-1.5 text-xs",
             actionProps.selection.reasoning === reasoning
-              ? "bg-accent text-foreground"
-              : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
+              ? "bg-selected text-ink"
+              : "text-ink hover:bg-selected/50 hover:text-ink",
           )}
         >
           <span>{reasoningLabel(reasoning)}</span>
-          {actionProps.selection.reasoning === reasoning && <Check size={10} className="shrink-0 text-foreground" />}
+          {actionProps.selection.reasoning === reasoning && <Check size={10} className="shrink-0 text-ink" />}
         </button>
       ))}
     </>
@@ -230,7 +230,7 @@ function ComposerContextWindowOptions({
   return (
     <>
       {state.reasoningLevels.length > 0 && <div className="my-1 h-px bg-border/60" />}
-      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground/60 select-none">Context window</div>
+      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">Context window</div>
       {(["200k", "1m"] as const).map((nextContextWindow) => (
         <button
           key={nextContextWindow}
@@ -243,12 +243,12 @@ function ComposerContextWindowOptions({
           className={cn(
             "flex w-full items-center justify-between rounded px-3 py-1.5 text-xs",
             state.contextWindow === nextContextWindow
-              ? "bg-accent text-foreground"
-              : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
+              ? "bg-selected text-ink"
+              : "text-ink hover:bg-selected/50 hover:text-ink",
           )}
         >
           <span className="tabular-nums">{nextContextWindow === "1m" ? "1M tokens" : "200K tokens"}</span>
-          {state.contextWindow === nextContextWindow && <Check size={10} className="shrink-0 text-foreground" />}
+          {state.contextWindow === nextContextWindow && <Check size={10} className="shrink-0 text-ink" />}
         </button>
       ))}
     </>
@@ -267,7 +267,7 @@ function ComposerThinkingOptions({
   return (
     <>
       {(state.reasoningLevels.length > 0 || state.has1M) && <div className="my-1 h-px bg-border/60" />}
-      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground/60 select-none">Thinking</div>
+      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">Thinking</div>
       {[false, true].map((nextThinking) => (
         <button
           key={String(nextThinking)}
@@ -280,12 +280,12 @@ function ComposerThinkingOptions({
           className={cn(
             "flex w-full items-center justify-between rounded px-3 py-1.5 text-xs",
             state.thinking === nextThinking
-              ? "bg-accent text-foreground"
-              : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
+              ? "bg-selected text-ink"
+              : "text-ink hover:bg-selected/50 hover:text-ink",
           )}
         >
           <span>{nextThinking ? "On" : "Off"}</span>
-          {state.thinking === nextThinking && <Check size={10} className="shrink-0 text-foreground" />}
+          {state.thinking === nextThinking && <Check size={10} className="shrink-0 text-ink" />}
         </button>
       ))}
     </>
@@ -304,13 +304,13 @@ function ComposerFastModeOption({
   return (
     <>
       {(state.reasoningLevels.length > 0 || state.has1M || state.hasThinking) && <div className="my-1 h-px bg-border/60" />}
-      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground/60 select-none">Fast mode</div>
+      <div className="px-3 pt-1.5 pb-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">Fast mode</div>
       <label
         className={cn(
           "flex w-full cursor-pointer items-center justify-between rounded px-3 py-1.5 text-xs",
           state.codexFastMode
-            ? "bg-accent/50 text-foreground"
-            : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
+            ? "bg-selected/50 text-ink"
+            : "text-ink hover:bg-selected/50 hover:text-ink",
         )}
       >
         <span>Fast</span>
@@ -346,7 +346,7 @@ function ComposerModelPreferenceMenu({
   return (
     <div
       onClick={(event) => event.stopPropagation()}
-      className="absolute bottom-full left-0 z-20 mb-1 min-w-[224px] rounded-md border border-border bg-popover p-1 shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150"
+      className="absolute bottom-full left-0 z-20 mb-1 min-w-[224px] rounded-md border border-border bg-panel p-1 shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150"
     >
       <ComposerReasoningOptions state={state} actionProps={actionProps} />
       <ComposerContextWindowOptions state={state} actionProps={actionProps} />

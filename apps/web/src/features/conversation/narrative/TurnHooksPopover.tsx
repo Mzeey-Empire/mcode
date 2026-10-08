@@ -25,7 +25,7 @@ function HookSummary({ hook, count }: { hook: HookExecution; count: number }) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] items-start gap-x-3">
       <dt className="break-words [overflow-wrap:anywhere]">{trigger}</dt>
-      <dd className="min-w-0 text-muted-foreground">
+      <dd className="min-w-0 text-muted">
         <div>{count} {count === 1 ? "run" : "runs"}</div>
         {name && <div className="break-words [overflow-wrap:anywhere]">{name}</div>}
       </dd>
@@ -56,7 +56,7 @@ export function TurnHooksPopover({ hooks }: { hooks: readonly HookExecution[] })
         onKeyUp={(event) => { if (event.key === "Tab") setOpen(true); }}
         render={<Button variant="ghost" size="icon-xs" />}
         aria-label={label}
-        className={`size-7 ${needsAttention ? "text-destructive" : running ? "text-primary" : "text-muted-foreground"}`}
+        className={`size-7 ${needsAttention ? "text-destructive" : running ? "text-primary" : "text-muted"}`}
       >
         <Icon className="size-3.5" aria-hidden="true" />
       </PopoverTrigger>

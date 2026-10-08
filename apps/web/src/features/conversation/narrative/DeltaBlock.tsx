@@ -232,29 +232,29 @@ function useTypewriter(target: string, isStreaming: boolean): string {
 function StreamingSkeleton({ label, rows, columns }: { label: string; rows: number; columns?: number }) {
   return (
     <div className="my-2" data-testid="streaming-skeleton" aria-label={label}>
-      <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted">
         <span className="size-1.5 rounded-full bg-primary animate-pulse" />
         {label}
       </div>
       {columns === undefined ? (
-        <div className="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-2">
+        <div className="rounded-lg border border-border/60 bg-hover/30 p-4 space-y-2">
           {Array.from({ length: Math.min(Math.max(1, rows), 8) }, (_, i) => (
             <div
               key={i}
-              className="h-3 rounded bg-muted-foreground/15 animate-pulse"
+              className="h-3 rounded bg-muted/15 animate-pulse"
               style={{ width: `${55 + ((i * 37) % 40)}%`, animationDelay: `${i * 60}ms` }}
             />
           ))}
         </div>
       ) : (
         <div className="rounded-lg border border-border/60 overflow-hidden">
-          <div className="h-8 bg-muted/50 border-b border-border/60 animate-pulse" />
+          <div className="h-8 bg-hover/50 border-b border-border/60 animate-pulse" />
           {Array.from({ length: Math.min(rows, 8) }, (_, r) => (
             <div key={r} className="flex border-b border-border/40 last:border-0">
               {Array.from({ length: Math.min(Math.max(1, columns), 8) }, (_, c) => (
                 <div key={c} className="flex-1 px-3 py-2 border-r border-border/40 last:border-0">
                   <div
-                    className="h-3 rounded bg-muted-foreground/15 animate-pulse"
+                    className="h-3 rounded bg-muted/15 animate-pulse"
                     style={{ animationDelay: `${(r * columns + c) * 70}ms` }}
                   />
                 </div>
@@ -275,7 +275,7 @@ function StreamingTable({ header, rows }: { header: string[]; rows: string[][] }
         <thead>
           <tr>
             {header.map((cell, i) => (
-              <th key={i} className="border border-border bg-muted/50 px-3 py-1.5 text-left text-sm font-semibold">
+              <th key={i} className="border border-border bg-hover/50 px-3 py-1.5 text-left text-sm font-semibold">
                 {cell}
               </th>
             ))}
@@ -312,7 +312,7 @@ function StreamingPart({ part }: { part: StreamingBlockPart }) {
     return (
       <Suspense
         fallback={
-          <pre className="bg-muted/30 rounded-lg p-4 overflow-x-auto text-sm font-mono">
+          <pre className="bg-hover/30 rounded-lg p-4 overflow-x-auto text-sm font-mono">
             <code>{part.code}</code>
           </pre>
         }

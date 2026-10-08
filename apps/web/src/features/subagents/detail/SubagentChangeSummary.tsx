@@ -20,8 +20,8 @@ export function SubagentChangeSummary({ effects, onViewAllDiffs }: SubagentChang
 
   return (
     <div className={diffCardSurfaceClass("mt-6")}>
-      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-        <FileText size={13} aria-hidden className="shrink-0 text-muted-foreground/60" />
+      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted">
+        <FileText size={13} aria-hidden className="shrink-0 text-muted/60" />
         <span className="min-w-0 flex-1">
           {paths.length} file{paths.length === 1 ? "" : "s"} changed
         </span>
@@ -32,7 +32,7 @@ export function SubagentChangeSummary({ effects, onViewAllDiffs }: SubagentChang
           type="button"
           variant="ghost"
           size="xs"
-          className="shrink-0 gap-1 text-muted-foreground/70"
+          className="shrink-0 gap-1 text-muted/70"
           onClick={() => onViewAllDiffs(paths, additions, deletions)}
         >
           <ExternalLink size={10} aria-hidden />

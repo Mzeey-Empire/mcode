@@ -178,21 +178,21 @@ function errorCopy(error: PullRequestError): string {
 function SourceReadout({ source }: { source: PullRequestReviewSource }) {
   return (
     <div className="bg-page/65 px-5 py-4">
-      <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+      <p className="font-mono text-xs uppercase tracking-widest text-muted">
         Change stack
       </p>
-      <div className="mt-2 flex min-w-0 items-center gap-2 text-sm text-foreground/90">
+      <div className="mt-2 flex min-w-0 items-center gap-2 text-sm text-ink/90">
         <GitPullRequest size={14} aria-hidden className="shrink-0 text-primary/85" />
-        <span className="truncate font-medium">
+        <span className="text-fade font-medium">
           {source.identity.owner}/{source.identity.repository} #{source.identity.number}
         </span>
       </div>
-      <p className="mt-1 truncate text-xs text-muted-foreground">{source.title}</p>
-      <p className="mt-3 flex min-w-0 items-center gap-2 font-mono text-xs text-foreground/80">
-        <span className="truncate">{source.base.name}</span>
-        <span aria-hidden className="text-muted-foreground/45">←</span>
-        <span className="truncate text-foreground">{source.head.name}</span>
-        <span className="ml-auto shrink-0 text-muted-foreground">
+      <p className="mt-1 text-fade text-xs text-muted">{source.title}</p>
+      <p className="mt-3 flex min-w-0 items-center gap-2 font-mono text-xs text-ink/80">
+        <span className="text-fade">{source.base.name}</span>
+        <span aria-hidden className="text-muted/45">←</span>
+        <span className="text-fade text-ink">{source.head.name}</span>
+        <span className="ml-auto shrink-0 text-muted">
           {source.expectedHeadOid.slice(0, 7)}
         </span>
       </p>
@@ -215,7 +215,7 @@ function IntentField({
 }) {
   return (
     <div className="space-y-1.5">
-      <label htmlFor="pull-request-review-intent" className="text-xs text-muted-foreground">
+      <label htmlFor="pull-request-review-intent" className="text-xs text-muted">
         Task intent
       </label>
       <Textarea
@@ -229,7 +229,7 @@ function IntentField({
         onChange={(event) => onChange(event.target.value)}
         className="resize-none"
       />
-      <p className="font-mono text-xs tabular-nums text-muted-foreground/70">
+      <p className="font-mono text-xs tabular-nums text-muted/70">
         {value.length}/{PULL_REQUEST_REVIEW_INTENT_MAX_LENGTH}
       </p>
     </div>
@@ -244,16 +244,16 @@ function ExistingWorktreeReadout({
   return (
     <dl className="space-y-3 text-xs">
       <div>
-        <dt className="font-mono uppercase tracking-wider text-muted-foreground">Worktree</dt>
-        <dd className="mt-1 flex items-center gap-2 text-foreground/90">
-          <GitBranch size={13} aria-hidden className="text-muted-foreground" />
+        <dt className="font-mono uppercase tracking-wider text-muted">Worktree</dt>
+        <dd className="mt-1 flex items-center gap-2 text-ink/90">
+          <GitBranch size={13} aria-hidden className="text-muted" />
           <span className="font-medium">{worktree.name}</span>
-          <span className="font-mono text-muted-foreground">{worktree.branch}</span>
+          <span className="font-mono text-muted">{worktree.branch}</span>
         </dd>
       </div>
       <div>
-        <dt className="font-mono uppercase tracking-wider text-muted-foreground">Path</dt>
-        <dd className="mt-1 break-all font-mono text-sm leading-5 text-foreground">
+        <dt className="font-mono uppercase tracking-wider text-muted">Path</dt>
+        <dd className="mt-1 break-all font-mono text-sm leading-5 text-ink">
           {worktree.path}
         </dd>
       </div>
@@ -329,7 +329,7 @@ function ReviewTaskPreparing({
     );
   }
   return (
-    <div className="flex min-h-52 items-center justify-center gap-2 px-6 text-xs text-muted-foreground">
+    <div className="flex min-h-52 items-center justify-center gap-2 px-6 text-xs text-muted">
       <Spinner size="xs" aria-hidden />
       <span>{phase === "navigating" ? "Opening Review task" : "Checking local projects"}</span>
     </div>
@@ -351,11 +351,11 @@ function ReviewTaskPreparationError({
     <div className="space-y-4 px-5 py-5">
       <div role="alert" className="flex items-start gap-2 bg-destructive/8 px-3 py-2.5 text-xs">
         <ErrorIcon size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" />
-        <p className="text-foreground/85">{errorCopy(error)}</p>
+        <p className="text-ink/85">{errorCopy(error)}</p>
       </div>
       {ambiguous ? (
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground" htmlFor="review-task-workspace">Project</label>
+          <label className="text-xs text-muted" htmlFor="review-task-workspace">Project</label>
           <Select value={selectedWorkspaceId} onValueChange={setSelectedWorkspaceId}>
             <SelectTrigger id="review-task-workspace" className="w-full">
               <SelectValue>{selectedWorkspace ? selectedWorkspace.name : "Choose a project"}</SelectValue>
@@ -364,8 +364,8 @@ function ReviewTaskPreparationError({
               {candidates.map((candidate) => (
                 <SelectItem key={candidate.id} value={candidate.id}>
                   <span className="min-w-0">
-                    <span className="block truncate">{candidate.name}</span>
-                    <span className="block truncate font-mono text-xs text-muted-foreground">{candidate.path}</span>
+                    <span className="block text-fade">{candidate.name}</span>
+                    <span className="block text-fade font-mono text-xs text-muted">{candidate.path}</span>
                   </span>
                 </SelectItem>
               ))}
@@ -435,10 +435,10 @@ function ReviewTaskPreparedContent({
       ) : null}
       <div className="space-y-4 px-5 py-4">
         {error ? <ReviewTaskErrorNotice error={error} onRefresh={() => void onPrepare(prepared.workspace.id)} /> : null}
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 text-xs text-muted">
           <MapPin size={13} aria-hidden />
           <span>Project</span>
-          <span className="ml-auto truncate text-foreground/85">{prepared.workspace.name}</span>
+          <span className="ml-auto text-fade text-ink/85">{prepared.workspace.name}</span>
         </div>
         {confirmationRequired ? (
           <ReviewTaskNewWorktreeFields
@@ -453,7 +453,7 @@ function ReviewTaskPreparedContent({
           <ExistingWorktreeReadout worktree={prepared.worktree} />
         )}
         <IntentField value={intent} onChange={setIntent} disabled={busy} inputRef={intentInputRef} invalid={intentInvalid} />
-        <p className="text-xs leading-5 text-muted-foreground">
+        <p className="text-xs leading-5 text-muted">
           This changes local worktree and task state. Remote pull request actions stay explicit.
         </p>
       </div>
@@ -471,7 +471,7 @@ function ReviewTaskErrorNotice({ error, onRefresh }: { error: PullRequestError; 
   return (
     <div role="alert" className="flex items-start gap-2 bg-destructive/8 px-3 py-2.5 text-xs">
       <ErrorIcon size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" />
-      <p className="min-w-0 flex-1 text-foreground/85">{errorCopy(error)}</p>
+      <p className="min-w-0 flex-1 text-ink/85">{errorCopy(error)}</p>
       <Button variant="ghost" size="xs" onClick={onRefresh}>Refresh</Button>
     </div>
   );
@@ -495,7 +495,7 @@ function ReviewTaskNewWorktreeFields({
   return (
     <>
       <div className="space-y-1.5">
-        <label htmlFor="pull-request-worktree-name" className="text-xs text-muted-foreground">Worktree name</label>
+        <label htmlFor="pull-request-worktree-name" className="text-xs text-muted">Worktree name</label>
         <Input
           ref={inputRef}
           id="pull-request-worktree-name"
@@ -508,8 +508,8 @@ function ReviewTaskNewWorktreeFields({
         />
       </div>
       <div>
-        <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Destination</p>
-        <p className="mt-1 break-all font-mono text-sm leading-5 text-foreground">
+        <p className="font-mono text-xs uppercase tracking-wider text-muted">Destination</p>
+        <p className="mt-1 break-all font-mono text-sm leading-5 text-ink">
           {displayDestinationPath(prepared.destinationPath, prepared.suggestedWorktreeName, worktreeName)}
         </p>
       </div>

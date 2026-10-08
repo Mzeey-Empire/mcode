@@ -403,11 +403,11 @@ function ReviewViewMenu({
         data-testid="review-view-switcher"
         disabled={viewModes.length === 0}
         aria-label="Select review view"
-        className="flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium tracking-tight text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        className="flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium tracking-tight text-ink hover:bg-selected disabled:pointer-events-none disabled:opacity-50"
       >
         {activeView?.label ?? "-"}
         <ReviewFileCount fileCount={reviewFileCount} />
-        <ChevronDown size={11} className="text-muted-foreground/60" />
+        <ChevronDown size={11} className="text-muted/60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={4} className="min-w-[150px]">
         {viewModes.map((mode) => (
@@ -431,7 +431,7 @@ function ReviewFileCount({ fileCount }: { readonly fileCount: number | null }) {
   if (fileCount === null || fileCount <= 0) return null;
   return (
     <span
-      className="ml-1 rounded-full bg-muted-foreground/15 px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+      className="ml-1 rounded-full bg-muted/15 px-1.5 text-[10px] font-medium tabular-nums text-muted"
       data-testid="review-file-count"
     >
       {fileCount}
@@ -475,14 +475,14 @@ function ReviewViewMenuItem({
       className={cn(
         "flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs",
         disabled
-          ? "cursor-not-allowed text-muted-foreground/45"
+          ? "cursor-not-allowed text-muted/45"
           : active
-            ? "text-foreground"
-            : "text-popover-foreground",
+            ? "text-ink"
+            : "text-ink",
       )}
     >
       <span className="flex-1 text-left">{mode.label}</span>
-      {active ? <Check size={11} className="text-muted-foreground" /> : null}
+      {active ? <Check size={11} className="text-muted" /> : null}
     </DropdownMenuItem>
   );
 }
@@ -528,7 +528,7 @@ function ReviewDiffStat({
     return (
       <Spinner
         size={12}
-        className="text-muted-foreground/50"
+        className="text-muted/50"
         aria-label="Loading diff stats"
         data-testid="review-diff-stat-loading"
       />

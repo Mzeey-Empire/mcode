@@ -111,9 +111,9 @@ function MermaidPreviewDialogCanvas({
   }, []);
 
   const controlClass = cn(
-    "flex size-10 items-center justify-center rounded-md text-foreground/75",
-    "transition-colors hover:bg-muted hover:text-foreground",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    "flex size-10 items-center justify-center rounded-md text-ink/75",
+    "transition-colors hover:bg-hover hover:text-ink",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
     "disabled:pointer-events-none disabled:opacity-35 motion-reduce:transition-none",
   );
 
@@ -131,7 +131,7 @@ function MermaidPreviewDialogCanvas({
         >
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/60 px-4">
             <DialogTitle className="text-sm font-medium">Diagram preview</DialogTitle>
-            <span className="hidden text-xs text-muted-foreground sm:inline">
+            <span className="hidden text-xs text-muted sm:inline">
               Scroll to zoom, drag to pan
             </span>
             <DialogClose
@@ -152,8 +152,8 @@ function MermaidPreviewDialogCanvas({
             aria-label="Interactive diagram canvas"
             tabIndex={0}
             className={cn(
-              "relative min-h-0 flex-1 touch-none overflow-hidden bg-muted/10 outline-none",
-              "cursor-grab active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              "relative min-h-0 flex-1 touch-none overflow-hidden bg-hover/10 outline-none",
+              "cursor-grab active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus",
             )}
             onWheel={handleWheel}
             onPointerDown={handlePointerDown}
@@ -178,7 +178,7 @@ function MermaidPreviewDialogCanvas({
             </div>
 
             <div className="absolute inset-x-0 bottom-5 flex justify-center px-4">
-              <div className="flex items-center rounded-lg bg-popover p-1 ring-1 ring-border shadow-sm">
+              <div className="flex items-center rounded-lg bg-panel p-1 ring-1 ring-border shadow-sm">
                 <button
                   type="button"
                   className={controlClass}
@@ -190,7 +190,7 @@ function MermaidPreviewDialogCanvas({
                 </button>
                 <output
                   aria-live="polite"
-                  className="w-14 text-center text-xs tabular-nums text-muted-foreground"
+                  className="w-14 text-center text-xs tabular-nums text-muted"
                 >
                   {Math.round(viewport.scale * 100)}%
                 </output>

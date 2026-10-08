@@ -116,7 +116,7 @@ export function BrowserOverflowMenu({
             variant="ghost"
             size="icon-xs"
             aria-label="More browser tools"
-            className="text-muted-foreground hover:text-foreground"
+            className="text-muted hover:text-ink"
           >
             <EllipsisVertical aria-hidden />
           </Button>
@@ -132,7 +132,7 @@ export function BrowserOverflowMenu({
           className="gap-2 px-3 py-1.5 text-xs"
           onClick={onNewPage}
         >
-          <Plus size={14} className="text-muted-foreground" aria-hidden />
+          <Plus size={14} className="text-muted" aria-hidden />
           New page
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -140,7 +140,7 @@ export function BrowserOverflowMenu({
           disabled={!hasLoadedPage}
           onClick={onForceReload}
         >
-          <RotateCw size={14} className="text-muted-foreground" aria-hidden />
+          <RotateCw size={14} className="text-muted" aria-hidden />
           Force reload
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -149,7 +149,7 @@ export function BrowserOverflowMenu({
           disabled={!hasLoadedPage}
           onClick={onDumpContent}
         >
-          <FileText size={14} className="text-muted-foreground" aria-hidden />
+          <FileText size={14} className="text-muted" aria-hidden />
           Dump page content
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -159,7 +159,7 @@ export function BrowserOverflowMenu({
         >
           <SquareDashedMousePointer
             size={14}
-            className="text-muted-foreground"
+            className="text-muted"
             aria-hidden
           />
           Region capture
@@ -170,7 +170,7 @@ export function BrowserOverflowMenu({
           className="gap-2 px-3 py-1.5 text-xs"
           onClick={onOpenDevTools}
         >
-          <CodeXml size={14} className="text-muted-foreground" aria-hidden />
+          <CodeXml size={14} className="text-muted" aria-hidden />
           Developer tools
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -179,7 +179,7 @@ export function BrowserOverflowMenu({
           onClick={onToggleViewportToolbar}
         >
           <span className="flex items-center gap-2">
-            <Smartphone size={14} className="text-muted-foreground" aria-hidden />
+            <Smartphone size={14} className="text-muted" aria-hidden />
             {viewportToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
           </span>
         </DropdownMenuItem>
@@ -189,7 +189,7 @@ export function BrowserOverflowMenu({
             onClick={onStopAutomation}
             title={automationBusy ? "Stop the active operation and take control" : undefined}
           >
-            <Hand size={14} className="text-muted-foreground" aria-hidden />
+            <Hand size={14} className="text-muted" aria-hidden />
             Take control
           </DropdownMenuItem>
         ) : null}
@@ -203,7 +203,7 @@ export function BrowserOverflowMenu({
             !hasLoadedPage && "opacity-50",
           )}
         >
-          <span className="text-muted-foreground">Zoom</span>
+          <span className="text-muted">Zoom</span>
           <span className="flex items-center gap-1">
             <Button
               type="button"
@@ -247,7 +247,7 @@ export function BrowserOverflowMenu({
           disabled={!hasLoadedPage}
           onClick={onClearCookies}
         >
-          <Cookie size={14} className="text-muted-foreground" aria-hidden />
+          <Cookie size={14} className="text-muted" aria-hidden />
           Clear cookies
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -255,7 +255,7 @@ export function BrowserOverflowMenu({
           disabled={!hasLoadedPage}
           onClick={onClearCache}
         >
-          <Trash2 size={14} className="text-muted-foreground" aria-hidden />
+          <Trash2 size={14} className="text-muted" aria-hidden />
           Clear cache
         </DropdownMenuItem>
       </DropdownMenuContent>

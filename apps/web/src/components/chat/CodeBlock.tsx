@@ -75,22 +75,22 @@ function useHighlightVisibility(chatHighlighting: boolean, containerRef: RefObje
 
 function CodeBlockHeader({ language, languageLabel, isStreaming, copied, onCopy }: { language: string; languageLabel: string | undefined; isStreaming: boolean; copied: boolean; onCopy: () => Promise<void> }) {
   return <div className="flex items-center justify-between bg-background px-3 py-1 border-b border-border">
-    <span className="text-xs text-muted-foreground">{languageLabel || language || "text"}</span>
-    {!isStreaming && <button type="button" onClick={onCopy} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors" aria-label={copied ? "Copied" : "Copy code"}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>}
+    <span className="text-xs text-muted">{languageLabel || language || "text"}</span>
+    {!isStreaming && <button type="button" onClick={onCopy} className="flex items-center gap-1 text-xs text-muted hover:text-ink transition-colors" aria-label={copied ? "Copied" : "Copy code"}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>}
   </div>;
 }
 
 function CodeBlockPresentation({ containerRef, code, language, languageLabel, isStreaming, html, copied, onCopy }: { containerRef: RefObject<HTMLDivElement | null>; code: string; language: string; languageLabel: string | undefined; isStreaming: boolean; html: string | null; copied: boolean; onCopy: () => Promise<void> }) {
   const isReady = html !== null && html !== "";
-  const codeScrollBody = "overflow-x-auto bg-muted text-foreground text-sm font-code leading-relaxed";
+  const codeScrollBody = "overflow-x-auto bg-hover text-ink text-sm font-code leading-relaxed";
   const codePreInner = "m-0 min-w-full w-max bg-transparent p-3";
   return <div ref={containerRef} className="my-2 min-w-0 rounded-lg overflow-hidden border border-border">
     <CodeBlockHeader language={language} languageLabel={languageLabel} isStreaming={isStreaming} copied={copied} onCopy={onCopy} />
-    {isStreaming ? <div className={codeScrollBody}><pre className={`${codePreInner} text-foreground`}><code>{code}</code></pre></div> : <div data-code-block className={`grid min-w-0 ${isReady ? "ready" : ""}`}>
+    {isStreaming ? <div className={codeScrollBody}><pre className={`${codePreInner} text-ink`}><code>{code}</code></pre></div> : <div data-code-block className={`grid min-w-0 ${isReady ? "ready" : ""}`}>
       <div className={`${codeScrollBody} [grid-row:1/2] [grid-column:1/2] ${isReady ? "invisible opacity-0" : "visible opacity-100"}`}><pre className={codePreInner}><code>{code}</code></pre></div>
       {html && <div className={`${codeScrollBody} [grid-row:1/2] [grid-column:1/2] transition-opacity duration-150 ease-in
         [&_pre]:m-0 [&_pre]:min-w-full [&_pre]:w-max [&_pre]:bg-transparent [&_pre]:!bg-transparent [&_pre]:p-3
-        [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:text-foreground
+        [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:text-ink
         [&_code]:text-sm [&_code]:font-code`} dangerouslySetInnerHTML={{ __html: html }} />}
     </div>}
   </div>;

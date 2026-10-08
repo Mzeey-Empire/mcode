@@ -1,7 +1,7 @@
 import { Pin, GitBranch, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { PathLabel } from "./PathLabel";
+import { PathText } from "@/components/ui/path-text";
 import { useProjectSelectorStore } from "./state/projectSelectorStore";
 
 /** Props for ProjectRow. */
@@ -23,7 +23,7 @@ interface Props {
   onPin: (id: string, pinned: boolean) => void;
   /** Called when the user removes the workspace from recents. Optional — row hides the button if absent. */
   onRemove?: (id: string) => void;
-  /** Home directory prefix used by PathLabel to collapse the path to ~. */
+  /** Home directory prefix used by PathText to collapse the path to ~. */
   home?: string;
 }
 
@@ -76,10 +76,10 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
         }
       }}
       className={cn(
-        "group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-sm px-3 py-2 text-[13px] transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring max-[520px]:flex-col max-[520px]:items-stretch max-[520px]:gap-1.5",
+        "group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-sm px-3 py-2 text-[13px] transition-colors outline-none focus-visible:ring-1 focus-visible:ring-focus max-[520px]:flex-col max-[520px]:items-stretch max-[520px]:gap-1.5",
         // group-aria-selected/cmd responds to parent CommandItem keyboard focus in the palette.
         // has no effect in landing page context (no parent with group/cmd).
-        "hover:bg-accent/60 data-[active=true]:bg-accent group-aria-selected/cmd:bg-accent",
+        "hover:bg-selected/60 data-[active=true]:bg-selected group-aria-selected/cmd:bg-selected",
       )}
       onClick={() => onSelect(workspace.id)}
     >
@@ -99,13 +99,13 @@ function ProjectRowIdentity({
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-1.5">
-        <span className="truncate font-medium">{workspace.name}</span>
+        <span className="text-fade font-medium">{workspace.name}</span>
         <Tooltip>
           <TooltipTrigger
             render={
               <button
                 data-testid="project-row-pin"
-                className="ml-1 inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-primary/80 opacity-0 transition-opacity hover:bg-accent/60 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 data-[pinned=true]:opacity-100"
+                className="ml-1 inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-primary/80 opacity-0 transition-opacity hover:bg-selected/60 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 data-[pinned=true]:opacity-100"
                 data-pinned={workspace.pinned}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -120,7 +120,7 @@ function ProjectRowIdentity({
           <TooltipContent>{`${pinLabel} project`}</TooltipContent>
         </Tooltip>
       </div>
-      <PathLabel path={workspace.path} home={home} />
+      <PathText path={workspace.path} home={home} />
     </div>
   );
 }
@@ -133,7 +133,7 @@ function ProjectRowMetadata({
   lastOpenedLabel: string | null;
 }) {
   return (
-    <div className="flex shrink-0 min-w-0 max-w-[52%] flex-col items-end gap-0.5 font-mono text-[11px] text-muted-foreground/60 max-[520px]:max-w-none max-[520px]:flex-row max-[520px]:items-center max-[520px]:justify-between">
+    <div className="flex shrink-0 min-w-0 max-w-[52%] flex-col items-end gap-0.5 font-mono text-[11px] text-muted/60 max-[520px]:max-w-none max-[520px]:flex-row max-[520px]:items-center max-[520px]:justify-between">
       {enrichment ? <ProjectRowEnrichment enrichment={enrichment} /> : null}
       {lastOpenedLabel ? <span className="whitespace-nowrap tabular-nums">{lastOpenedLabel}</span> : null}
     </div>
@@ -146,7 +146,7 @@ function ProjectRowEnrichment({
   enrichment: NonNullable<ReturnType<typeof useProjectSelectorStore.getState>["enrichmentCache"] extends Map<string, infer Value> ? Value : never>;
 }) {
   if (!enrichment.isGit) {
-    return <span className="col-span-4 truncate justify-self-end text-muted-foreground/40">not a git repo</span>;
+    return <span className="col-span-4 text-fade justify-self-end text-muted/40">not a git repo</span>;
   }
   const branch = enrichment.branch ?? "detached";
   const workingTreeLabel = enrichment.isClean ? "Clean working tree" : "Uncommitted changes";
@@ -165,7 +165,7 @@ function ProjectRowEnrichment({
       </Tooltip>
       <GitBranch size={10} className="shrink-0 opacity-70" aria-hidden />
       <Tooltip>
-        <TooltipTrigger render={<span className="min-w-0 truncate text-right">{branch}</span>} />
+        <TooltipTrigger render={<span className="min-w-0 justify-self-end text-fade">{branch}</span>} />
         <TooltipContent>{branch}</TooltipContent>
       </Tooltip>
       <ProjectRowThreadCount count={enrichment.threadCount} />
@@ -192,7 +192,7 @@ function ProjectRowRemoveAction({ workspaceId, onRemove }: Pick<Props, "onRemove
         render={
           <button
             data-testid="project-row-remove"
-            className="inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:bg-accent/60 hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+            className="inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-muted/40 opacity-0 transition-opacity hover:bg-selected/60 hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
             onClick={(event) => {
               event.stopPropagation();
               onRemove(workspaceId);

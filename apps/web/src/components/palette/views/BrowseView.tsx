@@ -506,11 +506,11 @@ function BrowseEntries({
           value="__parent__"
           keywords={[".."]}
           onSelect={onAscend}
-          className="h-[40px] gap-3 px-[12px] text-[14px] text-foreground/85"
+          className="h-[40px] gap-3 px-[12px] text-[14px] text-ink/85"
         >
           <ArrowUp size={14} className="shrink-0 text-primary/80" />
           <span className="font-mono">..</span>
-          <span className="ml-auto text-[12px] text-muted-foreground/55">Parent folder</span>
+          <span className="ml-auto text-[12px] text-muted/55">Parent folder</span>
         </CommandItem>
       )}
       {filteredEntries.map((entry) => (
@@ -521,8 +521,8 @@ function BrowseEntries({
           onSelect={() => onSelect(entry.name)}
           className="h-[40px] gap-3 px-[12px] text-[14px]"
         >
-          <Folder size={15} className="shrink-0 text-muted-foreground/70" />
-          <span className="truncate text-foreground">{entry.name}</span>
+          <Folder size={15} className="shrink-0 text-muted/70" />
+          <span className="text-fade text-ink">{entry.name}</span>
         </CommandItem>
       ))}
     </CommandGroup>
@@ -534,7 +534,7 @@ function BrowseError({ error, onRetry }: { error: string | null; onRetry: () => 
 
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-2 text-xs" role="alert">
-      <span className="text-muted-foreground">Check the path or retry the folder listing.</span>
+      <span className="text-muted">Check the path or retry the folder listing.</span>
       <Button type="button" size="sm" variant="outline" onClick={onRetry}>
         Retry
       </Button>
@@ -562,7 +562,7 @@ function BrowseShortcuts({
   return (
     <div
       data-testid="browse-shortcuts"
-      className="hidden min-h-[44px] shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-muted/20 px-[16px] py-[10px] text-[12px] text-muted-foreground/75 sm:flex"
+      className="hidden min-h-[44px] shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-hover/20 px-[16px] py-[10px] text-[12px] text-muted/75 sm:flex"
     >
       <div className="flex min-w-0 items-center gap-3">
         <span className="flex shrink-0 items-center gap-1.5"><Kbd>Enter</Kbd> Open folder</span>

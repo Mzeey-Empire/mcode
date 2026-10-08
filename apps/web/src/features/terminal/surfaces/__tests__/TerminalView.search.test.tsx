@@ -174,10 +174,10 @@ beforeEach(() => {
   synchronousFrameCount = 0;
   resetTerminalSearchState();
   term.write.mockImplementation((_data: string | Uint8Array, callback?: () => void) => callback?.());
-  document.documentElement.style.setProperty("--muted", "rgb(20, 20, 20)");
+  document.documentElement.style.setProperty("--hover", "rgb(20, 20, 20)");
   document.documentElement.style.setProperty("--border", "rgb(40, 40, 40)");
   document.documentElement.style.setProperty("--primary", "rgb(220, 160, 40)");
-  document.documentElement.style.setProperty("--ring", "rgb(100, 140, 220)");
+  document.documentElement.style.setProperty("--focus", "rgb(100, 140, 220)");
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
     if (synchronousFrameCount >= 20) return 0;
     synchronousFrameCount += 1;

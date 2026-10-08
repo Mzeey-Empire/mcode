@@ -624,7 +624,7 @@ export function ReviewDiffView({
         <button
           type="button"
           aria-label={`Add comment on line in ${item.id}`}
-          className="relative z-10 flex h-5 w-5 items-center justify-center rounded-md bg-foreground text-background shadow-sm transition-colors hover:bg-foreground/90"
+          className="relative z-10 flex h-5 w-5 items-center justify-center rounded-md bg-ink text-background shadow-sm transition-colors hover:bg-ink/90"
           // Pierre's line-number span overlaps the utility slot, so the button
           // must stack above it to be clickable; press events are stopped so a
           // click on "+" cannot start a line-range selection.
@@ -661,15 +661,15 @@ function HeaderToggleButton({ itemId, expanded, highlighted, onToggle }: HeaderT
       onClick={onToggle}
       className={cn(
         "flex size-5 shrink-0 items-center justify-center rounded transition-colors",
-        "hover:bg-foreground/[0.08]",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring/55",
+        "hover:bg-ink/[0.08]",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus/55",
       )}
     >
       <ChevronRight
         aria-hidden="true"
         size={14}
         className={cn(
-          "text-muted-foreground/70 transition-transform duration-150",
+          "text-muted/70 transition-transform duration-150",
           expanded && "rotate-90",
         )}
       />
@@ -685,7 +685,7 @@ function DiffStatusRow({ status }: { readonly status: "loading" | "empty" | "bin
         {[0, 150, 300].map((delay) => (
           <div
             key={delay}
-            className="h-1 w-1 animate-pulse rounded-full bg-muted-foreground/40"
+            className="h-1 w-1 animate-pulse rounded-full bg-muted/40"
             style={{ animationDelay: `${delay}ms` }}
           />
         ))}
@@ -693,7 +693,7 @@ function DiffStatusRow({ status }: { readonly status: "loading" | "empty" | "bin
     );
   }
   return (
-    <p className="px-3 py-2 font-mono text-[11px] text-muted-foreground/70">
+    <p className="px-3 py-2 font-mono text-[11px] text-muted/70">
       {status === "binary" ? "Binary file changed" : "No diff content"}
     </p>
   );
@@ -712,13 +712,13 @@ function SavedAnnotationChip({
       type="button"
       onClick={onEdit}
       aria-label={`Edit comment ${annotation.displayNumber}`}
-      className="mx-3 my-1.5 flex w-[calc(100%-1.5rem)] items-start gap-2 rounded-lg bg-muted/45 px-3 py-2 text-left ring-1 ring-inset ring-border/60 transition-colors hover:bg-muted/60"
+      className="mx-3 my-1.5 flex w-[calc(100%-1.5rem)] items-start gap-2 rounded-lg bg-hover/45 px-3 py-2 text-left ring-1 ring-inset ring-border/60 transition-colors hover:bg-hover/60"
     >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-foreground font-mono text-[10px] font-semibold tabular-nums text-background">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-ink font-mono text-[10px] font-semibold tabular-nums text-background">
         {annotation.displayNumber}
       </span>
-      <MessageCircle size={12} className="mt-1 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="min-w-0 whitespace-pre-wrap text-xs leading-5 text-foreground/85">
+      <MessageCircle size={12} className="mt-1 shrink-0 text-muted" aria-hidden />
+      <span className="min-w-0 whitespace-pre-wrap text-xs leading-5 text-ink/85">
         {annotation.note}
       </span>
     </button>

@@ -18,7 +18,7 @@ function RemoteMarkdownComponent({ content, className }: RemoteMarkdownProps) {
   return (
     <div
       className={cn(
-        "min-w-0 break-words text-sm leading-relaxed text-foreground/90",
+        "min-w-0 break-words text-sm leading-relaxed text-ink/90",
         className,
       )}
     >
@@ -27,7 +27,7 @@ function RemoteMarkdownComponent({ content, className }: RemoteMarkdownProps) {
           <Spinner
             size="sm"
             aria-label="Loading pull request content"
-            className="text-muted-foreground"
+            className="text-muted"
           />
         }
       >

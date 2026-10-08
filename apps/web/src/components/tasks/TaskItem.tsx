@@ -13,15 +13,15 @@ function taskRowClass(status: TaskItemType["status"]): string {
   const background = status === "in_progress"
     ? "bg-primary/[0.06]"
     : status === "completed" || status === "cancelled"
-      ? "hover:bg-muted/[0.06]"
-      : "hover:bg-muted/[0.08]";
+      ? "hover:bg-hover/[0.06]"
+      : "hover:bg-hover/[0.08]";
   const text = status === "cancelled"
-    ? "text-muted-foreground/35"
+    ? "text-muted/35"
     : status === "completed"
-      ? "text-muted-foreground/45"
+      ? "text-muted/45"
       : status === "in_progress"
-        ? "text-foreground/95"
-        : "text-foreground/60";
+        ? "text-ink/95"
+        : "text-ink/60";
   return `flex items-start gap-2.5 px-3 py-[7px] text-[11.5px] leading-[1.5] transition-colors duration-150 ${background} ${text}`;
 }
 
@@ -38,9 +38,9 @@ function TaskStatusMark({ status }: { status: TaskItemType["status"] }) {
     );
   }
   if (status === "pending") {
-    return <span className="h-[10px] w-[10px] rounded-full border border-muted-foreground/30" aria-hidden />;
+    return <span className="h-[10px] w-[10px] rounded-full border border-muted/30" aria-hidden />;
   }
-  return <X size={11} className="text-muted-foreground/40" aria-hidden />;
+  return <X size={11} className="text-muted/40" aria-hidden />;
 }
 
 /**

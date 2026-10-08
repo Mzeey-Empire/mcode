@@ -41,14 +41,14 @@ function HookActivityContent({
           >
             <ChevronRight
               className={cn(
-                "size-3 text-muted-foreground/50 transition-transform duration-150",
+                "size-3 text-muted/50 transition-transform duration-150",
                 expanded && "rotate-90",
               )}
             />
-            <span className="font-mono text-xs tracking-[0.18em] uppercase text-muted-foreground/60">
+            <span className="font-mono text-xs tracking-[0.18em] uppercase text-muted/60">
               Hooks
             </span>
-            <span className="font-mono text-xs tabular-nums text-muted-foreground/40">
+            <span className="font-mono text-xs tabular-nums text-muted/40">
               {hooks.length}
             </span>
             <StatusDot hasError={hasError} hasRunning={hasRunning} />
@@ -80,7 +80,7 @@ function StatusDot({ hasError, hasRunning }: { hasError: boolean; hasRunning: bo
 function HookStatusDetails({ hook }: { hook: HookExecution }) {
   if (hook.status === "running") return <ElapsedTimer startedAt={hook.startedAt} />;
   if (hook.status === "completed" && hook.durationMs != null) {
-    return <span className="font-mono tabular-nums text-xs text-muted-foreground">{formatDuration(hook.durationMs)}</span>;
+    return <span className="font-mono tabular-nums text-xs text-muted">{formatDuration(hook.durationMs)}</span>;
   }
   return null;
 }
@@ -102,17 +102,17 @@ function HookRowContent({ hook, hasOutput, detailOpen }: { hook: HookExecution; 
       {hasOutput && (
         <ChevronRight
           className={cn(
-            "size-2.5 text-muted-foreground/40 transition-transform duration-150 shrink-0",
+            "size-2.5 text-muted/40 transition-transform duration-150 shrink-0",
             detailOpen && "rotate-90",
           )}
         />
       )}
       {!hasOutput && <span className="w-2.5 shrink-0" />}
-      <span className="font-mono text-xs text-foreground truncate">
+      <span className="font-mono text-xs text-ink text-fade">
         {hook.hookName}
       </span>
       {hook.toolName && (
-        <span className="text-xs text-muted-foreground/50 truncate shrink-0">
+        <span className="text-xs text-muted/50 text-fade shrink-0">
           triggered by {hook.toolName}
         </span>
       )}
@@ -149,7 +149,7 @@ const HookRow = memo(function HookRow({ hook }: { hook: HookExecution }) {
       <CollapsibleTrigger asChild>
         <button
           type="button"
-          className={cn(rowClasses, "cursor-pointer hover:bg-muted/30 rounded-sm")}
+          className={cn(rowClasses, "cursor-pointer hover:bg-hover/30 rounded-sm")}
         >
           <HookRowContent hook={hook} hasOutput detailOpen={detailOpen} />
         </button>
@@ -157,7 +157,7 @@ const HookRow = memo(function HookRow({ hook }: { hook: HookExecution }) {
       {displayLines.length > 0 && (
         <CollapsibleContent>
           <div className="ml-2.5 mt-0.5 mb-1">
-            <pre className="font-mono text-xs bg-muted/50 rounded-sm p-2 overflow-x-auto max-h-[300px] overflow-y-auto text-muted-foreground whitespace-pre-wrap break-all">
+            <pre className="font-mono text-xs bg-hover/50 rounded-sm p-2 overflow-x-auto max-h-[300px] overflow-y-auto text-muted whitespace-pre-wrap break-all">
               {outputText}
             </pre>
             {hasMore && (
@@ -186,7 +186,7 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
 
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
   return (
-    <span className="font-mono tabular-nums text-xs text-muted-foreground animate-pulse">
+    <span className="font-mono tabular-nums text-xs text-muted animate-pulse">
       {elapsed}s
     </span>
   );

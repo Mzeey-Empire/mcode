@@ -33,7 +33,7 @@ export const EditRenderer = memo(function EditRenderer({ toolCall, isActive }: T
                   : "bg-primary/10 text-primary/70"
               }`}
             >
-              <span className="select-none text-muted-foreground/40 mr-2 inline-block w-3 text-right">
+              <span className="select-none text-muted/40 mr-2 inline-block w-3 text-right">
                 {line.type === "remove" ? "−" : "+"}
               </span>
               {line.content}

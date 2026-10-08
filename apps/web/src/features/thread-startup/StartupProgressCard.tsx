@@ -146,18 +146,18 @@ function visibleSteps(startup: StartupDisplay, context: StartupDisplayContext): 
 function labelTone(state: ThreadStartupStepState): string {
   switch (state) {
     case "running":
-      return "text-foreground font-medium";
+      return "text-ink font-medium";
     case "blocked":
-      return "text-foreground";
+      return "text-ink";
     case "failed":
       return "text-destructive";
     case "completed":
     case "skipped":
-      return "text-muted-foreground";
+      return "text-muted";
     case "cancelled":
     case "interrupted":
     case "pending":
-      return "text-muted-foreground/70";
+      return "text-muted/70";
   }
 }
 
@@ -190,13 +190,13 @@ function canCancelStartup(startupId: string | undefined, startup: StartupDisplay
 function StartupActivityLine({ activity }: { activity: StartupActivity }) {
   const message = activity.changing ? `${activity.lead} ${activity.changing}` : activity.lead;
   return (
-    <div role="status" aria-live="polite" data-testid="startup-activity" className="relative text-sm text-muted-foreground">
+    <div role="status" aria-live="polite" data-testid="startup-activity" className="relative text-sm text-muted">
       <span data-testid="startup-activity-base" className="flex items-center gap-1.5">
         <WorktreeModeIcon data-testid="startup-activity-icon" aria-hidden size={12} className="text-current" />
         <span className="text-current">{message}</span>
       </span>
       {activity.active ? (
-        <span aria-hidden data-testid="startup-activity-shimmer" className="pointer-events-none absolute inset-0 flex items-center gap-1.5 text-foreground startup-activity-shimmer motion-reduce:animate-none">
+        <span aria-hidden data-testid="startup-activity-shimmer" className="pointer-events-none absolute inset-0 flex items-center gap-1.5 text-ink startup-activity-shimmer motion-reduce:animate-none">
           <WorktreeModeIcon data-testid="startup-activity-shimmer-icon" size={12} className="text-current" />
           <span data-startup-activity-shimmer-text={message} className="text-current startup-activity-shimmer-text" />
         </span>
@@ -219,7 +219,7 @@ function StepNode({ state }: { state: ThreadStartupStepState }) {
   }
   if (state === "completed") {
     return (
-      <span aria-label={label} className={cn(NODE_BASE, "border-transparent bg-primary text-primary-foreground")}>
+      <span aria-label={label} className={cn(NODE_BASE, "border-transparent bg-primary text-primary-ink")}>
         <Check size={11} className="startup-node-pop" />
       </span>
     );
@@ -240,13 +240,13 @@ function StepNode({ state }: { state: ThreadStartupStepState }) {
   }
   if (state === "skipped" || state === "cancelled" || state === "interrupted") {
     return (
-      <span aria-label={label} className={cn(NODE_BASE, "border-border bg-card text-muted-foreground/60")}>
+      <span aria-label={label} className={cn(NODE_BASE, "border-border bg-panel text-muted/60")}>
         <Minus size={10} className="startup-node-pop" />
       </span>
     );
   }
   return (
-    <span aria-label={label} className={cn(NODE_BASE, "border-border bg-card")}>
+    <span aria-label={label} className={cn(NODE_BASE, "border-border bg-panel")}>
       <span className="size-1.5 rounded-full bg-border" />
     </span>
   );
@@ -288,10 +288,10 @@ function StartupTranscript({ transcript }: { transcript: StartupDisplay["transcr
   const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <details className="min-w-0" onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
-      <summary className="cursor-pointer text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+      <summary className="cursor-pointer text-xs text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus/60">
         {detailsOpen ? "Less details" : "More details"}
       </summary>
-      <div className="mt-2 max-h-52 overflow-auto rounded-md border border-border/70 bg-background/60 p-3 font-mono text-xs leading-5 text-muted-foreground">
+      <div className="mt-2 max-h-52 overflow-auto rounded-md border border-border/70 bg-background/60 p-3 font-mono text-xs leading-5 text-muted">
         <div role="log" aria-live="polite" aria-relevant="additions" className="space-y-1 whitespace-pre-wrap break-words">
           {transcript.length
             ? transcript.map((entry, index) => <p key={`${entry.createdAt}-${index}`}>{entry.content}</p>)
@@ -349,7 +349,7 @@ function StartupControls({
 
 function statusTone(state: StartupDisplay["state"]): string {
   if (state === "failed") return "text-destructive";
-  if (state === "interrupted" || state === "blocked") return "text-muted-foreground";
+  if (state === "interrupted" || state === "blocked") return "text-muted";
   return "text-primary";
 }
 
@@ -365,7 +365,7 @@ function StartupHeader({
   const statusHidden = cancellationPending || startup.cancellation === "requested" || startup.state === "cancelled";
   return (
     <header className="flex items-center justify-between gap-3">
-      <h2 className="text-sm font-medium text-foreground">{cardTitle(context)}</h2>
+      <h2 className="text-sm font-medium text-ink">{cardTitle(context)}</h2>
       {!statusHidden ? (
         <span className={cn("shrink-0 text-xs transition-colors duration-200", statusTone(startup.state))}>
           {startupStatus(startup)}
@@ -391,7 +391,7 @@ export function StartupProgressCard({ startup, context, startupId, actions }: St
   return (
     <section data-testid="startup-progress" aria-label="Thread startup" className="animate-fade-up-in space-y-2">
       <StartupActivityLine activity={activity} />
-      <section aria-busy={isStartupBusy(display)} className="rounded-lg border border-border bg-card px-4 py-3">
+      <section aria-busy={isStartupBusy(display)} className="rounded-lg border border-border bg-panel px-4 py-3">
         <StartupHeader context={context} startup={display} cancellationPending={cancellationPending} />
         <StartupSteps startup={display} context={context} />
         <StartupNotice startup={display} cancelError={cancelError} />

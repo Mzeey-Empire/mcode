@@ -36,15 +36,15 @@ export function ComposerNewThreadContext({
   return (
     <div
       data-testid="new-thread-context-strip"
-      className="relative z-0 mx-[14px] flex h-[40px] min-w-0 items-center gap-1 overflow-x-auto rounded-t-xl bg-muted/45 px-[16px] ring-1 ring-inset ring-border/60"
+      className="relative z-0 mx-[14px] flex h-[40px] min-w-0 items-center gap-1 overflow-x-auto rounded-t-xl bg-hover/45 px-[16px] ring-1 ring-inset ring-border/60"
     >
       {activeWorkspace ? (
         <>
-          <div className="inline-flex h-[28px] min-w-0 shrink items-center gap-[6px] rounded-md pl-[10px] text-xs font-medium leading-none text-foreground/90">
-            <Folder size={14} className="shrink-0 text-muted-foreground" aria-hidden />
+          <div className="inline-flex h-[28px] min-w-0 shrink items-center gap-[6px] rounded-md pl-[10px] text-xs font-medium leading-none text-ink/90">
+            <Folder size={14} className="shrink-0 text-muted" aria-hidden />
             <Tooltip>
               <TooltipTrigger
-                render={<span className="max-w-40 truncate">{activeWorkspace.name}</span>}
+                render={<span className="max-w-40 text-fade">{activeWorkspace.name}</span>}
               />
               <TooltipContent>{activeWorkspace.path}</TooltipContent>
             </Tooltip>
@@ -57,7 +57,7 @@ export function ComposerNewThreadContext({
                     size="icon"
                     aria-label={`Clear ${activeWorkspace.name} project`}
                     onClick={() => setActiveWorkspace(null)}
-                    className="-mr-0.5 size-7 rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:border-destructive/40 focus-visible:ring-destructive/20"
+                    className="-mr-0.5 size-7 rounded-md text-muted transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:border-destructive/40 focus-visible:ring-destructive/20"
                   >
                     <X className="size-3.5" aria-hidden />
                   </Button>
@@ -78,7 +78,7 @@ export function ComposerNewThreadContext({
           ) : (
             <span
               data-testid="local-environment-label"
-              className="flex h-[28px] items-center gap-[6px] rounded-md px-[10px] text-xs font-medium leading-none text-muted-foreground/70"
+              className="flex h-[28px] items-center gap-[6px] rounded-md px-[10px] text-xs font-medium leading-none text-muted/70"
             >
               <FolderOpen size={14} aria-hidden />
               Local

@@ -20,9 +20,9 @@ function ActivityStatusIcon({ activity }: { readonly activity: SubagentDetailAct
     return <CircleX size={13} aria-hidden className="shrink-0 text-destructive" />;
   }
   if (!activity.isComplete) {
-    return <CircleDashed size={13} aria-hidden className="shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />;
+    return <CircleDashed size={13} aria-hidden className="shrink-0 animate-spin text-muted motion-reduce:animate-none" />;
   }
-  return <CircleCheck size={13} aria-hidden className="shrink-0 text-muted-foreground" />;
+  return <CircleCheck size={13} aria-hidden className="shrink-0 text-muted" />;
 }
 
 function NarrativeActivityRow({ activity }: { readonly activity: SubagentDetailActivity }) {
@@ -33,9 +33,9 @@ function NarrativeActivityRow({ activity }: { readonly activity: SubagentDetailA
       style={{ paddingLeft: `${16 + activity.depth * 14}px` }}
     >
       <ActivityStatusIcon activity={activity} />
-      <span className="shrink-0 text-xs font-medium text-foreground/80">{activity.label}</span>
+      <span className="shrink-0 text-xs font-medium text-ink/80">{activity.label}</span>
       {activity.detail && activity.detail !== activity.label && (
-        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{activity.detail}</span>
+        <span className="min-w-0 flex-1 text-fade text-xs text-muted">{activity.detail}</span>
       )}
     </li>
   );
@@ -72,18 +72,18 @@ export function NarrativeDetailView({
             size={15}
           />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold">{title}</h2>
-            {row.task && <p className="truncate text-xs text-muted-foreground">{identity}</p>}
+            <h2 className="text-fade text-sm font-semibold">{title}</h2>
+            {row.task && <p className="text-fade text-xs text-muted">{identity}</p>}
           </div>
           <span role="status" className="sr-only">
             {narrativeRowStatus(row)}
           </span>
-          {configuration && <span className="shrink-0 font-mono text-xs text-muted-foreground">{configuration}</span>}
+          {configuration && <span className="shrink-0 font-mono text-xs text-muted">{configuration}</span>}
         </div>
       </header>
       <ScrollArea className="min-h-0 flex-1">
         {row.detail.output && (
-          <p className="whitespace-pre-wrap px-4 py-3 text-xs text-foreground/85">{row.detail.output}</p>
+          <p className="whitespace-pre-wrap px-4 py-3 text-xs text-ink/85">{row.detail.output}</p>
         )}
         {row.detail.activity.length > 0 && (
           <ul className="py-2" aria-label="Subagent activity">
@@ -93,7 +93,7 @@ export function NarrativeDetailView({
           </ul>
         )}
         {row.detail.activityTruncated && (
-          <p className="px-4 pb-3 text-xs text-muted-foreground">Earlier activity is truncated.</p>
+          <p className="px-4 pb-3 text-xs text-muted">Earlier activity is truncated.</p>
         )}
       </ScrollArea>
     </section>

@@ -65,7 +65,7 @@ describe("narrative tool row layout classes", () => {
     expect(button).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "false");
-    expect(commandPreview).toHaveClass("truncate");
+    expect(commandPreview).toHaveClass("text-fade");
     await user.hover(commandPreview);
     await waitFor(() => {
       const tooltip = document.querySelector<HTMLElement>("[data-slot='tooltip-content']");
@@ -137,7 +137,7 @@ describe("narrative tool row layout classes", () => {
 
     const detail = within(child).getByText(LONG_SHELL_COMMAND);
 
-    expect(detail.className).toContain("truncate");
+    expect(detail.className).toContain("text-fade");
     expect(detail.closest("li")?.className).toContain("min-w-0");
     expect(screen.getByRole("region", { name: "Shell output" })).toBeTruthy();
     expect(screen.getByText("Shell")).toBeTruthy();
@@ -378,7 +378,7 @@ describe("narrative tool row layout classes", () => {
     const panel = screen.getByRole("region", { name: "Shell output" });
     const exitCode = screen.getByText("exit code 1");
     expect(panel).toContainElement(exitCode);
-    expect(exitCode).toHaveClass("text-muted-foreground");
+    expect(exitCode).toHaveClass("text-muted");
     expect(exitCode).toHaveAttribute("role", "status");
     expect(exitCode.closest("footer")).toHaveClass("justify-end");
   });

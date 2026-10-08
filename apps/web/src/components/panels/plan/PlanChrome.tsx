@@ -54,7 +54,7 @@ export function PlanChrome({
               aria-label={`Revision history: v${plan.version} of ${maxVersion}`}
             >
               v{plan.version}
-              <span className="tracking-normal text-muted-foreground/70 normal-case">
+              <span className="tracking-normal text-muted/70 normal-case">
                 {formatRelative(plan.createdAt)}
               </span>
               <ChevronDown size={12} aria-hidden />
@@ -62,7 +62,7 @@ export function PlanChrome({
           }
         />
         <PopoverContent align="start" className="w-72 p-0">
-          <div className="px-3 pt-3 pb-2 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/45">
+          <div className="px-3 pt-3 pb-2 font-mono text-[9px] uppercase tracking-[0.18em] text-muted/45">
             Revision history
           </div>
           <div className="flex flex-col gap-0.5 px-1.5 pb-1.5">
@@ -78,20 +78,20 @@ export function PlanChrome({
                   onClick={() => setActiveVersion(threadId, isLatest ? null : p.version)}
                   aria-current={isActive ? "true" : undefined}
                   className={cn(
-                    "h-auto w-full flex-col items-stretch gap-1 whitespace-normal rounded-md px-2.5 py-2.5 text-left font-normal transition-colors hover:bg-accent/50",
-                    isActive && "bg-accent/40",
+                    "h-auto w-full flex-col items-stretch gap-1 whitespace-normal rounded-md px-2.5 py-2.5 text-left font-normal transition-colors hover:bg-selected/50",
+                    isActive && "bg-selected/40",
                   )}
                 >
                   <span className="flex items-center gap-2.5">
                     <span
                       className={cn(
                         "font-mono text-[11px] tabular-nums",
-                        isActive ? "text-primary" : "text-foreground",
+                        isActive ? "text-primary" : "text-ink",
                       )}
                     >
                       v{p.version}
                     </span>
-                    <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+                    <span className="font-mono text-[10px] tabular-nums text-muted/70">
                       {formatRelative(p.createdAt)}
                     </span>
                     {isLatest ? (
@@ -99,13 +99,13 @@ export function PlanChrome({
                         latest
                       </span>
                     ) : (
-                      <span className="ml-auto font-mono text-[8px] uppercase tracking-[0.16em] text-muted-foreground/45">
+                      <span className="ml-auto font-mono text-[8px] uppercase tracking-[0.16em] text-muted/45">
                         {p.status}
                       </span>
                     )}
                   </span>
                   {p.changeSummary && (
-                    <span className="text-[11px] leading-relaxed text-muted-foreground/80">{p.changeSummary}</span>
+                    <span className="text-[11px] leading-relaxed text-muted/80">{p.changeSummary}</span>
                   )}
                 </Button>
               );
@@ -118,7 +118,7 @@ export function PlanChrome({
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="min-w-0 truncate text-[11px] leading-snug text-muted-foreground">
+              <span className="min-w-0 text-fade text-[11px] leading-snug text-muted">
                 {plan.changeSummary}
               </span>
             }
@@ -141,7 +141,7 @@ export function PlanChrome({
                 onClick={onRevise}
                 className={cn(
                   "font-mono text-[10px] uppercase tracking-[0.16em]",
-                  hasFeedback && "text-foreground",
+                  hasFeedback && "text-ink",
                 )}
               >
                 {hasFeedback ? `Feedback (${commentCount})` : "Revise"}

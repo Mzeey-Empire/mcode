@@ -153,9 +153,9 @@ const PullRequestSummaryPanel = memo(function PullRequestSummaryPanel({
       {summaryError && (
         <div
           role="status"
-          className="flex items-center gap-2 bg-primary/8 px-4 py-2 text-xs text-muted-foreground"
+          className="flex items-center gap-2 bg-primary/8 px-4 py-2 text-xs text-muted"
         >
-          <span className="min-w-0 flex-1 truncate">
+          <span className="min-w-0 flex-1 text-fade">
             {summaryStale
               ? "Stale Summary data."
               : "Summary data is unavailable."}{" "}
@@ -264,9 +264,9 @@ const PullRequestTimelinePanel = memo(function PullRequestTimelinePanel({
       {presentation.error && (
         <div
           role="status"
-          className="flex items-center gap-2 bg-primary/8 px-4 py-2 text-xs text-muted-foreground"
+          className="flex items-center gap-2 bg-primary/8 px-4 py-2 text-xs text-muted"
         >
-          <span className="min-w-0 flex-1 truncate">
+          <span className="min-w-0 flex-1 text-fade">
             {presentation.stale ? "Stale Timeline data." : "Timeline is unavailable."}{" "}
             {presentation.error.message}
           </span>
@@ -428,8 +428,8 @@ function PullRequestDetailTabs({
           className={cn(
             "relative h-full rounded-none px-0 text-xs font-medium capitalize after:absolute after:inset-x-0 after:bottom-0 after:h-px after:origin-center after:scale-x-0 after:bg-primary after:transition-transform after:duration-150 motion-reduce:after:transition-none",
             activeTab === tab
-              ? "bg-transparent text-foreground after:scale-x-100"
-              : "text-muted-foreground hover:bg-transparent hover:text-foreground",
+              ? "bg-transparent text-ink after:scale-x-100"
+              : "text-muted hover:bg-transparent hover:text-ink",
           )}
           onClick={() => onChange(tab)}
           onKeyDown={(event) => handleKeyDown(event, index)}
@@ -465,7 +465,7 @@ function PullRequestReviewAction({
         type="button"
         variant="outline"
         size="xs"
-        className="shrink-0 border-border/60 bg-background/50 text-foreground shadow-none hover:bg-muted/40"
+        className="shrink-0 border-border/60 bg-background/50 text-ink shadow-none hover:bg-hover/40"
         aria-describedby={
           unavailableReason ? "pull-request-review-unavailable" : undefined
         }
@@ -509,7 +509,7 @@ function PullRequestDetailLoadingContent({
               aria-hidden
               className="text-destructive/75"
             />
-            <p className="text-sm text-foreground">
+            <p className="text-sm text-ink">
               {detailLane.error?.message ?? "Pull request detail is unavailable."}
             </p>
             <Button
@@ -610,9 +610,9 @@ function PullRequestDetailTabPanel({
         <ErrorIcon
           size={18}
           aria-hidden
-          className="mx-auto text-muted-foreground/55"
+          className="mx-auto text-muted/55"
         />
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="mt-2 text-xs text-muted">
           Code needs both base and head commit identifiers.
         </p>
       </div>
@@ -665,8 +665,8 @@ function PullRequestDetailLoadedContent({
   return (
     <>
       {detailLane.stale && detailLane.error && (
-        <div className="flex items-center gap-2 bg-destructive/8 px-4 py-2 text-xs text-muted-foreground">
-          <span className="min-w-0 flex-1 truncate">
+        <div className="flex items-center gap-2 bg-destructive/8 px-4 py-2 text-xs text-muted">
+          <span className="min-w-0 flex-1 text-fade">
             Stale detail. {detailLane.error.message}
           </span>
           <Button

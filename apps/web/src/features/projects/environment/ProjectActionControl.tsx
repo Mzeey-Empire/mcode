@@ -167,7 +167,7 @@ function ProjectActionMenuDropdown({
             variant="ghost"
             size="icon-xs"
             aria-label="Project Actions"
-            className="text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+            className="text-muted hover:bg-hover/40 hover:text-ink"
           >
             <MoreIcon size={14} aria-hidden />
           </Button>
@@ -225,7 +225,7 @@ function ProjectActionMenuItem({
       onKeyDown={(event) => recordProjectActionKeyboard(event, row, focusAction, pointerActivation, keyboardActivation)}
       onClick={() => activateProjectAction(row, run, focusAction, onStart, onFocus, pointerActivation, keyboardActivation)}
     >
-      <span className="min-w-0 flex-1 truncate">{row.actionName}</span>
+      <span className="min-w-0 flex-1 text-fade">{row.actionName}</span>
       <ActionStatus status={run?.status ?? null} finishedAt={run?.finishedAt ?? null} />
     </DropdownMenuItem>
   );
@@ -413,7 +413,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
   }, [actionId, applyRun, run, threadId]);
 
   if (!run && loadError) {
-    return <section data-testid={`action-terminal:${actionId}`} className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-sm text-muted-foreground" aria-label="Project Action result unavailable">{loadError}</section>;
+    return <section data-testid={`action-terminal:${actionId}`} className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-sm text-muted" aria-label="Project Action result unavailable">{loadError}</section>;
   }
 
   if (!run) {
@@ -427,7 +427,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
       aria-label={`${run.actionName} terminal`}
     >
       <div className="flex h-9 items-center gap-2 border-b border-border/50 px-3 text-xs">
-        <span className="min-w-0 flex-1 truncate font-medium text-foreground">{run.actionName}</span>
+        <span className="min-w-0 flex-1 text-fade font-medium text-ink">{run.actionName}</span>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -472,7 +472,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
       <ScrollArea className="min-h-0 flex-1" viewportProps={{ tabIndex: 0, "aria-label": `${run.actionName} output` }}>
         <ProjectActionTerminalTranscript transcript={run.transcript} />
       </ScrollArea>
-      {run.exitCode !== null ? <p className="border-t border-border/50 px-3 py-2 font-mono text-xs text-muted-foreground">Exit code: {run.exitCode}</p> : null}
+      {run.exitCode !== null ? <p className="border-t border-border/50 px-3 py-2 font-mono text-xs text-muted">Exit code: {run.exitCode}</p> : null}
     </section>
   );
 }
@@ -565,7 +565,7 @@ export function useProjectActions(workspaceId: string, threadId: string): {
 function ProjectActionTerminalTranscript({ transcript }: { readonly transcript: string }) {
   const segments = useMemo(() => parseAnsiTranscript(transcript || "No output"), [transcript]);
   return (
-    <pre className="min-w-max whitespace-pre p-3 font-mono text-xs leading-5 text-foreground">
+    <pre className="min-w-max whitespace-pre p-3 font-mono text-xs leading-5 text-ink">
       {segments.map((segment, index) => (
         <span key={`${index}:${segment.text}`} className={segment.className}>{segment.text}</span>
       ))}
@@ -609,23 +609,23 @@ function ansiColor(sequence: string): string | undefined {
 
 const ANSI_COLORS: Readonly<Record<number, string | null>> = {
   0: null,
-  30: "text-foreground",
+  30: "text-ink",
   31: "text-red-500",
   32: "text-emerald-500",
   33: "text-amber-500",
   34: "text-blue-500",
   35: "text-fuchsia-500",
   36: "text-cyan-500",
-  37: "text-foreground",
+  37: "text-ink",
   39: null,
-  90: "text-foreground",
+  90: "text-ink",
   91: "text-red-500",
   92: "text-emerald-500",
   93: "text-amber-500",
   94: "text-blue-500",
   95: "text-fuchsia-500",
   96: "text-cyan-500",
-  97: "text-foreground",
+  97: "text-ink",
 };
 
 function ActionStatus({
@@ -659,7 +659,7 @@ function ActionStatusIcon({
   readonly showIdlePlay: boolean;
 }) {
   const statusNode = actionStatusNode(status, showRecentResult);
-  return statusNode ?? (showIdlePlay ? <Play className="ml-2 size-3.5 shrink-0 text-muted-foreground" aria-label="Play" /> : null);
+  return statusNode ?? (showIdlePlay ? <Play className="ml-2 size-3.5 shrink-0 text-muted" aria-label="Play" /> : null);
 }
 
 const ACTION_STATUS_NODES: Readonly<Partial<Record<NonNullable<WorkspaceEnvironmentActionRun["status"]>, ReactNode>>> = {
@@ -667,8 +667,8 @@ const ACTION_STATUS_NODES: Readonly<Partial<Record<NonNullable<WorkspaceEnvironm
   "awaiting-approval": <Badge role="status" aria-label="Approval required" variant="secondary" size="sm" className="ml-2 shrink-0">Approval</Badge>,
   completed: <span role="status" aria-label="Completed" className="ml-2 flex shrink-0"><CircleCheck className="size-3.5 text-[var(--diff-add-strong)]" aria-hidden /></span>,
   failed: <span role="status" aria-label="Failed" className="ml-2 flex shrink-0"><CircleX className="size-3.5 text-[var(--diff-remove)]" aria-hidden /></span>,
-  interrupted: <span role="status" aria-label="Interrupted" className="ml-2 flex shrink-0 text-muted-foreground"><CircleStop className="size-3.5" aria-hidden /></span>,
-  unavailable: <span role="status" aria-label="Unavailable" className="ml-2 flex shrink-0 text-muted-foreground"><CircleSlash className="size-3.5" aria-hidden /></span>,
+  interrupted: <span role="status" aria-label="Interrupted" className="ml-2 flex shrink-0 text-muted"><CircleStop className="size-3.5" aria-hidden /></span>,
+  unavailable: <span role="status" aria-label="Unavailable" className="ml-2 flex shrink-0 text-muted"><CircleSlash className="size-3.5" aria-hidden /></span>,
 };
 
 function actionStatusNode(

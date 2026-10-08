@@ -191,9 +191,9 @@ function checkVisual(state: PullRequestCheckState): {
     return { icon: Loader2, className: "animate-spin text-primary" };
   }
   if (state === "neutral" || state === "skipped") {
-    return { icon: CircleMinus, className: "text-muted-foreground" };
+    return { icon: CircleMinus, className: "text-muted" };
   }
-  return { icon: CircleQuestionMark, className: "text-muted-foreground" };
+  return { icon: CircleQuestionMark, className: "text-muted" };
 }
 
 function boundedMessage(
@@ -253,7 +253,7 @@ function BoundedDataNotice({
     <p
       role="status"
       data-bounded-reason={marker.reason}
-      className="mt-2 flex items-start gap-2 bg-muted/30 px-2.5 py-2 text-xs text-muted-foreground"
+      className="mt-2 flex items-start gap-2 bg-hover/30 px-2.5 py-2 text-xs text-muted"
     >
       <ErrorIcon
         size={13}
@@ -375,15 +375,15 @@ const CheckRow = memo(function CheckRow({
         aria-hidden
         className={cn("shrink-0", visual.className)}
       />
-      <span className="min-w-0 flex-1 truncate text-foreground/90">
+      <span className="min-w-0 flex-1 text-fade text-ink/90">
         {check.name}
       </span>
       {check.isRequired === true && (
-        <Badge variant="ghost" size="sm" className="text-muted-foreground">
+        <Badge variant="ghost" size="sm" className="text-muted">
           Required
         </Badge>
       )}
-      <span className="font-mono text-muted-foreground">
+      <span className="font-mono text-muted">
         {titleCase(check.state)}
       </span>
     </>
@@ -422,7 +422,7 @@ function ConversationAuthor({
     : null;
 
   return (
-    <span className="flex min-w-0 items-center gap-2 font-medium text-foreground/90">
+    <span className="flex min-w-0 items-center gap-2 font-medium text-ink/90">
       {avatarUrl ? (
         <img
           src={avatarUrl}
@@ -433,10 +433,10 @@ function ConversationAuthor({
         <UserRound
           size={16}
           aria-hidden
-          className="shrink-0 text-muted-foreground"
+          className="shrink-0 text-muted"
         />
       )}
-      <span className="truncate">{label}</span>
+      <span className="text-fade">{label}</span>
     </span>
   );
 }
@@ -481,7 +481,7 @@ function IssueCommentActions({
           type="button"
           variant="ghost"
           size="sm"
-          className="text-xs text-muted-foreground"
+          className="text-xs text-muted"
           aria-expanded={prompting}
           onClick={() => onTogglePrompt(item)}
         >
@@ -501,7 +501,7 @@ function IssueCommentActions({
           type="button"
           variant="ghost"
           size="sm"
-          className="ml-auto text-xs text-muted-foreground"
+          className="ml-auto text-xs text-muted"
           onClick={() => onReply(item)}
         >
           Reply
@@ -524,7 +524,7 @@ function PromptFixConfirmation({
 
   return (
     <div className="mt-2 flex items-center gap-3 border-t border-border/40 pt-3">
-      <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+      <p className="min-w-0 flex-1 text-xs text-muted">
         Start a Review task with this comment as context.
       </p>
       <Button
@@ -555,9 +555,9 @@ function IssueCommentRow({
   return (
     <article
       aria-label={`Comment from ${author}`}
-      className="min-w-0 overflow-hidden rounded-lg bg-card/45 px-4 py-4"
+      className="min-w-0 overflow-hidden rounded-lg bg-panel/45 px-4 py-4"
     >
-      <header className="flex min-h-8 items-center gap-2 pb-3 text-xs text-muted-foreground">
+      <header className="flex min-h-8 items-center gap-2 pb-3 text-xs text-muted">
         <ConversationAuthor author={item.author} />
         <time dateTime={item.createdAt} className="font-mono tabular-nums">
           {formatRelative(item.createdAt)}
@@ -595,17 +595,17 @@ function ReviewThreadRow({
   return (
     <article
       aria-label={`Review thread on ${location}`}
-      className="min-w-0 overflow-hidden rounded-lg bg-card/45 px-4 py-4"
+      className="min-w-0 overflow-hidden rounded-lg bg-panel/45 px-4 py-4"
     >
       <header className="flex min-h-8 min-w-0 flex-wrap items-center gap-2 pb-3 text-xs">
-        <span className="truncate font-mono text-foreground/85">
+        <span className="text-fade font-mono text-ink/85">
           {location}
         </span>
-        <Badge variant="ghost" size="sm" className="text-muted-foreground">
+        <Badge variant="ghost" size="sm" className="text-muted">
           {item.isResolved ? "Resolved" : "Unresolved"}
         </Badge>
         {item.isOutdated && (
-          <Badge variant="ghost" size="sm" className="text-muted-foreground">
+          <Badge variant="ghost" size="sm" className="text-muted">
             Outdated
           </Badge>
         )}
@@ -614,7 +614,7 @@ function ReviewThreadRow({
         {item.comments.map((comment) => {
           return (
             <section key={comment.providerNodeId} className="py-4 first:pt-0">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 text-xs text-muted">
                 <ConversationAuthor author={comment.author} />
                 <time
                   dateTime={comment.createdAt}
@@ -632,7 +632,7 @@ function ReviewThreadRow({
         })}
       </div>
       {item.totalCount > item.comments.length && (
-        <p className="border-t border-border/40 pt-3 font-mono text-xs text-muted-foreground">
+        <p className="border-t border-border/40 pt-3 font-mono text-xs text-muted">
           Showing {item.comments.length} of {item.totalCount} thread comments.
         </p>
       )}
@@ -712,13 +712,13 @@ function SummaryDescription({
           className="max-w-[72ch] [&_h1:first-child]:mt-0 [&_h2:first-child]:mt-0 [&_h3:first-child]:mt-0"
         />
       ) : (
-        <p className="text-xs text-muted-foreground">No description</p>
+        <p className="text-xs text-muted">No description</p>
       )}
       {boundedData && (
         <p
           role="status"
           data-bounded-reason={boundedData.reason}
-          className="mt-2 flex items-start gap-2 bg-muted/30 px-2.5 py-2 text-xs text-muted-foreground"
+          className="mt-2 flex items-start gap-2 bg-hover/30 px-2.5 py-2 text-xs text-muted"
         >
           <ErrorIcon
             size={13}
@@ -751,7 +751,7 @@ function ResourceListState({
     return (
       <p
         role="status"
-        className="flex items-center gap-2 py-3 text-xs text-muted-foreground"
+        className="flex items-center gap-2 py-3 text-xs text-muted"
       >
         <Spinner size="xs" aria-hidden />
         {loadingLabel}
@@ -759,7 +759,7 @@ function ResourceListState({
     );
   }
   if (loaded && itemCount === 0) {
-    return <p className="py-3 text-xs text-muted-foreground">{emptyLabel}</p>;
+    return <p className="py-3 text-xs text-muted">{emptyLabel}</p>;
   }
   return children;
 }
@@ -789,7 +789,7 @@ function ResourceLoadContinuation({
       type="button"
       variant="ghost"
       size="sm"
-      className="mt-2 w-full text-xs text-muted-foreground"
+      className="mt-2 w-full text-xs text-muted"
       onClick={onLoadMore}
       disabled={loading}
     >
@@ -825,7 +825,7 @@ function PullRequestResourceSection({
         <Button
           type="button"
           variant="ghost"
-          className="group h-11 w-full justify-start rounded-none px-0 text-xs hover:bg-muted/15 aria-expanded:bg-transparent dark:hover:bg-muted/10 dark:aria-expanded:bg-transparent"
+          className="group h-11 w-full justify-start rounded-none px-0 text-xs hover:bg-hover/15 aria-expanded:bg-transparent dark:hover:bg-hover/10 dark:aria-expanded:bg-transparent"
           aria-label={`${label}, ${loadedCount} loaded of ${totalCount}`}
         >
           {icon}
@@ -833,14 +833,14 @@ function PullRequestResourceSection({
           <Badge
             variant="ghost"
             size="sm"
-            className="ml-auto text-muted-foreground"
+            className="ml-auto text-muted"
           >
             {totalCount}
           </Badge>
           <ChevronDown
             size={13}
             aria-hidden
-            className="text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
+            className="text-muted transition-transform group-data-[state=open]:rotate-180"
           />
         </Button>
       </CollapsibleTrigger>
@@ -1164,7 +1164,7 @@ function PullRequestSummaryContent({
       </PullRequestResourceSection>
       <PullRequestResourceSection
         label="Comments"
-        icon={<MessageCircle size={13} aria-hidden className="text-muted-foreground" />}
+        icon={<MessageCircle size={13} aria-hidden className="text-muted" />}
         loadedCount={comments.length}
         totalCount={conversationCount}
         defaultOpen={defaultCommentsOpen}
