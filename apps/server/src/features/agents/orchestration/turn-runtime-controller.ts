@@ -782,6 +782,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       this.featureEffects.onAssistantMessage("codex", event);
     }
     for (const intent of result.parentEvent?.runtime ?? []) {
+      if (intent.kind === "plan-captured") this.featureEffects.onPlanPersisted(active.execution.threadId);
       if (intent.kind === "assistant-message-feature") {
         this.featureEffects.onAssistantMessage(active.prepared.providerId, intent.event);
       }

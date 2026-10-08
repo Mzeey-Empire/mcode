@@ -267,7 +267,11 @@ export class CursorProvider
             // Permission completion must not depend on a renderer subscriber.
           }
         },
-        emitExitPlanMode: (args) => this.emit("exit_plan_mode", args),
+        emitPlanCaptured: (args, entry) => {
+          const routing = this.turnRoutingForEntry(entry);
+          if (routing) this.canonicalEventPublisher.capturePlan(routing, { markdown: args.markdown, source: args.source });
+          this.emit("plan_captured", args);
+        },
       });
     }
     return this.acpClientBridge;

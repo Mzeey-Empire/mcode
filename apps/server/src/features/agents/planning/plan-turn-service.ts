@@ -2,6 +2,7 @@ import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type {
   AgentEvent,
+  PlanCapture,
   ContextWindowMode,
   IProviderRegistry,
   PermissionMode,
@@ -24,7 +25,7 @@ type ClaudePlanAnswerModeProvider = {
   setPlanAnswerMode(threadId: string, enabled: boolean): void;
 };
 
-/** Owns plan-question turns and durable plan-output materialization. */
+/** Owns plan-question turns and durable plan capture materialization. */
 @injectable()
 export class PlanTurnService {
   private readonly executionByThread = new Map<string, PlanExecutionState>();
@@ -42,7 +43,7 @@ export class PlanTurnService {
     this.execution(threadId).beginQuestionGeneration();
   }
 
-  /** Start parsing one structured plan-output turn and arm its native provider mode. */
+  /** Start parsing one structured plan capture turn and arm its native provider mode. */
   beginOutputGeneration(threadId: string): void {
     this.execution(threadId).beginOutputGeneration();
     this.armNativeOutputMode(threadId);
@@ -80,7 +81,7 @@ Output format (must be valid JSON inside the fence):
 ${userMessage}`;
   }
 
-  /** Return instructions that require a structured plan-output block. */
+  /** Return instructions that require a structured plan capture block. */
   buildPlanOutputInstructions(): string {
     return this.questions.buildPlanOutputInstructions();
   }
@@ -92,8 +93,8 @@ ${userMessage}`;
   }
 
   /** Capture native plan markdown until its assistant message receives a durable identity. */
-  handleExitPlanMode(threadId: string, planMarkdown: string): void {
-    this.execution(threadId).handleNativeExit(planMarkdown);
+  handlePlanCaptured(capture: PlanCapture): void {
+    this.execution(capture.threadId).handlePlanCapture(capture);
   }
 
   /** Return whether a message needs early durable materialization for a plan record. */
@@ -143,8 +144,15 @@ ${userMessage}`;
     if (assistantMessageId) broadcast("plan.dismissed", { threadId, assistantMessageId });
   }
 
+  /** Record a capture already persisted by the execution worker. */
+  markPlanPersisted(threadId: string): void {
+    this.executionByThread.get(threadId)?.markPlanPersisted();
+  }
+
   /** Clear volatile plan state once a turn reaches its terminal lifecycle. */
   clearTurn(threadId: string): void {
+    const result = this.executionByThread.get(threadId)?.finishTurn();
+    if (result?.outcome === "missing") logger.warn("Planning turn produced no plan", { threadId, ...result });
     this.executionByThread.delete(threadId);
   }
 

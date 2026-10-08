@@ -14,7 +14,7 @@ type TerminalIntent = Extract<CodexLiveWriterIntent, { kind: "terminal-projectio
 export type CodexLiveRuntimeIntent = Extract<CodexLiveWriterIntent, { kind:
   "turn-started" | "generated-attachment" | "tool-use" | "tool-result" | "hook-started"
   | "hook-completed" | "narrative-effect" | "context-usage" | "compaction-started"
-  | "compaction-divider" | "compaction-summary" | "turn-error" | "turn-ended"
+  | "compaction-divider" | "compaction-summary" | "turn-error" | "turn-ended" | "plan-captured"
 }> | { readonly kind: "feature-event"; readonly feature: "goal-refresh"; readonly event: ReducedEvent["publication"]["event"] };
 
 /** Cloneable parent writes and the remaining work required before publication. */
@@ -101,7 +101,9 @@ export class CodexLiveEventEffects {
       case "narrative-recovery": return this.narrativeEffects(intent, effects);
       case "feature-event": return this.featureEffects(intent, effects, runtime);
       case "plan-questions": return { ...effects, planQuestions: intent.questions };
-      case "plan-output": return { ...effects, planOutput: intent.output };
+      case "plan-captured":
+        runtime.push(intent);
+        return { ...effects, planOutput: intent.output };
       case "notice-session":
       case "system-notice":
       case "session-cursor": return this.systemEffects(intent, effects);

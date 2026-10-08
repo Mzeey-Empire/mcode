@@ -74,6 +74,18 @@ function makeMessage(content: string): Message {
   };
 }
 
+describe("hidden plan messages", () => {
+  it.each([
+    '```plan-output\n{"title":"Historic plan"}\n```',
+    "````mcode-plan\n# Still streaming",
+    "````mcode-plan\n# Plan\n```ts\ncode();\n```\n````",
+  ])("leaves no empty assistant bubble for a protocol-only message", (content) => {
+    const message = { ...makeMessage(content), role: "assistant" as const };
+    const { container } = render(<MessageBubble message={message} />);
+    expect(container.innerHTML).toBe("");
+  });
+});
+
 function makePreviewAnnotationBundle(): PreviewAnnotationBundle {
   return {
     schemaVersion: 1,

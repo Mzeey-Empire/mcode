@@ -4,6 +4,7 @@ import { ImageIcon, RotateCcw, Copy, Check, GitFork, Target } from "lucide-react
 import { ErrorIcon, WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
+import { stripPlanFences } from "@/lib/plan-fences";
 import { stripInjectedFiles } from "@/lib/file-tags";
 import {
   buildStoredAttachmentImageSrc,
@@ -39,9 +40,7 @@ import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
  * ONLY the plan-questions block" obedience produces).
  */
 function isAssistantContentEmpty(content: string): boolean {
-  const stripped = content
-    .replace(/```plan-questions\n[\s\S]*?```/g, "")
-    .replace(/```plan-output\n[\s\S]*?```/g, "");
+  const stripped = stripPlanFences(content);
   return stripped.trim().length === 0;
 }
 

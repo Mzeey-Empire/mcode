@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@mcode/contracts";
+import type { AgentEvent, ProviderRuntimeEvent } from "@mcode/contracts";
 
 import type { DataOnlyParentTerminalProjectionInput } from "../canonical/canonical-parent-turn-write.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
@@ -62,7 +62,7 @@ export class OtherProviderLiveEventEffects {
   }
 
   /** Reduce exactly one event; unsupported input never yields a publication. */
-  prepare(event: AgentEvent, endedAt?: string): OtherProviderLivePreparation {
+  prepare(event: AgentEvent, endedAt?: string, capture?: ProviderRuntimeEvent["planCapture"]): OtherProviderLivePreparation {
     if (event.type === "turnComplete" && event.providerId && event.providerId !== this.providerId) {
       return {
         kind: "unsupported",
@@ -72,7 +72,7 @@ export class OtherProviderLiveEventEffects {
         reason: "different provider",
       };
     }
-    return this.prepareReduction(this.reducer.reduce(event), endedAt);
+    return this.prepareReduction(this.reducer.reduce(event, capture), endedAt);
   }
 
   /** Prepare an interrupted execution from worker-owned buffers, including unclassified partial text. */

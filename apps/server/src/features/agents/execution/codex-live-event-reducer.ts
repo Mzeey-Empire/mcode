@@ -1,4 +1,4 @@
-import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, StoredAttachment, TurnOutcome } from "@mcode/contracts";
+import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, ProviderRuntimeEvent, StoredAttachment, TurnOutcome } from "@mcode/contracts";
 import { NarrativeTurnState, type NarrativeTurnStateEffect } from "../conversation/narrative/narrative-turn-state.js";
 import { AssistantExecutionState, type AssistantMaterializationInput } from "../turns/assistant-execution-state.js";
 import { NarrativeRecoveryDelta, type PreparedNarrativeRecoveryDelta } from "../turns/narrative-recovery-delta.js";
@@ -80,7 +80,7 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "narrative-effect"; readonly effect: NarrativeTurnStateEffect }
   | { readonly kind: "feature-event"; readonly feature: "plan-text" | "assistant-message" | "task-tool" | "goal-refresh"; readonly event: AgentEvent }
   | { readonly kind: "plan-questions"; readonly questions: readonly PlanQuestion[] }
-  | { readonly kind: "plan-output"; readonly output: PlanPersistenceReady }
+  | { readonly kind: "plan-captured"; readonly output: PlanPersistenceReady }
   | { readonly kind: "context-usage"; readonly tokensIn: number; readonly contextWindow?: number }
   | { readonly kind: "compaction-started" }
   | { readonly kind: "compaction-divider" }
@@ -146,7 +146,7 @@ export class CodexLiveEventReducer {
     return copy;
   }
 
-  reduce(input: AgentEvent): CodexLiveReduction {
+  reduce(input: AgentEvent, capture?: ProviderRuntimeEvent["planCapture"]): CodexLiveReduction {
     const rejection = this.identityRejection(input) ?? UNSUPPORTED_FEATURE_REASON[input.type]
       ?? this.phaseRejection(input) ?? this.textRejection(input) ?? this.planTextRejection(input);
     if (rejection) return this.unsupported(input, rejection);
@@ -157,7 +157,7 @@ export class CodexLiveEventReducer {
       return this.unsupported(input, "event is not cloneable");
     }
 
-    const writer = this.apply(event);
+    const writer = this.apply(event, capture);
     if (!writer) return this.unsupported(input, "reducer dispatch owner has no handler for this event");
     for (const effect of this.narrative.takeEffects()) writer.push({ kind: "narrative-effect", effect });
     return structuredClone({
@@ -248,15 +248,15 @@ export class CodexLiveEventReducer {
       ? "terminal" : "writer";
   }
 
-  private apply(event: AgentEvent): CodexLiveWriterIntent[] | undefined {
-    return this.applyNarrative(event) ?? this.applyLifecycle(event);
+  private apply(event: AgentEvent, capture?: ProviderRuntimeEvent["planCapture"]): CodexLiveWriterIntent[] | undefined {
+    return this.applyNarrative(event, capture) ?? this.applyLifecycle(event);
   }
 
-  private applyNarrative(event: AgentEvent): CodexLiveWriterIntent[] | undefined {
+  private applyNarrative(event: AgentEvent, capture?: ProviderRuntimeEvent["planCapture"]): CodexLiveWriterIntent[] | undefined {
     switch (event.type) {
       case "textDelta": return this.textDelta(event);
       case "assistantMessageBoundary": return this.boundary(event);
-      case "message": return this.message(event);
+      case "message": return this.message(event, capture);
       case "generatedAttachment": return this.attachment(event);
       case "toolUse": return this.toolUse(event);
       case "toolResult": return this.toolResult(event);
@@ -339,7 +339,8 @@ export class CodexLiveEventReducer {
     return writer;
   }
 
-  private message(event: MessageEvent): CodexLiveWriterIntent[] {
+  private message(event: MessageEvent, capture?: ProviderRuntimeEvent["planCapture"]): CodexLiveWriterIntent[] {
+    if (capture) this.plan?.handlePlanCapture(capture);
     this.assistant.bufferBody(event.content, event.model ?? null, event.attachments ?? []);
     const body = this.assistant.materializationInput(event.model ?? null);
     this.assistant.resetStreamingText();
@@ -352,7 +353,10 @@ export class CodexLiveEventReducer {
     ];
     if (this.plan && this.planFeature === "output") {
       const output = this.plan.consumeAssistantMessage(event.content);
-      if (output) writer.push({ kind: "plan-output", output });
+      if (output) {
+        this.plan.markPlanPersisted();
+        writer.push({ kind: "plan-captured", output });
+      }
     }
     return writer;
   }

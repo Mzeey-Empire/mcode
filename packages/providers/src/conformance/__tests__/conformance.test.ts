@@ -18,6 +18,7 @@ import { loadPlanProtocolFixture, parsePlanProtocolFixture, projectPlanProtocolC
 import { providerFixtureSourceHash } from "../fixture-safety.js";
 import { containedPath, recordChildStderr } from "../plan-probes/runtime.js";
 import type { ProviderEventDraft } from "../../host-ports.js";
+import { capturePlanFromAgentText } from "../harness.js";
 import {
   DeterministicCanonicalSink,
   ENABLED_PROVIDER_CONFORMANCE,
@@ -34,6 +35,23 @@ import {
 } from "../index.js";
 
 const planFixtureDirectory = NodePath.resolve(import.meta.dirname, "../fixtures/plan-protocol");
+describe("synthetic plan capture conformance", () => {
+  it.each(ENABLED_PROVIDER_CONFORMANCE)("captures exactly one fenced plan for $providerId", (registration) => {
+    const file = registration.fixtureFiles.find((path) => path.endsWith("-core.synthetic.json"));
+    if (!file) throw new Error("Missing core synthetic fixture");
+    const fixture = loadProviderFixtureManifest(file);
+    if (!fixture.input.planTextDeltas) throw new Error("Missing plan capture fixture");
+    expect(capturePlanFromAgentText(fixture.input.planTextDeltas, "THREAD_1")).toEqual([{
+      threadId: "THREAD_1", source: "fence",
+      markdown: "# Synthetic plan\n\n## Build\n```ts\nconst answer = 42;\n```",
+    }]);
+  });
+
+  it("does not capture prose or an unfinished fence", () => {
+    expect(capturePlanFromAgentText(["# Prose\n## Status"], "THREAD_1")).toEqual([]);
+    expect(capturePlanFromAgentText(["````mcode-plan\n# Unfinished"], "THREAD_1")).toEqual([]);
+  });
+});
 const planMetadata = {
   providerId: "codex", scenario: "questions-free-text", cliVersion: "0.161.0", protocolVersion: "app-server-unversioned", sdk: null,
   end: { kind: "completed" }, capturedAt: "2026-10-08T12:00:00.000Z",

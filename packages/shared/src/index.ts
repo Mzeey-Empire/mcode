@@ -35,3 +35,5 @@ export {
 } from "./model-effort/index.js";
 
 export { redactMcodeBrowserCaptureV2 } from "./browser-preview/redact.js";
+
+export { PlanFenceParser } from "./plan-fence-parser.js";

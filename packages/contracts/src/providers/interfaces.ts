@@ -1,3 +1,4 @@
+import type { NativePlanFileOutcome } from "../models/plan.js";
 import type { ProviderRuntimeEvent } from "../events/provider-runtime-event.js";
 import type { ApprovalReviewMode, DevinMode, InteractionMode, OrchestrationMode, PermissionMode } from "../models/enums.js";
 import type { AttachmentMeta } from "../models/attachment.js";
@@ -108,6 +109,8 @@ export interface TurnRequest<P extends ProviderId = ProviderId> {
   approvalReviewMode: ApprovalReviewMode;
   /** Per-Turn interaction state. Plan suppresses Cursor's native auto-answer. */
   interactionMode: InteractionMode;
+  /** Planning classification and Mcode plan file, supplied by turn admission. */
+  planTurn?: { kind: "questions" | "planning" | "revise"; planFilePath: string | null };
   /** Requests provider-native proactive delegation without changing reasoning effort. */
   orchestrationMode?: OrchestrationMode;
   reasoningLevel?: ReasoningLevel;
@@ -125,6 +128,21 @@ export interface TurnRequest<P extends ProviderId = ProviderId> {
   resumeFrom?: string;
   /** Provider-specific knobs, walled off by `P`. Required; empty-knob Providers pass `{}`. */
   providerOptions: ProviderOptionsByProvider[P];
+}
+
+/** A provider-owned plan file tied to one session by its own event. Never sent to clients. */
+export interface NativePlanFileRef {
+  path: string;
+  sessionId: string;
+  sha256: string;
+}
+
+/** Complete plan markdown captured at the provider boundary. */
+export interface PlanCapture {
+  threadId: string;
+  markdown: string;
+  source: "native" | "fence";
+  nativePlanFile?: NativePlanFileRef;
 }
 
 /** A pluggable agent backend that can run sessions and emit events. */
@@ -177,6 +195,11 @@ export interface IAgentProvider {
    */
   sendTurn(req: TurnRequest): Promise<void>;
 
+  /** Reconcile a proven provider plan file before Implement; absence means skipped with no-file. */
+  prepareImplement?(input: {
+    threadId: string; markdown: string; nativePlanFile: NativePlanFileRef | null;
+  }): Promise<NativePlanFileOutcome>;
+
   /** Abort a running session. Returned promise resolves after provider-owned teardown where supported. */
   stopSession(sessionId: string): void | Promise<void>;
 
@@ -225,8 +248,8 @@ export interface IAgentProvider {
     event: "permission_resolved",
     handler: (payload: { requestId: string; decision: PermissionDecision; optionLabel?: string }) => void,
   ): void;
-  /** Subscribe to ExitPlanMode capture events (Claude SDK plan output). */
-  on(event: "exit_plan_mode", handler: (payload: { threadId: string; planMarkdown: string }) => void): void;
+  /** Subscribe to complete native or fenced plan captures. */
+  on(event: "plan_captured", handler: (payload: PlanCapture) => void): void;
 }
 
 /** Provider-neutral result of inspecting automatic approval review support. */

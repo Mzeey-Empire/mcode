@@ -12,70 +12,98 @@ const question = {
   ],
 };
 
-const structuredPlan = {
-  title: "Login plan",
-  changeSummary: "Use passkeys",
-  sections: [{ id: "s1", title: "Implementation", level: 1, content: "Add passkey login." }],
-};
+
+const markdown = "# Login plan\n\n## Implementation\n\nAdd passkey login.";
+const fenced = "````mcode-plan\n" + markdown + "\n````";
 
 describe("PlanExecutionState", () => {
-  it("publishes one plain question outcome from chunked text", () => {
+  it("publishes one question outcome from chunked text", () => {
     const state = new PlanExecutionState();
     state.beginQuestionGeneration();
-    const block = `\`\`\`plan-questions\n${JSON.stringify([question])}\n\`\`\``;
-
+    const block = "```plan-questions\n" + JSON.stringify([question]) + "\n```";
     expect(state.feedText(block.slice(0, 23))).toBeNull();
-    const ready = state.feedText(block.slice(23));
-    expect(ready).toEqual({ questions: [question] });
-    expect(structuredClone(ready)).toEqual(ready);
+    expect(state.feedText(block.slice(23))).toEqual({ questions: [question] });
     expect(state.feedText(block)).toBeNull();
+    expect(state.finishTurn()).toBeNull();
   });
 
-  it("uses the parsed plan at the assistant message boundary", () => {
+  it("captures a streamed fence at the assistant boundary, once persisted", () => {
     const state = new PlanExecutionState();
     state.beginOutputGeneration();
-    const block = `\`\`\`plan-output\n${JSON.stringify(structuredPlan)}\n\`\`\``;
-
-    expect(state.needsAssistantMaterialization()).toBe(true);
-    expect(state.feedText(block.slice(0, 19))).toBeNull();
-    expect(state.feedText(block.slice(19))).toBeNull();
-    expect(state.consumeAssistantMessage("provider prose")).toEqual({
-      title: "Login plan",
-      contentMd: "## Implementation\n\nAdd passkey login.",
-      sectionsJson: '[{"id":"s1","title":"Implementation","level":1}]',
-      changeSummary: "Use passkeys",
-    });
-    expect(state.needsAssistantMaterialization()).toBe(false);
-    expect(state.consumeAssistantMessage("# Another\n## Section")).toBeNull();
-  });
-
-  it("uses assistant markdown when no structured block completes", () => {
-    const state = new PlanExecutionState();
-    state.beginOutputGeneration();
-
-    expect(state.consumeAssistantMessage("# Fallback\n## Step\nDo it.")).toEqual({
-      title: "Fallback",
-      contentMd: "# Fallback\n## Step\nDo it.",
-      sectionsJson: '[{"id":"s1","title":"Step","level":2}]',
-      changeSummary: null,
-    });
-    expect(state.needsAssistantMaterialization()).toBe(false);
-  });
-
-  it("lets native exit markdown replace a pending streamed plan", () => {
-    const state = new PlanExecutionState();
-    state.beginOutputGeneration();
-    state.feedText(`\`\`\`plan-output\n${JSON.stringify(structuredPlan)}\n\`\`\``);
-    state.handleNativeExit("# Native plan\n## Deploy\nShip it.");
-
-    expect(state.consumeAssistantMessage("ignored")).toEqual({
-      title: "Native plan",
-      contentMd: "# Native plan\n## Deploy\nShip it.",
-      sectionsJson: '[{"id":"s1","title":"Deploy","level":2}]',
-      changeSummary: null,
+    state.feedText(fenced.slice(0, 19));
+    state.feedText(fenced.slice(19));
+    expect(state.consumeAssistantMessage("Summary")).toEqual({
+      title: "Login plan", contentMd: markdown,
+      sectionsJson: '[{"id":"s1","title":"Implementation","level":2}]', changeSummary: null,
     });
     state.markPlanPersisted();
-    state.handleNativeExit("# Later\n## Ignored");
-    expect(state.consumeAssistantMessage("ignored")).toBeNull();
+    expect(state.needsAssistantMaterialization()).toBe(false);
+    expect(state.consumeAssistantMessage(fenced)).toBeNull();
+    expect(state.finishTurn()).toEqual({ outcome: "captured" });
+  });
+
+  it("reports missing for a prose-only reply with headings and creates no version", () => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    state.feedText("# Findings\n## Status\nStill investigating.");
+    expect(state.consumeAssistantMessage("# Findings\n## Status\nStill investigating.")).toBeNull();
+    expect(state.hasPersistedPlan()).toBe(false);
+    expect(state.finishTurn()).toEqual({ outcome: "missing" });
+  });
+
+  it.each(["native-first", "fence-first"])("prefers native capture regardless of arrival order: %s", (order) => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    const capture = { markdown: "# Native plan\n## Deploy\nShip it.", source: "native" as const };
+    if (order === "native-first") state.handlePlanCapture(capture);
+    state.feedText(fenced);
+    if (order === "fence-first") state.handlePlanCapture(capture);
+    expect(state.consumeAssistantMessage(fenced)).toEqual({
+      title: "Native plan", contentMd: capture.markdown,
+      sectionsJson: '[{"id":"s1","title":"Deploy","level":2}]', changeSummary: null,
+    });
+    state.markPlanPersisted();
+    state.handlePlanCapture(capture);
+    expect(state.consumeAssistantMessage(fenced)).toBeNull();
+  });
+
+  it("captures a complete message without deltas after an earlier prose message", () => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    expect(state.consumeAssistantMessage("# Findings\n## Status")).toBeNull();
+    expect(state.consumeAssistantMessage(fenced)?.contentMd).toBe(markdown);
+  });
+
+  it("takes the first H1 and skips headings inside code blocks", () => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    const body = "## Context\n# Actual title\n```sh\n# Not a heading\n```\n## Steps\nDo it.";
+    state.handlePlanCapture({ markdown: body, source: "native" });
+    expect(state.consumeAssistantMessage("Summary")).toEqual({
+      title: "Actual title", contentMd: body,
+      sectionsJson: '[{"id":"s1","title":"Context","level":2},{"id":"s2","title":"Steps","level":2}]', changeSummary: null,
+    });
+  });
+
+  it("allows a titled plan without subheadings and rejects missing or unclosed captures", () => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    expect(state.consumeAssistantMessage("````mcode-plan\n# Unclosed")).toBeNull();
+    state.handlePlanCapture({ markdown: "## No H1", source: "native" });
+    expect(state.consumeAssistantMessage("Summary")).toBeNull();
+    state.handlePlanCapture({ markdown: "# Small plan\nDo it.", source: "native" });
+    expect(state.consumeAssistantMessage("Summary")).toEqual({
+      title: "Small plan", contentMd: "# Small plan\nDo it.", sectionsJson: "[]", changeSummary: null,
+    });
+  });
+
+  it("forks partial fences without consuming accepted state", () => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    state.feedText(fenced.slice(0, 12));
+    const copy = state.fork();
+    copy.feedText(fenced.slice(12));
+    expect(copy.consumeAssistantMessage("Summary")?.title).toBe("Login plan");
+    expect(state.consumeAssistantMessage("Summary")).toBeNull();
   });
 });

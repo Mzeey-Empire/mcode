@@ -2,21 +2,11 @@ import { describe, it, expect } from "vitest";
 import { extractCursorCreatePlanMarkdown } from "../cursor-create-plan.js";
 
 describe("extractCursorCreatePlanMarkdown", () => {
-  it("reads a top-level markdown field", () => {
-    expect(
-      extractCursorCreatePlanMarkdown({ markdown: "# Plan\n\nBody" }),
-    ).toBe("# Plan\n\nBody");
+  it("reads the S07-00 captured top-level plan field", () => {
+    expect(extractCursorCreatePlanMarkdown({ plan: "# Plan\n\nBody", markdown: "Wrong field" })).toBe("# Plan\n\nBody");
   });
 
-  it("reads nested plan.markdown", () => {
-    expect(
-      extractCursorCreatePlanMarkdown({
-        plan: { markdown: "## Nested plan" },
-      }),
-    ).toBe("## Nested plan");
-  });
-
-  it("returns null when no markdown is present", () => {
-    expect(extractCursorCreatePlanMarkdown({ title: "Only title" })).toBeNull();
+  it.each([{}, { plan: "" }, { plan: "  " }, { plan: 42 }, { markdown: "# Wrong field" }, { plan: { markdown: "# Wrong shape" } }])("rejects missing or invalid native plan text: %j", (params) => {
+    expect(extractCursorCreatePlanMarkdown(params)).toBeNull();
   });
 });

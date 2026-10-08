@@ -220,7 +220,7 @@ describe("PlanQuestionService.buildAnswerPayload", () => {
     expect(content).toContain("**q1**: o1");
   });
 
-  it("appends plan-output instructions and keys the marker on the fenced message", () => {
+  it("appends fenced plan instructions and keys the marker on the fenced message", () => {
     insertMessage(db, "m1", "assistant", fence(), 1);
 
     const { content, markPlanAnswerForMessageId } = svc.buildAnswerPayload("thread-1", [
@@ -228,7 +228,7 @@ describe("PlanQuestionService.buildAnswerPayload", () => {
     ]);
 
     expect(content).toContain(PLAN_ANSWER_MESSAGE_PREFIX);
-    expect(content).toContain("```plan-output");
+    expect(content).toContain("````mcode-plan");
     expect(markPlanAnswerForMessageId).toBe("m1");
   });
 });

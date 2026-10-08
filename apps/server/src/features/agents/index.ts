@@ -4,7 +4,7 @@ export { AgentService } from "./orchestration/agent-service.js";
 /** Agent permission capability used by the server composition roots. */
 export { AgentPermissionService } from "./permissions/agent-permission-service.js";
 
-/** Owns plan-question and plan-output turns. */
+/** Owns plan-question and plan-captured turns. */
 export { PlanTurnService } from "./planning/plan-turn-service.js";
 
 /** Owns provider-native goal lifecycle and goal commands. */

@@ -3,7 +3,8 @@ import {
   CanonicalAgentEventSchema,
   type CanonicalAgentEvent,
 } from "@mcode/agent-model";
-import { AgentEventType, ProviderRuntimeEventSchema, type AgentEvent } from "@mcode/contracts";
+import { AgentEventType, ProviderRuntimeEventSchema, type AgentEvent, type PlanCapture } from "@mcode/contracts";
+import { PlanFenceParser } from "@mcode/shared";
 import type { ProviderBoundary } from "../factory-types.js";
 import type { RequestPermissionRequest, SessionNotification } from "@agentclientprotocol/sdk";
 import type { ProviderFactoryInput } from "../factory-types.js";
@@ -43,6 +44,14 @@ export interface CursorAcpTraceProfileResult {
   emittedEventTypes: readonly string[];
   toolNames: readonly string[];
   unsupportedMethods: readonly string[];
+}
+
+/** Capture the fenced fallback from the assistant text delivered by a fixture or mapper. */
+export function capturePlanFromAgentText(deltas: readonly string[], threadId: string): PlanCapture[] {
+  const parser = new PlanFenceParser();
+  for (const delta of deltas) parser.feed(delta);
+  const markdown = parser.finish();
+  return markdown ? [{ threadId, markdown, source: "fence" }] : [];
 }
 
 /** Replays a sanitized fixture through one native mapper and checks semantics. */
@@ -171,7 +180,7 @@ interface CursorAcpTraceReplay {
   client: ReturnType<CursorAcpClientBridge["createClient"]>;
   requestExtMethod: NonNullable<ReturnType<CursorAcpClientBridge["createClient"]>["extMethod"]>;
   emittedEvents: AgentEvent[];
-  planExits: Array<{ threadId: string; planMarkdown: string }>;
+  planCaptures: Array<{ threadId: string; markdown: string; source: "native" | "fence" }>;
   permissionOutcomes: string[];
   unsupportedMethods: string[];
   ignoredForeignSessionUpdateCount: number;
@@ -207,14 +216,14 @@ function getCursorAcpTraceFixture(fixture: ProviderFixtureManifest): {
 
 function createCursorAcpTraceReplay(trace: CursorAcpTraceFixture): CursorAcpTraceReplay {
   const emittedEvents: AgentEvent[] = [];
-  const planExits: Array<{ threadId: string; planMarkdown: string }> = [];
+  const planCaptures: Array<{ threadId: string; markdown: string; source: "native" | "fence" }> = [];
   const bridge = new CursorAcpClientBridge({
     settings: { get: () => ({ provider: { cursor: {} } }) as never },
     publishEvent: (_entry, event) => emittedEvents.push(event),
     publishNativeTurnDiff: () => undefined,
     emitPermissionRequest: () => undefined,
     emitPermissionResolved: () => undefined,
-    emitExitPlanMode: (args) => planExits.push(args),
+    emitPlanCaptured: (args) => planCaptures.push(args),
   });
   const entry = createCursorTraceSessionEntry(trace);
   const client = bridge.createClient(entry);
@@ -225,7 +234,7 @@ function createCursorAcpTraceReplay(trace: CursorAcpTraceFixture): CursorAcpTrac
     client,
     requestExtMethod,
     emittedEvents,
-    planExits,
+    planCaptures,
     permissionOutcomes: [],
     unsupportedMethods: [],
     ignoredForeignSessionUpdateCount: 0,
@@ -293,7 +302,7 @@ function summarizeCursorAcpTraceReplay(replay: CursorAcpTraceReplay) {
     toolNames: replay.emittedEvents
       .filter((event): event is Extract<AgentEvent, { type: "toolUse" }> => event.type === "toolUse")
       .map((event) => event.toolName),
-    planExitCount: replay.planExits.length,
+    planCaptureCount: replay.planCaptures.length,
     permissionOutcomes: replay.permissionOutcomes,
     unsupportedMethods: replay.unsupportedMethods,
     ignoredForeignSessionUpdateCount: replay.ignoredForeignSessionUpdateCount,

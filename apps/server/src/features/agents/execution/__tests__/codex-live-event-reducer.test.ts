@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentEventSchema, type AgentEvent } from "@mcode/contracts";
+import { AgentEventSchema, type AgentEvent, type ProviderRuntimeEvent } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 import { CodexEventMapper } from "../../../../../../../packages/providers/src/private/codex/codex-event-mapper.js";
 import { CodexLiveEventReducer } from "../codex-live-event-reducer.js";
@@ -25,14 +25,14 @@ function reduceEvent(reducer: CodexLiveEventReducer, type: AgentEvent["type"], f
   return reduction;
 }
 
-function runtimeDraft(input: AgentEvent, sequence: number): ProviderEventDraft {
+function runtimeDraft(input: AgentEvent, sequence: number, planCapture?: ProviderRuntimeEvent["planCapture"]): ProviderEventDraft {
   const timestamp = "2026-09-30T10:00:00.000Z";
   const itemId = `runtime:${sequence}`;
   return { eventId: `provider:${sequence}`, routing: { ...execution, itemId },
     sourceProviderId: "codex", sourceIdentities: [], sourceSequence: sequence,
     payload: { type: "item.recorded", item: {
       id: itemId, threadId: execution.threadId, turnId: execution.turnId,
-      kind: "system", providerIdentities: [], payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: input } },
+      kind: "system", providerIdentities: [], payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: input, ...(planCapture ? { planCapture } : {}) } },
       createdAt: timestamp, updatedAt: timestamp,
     } } };
 }
@@ -45,6 +45,21 @@ function prepareCandidate(accepted: ProviderExecutionEventState, input: AgentEve
 }
 
 describe("CodexLiveEventReducer", () => {
+  it.each(["claude", "cursor"])("materializes %s native capture through the worker, ahead of its fence", (providerId) => {
+    const state = new ProviderExecutionEventState(providerId, execution, { precedingMessageId: "user", planFeature: "output" });
+    state.startFromAdmission();
+    const draft = runtimeDraft(event("message", { content: "````mcode-plan\n# Fence plan\n````", tokens: null }), 1,
+      { markdown: "# Native plan\n## Build\nShip it.", source: "native" });
+    const result = state.prepare([{ ...draft, sourceProviderId: providerId }]);
+    if (result.kind !== "parent") throw new Error("Native capture was rejected");
+    expect(result.prepared.effects.planOutput).toEqual({
+      title: "Native plan", contentMd: "# Native plan\n## Build\nShip it.",
+      sectionsJson: '[{"id":"s1","title":"Build","level":2}]', changeSummary: null,
+    });
+    const duplicate = state.prepare([{ ...runtimeDraft(event("message", { content: "# More prose", tokens: null }), 2), sourceProviderId: providerId }]);
+    if (duplicate.kind !== "parent") throw new Error("Follow-up message was rejected");
+    expect(duplicate.prepared.effects.planOutput).toBeUndefined();
+  });
   it("prepares more than 1000 completed tools through the public parent path and retains full terminal history", () => {
     let accepted = new ProviderExecutionEventState("codex", execution, { precedingMessageId: "user", planFeature: "none" });
     const start = prepareCandidate(accepted, event("turnStarted"), 1);
@@ -237,18 +252,16 @@ describe("CodexLiveEventReducer", () => {
 
   it("carries plan output data with the assistant body and bounds parser input", () => {
     const reducer = new CodexLiveEventReducer(execution, "output");
-    const plan = { title: "Login plan", sections: [
-      { id: "s1", title: "Implementation", level: 1, content: "Add passkey login." },
-    ] };
-    const block = `\`\`\`plan-output\n${JSON.stringify(plan)}\n\`\`\``;
+    const plan = "# Login plan\n\n## Implementation\n\nAdd passkey login.";
+    const block = `\`\`\`\`mcode-plan\n${plan}\n\`\`\`\``;
     expect(reducer.reduce(event("turnStarted")).kind).toBe("reduced");
     expect(reducer.reduce(event("textDelta", { delta: block })).kind).toBe("reduced");
     const message = reducer.reduce(event("message", { content: "Provider prose", tokens: null }));
     expect(message.kind).toBe("reduced");
     if (message.kind !== "reduced") return;
-    expect(message.writer).toContainEqual({ kind: "plan-output", output: {
-      title: "Login plan", contentMd: "## Implementation\n\nAdd passkey login.",
-      sectionsJson: '[{"id":"s1","title":"Implementation","level":1}]', changeSummary: null,
+    expect(message.writer).toContainEqual({ kind: "plan-captured", output: {
+      title: "Login plan", contentMd: plan,
+      sectionsJson: '[{"id":"s1","title":"Implementation","level":2}]', changeSummary: null,
     } });
     expect(message.writer[0]).toMatchObject({ kind: "assistant-body", content: "Provider prose" });
 

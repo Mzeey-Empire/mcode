@@ -116,7 +116,7 @@ export class TurnFinalizer {
    * (or eagerly via {@link materializeAssistantRow} when a plan record needs
    * the foreign-key target) only when {@link hasRecordableActivity} holds, so an
    * empty turn leaves no hollow row. Returns the deterministic id the row will
-   * take, so callers can carry it on the broadcast and plan-output paths before
+   * take, so callers can carry it on the broadcast and plan-captured paths before
    * the row exists.
    */
   bufferAssistantBody(

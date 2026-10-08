@@ -667,12 +667,9 @@ seedCiWatcher(allWorkspaces);
 /** Registers provider events that persist native plan output. */
 function registerProviderPlanListeners(): void {
   for (const provider of providerRegistry.resolveAll()) {
-  // ExitPlanMode: Claude SDK's native plan output. The provider intercepts
-  // the tool call, captures the plan markdown, and emits this event. We
-  // persist the plan and broadcast to clients.
-  provider.on("exit_plan_mode", (data: { threadId: string; planMarkdown: string }) => {
-    planTurnService.handleExitPlanMode(data.threadId, data.planMarkdown);
-  });
+    provider.on("plan_captured", (data) => {
+      planTurnService.handlePlanCaptured(data);
+    });
   }
 }
 

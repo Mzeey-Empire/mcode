@@ -876,21 +876,19 @@ export type {
 
 // Plan output
 export {
-  PlanSectionSchema,
+  NativePlanFileOutcomeSchema,
   PlanSectionNavSchema,
-  PlanOutputSchema,
   PlanStatusSchema,
   PlanActionSchema,
   PlanRecordSchema,
-} from "./models/plan-output.js";
+} from "./models/plan.js";
 export type {
-  PlanSection,
+  NativePlanFileOutcome,
   PlanSectionNav,
-  PlanOutput,
   PlanStatus,
   PlanAction,
   PlanRecord,
-} from "./models/plan-output.js";
+} from "./models/plan.js";
 
 // Permissions
 export {
@@ -1416,6 +1414,8 @@ export type { HandoffMetadata } from "./handoff.js";
 export type {
   ProviderId,
   SessionForkBehavior,
+  NativePlanFileRef,
+  PlanCapture,
   IAgentProvider,
   IApprovalReviewCapable,
   ITurnDiffSource,

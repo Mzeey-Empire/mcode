@@ -77,6 +77,11 @@ export const ProviderRuntimeEventSchema = lazySchema(() =>
     deliveryAttempt: z.number().int().positive().optional(),
     extension: ProviderRuntimeExtensionSchema().optional(),
     parentEvidence: ProviderParentEvidenceSchema().optional(),
+    /** Private capture evidence bound to the assistant message that materializes it. */
+    planCapture: z.object({
+      markdown: z.string().min(1).max(256 * 1024),
+      source: z.enum(["native", "fence"]),
+    }).strict().optional(),
   }).strict(),
 );
 

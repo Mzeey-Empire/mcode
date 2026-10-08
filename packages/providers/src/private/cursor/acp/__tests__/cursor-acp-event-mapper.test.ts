@@ -722,7 +722,7 @@ describe("Cursor ACP client-factory session-update seam", () => {
       publishNativeTurnDiff: (_entry, update) => { diffUpdates.push(update); },
       emitPermissionRequest: () => {},
       emitPermissionResolved: () => {},
-      emitExitPlanMode: () => {},
+      emitPlanCaptured: () => {},
     });
     let entry: any;
     let client!: Client;
@@ -816,7 +816,7 @@ describe("Cursor ACP client-factory session-update seam", () => {
       publishNativeTurnDiff: (_entry, update) => { diffUpdates.push(update); },
       emitPermissionRequest: () => {},
       emitPermissionResolved: () => {},
-      emitExitPlanMode: () => {},
+      emitPlanCaptured: () => {},
     });
     const entry = {
       acpSessionId: "cursor-session",

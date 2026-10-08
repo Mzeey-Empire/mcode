@@ -58,6 +58,35 @@ afterEach(async () => { await Promise.allSettled(providers.splice(0).map((provid
 async function completed(events: () => ProviderRuntimeEvent[], count: number) { await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(count)); }
 
 describe("Claude public factory core and capabilities", () => {
+  it("carries native ExitPlanMode capture into the canonical assistant message once", async () => {
+    const decisions: Array<Promise<unknown>> = [];
+    installTransport((turn, options) => {
+      if (turn === 1) {
+        assert(options.canUseTool);
+        decisions.push(options.canUseTool("ExitPlanMode", { plan: "# Native plan\n## Build\nShip it." },
+          { signal: new AbortController().signal, toolUseID: "PLAN_NATIVE" }));
+      }
+      return [{ type: "assistant", uuid: `ASSISTANT_${turn}`, parent_tool_use_id: null,
+        message: { role: "assistant", model: "claude-sonnet-4-6", content: [{ type: "text", text: "Summary." }] } }, result(`RESULT_${turn}`)];
+    });
+    const { provider, events } = fixture();
+    const capture = vi.fn();
+    provider.on("plan_captured", capture);
+    provider.setPlanAnswerMode("thread-1", true);
+    await provider.sendTurn(request());
+    await completed(events, 1);
+    expect(await Promise.all(decisions)).toEqual([{ behavior: "deny",
+      message: "The client captured your proposed plan. Stop here and wait for the user to review it." }]);
+    expect(capture).toHaveBeenCalledExactlyOnceWith({
+      threadId: "thread-1", markdown: "# Native plan\n## Build\nShip it.", source: "native",
+    });
+    await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: execution2 }));
+    await completed(events, 2);
+    expect(events().filter((runtime) => runtime.planCapture).map((runtime) => ({
+      type: runtime.event.type, executionId: runtime.event.turnExecutionId, capture: runtime.planCapture,
+    }))).toEqual([{ type: "message", executionId: execution1,
+      capture: { markdown: "# Native plan\n## Build\nShip it.", source: "native" } }]);
+  });
   it("validates configuration and host ports without SDK or host I/O", () => {
     installTransport();
     const { provider, input } = fixture();
@@ -233,9 +262,9 @@ describe("Claude public factory core and capabilities", () => {
     const canUseTool = options.canUseTool;
     assert(canUseTool);
     const plan = vi.fn();
-    provider.on("exit_plan_mode", plan);
+    provider.on("plan_captured", plan);
     await canUseTool("ExitPlanMode", { plan: "fixture plan" }, { signal: new AbortController().signal, toolUseID: "PLAN_1" });
-    expect(plan).toHaveBeenCalledWith({ threadId: "thread-1", planMarkdown: "fixture plan" });
+    expect(plan).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-1", markdown: "fixture plan", source: "native" });
     provider.setPlanAnswerMode("thread-1", false);
     expect(await provider.clearGoal("mcode-thread-1")).toBe(true);
     await provider.discardSession("mcode-thread-1");

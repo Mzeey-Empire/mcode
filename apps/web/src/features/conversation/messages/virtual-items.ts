@@ -11,7 +11,7 @@ import { isRoutineProviderNotice } from "../notices/provider-notices";
  * message, so it can be the trailing stable item while the NEXT turn generates
  * the plan. It is never the live turn's own response, so the in-flight narrative
  * must append AFTER it (preserving chronological order: questions answered → new
- * turn's actions → response) rather than being split in ABOVE it. Plan-output
+ * turn's actions → response) rather than being split in ABOVE it. Plan capture
  * bubbles are intentionally excluded — their own turn's narrative belongs above
  * the saved Plan tab answer.
  */

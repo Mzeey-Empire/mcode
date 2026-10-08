@@ -24,6 +24,7 @@ interface ProviderExecutionQueue {
   tail: Promise<void>;
   failure: Error | undefined;
   nativeEvents: Map<string, string>;
+  planCapture?: ProviderRuntimeEvent["planCapture"];
 }
 
 /** Source evidence supplied by a native protocol event. */
@@ -54,6 +55,11 @@ export class CanonicalLiveEventPublisher {
     private readonly failureLifetime: "provider" | "execution" = "provider",
   ) {}
 
+  /** Retain native plan evidence within its exact execution until an assistant message arrives. */
+  capturePlan(routing: CanonicalLiveEventRouting, capture: NonNullable<ProviderRuntimeEvent["planCapture"]>): void {
+    if (!this.admissionStopped) this.queueFor(routing).planCapture = capture;
+  }
+
   /** Queues one runtime event; a replay ID alone does not imply a native timestamp. */
   publish(
     routing: CanonicalLiveEventRouting,
@@ -70,6 +76,10 @@ export class CanonicalLiveEventPublisher {
     }
     const queue = this.queueFor(routing);
     if (!this.admit(queue, routing, runtimeEvent, sourceIdentities, native)) return;
+    if (runtimeEvent.event.type === AgentEventType.Message && queue.planCapture) {
+      runtimeEvent = { ...runtimeEvent, planCapture: queue.planCapture };
+      queue.planCapture = undefined;
+    }
     const sourceSequence = queue.nextSourceSequence;
     queue.nextSourceSequence += 1;
     queue.pendingEventCount += 1;

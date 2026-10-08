@@ -1,5 +1,6 @@
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
+import { capturePlanFromAgentText } from "../../../conformance/harness.js";
 import {
   createDevinAcpTurnState,
   devinPermissionPreview,
@@ -25,6 +26,19 @@ function toolCall(toolCallId: string, extra: Record<string, unknown> = {}): Reco
 }
 
 describe("mapDevinAcpSessionNotification", () => {
+  it("preserves the plan fence through the mapper and captures it exactly once", () => {
+    const state = createDevinAcpTurnState();
+    const deltas: string[] = [];
+    for (const text of ["Summary\n``", "``mcode-", "plan\n# Devin plan\n## Build\nDo it.\n```", "`"]) {
+      const events = mapDevinAcpSessionNotification({
+        sessionId: "acp-1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+      }, THREAD, state);
+      for (const event of events) if (event.type === "textDelta") deltas.push(event.delta);
+    }
+    expect(capturePlanFromAgentText(deltas, THREAD)).toEqual([{
+      threadId: THREAD, source: "fence", markdown: "# Devin plan\n## Build\nDo it.",
+    }]);
+  });
   it("emits text deltas and accumulates assistant text", () => {
     const state = createDevinAcpTurnState();
     const events = mapDevinAcpSessionNotification(
