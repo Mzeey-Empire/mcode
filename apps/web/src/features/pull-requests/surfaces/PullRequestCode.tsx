@@ -434,7 +434,7 @@ function PullRequestCodeDiffBody({
   if (initialLoading) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-xs text-muted">
-        <Spinner size="xs" aria-hidden />
+        <Spinner size={12} aria-hidden />
         <span role="status">Loading changed files</span>
       </div>
     );
@@ -926,7 +926,7 @@ export function PullRequestCode({
   if (!viewerNodeId) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center gap-2 bg-page text-xs text-muted">
-        <Spinner size="xs" aria-hidden />
+        <Spinner size={12} aria-hidden />
         <span role="status">Loading GitHub viewer context</span>
       </div>
     );

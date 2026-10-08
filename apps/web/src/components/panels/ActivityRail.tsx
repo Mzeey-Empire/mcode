@@ -642,7 +642,7 @@ function RailAddControl({
                     {type.label}
                   </span>
                   {type.comingSoon ? (
-                    <Badge variant="secondary" size="sm" className="uppercase tracking-wide">
+                    <Badge variant="secondary" size="compact" className="uppercase tracking-wide">
                       Soon
                     </Badge>
                   ) : (

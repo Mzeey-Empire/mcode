@@ -86,7 +86,7 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
               >
                 <span className="text-fade">{b.name}</span>
                 {b.isCurrent && (
-                  <Badge variant="secondary" size="sm" className="ml-2 shrink-0">current</Badge>
+                  <Badge variant="secondary" size="compact" className="ml-2 shrink-0">current</Badge>
                 )}
               </CommandItem>
             ))}
@@ -545,7 +545,7 @@ function PrDialogSidebar({
           disabled={isDisabled || !form.title.trim()}
           className="w-full gap-1.5"
         >
-          {form.state === "submitting" && <Spinner size={14} className="text-current" />}
+          {form.state === "submitting" && <Spinner size={16} className="text-current" />}
           Create PR
         </Button>
         <Button

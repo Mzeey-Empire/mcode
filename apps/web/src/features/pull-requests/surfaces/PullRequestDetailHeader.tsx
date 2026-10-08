@@ -21,6 +21,7 @@ import {
 import { formatRelative } from "@/lib/format-relative";
 import { cn } from "@/lib/utils";
 import { safePullRequestHttpUrl } from "./safePullRequestHttpUrl";
+import { Spinner } from "@/components/ui/spinner";
 
 /** Props for the pull request identity block rendered inside Summary. */
 export interface PullRequestDetailHeaderProps {
@@ -48,9 +49,6 @@ function checkRingTone(state: PullRequestCheckState): string {
   }
   if (state === "failing" || state === "cancelled") {
     return "border-[var(--diff-remove-strong)]";
-  }
-  if (state === "pending") {
-    return "animate-spin border-muted/30 border-t-primary motion-reduce:animate-none";
   }
   return "border-muted/55";
 }
@@ -136,7 +134,7 @@ function PullRequestReviewers({ detail }: { detail: PullRequestDetail | null | u
 function PullRequestDetailHeaderContent({ model, detail, isNarrow }: { model: PullRequestDetail | PullRequestSummaryRecord; detail: PullRequestDetail | null | undefined; isNarrow: boolean }) {
   const conversationCount = model.commentCount + (detail?.reviewThreadCount ?? 0);
   return (
-    <header aria-label="Pull request summary identity"><div className={cn("mx-auto w-full max-w-5xl", isNarrow ? "px-4 pb-4 pt-6" : "px-6 pb-5 pt-8")}><PullRequestHeaderMeta model={model} detail={detail} /><dl className="mt-8 space-y-3 text-xs"><PullRequestBranchRow model={model} /><PullRequestReviewers detail={detail} /><div className="grid min-w-0 grid-cols-[1.25rem_5.25rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[1.25rem_6.5rem_minmax(0,1fr)]"><MessageCircle size={14} aria-hidden className="text-muted/80" /><dt className="text-muted">Comments</dt><dd className="text-ink/90">{conversationCount} {conversationCount === 1 ? "comment" : "comments"}</dd></div><div className="grid min-w-0 grid-cols-[1.25rem_5.25rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[1.25rem_6.5rem_minmax(0,1fr)]"><span aria-hidden data-check-state={model.checks.state} className={cn("ml-0.5 size-3 rounded-full border-2", checkRingTone(model.checks.state))} /><dt className="text-muted">Checks</dt><dd className="text-ink/90">{checkLabel(model.checks.state)}</dd></div></dl></div></header>
+    <header aria-label="Pull request summary identity"><div className={cn("mx-auto w-full max-w-5xl", isNarrow ? "px-4 pb-4 pt-6" : "px-6 pb-5 pt-8")}><PullRequestHeaderMeta model={model} detail={detail} /><dl className="mt-8 space-y-3 text-xs"><PullRequestBranchRow model={model} /><PullRequestReviewers detail={detail} /><div className="grid min-w-0 grid-cols-[1.25rem_5.25rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[1.25rem_6.5rem_minmax(0,1fr)]"><MessageCircle size={14} aria-hidden className="text-muted/80" /><dt className="text-muted">Comments</dt><dd className="text-ink/90">{conversationCount} {conversationCount === 1 ? "comment" : "comments"}</dd></div><div className="grid min-w-0 grid-cols-[1.25rem_5.25rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[1.25rem_6.5rem_minmax(0,1fr)]">{model.checks.state === "pending" ? <Spinner size={12} data-check-state="pending" className="ml-0.5 text-primary" /> : <span aria-hidden data-check-state={model.checks.state} className={cn("ml-0.5 size-3 rounded-full border-2", checkRingTone(model.checks.state))} />}<dt className="text-muted">Checks</dt><dd className="text-ink/90">{checkLabel(model.checks.state)}</dd></div></dl></div></header>
   );
 }
 

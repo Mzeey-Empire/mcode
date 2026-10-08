@@ -738,7 +738,7 @@ function SubagentRosterList({
               <section aria-labelledby="subagents-active-heading">
                 <div className="flex items-center gap-2 px-6 pb-1 pt-6">
                   <h2 id="subagents-active-heading" className="text-sm font-semibold text-ink">Active</h2>
-                  <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
+                  <Badge variant="ghost" size="compact" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
                     {activeRows.length + narrative.active.length}
                   </Badge>
                   {eligibleStopAllCount >= 2 && (
@@ -782,7 +782,7 @@ function SubagentRosterList({
               <section aria-labelledby="subagents-done-heading">
                 <div className="flex items-center gap-2 px-6 pb-1 pt-6">
                   <h2 id="subagents-done-heading" className="text-sm font-semibold text-ink">Done</h2>
-                  <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
+                  <Badge variant="ghost" size="compact" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
                     {doneRows.length + narrative.finished.length}
                   </Badge>
                 </div>

@@ -188,7 +188,7 @@ function PullRequestInboxToolbar({
         onClick={onRefresh}
         className="ml-1 text-muted"
       >
-        {status === "refreshing" ? <Spinner size="sm" /> : <RefreshCw size={13} aria-hidden />}
+        {status === "refreshing" ? <Spinner size={12} /> : <RefreshCw size={13} aria-hidden />}
       </Button>
     </div>
   );
@@ -326,7 +326,7 @@ function PullRequestInboxBody({
   children: ReactNode;
 }) {
   if (loadingEmpty) {
-    return <div className="flex flex-1 items-center justify-center text-muted"><Spinner size="sm" aria-label="Loading pull requests" /></div>;
+    return <div className="flex flex-1 items-center justify-center text-muted"><Spinner size={12} aria-label="Loading pull requests" /></div>;
   }
   if (errorEmpty) {
     return <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"><ErrorIcon size={22} aria-hidden className="text-destructive/70" /><p className="text-sm text-ink">{error?.message ?? "Pull request read failed"}</p><Button type="button" variant="outline" size="compact" onClick={onRefresh}>Retry</Button></div>;

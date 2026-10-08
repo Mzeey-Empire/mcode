@@ -1,8 +1,9 @@
-import { Loader2, Square } from "lucide-react";
+import { Square } from "lucide-react";
 import { useId, useState } from "react";
 import type { CanonicalSubagentStopResult } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 
 type SubagentStopControlProps = {
   readonly active: boolean;
@@ -72,7 +73,7 @@ export function SubagentStopControl({
         data-testid="subagent-stop-control"
         className="shrink-0 text-muted hover:text-ink"
       >
-        {pending ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <Square size={13} aria-hidden />}
+        {pending ? <Spinner size={12} /> : <Square size={13} aria-hidden />}
         {pending ? "Stopping…" : "Stop"}
       </Button>
       {error && (

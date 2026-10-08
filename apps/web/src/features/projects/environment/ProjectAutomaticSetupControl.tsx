@@ -157,7 +157,7 @@ function AutomaticSetupHeader({ state }: { readonly state: AutomaticSetupAttempt
       </div>
       {state === "running" ? (
         <span role="status" className="flex shrink-0 items-center gap-1.5 text-xs text-muted">
-          <Spinner size={13} aria-hidden />
+          <Spinner size={12} aria-hidden />
           Running
         </span>
       ) : null}
@@ -185,11 +185,11 @@ function AutomaticSetupRecoveryActions({ busy, onContinue, onRetry }: {
   return (
     <div className="mt-3 flex gap-2">
       <Button type="button" size="compact" disabled={busy !== null} onClick={() => { void onRetry(); }}>
-        {busy === "retry" ? <Spinner size={13} aria-hidden /> : null}
+        {busy === "retry" ? <Spinner size={12} aria-hidden /> : null}
         Retry setup
       </Button>
       <Button type="button" size="compact" variant="outline" disabled={busy !== null} onClick={() => { void onContinue(); }}>
-        {busy === "continue" ? <Spinner size={13} aria-hidden /> : null}
+        {busy === "continue" ? <Spinner size={12} aria-hidden /> : null}
         Continue without setup
       </Button>
     </div>

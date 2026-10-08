@@ -90,7 +90,7 @@ function DraftEditor({
           Local comment
         </span>
         {draft.outdated ? (
-          <Badge variant="ghost" size="sm">
+          <Badge variant="ghost" size="compact">
             Outdated
           </Badge>
         ) : null}
@@ -174,11 +174,11 @@ function PullRequestInlineThreadComponent({
               <span className="text-sm font-medium text-ink">
                 Review thread
               </span>
-              <Badge variant="ghost" size="sm">
+              <Badge variant="ghost" size="compact">
                 {thread.isResolved ? "Resolved" : "Open"}
               </Badge>
               {thread.isOutdated && (
-                <Badge variant="ghost" size="sm">
+                <Badge variant="ghost" size="compact">
                   Outdated
                 </Badge>
               )}

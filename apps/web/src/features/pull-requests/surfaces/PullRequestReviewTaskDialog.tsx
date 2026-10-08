@@ -330,7 +330,7 @@ function ReviewTaskPreparing({
   }
   return (
     <div className="flex min-h-52 items-center justify-center gap-2 px-6 text-xs text-muted">
-      <Spinner size="xs" aria-hidden />
+      <Spinner size={12} aria-hidden />
       <span>{phase === "navigating" ? "Opening Review task" : "Checking local projects"}</span>
     </div>
   );

@@ -855,7 +855,7 @@ function ProviderCatalogContent({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Spinner size={14} className="text-muted" />
+        <Spinner size={16} className="text-muted" />
         <span className="sr-only">Loading models</span>
       </div>
     );

@@ -363,7 +363,7 @@ describe("App", () => {
     render(<App />);
 
     const titleBar = screen.getByTestId("desktop-title-bar");
-    const banner = screen.getByText("Connection lost. Reconnecting to server...");
+    const banner = screen.getByText("Reconnecting to server");
     expect(
       titleBar.compareDocumentPosition(banner) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);

@@ -439,7 +439,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
                 disabled={command !== null}
                 onClick={restartAction}
               >
-                {command === "restart" ? <Spinner size={14} aria-hidden /> : <RotateCcw size={14} aria-hidden />}
+                {command === "restart" ? <Spinner size={16} aria-hidden /> : <RotateCcw size={14} aria-hidden />}
               </Button>
             }
           />
@@ -458,7 +458,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
                     disabled={command !== null}
                     onClick={stopAction}
                   >
-                    {command === "stop" ? <Spinner size={14} aria-hidden /> : <CircleStop size={14} aria-hidden />}
+                    {command === "stop" ? <Spinner size={16} aria-hidden /> : <CircleStop size={14} aria-hidden />}
                   </Button>
                 }
               />
@@ -664,7 +664,7 @@ function ActionStatusIcon({
 
 const ACTION_STATUS_NODES: Readonly<Partial<Record<NonNullable<WorkspaceEnvironmentActionRun["status"]>, ReactNode>>> = {
   running: <span role="status" aria-label="Running" className="ml-2 flex shrink-0 text-muted"><Spinner size={12} aria-hidden className="motion-reduce:animate-none" /></span>,
-  "awaiting-approval": <Badge role="status" aria-label="Approval required" variant="secondary" size="sm" className="ml-2 shrink-0">Approval</Badge>,
+  "awaiting-approval": <Badge role="status" aria-label="Approval required" variant="secondary" size="compact" className="ml-2 shrink-0">Approval</Badge>,
   completed: <span role="status" aria-label="Completed" className="ml-2 flex shrink-0"><CircleCheck className="size-3.5 text-[var(--diff-add-strong)]" aria-hidden /></span>,
   failed: <span role="status" aria-label="Failed" className="ml-2 flex shrink-0"><CircleX className="size-3.5 text-[var(--diff-remove)]" aria-hidden /></span>,
   interrupted: <span role="status" aria-label="Interrupted" className="ml-2 flex shrink-0 text-muted"><CircleStop className="size-3.5" aria-hidden /></span>,

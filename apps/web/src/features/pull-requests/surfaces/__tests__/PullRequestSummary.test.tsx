@@ -450,8 +450,8 @@ describe("PullRequestSummary", () => {
     expect(document.querySelector('svg[data-check-state="passing"]')).toHaveClass(
       "lucide-circle-check",
     );
-    expect(document.querySelector('svg[data-check-state="pending"]')).toHaveClass(
-      "lucide-loader-circle",
+    expect(document.querySelector('[data-check-state="pending"]')).toHaveClass(
+      "spinner-tail-fade",
     );
     expect(screen.getByText("Required")).toBeVisible();
     expect(

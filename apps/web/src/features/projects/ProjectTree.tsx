@@ -324,7 +324,7 @@ function ThreadDeleteDialog({
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" className="cursor-pointer" disabled={isDeleting} onClick={onClose}>Cancel</Button>
           <Button variant="destructive" className="cursor-pointer" disabled={isDeleting} onClick={onConfirm}>
-            {isDeleting && <Spinner size={14} className="text-current" />}
+            {isDeleting && <Spinner size={16} className="text-current" />}
             {isDeleting ? "Deleting..." : "Delete"}
           </Button>
         </div>
@@ -1260,7 +1260,7 @@ export function ProjectTree() {
                   isRenaming || workspaceRenameValue.trim().length === 0
                 }
               >
-                {isRenaming && <Spinner size={14} className="text-current" />}
+                {isRenaming && <Spinner size={16} className="text-current" />}
                 {isRenaming ? "Renaming..." : "Rename"}
               </Button>
             </div>
@@ -1853,6 +1853,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
       }}
       className={cn(
         "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-body-small cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "has-[[data-status-mark=running]]:opacity-55",
         isActive ? "bg-selected text-ink" : "text-muted/85 hover:bg-selected/40 hover:text-ink",
         triggerClassName,
       )}
@@ -1950,7 +1951,7 @@ function ThreadLifecycleButton({
 }
 
 function ThreadLifecycleIcon({ isPending, isCompleted }: { isPending: boolean; isCompleted: boolean }) {
-  if (isPending) return <Spinner size={11} />;
+  if (isPending) return <Spinner size={12} />;
   if (isCompleted) return <Check size={13} aria-hidden />;
   return <Circle size={13} aria-hidden />;
 }
@@ -2154,8 +2155,8 @@ const WorkspaceCiRollupChip = memo(function WorkspaceCiRollupChip({
               chromeClass,
             )}
           >
-            {rollup.aggregate === "pending" ? (
-              <Spinner size={9} className="text-current" />
+            {Icon === null ? (
+              <Spinner size={12} className="text-current" />
             ) : (
               <Icon size={9} className="shrink-0" />
             )}

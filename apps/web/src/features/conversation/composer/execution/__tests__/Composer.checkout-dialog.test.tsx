@@ -267,10 +267,6 @@ vi.mock("@/components/chat/SlashCommandPopup", () => ({
   SlashCommandPopup: () => <div />,
 }));
 
-vi.mock("@/components/chat/ProviderUnavailableBanner", () => ({
-  ProviderUnavailableBanner: () => <div />,
-}));
-
 function seedComposerState(
   mode: "direct" | "worktree" | "existing-worktree",
   isGitRepo = true,

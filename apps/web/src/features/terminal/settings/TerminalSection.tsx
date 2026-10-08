@@ -487,7 +487,7 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
                 {profile.name}
                 <span className="ml-2 text-muted">{profile.executable}</span>
               </span>
-              <Badge variant="secondary" size="sm">Detected</Badge>
+              <Badge variant="secondary" size="compact">Detected</Badge>
             </div>
           ))}
         </div>
@@ -509,7 +509,7 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
                 {profile.name}
                 <span className="ml-2 text-muted">{profile.executable}</span>
               </span>
-              <Badge variant="secondary" size="sm">Recovered</Badge>
+              <Badge variant="secondary" size="compact">Recovered</Badge>
             </div>
           ))}
           <Button

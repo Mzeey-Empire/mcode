@@ -4,6 +4,7 @@ import { RefreshCw, X } from "lucide-react";
 import { WarningIcon } from "@/components/ui/icon-map";
 import { Button } from "@/components/ui/button";
 import { formatDurationMs } from "@/lib/time";
+import { Spinner } from "@/components/ui/spinner";
 
 interface InterruptedSessionsBannerProps {
   /** Exact turns interrupted by one server restart. */
@@ -46,7 +47,7 @@ export function InterruptedSessionsBanner({
         </ul>
       </div>
       <Button variant="outline" size="compact" disabled={retrying} onClick={() => void retryAll()}>
-        <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${retrying ? "animate-spin" : ""}`} />
+        {retrying ? <Spinner size={12} className="mr-1.5" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
         {retrying ? "Retrying..." : "Retry all"}
       </Button>
       <Button

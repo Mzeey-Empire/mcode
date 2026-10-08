@@ -222,7 +222,7 @@ function CommandRow({
       {origin && (
         <Badge
           variant="outline"
-          size="sm"
+          size="compact"
           className={cn(tone === "dark" && "border-border text-muted")}
         >
           {origin}

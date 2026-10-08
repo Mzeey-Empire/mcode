@@ -1541,10 +1541,7 @@ describe("ProjectTree action-required indicator", () => {
       "thread-pending": [{ settled: false }],
     };
     render(<ProjectTree />);
-    const indicator = screen.getByLabelText("Action required");
-    expect(indicator.className).toContain("ring-primary");
-    expect(indicator.className).toContain("bg-transparent");
-    expect(indicator.className).toContain("status-pulse");
+    expect(screen.getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
   });
 
   it("renders a solid dot (no action-required label) when there is no pending permission", () => {
@@ -1569,9 +1566,8 @@ describe("ProjectTree action-required indicator", () => {
     };
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
     render(<ProjectTree />);
-    const indicator = screen.getByLabelText("Action required");
-    expect(indicator.className).toContain("ring-primary");
-    expect(indicator.className).not.toContain("bg-primary");
+    expect(screen.getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(screen.queryByRole("img", { name: "Running" })).toBeNull();
   });
 
   it("renders the running marker from the matching thread row state", () => {
@@ -1613,7 +1609,7 @@ describe("ProjectTree action-required indicator", () => {
 
     render(<ProjectTree />);
 
-    expect(await screen.findByLabelText("Setup running")).toHaveClass("text-ink");
+    expect(await screen.findByRole("img", { name: "Setup running" })).toHaveAttribute("data-status-mark", "running");
   });
 
   it("shows Awaiting response for a failed blocking setup", async () => {
@@ -1627,17 +1623,16 @@ describe("ProjectTree action-required indicator", () => {
 
     render(<ProjectTree />);
 
-    const indicator = await screen.findByLabelText("Awaiting response");
-    expect(indicator).toHaveClass("ring-primary", "status-pulse");
+    expect(await screen.findByRole("img", { name: "Awaiting response" })).toHaveAttribute("data-status-mark", "attention");
     expect(screen.queryByLabelText("Setup running")).not.toBeInTheDocument();
   });
 
   it.each([
-    ["completed", "Completed", "bg-success"],
-    ["errored", "Errored", "bg-error"],
+    ["completed", "Completed", "success"],
+    ["errored", "Failed", "error"],
   ] as const)(
     "shows the %s turn notification blob when a PR has checks",
-    (status, label, tone) => {
+    (status, label, markState) => {
       currentThread = makeThread({
         id: "thread-pending",
         status,
@@ -1663,8 +1658,7 @@ describe("ProjectTree action-required indicator", () => {
 
       const blob = screen.getByLabelText(label);
       expect(blob).toBeVisible();
-      expect(blob.className).toContain(tone);
-      expect(blob.parentElement).toHaveClass("inline-flex");
+      expect(blob).toHaveAttribute("data-status-mark", markState);
     },
   );
 
@@ -1776,8 +1770,8 @@ describe("ProjectTree action-required indicator", () => {
       "thread-pending": [{ settled: false }],
     };
     render(<ProjectTree />);
-    const indicator = screen.getByLabelText("Action required");
-    expect(indicator.className).toContain("ring-primary");
+    const indicator = screen.getByRole("img", { name: "Action required" });
+    expect(indicator).toHaveAttribute("data-status-mark", "attention");
     expect(indicator.className).not.toContain("absolute");
   });
 
@@ -1802,10 +1796,7 @@ describe("ProjectTree action-required indicator", () => {
       "thread-pending": [{ settled: false }],
     };
     render(<ProjectTree />);
-    const indicator = screen.getByLabelText("Action required");
-    expect(indicator.className).toContain("ring-primary");
-    // CI "failing" would normally paint bg-red-500; the ring must suppress it.
-    expect(indicator.className).not.toContain("bg-red-500");
+    expect(screen.getByRole("img", { name: "Action required" })).toHaveAttribute("data-status-mark", "attention");
     expect(screen.queryByTestId("thread-pr-ci-thread-pending")).toBeNull();
   });
 
@@ -1999,7 +1990,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
     );
     expect(screen.queryByLabelText("Action required")).toBeNull();
     expect(screen.queryByLabelText("Completed")).toBeNull();
-    expect(screen.queryByLabelText("Errored")).toBeNull();
+    expect(screen.queryByLabelText("Failed")).toBeNull();
     expect(screen.queryByLabelText("Interrupted")).toBeNull();
     expect(screen.queryByTitle(/PR #/)).toBeNull();
   });

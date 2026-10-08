@@ -181,11 +181,11 @@ function ReviewThreadEventBody({
     <div className="mt-2 bg-page/45 px-3 py-2.5">
       <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
         <span className="text-fade font-mono text-ink/85">{location}</span>
-        <Badge variant="ghost" size="sm" className="text-muted">
+        <Badge variant="ghost" size="compact" className="text-muted">
           {item.isResolved ? "Resolved" : "Unresolved"}
         </Badge>
         {item.isOutdated && (
-          <Badge variant="ghost" size="sm" className="text-muted">
+          <Badge variant="ghost" size="compact" className="text-muted">
             Outdated
           </Badge>
         )}
@@ -452,7 +452,7 @@ function TimelineEmptyState({
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center gap-2 px-4 py-12 text-xs text-muted">
-        <Spinner size="xs" aria-hidden />
+        <Spinner size={12} aria-hidden />
         <span role="status">Loading Timeline activity</span>
       </div>
     );

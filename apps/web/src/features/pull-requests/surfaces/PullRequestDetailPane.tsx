@@ -524,7 +524,7 @@ function PullRequestDetailLoadingContent({
             </Button>
           </div>
         ) : (
-          <Spinner size="sm" aria-label="Loading pull request detail" />
+          <Spinner size={12} aria-label="Loading pull request detail" />
         )}
       </div>
     </>
@@ -588,7 +588,7 @@ function PullRequestDetailTabPanel({
       <Suspense
         fallback={
           <div className="flex min-h-0 flex-1 items-center justify-center">
-            <Spinner size="sm" aria-label="Loading pull request Code" />
+            <Spinner size={12} aria-label="Loading pull request Code" />
           </div>
         }
       >

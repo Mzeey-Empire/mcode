@@ -126,7 +126,7 @@ export function PullRequestFilters({
                 {activeCount > 0 && (
                   <Badge
                     variant="secondary"
-                    size="sm"
+                    size="compact"
                     aria-hidden
                     className="absolute -right-1 -top-1 min-w-4 rounded-full px-1 font-mono tabular-nums"
                   >

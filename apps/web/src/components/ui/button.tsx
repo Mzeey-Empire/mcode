@@ -4,7 +4,7 @@ import { Children, isValidElement, type MouseEvent, type ReactNode } from "react
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 
-import { Spinner } from "@/components/ui/spinner"
+import { Spinner, type SpinnerSize } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
@@ -64,7 +64,7 @@ const buttonVariants = cva(
   }
 )
 
-const SPINNER_PX_BY_SIZE: Record<ButtonSize, number> = {
+const SPINNER_PX_BY_SIZE: Record<ButtonSize, SpinnerSize> = {
   compact: 16,
   default: 20,
   comfortable: 20,
@@ -104,7 +104,7 @@ function withSpinnerOver(content: ReactNode, spinner: ReactNode, key?: string): 
  * Puts the spinner over the marked leading icon and keeps the label visible; without a
  * marked icon it covers the whole content. Either way every box keeps its size.
  */
-function renderLoadingContent(children: ReactNode, spinnerPx: number): ReactNode {
+function renderLoadingContent(children: ReactNode, spinnerPx: SpinnerSize): ReactNode {
   const [first, ...rest] = Children.toArray(children)
   const spinner = <Spinner size={spinnerPx} className="text-current" />
   if (isLeadingIcon(first)) return [withSpinnerOver(first, spinner, "loading-icon"), ...rest]

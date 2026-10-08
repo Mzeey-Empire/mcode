@@ -142,7 +142,7 @@ export function ProjectSetupMenuItem({ attempt, starting, onStart }: ProjectSetu
   const disabled = attempt?.status === "running" || attempt?.status === "awaiting-approval" || attempt?.cleanupPending === true;
   return (
     <DropdownMenuItem disabled={disabled || starting} onClick={() => { void onStart(); }}>
-      {starting ? <Spinner size={13} aria-hidden /> : null}
+      {starting ? <Spinner size={12} aria-hidden /> : null}
       Run Setup
     </DropdownMenuItem>
   );
@@ -300,7 +300,7 @@ function SetupAttemptStatus({ status }: { readonly status: WorkspaceEnvironmentS
         </>
       );
     case "awaiting-approval":
-      return <Badge variant="secondary" size="sm" className="shrink-0">Approval required</Badge>;
+      return <Badge variant="secondary" size="compact" className="shrink-0">Approval required</Badge>;
     case "passed":
       return <CircleCheck className="size-3.5 shrink-0 text-[var(--diff-add-strong)]" aria-hidden />;
     case "failed":

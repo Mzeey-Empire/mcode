@@ -72,7 +72,7 @@ function SettledPermissionRequest({ icon, label, decision, optionLabel }: { icon
     <div className="flex items-center gap-2 border-l-2 border-border/30 pl-3 py-1 text-xs text-muted/70">
       {icon}
       <span className="font-medium">{label}</span>
-      <Badge variant={badgeVariantFor(decision)} size="sm" className="ml-1">
+      <Badge variant={badgeVariantFor(decision)} size="compact" className="ml-1">
         {optionLabel ?? decisionLabel(decision)}
       </Badge>
     </div>

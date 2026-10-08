@@ -9,7 +9,8 @@ import { ContextTracker } from "@/components/chat/ContextTracker";
 import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPopup";
 import { PlanPreview } from "@/components/chat/PlanPreview";
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
-import { ProviderUnavailableBanner } from "@/components/chat/ProviderUnavailableBanner";
+import { providerUnavailableMessage, type ProviderUnavailableReason } from "@/components/chat/provider-unavailable";
+import { Notice } from "@/components/ui/notice";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { type useSlashCommand } from "@/components/chat/useSlashCommand";
 import { SpellcheckContextMenu } from "@/components/chat/SpellcheckContextMenu";
@@ -69,7 +70,7 @@ interface ComposerContentSurfaceProps {
     readonly isDragOver: boolean;
     readonly fetchingBranch: boolean;
     readonly effectiveProviderId: ProviderId;
-    readonly providerReason: ComponentProps<typeof ProviderUnavailableBanner>["reason"] | null;
+    readonly providerReason: ProviderUnavailableReason | null;
     readonly goalPending: boolean;
     readonly isStaleWorktree: boolean;
     readonly fileAutocomplete: FileAutocomplete;
@@ -228,18 +229,22 @@ function ComposerNewThreadSurface({
   );
 }
 
-function ComposerProviderUnavailableBanner({
+function ComposerProviderUnavailableNotice({
   model,
 }: Pick<ComposerContentSurfaceProps, "model">) {
   if (!model.providerReason) return null;
 
   return (
-    <ProviderUnavailableBanner
-      providerId={model.effectiveProviderId}
-      reason={model.providerReason}
-      onOpenSettings={() =>
-        window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "model" } }))
-      }
+    <Notice
+      tone="warning"
+      title="Provider unavailable"
+      detail={providerUnavailableMessage(model.effectiveProviderId, model.providerReason)}
+      action={{
+        label: "Open Settings",
+        onClick: () => window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "model" } })),
+      }}
+      data-testid="provider-unavailable-notice"
+      className="mb-2"
     />
   );
 }
@@ -561,7 +566,7 @@ function ComposerSendButton({
       aria-label={SEND_BUTTON_COPY[copy]}
     >
       {visualState === "scaffold" || visualState === "stopping" ? (
-        <Spinner size={14} className="text-current" />
+        <Spinner size={16} className="text-current" />
       ) : visualState === "stop" ? (
         <div className="h-4 w-4 rounded-sm bg-current" />
       ) : (
@@ -688,7 +693,7 @@ function ComposerInputSurface({
         onSave={actions.onSaveSelectedTextComment}
         onEditorChange={actions.onSelectedTextCommentEditorChange}
       />
-      <ComposerProviderUnavailableBanner model={model} />
+      <ComposerProviderUnavailableNotice model={model} />
       <ComposerQueueEditNotice model={model} actions={actions} />
       <ComposerEditorSurface model={model} actions={actions} />
       <ComposerAttachmentSurface model={model} actions={actions} />

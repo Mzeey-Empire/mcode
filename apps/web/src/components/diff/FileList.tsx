@@ -36,6 +36,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { ReviewDiffView } from "./ReviewDiffView";
 import { ReviewToolbarSlotContext } from "./review-toolbar-slot";
+import { Spinner } from "@/components/ui/spinner";
 
 const PIERRE_WORKER_POOL_SIZE = 3;
 
@@ -314,7 +315,7 @@ function FileListToolbar({
           data-testid="review-refresh-progress"
           className="inline-flex h-6 w-6 items-center justify-center text-muted/55"
         >
-          <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
+          <Spinner size={12} />
         </span>
       ) : null}
       <FilesToggle filesVisible={filesVisible} onToggle={onToggleFiles} />
@@ -416,7 +417,7 @@ function ReviewOptionsMenu({
             data-testid="review-option-refresh"
             className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs"
           >
-            <RefreshCw size={13} className={cn("text-muted", refreshInProgress && "animate-spin")} />
+            {refreshInProgress ? <Spinner size={12} className="text-muted" /> : <RefreshCw size={13} className="text-muted" />}
             {refreshInProgress ? "Refreshing" : "Refresh"}
           </DropdownMenuItem>
         ) : null}
