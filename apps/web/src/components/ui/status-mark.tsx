@@ -3,14 +3,15 @@ import { cn } from "@/lib/utils";
 
 /**
  * What a status mark shows. `attention` is a thread waiting on the user;
- * `running` is a neutral spinner; the rest are settled outcomes.
+ * `running` is a neutral spinner; `info` is a notice with no outcome; the rest are settled outcomes.
  */
-export type StatusMarkState = "running" | "attention" | "success" | "error";
+export type StatusMarkState = "running" | "attention" | "success" | "error" | "info";
 
 const DOT_CLASS: Record<Exclude<StatusMarkState, "running">, string> = {
   attention: "border-[1.5px] border-primary",
   success: "bg-success",
   error: "bg-error",
+  info: "bg-info",
 };
 
 /** Props for {@link StatusMark}. */
