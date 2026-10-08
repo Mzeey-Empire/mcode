@@ -155,7 +155,7 @@ describe("PullRequestInlineThread", () => {
     expect(editor).toHaveClass(
       "min-h-20",
       "resize-none",
-      "rounded-lg",
+      "rounded-control",
       "text-sm",
     );
     expect(editor).not.toHaveClass("font-mono", "rounded-none", "resize-y");

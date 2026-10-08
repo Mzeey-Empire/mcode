@@ -103,7 +103,7 @@ export function PullRequestFilters({
             className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted/70"
           />
           <Input
-            size="sm"
+            size="compact"
             value={search}
             maxLength={200}
             onChange={(event) => onSearchChange(event.target.value)}

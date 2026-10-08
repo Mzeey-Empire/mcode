@@ -7,7 +7,10 @@ All UI primitives live in `apps/web/src/components/ui/`. **Always use these inst
 | Component | File | Use Instead Of |
 |-----------|------|----------------|
 | `Button` | `button.tsx` | `<button className="...">` |
-| `Input` | `input.tsx` | `<input className="...">` |
+| `Input`, `Textarea` | `input.tsx`, `textarea.tsx` | `<input className="...">`, `<textarea className="...">` |
+| `FieldError` | `field-error.tsx` | Ad hoc red text under an invalid field |
+| `Checkbox` | `checkbox.tsx` | `<input type="checkbox">`; pass `checked="mixed"` for a partly checked parent row |
+| `RadioGroup`, `RadioGroupItem` | `radio-group.tsx` | Buttons with `role="radio"` and hand-written arrow-key handling |
 | `Badge` | `badge.tsx` | `<span className="rounded px-1.5 py-0.5 text-xs ...">` |
 | `Dialog` | `dialog.tsx` | Custom modal divs |
 | `DropdownMenu` | `dropdown-menu.tsx` | Custom dropdown implementations |
@@ -59,11 +62,14 @@ the shared portal layers.
 ## Input Sizes
 
 ```tsx
-// Sizes: xs/sm/default = small (h-8, text-sm), md = medium (h-12, text-base), lg = large (h-14, text-lg)
-<Input placeholder="Default input" />
-<Input size="sm" placeholder="Compact search input" />
-<Input size="md" placeholder="Dialog input" />
+// Sizes follow Paper's control scale: compact 32, default 40, comfortable 48.
+// Use compact in dense chrome (toolbars, pane headers, inline editors) and default in forms and dialogs.
+<Input placeholder="Dialog input" />
+<Input size="compact" placeholder="Search files" />
 ```
+
+`SelectTrigger` takes the same three sizes. Inputs, textareas and select triggers share one
+state recipe in `field-surface.ts`; every form control draws focus with `FOCUS_RING_CLASS` from `focus-ring.ts`.
 
 ## Badge Variants
 

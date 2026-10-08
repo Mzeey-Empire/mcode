@@ -80,7 +80,7 @@ function OptionTileDetails({
         rows={2}
         className={cn(
           "mt-2 min-h-0 rounded-none border-0 border-b border-border/40 bg-transparent px-0 py-1.5 text-xs",
-          "shadow-none focus-visible:ring-0 focus-visible:border-primary/50",
+          "shadow-none focus-visible:outline-0 focus-visible:ring-0 focus-visible:border-primary/50",
           "resize-none",
         )}
       />

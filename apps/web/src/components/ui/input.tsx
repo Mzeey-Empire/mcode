@@ -2,17 +2,20 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
+import { FIELD_READ_ONLY_CLASS, FIELD_SURFACE_CLASS } from "./field-surface"
 
 const inputVariants = cva(
-  "flex w-full border border-control-border bg-selected transition-colors file:border-0 file:bg-transparent file:font-medium file:text-ink placeholder:text-muted focus-visible:border-focus focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+  cn(
+    "flex px-3 file:border-0 file:bg-transparent file:font-medium file:text-ink file:text-body-small",
+    FIELD_SURFACE_CLASS,
+    FIELD_READ_ONLY_CLASS,
+  ),
   {
     variants: {
       size: {
-        default: "h-8 rounded-lg px-3 py-1 text-sm file:text-sm",
-        sm: "h-8 rounded-lg px-3 py-1 text-sm file:text-sm",
-        xs: "h-8 rounded-lg px-3 py-1 text-sm file:text-sm",
-        md: "h-12 rounded-lg px-3 py-2 text-base file:text-base",
-        lg: "h-14 rounded-lg px-4 py-2 text-lg file:text-lg",
+        compact: "h-control-compact",
+        default: "h-control-default",
+        comfortable: "h-control-comfortable",
       },
     },
     defaultVariants: {
@@ -21,7 +24,7 @@ const inputVariants = cva(
   }
 )
 
-/** Text input with size variants for compact contexts. */
+/** Text input on Paper's control scale: 40 by default, 32 in dense chrome, 48 for prominent fields. */
 function Input({
   className,
   type,

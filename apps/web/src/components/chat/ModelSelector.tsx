@@ -1087,7 +1087,7 @@ function ModelSelectorPanel({
         />
         <div className="min-w-0 flex-1 p-1.5">
           <Input
-            size="xs"
+            size="compact"
             placeholder={getSearchPlaceholder(leftRailSelection)}
             value={rightPanelSearch}
             onChange={(event) => onSearchChange(event.target.value)}

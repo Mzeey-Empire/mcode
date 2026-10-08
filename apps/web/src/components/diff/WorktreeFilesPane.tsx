@@ -87,7 +87,7 @@ export function WorktreeFilesPane({
               className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted/70"
             />
             <Input
-              size="sm"
+              size="compact"
               value={search}
               maxLength={200}
               aria-label="Search files"

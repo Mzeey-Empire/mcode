@@ -1,28 +1,44 @@
 "use client";
 
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox";
-import { Check } from "lucide-react";
+import { Check, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FOCUS_RING_CLASS } from "./focus-ring";
 
-/** Shared checkbox primitive with Mcode focus and disabled states. */
+/** A checked state, or `"mixed"` for a parent row whose children are partly checked. */
+type CheckboxChecked = boolean | "mixed";
+
+/** Checkbox on Paper's 20px box, with a mixed state that reads as `aria-checked="mixed"`. */
 function Checkbox({
   className,
+  checked,
   ...props
-}: CheckboxPrimitive.Root.Props) {
+}: Omit<CheckboxPrimitive.Root.Props, "checked" | "indeterminate"> & {
+  checked?: CheckboxChecked;
+}) {
+  const mixed = checked === "mixed";
   return (
     <CheckboxPrimitive.Root
       data-slot="checkbox"
+      checked={mixed ? false : checked}
+      indeterminate={mixed}
       className={cn(
-        "peer flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-control-border bg-background text-primary-ink outline-none transition-colors focus-visible:border-focus focus-visible:ring-3 focus-visible:ring-focus/50 disabled:cursor-not-allowed disabled:opacity-50 data-[checked]:border-primary data-[checked]:bg-primary",
+        "peer flex size-5 shrink-0 items-center justify-center rounded-badge border border-control-border bg-field text-primary-ink transition-colors duration-(--duration-fast) ease-(--ease-standard) hover:not-aria-invalid:border-muted hover:bg-hover aria-invalid:border-error data-[checked]:not-aria-invalid:border-primary data-[checked]:bg-primary data-[checked]:hover:not-aria-invalid:border-primary-hover data-[checked]:hover:bg-primary-hover data-[indeterminate]:not-aria-invalid:border-primary data-[indeterminate]:bg-primary data-[indeterminate]:hover:not-aria-invalid:border-primary-hover data-[indeterminate]:hover:bg-primary-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        FOCUS_RING_CLASS,
         className,
       )}
       {...props}
     >
       <CheckboxPrimitive.Indicator data-slot="checkbox-indicator">
-        <Check className="size-3" aria-hidden />
+        {mixed ? (
+          <Minus className="size-4" strokeWidth={2} aria-hidden />
+        ) : (
+          <Check className="size-4" strokeWidth={2} aria-hidden />
+        )}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );
 }
 
 export { Checkbox };
+export type { CheckboxChecked };

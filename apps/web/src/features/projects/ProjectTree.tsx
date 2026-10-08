@@ -352,7 +352,7 @@ function ThreadDeleteWorktreeOption({
         <div className="text-sm font-medium">Delete worktree</div>
         <div className="text-fade text-xs text-muted">{dialog.worktreePath}</div>
       </div>
-      <Switch checked={deleteWorktree} onCheckedChange={(checked) => { if (!isDeleting) onChange(checked); }} disabled={isDeleting} className="data-[checked]:bg-destructive" aria-label="Delete worktree" />
+      <Switch checked={deleteWorktree} onCheckedChange={(checked) => { if (!isDeleting) onChange(checked); }} disabled={isDeleting} className="data-[checked]:not-aria-invalid:border-destructive data-[checked]:bg-destructive data-[checked]:hover:not-aria-invalid:border-button-destructive-hover data-[checked]:hover:bg-button-destructive-hover" aria-label="Delete worktree" />
     </div>
   );
 }
@@ -1971,7 +1971,7 @@ function ThreadRowContent({
       {isEditing ? (
         <Input
           type="text"
-          size="xs"
+          size="compact"
           value={inlineEdit?.title ?? ""}
           onChange={(event) => onInlineEditChange(event.target.value)}
           onKeyDown={(event) => handleInlineEditKeyDown(event, onInlineEditCommit, onInlineEditCancel)}

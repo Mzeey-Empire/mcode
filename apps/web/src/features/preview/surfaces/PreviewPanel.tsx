@@ -935,14 +935,14 @@ function InspectorValueInput({
   return (
     <span className="relative flex min-w-0 items-center">
       <Input
-        size="xs"
+        size="compact"
         aria-label={label}
         value={displayVisualControlValue(controlKey, value)}
         onChange={(event) => onChange(controlKey, event.target.value)}
         placeholder={affordance === "0-1" ? "0-1" : undefined}
         inputMode={affordance === "0-1" || affordance === "px" ? "decimal" : undefined}
         className={cn(
-          "h-7 rounded-md border-control-border bg-selected text-xs text-ink shadow-none placeholder:text-muted hover:border-border focus-visible:border-focus focus-visible:ring-1 focus-visible:ring-focus",
+          "h-7 rounded-md border-control-border bg-selected text-xs text-ink shadow-none placeholder:text-muted hover:border-border focus-visible:border-focus focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-focus",
           affordance === "px" && "pr-8",
           className,
         )}
@@ -1122,14 +1122,14 @@ function ColorInspectorControl({
   const formatFields =
     colorFormat === "hex" ? (
       <Input
-        size="xs"
+        size="compact"
         aria-label={`${label} HEX value`}
         value={colorToHex(pickerColor)}
         onChange={(event) => {
           const next = parseColorValue(event.target.value);
           if (next) commitColor({ ...next, a: pickerColor.a });
         }}
-        className="h-7 rounded-md border-control-border bg-selected font-mono text-xs text-ink shadow-none focus-visible:border-focus focus-visible:ring-1 focus-visible:ring-focus"
+        className="h-7 rounded-md border-control-border bg-selected font-mono text-xs text-ink shadow-none focus-visible:border-focus focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-focus"
       />
     ) : colorFormat === "hsl" ? (
       <div className="grid grid-cols-3 gap-1.5">
@@ -1143,12 +1143,12 @@ function ColorInspectorControl({
               {fieldLabel}
             </span>
             <Input
-              size="xs"
+              size="compact"
               aria-label={`${label} ${fieldLabel}`}
               value={formatColorNumber(channelValue)}
               inputMode={inputMode}
               onChange={updateHslChannel(channel)}
-              className="h-7 rounded-md border-control-border bg-selected text-center font-mono text-xs text-ink shadow-none focus-visible:border-focus focus-visible:ring-1 focus-visible:ring-focus"
+              className="h-7 rounded-md border-control-border bg-selected text-center font-mono text-xs text-ink shadow-none focus-visible:border-focus focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-focus"
             />
           </label>
         ))}
@@ -1165,12 +1165,12 @@ function ColorInspectorControl({
               {fieldLabel}
             </span>
             <Input
-              size="xs"
+              size="compact"
               aria-label={`${label} ${fieldLabel}`}
               value={formatColorNumber(channelValue)}
               inputMode={inputMode}
               onChange={updateRgbChannel(channel)}
-              className="h-7 rounded-md border-control-border bg-selected text-center font-mono text-xs text-ink shadow-none focus-visible:border-focus focus-visible:ring-1 focus-visible:ring-focus"
+              className="h-7 rounded-md border-control-border bg-selected text-center font-mono text-xs text-ink shadow-none focus-visible:border-focus focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-focus"
             />
           </label>
         ))}
@@ -1298,11 +1298,11 @@ function ColorInspectorControl({
                 <div className="min-w-0 flex-1">{formatFields}</div>
               </div>
               <Input
-                size="xs"
+                size="compact"
                 aria-label={`Color picker for ${label}`}
                 value={formatColorValue(pickerColor, colorFormat)}
                 onChange={(event) => onChange(controlKey, event.target.value)}
-                className="h-7 rounded-md border-control-border bg-selected font-mono text-xs text-ink shadow-none focus-visible:border-focus focus-visible:ring-1 focus-visible:ring-focus"
+                className="h-7 rounded-md border-control-border bg-selected font-mono text-xs text-ink shadow-none focus-visible:border-focus focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-focus"
               />
               <div className="grid grid-cols-3 overflow-hidden rounded-md border border-border bg-selected">
                 {(["rgb", "hsl", "hex"] as const).map((format) => (
@@ -1332,7 +1332,7 @@ function ColorInspectorControl({
           </PopoverContent>
         </Popover>
         <Input
-          size="xs"
+          size="compact"
           aria-label={label}
           value={displayValue}
           onFocus={(event) => {
@@ -1343,7 +1343,7 @@ function ColorInspectorControl({
             }, 0);
           }}
           onChange={(event) => onChange(controlKey, event.target.value)}
-          className="h-7 rounded-md border-control-border bg-selected pl-8 font-mono text-xs text-ink shadow-none placeholder:text-muted hover:border-border focus-visible:border-focus focus-visible:ring-1 focus-visible:ring-focus"
+          className="h-7 rounded-md border-control-border bg-selected pl-8 font-mono text-xs text-ink shadow-none placeholder:text-muted hover:border-border focus-visible:border-focus focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-focus"
         />
       </div>
     </InspectorRow>
@@ -1411,12 +1411,12 @@ function QuadInputStrip({
         >
           <span className="sr-only">{entry.ariaLabel}</span>
           <Input
-            size="xs"
+            size="compact"
             aria-label={entry.ariaLabel}
             value={displayVisualControlValue(entry.key, values[entry.key])}
             onChange={(event) => onChange(entry.key, event.target.value)}
             inputMode="decimal"
-            className="h-7 rounded-none border-0 bg-transparent px-0 text-center font-mono text-xs tabular-nums text-ink shadow-none placeholder:text-muted hover:bg-hover focus-visible:ring-1 focus-visible:ring-focus"
+            className="h-7 rounded-none border-0 bg-transparent px-0 text-center font-mono text-xs tabular-nums text-ink shadow-none placeholder:text-muted hover:bg-hover focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-focus"
           />
         </label>
       ))}
@@ -4088,7 +4088,7 @@ export function PreviewPanel({
                 onKeyDown={onBubbleNoteKeyDown}
                 onFocus={() => setBubbleInputFocused(true)}
                 onBlur={() => setBubbleInputFocused(false)}
-                className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm text-ink shadow-none outline-none placeholder:text-muted focus-visible:ring-0"
+                className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm text-ink shadow-none outline-none placeholder:text-muted focus-visible:outline-0 focus-visible:ring-0"
                 maxLength={4000}
                 placeholder="Comment · / for skills · @ to mention"
                 aria-label="Annotation note"

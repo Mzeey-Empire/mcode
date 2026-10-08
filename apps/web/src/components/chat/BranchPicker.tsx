@@ -258,7 +258,7 @@ function BranchPickerDropdown({
       <PopoverContent align="end" side="top" sideOffset={4} className="w-[280px] p-0">
         {/* Search */}
         <div className="p-1.5 pb-0">
-          <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." size="sm" className="text-ink" />
+          <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." size="compact" className="text-ink" />
         </div>
 
         {/* Tabs */}

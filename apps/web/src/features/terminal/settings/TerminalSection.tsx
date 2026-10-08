@@ -33,9 +33,6 @@ const profileName = (profileId: TerminalProfileReference): string => {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
 
-const terminalFieldClassName =
-  "bg-transparent shadow-none dark:bg-selected/30";
-
 interface ProfileDialogProps {
   open: boolean;
   profile: TerminalCustomProfile | null;
@@ -87,7 +84,6 @@ function ProfileDialog({ open, profile, pending, onOpenChange, onSubmit }: Profi
               aria-label="Profile name"
               value={name}
               maxLength={64}
-              className={terminalFieldClassName}
               onChange={(event) => setName(event.target.value)}
             />
           </label>
@@ -97,7 +93,6 @@ function ProfileDialog({ open, profile, pending, onOpenChange, onSubmit }: Profi
               aria-label="Profile executable"
               value={executable}
               maxLength={1024}
-              className={terminalFieldClassName}
               onChange={(event) => setExecutable(event.target.value)}
             />
           </label>
@@ -567,7 +562,7 @@ function TerminalPresentationSection({ model }: { readonly model: TerminalSectio
           onBlur={model.commitFontFamily}
           onKeyDown={(event) => handleFontFamilyKey(event, () => model.setFontFamilyDraft(presentation.fontFamily))}
           maxLength={128}
-          className={`${terminalFieldClassName} w-full sm:w-64`}
+          className="w-full sm:w-64"
         />
       </SettingRow>
       <SettingRow label="Font size" configKey="terminal.presentation.fontSize">
