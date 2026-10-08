@@ -25,14 +25,12 @@ import {
   Trash2,
   GitBranch,
   GitBranchMinus,
-  AlertTriangle,
   ChevronRight,
   FolderPlus,
   Folder,
   FolderCheck,
   FolderOpen,
   Activity,
-  MoreHorizontal,
   Pencil,
   Plus,
   SquarePen,
@@ -40,6 +38,7 @@ import {
   Check,
   RefreshCw,
 } from "lucide-react";
+import { MoreIcon, WarningIcon } from "@/components/ui/icon-map";
 import {
   Tooltip,
   TooltipTrigger,
@@ -89,7 +88,7 @@ import {
   prefetchOnPointerDown,
 } from "@/features/conversation";
 import { isPrable } from "@/lib/is-prable";
-import { getCiVisual, CI_ICON_STROKE } from "@/lib/ci-status";
+import { getCiVisual } from "@/lib/ci-status";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { FILE_EXPLORER_ID } from "@/lib/resolveDefaultOpenInApp";
 import { getTransport } from "@/transport";
@@ -1138,7 +1137,6 @@ export function ProjectTree() {
                 with the rest of the picker (no unicode glyphs). Larger/quieter than the CTA. */}
             <FolderPlus
               size={28}
-              strokeWidth={1.25}
               aria-hidden
               className="text-muted-foreground/25"
             />
@@ -1965,8 +1963,8 @@ function ThreadLifecycleButton({
 
 function ThreadLifecycleIcon({ isPending, isCompleted }: { isPending: boolean; isCompleted: boolean }) {
   if (isPending) return <Spinner size={11} />;
-  if (isCompleted) return <Check size={13} strokeWidth={2.5} aria-hidden />;
-  return <Circle size={13} strokeWidth={1.8} aria-hidden />;
+  if (isCompleted) return <Check size={13} aria-hidden />;
+  return <Circle size={13} aria-hidden />;
 }
 
 function ThreadRowContent({
@@ -2036,7 +2034,7 @@ function StaleWorktreeWarning({ isStale }: { isStale: boolean }) {
   if (!isStale) return null;
   return (
     <Tooltip>
-      <TooltipTrigger render={<AlertTriangle size={11} className="inline mr-1 align-text-bottom text-[var(--diff-remove-strong)]/80" />} />
+      <TooltipTrigger render={<WarningIcon size={11} className="inline mr-1 align-text-bottom text-[var(--diff-remove-strong)]/80" />} />
       <TooltipContent side="right" className="text-xs">Worktree directory no longer exists</TooltipContent>
     </Tooltip>
   );
@@ -2171,7 +2169,7 @@ const WorkspaceCiRollupChip = memo(function WorkspaceCiRollupChip({
             {rollup.aggregate === "pending" ? (
               <Spinner size={9} className="text-current" />
             ) : (
-              <Icon size={9} strokeWidth={CI_ICON_STROKE} className="shrink-0" />
+              <Icon size={9} className="shrink-0" />
             )}
             <span>{rollup.count}</span>
           </span>
@@ -2608,7 +2606,7 @@ function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: (
 
 function ProjectGitStatus({ isGitRepository }: { isGitRepository: boolean }) {
   if (isGitRepository) return null;
-  return <Tooltip><TooltipTrigger render={<GitBranchMinus size={12} strokeWidth={2} className="shrink-0 text-muted-foreground/45" aria-label="Not a git repository" />} /><TooltipContent side="right" className="text-xs">Not a git repository</TooltipContent></Tooltip>;
+  return <Tooltip><TooltipTrigger render={<GitBranchMinus size={12} className="shrink-0 text-muted-foreground/45" aria-label="Not a git repository" />} /><TooltipContent side="right" className="text-xs">Not a git repository</TooltipContent></Tooltip>;
 }
 
 function ProjectRunningStatus({ hasRunning }: { hasRunning: boolean }) {
@@ -2636,7 +2634,7 @@ function ProjectRowActions({
         <ChevronRight size={14} className={cn("transition-transform duration-150 motion-reduce:transition-none", isExpanded && "rotate-90")} />
       </Button>
       <DropdownMenu>
-        <DropdownMenuTrigger aria-label={`Project options for ${workspace.name}`} onClick={(event) => event.stopPropagation()} className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-colors hover:bg-background/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/70 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100"><MoreHorizontal size={13} /></DropdownMenuTrigger>
+        <DropdownMenuTrigger aria-label={`Project options for ${workspace.name}`} onClick={(event) => event.stopPropagation()} className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-colors hover:bg-background/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/70 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100"><MoreIcon size={13} /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={4} className="min-w-40">
           <DropdownMenuItem onClick={onOpenInExplorer} className="flex cursor-pointer items-center gap-2"><FolderOpen size={13} />Open in Explorer</DropdownMenuItem>
           <DropdownMenuItem onClick={onRename} className="flex cursor-pointer items-center gap-2"><Pencil size={13} />Rename project</DropdownMenuItem>

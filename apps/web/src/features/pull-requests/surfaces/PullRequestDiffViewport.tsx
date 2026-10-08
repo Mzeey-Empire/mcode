@@ -4,7 +4,8 @@ import type {
   PullRequestIdentity,
   PullRequestReviewThread,
 } from "@mcode/contracts";
-import { AlertCircle, MessageSquare } from "lucide-react";
+import { MessageSquare } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import type { PullRequestTransport } from "@/transport/pull-requests";
@@ -594,7 +595,7 @@ export function PullRequestDiffViewport({
           role="status"
           className="flex items-center gap-2 bg-page/70 px-3 py-1.5 text-xs text-muted-foreground"
         >
-          <AlertCircle size={12} aria-hidden className="text-primary/75" />
+          <ErrorIcon size={12} aria-hidden className="text-primary/75" />
           Syntax highlighting paused for memory. Plain-text diff remains
           available.
         </p>

@@ -19,7 +19,7 @@ function Checkbox({
       {...props}
     >
       <CheckboxPrimitive.Indicator data-slot="checkbox-indicator">
-        <Check className="size-3" strokeWidth={2.5} aria-hidden />
+        <Check className="size-3" aria-hidden />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

@@ -269,7 +269,7 @@ function ComposerQueueEditNotice({
               aria-label="Discard edits and restore the original queued message"
               className="rounded-sm p-1 text-primary/55 transition-colors hover:bg-primary/10 hover:text-primary"
             >
-              <X size={11} strokeWidth={1.75} />
+              <X size={11} />
             </button>
           }
         />

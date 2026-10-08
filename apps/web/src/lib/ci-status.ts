@@ -1,11 +1,5 @@
-import { CircleCheck, CircleX, Loader2, MinusCircle, type LucideIcon } from "lucide-react";
+import { CircleCheck, CircleX, Loader2, CircleMinus, type LucideIcon } from "lucide-react";
 import type { ChecksStatus, CheckRun } from "@mcode/contracts";
-
-/**
- * Shared stroke-width for CI icons across every surface (chip, button, popover).
- * Kept in one place so glyph weight doesn't drift between components.
- */
-export const CI_ICON_STROKE = 2.25;
 
 /** Visual properties for a CI aggregate state. */
 export interface CiVisual {
@@ -68,9 +62,9 @@ export function getCiVisual(aggregate: ChecksStatus["aggregate"]): CiVisual {
       };
     case "no_checks":
       return {
-        // MinusCircle (not CircleCheck) so a muted tick never reads as "passed" when
+        // CircleMinus (not CircleCheck) so a muted tick never reads as "passed" when
         // no checks are configured — the shape itself signals absence rather than success.
-        icon: MinusCircle,
+        icon: CircleMinus,
         color: "text-muted-foreground",
         borderColor: "border-border",
         surface: "bg-muted/30",

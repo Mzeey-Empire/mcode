@@ -5,7 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { Check, FilePlus2, Goal, ListChecks, Network, Plus } from "lucide-react";
+import { Check, FilePlusCorner, Goal, ListChecks, Network, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ComposerOverlaySurface } from "./ComposerOverlaySurface";
@@ -197,7 +197,7 @@ export function ComposerAddMenu({
               onClick={handleAttachFiles}
               className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent/70"
             >
-              <FilePlus2 size={15} className="shrink-0 text-muted-foreground" aria-hidden />
+              <FilePlusCorner size={15} className="shrink-0 text-muted-foreground" aria-hidden />
               <ComposerAddMenuLabel
                 title="Files"
                 description="Images, PDFs, documents, and code"

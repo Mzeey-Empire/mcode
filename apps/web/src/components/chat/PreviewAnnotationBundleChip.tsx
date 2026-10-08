@@ -3,7 +3,7 @@ import {
   type ComposerAnnotationPayload,
   type PreviewAnnotationBundle,
 } from "@mcode/contracts";
-import { FileCode2, ImageIcon, MessageCircle, X } from "lucide-react";
+import { FileCodeCorner, ImageIcon, MessageCircle, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -159,7 +159,7 @@ export function PreviewAnnotationBundleChip({
                       {item.displayNumber}
                     </span>
                     {isComment ? (
-                      <FileCode2 size={14} className="shrink-0 text-muted-foreground" aria-hidden />
+                      <FileCodeCorner size={14} className="shrink-0 text-muted-foreground" aria-hidden />
                     ) : (
                       <ImageIcon size={14} className="shrink-0 text-muted-foreground" aria-hidden />
                     )}

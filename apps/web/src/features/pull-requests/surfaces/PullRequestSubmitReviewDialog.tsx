@@ -4,7 +4,8 @@ import {
   type PullRequestReviewDraftSubmission,
   type PullRequestReviewSubmissionEvent,
 } from "@mcode/contracts";
-import { AlertCircle, GitBranch, MessageSquareText } from "lucide-react";
+import { GitBranch, MessageSquareText } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -484,7 +485,7 @@ function ReviewSubmissionNotices({ review }: { review: ReviewSubmission }) {
       {review.summary?.outdated ? <OutdatedReviewNotice review={review} /> : null}
       {review.unavailableReason && !review.summary?.outdated ? (
         <p role="status" className="flex items-start gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted-foreground">
-          <AlertCircle size={13} aria-hidden className="mt-0.5 shrink-0 text-primary/80" />
+          <ErrorIcon size={13} aria-hidden className="mt-0.5 shrink-0 text-primary/80" />
           {review.unavailableReason}
         </p>
       ) : null}
@@ -504,7 +505,7 @@ function ReviewSubmissionNotices({ review }: { review: ReviewSubmission }) {
 function OutdatedReviewNotice({ review }: { review: ReviewSubmission }) {
   return (
     <div className="flex items-center gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted-foreground">
-      <AlertCircle size={13} aria-hidden className="shrink-0 text-primary/80" />
+      <ErrorIcon size={13} aria-hidden className="shrink-0 text-primary/80" />
       <span className="min-w-0 flex-1">The overall review targets an older snapshot.</span>
       <Button type="button" variant="ghost" size="xs" disabled={review.mutationBlocked} onClick={review.startFresh}>
         Start fresh

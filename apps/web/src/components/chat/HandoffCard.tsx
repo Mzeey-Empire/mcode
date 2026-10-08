@@ -1,5 +1,5 @@
 import { memo, useState, useMemo } from "react";
-import { ChevronRight, GitFork, FileCode, ListChecks, GitCommit } from "lucide-react";
+import { ChevronRight, GitFork, FileCode, ListChecks, GitCommitHorizontal } from "lucide-react";
 import { parseHandoffJson } from "./handoff-utils";
 
 /** Props for HandoffCard. */
@@ -57,7 +57,7 @@ export const HandoffCard = memo(function HandoffCard({ content }: HandoffCardPro
               </span>
               {metadata.sourceHead && (
                 <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-muted-foreground">
-                  <GitCommit size={10} className="shrink-0" />
+                  <GitCommitHorizontal size={10} className="shrink-0" />
                   <span className="font-mono font-medium text-foreground/80">{metadata.sourceHead.slice(0, 7)}</span>
                 </span>
               )}

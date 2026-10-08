@@ -9,10 +9,10 @@ import {
   CircleDot,
   GitFork,
   GitMerge,
-  MoreHorizontal,
   RefreshCw,
-  XCircle,
+  CircleX,
 } from "lucide-react";
+import { MoreIcon } from "@/components/ui/icon-map";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -275,7 +275,7 @@ function LifecycleCloseActions({
         className="text-xs text-destructive"
         onClick={onClose}
       >
-        <XCircle size={13} aria-hidden />
+        <CircleX size={13} aria-hidden />
         Close pull request
       </DropdownMenuItem>
       {readinessReason || closeReason ? <MenuReason reason={readinessReason ?? closeReason ?? ""} /> : null}
@@ -371,7 +371,7 @@ export function PullRequestLifecycleActions({
               className="text-muted-foreground"
               aria-label="Pull request actions"
             >
-              <MoreHorizontal size={14} aria-hidden />
+              <MoreIcon size={14} aria-hidden />
             </Button>
           }
         />

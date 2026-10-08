@@ -1,13 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { FileCode2 } from "lucide-react";
+import { FileCodeCorner } from "lucide-react";
 import { FileTypeIcon } from "../file-type-icon";
 
 vi.mock("@/lib/vscode-icons", () => ({
   resolveIcon: vi.fn(async (fileName: string) =>
     fileName.endsWith(".ts")
       ? { type: "vscode", url: "blob:typescript-icon" }
-      : { type: "lucide", icon: FileCode2 },
+      : { type: "lucide", icon: FileCodeCorner },
   ),
 }));
 

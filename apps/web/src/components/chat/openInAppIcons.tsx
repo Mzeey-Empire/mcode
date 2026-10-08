@@ -1,5 +1,6 @@
 import type React from "react";
-import { FolderOpen, Github, Terminal, TerminalSquare, SquareChevronRight } from "lucide-react";
+import { FolderOpen, Github, Terminal, SquareChevronRight } from "lucide-react";
+import { TerminalIcon } from "@/components/ui/icon-map";
 import { VsCodeIcon, VisualStudioIcon, ZedIcon } from "./EditorIcons";
 import { CursorProviderIcon } from "./ProviderIcons";
 
@@ -22,7 +23,7 @@ export function openInAppIcon(iconKey: string, size: number): React.ReactNode {
     case "githubDesktop":
       return <Github size={size} />;
     case "windows-terminal":
-      return <TerminalSquare size={size} />;
+      return <TerminalIcon size={size} />;
     case "git-bash":
       return <Terminal size={size} />;
     case "wsl":

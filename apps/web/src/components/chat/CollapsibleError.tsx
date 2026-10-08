@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { AlertCircle, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -27,7 +28,7 @@ export function CollapsibleError({ error, onRetry, onDismiss }: CollapsibleError
               type="button"
               className="flex w-full items-center gap-2 text-left text-sm font-medium text-destructive"
             >
-              <AlertCircle className="h-4 w-4 shrink-0" />
+              <ErrorIcon className="h-4 w-4 shrink-0" />
               <span className="flex-1">Failed to create thread</span>
               <ChevronRight
                 className="h-4 w-4 shrink-0 text-destructive/60 transition-transform duration-200"

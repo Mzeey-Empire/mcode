@@ -231,7 +231,7 @@ function DiffCellDraftAction({
         onCreateDraft(row, cell);
       }}
     >
-      <Plus className="size-4" strokeWidth={2.5} aria-hidden />
+      <Plus className="size-4" aria-hidden />
     </Button>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowUpCircle } from "lucide-react";
+import { CircleArrowUp } from "lucide-react";
 import { useUpdateStore } from "@/stores/updateStore";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -111,7 +111,7 @@ export function UpdateIndicator() {
           {busy ? (
             <Spinner size={12} className="text-current" />
           ) : (
-            <ArrowUpCircle size={12} aria-hidden="true" />
+            <CircleArrowUp size={12} aria-hidden="true" />
           )}
           <span className="truncate">{busy ? "Restarting…" : "Restart to update"}</span>
         </span>

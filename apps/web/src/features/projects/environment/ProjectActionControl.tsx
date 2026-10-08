@@ -9,7 +9,8 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { CircleCheck, CircleSlash, CircleStop, CircleX, MoreHorizontal, Pencil, Play, RotateCcw } from "lucide-react";
+import { CircleCheck, CircleSlash, CircleStop, CircleX, Pencil, Play, RotateCcw } from "lucide-react";
+import { MoreIcon } from "@/components/ui/icon-map";
 import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun, WorkspaceEnvironmentCommandApproval } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -168,7 +169,7 @@ function ProjectActionMenuDropdown({
             aria-label="Project Actions"
             className="text-muted-foreground hover:bg-muted/40 hover:text-foreground"
           >
-            <MoreHorizontal size={14} aria-hidden />
+            <MoreIcon size={14} aria-hidden />
           </Button>
         }
       />

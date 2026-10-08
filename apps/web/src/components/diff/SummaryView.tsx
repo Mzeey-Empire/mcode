@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { RefreshCw, AlertCircle, Copy, Check, X } from "lucide-react";
+import { RefreshCw, Copy, Check, X } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MarkdownContent } from "@/components/chat/MarkdownContent";
@@ -280,7 +281,7 @@ function SummaryError({ error }: { readonly error: string | null }) {
   if (!error) return null;
   return (
     <div className="flex items-center gap-1.5 text-xs text-destructive" role="alert">
-      <AlertCircle size={12} aria-hidden="true" />
+      <ErrorIcon size={12} aria-hidden="true" />
       <span>{error}</span>
     </div>
   );

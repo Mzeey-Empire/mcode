@@ -110,7 +110,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
         )}
         aria-hidden
       >
-        <X size={12} strokeWidth={2.5} />
+        <X size={12} />
       </span>
     </Button>
   );

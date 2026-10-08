@@ -5,13 +5,13 @@ import type {
 } from "@mcode/contracts";
 import { type Virtualizer, useVirtualizer } from "@tanstack/react-virtual";
 import {
-  AlertCircle,
-  CheckCircle2,
+  CircleCheck,
   CircleDot,
   ExternalLink,
   GitCommitHorizontal,
   MessageCircle,
 } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { memo, useMemo, useRef, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -136,7 +136,7 @@ function EventGlyph({ kind }: { kind: PullRequestTimelineItem["kind"] }) {
     return <MessageCircle aria-hidden className={className} />;
   }
   if (kind === "checks" || kind === "merged") {
-    return <CheckCircle2 aria-hidden className={className} />;
+    return <CircleCheck aria-hidden className={className} />;
   }
   return <CircleDot aria-hidden className={className} />;
 }
@@ -409,7 +409,7 @@ function TimelineStaleNotice({ stale }: { stale: boolean }) {
       role="status"
       className="flex items-center gap-2 bg-primary/8 px-4 py-2 text-xs text-muted-foreground"
     >
-      <AlertCircle size={13} aria-hidden className="shrink-0 text-primary/80" />
+      <ErrorIcon size={13} aria-hidden className="shrink-0 text-primary/80" />
       Stale data. Showing the last successful Timeline.
     </p>
   );
@@ -460,7 +460,7 @@ function TimelineEmptyState({
   if (initialFailed) {
     return (
       <div className="px-4 py-12 text-center">
-        <AlertCircle aria-hidden className="mx-auto size-4 text-destructive/70" />
+        <ErrorIcon aria-hidden className="mx-auto size-4 text-destructive/70" />
         <p className="mt-2 text-xs text-muted-foreground">
           Timeline activity is unavailable.
         </p>
@@ -588,7 +588,7 @@ function TimelineBoundedDataNotice({
       data-bounded-reason={boundedData.reason}
       className="mx-4 mb-2 flex items-start gap-2 bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
     >
-      <AlertCircle
+      <ErrorIcon
         size={13}
         aria-hidden
         className="mt-0.5 shrink-0 text-primary/80"

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
-import { X, AlertCircle, Info } from "lucide-react";
+import { X, Info } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { useToastStore, type Toast as ToastData } from "@/stores/toastStore";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -7,7 +8,7 @@ import { cn } from "@/lib/utils";
 /** Icon, text accent, and chip tint per toast level. */
 const LEVEL_CONFIG = {
   error: {
-    icon: AlertCircle,
+    icon: ErrorIcon,
     accent: "text-destructive",
     chip: "bg-destructive/10",
   },
@@ -49,7 +50,7 @@ function ToastItem({ toast }: { toast: ToastData }) {
           config.accent,
         )}
       >
-        <Icon size={15} strokeWidth={2.25} />
+        <Icon size={15} />
       </div>
 
       {/* Content */}

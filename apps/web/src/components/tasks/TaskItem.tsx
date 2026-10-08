@@ -27,7 +27,7 @@ function taskRowClass(status: TaskItemType["status"]): string {
 
 function TaskStatusMark({ status }: { status: TaskItemType["status"] }) {
   if (status === "completed") {
-    return <Check size={11} strokeWidth={2.25} className="text-[var(--diff-add-strong)]" aria-hidden />;
+    return <Check size={11} className="text-[var(--diff-add-strong)]" aria-hidden />;
   }
   if (status === "in_progress") {
     return (
@@ -40,7 +40,7 @@ function TaskStatusMark({ status }: { status: TaskItemType["status"] }) {
   if (status === "pending") {
     return <span className="h-[10px] w-[10px] rounded-full border border-muted-foreground/30" aria-hidden />;
   }
-  return <X size={11} strokeWidth={2.25} className="text-muted-foreground/40" aria-hidden />;
+  return <X size={11} className="text-muted-foreground/40" aria-hidden />;
 }
 
 /**

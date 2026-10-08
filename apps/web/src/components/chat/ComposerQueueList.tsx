@@ -135,7 +135,7 @@ export function ComposerQueueList({
               aria-label="Send next queued message"
               className="flex items-center gap-1 rounded-sm bg-primary/10 px-1.5 py-0.5 font-mono text-xs uppercase tracking-[0.16em] text-primary transition-colors hover:bg-primary/20"
             >
-              <Play size={9} strokeWidth={1.75} />
+              <Play size={9} />
               Continue
             </button>
           )}
@@ -145,7 +145,7 @@ export function ComposerQueueList({
             aria-label="Clear all queued messages"
             className="flex items-center gap-1 rounded-sm px-1 py-0.5 font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground/50 transition-colors hover:bg-destructive/8 hover:text-destructive"
           >
-            <Trash2 size={9} strokeWidth={1.75} />
+            <Trash2 size={9} />
             Clear all
           </button>
         </div>
@@ -314,7 +314,7 @@ function QueueAttachmentCount({ attachments }: Pick<QueuedMessage, "attachments"
       className="flex shrink-0 items-center gap-0.5 font-mono text-xs tabular-nums text-muted-foreground/55"
       aria-label={`${attachments.length} ${attachmentLabel}`}
     >
-      <Paperclip size={9} strokeWidth={1.75} />
+      <Paperclip size={9} />
       {attachments.length}
     </span>
   );
@@ -332,10 +332,10 @@ function QueueRowActions({
     <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
       {canSendNow && onSendNow ? <QueueSendNowAction index={index} onSendNow={onSendNow} /> : null}
       <RowAction label={`Edit queued message ${index + 1}`} hint="Edit in composer" tone="muted" onClick={onEdit}>
-        <Pencil size={11} strokeWidth={1.75} />
+        <Pencil size={11} />
       </RowAction>
       <RowAction label={`Remove queued message ${index + 1}`} hint="Remove" tone="destructive" onClick={onRemove}>
-        <X size={11} strokeWidth={1.75} />
+        <X size={11} />
       </RowAction>
     </div>
   );
@@ -347,7 +347,7 @@ function QueueSendNowAction({ index, onSendNow }: Pick<QueueRowProps, "index" | 
 
   return (
     <RowAction label={`Send queued message ${index + 1} now`} hint="Send now (queued next)" tone="primary" onClick={onSendNow}>
-      <Zap size={11} strokeWidth={1.75} />
+      <Zap size={11} />
     </RowAction>
   );
 }
@@ -361,7 +361,7 @@ function DragGrip({ listeners }: { listeners: DraggableSyntheticListeners }) {
       className="cursor-grab text-muted-foreground/25 transition-colors hover:text-muted-foreground/70 focus:text-muted-foreground/70 focus:outline-none active:cursor-grabbing"
       {...listeners}
     >
-      <GripVertical size={11} strokeWidth={1.5} />
+      <GripVertical size={11} />
     </button>
   );
 }

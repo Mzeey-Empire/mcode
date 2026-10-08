@@ -14,8 +14,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  AlignJustify,
-  AlertCircle,
+  TextAlignJustify,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -23,6 +22,7 @@ import {
   Files,
   GitBranch,
 } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useElementWidth } from "@/hooks/useElementWidth";
@@ -320,7 +320,7 @@ function PullRequestCodeToolbar({
           {view.viewMode === "unified" ? (
             <Columns2 size={13} aria-hidden />
           ) : (
-            <AlignJustify size={13} aria-hidden />
+            <TextAlignJustify size={13} aria-hidden />
           )}
         </Button>
 
@@ -363,7 +363,7 @@ function PullRequestFilesErrorNotice({
       role="alert"
       className="flex min-h-8 items-center gap-2 bg-destructive/8 px-3 text-xs text-muted-foreground"
     >
-      <AlertCircle size={13} aria-hidden className="text-destructive/75" />
+      <ErrorIcon size={13} aria-hidden className="text-destructive/75" />
       <span className="min-w-0 flex-1 truncate">{error.message}</span>
       <Button
         type="button"
@@ -386,7 +386,7 @@ function PullRequestCommentsPaginationNotice({ stalled }: { stalled: boolean }) 
       role="status"
       className="flex min-h-8 items-center gap-2 bg-primary/6 px-3 text-xs text-muted-foreground"
     >
-      <AlertCircle size={13} aria-hidden className="text-primary/75" />
+      <ErrorIcon size={13} aria-hidden className="text-primary/75" />
       Review thread loading stopped because GitHub repeated a page cursor. Some
       threads may be missing.
     </p>
