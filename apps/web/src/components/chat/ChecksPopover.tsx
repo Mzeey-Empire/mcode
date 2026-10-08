@@ -54,7 +54,7 @@ function getRunVisual(run: CheckRun): CheckRunVisual {
     return {
       iconClassName: "text-primary",
       label: "Running",
-      labelClassName: "text-muted-foreground",
+      labelClassName: "text-muted",
       spinning: true,
     };
   }
@@ -65,7 +65,7 @@ function getRunVisual(run: CheckRun): CheckRunVisual {
         icon: CircleCheck,
         iconClassName: "text-[var(--diff-add-strong)]",
         label: "Succeeded",
-        labelClassName: "text-muted-foreground",
+        labelClassName: "text-muted",
       };
     case "failure":
     case "timed_out":
@@ -73,14 +73,14 @@ function getRunVisual(run: CheckRun): CheckRunVisual {
         icon: CircleX,
         iconClassName: "text-[var(--diff-remove-strong)]",
         label: "Failed",
-        labelClassName: "text-muted-foreground",
+        labelClassName: "text-muted",
       };
     default:
       return {
         icon: CircleMinus,
-        iconClassName: "text-muted-foreground/80",
+        iconClassName: "text-muted/80",
         label: run.conclusion ? run.conclusion.replace(/_/g, " ") : "Completed",
-        labelClassName: "text-muted-foreground",
+        labelClassName: "text-muted",
       };
   }
 }
@@ -184,7 +184,7 @@ export function ChecksPopover({
         data-testid="thread-overview-ci-popover"
         ref={flyoutRef}
         style={flyoutStyle}
-        className="fixed z-50 overflow-hidden rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl"
+        className="fixed z-50 overflow-hidden rounded-lg border border-border bg-panel p-0 text-ink shadow-xl"
       >
         <div className="max-h-[320px] overflow-y-auto py-1 scrollbar-on-hover">
           {sortedRuns.length > 0 ? (
@@ -192,7 +192,7 @@ export function ChecksPopover({
               <RunRow key={`${run.name}-${index}`} run={run} />
             ))
           ) : (
-            <div className="px-4 py-3 text-xs text-muted-foreground">No checks configured</div>
+            <div className="px-4 py-3 text-xs text-muted">No checks configured</div>
           )}
         </div>
       </div>
@@ -231,7 +231,7 @@ function RunRow({ run }: { run: CheckRun }) {
             className={cn("shrink-0", visual.iconClassName)}
           />
         ) : null}
-        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+        <span className="min-w-0 flex-1 text-fade text-sm text-ink">
           {run.name}
         </span>
         <span className={cn("shrink-0 text-xs", visual.labelClassName)}>

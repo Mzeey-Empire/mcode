@@ -12,6 +12,7 @@ export type { ActiveGoalChipProps } from "./composer/ActiveGoalChip";
 /** Public transcript list used by Conversation and child detail views. */
 export { MessageList } from "./messages/MessageList";
 export type { MessageListProps } from "./messages/MessageList";
+export { SubagentProviderScope, useSubagentProvider } from "./narrative/subagent-provider";
 /** Public transcript message renderer. */
 export { MessageBubble } from "./messages/MessageBubble";
 export { NarrativeFlow } from "./narrative";

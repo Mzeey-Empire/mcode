@@ -47,7 +47,7 @@ export function ProviderUnavailableBanner({
   return (
     <div
       data-testid="provider-unavailable-banner"
-      className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-sm"
+      className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-border/60 bg-hover/40 px-3 py-2 text-sm"
     >
       <span className="flex-1">{copy}</span>
       <Button size="sm" variant="outline" onClick={onOpenSettings}>Open Settings</Button>

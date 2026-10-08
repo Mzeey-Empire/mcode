@@ -118,8 +118,6 @@ import type { ProviderCatalogService } from "../../features/providers/catalog/pr
 import type { TerminalBackend } from "../../features/terminal/backends/terminal-backend.js";
 import { TerminalBackendError } from "../../features/terminal/backends/terminal-backend.js";
 import type { TerminalDiagnosticsService } from "../../features/terminal/diagnostics/terminal-diagnostics-service.js";
-import { TerminalSessionPolicyError } from "../../features/terminal/sessions/terminal-session-service.js";
-import { TerminalSessionRuntimeError } from "../../features/terminal/sessions/terminal-session-runtime.js";
 import type { TerminalProfileService } from "../../features/terminal/profiles/terminal-profile-service.js";
 import type { WorkspaceTerminalPreferencesService } from "../../features/terminal/preferences/workspace-terminal-preferences-service.js";
 import { isTerminalRpcMethod, routeTerminalRpc } from "../../features/terminal/transport/terminal-rpc.js";
@@ -448,7 +446,7 @@ function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResp
   if (error instanceof DraftImageMissingError) {
     return { id: request.id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
-  if (error instanceof TerminalBackendError || error instanceof TerminalSessionPolicyError || error instanceof TerminalSessionRuntimeError) {
+  if (error instanceof TerminalBackendError) {
     return terminalRouteError(request.id, error, message);
   }
   if (isProviderAvailabilityError(error)) return providerAvailabilityRouteError(request, error, message);
@@ -459,7 +457,7 @@ function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResp
 
 function terminalRouteError(
   id: string,
-  error: TerminalBackendError | TerminalSessionPolicyError | TerminalSessionRuntimeError,
+  error: TerminalBackendError,
   message: string,
 ): WebSocketResponse {
   return {

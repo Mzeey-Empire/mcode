@@ -32,7 +32,7 @@ class ToolCallErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="pl-3 border-l-2 border-destructive/30 py-1 text-xs text-muted-foreground">
+        <div className="pl-3 border-l-2 border-destructive/30 py-1 text-xs text-muted">
           Tool call render error
         </div>
       );
@@ -42,19 +42,19 @@ class ToolCallErrorBoundary extends Component<
 }
 
 function getWrapperClass(isActive: boolean): string {
-  return `transition-colors rounded-sm ${isActive ? "bg-primary/5" : "hover:bg-muted/20"}`;
+  return `transition-colors rounded-sm ${isActive ? "bg-primary/5" : "hover:bg-hover/20"}`;
 }
 
 function getTriggerClass(hasContent: boolean): string {
-  return `flex w-full flex-col gap-0.5 pl-3 pr-1 py-1.5 text-left text-sm ${hasContent ? "cursor-pointer hover:bg-muted/30" : "cursor-default"}`;
+  return `flex w-full flex-col gap-0.5 pl-3 pr-1 py-1.5 text-left text-sm ${hasContent ? "cursor-pointer hover:bg-hover/30" : "cursor-default"}`;
 }
 
 function getToolIconClass(isActive: boolean): string {
-  return `shrink-0 ${isActive ? "animate-spin text-primary/80" : "text-muted-foreground/60"}`;
+  return `shrink-0 ${isActive ? "animate-spin text-primary/80" : "text-muted/60"}`;
 }
 
 function getToolLabelClass(isActive: boolean): string {
-  return `font-medium ${isActive ? "text-foreground font-medium" : "text-foreground/70"}`;
+  return `font-medium ${isActive ? "text-ink font-medium" : "text-ink/70"}`;
 }
 
 /** Cardless tool call row with left-accent gutter. */
@@ -91,7 +91,7 @@ function ToolCallWrapperInner({
           {hasContent && (
             <ChevronRight
               size={11}
-              className={`ml-auto shrink-0 text-muted-foreground/40 transition-transform ${
+              className={`ml-auto shrink-0 text-muted/40 transition-transform ${
                 expanded ? "rotate-90" : ""
               }`}
             />
@@ -99,7 +99,7 @@ function ToolCallWrapperInner({
         </div>
 
         {badge && (
-          <span className="truncate pl-[21px] text-sm text-muted-foreground/50 font-mono">
+          <span className="text-fade pl-[21px] text-sm text-muted/50 font-mono">
             {badge}
           </span>
         )}

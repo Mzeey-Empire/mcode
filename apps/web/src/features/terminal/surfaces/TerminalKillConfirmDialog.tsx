@@ -52,7 +52,7 @@ export const TerminalKillConfirmDialog = memo(function TerminalKillConfirmDialog
           <DialogTitle className="text-sm font-medium">
             Close {targetName}?
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground">
+          <DialogDescription className="text-xs text-muted">
             This will terminate the entire process tree, including every running child process.
           </DialogDescription>
           <div className="flex justify-end gap-2 pt-1">

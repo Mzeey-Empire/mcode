@@ -71,7 +71,7 @@ export function AnsweredSummary({ content, messageId }: AnsweredSummaryProps) {
       )}
       data-role="answered-plan-questions"
     >
-      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground/50 hover:text-muted-foreground/70 transition-colors cursor-pointer">
+      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted/50 hover:text-muted/70 transition-colors cursor-pointer">
         <ChevronRight
           className={cn(
             "w-3 h-3 transition-transform duration-150",
@@ -86,10 +86,10 @@ export function AnsweredSummary({ content, messageId }: AnsweredSummaryProps) {
       <CollapsibleContent className="ml-4.5 space-y-2 data-[state=open]:animate-fade-up-in">
         {questions.map((q) => (
           <div key={q.id} className="text-xs">
-            <span className="text-xs font-medium uppercase tracking-widest text-muted-foreground/30">
+            <span className="text-xs font-medium uppercase tracking-widest text-muted/30">
               {q.category}
             </span>
-            <p className="text-muted-foreground/60 mt-0.5">{q.question}</p>
+            <p className="text-muted/60 mt-0.5">{q.question}</p>
             <div className="flex flex-wrap gap-1.5 mt-1">
               {q.options.map((o) => (
                 <span
@@ -98,7 +98,7 @@ export function AnsweredSummary({ content, messageId }: AnsweredSummaryProps) {
                     "inline-block text-xs px-1.5 py-0.5 rounded border",
                     o.recommended
                       ? "border-primary/20 text-primary/50 bg-primary/5"
-                      : "border-border/30 text-muted-foreground/35",
+                      : "border-border/30 text-muted/35",
                   )}
                 >
                   {o.title}

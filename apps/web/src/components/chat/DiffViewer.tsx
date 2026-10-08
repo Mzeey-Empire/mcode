@@ -65,11 +65,11 @@ export function DiffViewer({ snapshotId, filePath, changeType = "modified" }: Di
       <button
         type="button"
         onClick={handleToggle}
-        className="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/40"
+        className="flex w-full items-center gap-2 bg-hover/20 px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover/40"
       >
         <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
         <FileText className="h-3 w-3 shrink-0" />
-        <span className="truncate font-mono">{filePath}</span>
+        <span className="text-fade font-mono">{filePath}</span>
         <span className="ml-auto text-xs opacity-60">{changeLabel}</span>
         {loading && <span className="text-xs">Loading...</span>}
       </button>
@@ -102,7 +102,7 @@ function DiffBody({
 }) {
   if (binary) {
     return (
-      <div className="px-3 py-2 text-xs text-muted-foreground/70">
+      <div className="px-3 py-2 text-xs text-muted/70">
         Binary file changed. No diff available.
       </div>
     );
@@ -116,13 +116,13 @@ function DiffBody({
           options={{ theme: shikiTheme, diffStyle: "unified", overflow: "scroll" }}
         />
       ) : (
-        <p className="px-3 py-2 text-xs text-muted-foreground/70">No diff content</p>
+        <p className="px-3 py-2 text-xs text-muted/70">No diff content</p>
       )}
       {truncated ? (
         <button
           type="button"
           onClick={onShowAll}
-          className="w-full bg-muted/20 py-1.5 text-center text-xs text-muted-foreground/70 hover:text-foreground"
+          className="w-full bg-hover/20 py-1.5 text-center text-xs text-muted/70 hover:text-ink"
         >
           Show full diff
         </button>

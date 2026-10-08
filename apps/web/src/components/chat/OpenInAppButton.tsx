@@ -6,7 +6,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { registerCommand } from "@/lib/command-registry";
-import { formatKeybinding } from "@/lib/keybinding-manager";
+import { keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import { resolveDefaultOpenInApp, FILE_EXPLORER_ID } from "@/lib/resolveDefaultOpenInApp";
 import { cn } from "@/lib/utils";
@@ -84,7 +84,7 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
     });
   }, [disabled, openDefault, resolvedLabel]);
 
-  const shortcut = formatKeybinding("mod+o", isMac);
+  const shortcut = keybindingKeycaps("mod+o", isMac);
 
   return (
     <div className="relative inline-flex">
@@ -95,7 +95,7 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
               <Button
                 variant="ghost"
                 size="icon-xs"
-                className="text-foreground/70 hover:text-foreground hover:bg-muted/40 rounded-r-none"
+                className="text-ink/70 hover:text-ink hover:bg-hover/40 rounded-r-none"
                 onClick={openDefault}
                 disabled={disabled}
                 aria-label={`Open in ${resolvedLabel}`}
@@ -104,8 +104,8 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
               </Button>
             }
           />
-          <TooltipContent side="bottom" className="text-xs">
-            {disabled ? "No workspace to open" : `Open in ${resolvedLabel} (${shortcut})`}
+          <TooltipContent side="bottom" shortcut={disabled ? undefined : shortcut}>
+            {disabled ? "No workspace to open" : `Open in ${resolvedLabel}`}
           </TooltipContent>
         </Tooltip>
 
@@ -115,7 +115,7 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
             disabled={disabled}
             className={cn(
               "inline-flex h-8 items-center px-1.5 text-xs border-l border-border/20 rounded-r transition-colors outline-none",
-              "text-foreground/70 hover:text-foreground hover:bg-muted/40 focus-visible:ring-1 focus-visible:ring-ring",
+              "text-ink/70 hover:text-ink hover:bg-hover/40 focus-visible:ring-1 focus-visible:ring-focus",
               "disabled:opacity-50 disabled:pointer-events-none",
             )}
           >

@@ -131,16 +131,16 @@ export function DiffCommentEditor({
       role="dialog"
       aria-label={`Comment on ${target.filePath} line ${target.line}`}
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-border/70 bg-popover text-popover-foreground shadow-lg",
+        "relative overflow-hidden rounded-2xl border border-border/70 bg-panel text-ink shadow-lg",
         isShaking && "animate-preview-annotation-shake",
       )}
     >
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
-        <MessageCircle size={12} className="shrink-0 text-muted-foreground" aria-hidden />
+        <MessageCircle size={12} className="shrink-0 text-muted" aria-hidden />
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" />
+              <span className="min-w-0 text-fade font-mono text-[11px] text-muted" />
             }
           >
             {basename(target.filePath)}:{target.line}

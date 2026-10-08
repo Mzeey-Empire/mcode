@@ -22,37 +22,6 @@ const terminalCreateCases = [
     params: { threadId: "thread-1" },
     result: { ptyId: "pty-late", shell: "pwsh" },
   },
-  {
-    method: "terminal.session.create",
-    params: {
-      scope: { kind: "workspace", workspaceId: "00000000-0000-4000-8000-000000000002" },
-    },
-    result: {
-      contractVersion: 1,
-      sessionId: "00000000-0000-4000-8000-000000000001",
-      scope: { kind: "workspace", workspaceId: "00000000-0000-4000-8000-000000000002" },
-      state: "running",
-      hostGeneration: "1",
-      launch: {
-        requestedProfileId: "automatic",
-        resolvedProfile: {
-          id: "certified:windows-powershell-7",
-          name: "PowerShell 7",
-          executable: "pwsh.exe",
-          arguments: [],
-          source: "certified",
-          platform: "windows",
-        },
-        scope: { kind: "workspace", workspaceId: "00000000-0000-4000-8000-000000000002" },
-        arguments: [],
-      },
-      createdAt: "2026-09-24T12:00:00.000Z",
-      lastCommandSeq: "0",
-      lastOutputSeq: "0",
-      exit: null,
-      tombstone: false,
-    },
-  },
 ] as const;
 
 describe("disconnected Terminal creates", () => {
@@ -84,25 +53,12 @@ describe("disconnected Terminal creates", () => {
         await cleanupAllowed.promise;
         cleanupCompleted.resolve();
       });
-      const routeV1 = vi.fn(async (routeMethod: string) => {
-        if (routeMethod === "terminal.session.create") {
-          createStarted.resolve();
-          return created.promise;
-        }
-        if (routeMethod === "terminal.session.close") {
-          cleanupStarted.resolve();
-          await cleanupAllowed.promise;
-          cleanupCompleted.resolve();
-        }
-        return undefined;
-      });
       const terminalService = {
         create: vi.fn(() => {
           createStarted.resolve();
           return created.promise;
         }),
         kill,
-        routeV1,
         cleanupDisconnectedCreate: TerminalBackend.prototype.cleanupDisconnectedCreate,
         disconnectClient: vi.fn(() => clientDisconnected.resolve()),
       };
@@ -143,17 +99,7 @@ describe("disconnected Terminal creates", () => {
       expect(drained).toBe(true);
       await stopAdmissionAndDrain();
 
-      if (method === "terminal.create") {
-        expect(kill).toHaveBeenCalledExactlyOnceWith("pty-late");
-      } else {
-        const createCall = routeV1.mock.calls.find(([calledMethod]) => calledMethod === "terminal.session.create");
-        const closeCall = routeV1.mock.calls.at(-1);
-        expect(closeCall?.slice(0, 2)).toEqual([
-          "terminal.session.close",
-          { sessionId: "00000000-0000-4000-8000-000000000001", reason: "user" },
-        ]);
-        expect(closeCall?.[2]).toBe(createCall?.[2]);
-      }
+      expect(kill).toHaveBeenCalledExactlyOnceWith("pty-late");
     },
   );
 

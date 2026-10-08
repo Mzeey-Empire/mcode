@@ -80,12 +80,12 @@ function resolveTerminalSearchColor(token: string): string {
 
 function resolveTerminalSearchDecorations() {
   return {
-    matchBackground: resolveTerminalSearchColor("--muted"),
+    matchBackground: resolveTerminalSearchColor("--hover"),
     matchBorder: resolveTerminalSearchColor("--border"),
     matchOverviewRuler: resolveTerminalSearchColor("--primary"),
     activeMatchBackground: resolveTerminalSearchColor("--primary"),
-    activeMatchBorder: resolveTerminalSearchColor("--ring"),
-    activeMatchColorOverviewRuler: resolveTerminalSearchColor("--ring"),
+    activeMatchBorder: resolveTerminalSearchColor("--focus"),
+    activeMatchColorOverviewRuler: resolveTerminalSearchColor("--focus"),
   };
 }
 
@@ -474,6 +474,7 @@ function terminalStatusMessage(
 ): string {
   if (recoveryNotice !== null) return recoveryNotice;
   if (sessionState === "failed") return "This terminal failed. Its completed output is retained.";
+  if (exit?.code === null) return "This terminal exited without an exit code. Its completed output is retained.";
   return `This terminal exited with code ${exit?.code ?? 0}. Its completed output is retained.`;
 }
 
@@ -514,7 +515,7 @@ function TerminalStatus({
 
   return (
     <div
-      className="mx-3 mt-2 rounded border border-border/70 bg-muted/30 px-2 py-1 text-xs text-muted-foreground"
+      className="mx-3 mt-2 rounded border border-border/70 bg-hover/30 px-2 py-1 text-xs text-muted"
       data-testid="terminal-status"
     >
       <div role="status" aria-live="polite" aria-atomic="true">
@@ -1485,9 +1486,10 @@ export const TerminalView = memo(function TerminalView({
     setRecoveryNotice("Starting a replacement terminal.");
     void getTransport()
       .terminalCreate(ownerScopeId, ptyId)
-      .then(({ ptyId: replacementPtyId, shell }) => {
-        useTerminalStore.getState().removeTerminal(ptyId);
-        useTerminalStore.getState().addTerminal(ownerScopeId, replacementPtyId, shell);
+      .then(({ ptyId: replacementPtyId, shell, ...metadata }) => {
+        useTerminalStore.getState().replaceTerminal(ptyId, {
+          ptyId: replacementPtyId, threadId: ownerScopeId, shell, ...metadata,
+        });
       })
       .catch(() => {
         setRecoveryAction(null);

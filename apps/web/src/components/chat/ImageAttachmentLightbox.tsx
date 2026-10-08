@@ -205,7 +205,7 @@ function LightboxCaption({ carousel, items, activeIndex, rawTitle, displayTitle,
       <div className="flex w-full min-w-0 flex-col items-center gap-1 border-t border-white/[0.08] pt-3 text-center">
         <Tooltip>
           <TooltipTrigger
-            render={<p className="line-clamp-2 max-w-full min-w-0 break-words px-1 text-sm font-medium leading-snug tracking-tight text-white/[0.94]" />}
+            render={<p className="text-fade-lines-2 max-w-full min-w-0 break-words px-1 text-sm font-medium leading-snug tracking-tight text-white/[0.94]" />}
           >
             {displayTitle}
           </TooltipTrigger>

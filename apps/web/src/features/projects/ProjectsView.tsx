@@ -4,7 +4,7 @@ import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useProjectSelectorStore } from "./state/projectSelectorStore";
 import { ProjectRow } from "./ProjectRow";
-import { Kbd } from "@/components/palette/Kbd";
+import { Kbd } from "@/components/ui/kbd";
 
 /**
  * Palette subview listing pinned and recently-opened workspaces.
@@ -128,11 +128,11 @@ export function ProjectsView() {
       </CommandList>
 
       <div className="flex items-center justify-between border-t border-border/50 px-3 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/30">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted/30">
           <Kbd>↑↓</Kbd> Navigate · <Kbd>Enter</Kbd> Open
         </span>
         <button
-          className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/50 hover:text-foreground"
+          className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted/50 hover:text-ink"
           onClick={() => setQuery("~/")}
         >
           + Add project

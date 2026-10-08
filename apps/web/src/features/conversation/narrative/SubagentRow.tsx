@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { formatSubagentDisplayName } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
-import { SubagentIdentityGlyph } from "@/components/ui/SubagentIdentityGlyph";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import type { HookExecution, ToolCall } from "@/transport/types";
 import { NARRATIVE_TOOL_ROW } from "./narrative-layout";
 import type { SubagentLifecycle } from "./subagent-lifecycle";
+import { useSubagentProvider } from "./subagent-provider";
 import type { SubagentActivity, SubagentRosterTarget } from "./types";
 
 interface SubagentRowProps {
@@ -32,12 +33,9 @@ interface VisibleSubagentParticipant {
 }
 
 interface SubagentParticipantView {
-  identity: string;
   title: string;
-  paletteSeed: string;
   detailTarget: string | undefined;
   hasDetailTarget: boolean;
-  hasExplicitIdentity: boolean;
   status: string;
   unavailableMessage: string;
 }
@@ -123,10 +121,6 @@ function participantIdentity(participant: ToolCall): string {
   return participant.subagentPresentation?.displayName ?? "Subagent";
 }
 
-function participantIdentityKey(participant: ToolCall): string {
-  return participant.subagentPresentation?.identityKey ?? participant.id;
-}
-
 function participantTitle(participant: ToolCall): string {
   const task = participant.subagentPresentation?.task;
   return task ? formatSubagentDisplayName(task) : participantIdentity(participant);
@@ -162,12 +156,9 @@ function projectSubagentParticipant(
 ): SubagentParticipantView {
   const detailTarget = participantDetailTarget(participant, allToolCalls);
   return {
-    identity: participantIdentity(participant),
     title: participantTitle(participant),
-    paletteSeed: detailTarget ?? participantIdentityKey(participant),
     detailTarget,
     hasDetailTarget: detailTarget !== undefined,
-    hasExplicitIdentity: participant.subagentPresentation?.hasExplicitIdentity ?? false,
     status: participantStatus(participant, lifecycle),
     unavailableMessage: participantTranscriptUnavailableMessage(participant),
   };
@@ -202,7 +193,7 @@ function SubagentTranscriptNotice({
   if (unavailableDetailId !== participantId || !message) return null;
 
   return (
-    <span data-testid="subagent-transcript-unavailable" role="status" className="text-xs text-muted-foreground">
+    <span data-testid="subagent-transcript-unavailable" role="status" className="text-xs text-muted">
       {message}
     </span>
   );
@@ -217,6 +208,7 @@ function SubagentParticipant({
   onUnavailableDetail,
 }: SubagentParticipantProps) {
   const view = projectSubagentParticipant(participant, lifecycle, allToolCalls);
+  const provider = useSubagentProvider();
 
   return (
     <span className="flex min-w-0 shrink items-center gap-1">
@@ -231,18 +223,12 @@ function SubagentParticipant({
           onSubagentSelect,
           onUnavailableDetail,
         )}
-        className="min-w-0 shrink gap-1 rounded-full px-2 text-left transition-colors duration-150 motion-reduce:transition-none hover:bg-muted/30"
+        className="min-w-0 shrink gap-1 rounded-full px-2 text-left transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30"
         aria-label={`${view.hasDetailTarget ? "Open" : "Show"} ${view.title} subagent details`}
         aria-describedby={`subagent-status-${participant.id}`}
       >
-        <SubagentIdentityGlyph
-          identity={view.identity}
-          hasExplicitIdentity={view.hasExplicitIdentity}
-          paletteSeed={view.paletteSeed}
-          className="size-4"
-          size={12}
-        />
-        <span className="min-w-0 truncate text-xs font-medium text-foreground/85">
+        <ProviderIcon provider={provider} size={16} />
+        <span className="min-w-0 text-fade text-xs font-medium text-ink/85">
           {view.title}
         </span>
       </Button>
@@ -254,7 +240,7 @@ function SubagentParticipant({
         unavailableDetailId={unavailableDetailId}
         message={view.unavailableMessage}
       />
-      <span className="shrink-0 text-xs text-muted-foreground">
+      <span className="shrink-0 text-xs text-muted">
         {lifecycleLabel(lifecycle)}
       </span>
     </span>
@@ -274,7 +260,7 @@ function AggregateSubagentButton({
       variant="ghost"
       size="sm"
       onClick={() => onOpenSubagents?.(target)}
-      className="shrink-0 justify-start rounded-full px-2 text-left text-xs text-muted-foreground hover:bg-muted/30"
+      className="shrink-0 justify-start rounded-full px-2 text-left text-xs text-muted hover:bg-hover/30"
       aria-label={`Open full Subagents roster, ${label}`}
     >
       <span className="whitespace-nowrap">{label}</span>

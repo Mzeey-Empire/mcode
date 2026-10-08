@@ -21,10 +21,10 @@ export function ComposerBranchBar({ branchFromMessageId, branchFromMessageConten
     <div className="flex items-start gap-2 px-3 py-2 animate-fade-up-in">
       <span className="shrink-0 text-sm text-primary/70 leading-none mt-0.5" aria-hidden="true">↳</span>
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-muted-foreground/60 leading-none mb-0.5">Forking from</p>
+        <p className="text-xs font-medium text-muted/60 leading-none mb-0.5">Forking from</p>
         {branchFromMessageContent && (
-          <p className="text-xs text-muted-foreground/50 truncate italic">
-            {branchFromMessageContent.slice(0, 120)}{branchFromMessageContent.length > 120 ? "…" : ""}
+          <p className="text-xs text-muted/50 text-fade italic">
+            {branchFromMessageContent}
           </p>
         )}
       </div>
@@ -33,7 +33,7 @@ export function ComposerBranchBar({ branchFromMessageId, branchFromMessageConten
         size="icon-xs"
         onClick={onBranchModeExit}
         disabled={!onBranchModeExit}
-        className="shrink-0 text-muted-foreground/30 hover:bg-muted/40 hover:text-muted-foreground"
+        className="shrink-0 text-muted/30 hover:bg-hover/40 hover:text-muted"
         aria-label="Exit fork mode"
       >
         <X className="size-3.5" />

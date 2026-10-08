@@ -12,7 +12,7 @@ export function CompactingBanner() {
         <span className="motion-safe:animate-ping motion-reduce:hidden absolute inline-flex h-full w-full rounded-full bg-amber-500/60" />
         <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
       </span>
-      <span className="text-xs text-muted-foreground">
+      <span className="text-xs text-muted">
         Compacting context window&hellip;
       </span>
     </div>

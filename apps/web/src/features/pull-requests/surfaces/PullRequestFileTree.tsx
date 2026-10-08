@@ -57,7 +57,7 @@ function OverflowPathLabel({ label, path }: OverflowPathLabelProps) {
     <Tooltip disabled={!overflowing}>
       <TooltipTrigger
         render={
-          <span ref={labelRef} className="min-w-0 truncate">
+          <span ref={labelRef} className="min-w-0 text-fade">
             {label}
           </span>
         }
@@ -65,7 +65,6 @@ function OverflowPathLabel({ label, path }: OverflowPathLabelProps) {
       <TooltipContent
         side="left"
         align="start"
-        variant="surface"
         className="max-w-72 break-all whitespace-normal text-left font-mono leading-relaxed"
       >
         {path}
@@ -435,8 +434,8 @@ export function PullRequestFileTree(props: PullRequestFileTreeProps) {
               className={cn(
                 "mx-1 h-8 w-[calc(100%-0.5rem)] justify-start gap-1.5 rounded-md px-2 font-mono text-xs font-normal",
                 row.node.path === activePath
-                  ? "bg-muted/70 text-foreground"
-                  : "text-foreground/75 hover:bg-muted/40",
+                  ? "bg-hover/70 text-ink"
+                  : "text-ink/75 hover:bg-hover/40",
               )}
               style={{ paddingLeft: `${Math.max(8, row.depth * 12 - 4)}px` }}
               onClick={() => onActivate(row.node.path)}
@@ -467,14 +466,14 @@ export function PullRequestFileTree(props: PullRequestFileTreeProps) {
         aria-setsize={row.setSize}
         aria-expanded={expanded}
         ref={(node) => setRowRef(row.node.id, node)}
-        className="mx-1 h-8 w-[calc(100%-0.5rem)] justify-start gap-1 rounded-md px-2 font-mono text-xs font-medium text-muted-foreground aria-expanded:bg-transparent hover:bg-muted/40 hover:text-foreground"
+        className="mx-1 h-8 w-[calc(100%-0.5rem)] justify-start gap-1 rounded-md px-2 font-mono text-xs font-medium text-muted aria-expanded:bg-transparent hover:bg-hover/40 hover:text-ink"
         style={{ paddingLeft: `${Math.max(8, row.depth * 12 - 4)}px` }}
         onClick={() => toggleDirectory(row.node.id)}
         onFocus={() => setFocusedId(row.node.id)}
         onKeyDown={(event) => handleKeyDown(event, row, index)}
       >
         {expanded ? <ChevronDown size={11} aria-hidden /> : <ChevronRight size={11} aria-hidden />}
-        {expanded ? <FolderOpen size={12} aria-hidden className="text-muted-foreground/80" /> : <Folder size={12} aria-hidden />}
+        {expanded ? <FolderOpen size={12} aria-hidden className="text-muted/80" /> : <Folder size={12} aria-hidden />}
         <OverflowPathLabel label={row.node.name} path={row.node.path} />
       </Button>
     );
@@ -508,7 +507,7 @@ export function PullRequestFileTree(props: PullRequestFileTreeProps) {
       }}
     >
       {rows.length === 0 ? (
-        <p className="px-3 py-8 text-center text-xs text-muted-foreground">
+        <p className="px-3 py-8 text-center text-xs text-muted">
           No changed files match this view.
         </p>
       ) : virtualized ? (

@@ -6,7 +6,7 @@ vi.mock("@/transport", () => ({
   getTransport: () => ({ terminalPause }),
 }));
 
-import { MAX_TERMINALS_PER_SCOPE, useTerminalStore, TERMINAL_PANEL_DEFAULTS } from "../terminalStore";
+import { useTerminalStore, TERMINAL_PANEL_DEFAULTS } from "../terminalStore";
 
 describe("TerminalStore", () => {
   beforeEach(() => {
@@ -65,14 +65,12 @@ describe("TerminalStore", () => {
       expect(useTerminalStore.getState().terminals["thread-2"]).toHaveLength(1);
     });
 
-    it("caps one scope at four terminal sessions", () => {
-      for (let index = 1; index <= MAX_TERMINALS_PER_SCOPE + 1; index += 1) {
+    it("caps one scope at eight terminal records", () => {
+      for (let index = 1; index <= 9; index += 1) {
         useTerminalStore.getState().addTerminal("thread-1", `pty-${index}`);
       }
 
-      expect(useTerminalStore.getState().terminals["thread-1"]).toHaveLength(
-        MAX_TERMINALS_PER_SCOPE,
-      );
+      expect(useTerminalStore.getState().terminals["thread-1"]).toHaveLength(8);
     });
   });
 

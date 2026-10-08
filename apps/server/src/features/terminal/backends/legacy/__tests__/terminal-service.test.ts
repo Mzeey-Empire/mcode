@@ -13,6 +13,7 @@ import {
   PtyHostEventSchema,
   type PtyHostEvent,
 } from "../../../host/pty-host-protocol.js";
+import { InMemoryPtyHostAdapter } from "../../../testing/in-memory-pty-host-adapter.js";
 import { TerminalService } from "../terminal-service.js";
 
 class FakeHost implements PtyHostAdapter {
@@ -85,6 +86,7 @@ class FakeHost implements PtyHostAdapter {
 function createService(options: {
   readonly environment?: Record<string, string>;
   readonly sessionLimit?: number;
+  readonly host?: PtyHostAdapter;
 } = {}) {
   const environment = options.environment ?? { PATH: process.env.PATH ?? "" };
   const host = new FakeHost();
@@ -107,20 +109,22 @@ function createService(options: {
     { resolveWorkingDir: () => process.cwd() } as never,
     settings as never,
     { getEnv: () => environment } as never,
-    host,
+    options.host ?? host,
   );
-  const launch = {
-    executable: process.platform === "win32" ? "powershell.exe" : "/bin/sh",
+  const launch: Parameters<TerminalService["create"]>[1] = {
+    executable: "pwsh.exe",
     arguments: [],
     requestedProfileId: "automatic",
     resolvedProfile: {
-      kind: "certified",
-      id: "powershell",
-      executable: process.platform === "win32" ? "powershell.exe" : "/bin/sh",
+      id: "certified:windows-powershell-7",
+      name: "PowerShell 7",
+      executable: "pwsh.exe",
       arguments: [],
+      source: "certified",
+      platform: "windows",
     },
     headless: false,
-  } as never;
+  };
   return { host, service, launch };
 }
 
@@ -149,6 +153,181 @@ function exit(sessionId: string, code = 0) {
 }
 
 describe("TerminalService host ownership", () => {
+  it("counts host-start reservations and cancels them when their scope is torn down", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const start = host.start.bind(host);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(host, "start").mockImplementation(async () => { await gate; return start(); });
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    const creates = Array.from({ length: 8 }, () => service.create(scope, launch));
+    const settled = Promise.allSettled(creates);
+    await expect(service.create(scope, launch)).rejects.toThrow(/Maximum PTY limit/);
+    await service.killByThread(scope);
+    release();
+    expect((await settled).map((result) => result.status)).toEqual([
+      "rejected", "rejected", "rejected", "rejected", "rejected", "rejected", "rejected", "rejected",
+    ]);
+    expect(service.listActiveSessions()).toEqual([]);
+    const replacement = await service.create(scope, launch);
+    expect(service.listActiveSessions().map(({ ptyId }) => ptyId)).toEqual([replacement.ptyId]);
+    await service.shutdown();
+  });
+
+  it("lists literal metadata and replays a naturally exited shell until close", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const data = vi.fn();
+    service.setSender({ data, json: vi.fn() });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-08T12:00:00.000Z"));
+    try {
+      const created = await service.create(scope, launch);
+      expect(created).toEqual({
+        ptyId: created.ptyId, threadId: scope, shell: "pwsh", cwd: process.cwd(),
+        kind: "shell", state: "running", exitCode: null, createdAt: "2026-10-08T12:00:00.000Z",
+      });
+      host.emitOutput(created.ptyId, new TextEncoder().encode("retained output\r\n"));
+      host.emitExit(created.ptyId, 7);
+      expect(service.listActiveSessions()).toEqual([{
+        ptyId: created.ptyId, threadId: scope, shell: "pwsh", cwd: process.cwd(),
+        kind: "shell", state: "exited", exitCode: 7, createdAt: "2026-10-08T12:00:00.000Z",
+      }]);
+      expect(() => service.write(created.ptyId, "echo bad")).toThrow(/PTY not found/);
+      expect(() => service.resize(created.ptyId, 100, 30)).toThrow(/PTY not found/);
+      await expect(service.hasChildren(created.ptyId)).resolves.toEqual({ hasChildren: false });
+      data.mockClear();
+      expect(service.reattach(created.ptyId, -1, true)).toEqual({ mode: "delta" });
+      expect(data.mock.calls).toEqual([[created.ptyId, 1, Buffer.from("retained output\r\n")]]);
+      await service.kill(created.ptyId);
+      expect(service.listActiveSessions()).toEqual([]);
+      expect(() => service.reattach(created.ptyId, -1, true)).toThrow(/PTY not found/);
+    } finally {
+      vi.useRealTimers();
+      await service.shutdown();
+    }
+  });
+
+  it("keeps a retried first shell before the second shell in the server listing", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-08T12:00:00.000Z"));
+      const first = await service.create(scope, launch);
+      vi.setSystemTime(new Date("2026-10-08T12:01:00.000Z"));
+      const second = await service.create(scope, launch);
+      host.emitExit(first.ptyId, 7);
+      vi.setSystemTime(new Date("2026-10-08T12:02:00.000Z"));
+      const replacement = await service.create(scope, launch, first.ptyId);
+      expect(replacement.createdAt).toBe("2026-10-08T12:00:00.000Z");
+      expect(service.listActiveSessions()).toEqual([
+        {
+          ptyId: replacement.ptyId, threadId: scope, shell: "pwsh", cwd: process.cwd(),
+          kind: "shell", state: "running", exitCode: null, createdAt: "2026-10-08T12:00:00.000Z",
+        },
+        {
+          ptyId: second.ptyId, threadId: scope, shell: "pwsh", cwd: process.cwd(),
+          kind: "shell", state: "running", exitCode: null, createdAt: "2026-10-08T12:01:00.000Z",
+        },
+      ]);
+      expect(() => service.reattach(first.ptyId, -1)).toThrow(/PTY not found/);
+      await service.kill(first.ptyId);
+      expect(service.listActiveSessions().map(({ ptyId }) => ptyId)).toEqual([replacement.ptyId, second.ptyId]);
+    } finally {
+      vi.useRealTimers();
+      await service.shutdown();
+    }
+  });
+
+  it("replaces an exited shell when all eight scope slots are occupied", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    try {
+      const first = await service.create(scope, launch);
+      await Promise.all(Array.from({ length: 7 }, () => service.create(scope, launch)));
+      host.emitExit(first.ptyId, 0);
+      const replacement = await service.create(scope, launch, first.ptyId);
+      expect(service.listActiveSessions().map(({ state }) => state)).toEqual([
+        "running", "running", "running", "running", "running", "running", "running", "running",
+      ]);
+      expect(service.listActiveSessions().map(({ ptyId }) => ptyId)).toContain(replacement.ptyId);
+      expect(() => service.reattach(first.ptyId, -1)).toThrow(/PTY not found/);
+      await expect(service.create(scope, launch)).rejects.toThrow(/Maximum PTY limit/);
+    } finally {
+      await service.shutdown();
+    }
+  });
+
+  it("ignores a running shell as a replacement without killing it", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    try {
+      const first = await service.create(scope, launch);
+      const second = await service.create(scope, launch, first.ptyId);
+      expect(service.listActiveSessions().map(({ ptyId, state }) => [ptyId, state])).toEqual([
+        [first.ptyId, "running"], [second.ptyId, "running"],
+      ]);
+      await service.write(first.ptyId, "echo still running\r");
+      await expect(service.hasChildren(first.ptyId)).resolves.toEqual({ hasChildren: false });
+    } finally {
+      await service.shutdown();
+    }
+  });
+
+  it.each(["other scope", "unknown"])("ignores an %s replacement id", async (kind) => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    const otherScope = "00000000-0000-4000-8000-000000000002";
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-08T12:00:00.000Z"));
+      const first = await service.create(otherScope, launch);
+      host.emitExit(first.ptyId, 7);
+      vi.setSystemTime(new Date("2026-10-08T12:01:00.000Z"));
+      const second = await service.create(scope, launch, kind === "other scope" ? first.ptyId : "unknown");
+      expect(second.createdAt).toBe("2026-10-08T12:01:00.000Z");
+      expect(service.listActiveSessions().map(({ ptyId, state, exitCode }) => [ptyId, state, exitCode])).toEqual([
+        [first.ptyId, "exited", 7], [second.ptyId, "running", null],
+      ]);
+    } finally {
+      vi.useRealTimers();
+      await service.shutdown();
+    }
+  });
+
+  it("counts exited shells toward eight records, and close frees a slot", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    try {
+      const first = await service.create(scope, launch);
+      host.emitExit(first.ptyId, 0);
+      await Promise.all(Array.from({ length: 7 }, () => service.create(scope, launch)));
+      expect(service.listActiveSessions().map(({ kind, state }) => [kind, state])).toEqual([
+        ["shell", "exited"], ["shell", "running"],
+        ["shell", "running"], ["shell", "running"], ["shell", "running"],
+        ["shell", "running"], ["shell", "running"], ["shell", "running"],
+      ]);
+      await expect(service.create(scope, launch)).rejects.toThrow(/Maximum PTY limit/);
+      await service.kill(first.ptyId);
+      const replacement = await service.create(scope, launch);
+      expect(service.listActiveSessions()).toHaveLength(8);
+      expect(service.listActiveSessions().at(-1)?.ptyId).toBe(replacement.ptyId);
+      await service.killByThread(scope);
+      expect(service.listActiveSessions()).toEqual([]);
+      expect(() => service.reattach(replacement.ptyId, -1)).toThrow(/PTY not found/);
+    } finally {
+      await service.shutdown();
+    }
+  });
+
   it("retains and replays output through the legacy sender", async () => {
     const { service, host, launch } = createService();
     const data = vi.fn();
@@ -183,10 +362,10 @@ describe("TerminalService host ownership", () => {
 
   it("enforces the per-scope session limit while creates are active", async () => {
     const { service, launch } = createService();
-    await Promise.all(Array.from({ length: 4 }, () => service.create("thread", launch)));
+    await Promise.all(Array.from({ length: 8 }, () => service.create("thread", launch)));
 
     await expect(service.create("thread", launch)).rejects.toThrow(
-      "Maximum PTY limit (4)",
+      "Maximum PTY limit (8)",
     );
   });
 
@@ -197,6 +376,24 @@ describe("TerminalService host ownership", () => {
     await expect(service.startPreparedCommand("thread-two", launch)).rejects.toThrow(
       "app-wide Terminal session limit",
     );
+  });
+
+  it("allows shells above the app-wide limit while each scope is below eight", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host, sessionLimit: 1 });
+    const firstScope = "00000000-0000-4000-8000-000000000001";
+    const secondScope = "00000000-0000-4000-8000-000000000002";
+    try {
+      const first = await service.create(firstScope, launch);
+      host.emitExit(first.ptyId, 0);
+      const second = await service.create(secondScope, launch);
+      const third = await service.create(secondScope, launch);
+      expect(service.listActiveSessions().map(({ ptyId }) => ptyId)).toEqual([
+        first.ptyId, second.ptyId, third.ptyId,
+      ]);
+    } finally {
+      await service.shutdown();
+    }
   });
 
   it("releases a failed host-start reservation without creating a session", async () => {
@@ -296,7 +493,7 @@ describe("TerminalService host ownership", () => {
 
     await expect(service.kill(created.ptyId)).rejects.toThrow(Error);
     expect(service.listActiveSessions()).toEqual([
-      { ptyId: created.ptyId, threadId: "thread" },
+      { ...created, threadId: "thread" },
     ]);
   });
 
@@ -316,7 +513,7 @@ describe("TerminalService host ownership", () => {
       ptyId: created.ptyId,
       code: 11,
     });
-    expect(service.listActiveSessions()).toEqual([]);
+    expect(service.listActiveSessions()).toEqual([{ ...created, threadId: "thread", state: "exited", exitCode: 11 }]);
   });
 
   it("publishes a nonzero exit when the host generation fails", async () => {
@@ -338,16 +535,64 @@ describe("TerminalService host ownership", () => {
       ptyId: created.ptyId,
       code: 1,
     });
-    expect(service.listActiveSessions()).toEqual([]);
+    expect(service.listActiveSessions()).toEqual([{ ...created, threadId: "thread", state: "exited", exitCode: 1 }]);
   });
 
-  it("keeps prepared sessions out of generic thread teardown", async () => {
-    const { service, host, launch } = createService();
-    await service.startPreparedCommand("thread", launch);
+  it("counts a running headless session toward the cap but skips it during thread teardown", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    try {
+      const prepared = await service.startPreparedCommand(scope, launch);
+      const exits: Array<number | null> = [];
+      const received: Uint8Array[] = [];
+      prepared.onExit((code) => exits.push(code));
+      prepared.onOutput((data) => received.push(data));
+      await Promise.all(Array.from({ length: 7 }, () => service.create(scope, launch)));
+      expect(service.listActiveSessions()).toHaveLength(7);
+      await expect(service.create(scope, launch)).rejects.toThrow(/Maximum PTY limit/);
 
-    await service.killByThread("thread");
+      await service.killByThread(scope);
 
-    expect(host.closes).toEqual([]);
+      expect(service.listActiveSessions()).toEqual([]);
+      expect(exits).toEqual([]);
+      await service.write(prepared.terminalSessionId, "still running");
+      host.emitOutput(prepared.terminalSessionId, Buffer.from("action output"));
+      expect(Buffer.concat(received).toString()).toBe("action output");
+      host.emitExit(prepared.terminalSessionId, 3);
+      expect(exits).toEqual([3]);
+    } finally {
+      await service.shutdown();
+    }
+  });
+
+  it("removes an exited headless session, frees its slot, and replays to late listeners", async () => {
+    const host = new InMemoryPtyHostAdapter("1");
+    const { service, launch } = createService({ host });
+    const scope = "00000000-0000-4000-8000-000000000001";
+    const json = vi.fn();
+    service.setSender({ data: vi.fn(), json });
+    try {
+      const prepared = await service.startPreparedCommand(scope, launch);
+      expect(service.listActiveSessions()).toEqual([]);
+      host.emitOutput(prepared.terminalSessionId, Buffer.from("completed action\r\n"));
+      host.emitExit(prepared.terminalSessionId, 7);
+
+      expect(service.listActiveSessions()).toEqual([]);
+      expect(json.mock.calls).toEqual([]);
+      expect(() => service.reattach(prepared.terminalSessionId, -1)).toThrow(/PTY not found/);
+      await Promise.all(Array.from({ length: 8 }, () => service.create(scope, launch)));
+      expect(service.listActiveSessions()).toHaveLength(8);
+
+      const received: Uint8Array[] = [];
+      const exits: Array<number | null> = [];
+      prepared.onOutput((data) => received.push(data));
+      prepared.onExit((code) => exits.push(code));
+      expect(Buffer.concat(received).toString()).toBe("completed action\r\n");
+      expect(exits).toEqual([7]);
+    } finally {
+      await service.shutdown();
+    }
   });
 
   it("retains a synchronous headless exit until its owner attaches", async () => {
@@ -419,7 +664,7 @@ describe("TerminalService host ownership", () => {
 
     expect(host.shutdown).toHaveBeenCalledOnce();
     expect(service.listActiveSessions()).toEqual([
-      { ptyId: created.ptyId, threadId: "thread" },
+      { ...created, threadId: "thread" },
     ]);
   });
 });

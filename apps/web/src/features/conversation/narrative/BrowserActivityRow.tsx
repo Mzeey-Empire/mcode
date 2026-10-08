@@ -301,8 +301,8 @@ function BrowserActivityLineRow({ line }: { line: BrowserActivityLine }) {
   if (!line.receipt) {
     return (
       <div className={`${NARRATIVE_TOOL_ROW} py-1 text-sm`}>
-        <Icon className="size-3.5 shrink-0 text-muted-foreground/75" aria-hidden="true" />
-        <span className="min-w-0 flex-1 font-medium text-foreground/65">{line.label}</span>
+        <Icon className="size-3.5 shrink-0 text-muted/75" aria-hidden="true" />
+        <span className="min-w-0 flex-1 font-medium text-ink/65">{line.label}</span>
       </div>
     );
   }
@@ -314,14 +314,14 @@ function BrowserActivityLineRow({ line }: { line: BrowserActivityLine }) {
         variant="ghost"
         size="sm"
         onClick={() => setOpen((current) => !current)}
-        className={`${NARRATIVE_TOOL_ROW} h-auto w-full justify-start rounded-md px-0 py-1 text-left font-normal hover:bg-muted/30 aria-expanded:bg-transparent active:translate-y-0`}
+        className={`${NARRATIVE_TOOL_ROW} h-auto w-full justify-start rounded-md px-0 py-1 text-left font-normal hover:bg-hover/30 aria-expanded:bg-transparent active:translate-y-0`}
         aria-expanded={open}
         aria-controls={detailsId}
       >
-        <Icon className="size-3.5 shrink-0 text-muted-foreground/75" aria-hidden="true" />
-        <span className="min-w-0 flex-1 font-medium text-foreground/65">{line.label}</span>
+        <Icon className="size-3.5 shrink-0 text-muted/75" aria-hidden="true" />
+        <span className="min-w-0 flex-1 font-medium text-ink/65">{line.label}</span>
         <ChevronRight
-          className={`size-3 shrink-0 text-muted-foreground/45 transition-transform duration-150 motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+          className={`size-3 shrink-0 text-muted/45 transition-transform duration-150 motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
           aria-hidden="true"
         />
       </Button>
@@ -329,12 +329,12 @@ function BrowserActivityLineRow({ line }: { line: BrowserActivityLine }) {
         <section
           id={detailsId}
           aria-label={`${line.label} receipt`}
-          className="ml-5 mt-1 min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-muted/25"
+          className="ml-5 mt-1 min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-hover/25"
         >
-          <header className="border-b border-border/50 px-3 py-2 text-sm font-medium text-foreground/75">
+          <header className="border-b border-border/50 px-3 py-2 text-sm font-medium text-ink/75">
             Plain text
           </header>
-          <pre className="max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-xs leading-5 text-foreground/75 [overflow-wrap:anywhere]">
+          <pre className="max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-xs leading-5 text-ink/75 [overflow-wrap:anywhere]">
             {line.receipt}
           </pre>
         </section>
@@ -368,9 +368,9 @@ export function BrowserActivitySummary({
       <NarrativeSummaryLine
         open={open}
         onToggle={virtualExpansion?.onToggle ?? (() => setOpen((current) => !current))}
-        icon={<SquareMousePointer className="size-4 shrink-0 text-muted-foreground/55" aria-hidden="true" />}
+        icon={<SquareMousePointer className="size-4 shrink-0 text-muted/55" aria-hidden="true" />}
       >
-        <span className="min-w-0 flex-1 truncate font-medium text-foreground/75">
+        <span className="min-w-0 flex-1 text-fade font-medium text-ink/75">
           {buildBrowserActivitySummary(calls, active)}
         </span>
       </NarrativeSummaryLine>

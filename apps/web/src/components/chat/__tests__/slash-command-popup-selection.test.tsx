@@ -1,7 +1,7 @@
 /**
  * Tests for the CommandRow selection indicator in SlashCommandPopup.
  *
- * The selected row should use bg-accent as its only selection indicator.
+ * The selected row should use bg-selected as its only selection indicator.
  * The previous border-l-2 left-stripe must not appear on any row.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -137,10 +137,10 @@ function renderLongPopup() {
 }
 
 describe("SlashCommandPopup selection indicator", () => {
-  it("selected row has bg-accent class", () => {
+  it("selected row has bg-selected class", () => {
     renderPopup(0);
     const selectedRow = screen.getByRole("option", { name: /foo/ });
-    expect(selectedRow.className).toContain("bg-accent");
+    expect(selectedRow.className).toContain("bg-selected");
   });
 
   it("selected row has no border-l class", () => {

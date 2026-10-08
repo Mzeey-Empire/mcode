@@ -22,7 +22,7 @@ export const CHANGE_TYPE_GLYPHS: Record<ReviewFileChange["changeType"], string> 
 export function changeTypeTone(changeType: ReviewFileChange["changeType"]): string {
   if (changeType === "added") return "text-[var(--diff-add-strong)]";
   if (changeType === "deleted") return "text-[var(--diff-remove-strong)]";
-  return "text-muted-foreground/70";
+  return "text-muted/70";
 }
 
 

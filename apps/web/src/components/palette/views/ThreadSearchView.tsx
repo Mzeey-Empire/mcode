@@ -40,11 +40,11 @@ function getThreadSearchResultLabel(loading: boolean, hasQuery: boolean, resultC
 }
 
 function ThreadSearchToolbar({ loading, resultLabel, providers }: { loading: boolean; resultLabel: string; providers: string[] }) {
-  return <div data-testid="thread-search-toolbar" className="flex min-h-11 items-center justify-between gap-3 border-b border-border/60 px-3 py-1.5"><div aria-live="polite" className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">{loading && <Spinner size={12} aria-hidden />}<span>{resultLabel}</span></div><div className="flex shrink-0 items-center gap-1" role="toolbar" aria-label="Thread search controls"><ThreadSortControl showLabel /><ThreadFilterDropdown providers={providers} showLabel /></div></div>;
+  return <div data-testid="thread-search-toolbar" className="flex min-h-11 items-center justify-between gap-3 border-b border-border/60 px-3 py-1.5"><div aria-live="polite" className="flex min-w-0 items-center gap-2 text-xs text-muted">{loading && <Spinner size={12} aria-hidden />}<span>{resultLabel}</span></div><div className="flex shrink-0 items-center gap-1" role="toolbar" aria-label="Thread search controls"><ThreadSortControl showLabel /><ThreadFilterDropdown providers={providers} showLabel /></div></div>;
 }
 
 function ThreadSearchResults({ loading, rows, searchError, hasQuery, renderRow }: { loading: boolean; rows: SearchRow[]; searchError: boolean; hasQuery: boolean; renderRow: (row: SearchRow) => ReactNode }) {
-  if (loading && rows.length === 0) return <CommandList className="max-h-[28rem] overflow-y-auto p-1.5"><div className="grid gap-1 px-1 py-2" aria-label="Loading threads">{[0, 1, 2].map((item) => <div key={item} className="flex h-14 animate-pulse items-center gap-3 rounded-md px-3"><span className="size-7 rounded-md bg-accent" /><span className="grid flex-1 gap-2"><span className="h-3 w-2/5 rounded bg-accent" /><span className="h-2.5 w-3/5 rounded bg-accent/70" /></span></div>)}</div></CommandList>;
+  if (loading && rows.length === 0) return <CommandList className="max-h-[28rem] overflow-y-auto p-1.5"><div className="grid gap-1 px-1 py-2" aria-label="Loading threads">{[0, 1, 2].map((item) => <div key={item} className="flex h-14 animate-pulse items-center gap-3 rounded-md px-3"><span className="size-7 rounded-md bg-selected" /><span className="grid flex-1 gap-2"><span className="h-3 w-2/5 rounded bg-selected" /><span className="h-2.5 w-3/5 rounded bg-selected/70" /></span></div>)}</div></CommandList>;
   if (rows.length === 0) return <CommandList className="max-h-[28rem] overflow-y-auto p-1.5"><CommandEmpty>{searchError ? "Thread search is unavailable." : hasQuery ? "No matching threads." : "No recent threads."}</CommandEmpty></CommandList>;
   return <CommandList className="max-h-[28rem] overflow-y-auto p-1.5"><CommandGroup heading={hasQuery ? "Threads" : "Recent threads"}>{rows.map(renderRow)}</CommandGroup></CommandList>;
 }
@@ -105,19 +105,19 @@ function ThreadSearchResult({
     >
       <span
         className={cn(
-          "min-w-0 flex-1 truncate text-sm font-medium text-foreground",
+          "min-w-0 flex-1 text-fade text-sm font-medium text-ink",
           isUserCompleted &&
-            "text-muted-foreground line-through decoration-muted-foreground decoration-1",
+            "text-muted line-through decoration-muted decoration-1",
         )}
       >
         {thread.title}
       </span>
-      <div className="flex min-w-0 shrink items-center justify-end gap-2 whitespace-nowrap text-xs text-muted-foreground">
+      <div className="flex min-w-0 shrink items-center justify-end gap-2 whitespace-nowrap text-xs text-muted">
         <Tooltip>
           <TooltipTrigger
             render={
               <span
-                className="max-w-44 truncate text-right"
+                className="max-w-44 text-fade"
                 aria-label={`Project, ${row.workspaceName}`}
               >
                 {row.workspaceName}
@@ -126,11 +126,11 @@ function ThreadSearchResult({
           />
           <TooltipContent>{row.workspacePath}</TooltipContent>
         </Tooltip>
-        <span aria-hidden className="text-muted-foreground/35">·</span>
+        <span aria-hidden className="text-muted/35">·</span>
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="max-w-40 truncate font-mono" aria-label={`Branch, ${thread.branch}`}>
+              <span className="max-w-40 text-fade font-mono" aria-label={`Branch, ${thread.branch}`}>
                 {thread.branch}
               </span>
             }

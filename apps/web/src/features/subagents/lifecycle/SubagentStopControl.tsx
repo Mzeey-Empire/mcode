@@ -70,7 +70,7 @@ export function SubagentStopControl({
         aria-describedby={error ? errorId : undefined}
         aria-label={pending ? `Stopping ${label}` : `Stop ${label}`}
         data-testid="subagent-stop-control"
-        className="shrink-0 text-muted-foreground hover:text-foreground"
+        className="shrink-0 text-muted hover:text-ink"
       >
         {pending ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <Square size={13} aria-hidden />}
         {pending ? "Stopping…" : "Stop"}

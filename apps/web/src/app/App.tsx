@@ -336,7 +336,7 @@ function AppLayout(props: AppLayoutProps) {
   return (
     <TerminalPoolSlotProvider>
       <TooltipProvider delay={400}>
-        <div className="flex h-screen flex-col overflow-hidden bg-page text-foreground">
+        <div className="flex h-screen flex-col overflow-hidden bg-page text-ink">
           {props.isDesktop ? (
             <DesktopTitleBar
               canGoBack={props.navigationHistory.canGoBack(props.isValidLocation)}

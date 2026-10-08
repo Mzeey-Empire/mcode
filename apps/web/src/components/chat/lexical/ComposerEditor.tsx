@@ -150,15 +150,15 @@ export function ComposerEditor({
               ref={contentEditableRef}
               autoFocus={autoFocus}
               className={compact
-                ? "w-full resize-none bg-transparent px-2 pt-2.5 pb-1.5 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none"
-                : "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"}
+                ? "w-full resize-none bg-transparent px-2 pt-2.5 pb-1.5 text-sm leading-5 text-ink placeholder:text-muted focus:outline-none"
+                : "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-ink placeholder:text-muted focus:outline-none"}
               id={id}
               aria-label={ariaLabel}
               aria-placeholder={placeholder}
               placeholder={
                 <div className={compact
-                  ? "pointer-events-none absolute left-2 top-2.5 text-sm text-muted-foreground"
-                  : "pointer-events-none absolute left-4 top-3 text-sm text-muted-foreground"}>
+                  ? "pointer-events-none absolute left-2 top-2.5 text-sm text-muted"
+                  : "pointer-events-none absolute left-4 top-3 text-sm text-muted"}>
                   {placeholder}
                 </div>
               }

@@ -153,16 +153,16 @@ interface BrowserUrlBarProps {
 }
 
 function urlBarClass(focused: boolean, revealActions: boolean): string {
-  if (focused) return "bg-input ring-2 ring-ring/70";
-  if (revealActions) return "bg-input ring-1 ring-border";
-  return "hover:bg-input/60";
+  if (focused) return "bg-selected ring-2 ring-focus/70";
+  if (revealActions) return "bg-selected ring-1 ring-border";
+  return "hover:bg-selected/60";
 }
 
 function urlInputClass(showTitle: boolean, focused: boolean): string {
   return cn(
-    "min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground",
-    showTitle ? "cursor-default text-center font-medium text-foreground" : "text-foreground",
-    !showTitle && !focused && "text-center text-muted-foreground",
+    "min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted",
+    showTitle ? "cursor-default text-center font-medium text-ink" : "text-ink",
+    !showTitle && !focused && "text-center text-muted",
     focused && "font-mono",
   );
 }
@@ -260,7 +260,7 @@ function BrowserUrlBar({
           <Tooltip>
             <TooltipTrigger
               render={
-                <button type="button" onClick={onOpenExternal} aria-label="Open in system browser" className="shrink-0 text-muted-foreground hover:text-foreground">
+                <button type="button" onClick={onOpenExternal} aria-label="Open in system browser" className="shrink-0 text-muted hover:text-ink">
                   <ArrowUpRight size={14} aria-hidden />
                 </button>
               }

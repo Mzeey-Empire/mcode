@@ -456,22 +456,13 @@ const SetThreadSubscriptionsMethod: {
 
 type TerminalV1WsMethodName = Extract<
   TerminalV1MethodName,
-  `terminal.session.${string}`
-    | `terminal.profile.${string}`
+  `terminal.profile.${string}`
     | `terminal.workspacePreferences.${string}`
     | `terminal.preferences.${string}`
 >;
 
 const terminalV1SessionMethods = (): Record<TerminalV1WsMethodName, { params: z.ZodTypeAny; result: z.ZodTypeAny }> => {
   return {
-    "terminal.session.create": TERMINAL_V1_METHODS["terminal.session.create"],
-    "terminal.session.list": TERMINAL_V1_METHODS["terminal.session.list"],
-    "terminal.session.attach": TERMINAL_V1_METHODS["terminal.session.attach"],
-    "terminal.session.detach": TERMINAL_V1_METHODS["terminal.session.detach"],
-    "terminal.session.close": TERMINAL_V1_METHODS["terminal.session.close"],
-    "terminal.session.hasChildren": TERMINAL_V1_METHODS["terminal.session.hasChildren"],
-    "terminal.session.checkpoint.begin": TERMINAL_V1_METHODS["terminal.session.checkpoint.begin"],
-    "terminal.session.checkpoint.complete": TERMINAL_V1_METHODS["terminal.session.checkpoint.complete"],
     "terminal.profile.list": TERMINAL_V1_METHODS["terminal.profile.list"],
     "terminal.profile.create": TERMINAL_V1_METHODS["terminal.profile.create"],
     "terminal.profile.update": TERMINAL_V1_METHODS["terminal.profile.update"],

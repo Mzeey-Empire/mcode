@@ -63,7 +63,7 @@ export function ModeSelector({
     const lockedLabel =
       mode === "worktree" || mode === "existing-worktree" ? "Worktree" : "Local";
     return (
-      <span className={cn("flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground/70", className)}>
+      <span className={cn("flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted/70", className)}>
         <Icon size={iconSize} />
         {lockedLabel}
       </span>
@@ -73,7 +73,7 @@ export function ModeSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className={cn("flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground", className)}
+        className={cn("flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted hover:bg-selected hover:text-ink", className)}
       >
         <Icon size={iconSize} />
         {selected.label}
@@ -90,13 +90,13 @@ export function ModeSelector({
               className={cn(
                 "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs",
                 option.value === mode
-                  ? "bg-accent text-foreground"
-                  : "text-popover-foreground",
+                  ? "bg-selected text-ink"
+                  : "text-ink",
               )}
             >
               <OptionIcon size={12} />
               <span className="flex-1 text-left">{option.label}</span>
-              {option.value === mode && <Check size={10} className="text-muted-foreground" />}
+              {option.value === mode && <Check size={10} className="text-muted" />}
             </DropdownMenuItem>
           );
         })}

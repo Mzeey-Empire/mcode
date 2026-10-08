@@ -10,7 +10,6 @@ import {
   forwardRef,
   type CSSProperties,
   type ComponentPropsWithoutRef,
-  type ComponentType,
   type ReactNode,
 } from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
@@ -30,7 +29,6 @@ import {
   Folder,
   FolderCheck,
   FolderOpen,
-  Activity,
   Pencil,
   Plus,
   SquarePen,
@@ -45,15 +43,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
-import {
-  ClaudeIcon,
-  CodexIcon,
-  CopilotIcon,
-  CursorProviderIcon,
-  DevinIcon,
-  GeminiIcon,
-  OpenCodeIcon,
-} from "@/components/chat/ProviderIcons";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { getPrVisual } from "@/lib/pr-status";
 import { formatRelative } from "@/lib/format-relative";
 import { cn } from "@/lib/utils";
@@ -357,10 +347,10 @@ function ThreadDeleteWorktreeOption({
   if (!dialog?.worktreePath) return null;
   return (
     <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border p-3">
-      <GitBranch size={14} className="shrink-0 text-muted-foreground" />
+      <GitBranch size={14} className="shrink-0 text-muted" />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">Delete worktree</div>
-        <div className="truncate text-xs text-muted-foreground">{dialog.worktreePath}</div>
+        <div className="text-fade text-xs text-muted">{dialog.worktreePath}</div>
       </div>
       <Switch checked={deleteWorktree} onCheckedChange={(checked) => { if (!isDeleting) onChange(checked); }} disabled={isDeleting} className="data-[checked]:bg-destructive" aria-label="Delete worktree" />
     </div>
@@ -1077,7 +1067,7 @@ export function ProjectTree() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="mb-1 flex items-center justify-between px-3 py-1.5">
-        <span className="text-xs font-medium text-muted-foreground">
+        <span className="text-xs font-medium text-muted">
           Projects
         </span>
         <Tooltip>
@@ -1088,7 +1078,7 @@ export function ProjectTree() {
                 size="icon-xs"
                 onClick={handleOpenFolder}
                 aria-label="Add project"
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted hover:text-ink"
               >
                 <Plus size={15} />
               </Button>
@@ -1138,16 +1128,16 @@ export function ProjectTree() {
             <FolderPlus
               size={28}
               aria-hidden
-              className="text-muted-foreground/25"
+              className="text-muted/25"
             />
-            <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/45">
+            <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/45">
               No projects yet
             </p>
             <Button
               variant="ghost"
               size="xs"
               onClick={handleOpenFolder}
-              className="group h-auto gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-[11.5px] font-normal text-muted-foreground/80 hover:border-border hover:bg-accent/50 hover:text-foreground"
+              className="group h-auto gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-[11.5px] font-normal text-muted/80 hover:border-border hover:bg-selected/50 hover:text-ink"
             >
               <FolderPlus
                 size={11}
@@ -1530,7 +1520,7 @@ interface ThreadRowPresentation {
   isRunning: boolean;
   showPrCi: boolean;
   isStaleWorktree: boolean;
-  providerMeta: ReturnType<typeof getProviderMeta>;
+  provider: string;
   unusable: boolean;
   unusableReason: string;
   scaffoldDim: string | false | null;
@@ -1633,14 +1623,14 @@ function hasStaleThreadWorktree(
 function threadProviderPresentation(
   provider: string,
   availableProviders: ThreadRowProps["availableProviders"],
-): Pick<ThreadRowPresentation, "providerMeta" | "unusable" | "unusableReason"> {
+): Pick<ThreadRowPresentation, "provider" | "unusable" | "unusableReason"> {
   const providerRow = availableProviders.find((candidate) => candidate.id === provider);
   if (!providerRow) {
-    return { providerMeta: getProviderMeta(provider), unusable: false, unusableReason: "" };
+    return { provider, unusable: false, unusableReason: "" };
   }
   const unusable = !providerRow.enabled || providerRow.cli.status === "not_found";
   const unusableReason = providerRow.enabled ? "CLI not found" : "Provider disabled";
-  return { providerMeta: getProviderMeta(provider), unusable, unusableReason };
+  return { provider, unusable, unusableReason };
 }
 
 // In-flight lifecycle flags live outside React: virtualized rows unmount
@@ -1862,8 +1852,8 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
         onTriggerMouseLeave?.(event);
       }}
       className={cn(
-        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-[13px] cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-        isActive ? "bg-accent text-foreground" : "text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground",
+        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-[13px] cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        isActive ? "bg-selected text-ink" : "text-muted/85 hover:bg-selected/40 hover:text-ink",
         triggerClassName,
       )}
       style={{ paddingLeft: `${46 + depth * 12}px` }}
@@ -1908,20 +1898,18 @@ function ThreadRowLeading({
   presentation,
   lifecycle,
 }: Pick<ThreadRowVisualProps, "thread" | "depth" | "presentation" | "lifecycle">) {
-  const ProviderIcon = presentation.providerMeta.icon;
   return (
     <span className="absolute left-0.5 top-1/2 flex -translate-y-1/2 items-center justify-end gap-1" style={{ width: `${40 + depth * 12}px` }}>
       <ThreadLifecycleButton thread={thread} isRunning={presentation.isRunning} presentation={presentation} lifecycle={lifecycle} />
       <span
-        aria-label={`Provider, ${presentation.providerMeta.label}`}
+        aria-label={`Provider, ${providerLabel(presentation.provider)}`}
         className={cn(
           "-mt-px flex h-4 w-4 items-center justify-center",
-          presentation.providerMeta.color,
           presentation.scaffoldDim,
           presentation.isUserCompleted && "grayscale opacity-45",
         )}
       >
-        <ProviderIcon size={12} />
+        <ProviderIcon provider={presentation.provider} size={12} />
       </span>
     </span>
   );
@@ -1947,7 +1935,7 @@ function ThreadLifecycleButton({
           onKeyDown={(event) => event.stopPropagation()}
           onClick={lifecycle.handleLifecycleClick}
           className={cn(
-            "size-5 shrink-0 rounded-full p-0 text-muted-foreground/65 opacity-0 transition-opacity shadow-none hover:bg-transparent hover:text-foreground group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100 disabled:cursor-not-allowed",
+            "size-5 shrink-0 rounded-full p-0 text-muted/65 opacity-0 transition-opacity shadow-none hover:bg-transparent hover:text-ink group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100 disabled:cursor-not-allowed",
             isRunning && "disabled:opacity-0 group-hover/row:disabled:opacity-100 group-focus-visible/row:disabled:opacity-100",
           )}
         >
@@ -1990,7 +1978,7 @@ function ThreadRowContent({
           autoFocus
           onFocus={(event) => event.currentTarget.select()}
           onClick={(event) => event.stopPropagation()}
-          className="flex-1 border-ring"
+          className="flex-1 border-focus"
         />
       ) : (
         <ThreadRowTitle thread={thread} presentation={presentation} />
@@ -2016,8 +2004,8 @@ function ThreadRowTitle({ thread, presentation }: Pick<ThreadRowVisualProps, "th
     <>
       <span
         className={cn(
-          "truncate flex-1",
-          presentation.isUserCompleted && "text-muted-foreground/55 line-through decoration-muted-foreground/55 decoration-1",
+          "text-fade flex-1",
+          presentation.isUserCompleted && "text-muted/55 line-through decoration-muted/55 decoration-1",
           presentation.isStaleWorktree && "text-[var(--diff-remove-strong)]/85 line-through",
         )}
         data-testid="thread-title"
@@ -2044,7 +2032,7 @@ function ThreadWorktreeIndicator({ thread }: { thread: WorkspaceThread }) {
   if (thread.mode !== "worktree") return null;
   return (
     <Tooltip>
-      <TooltipTrigger render={<WorktreeModeIcon size={12} data-testid={`thread-worktree-indicator-${thread.id}`} aria-label="Worktree mode" className="text-muted-foreground/65" />} />
+      <TooltipTrigger render={<WorktreeModeIcon size={12} data-testid={`thread-worktree-indicator-${thread.id}`} aria-label="Worktree mode" className="text-muted/65" />} />
       <TooltipContent side="right" className="text-xs">Worktree</TooltipContent>
     </Tooltip>
   );
@@ -2058,7 +2046,7 @@ function ThreadProviderUnavailable({
   if (isEditing || !presentation.unusable) return null;
   return (
     <Tooltip>
-      <TooltipTrigger render={<span data-testid={`sidebar-unusable-${thread.id}`} className="ml-1 shrink-0 inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60" aria-label={presentation.unusableReason} />} />
+      <TooltipTrigger render={<span data-testid={`sidebar-unusable-${thread.id}`} className="ml-1 shrink-0 inline-block h-1.5 w-1.5 rounded-full bg-muted/60" aria-label={presentation.unusableReason} />} />
       <TooltipContent side="right" className="text-xs">{presentation.unusableReason}</TooltipContent>
     </Tooltip>
   );
@@ -2066,7 +2054,7 @@ function ThreadProviderUnavailable({
 
 function ThreadCleanupStatus({ isEditing, statusLabel }: { isEditing: boolean; statusLabel: string | null }) {
   if (isEditing || !statusLabel) return null;
-  return <span role="status" className="shrink-0 truncate text-xs text-muted-foreground">{statusLabel}</span>;
+  return <span role="status" className="shrink-0 text-fade text-xs text-muted">{statusLabel}</span>;
 }
 
 function ThreadCleanupRetry({
@@ -2088,7 +2076,7 @@ function ThreadCleanupRetry({
           onPointerDown={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
           onClick={lifecycle.handleCleanupRetry}
-          className="size-6 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:bg-transparent hover:text-foreground group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100"
+          className="size-6 shrink-0 text-muted opacity-0 transition-opacity hover:bg-transparent hover:text-ink group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100"
         >
           {lifecycle.isCleanupRetryPending ? <Spinner size={12} /> : <RefreshCw size={13} aria-hidden />}
         </Button>
@@ -2127,7 +2115,7 @@ function ThreadRowPreview({
   return (
     <Tooltip>
       <TooltipTrigger render={row} />
-      <TooltipContent side="right" align="start" sideOffset={8} variant="surface" className="max-w-none p-3">
+      <TooltipContent side="right" align="start" sideOffset={8} className="max-w-none p-3">
         <SidebarThreadPreview workspaceName={workspaceName} thread={thread} />
       </TooltipContent>
     </Tooltip>
@@ -2208,33 +2196,18 @@ function ciRollupStatus(
   return { aggregate, count, label };
 }
 
-type IconComponent = ComponentType<{ size?: number; className?: string }>;
-
-const PROVIDER_META: Record<
-  string,
-  { icon: IconComponent; label: string; color: string }
-> = {
-  claude: { icon: ClaudeIcon, label: "Claude", color: "" },
-  codex: { icon: CodexIcon, label: "Codex", color: "text-foreground" },
-  copilot: {
-    icon: CopilotIcon,
-    label: "GitHub Copilot",
-    color: "text-violet-400 dark:text-violet-300",
-  },
-  cursor: { icon: CursorProviderIcon, label: "Cursor", color: "" },
-  devin: { icon: DevinIcon, label: "Devin", color: "" },
-  gemini: { icon: GeminiIcon, label: "Gemini", color: "text-sky-400" },
-  opencode: { icon: OpenCodeIcon, label: "OpenCode", color: "text-violet-400" },
+const PROVIDER_LABELS: Record<string, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  copilot: "GitHub Copilot",
+  cursor: "Cursor",
+  devin: "Devin",
+  gemini: "Gemini",
+  opencode: "OpenCode",
 };
 
-function getProviderMeta(provider: string) {
-  return (
-    PROVIDER_META[provider] ?? {
-      icon: Activity,
-      label: provider || "Provider",
-      color: "text-muted-foreground",
-    }
-  );
+function providerLabel(provider: string): string {
+  return PROVIDER_LABELS[provider] ?? (provider || "Provider");
 }
 
 function SidebarThreadPreview({
@@ -2249,18 +2222,18 @@ function SidebarThreadPreview({
   return (
     <div
       data-testid={`thread-preview-${thread.id}`}
-      className="w-64 space-y-2 text-popover-foreground"
+      className="w-64 space-y-2 text-ink"
     >
       <div className="min-w-0 font-medium text-xs leading-5">
         {thread.title}
       </div>
       <div className="grid gap-1.5">
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs text-muted">
           Updated {formatLifecycleDate(thread.updated_at)}
         </div>
         {thread.user_completed_at !== null ? (
           <>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted">
               Completed {formatLifecycleDate(thread.user_completed_at)}
             </div>
             {thread.cleanup_state === "blocked" ? (
@@ -2268,15 +2241,15 @@ function SidebarThreadPreview({
                 Cleanup blocked: {thread.cleanup_reason ?? "User action is required."}
               </div>
             ) : thread.cleanup_state === "queued" ? (
-              <div className="text-xs text-muted-foreground" role="status">
+              <div className="text-xs text-muted" role="status">
                 Cleanup queued
               </div>
             ) : thread.cleanup_state === "retrying" ? (
-              <div className="text-xs text-muted-foreground" role="status">
+              <div className="text-xs text-muted" role="status">
                 Retrying cleanup
               </div>
             ) : (
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-muted">
                 {thread.scheduled_deletion_at
                   ? `Deletes ${formatLifecycleDate(thread.scheduled_deletion_at)}`
                   : "Automatic deletion disabled"}
@@ -2289,14 +2262,14 @@ function SidebarThreadPreview({
           className="flex min-w-0 items-center gap-2"
         >
           <Folder size={13} aria-hidden className="shrink-0 opacity-75" />
-          <span className="truncate text-xs">{workspaceName}</span>
+          <span className="text-fade text-xs">{workspaceName}</span>
         </div>
         <div
           aria-label={`Branch, ${checkoutLabel}`}
           className="flex min-w-0 items-center gap-2"
         >
           <GitBranch size={13} aria-hidden className="shrink-0 opacity-75" />
-          <span className="truncate font-mono text-xs">{checkoutLabel}</span>
+          <span className="text-fade font-mono text-xs">{checkoutLabel}</span>
         </div>
       </div>
     </div>
@@ -2517,9 +2490,9 @@ function ProjectWorkspaceRow({
       data-testid={`project-row-${workspace.id}`}
       onClick={toggle}
       className={cn(
-        "group/ws relative flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] transition-colors touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+        "group/ws relative flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] transition-colors touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         isProjectDragging && "cursor-grabbing",
-        isActive ? "text-foreground" : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+        isActive ? "text-ink" : "text-muted hover:bg-selected/40 hover:text-ink",
       )}
       {...sortableListeners}
     >
@@ -2574,7 +2547,7 @@ function ProjectLifecycleToggle({
           data-view={lifecycleView}
           onKeyDown={(event) => event.stopPropagation()}
           onClick={onClick}
-          className="relative -m-1.5 mr-0 size-8 shrink-0 rounded-sm text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
+          className="relative -m-1.5 mr-0 size-8 shrink-0 rounded-sm text-muted shadow-none hover:bg-transparent hover:text-ink dark:hover:bg-transparent"
         >
           <ProjectLifecycleIcons lifecycleView={lifecycleView} />
         </Button>
@@ -2596,7 +2569,7 @@ function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: (
     <Tooltip>
       <TooltipTrigger render={
         <Button type="button" variant="ghost" size="xs" aria-label={`Open project ${workspace.name}`} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 dark:hover:bg-transparent">
-          <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap font-medium tracking-tight group-hover/ws:[mask-image:linear-gradient(to_right,black_calc(100%_-_1.5rem),transparent)] group-focus-within/ws:[mask-image:linear-gradient(to_right,black_calc(100%_-_1.5rem),transparent)] group-hover/ws:[-webkit-mask-image:linear-gradient(to_right,black_calc(100%_-_1.5rem),transparent)] group-focus-within/ws:[-webkit-mask-image:linear-gradient(to_right,black_calc(100%_-_1.5rem),transparent)]">{workspace.name}</span>
+          <span className="flex-1 text-fade font-medium tracking-tight">{workspace.name}</span>
         </Button>
       } />
       <TooltipContent side="right" className="text-xs">{workspace.name}</TooltipContent>
@@ -2606,7 +2579,7 @@ function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: (
 
 function ProjectGitStatus({ isGitRepository }: { isGitRepository: boolean }) {
   if (isGitRepository) return null;
-  return <Tooltip><TooltipTrigger render={<GitBranchMinus size={12} className="shrink-0 text-muted-foreground/45" aria-label="Not a git repository" />} /><TooltipContent side="right" className="text-xs">Not a git repository</TooltipContent></Tooltip>;
+  return <Tooltip><TooltipTrigger render={<GitBranchMinus size={12} className="shrink-0 text-muted/45" aria-label="Not a git repository" />} /><TooltipContent side="right" className="text-xs">Not a git repository</TooltipContent></Tooltip>;
 }
 
 function ProjectRunningStatus({ hasRunning }: { hasRunning: boolean }) {
@@ -2616,7 +2589,7 @@ function ProjectRunningStatus({ hasRunning }: { hasRunning: boolean }) {
 
 function ProjectThreadCount({ workspaceId, count }: { workspaceId: string; count: number }) {
   if (count === 0) return null;
-  return <span data-testid={`project-thread-count-${workspaceId}`} className="ml-auto flex h-4 min-w-3 shrink-0 items-center justify-end font-mono text-xs leading-4 tabular-nums text-muted-foreground/45 transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none">{count}</span>;
+  return <span data-testid={`project-thread-count-${workspaceId}`} className="ml-auto flex h-4 min-w-3 shrink-0 items-center justify-end font-mono text-xs leading-4 tabular-nums text-muted/45 transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none">{count}</span>;
 }
 
 function ProjectRowActions({
@@ -2630,11 +2603,11 @@ function ProjectRowActions({
 }: { workspace: Workspace; isExpanded: boolean; onToggle: () => void; onOpenInExplorer: (event: React.MouseEvent) => void; onRename: (event: React.MouseEvent) => void; onDelete: (event: React.MouseEvent) => void; onCreateThread: (event: React.MouseEvent) => void }) {
   return (
     <div data-testid={`project-row-actions-${workspace.id}`} className="pointer-events-none absolute inset-y-0 right-1.5 z-10 flex items-center justify-end gap-1 bg-transparent px-0.5 opacity-0 transition-opacity duration-150 group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100 motion-reduce:transition-none">
-      <Button type="button" variant="ghost" size="icon-xs" aria-label={`Toggle threads for ${workspace.name}`} aria-expanded={isExpanded} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggle(); }} className="size-6 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:bg-transparent hover:text-muted-foreground dark:hover:bg-transparent group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100">
+      <Button type="button" variant="ghost" size="icon-xs" aria-label={`Toggle threads for ${workspace.name}`} aria-expanded={isExpanded} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggle(); }} className="size-6 shrink-0 text-muted opacity-0 transition-opacity hover:bg-transparent hover:text-muted dark:hover:bg-transparent group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100">
         <ChevronRight size={14} className={cn("transition-transform duration-150 motion-reduce:transition-none", isExpanded && "rotate-90")} />
       </Button>
       <DropdownMenu>
-        <DropdownMenuTrigger aria-label={`Project options for ${workspace.name}`} onClick={(event) => event.stopPropagation()} className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-colors hover:bg-background/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/70 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100"><MoreIcon size={13} /></DropdownMenuTrigger>
+        <DropdownMenuTrigger aria-label={`Project options for ${workspace.name}`} onClick={(event) => event.stopPropagation()} className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted opacity-0 outline-none transition-colors hover:bg-background/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100"><MoreIcon size={13} /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={4} className="min-w-40">
           <DropdownMenuItem onClick={onOpenInExplorer} className="flex cursor-pointer items-center gap-2"><FolderOpen size={13} />Open in Explorer</DropdownMenuItem>
           <DropdownMenuItem onClick={onRename} className="flex cursor-pointer items-center gap-2"><Pencil size={13} />Rename project</DropdownMenuItem>
@@ -2644,7 +2617,7 @@ function ProjectRowActions({
       </DropdownMenu>
       <Tooltip>
         <TooltipTrigger
-          render={<Button variant="ghost" size="icon-xs" aria-label={`New thread in ${workspace.name}`} onKeyDown={(event) => event.stopPropagation()} onClick={onCreateThread} className="opacity-0 text-muted-foreground hover:bg-background/60 hover:text-foreground group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100"><SquarePen className="size-[1.4rem]" /></Button>}
+          render={<Button variant="ghost" size="icon-xs" aria-label={`New thread in ${workspace.name}`} onKeyDown={(event) => event.stopPropagation()} onClick={onCreateThread} className="opacity-0 text-muted hover:bg-background/60 hover:text-ink group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100"><SquarePen className="size-[1.4rem]" /></Button>}
         />
         <TooltipContent>{`New thread in ${workspace.name}`}</TooltipContent>
       </Tooltip>
@@ -2659,7 +2632,7 @@ function ProjectThreadListToggle({
   onToggleThreadList,
 }: { workspaceId: string; isExpanded: boolean; hiddenCount: number; onToggleThreadList: (workspaceId: string) => void }) {
   const label = isExpanded ? "Show less" : `Show more (${hiddenCount})`;
-  return <Button variant="ghost" size="xs" onClick={() => onToggleThreadList(workspaceId)} className="mt-0.5 h-auto w-full justify-start rounded-md px-2 py-1 text-[11px] font-normal text-muted-foreground/55 hover:bg-accent/40 hover:text-foreground">{label}</Button>;
+  return <Button variant="ghost" size="xs" onClick={() => onToggleThreadList(workspaceId)} className="mt-0.5 h-auto w-full justify-start rounded-md px-2 py-1 text-[11px] font-normal text-muted/55 hover:bg-selected/40 hover:text-ink">{label}</Button>;
 }
 
 /**
@@ -2871,10 +2844,10 @@ function DraftRow({
       onClick={() => onOpen(workspaceId, draft.id)}
       onContextMenu={(event) => onContextMenu(event, draft.id)}
       className={cn(
-        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-[13px] cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-[13px] cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         isActive
-          ? "bg-accent text-foreground"
-          : "text-muted-foreground/70 hover:bg-accent/40 hover:text-foreground",
+          ? "bg-selected text-ink"
+          : "text-muted/70 hover:bg-selected/40 hover:text-ink",
       )}
       style={{ paddingLeft: "46px" }}
     >
@@ -2896,7 +2869,7 @@ function DraftRow({
                   event.stopPropagation();
                   onDiscard(draft.id);
                 }}
-                className="size-5 shrink-0 rounded-full p-0 text-muted-foreground/65 opacity-0 transition-opacity shadow-none hover:bg-transparent hover:text-foreground group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100"
+                className="size-5 shrink-0 rounded-full p-0 text-muted/65 opacity-0 transition-opacity shadow-none hover:bg-transparent hover:text-ink group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100"
               >
                 <Trash2 size={12} aria-hidden />
               </Button>
@@ -2906,18 +2879,18 @@ function DraftRow({
             Delete draft
           </TooltipContent>
         </Tooltip>
-        <span className="-mt-px flex h-4 w-4 items-center justify-center text-muted-foreground/45">
+        <span className="-mt-px flex h-4 w-4 items-center justify-center text-muted/45">
           <Pencil size={12} aria-hidden />
         </span>
       </span>
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="shrink-0 text-[11px] font-medium text-muted-foreground/60">
+        <span className="shrink-0 text-[11px] font-medium text-muted/60">
           Draft
         </span>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground/75">
+        <span className="min-w-0 flex-1 text-fade text-muted/75">
           {preview}
         </span>
-        <span className="shrink-0 text-[11px] text-muted-foreground/50">
+        <span className="shrink-0 text-[11px] text-muted/50">
           {formatRelative(new Date(draft.updatedAt).toISOString())}
         </span>
       </div>
@@ -2961,7 +2934,7 @@ function WorkspaceThreadSection({
       {threadList.visibleThreads.length === 0 && !showDrafts ? (
         <p
           data-testid={`project-empty-${workspace.id}`}
-          className="px-9 py-1 font-mono text-xs text-muted-foreground/70"
+          className="px-9 py-1 font-mono text-xs text-muted/70"
         >
           {lifecycleView === "completed"
             ? "No completed threads"

@@ -28,12 +28,12 @@ export function PlanPreview({ workspaceId, threadId, preview }: PlanPreviewProps
   return (
     <div
       data-testid="plan-preview"
-      className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card/75 px-3 py-2 shadow-sm"
+      className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-panel/75 px-3 py-2 shadow-sm"
     >
-      <ListChecks size={16} className="shrink-0 text-muted-foreground" aria-hidden />
+      <ListChecks size={16} className="shrink-0 text-muted" aria-hidden />
       <Tooltip>
         <TooltipTrigger
-          render={<span className="min-w-0 flex-1 truncate text-sm text-foreground" />}
+          render={<span className="min-w-0 flex-1 text-fade text-sm text-ink" />}
         >
           {preview.title}
         </TooltipTrigger>
@@ -57,7 +57,7 @@ export function PlanPreview({ workspaceId, threadId, preview }: PlanPreviewProps
               size="icon-xs"
               aria-label="Dismiss plan preview"
               onClick={() => usePlanStore.getState().dismissLivePreview(threadId, preview.version)}
-              className="shrink-0 text-muted-foreground"
+              className="shrink-0 text-muted"
             >
               <X size={14} />
             </Button>

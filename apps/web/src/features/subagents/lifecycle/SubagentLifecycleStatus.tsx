@@ -15,7 +15,7 @@ const DOT_CLASS: Record<SubagentLifecycleTone, string> = {
   running: "bg-primary status-pulse",
   settled: "bg-[var(--diff-add-strong)]",
   error: "bg-[var(--diff-remove-strong)]",
-  muted: "bg-muted-foreground",
+  muted: "bg-muted",
 };
 
 /** Renders a glanceable text status with Mcode's canonical six-pixel state dot. */
@@ -30,7 +30,7 @@ export function SubagentLifecycleStatus({
       size="sm"
       data-testid="subagent-lifecycle-status"
       className={cn(
-        "h-4 gap-1.5 px-0 font-mono font-normal text-muted-foreground hover:bg-transparent dark:hover:bg-transparent",
+        "h-4 gap-1.5 px-0 font-mono font-normal text-muted hover:bg-transparent dark:hover:bg-transparent",
         className,
       )}
     >

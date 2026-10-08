@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TerminalExitMetadata, TerminalSessionState } from "@mcode/contracts";
+import { TERMINAL_MAX_PER_SCOPE, type LegacyTerminalRecord, type TerminalExitMetadata, type TerminalSessionState } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { createBatchedUpdater } from "@/stores/batchMiddleware";
 
@@ -8,17 +8,16 @@ export interface TerminalInstance {
   readonly id: string;
   readonly threadId: string;
   readonly label: string;
-  readonly state?: TerminalSessionState;
+  readonly state?: TerminalSessionState | "pending";
   readonly exit?: TerminalExitMetadata;
+  readonly exitCode?: number | null;
+  readonly cwd?: string;
+  readonly createdAt?: string;
+  readonly kind?: "shell" | "action";
 }
 
 /** Server-authoritative PTY identity returned during reconnect. */
-export interface ActiveTerminalSession {
-  readonly ptyId: string;
-  readonly threadId: string;
-  readonly state?: TerminalSessionState;
-  readonly exit?: TerminalExitMetadata;
-}
+export type ActiveTerminalSession = LegacyTerminalRecord;
 
 /** Search matching flags retained independently for each PTY. */
 export interface TerminalSearchOptions {
@@ -66,10 +65,8 @@ export const TERMINAL_PANEL_DEFAULTS: TerminalPanelState = {
   activeTerminalId: null,
 } as const;
 
-/** Maximum concurrent shell sessions in one thread or workspace scope. */
-export const MAX_TERMINALS_PER_SCOPE = 4;
-
 interface TerminalState {
+  readonly hasHydrated: boolean;
   readonly terminals: Record<string, readonly TerminalInstance[]>;
   readonly terminalPanelByThread: Record<string, TerminalPanelState>;
   /** Reverse index: ptyId → threadId for O(1) owner lookup in removeTerminal. */
@@ -96,7 +93,9 @@ interface TerminalState {
     resultCount: number,
   ) => void;
   clearTerminalSearchResult: (ptyId: string) => void;
-  addTerminal: (threadId: string, ptyId: string, shell?: string) => void;
+  addTerminal: (threadId: string, ptyId: string, shell?: string, metadata?: Omit<LegacyTerminalRecord, "ptyId" | "threadId" | "shell">) => void;
+  /** Replaces an exited terminal in its existing slot after Retry succeeds. */
+  replaceTerminal: (ptyId: string, replacement: LegacyTerminalRecord) => void;
   /** Retains terminal output metadata after a natural or failed session exit. */
   recordTerminalExit: (ptyId: string, exit: TerminalExitMetadata) => void;
   /** Replaces stale client identities with the server's active PTY set. */
@@ -160,7 +159,7 @@ function reconcileTerminalInstances(
 } {
   const terminals: Record<string, readonly TerminalInstance[]> = {};
   const ptyToThread: Record<string, string> = {};
-  for (const session of sessions) {
+  for (const session of [...sessions].sort((left, right) => (left.createdAt ?? "").localeCompare(right.createdAt ?? ""))) {
     const scopeTerminals = terminals[session.threadId] ?? [];
     const terminal = reconcileTerminalInstance(session, existingById.get(session.ptyId), scopeTerminals);
     terminals[session.threadId] = [...scopeTerminals, terminal];
@@ -174,12 +173,19 @@ function reconcileTerminalInstance(
   existing: TerminalInstance | undefined,
   scopeTerminals: readonly TerminalInstance[],
 ): TerminalInstance {
-  const terminal = existing ?? { id: session.ptyId, label: generateLabel(scopeTerminals) };
+  const terminal = existing ?? { id: session.ptyId, label: session.shell ?? generateLabel(scopeTerminals) };
   return {
     ...terminal,
     threadId: session.threadId,
+    label: session.shell ?? terminal.label,
     state: session.state ?? "running",
-    ...(session.exit ? { exit: session.exit } : {}),
+    exitCode: session.exitCode,
+    cwd: session.cwd,
+    createdAt: session.createdAt,
+    kind: session.kind ?? "shell",
+    exit: session.state === "exited"
+      ? { code: session.exitCode ?? null, signal: null, reason: "natural" }
+      : undefined,
   };
 }
 
@@ -222,6 +228,7 @@ function reconcileTerminalSearch(
 
 /** Zustand store for terminal instances and per-thread panel state. */
 export const useTerminalStore = create<TerminalState>((set, get) => ({
+  hasHydrated: false,
   terminals: {},
   terminalPanelByThread: {},
   ptyToThread: {},
@@ -378,12 +385,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
     }),
 
-  addTerminal: (threadId, ptyId, shell) =>
+  addTerminal: (threadId, ptyId, shell, metadata) =>
     set((state) => {
       const existing = state.terminals[threadId] ?? [];
-      if (existing.length >= MAX_TERMINALS_PER_SCOPE) return state;
-      const label = shell ?? generateLabel(existing);
-      const instance: TerminalInstance = { id: ptyId, threadId, label, state: "running" };
+      if (existing.some((terminal) => terminal.id === ptyId) || existing.length >= TERMINAL_MAX_PER_SCOPE) return state;
+      const instance = reconcileTerminalInstance({ ...metadata, ptyId, threadId, shell }, undefined, existing);
       const currentPanel = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
       if (currentPanel.visible && currentPanel.activeTerminalId) {
         getTransport().terminalPause(currentPanel.activeTerminalId).catch(() => {});
@@ -417,15 +423,41 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           ...state.terminals,
           [ownerThreadId]: ownerInstances.map((terminal) =>
             terminal.id === ptyId
-              ? { ...terminal, state: nextState, exit }
+              ? { ...terminal, state: nextState, exit, exitCode: exit.code }
               : terminal,
           ),
         },
       };
     }),
 
+  replaceTerminal: (ptyId, replacement) =>
+    set((state) => {
+      const scopeId = state.ptyToThread[ptyId];
+      if (!scopeId || scopeId !== replacement.threadId) return state;
+      const ptyToThread = { ...state.ptyToThread };
+      delete ptyToThread[ptyId];
+      ptyToThread[replacement.ptyId] = scopeId;
+      const terminalSearchByPty = { ...state.terminalSearchByPty };
+      delete terminalSearchByPty[ptyId];
+      const panel = state.terminalPanelByThread[scopeId] ?? TERMINAL_PANEL_DEFAULTS;
+      return {
+        ptyToThread,
+        terminalSearchByPty,
+        terminals: {
+          ...state.terminals,
+          [scopeId]: state.terminals[scopeId].map((terminal) => terminal.id === ptyId
+            ? reconcileTerminalInstance(replacement, undefined, [])
+            : terminal),
+        },
+        terminalPanelByThread: {
+          ...state.terminalPanelByThread,
+          [scopeId]: { ...panel, activeTerminalId: replacement.ptyId },
+        },
+      };
+    }),
+
   reconcileActiveSessions: (sessions) =>
-    set((state) => reconcileActiveTerminalSessions(state, sessions)),
+    set((state) => ({ ...reconcileActiveTerminalSessions(state, sessions), hasHydrated: true })),
 
   removeTerminal: (ptyId) =>
     set((state) => {

@@ -171,7 +171,7 @@ export function ProjectSetupAttemptCard({ attempt, onApprove }: ProjectSetupAtte
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <section className="mx-1.5 mt-1.5 overflow-hidden rounded-lg border border-border/60 bg-muted/20">
+      <section className="mx-1.5 mt-1.5 overflow-hidden rounded-lg border border-border/60 bg-hover/20">
         <CollapsibleTrigger asChild>
           <Button
             id={headingId}
@@ -183,7 +183,7 @@ export function ProjectSetupAttemptCard({ attempt, onApprove }: ProjectSetupAtte
             className="h-8 w-full justify-between rounded-none px-2.5 text-xs motion-reduce:transition-none"
           >
             <span className="flex min-w-0 items-center gap-2">
-              <span className="font-medium text-foreground">Setup</span>
+              <span className="font-medium text-ink">Setup</span>
               <SetupAttemptStatus status={attempt.status} />
             </span>
             <ChevronDown
@@ -227,9 +227,9 @@ function ProjectSetupAttemptDetails({
     <div className={cn("border-t border-border/50 p-2.5", !open && "hidden")}>
       {command ? <TerminalBlock label="Command" value={command} wraps /> : null}
       <TerminalBlock label="Output" value={attempt.output || "No output"} />
-      {attempt.exitCode !== null ? <p className="mt-2 font-mono text-xs tabular-nums text-muted-foreground">Exit code: {attempt.exitCode}</p> : null}
-      {attempt.outputTruncated ? <p className="mt-2 text-xs text-muted-foreground">Output was truncated.</p> : null}
-      {attempt.cleanupPending ? <p className="mt-2 text-xs text-muted-foreground">Setup cleanup is still pending.</p> : null}
+      {attempt.exitCode !== null ? <p className="mt-2 font-mono text-xs tabular-nums text-muted">Exit code: {attempt.exitCode}</p> : null}
+      {attempt.outputTruncated ? <p className="mt-2 text-xs text-muted">Output was truncated.</p> : null}
+      {attempt.cleanupPending ? <p className="mt-2 text-xs text-muted">Setup cleanup is still pending.</p> : null}
       {attempt.status === "awaiting-approval" && !approvalOpen ? <Button type="button" size="sm" className="mt-2" onClick={onOpenApproval}>Review shared command</Button> : null}
     </div>
   );
@@ -274,7 +274,7 @@ function TerminalBlock({ label, value, wraps = false }: {
 }) {
   return (
     <div className="mt-2 first:mt-0">
-      <p className="mb-1 text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="mb-1 text-xs font-medium text-muted">{label}</p>
       <ScrollArea
         className={cn("overflow-hidden rounded-md bg-background/60", wraps && "max-h-40")}
         horizontalScrollbar={wraps ? undefined : true}
@@ -282,7 +282,7 @@ function TerminalBlock({ label, value, wraps = false }: {
         viewportProps={{ tabIndex: 0, "aria-label": `Setup ${label.toLowerCase()}` }}
       >
         <pre className={cn(
-          "font-mono text-xs leading-5 text-foreground",
+          "font-mono text-xs leading-5 text-ink",
           wraps ? "p-2 whitespace-pre-wrap break-words" : "min-w-max whitespace-pre p-2",
         )}>{value}</pre>
       </ScrollArea>
@@ -311,7 +311,7 @@ function SetupAttemptStatus({ status }: { readonly status: WorkspaceEnvironmentS
         </span>
       );
     case "unavailable":
-      return <span className="shrink-0 text-xs text-muted-foreground">Unavailable</span>;
+      return <span className="shrink-0 text-xs text-muted">Unavailable</span>;
   }
 }
 

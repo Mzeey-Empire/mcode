@@ -24,11 +24,11 @@ describe("resolveSelectedTerminalId", () => {
     })).toBeNull();
   });
 
-  it("reattaches the selected starting session and retained tombstones", () => {
+  it("waits for pending creation and reattaches retained exits", () => {
     expect(shouldReattachSelectedTerminal(
-      { ptyId: "pty-starting", state: "starting" },
-      "pty-starting",
-    )).toBe(true);
+      { ptyId: "pty-pending", state: "pending" },
+      "pty-pending",
+    )).toBe(false);
     expect(shouldReattachSelectedTerminal(
       { ptyId: "pty-exited", state: "exited" },
       "pty-exited",

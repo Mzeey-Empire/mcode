@@ -214,13 +214,13 @@ function MermaidToolbar({ copied, onCopy, view, onToggleView }: MermaidToolbarPr
   const canToggleView = view !== undefined && onToggleView !== undefined;
   return (
     <div className="flex items-center justify-between bg-background px-3 py-1 border-b border-border">
-      <span className="text-xs text-muted-foreground">mermaid</span>
+      <span className="text-xs text-muted">mermaid</span>
       <div className="flex items-center gap-1">
         {canToggleView ? (
           <button
             type="button"
             onClick={onToggleView}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center gap-1 text-xs text-muted hover:text-ink transition-colors"
             aria-label={view === "diagram" ? "View code" : "View diagram"}
           >
             {view === "diagram" ? <CodeXml size={13} /> : <GitGraph size={13} />}
@@ -229,7 +229,7 @@ function MermaidToolbar({ copied, onCopy, view, onToggleView }: MermaidToolbarPr
         <button
           type="button"
           onClick={onCopy}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1 text-xs text-muted hover:text-ink transition-colors"
           aria-label={copied ? "Copied" : "Copy code"}
         >
           {copied ? <Check size={13} /> : <Copy size={13} />}
@@ -241,7 +241,7 @@ function MermaidToolbar({ copied, onCopy, view, onToggleView }: MermaidToolbarPr
 
 function MermaidCode({ code }: { code: string }) {
   return (
-    <pre className="bg-muted text-foreground p-3 overflow-x-auto text-sm font-mono leading-relaxed">
+    <pre className="bg-hover text-ink p-3 overflow-x-auto text-sm font-mono leading-relaxed">
       <code>{code}</code>
     </pre>
   );
@@ -283,8 +283,8 @@ function MermaidReadyContent({
       aria-label="Open diagram preview"
       className={[
         "group/diagram block w-full cursor-zoom-in overflow-x-auto bg-background p-3 text-left",
-        "outline-none transition-colors hover:bg-muted/15",
-        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        "outline-none transition-colors hover:bg-hover/15",
+        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus",
         "motion-reduce:transition-none",
       ].join(" ")}
       onClick={onPreviewOpen}

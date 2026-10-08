@@ -6,6 +6,14 @@
  * widening the chat column.
  */
 
+/**
+ * Narration and answer prose at 16/28 ink. Markdown paragraphs and list items
+ * carry their own `leading-relaxed`, so they inherit the prose leading instead;
+ * otherwise settled text would sit at 26px lines and the row would shrink at
+ * the swap from the streaming body to the persisted markdown.
+ */
+export const TURN_PROSE_CLASS = "text-prose text-ink [&_p]:leading-[inherit] [&_li]:leading-[inherit]";
+
 /** Constrains a horizontal tool/meta row inside the virtualized chat column. */
 export const NARRATIVE_TOOL_ROW =
   "flex min-w-0 max-w-full items-center gap-2 overflow-hidden";
@@ -18,7 +26,7 @@ export const NARRATIVE_TOOL_ROW =
 export function narrativeToolDetailClass(size: "sm" | "md"): string {
   const tone =
     size === "md"
-      ? "text-sm text-muted-foreground/80"
-      : "text-xs text-muted-foreground/65";
-  return `font-mono ${tone} truncate flex-1 min-w-0 [overflow-wrap:anywhere]`;
+      ? "text-sm text-muted/80"
+      : "text-xs text-muted/65";
+  return `font-mono ${tone} text-fade flex-1 min-w-0 [overflow-wrap:anywhere]`;
 }

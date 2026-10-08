@@ -80,7 +80,7 @@ export function ProviderSection() {
         ))}
         {comingSoonProviders.length > 0 && (
           <div data-testid="coming-soon-providers" className="py-4">
-            <h3 className="px-1 text-xs font-semibold text-muted-foreground">
+            <h3 className="px-1 text-xs font-semibold text-muted">
               Coming soon
             </h3>
             <div className="mt-2 space-y-0.5">
@@ -130,9 +130,9 @@ function ProviderControls({ row, switchDisabled, onToggle }: Pick<ProviderRowPro
 function ProviderConfig({ row, label, hint, cliPath, onCliPathChange, controls, extraConfig }: { row: ProviderAvailability; label: string; hint: string; cliPath: string | undefined; onCliPathChange: (value: string) => void; controls: ReactNode; extraConfig?: ReactNode }) {
   const [isConfigOpen, setIsConfigOpen] = useState(row.beta);
   return <Collapsible open={isConfigOpen} onOpenChange={setIsConfigOpen} className="border-b border-border/50 last:border-b-0"><div className="px-1 py-4"><div className={SETTING_ROW_GRID_CLASS}>
-    <CollapsibleTrigger asChild><Button type="button" variant="ghost" size="sm" data-testid={`provider-config-trigger-${row.id}`} aria-label={`${isConfigOpen ? "Hide" : "Show"} ${label} configuration`} className="-ml-2 h-auto w-full min-w-0 items-start justify-between gap-4 rounded-md px-2 py-1 text-left hover:bg-accent/60 aria-expanded:bg-transparent dark:aria-expanded:bg-transparent"><span className="flex min-w-0 flex-col items-start"><span className="text-sm font-semibold text-foreground">{label}</span>{hint && <span className="mt-1 text-xs text-muted-foreground">{hint}</span>}</span><ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none", isConfigOpen && "rotate-180")} aria-hidden /></Button></CollapsibleTrigger>
+    <CollapsibleTrigger asChild><Button type="button" variant="ghost" size="sm" data-testid={`provider-config-trigger-${row.id}`} aria-label={`${isConfigOpen ? "Hide" : "Show"} ${label} configuration`} className="-ml-2 h-auto w-full min-w-0 items-start justify-between gap-4 rounded-md px-2 py-1 text-left hover:bg-selected/60 aria-expanded:bg-transparent dark:aria-expanded:bg-transparent"><span className="flex min-w-0 flex-col items-start"><span className="text-sm font-semibold text-ink">{label}</span>{hint && <span className="mt-1 text-xs text-muted">{hint}</span>}</span><ChevronDown className={cn("size-4 shrink-0 text-muted transition-transform duration-200 motion-reduce:transition-none", isConfigOpen && "rotate-180")} aria-hidden /></Button></CollapsibleTrigger>
     {controls}
-  </div><CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none"><div className={cn(SETTING_ROW_GRID_CLASS, "mt-3 border-t border-border/40 pt-3 pl-2")}><label htmlFor={`provider-cli-path-${row.id}`} className="text-sm font-medium text-foreground">{label} CLI path</label><Input id={`provider-cli-path-${row.id}`} data-testid={`provider-cli-path-${row.id}`} value={cliPath ?? ""} onChange={(event) => onCliPathChange(event.target.value)} placeholder={row.id} className="h-7 w-56 text-xs" /></div>{extraConfig}</CollapsibleContent></div></Collapsible>;
+  </div><CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none"><div className={cn(SETTING_ROW_GRID_CLASS, "mt-3 border-t border-border/40 pt-3 pl-2")}><label htmlFor={`provider-cli-path-${row.id}`} className="text-sm font-medium text-ink">{label} CLI path</label><Input id={`provider-cli-path-${row.id}`} data-testid={`provider-cli-path-${row.id}`} value={cliPath ?? ""} onChange={(event) => onCliPathChange(event.target.value)} placeholder={row.id} className="h-7 w-56 text-xs" /></div>{extraConfig}</CollapsibleContent></div></Collapsible>;
 }
 
 /**
@@ -187,8 +187,8 @@ function OpenCodeServeUrlField() {
 
   return <div className={cn(SETTING_ROW_GRID_CLASS, "mt-3 pl-2")}>
     <div className="min-w-0">
-      <label htmlFor="provider-serve-url-opencode" className="text-sm font-medium text-foreground">Serve URL</label>
-      <p id="provider-serve-url-opencode-hint" className={cn("mt-1 max-w-[62ch] text-xs", invalid ? "text-destructive" : "text-muted-foreground")}>
+      <label htmlFor="provider-serve-url-opencode" className="text-sm font-medium text-ink">Serve URL</label>
+      <p id="provider-serve-url-opencode-hint" className={cn("mt-1 max-w-[62ch] text-xs", invalid ? "text-destructive" : "text-muted")}>
         {invalid
           ? "Enter an http or https URL, or leave it empty."
           : "Empty spawns a local server per worktree. A URL attaches to a shared server the app never closes."}
@@ -218,7 +218,7 @@ function OpenCodeServeUrlField() {
 function ComingSoonProviderRow({ row }: { row: ProviderAvailability }) {
   return (
     <div className="flex items-center justify-between gap-4 px-1 py-2.5">
-      <span className="text-sm font-medium text-foreground/75">
+      <span className="text-sm font-medium text-ink/75">
         {labelFor(row.id)}
       </span>
       <Badge

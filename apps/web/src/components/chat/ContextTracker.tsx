@@ -25,7 +25,7 @@ interface ContextTrackerProps {
 function colorTier(pct: number) {
   if (pct >= 90) return { text: "text-destructive", stroke: "stroke-destructive", fill: "bg-destructive" } as const;
   if (pct >= 70) return { text: "text-amber-500", stroke: "stroke-amber-500", fill: "bg-amber-500" } as const;
-  return { text: "text-foreground", stroke: "stroke-primary", fill: "bg-primary" } as const;
+  return { text: "text-ink", stroke: "stroke-primary", fill: "bg-primary" } as const;
 }
 
 /**
@@ -58,7 +58,7 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
         render={
           <div
             className={cn(
-              "relative flex items-center justify-center cursor-pointer rounded-full focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2",
+              "relative flex items-center justify-center cursor-pointer rounded-full focus-visible:outline-2 focus-visible:outline-focus focus-visible:outline-offset-2",
               className,
             )}
             style={{ width: "3.2rem", height: "3.2rem" }}
@@ -81,7 +81,7 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
                 r={RADIUS}
                 fill="none"
                 strokeWidth={2}
-                className="stroke-muted-foreground/15"
+                className="stroke-muted/15"
               />
               {/* Filled arc */}
               <circle
@@ -108,7 +108,7 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
           </div>
         }
       />
-      <TooltipContent side="top" align="end" sideOffset={8} variant="surface" className="w-72 max-w-none p-3">
+      <TooltipContent side="top" align="end" sideOffset={8} className="w-72 max-w-none p-3">
         <div className="flex w-full flex-col gap-3">
           <div className="flex items-center justify-between gap-4">
             <span className="font-medium">Context window</span>
@@ -121,16 +121,16 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuetext={tooltipLine}
-            className="h-2 overflow-hidden rounded-full bg-muted"
+            className="h-2 overflow-hidden rounded-full bg-hover"
           >
             <div className={cn("h-full rounded-full", fill)} style={{ width: `${pct}%` }} />
           </div>
           <div className="flex items-baseline justify-between gap-4 tabular-nums">
-            <span className="whitespace-nowrap"><span className="font-medium">{abbrev(tokensIn)}</span><span className="text-muted-foreground"> / {abbrev(contextWindow)} tokens</span></span>
-            <span className="whitespace-nowrap text-muted-foreground">{abbrev(Math.max(0, contextWindow - tokensIn))} left</span>
+            <span className="whitespace-nowrap"><span className="font-medium">{abbrev(tokensIn)}</span><span className="text-muted"> / {abbrev(contextWindow)} tokens</span></span>
+            <span className="whitespace-nowrap text-muted">{abbrev(Math.max(0, contextWindow - tokensIn))} left</span>
           </div>
           {totalProcessedTokens != null && totalProcessedTokens > tokensIn && (
-            <div className="flex justify-between gap-4 border-t border-border pt-2 text-muted-foreground">
+            <div className="flex justify-between gap-4 border-t border-border pt-2 text-muted">
               <span>Total processed</span>
               <span className="tabular-nums">{abbrev(totalProcessedTokens)} tokens</span>
             </div>

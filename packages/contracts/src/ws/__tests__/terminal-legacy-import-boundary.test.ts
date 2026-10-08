@@ -11,10 +11,9 @@ const SOURCE_ROOTS = [
 ] as const;
 const ALLOWED_LEGACY_IMPORTERS = new Set([
   "apps/server/src/features/terminal/composition/register-terminal.ts",
-  "apps/server/src/features/terminal/backends/__tests__/terminal-backend-selector.test.ts",
-  "apps/server/src/features/terminal/backends/terminal-backend-selector.ts",
   "apps/web/src/features/terminal/adapters/__tests__/legacy-terminal-client.test.ts",
-  "apps/web/src/features/terminal/adapters/terminal-client-selector.ts",
+  // Constructs the only Terminal client now that the backend selector is gone.
+  "apps/web/src/transport/ws-transport.ts",
   "packages/contracts/src/index.ts",
   "packages/contracts/src/ws/__tests__/terminal-legacy-binary.test.ts",
   "packages/contracts/src/ws/channels.ts",

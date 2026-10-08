@@ -9,6 +9,7 @@ export interface PtyDataPayload {
 export interface PtyExitPayload {
   readonly ptyId: string;
   readonly code: number;
+  readonly exitCode?: number | null;
 }
 
 /** Payload delivered on a reconnect gap. */

@@ -57,7 +57,7 @@ export function ReviewFileChangeRow({
             aria-selected={active}
             className={cn(
               "relative mx-1 h-8 w-[calc(100%-0.5rem)] justify-start gap-1.5 rounded-md px-2 font-normal",
-              active ? "bg-muted/70 text-foreground" : "text-foreground/75 hover:bg-muted/40",
+              active ? "bg-hover/70 text-ink" : "text-ink/75 hover:bg-hover/40",
             )}
             style={{ paddingLeft: `${Math.max(8, depth * 12 - 4)}px` }}
             onClick={() => onActivate(file.path)}
@@ -67,7 +67,7 @@ export function ReviewFileChangeRow({
             <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
               <FileTypeIcon filePath={file.path} size={14} />
             </span>
-            <span className="min-w-0 flex-1 truncate text-left font-mono text-xs">{name}</span>
+            <span className="min-w-0 flex-1 text-fade text-left font-mono text-xs">{name}</span>
             {file.binary ? (
               <Badge variant="ghost" size="sm" className="max-w-20 px-1 font-mono uppercase tracking-wide">
                 Binary

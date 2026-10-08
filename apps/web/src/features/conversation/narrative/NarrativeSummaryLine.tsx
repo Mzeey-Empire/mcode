@@ -28,7 +28,7 @@ export function NarrativeSummaryLine({
       onClick={onToggle}
       disabled={disabled}
       className={`${NARRATIVE_TOOL_ROW} w-full rounded-md px-2 py-1 text-left text-sm transition-colors duration-100 ${
-        disabled ? "cursor-default" : "hover:bg-muted/30"
+        disabled ? "cursor-default" : "hover:bg-hover/30"
       }`}
       aria-expanded={expandable ? open : undefined}
     >
@@ -37,7 +37,7 @@ export function NarrativeSummaryLine({
       {badge}
       {expandable ? (
         <ChevronRight
-          className={`size-3 shrink-0 text-muted-foreground/30 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+          className={`size-3 shrink-0 text-muted/30 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
           aria-hidden="true"
         />
       ) : null}

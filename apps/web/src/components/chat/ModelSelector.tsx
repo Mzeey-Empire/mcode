@@ -5,7 +5,6 @@ import {
   useCallback,
   useMemo,
   useId,
-  type ComponentType,
   type ReactNode,
 } from "react";
 import { ChevronDown, Lock, Check, Star } from "lucide-react";
@@ -33,30 +32,16 @@ import {
   type ModelFavoriteEntry,
 } from "@/stores/modelFavoritesStore";
 import { tokenizeSearch, matchesAllTokens } from "@/lib/searchTokens";
-import {
-  ClaudeIcon,
-  CodexIcon,
-  CursorProviderIcon,
-  DevinIcon,
-  OpenCodeIcon,
-  GeminiIcon,
-  CopilotIcon,
-} from "./ProviderIcons";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 
-type IconComponent = ComponentType<{ size?: number; className?: string }>;
 type ModelDefinition = ModelProvider["models"][number];
 
-const DEFAULT_PROVIDER_META = { icon: ClaudeIcon, color: "" };
+/** Provider shown when the selected model belongs to no known provider. */
+const DEFAULT_PROVIDER_ID = "claude";
 
-const PROVIDER_META: Record<string, { icon: IconComponent; color: string }> = {
-  claude: { icon: ClaudeIcon, color: "" },
-  codex: { icon: CodexIcon, color: "text-foreground" },
-  copilot: { icon: CopilotIcon, color: "text-violet-400 dark:text-violet-300" },
-  cursor: { icon: CursorProviderIcon, color: "" },
-  devin: { icon: DevinIcon, color: "" },
-  opencode: { icon: OpenCodeIcon, color: "text-violet-400" },
-  gemini: { icon: GeminiIcon, color: "text-sky-400" },
-};
+function iconProviderIdFor(provider: ModelProvider | undefined): string {
+  return provider?.id ?? DEFAULT_PROVIDER_ID;
+}
 
 /** Matches Tailwind `w-[52px]` for header alignment and icon-first rail. */
 const LEFT_RAIL_WIDTH_CLASS = "w-[52px]";
@@ -108,8 +93,7 @@ interface SelectedModelPresentation {
   displayProvider?: ModelProvider;
   normalizedModelId: string;
   selectedProviderId?: string;
-  icon: IconComponent;
-  iconClass: string;
+  iconProviderId: string;
   shortLabel: string;
 }
 
@@ -219,13 +203,6 @@ interface ModelSelectorPanelProps extends ModelSelectorRightPanelProps {
   onSelectProvider: (provider: ModelProvider) => void;
 }
 
-function getProviderMeta(providerId: string | undefined): {
-  icon: IconComponent;
-  color: string;
-} {
-  return PROVIDER_META[providerId ?? ""] ?? DEFAULT_PROVIDER_META;
-}
-
 function findDisplayProvider(
   selectedProviderId: string | undefined,
   normalizedModelId: string,
@@ -245,7 +222,6 @@ function getSelectedModelPresentation(
   const model = findModelById(selectedModelId);
   const normalizedModelId = model?.id ?? selectedModelId;
   const displayProvider = findDisplayProvider(selectedProviderId, normalizedModelId);
-  const providerMeta = getProviderMeta(displayProvider?.id);
   const label = model?.label ?? selectedModelId;
   const shortLabel = model && displayProvider
     ? label.replace(`${displayProvider.name} `, "")
@@ -255,8 +231,7 @@ function getSelectedModelPresentation(
     displayProvider,
     normalizedModelId,
     selectedProviderId: selectedProviderId ?? displayProvider?.id,
-    icon: providerMeta.icon,
-    iconClass: providerMeta.color,
+    iconProviderId: iconProviderIdFor(displayProvider),
     shortLabel,
   };
 }
@@ -365,8 +340,8 @@ function getSelectedModelAriaLabel(label: string, selected: boolean): string {
 
 function getSelectedModelClassName(selected: boolean): string {
   return selected
-    ? "bg-accent text-foreground"
-    : "text-popover-foreground hover:bg-accent/50 hover:text-foreground";
+    ? "bg-selected text-ink"
+    : "text-ink hover:bg-selected/50 hover:text-ink";
 }
 
 function getFavoriteActionLabel(label: string, starred: boolean): string {
@@ -397,10 +372,6 @@ function getProviderRailTooltip(
   }
   if (provider.models.length === 1) return `Select ${provider.models[0].label}`;
   return `Browse ${provider.name} models`;
-}
-
-function getProviderRailIconClass(comingSoon: boolean, color: string): string {
-  return comingSoon ? "opacity-50" : color;
 }
 
 function getSearchAriaLabel(leftRailSelection: LeftRailSelection): string {
@@ -556,7 +527,7 @@ function FavoriteToggle({
       type="button"
       variant="ghost"
       size="icon-xs"
-      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+      className="h-7 w-7 shrink-0 text-muted hover:text-ink"
       aria-label={getFavoriteActionLabel(label, starred)}
       onClick={(event) => {
         event.stopPropagation();
@@ -613,8 +584,6 @@ function FavoriteModelRow({
   isFavorite,
   onToggleFavorite,
 }: FavoriteModelRowProps) {
-  const providerMeta = getProviderMeta(entry.providerId);
-  const ProviderIcon = providerMeta.icon;
   const starred = isFavorite(entry.providerId, entry.modelId);
 
   return (
@@ -637,8 +606,8 @@ function FavoriteModelRow({
         onSelect={onSelect}
         label={entry.label}
       >
-        <ProviderIcon size={12} className={providerMeta.color} aria-hidden />
-        <span className="truncate text-left">{entry.label}</span>
+        <ProviderIcon provider={entry.providerId} size={12} />
+        <span className="text-fade text-left">{entry.label}</span>
       </ModelSelectionButton>
     </div>
   );
@@ -662,9 +631,9 @@ function GatedModelRow({ model }: { model: ModelDefinition }) {
               disabled
               data-testid={`model-row-gated-${model.id}`}
               aria-label={`${model.label}, no longer available`}
-              className="flex min-w-0 flex-1 cursor-not-allowed items-center gap-2 rounded px-2 py-1.5 text-xs text-muted-foreground/60"
+              className="flex min-w-0 flex-1 cursor-not-allowed items-center gap-2 rounded px-2 py-1.5 text-xs text-muted/60"
             >
-              <span className="flex-1 truncate text-left">{model.label}</span>
+              <span className="flex-1 text-fade text-left">{model.label}</span>
               <span className="text-xs tabular-nums shrink-0">Ended {endDate}</span>
             </button>
           }
@@ -689,17 +658,17 @@ function ModelMetadata({ model }: { model: ModelDefinition }) {
   return (
     <>
       {contextLabel && (
-        <span className="text-xs text-muted-foreground/60 tabular-nums shrink-0">
+        <span className="text-xs text-muted/60 tabular-nums shrink-0">
           {contextLabel}
         </span>
       )}
       {model.multiplier != null && (
-        <span className="text-xs text-muted-foreground/60 tabular-nums shrink-0">
+        <span className="text-xs text-muted/60 tabular-nums shrink-0">
           {model.multiplier}x
         </span>
       )}
       {availableUntil && (
-        <span className="text-xs text-muted-foreground/60 tabular-nums shrink-0">
+        <span className="text-xs text-muted/60 tabular-nums shrink-0">
           Until {availableUntil}
         </span>
       )}
@@ -742,9 +711,9 @@ function AvailableModelRow({
         onSelect={onSelect}
         label={model.label}
       >
-        <span className="flex-1 truncate text-left">{model.label}</span>
+        <span className="flex-1 text-fade text-left">{model.label}</span>
         <ModelMetadata model={model} />
-        {selected && <Check size={10} className="shrink-0 text-foreground" aria-hidden />}
+        {selected && <Check size={10} className="shrink-0 text-ink" aria-hidden />}
       </ModelSelectionButton>
     </div>
   );
@@ -773,7 +742,7 @@ function ModelGroup({
   return (
     <div key={label}>
       <div
-        className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted-foreground/60 select-none"
+        className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none"
         id={headingId}
       >
         {label}
@@ -851,7 +820,7 @@ function EmptyFavoritesMessage({
     : "No favorites yet. Open a provider on the left, then star models you use often.";
 
   return (
-    <p className="px-3 py-8 text-center text-xs text-muted-foreground leading-relaxed">
+    <p className="px-3 py-8 text-center text-xs text-muted leading-relaxed">
       {message}
     </p>
   );
@@ -872,7 +841,7 @@ function FavoritesPanel({
 
   return (
     <div className="space-y-0.5">
-      <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted-foreground/60 select-none">
+      <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">
         Favorites
       </div>
       {favoritesFiltered.map((entry) => (
@@ -901,7 +870,7 @@ function ProviderCatalogContent({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Spinner size={14} className="text-muted-foreground" />
+        <Spinner size={14} className="text-muted" />
         <span className="sr-only">Loading models</span>
       </div>
     );
@@ -910,7 +879,7 @@ function ProviderCatalogContent({
   return (
     <>
       {!catalogUsesModelGroups(models) && (
-        <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted-foreground/60 select-none">
+        <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">
           {provider.name}
         </div>
       )}
@@ -991,7 +960,7 @@ function ProviderUnavailableIndicator({ unavailable }: { unavailable: boolean })
   return unavailable
     ? (
       <span
-        className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/80"
+        className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-muted/80"
         aria-hidden
       />
     )
@@ -1004,8 +973,6 @@ function ProviderRailItem({
   selected,
   onClick,
 }: ProviderRailItemProps) {
-  const providerMeta = getProviderMeta(provider.id);
-  const ProviderIcon = providerMeta.icon;
   const unavailable = isProviderRailUnavailable(provider, providerDisabled);
   const tooltip = getProviderRailTooltip(provider, providerDisabled);
   const isCurrent = selected && provider.models.length !== 1 && !unavailable;
@@ -1025,14 +992,14 @@ function ProviderRailItem({
             className={cn(
               "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors",
               unavailable && "cursor-not-allowed opacity-45",
-              !unavailable && "text-popover-foreground hover:bg-accent/40 hover:text-foreground",
-              isCurrent && "bg-accent text-foreground shadow-sm",
+              !unavailable && "text-ink hover:bg-selected/40 hover:text-ink",
+              isCurrent && "bg-selected text-ink shadow-sm",
             )}
           >
             <ProviderIcon
-              size={18}
-              className={getProviderRailIconClass(provider.comingSoon, providerMeta.color)}
-              aria-hidden
+              provider={provider.id}
+              size={20}
+              className={cn(provider.comingSoon && "opacity-50")}
             />
             <ProviderUnavailableIndicator unavailable={unavailable} />
           </button>
@@ -1057,7 +1024,7 @@ function ProviderRail({
     <nav
       className={cn(
         LEFT_RAIL_WIDTH_CLASS,
-        "flex shrink-0 flex-col items-center gap-1 overflow-y-auto bg-muted/15 py-1",
+        "flex shrink-0 flex-col items-center gap-1 overflow-y-auto bg-hover/15 py-1",
       )}
       aria-label={providerLocked ? "Scope and favorites" : "Favorites and providers"}
     >
@@ -1073,8 +1040,8 @@ function ProviderRail({
               className={cn(
                 "flex h-10 w-10 items-center justify-center rounded-md transition-colors",
                 favoritesSelected
-                  ? "bg-accent text-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                  ? "bg-selected text-ink shadow-sm"
+                  : "text-muted hover:bg-selected/40 hover:text-ink",
               )}
             >
               <Star
@@ -1125,7 +1092,7 @@ function ModelSelectorPanel({
       role="dialog"
       aria-label="Choose model and provider"
       className={cn(
-        "absolute bottom-full left-0 z-20 mb-1 flex h-[min(440px,calc(100vh-8rem))] w-[min(92vw,520px)] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg",
+        "absolute bottom-full left-0 z-20 mb-1 flex h-[min(440px,calc(100vh-8rem))] w-[min(92vw,520px)] flex-col overflow-hidden rounded-lg border border-border bg-panel shadow-lg",
       )}
     >
       <div className="flex shrink-0 border-b border-border/40">
@@ -1157,7 +1124,7 @@ function ModelSelectorPanel({
         />
 
         <div
-          className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-popover p-1"
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-panel p-1"
           role="region"
           aria-label="Model list"
         >
@@ -1173,17 +1140,16 @@ function ModelSelectorPanel({
 }
 
 function LockedModelLabel({
-  icon: Icon,
-  iconClass,
+  iconProviderId,
   shortLabel,
-}: Pick<SelectedModelPresentation, "icon" | "iconClass" | "shortLabel">) {
+}: Pick<SelectedModelPresentation, "iconProviderId" | "shortLabel">) {
   return (
     <span
-      className="flex flex-none max-w-full items-center gap-0.5 px-1.5 py-1 text-xs text-muted-foreground"
+      className="flex flex-none max-w-full items-center gap-0.5 px-1.5 py-1 text-xs text-muted"
       aria-label={shortLabel}
       role="img"
     >
-      <Icon size={12} className={cn("shrink-0", iconClass)} aria-hidden />
+      <ProviderIcon provider={iconProviderId} size={12} />
       <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{shortLabel}</span>
       <Lock size={10} className="ml-0.5 shrink-0 opacity-75" aria-hidden />
     </span>
@@ -1269,8 +1235,6 @@ export function ModelSelector({
     return <LockedModelLabel {...presentation} />;
   }
 
-  const TriggerIcon = presentation.icon;
-
   return (
     <div ref={containerRef} className="relative">
       <Button
@@ -1281,9 +1245,9 @@ export function ModelSelector({
         aria-haspopup="dialog"
         aria-controls={open ? panelId : undefined}
         onClick={() => setOpen(!open)}
-        className="max-w-full shrink whitespace-normal text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        className="max-w-full shrink whitespace-normal text-muted transition-colors hover:bg-hover/40 hover:text-ink"
       >
-        <TriggerIcon size={14} className={cn("shrink-0", presentation.iconClass)} aria-hidden />
+        <ProviderIcon provider={presentation.iconProviderId} size={16} />
         <span className="min-w-0 whitespace-normal text-sm [overflow-wrap:anywhere]">{presentation.shortLabel}</span>
         <ChevronDown size={11} className="shrink-0" aria-hidden />
       </Button>

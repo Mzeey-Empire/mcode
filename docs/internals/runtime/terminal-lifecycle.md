@@ -7,15 +7,10 @@ like restarting the terminal runtime.
 
 ## Runtime ownership
 
-The Bun server owns shell-session records and bounded output retention. Both
-terminal backends use the same separate Node PTY host to own native PTYs and
-contained shell process trees. The [backend composition](../../../apps/server/src/features/terminal/composition/register-terminal.ts)
-connects the legacy service and modern runtime to that host.
-
-The [backend selector](../../../apps/server/src/features/terminal/backends/terminal-backend-selector.ts)
-defaults to `legacy`. `MCODE_TERMINAL_BACKEND=modern` opts into `modern` before
-the server accepts requests. The choice is immutable for that server boot.
-The modern attachment rules below do not describe the legacy protocol.
+The Bun server owns shell-session records and bounded output retention. The
+[legacy service](../../../apps/server/src/features/terminal/backends/legacy/terminal-service.ts)
+uses a separate Node PTY host to own native PTYs and contained shell process
+trees, wired through the [backend composition](../../../apps/server/src/features/terminal/composition/register-terminal.ts).
 
 ## View changes and transport reconnects
 
@@ -28,41 +23,22 @@ Switching shells or scopes replaces the view without closing either shell.
 A returning view receives retained output, using a delta or bounded hydration.
 Replay can include a checkpoint and later output. Retention limits can discard
 older history, so replay does not promise the shell's complete output history.
-The [legacy reattach path](../../../apps/server/src/features/terminal/backends/legacy/terminal-service.ts)
-and [modern attachment runtime](../../../apps/server/src/features/terminal/sessions/terminal-session-runtime.ts)
-implement these distinct replay protocols.
+The [reattach path](../../../apps/server/src/features/terminal/backends/legacy/terminal-service.ts)
+replays both running and exited records.
 
 A transport disconnect can be repaired while the server, PTY host, and shell
 remain alive. The [WebSocket reconnect path](../../../apps/web/src/transport/ws-transport.ts)
-lists existing sessions and reattaches the selected running shell. It does not
+lists retained records and reattaches the selected terminal. It does not
 create a replacement shell or resume a terminated one.
-
-## Modern attachment and input ownership
-
-An attachment is the modern backend's current controller lease for a shell.
-Attaching allocates a new attachment epoch and revokes the prior controller.
-Detaching releases that lease and leaves the shell running.
-
-The [modern runtime](../../../apps/server/src/features/terminal/sessions/terminal-session-runtime.ts)
-accepts input and resize commands only for the shell's host generation and
-current attachment epoch, after hydration completes. Each command must have
-the next command sequence. A stale controller cannot write to a replacement
-attachment, and a view cannot send input before its retained output is ready.
-
-Unacknowledged input makes reconnect different from a safe retry. Detaching
-or replacing an attachment with pending input marks delivery as unknown.
-An input acknowledgement timeout also revokes the attachment. The runtime
-reports `INPUT_DELIVERY_UNKNOWN` and blocks further input until the outstanding
-input is acknowledged. Resending those bytes could execute a shell command
-twice, so an attachment change must not imply that the input failed to arrive.
 
 ## Shell, server, and host failure
 
 Closing a Terminal tab closes its shell process tree, as recorded in
 [ADR 0020](../../adr/0020-repeatable-terminal-tabs-in-right-panel-order.md).
-A shell that exits has no running process to reconnect to. The modern runtime
-can retain an exited session for bounded output hydration, but that record
-does not keep the shell alive.
+A shell that exits keeps its terminal record, bounded replay output, and exit
+code until the user closes it or its scope is deleted. Exited records count
+toward the eight-terminal scope limit. Switching scopes or reloading the client
+restores the record and its output; Retry replaces it with a new shell.
 
 Server loss discards the in-memory session and replay owners. Cleanup records
 identify process trees to reap when the next host starts. They are not saved

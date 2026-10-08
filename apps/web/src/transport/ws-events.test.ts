@@ -382,7 +382,7 @@ describe("ws-events terminal.exit", () => {
     vi.useRealTimers();
   });
 
-  it("reports a natural exit before removing its terminal after two seconds", () => {
+  it("reports a natural exit and keeps the exited terminal until it is closed", () => {
     vi.useFakeTimers();
     useTerminalStore.setState({
       terminals: {
@@ -397,11 +397,15 @@ describe("ws-events terminal.exit", () => {
     pushEmitter.emit("terminal.exit", { ptyId: "pty-1", code: 7 });
 
     expect(onExit).toHaveBeenCalledWith({ ptyId: "pty-1", code: 7 });
-    expect(useTerminalStore.getState().terminals["thread-1"]).toHaveLength(1);
-    vi.advanceTimersByTime(1_999);
-    expect(useTerminalStore.getState().terminals["thread-1"]).toHaveLength(1);
-    vi.advanceTimersByTime(1);
-    expect(useTerminalStore.getState().terminals["thread-1"]).toBeUndefined();
+    vi.advanceTimersByTime(60_000);
+    expect(useTerminalStore.getState().terminals["thread-1"]).toEqual([
+      expect.objectContaining({
+        id: "pty-1",
+        state: "exited",
+        exitCode: 7,
+        exit: { code: 7, signal: null, reason: "natural" },
+      }),
+    ]);
     unsubscribe();
   });
 });

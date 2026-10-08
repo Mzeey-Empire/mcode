@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { SubagentIdentityGlyph } from "@/components/ui/SubagentIdentityGlyph";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { formatSubagentIdentity } from "../identity/format-subagent-identity";
 import { SubagentStopControl } from "../lifecycle/SubagentStopControl";
 import {
@@ -26,7 +26,6 @@ import { NarrativeDetailView } from "../detail/NarrativeDetailView";
 import {
   dedupeNarrativeRoster,
   narrativeRowStatus,
-  narrativePaletteSeed,
   narrativeRowTab,
   resolveCanonicalSubagentSelection,
   resolveNarrativeSubagentSelection,
@@ -38,7 +37,12 @@ export { resolveCanonicalSubagentSelection } from "./narrative-subagents";
 import { getTransport } from "@/transport";
 import { resolveModelDisplayLabel } from "@/lib/format-model-label";
 import { formatRelative } from "@/lib/format-relative";
-import { getConversationResidency, MessageList } from "@/features/conversation";
+import {
+  getConversationResidency,
+  MessageList,
+  SubagentProviderScope,
+  useSubagentProvider,
+} from "@/features/conversation";
 import {
   formatSubagentDisplayName,
   type CanonicalSubagentRoster,
@@ -140,8 +144,9 @@ function CanonicalRosterRow({
   const status = canonicalStatus(row);
   const lineage = canonicalLineage(row, rows);
   const configuration = canonicalConfiguration(row);
+  const provider = useSubagentProvider();
   return (
-    <div data-testid={testId} className="flex w-full min-w-0 items-center rounded-none transition-colors duration-150 motion-reduce:transition-none hover:bg-muted/30">
+    <div data-testid={testId} className="flex w-full min-w-0 items-center rounded-none transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30">
       <Button
         type="button"
         variant="ghost"
@@ -150,14 +155,7 @@ function CanonicalRosterRow({
         data-subagent-id={row.id}
         className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none px-6 py-2.5 text-left focus-visible:ring-inset"
       >
-        <SubagentIdentityGlyph
-          identity={canonicalIdentity(row)}
-          hasExplicitIdentity={row.identity !== undefined}
-          paletteSeed={row.id}
-          animated={active}
-          className="size-6"
-          size={15}
-        />
+        <ProviderIcon provider={provider} size={20} />
         <CanonicalRosterMetadata row={row} active={active} status={status} lineage={lineage} configuration={configuration} />
       </Button>
       <SubagentStopControl
@@ -190,12 +188,12 @@ function CanonicalRosterMetadata({
   return (
     <span className="min-w-0 flex-1">
       <span className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{canonicalTitle(row)}</span>
+        <span className="min-w-0 flex-1 text-fade text-sm font-medium text-ink">{canonicalTitle(row)}</span>
         <CanonicalRosterTimestamp active={active} status={status} lastActiveAt={lastActiveAt} lastActiveLabel={lastActiveLabel} />
       </span>
-      {lineage && <span className="mt-0.5 block truncate text-xs text-muted-foreground" aria-label={`Lineage: ${lineage}`}>{lineage}</span>}
-      {row.task && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{canonicalIdentity(row)}</span>}
-      {configuration && <span className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">{configuration}</span>}
+      {lineage && <span className="mt-0.5 block text-fade text-xs text-muted" aria-label={`Lineage: ${lineage}`}>{lineage}</span>}
+      {row.task && <span className="mt-0.5 block text-fade text-xs text-muted">{canonicalIdentity(row)}</span>}
+      {configuration && <span className="mt-0.5 block text-fade font-mono text-xs text-muted">{configuration}</span>}
       {!active && row.hasActiveDescendant && <span className="mt-0.5 block text-xs text-primary">Active descendant</span>}
     </span>
   );
@@ -214,7 +212,7 @@ function CanonicalRosterTimestamp({
 }) {
   if (active) return null;
   return (
-    <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground">
+    <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums text-muted">
       {status !== "Completed" && <span>{status}</span>}
       {status !== "Completed" && lastActiveLabel && <span aria-hidden>·</span>}
       {lastActiveAt && lastActiveLabel && (
@@ -241,11 +239,11 @@ function NarrativeRosterRow({
   const title = row.task ? formatSubagentDisplayName(row.task) : identity;
   const status = narrativeRowStatus(row);
   const active = narrativeRowTab(row) === "active";
-  const paletteSeed = narrativePaletteSeed(row);
+  const provider = useSubagentProvider();
   const lastActiveAt = new Date(row.activityAt).toISOString();
   const lastActiveLabel = active ? null : formatRelative(lastActiveAt);
   return (
-    <div data-testid={testId} className="flex w-full min-w-0 items-center rounded-none transition-colors duration-150 motion-reduce:transition-none hover:bg-muted/30">
+    <div data-testid={testId} className="flex w-full min-w-0 items-center rounded-none transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30">
       <Button
         type="button"
         variant="ghost"
@@ -254,19 +252,12 @@ function NarrativeRosterRow({
         data-subagent-id={row.id}
         className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none px-6 py-2.5 text-left focus-visible:ring-inset"
       >
-        <SubagentIdentityGlyph
-          identity={identity}
-          hasExplicitIdentity={row.hasExplicitIdentity}
-          paletteSeed={paletteSeed}
-          animated={active}
-          className="size-6"
-          size={15}
-        />
+        <ProviderIcon provider={provider} size={20} />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{title}</span>
+            <span className="min-w-0 flex-1 text-fade text-sm font-medium text-ink">{title}</span>
             {!active && (
-              <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground">
+              <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums text-muted">
                 {status !== "Completed" && <span>{status}</span>}
                 {status !== "Completed" && lastActiveLabel && <span aria-hidden>·</span>}
                 {lastActiveLabel && (
@@ -278,8 +269,8 @@ function NarrativeRosterRow({
               </span>
             )}
           </span>
-          {row.task && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{identity}</span>}
-          {row.activity && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{row.activity}</span>}
+          {row.task && <span className="mt-0.5 block text-fade text-xs text-muted">{identity}</span>}
+          {row.activity && <span className="mt-0.5 block text-fade text-xs text-muted">{row.activity}</span>}
         </span>
       </Button>
     </div>
@@ -289,14 +280,12 @@ function NarrativeRosterRow({
 function CanonicalDetailView({
   row,
   rows,
-  paletteSeed,
   onBack,
   onStop,
   onTerminal,
 }: {
   readonly row: CanonicalSubagentRosterRow;
   readonly rows: readonly CanonicalSubagentRosterRow[];
-  readonly paletteSeed: string;
   readonly onBack: () => void;
   readonly onStop: () => Promise<CanonicalSubagentStopResult>;
   readonly onTerminal: () => Promise<void> | void;
@@ -306,6 +295,7 @@ function CanonicalDetailView({
   const lineage = canonicalLineage(row, rows);
   const active = canonicalIsActive(row);
   const configuration = canonicalConfiguration(row);
+  const provider = useSubagentProvider();
   const [displayLeaseAcquired, setDisplayLeaseAcquired] = useState(false);
   useEffect(() => {
     const residency = getConversationResidency();
@@ -321,16 +311,16 @@ function CanonicalDetailView({
           <ArrowLeft size={15} aria-hidden />
         </Button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <SubagentIdentityGlyph identity={identity} hasExplicitIdentity={row.identity !== undefined} paletteSeed={paletteSeed} className="size-6" size={15} />
+          <ProviderIcon provider={provider} size={20} />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold">{title}</h2>
-            {row.task && <p className="truncate text-xs text-muted-foreground">{identity}</p>}
-            {lineage && <p className="truncate text-xs text-muted-foreground">{lineage}</p>}
+            <h2 className="text-fade text-sm font-semibold">{title}</h2>
+            {row.task && <p className="text-fade text-xs text-muted">{identity}</p>}
+            {lineage && <p className="text-fade text-xs text-muted">{lineage}</p>}
           </div>
           <span role="status" className="sr-only">
             {canonicalStatus(row)}
           </span>
-          {configuration && <span className="shrink-0 font-mono text-xs text-muted-foreground">{configuration}</span>}
+          {configuration && <span className="shrink-0 font-mono text-xs text-muted">{configuration}</span>}
         </div>
       </header>
       <div className="min-h-0 flex-1">
@@ -417,16 +407,16 @@ function StopAllConfirmationDialog({
               const statusLabel = stopAllStatusLabel(status);
               return (
                 <li key={target.id} className="flex min-h-12 items-center justify-between gap-6 py-3 text-sm">
-                  <span className="min-w-0 text-foreground">
+                  <span className="min-w-0 text-ink">
                     <span className="block font-medium leading-5">{target.identity}</span>
                     {target.lineage && (
-                      <span className="mt-1 block text-xs leading-4 text-muted-foreground">
+                      <span className="mt-1 block text-xs leading-4 text-muted">
                         Lineage: {target.lineage}
                       </span>
                     )}
                   </span>
                   {statusLabel && (
-                    <span className={`shrink-0 text-xs ${status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
+                    <span className={`shrink-0 text-xs ${status === "failed" ? "text-destructive" : "text-muted"}`}>
                       {statusLabel}
                     </span>
                   )}
@@ -680,7 +670,7 @@ function canonicalRosterPlaceholder(
     return {
       placeholder: (
         <section className="flex min-h-0 flex-1 items-center justify-center px-4" aria-label="Subagents" data-testid="subagents-loading" role="status">
-          <p className="text-sm text-muted-foreground">Loading subagents…</p>
+          <p className="text-sm text-muted">Loading subagents…</p>
         </section>
       ),
     };
@@ -690,8 +680,8 @@ function canonicalRosterPlaceholder(
       placeholder: (
         <section className="flex min-h-0 flex-1 items-center justify-center px-4" aria-label="Subagents" data-testid="subagents-error" role="alert">
           <div className="max-w-md space-y-1 text-center">
-            <p className="font-medium text-foreground">Could not load subagents</p>
-            <p className="text-sm text-muted-foreground">The canonical roster is unavailable.</p>
+            <p className="font-medium text-ink">Could not load subagents</p>
+            <p className="text-sm text-muted">The canonical roster is unavailable.</p>
           </div>
         </section>
       ),
@@ -739,7 +729,7 @@ function SubagentRosterList({
     <section ref={stopAll.panelRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col" aria-label="Subagents">
       <ScrollArea className="min-h-0 flex-1" viewportRef={detail.viewportRef}>
         {isEmpty ? (
-          <p data-testid="subagents-empty" className="px-4 py-6 text-sm text-muted-foreground">
+          <p data-testid="subagents-empty" className="px-4 py-6 text-sm text-muted">
             Sub-agents will appear here when this thread delegates work.
           </p>
         ) : (
@@ -747,8 +737,8 @@ function SubagentRosterList({
             {(activeRows.length + narrative.active.length) > 0 && (
               <section aria-labelledby="subagents-active-heading">
                 <div className="flex items-center gap-2 px-6 pb-1 pt-6">
-                  <h2 id="subagents-active-heading" className="text-sm font-semibold text-foreground">Active</h2>
-                  <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted-foreground hover:bg-transparent">
+                  <h2 id="subagents-active-heading" className="text-sm font-semibold text-ink">Active</h2>
+                  <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
                     {activeRows.length + narrative.active.length}
                   </Badge>
                   {eligibleStopAllCount >= 2 && (
@@ -791,8 +781,8 @@ function SubagentRosterList({
             {(doneRows.length + narrative.finished.length) > 0 && (
               <section aria-labelledby="subagents-done-heading">
                 <div className="flex items-center gap-2 px-6 pb-1 pt-6">
-                  <h2 id="subagents-done-heading" className="text-sm font-semibold text-foreground">Done</h2>
-                  <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted-foreground hover:bg-transparent">
+                  <h2 id="subagents-done-heading" className="text-sm font-semibold text-ink">Done</h2>
+                  <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted hover:bg-transparent">
                     {doneRows.length + narrative.finished.length}
                   </Badge>
                 </div>
@@ -837,7 +827,16 @@ function SubagentRosterList({
 }
 
 /** Renders the canonical child roster for the selected parent thread. */
+/** Sub-agents roster and detail for one parent thread. */
 export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
+  return (
+    <SubagentProviderScope threadId={threadId}>
+      <SubagentsPanelContent threadId={threadId} />
+    </SubagentProviderScope>
+  );
+}
+
+function SubagentsPanelContent({ threadId }: { readonly threadId: string }) {
   const { state: canonicalState, refresh: refreshRoster } = useCanonicalRoster(threadId);
   const clearDetail = useClearSubagentDetail();
   const detail = useCanonicalDetail(threadId, canonicalState);
@@ -866,7 +865,6 @@ export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
       key={selectedCanonicalRow.id}
       row={selectedCanonicalRow}
       rows={detail.rows}
-      paletteSeed={selection.id}
       onStop={() => getTransport().stopCanonicalSubagent(selectedCanonicalRow.owningParentThreadId, selectedCanonicalRow.id)}
       onTerminal={refreshRoster}
       onBack={backToRoster(threadId, selection.scrollTop, detail.viewportRef, selectedCanonicalRow.id, clearDetail)}
@@ -877,7 +875,6 @@ export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
     return <NarrativeDetailView
       key={selectedNarrativeRow.id}
       row={selectedNarrativeRow}
-      paletteSeed={selection.id}
       onBack={backToRoster(threadId, selection.scrollTop, detail.viewportRef, selectedNarrativeRow.id, clearDetail)}
     />;
   }

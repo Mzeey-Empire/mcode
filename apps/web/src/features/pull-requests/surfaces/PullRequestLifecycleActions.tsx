@@ -188,7 +188,7 @@ function LifecycleRemoteActions({
 
 function MenuReason({ reason }: { reason: string }) {
   return (
-    <DropdownMenuLabel className="max-w-64 whitespace-normal text-xs font-normal leading-5 text-muted-foreground">
+    <DropdownMenuLabel className="max-w-64 whitespace-normal text-xs font-normal leading-5 text-muted">
       {reason}
     </DropdownMenuLabel>
   );
@@ -368,7 +368,7 @@ export function PullRequestLifecycleActions({
               type="button"
               variant="ghost"
               size="icon-xs"
-              className="text-muted-foreground"
+              className="text-muted"
               aria-label="Pull request actions"
             >
               <MoreIcon size={14} aria-hidden />

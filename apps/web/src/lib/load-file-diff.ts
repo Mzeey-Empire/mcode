@@ -1,5 +1,5 @@
 import type { McodeTransport } from "@/transport/types";
-import type { SelectedFile } from "@/stores/diffStore";
+import type { DiffSource } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 
 async function loadBranchFileDiff(
@@ -27,9 +27,8 @@ async function loadCommitFileDiff(
 
 /**
  * Fetch the unified diff for a single file in a Review view. Centralizes the
- * per-source routing shared by the inline file rows and the selected-file pane,
- * so the two stay in lockstep as sources are added. The `id` resolves the diff
- * per {@link SelectedFile.id}: snapshot ID, thread ID, commit SHA, the
+ * per-source routing for Review file content. The `id` resolves the diff
+ * for each {@link DiffSource}: snapshot or turn-diff ID, thread ID, commit SHA, the
  * `base...target` comparison range for `"branch"`, or the workspace ID for the
  * working-tree views. For the git views `threadId` (when a real thread) makes
  * the diff read the thread's worktree rather than the workspace root; the server
@@ -37,7 +36,7 @@ async function loadCommitFileDiff(
  */
 export async function loadFileDiff(
   transport: McodeTransport,
-  source: SelectedFile["source"],
+  source: DiffSource,
   id: string,
   filePath: string,
   threadId?: string,

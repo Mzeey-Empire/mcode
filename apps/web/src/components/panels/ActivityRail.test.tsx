@@ -246,6 +246,18 @@ describe("ActivityRail expansion", () => {
     expect(handlers.onCreate).toHaveBeenCalledWith("preview");
   });
 
+  it("disables the terminal choice at eight records and explains the limit", () => {
+    render(<ActivityRail {...railElement().props} terminalCapReached />);
+    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    const terminal = screen.getByRole("menuitem", { name: "Terminal" });
+    expect(terminal).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(terminal);
+    expect(handlers.onCreate).not.toHaveBeenCalled();
+    fireEvent.focus(terminal.parentElement!);
+    act(() => vi.runAllTimers());
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent("8 terminals are open. Close one to open another.");
+  });
+
   it("collapses after a focused rail control is removed", () => {
     const { rerender } = render(railElement(["terminal"]));
     const rail = screen.getByTestId("activity-rail");

@@ -55,15 +55,15 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
             disabled={disabled}
             aria-label="Base branch"
             className={cn(
-              "flex h-8 w-full items-center justify-between rounded-lg border border-input bg-background pl-3 pr-2.5 text-sm shadow-xs transition-colors",
-              "focus-visible:border-ring focus-visible:outline-none",
+              "flex h-8 w-full items-center justify-between rounded-lg border border-control-border bg-background pl-3 pr-2.5 text-sm shadow-xs transition-colors",
+              "focus-visible:border-focus focus-visible:outline-none",
               "disabled:cursor-not-allowed disabled:opacity-50",
-              open && "border-ring",
+              open && "border-focus",
             )}
           >
-            <span className="truncate">{value}</span>
+            <span className="text-fade">{value}</span>
             <ChevronDown
-              className={cn("size-3.5 text-muted-foreground transition-transform duration-150", open && "rotate-180")}
+              className={cn("size-3.5 text-muted transition-transform duration-150", open && "rotate-180")}
               aria-hidden="true"
             />
           </button>
@@ -81,10 +81,10 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
                 onSelect={(name) => { onChange(name); setOpen(false); }}
                 className={cn(
                   "flex justify-between text-xs",
-                  b.name === value && "bg-accent text-foreground",
+                  b.name === value && "bg-selected text-ink",
                 )}
               >
-                <span className="truncate">{b.name}</span>
+                <span className="text-fade">{b.name}</span>
                 {b.isCurrent && (
                   <Badge variant="secondary" size="sm" className="ml-2 shrink-0">current</Badge>
                 )}
@@ -454,23 +454,23 @@ export function CreatePrDialog({
 function PrDialogHeader({ branch, baseBranch, isDraft }: PrDialogHeaderProps) {
   return (
     <div className="flex items-center gap-3 border-b border-border/50 py-4 pl-5 pr-12">
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40">
-        <GitPullRequest className="size-3.5 text-muted-foreground" aria-hidden="true" />
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-hover/40">
+        <GitPullRequest className="size-3.5 text-muted" aria-hidden="true" />
       </div>
       <div className="min-w-0 flex-1">
         <DialogTitle className="text-sm font-medium leading-none">Create pull request</DialogTitle>
         <DialogDescription className="mt-1 flex min-w-0 items-center gap-1.5 text-xs">
-          <span className="min-w-0 max-w-[min(200px,40vw)] truncate font-mono text-foreground/80">
+          <span className="min-w-0 max-w-[min(200px,40vw)] text-fade font-mono text-ink/80">
             {branch}
           </span>
-          <span className="shrink-0 text-muted-foreground/50" aria-hidden="true">→</span>
-          <span className="min-w-0 max-w-[min(200px,40vw)] truncate font-mono text-muted-foreground">
+          <span className="shrink-0 text-muted/50" aria-hidden="true">→</span>
+          <span className="min-w-0 max-w-[min(200px,40vw)] text-fade font-mono text-muted">
             {baseBranch}
           </span>
         </DialogDescription>
       </div>
       {isDraft && (
-        <span className="shrink-0 rounded border border-border/50 bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground">
+        <span className="shrink-0 rounded border border-border/50 bg-hover/60 px-2 py-0.5 text-xs text-muted">
           Draft
         </span>
       )}
@@ -488,7 +488,7 @@ function PrDialogSidebar({
   return (
     <div className="flex min-h-0 w-64 shrink-0 flex-col gap-4 border-r border-border/50 p-5 max-sm:w-full max-sm:border-r-0 max-sm:border-b max-sm:border-border/50">
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="pr-title" className="text-xs text-muted-foreground">
+        <label htmlFor="pr-title" className="text-xs text-muted">
           Title
         </label>
         <Input
@@ -501,7 +501,7 @@ function PrDialogSidebar({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+        <label className="flex items-center gap-1 text-xs text-muted">
           <GitBranch className="size-3" aria-hidden="true" />
           Base branch
         </label>
@@ -516,7 +516,7 @@ function PrDialogSidebar({
       <div className="flex items-center justify-between">
         <label
           htmlFor="pr-is-draft"
-          className="cursor-pointer select-none text-xs text-muted-foreground"
+          className="cursor-pointer select-none text-xs text-muted"
         >
           Draft PR
         </label>
@@ -580,9 +580,9 @@ function PrDraftLoadingState() {
     <div
       role="status"
       aria-live="polite"
-      className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
+      className="flex flex-1 items-center justify-center gap-2 text-sm text-muted"
     >
-      <Spinner size={16} className="text-muted-foreground" />
+      <Spinner size={16} className="text-muted" />
       Generating PR draft…
     </div>
   );
@@ -592,7 +592,7 @@ function PrDescriptionEditor({ form, isDisabled, onRegenerate }: PrDescriptionPa
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-5">
       <div className="flex items-center justify-between">
-        <label htmlFor="pr-body" className="text-xs text-muted-foreground">
+        <label htmlFor="pr-body" className="text-xs text-muted">
           Description
         </label>
         <div className="flex items-center gap-2">
@@ -634,7 +634,7 @@ function PrDraftGenerationButton({
       size="sm"
       onClick={onRegenerate}
       disabled={disabled}
-      className="h-6 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+      className="h-6 gap-1.5 px-2 text-xs text-muted hover:text-ink"
     >
       {isRegenerating ? (
         <Spinner size={12} className="text-current" />
@@ -656,10 +656,10 @@ function PrDescriptionField({ form, isDisabled }: Pick<PrDescriptionPanelProps, 
         disabled={isDisabled}
         placeholder="PR description"
         className={cn(
-          "flex-1 min-h-0 w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm shadow-xs transition-colors",
+          "flex-1 min-h-0 w-full rounded-lg border border-control-border bg-background px-3 py-2.5 text-sm shadow-xs transition-colors",
           "font-mono resize-none overflow-y-auto",
-          "placeholder:text-muted-foreground",
-          "focus-visible:border-ring focus-visible:outline-none",
+          "placeholder:text-muted",
+          "focus-visible:border-focus focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-50",
         )}
       />
@@ -671,13 +671,13 @@ function PrDescriptionField({ form, isDisabled }: Pick<PrDescriptionPanelProps, 
 
 function PrMarkdownPreview({ body }: { body: string }) {
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border border-input bg-background px-3 py-2.5 text-sm">
+    <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border border-control-border bg-background px-3 py-2.5 text-sm">
       {body.trim() ? (
-        <Suspense fallback={<span className="text-sm text-muted-foreground">Loading preview…</span>}>
+        <Suspense fallback={<span className="text-sm text-muted">Loading preview…</span>}>
           <PreviewMarkdown content={body} />
         </Suspense>
       ) : (
-        <span className="italic text-muted-foreground">Nothing to preview.</span>
+        <span className="italic text-muted">Nothing to preview.</span>
       )}
     </div>
   );

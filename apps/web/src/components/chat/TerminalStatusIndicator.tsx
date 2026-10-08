@@ -26,8 +26,8 @@ export function TerminalStatusIndicator() {
       onClick={togglePanel}
       className="flex cursor-pointer items-center gap-1.5 text-xs hover:opacity-80"
     >
-      <Spinner size={12} className="text-muted-foreground" style={SLOW_SPIN_STYLE} />
-      <span className="flex items-center gap-1.5 text-muted-foreground font-medium">
+      <Spinner size={12} className="text-muted" style={SLOW_SPIN_STYLE} />
+      <span className="flex items-center gap-1.5 text-muted font-medium">
         <span className="size-1.5 rounded-full bg-primary animate-pulse" />
         {count} active terminal{count !== 1 ? "s" : ""}
       </span>

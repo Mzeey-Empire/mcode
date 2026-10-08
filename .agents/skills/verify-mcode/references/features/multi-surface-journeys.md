@@ -148,11 +148,11 @@ Use `composer-queue proof --cursor-model <id> --allow-enable-cursor --confirm-pr
 1. Start a direct Codex thread with `gpt-5.6-terra` and delegate one marked task.
 2. Confirm that either Codex protocol event shape maps to one canonical child.
 3. Observe Active, then Completed, in the canonical roster.
-4. Open the chat row and confirm that the exact child detail uses the same glyph color.
+4. Open the chat row and confirm that the exact child detail shows the same provider icon.
 5. Confirm that the parent task and child assistant message render in the child transcript.
-6. Reload and confirm the same title, state, color, and message.
+6. Reload and confirm the same title, state, provider icon, and message.
 
-Use `runtime check` for both protocol shapes. Use `runtime live --scenario subagent --provider codex --model gpt-5.6-terra --confirm-provider-call` for the live provider and persistence proof. Use the Electron steps in [Codex subagent view](codex-subagent-view.md) for click, color, and reload evidence.
+Use `runtime check` for both protocol shapes. Use `runtime live --scenario subagent --provider codex --model gpt-5.6-terra --confirm-provider-call` for the live provider and persistence proof. Use the Electron steps in [Codex subagent view](codex-subagent-view.md) for click, provider icon, and reload evidence.
 
 ## Managed-worktree Setup readiness
 

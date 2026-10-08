@@ -5,7 +5,7 @@ import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
-import { getSubagentIdentityPaletteIndex } from "@/components/ui/SubagentIdentityGlyph";
+import { createMockThread } from "@/__tests__/mocks/transport";
 
 const harness = vi.hoisted(() => ({
   loadCanonicalSubagentRoster: vi.fn(),
@@ -92,7 +92,7 @@ describe("SubagentsPanel", () => {
     harness.residency.unmountDisplayConversation.mockReset();
     useWorkspaceStore.setState({ activeWorkspaceId: "workspace-1", activeThreadId: "thread-1" });
     useThreadStore.setState({ currentThreadId: "thread-1", records: new Map() });
-    useDiffStore.setState({ subagentDetailByThread: {}, subagentReviewScopeByThread: {} });
+    useDiffStore.setState({ subagentDetailByThread: {} });
   });
 
   it("does not render narrative-derived rows while the canonical roster is loading", () => {
@@ -187,7 +187,6 @@ describe("SubagentsPanel", () => {
       subagentDetailByThread: {
         "thread-1": { id: "live-agent-call", originTab: "active", scrollTop: 0 },
       },
-      subagentReviewScopeByThread: {},
     });
     let poll: (() => void) | undefined;
     const intervalSpy = vi.spyOn(window, "setInterval").mockImplementation((callback, delay) => {
@@ -220,8 +219,9 @@ describe("SubagentsPanel", () => {
       subagentDetailByThread: {
         "thread-1": { id: "canonical-chat-child", originTab: "finished", scrollTop: 0 },
       },
-      subagentReviewScopeByThread: {},
     });
+
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1", provider: "codex" })] });
 
     render(<SubagentsPanel threadId="thread-1" />);
 
@@ -230,10 +230,8 @@ describe("SubagentsPanel", () => {
       "data-display-thread-id",
       "canonical-chat-child",
     );
-    expect(document.querySelector('[data-subagent-identity-glyph="Selected child"]')).toHaveAttribute(
-      "data-subagent-palette",
-      String(getSubagentIdentityPaletteIndex("canonical-chat-child")),
-    );
+    expect(screen.getByRole("region", { name: "Selected child subagent details" })
+      .querySelector('[data-provider-icon="codex"]')).toBeInTheDocument();
     expect(screen.queryByText("Other child")).not.toBeInTheDocument();
   });
 
@@ -635,7 +633,6 @@ describe("SubagentsPanel", () => {
       subagentDetailByThread: {
         "thread-1": { id: "raw-agent-call", scrollTop: 0 },
       },
-      subagentReviewScopeByThread: {},
     });
 
     render(<SubagentsPanel threadId="thread-1" />);
@@ -667,7 +664,6 @@ describe("SubagentsPanel", () => {
       subagentDetailByThread: {
         "thread-1": { id: "native-provider-child", originTab: "finished", scrollTop: 0 },
       },
-      subagentReviewScopeByThread: {},
     });
 
     render(<SubagentsPanel threadId="thread-1" />);
@@ -1192,7 +1188,6 @@ describe("SubagentsPanel", () => {
         subagentDetailByThread: {
           "thread-1": { id: "agent-1", originTab: "finished", scrollTop: 0 },
         },
-        subagentReviewScopeByThread: {},
       });
 
       render(<SubagentsPanel threadId="thread-1" />);
@@ -1214,7 +1209,6 @@ describe("SubagentsPanel", () => {
         subagentDetailByThread: {
           "thread-1": { id: "canonical-child", originTab: "finished", scrollTop: 0 },
         },
-        subagentReviewScopeByThread: {},
       });
 
       render(<SubagentsPanel threadId="thread-1" />);

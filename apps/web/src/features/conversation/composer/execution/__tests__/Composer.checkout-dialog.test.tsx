@@ -861,8 +861,8 @@ describe("Composer checkout confirmation", () => {
       "1 annotation",
     );
     expect(screen.getByTestId("composer-annotation-bundle")).toHaveClass(
-      "bg-accent",
-      "text-accent-foreground",
+      "bg-selected",
+      "text-ink",
     );
     expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("1 comment");
     await userEvent.click(screen.getByLabelText("Send message"));

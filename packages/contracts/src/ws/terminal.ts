@@ -1,20 +1,14 @@
 import { z } from "zod";
+import { TerminalBackendCapabilitiesSchema } from "../models/terminal-backend.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import {
-  TERMINAL_MAX_CHECKPOINT_BYTES,
-  TERMINAL_MAX_SESSIONS,
-  TerminalAttachmentDescriptorSchema,
   type TerminalErrorCode,
   TerminalCustomProfileIdSchema,
   TerminalCustomProfileSchema,
   TerminalErrorSchema,
   TerminalProfileReferenceSchema,
   TerminalResolvedProfileSchema,
-  TerminalScopeSchema,
-  TerminalSessionSnapshotSchema,
-  TerminalU64Schema,
   TerminalUuidSchema,
-  TerminalV1BackendCapabilitiesSchema,
   type TerminalRetryClass,
 } from "../models/terminal.js";
 import {
@@ -41,14 +35,6 @@ const TERMINAL_DIAGNOSTICS_RESPONSE_MAX_BYTES = 524_288 + 1_024;
 /** Frozen Terminal v1 management method names. */
 export const TERMINAL_V1_METHOD_NAMES = [
   "terminal.capabilities",
-  "terminal.session.create",
-  "terminal.session.list",
-  "terminal.session.attach",
-  "terminal.session.detach",
-  "terminal.session.close",
-  "terminal.session.hasChildren",
-  "terminal.session.checkpoint.begin",
-  "terminal.session.checkpoint.complete",
   "terminal.profile.list",
   "terminal.profile.create",
   "terminal.profile.update",
@@ -77,8 +63,6 @@ interface MethodContract {
 
 const empty = z.object({}).strict();
 const id = TerminalUuidSchema();
-const u64 = TerminalU64Schema();
-const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const terminalProfileInput = TerminalCustomProfileSchema().omit({ id: true });
 const terminalPreferencesResult = z
   .object({
@@ -102,59 +86,9 @@ const contract = (
 
 /** Strict schemas and retry metadata for every Terminal v1 management method. */
 export const TERMINAL_V1_METHODS = {
-  "terminal.capabilities": contract(empty, TerminalV1BackendCapabilitiesSchema(), {
+  "terminal.capabilities": contract(empty, TerminalBackendCapabilitiesSchema(), {
     HOST_STARTING: "SAFE_RETRY", HOST_UNHEALTHY: "SAFE_RETRY", BACKEND_RESTART_REQUIRED: "RESTART", PROTOCOL_MISMATCH: "RESTART",
   }, "SAFE_RETRY"),
-  "terminal.session.create": contract(
-    z.object({ scope: TerminalScopeSchema(), requestedProfileId: TerminalProfileReferenceSchema().optional(), replacesSessionId: id.optional() }).strict(),
-    TerminalSessionSnapshotSchema().refine((value) => value.state === "running"),
-    { INVALID_SCOPE: "NEW_SESSION", PROFILE_NOT_FOUND: "NEW_SESSION", PROFILE_UNAVAILABLE: "NEW_SESSION", SLOT_LIMIT_REACHED: "NEW_SESSION", HOST_STARTING: "SAFE_RETRY", HOST_UNHEALTHY: "NEW_SESSION", CONTAINMENT_FAILED: "NEW_SESSION", PROTOCOL_MISMATCH: "RESTART" },
-    "UNKNOWN_DELIVERY",
-  ),
-  "terminal.session.list": contract(
-    z.object({ scope: TerminalScopeSchema().optional() }).strict(),
-    z
-      .array(TerminalSessionSnapshotSchema())
-      .max(TERMINAL_MAX_SESSIONS)
-      .refine(
-        (sessions) => sessions.every((session, index) => index === 0 || sessions[index - 1].createdAt <= session.createdAt),
-        "Terminal sessions must be ordered by creation time",
-      ),
-    { PROTOCOL_MISMATCH: "RESTART" },
-    "SAFE_RETRY",
-  ),
-  "terminal.session.attach": contract(
-    z.object({ sessionId: id, attachmentId: id, hostGeneration: u64, lastOutputSeq: u64, lastCommandSeq: u64, checkpointSeq: u64.optional() }).strict(),
-    TerminalAttachmentDescriptorSchema(),
-    { SESSION_NOT_FOUND: "NEW_SESSION", SESSION_NOT_RUNNING: "NEW_SESSION", STALE_HOST_GENERATION: "REATTACH", STALE_ATTACHMENT: "REATTACH", REPLAY_GAP: "REATTACH", HOST_UNHEALTHY: "REATTACH", PROTOCOL_MISMATCH: "RESTART" },
-    "REATTACH",
-  ),
-  "terminal.session.detach": contract(
-    z.object({ sessionId: id, attachmentId: id, attachmentEpoch: u64, reason: z.enum(["hide", "switch", "disconnect"]) }).strict(),
-    z.object({ detached: z.literal(true) }).strict(),
-    { SESSION_NOT_FOUND: "SAFE_RETRY", STALE_ATTACHMENT: "SAFE_RETRY", PROTOCOL_MISMATCH: "RESTART" },
-    "SAFE_RETRY",
-  ),
-  "terminal.session.close": contract(
-    z.object({ sessionId: id, reason: z.enum(["user", "scope-reset", "workspace-delete", "app-shutdown"]) }).strict(),
-    TerminalSessionSnapshotSchema().refine((value) => value.state === "exited" || value.state === "failed"),
-    { SESSION_NOT_FOUND: "SAFE_RETRY", SESSION_NOT_RUNNING: "SAFE_RETRY", STALE_HOST_GENERATION: "SAFE_RETRY", HOST_UNHEALTHY: "SAFE_RETRY", CONTAINMENT_FAILED: "NEW_SESSION", EXIT_FLUSH_FAILED: "REATTACH", PROTOCOL_MISMATCH: "RESTART" },
-    "SAFE_RETRY",
-  ),
-  "terminal.session.hasChildren": contract(
-    z.object({ sessionId: id }).strict(), z.object({ hasChildren: z.boolean() }).strict(),
-    { SESSION_NOT_FOUND: "SAFE_RETRY", HOST_UNHEALTHY: "SAFE_RETRY", PROTOCOL_MISMATCH: "RESTART" }, "SAFE_RETRY",
-  ),
-  "terminal.session.checkpoint.begin": contract(
-    z.object({ sessionId: id, attachmentId: id, attachmentEpoch: u64, hostGeneration: u64, baseOutputSeq: u64, declaredBytes: z.number().int().min(1).max(TERMINAL_MAX_CHECKPOINT_BYTES), sha256 }).strict(),
-    z.object({ uploadId: id, chunkBytes: z.literal(TERMINAL_CHECKPOINT_CHUNK_BYTES), expiresAfterMs: z.literal(TERMINAL_CHECKPOINT_EXPIRES_AFTER_MS) }).strict(),
-    { SESSION_NOT_FOUND: "REATTACH", STALE_ATTACHMENT: "REATTACH", STALE_HOST_GENERATION: "REATTACH", CHECKPOINT_REJECTED: "REATTACH", PROTOCOL_MISMATCH: "RESTART" }, "REATTACH",
-  ),
-  "terminal.session.checkpoint.complete": contract(
-    z.object({ sessionId: id, attachmentId: id, attachmentEpoch: u64, hostGeneration: u64, uploadId: id, totalBytes: z.number().int().min(1).max(TERMINAL_MAX_CHECKPOINT_BYTES), sha256 }).strict(),
-    z.object({ accepted: z.literal(true), checkpointThroughSeq: u64 }).strict(),
-    { SESSION_NOT_FOUND: "REATTACH", STALE_ATTACHMENT: "REATTACH", STALE_HOST_GENERATION: "REATTACH", CHECKPOINT_REJECTED: "REATTACH", PROTOCOL_MISMATCH: "RESTART" }, "UNKNOWN_DELIVERY", "checkpoint-upload",
-  ),
   "terminal.profile.list": contract(
     empty,
     z.object({

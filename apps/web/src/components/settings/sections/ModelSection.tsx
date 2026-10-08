@@ -23,27 +23,8 @@ import { SettingsProviderPicker } from "../SettingsProviderPicker";
 import { Switch } from "@/components/ui/switch";
 import type { ContextWindowMode, ProviderAvailability, SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
 import { Sparkles } from "lucide-react";
-import {
-  ClaudeIcon,
-  CodexIcon,
-  CursorProviderIcon,
-  DevinIcon,
-  OpenCodeIcon,
-  GeminiIcon,
-  CopilotIcon,
-} from "@/components/chat/ProviderIcons";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { useToastStore } from "@/stores/toastStore";
-
-/** Maps provider id to its brand icon component. */
-const PROVIDER_ICONS: Record<string, ReactNode> = {
-  claude: <ClaudeIcon size={12} />,
-  codex: <CodexIcon size={12} />,
-  copilot: <CopilotIcon size={12} />,
-  cursor: <CursorProviderIcon size={12} />,
-  devin: <DevinIcon size={12} />,
-  opencode: <OpenCodeIcon size={12} />,
-  gemini: <GeminiIcon size={12} />,
-};
 
 
 const REASONING_OPTIONS_BASE = [
@@ -97,7 +78,7 @@ function buildProviderOption(
     value: p.id,
     label: p.name,
     disabled: p.comingSoon || unavailable,
-    icon: PROVIDER_ICONS[p.id],
+    icon: <ProviderIcon provider={p.id} size={12} />,
     title,
   };
 }
@@ -189,7 +170,7 @@ export function ModelSection() {
         value: "",
         label: "Auto",
         disabled: false,
-        icon: <Sparkles size={12} className="text-muted-foreground" aria-hidden />,
+        icon: <Sparkles size={12} className="text-muted" aria-hidden />,
         title: "Use the default provider above",
       },
       ...MODEL_PROVIDERS.map((p) => buildProviderOption(p, availabilityById.get(p.id))),
@@ -555,10 +536,10 @@ function ModelSettingsContent({
   return (
     <div data-testid="model-settings-section" className="mx-auto w-full max-w-[88rem] pb-10">
       <header className="mb-8 border-b border-border/45 px-1 pb-6">
-        <h1 className="text-2xl leading-7 font-semibold tracking-tight text-foreground">
+        <h1 className="text-2xl leading-7 font-semibold tracking-tight text-ink">
           Models &amp; providers
         </h1>
-        <p className="mt-2 max-w-[65ch] text-sm leading-4 text-muted-foreground">
+        <p className="mt-2 max-w-[65ch] text-sm leading-4 text-muted">
           Configure the providers and model defaults used across new threads and utility tasks.
         </p>
       </header>
@@ -826,7 +807,7 @@ function UtilityModelSettings({
             data-testid="settings-utility-model-trigger"
           />
         ) : (
-          <div className="flex h-8 min-w-[220px] max-w-[280px] items-center rounded-[min(var(--radius-md),12px)] border border-input bg-background px-2.5 text-xs text-muted-foreground select-none">
+          <div className="flex h-8 min-w-[220px] max-w-[280px] items-center rounded-[min(var(--radius-md),12px)] border border-control-border bg-background px-2.5 text-xs text-muted select-none">
             Auto
           </div>
         )}

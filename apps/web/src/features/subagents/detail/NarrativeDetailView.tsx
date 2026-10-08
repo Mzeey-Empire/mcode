@@ -2,7 +2,8 @@ import { ArrowLeft, CircleCheck, CircleDashed, CircleX } from "lucide-react";
 import { formatSubagentDisplayName } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { SubagentIdentityGlyph } from "@/components/ui/SubagentIdentityGlyph";
+import { ProviderIcon } from "@/components/ui/provider-icon";
+import { useSubagentProvider } from "@/features/conversation";
 import { resolveModelDisplayLabel } from "@/lib/format-model-label";
 import { formatSubagentIdentity } from "../identity/format-subagent-identity";
 import { narrativeRowStatus } from "../roster/narrative-subagents";
@@ -20,9 +21,9 @@ function ActivityStatusIcon({ activity }: { readonly activity: SubagentDetailAct
     return <CircleX size={13} aria-hidden className="shrink-0 text-destructive" />;
   }
   if (!activity.isComplete) {
-    return <CircleDashed size={13} aria-hidden className="shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />;
+    return <CircleDashed size={13} aria-hidden className="shrink-0 animate-spin text-muted motion-reduce:animate-none" />;
   }
-  return <CircleCheck size={13} aria-hidden className="shrink-0 text-muted-foreground" />;
+  return <CircleCheck size={13} aria-hidden className="shrink-0 text-muted" />;
 }
 
 function NarrativeActivityRow({ activity }: { readonly activity: SubagentDetailActivity }) {
@@ -33,9 +34,9 @@ function NarrativeActivityRow({ activity }: { readonly activity: SubagentDetailA
       style={{ paddingLeft: `${16 + activity.depth * 14}px` }}
     >
       <ActivityStatusIcon activity={activity} />
-      <span className="shrink-0 text-xs font-medium text-foreground/80">{activity.label}</span>
+      <span className="shrink-0 text-xs font-medium text-ink/80">{activity.label}</span>
       {activity.detail && activity.detail !== activity.label && (
-        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{activity.detail}</span>
+        <span className="min-w-0 flex-1 text-fade text-xs text-muted">{activity.detail}</span>
       )}
     </li>
   );
@@ -47,16 +48,15 @@ function NarrativeActivityRow({ activity }: { readonly activity: SubagentDetailA
  */
 export function NarrativeDetailView({
   row,
-  paletteSeed,
   onBack,
 }: {
   readonly row: ProjectedSubagentRow;
-  readonly paletteSeed: string;
   readonly onBack: () => void;
 }) {
   const identity = formatSubagentIdentity(row.identity);
   const title = row.task ? formatSubagentDisplayName(row.task) : identity;
   const configuration = narrativeConfiguration(row);
+  const provider = useSubagentProvider();
   return (
     <section className="flex min-h-0 flex-1 flex-col" aria-label={`${identity} subagent details`}>
       <header className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-3">
@@ -64,26 +64,20 @@ export function NarrativeDetailView({
           <ArrowLeft size={15} aria-hidden />
         </Button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <SubagentIdentityGlyph
-            identity={identity}
-            hasExplicitIdentity={row.hasExplicitIdentity}
-            paletteSeed={paletteSeed}
-            className="size-6"
-            size={15}
-          />
+          <ProviderIcon provider={provider} size={20} />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold">{title}</h2>
-            {row.task && <p className="truncate text-xs text-muted-foreground">{identity}</p>}
+            <h2 className="text-fade text-sm font-semibold">{title}</h2>
+            {row.task && <p className="text-fade text-xs text-muted">{identity}</p>}
           </div>
           <span role="status" className="sr-only">
             {narrativeRowStatus(row)}
           </span>
-          {configuration && <span className="shrink-0 font-mono text-xs text-muted-foreground">{configuration}</span>}
+          {configuration && <span className="shrink-0 font-mono text-xs text-muted">{configuration}</span>}
         </div>
       </header>
       <ScrollArea className="min-h-0 flex-1">
         {row.detail.output && (
-          <p className="whitespace-pre-wrap px-4 py-3 text-xs text-foreground/85">{row.detail.output}</p>
+          <p className="whitespace-pre-wrap px-4 py-3 text-xs text-ink/85">{row.detail.output}</p>
         )}
         {row.detail.activity.length > 0 && (
           <ul className="py-2" aria-label="Subagent activity">
@@ -93,7 +87,7 @@ export function NarrativeDetailView({
           </ul>
         )}
         {row.detail.activityTruncated && (
-          <p className="px-4 pb-3 text-xs text-muted-foreground">Earlier activity is truncated.</p>
+          <p className="px-4 pb-3 text-xs text-muted">Earlier activity is truncated.</p>
         )}
       </ScrollArea>
     </section>

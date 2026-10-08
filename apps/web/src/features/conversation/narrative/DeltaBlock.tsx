@@ -1,9 +1,16 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { splitStreamingBlocks, type StreamingBlockPart } from "./streaming-blocks";
 import { CodeBlock } from "@/components/chat/CodeBlock";
+import { TURN_PROSE_CLASS } from "./narrative-layout";
 
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
 const LazyMermaidBlock = lazy(() => import("@/components/chat/MermaidBlock"));
+
+/** Typing caret size from the Paper boards: a 2×18 bar centred on the prose line. */
+const CARET_WIDTH_PX = 2;
+const CARET_HEIGHT_PX = 18;
+/** Gap between the last glyph and the caret. */
+const CARET_GAP_PX = 2;
 
 interface DeltaBlockProps {
   /** The streamed response text to display. */
@@ -60,16 +67,17 @@ function measureCaretPosition(
   if (lastTextNode.parentElement?.closest("p")) {
     const caretRect = getCaretRectAtEnd(lastTextNode);
     if (!caretRect) return null;
+    const lineHeight = caretRect.height || CARET_HEIGHT_PX;
     return {
-      x: caretRect.right - rootRect.left,
-      y: caretRect.top - rootRect.top,
-      h: Math.min(Math.max(caretRect.height || 16, 12), 28),
+      x: caretRect.right - rootRect.left + CARET_GAP_PX,
+      y: caretRect.top - rootRect.top + (lineHeight - CARET_HEIGHT_PX) / 2,
+      h: CARET_HEIGHT_PX,
     };
   }
   const lastBlock = cursor.previousElementSibling;
   if (!lastBlock) return null;
   const blockRect = lastBlock.getBoundingClientRect();
-  return { x: blockRect.left - rootRect.left, y: blockRect.bottom - rootRect.top, h: 16 };
+  return { x: blockRect.left - rootRect.left, y: blockRect.bottom - rootRect.top, h: CARET_HEIGHT_PX };
 }
 
 /**
@@ -232,29 +240,29 @@ function useTypewriter(target: string, isStreaming: boolean): string {
 function StreamingSkeleton({ label, rows, columns }: { label: string; rows: number; columns?: number }) {
   return (
     <div className="my-2" data-testid="streaming-skeleton" aria-label={label}>
-      <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted">
         <span className="size-1.5 rounded-full bg-primary animate-pulse" />
         {label}
       </div>
       {columns === undefined ? (
-        <div className="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-2">
+        <div className="rounded-lg border border-border/60 bg-hover/30 p-4 space-y-2">
           {Array.from({ length: Math.min(Math.max(1, rows), 8) }, (_, i) => (
             <div
               key={i}
-              className="h-3 rounded bg-muted-foreground/15 animate-pulse"
+              className="h-3 rounded bg-muted/15 animate-pulse"
               style={{ width: `${55 + ((i * 37) % 40)}%`, animationDelay: `${i * 60}ms` }}
             />
           ))}
         </div>
       ) : (
         <div className="rounded-lg border border-border/60 overflow-hidden">
-          <div className="h-8 bg-muted/50 border-b border-border/60 animate-pulse" />
+          <div className="h-8 bg-hover/50 border-b border-border/60 animate-pulse" />
           {Array.from({ length: Math.min(rows, 8) }, (_, r) => (
             <div key={r} className="flex border-b border-border/40 last:border-0">
               {Array.from({ length: Math.min(Math.max(1, columns), 8) }, (_, c) => (
                 <div key={c} className="flex-1 px-3 py-2 border-r border-border/40 last:border-0">
                   <div
-                    className="h-3 rounded bg-muted-foreground/15 animate-pulse"
+                    className="h-3 rounded bg-muted/15 animate-pulse"
                     style={{ animationDelay: `${(r * columns + c) * 70}ms` }}
                   />
                 </div>
@@ -275,7 +283,7 @@ function StreamingTable({ header, rows }: { header: string[]; rows: string[][] }
         <thead>
           <tr>
             {header.map((cell, i) => (
-              <th key={i} className="border border-border bg-muted/50 px-3 py-1.5 text-left text-sm font-semibold">
+              <th key={i} className="border border-border bg-hover/50 px-3 py-1.5 text-left text-sm font-semibold">
                 {cell}
               </th>
             ))}
@@ -295,9 +303,25 @@ function StreamingTable({ header, rows }: { header: string[]; rows: string[][] }
   );
 }
 
+/**
+ * Streaming prose split on blank lines into the same `mb-2` paragraphs the
+ * settled markdown renders, so the row keeps its height at the swap instead of
+ * collapsing each blank line from a full prose line to an 8px margin.
+ */
+function StreamingParagraphs({ text }: { text: string }) {
+  const paragraphs = text.split(/\n\s*\n/).filter((paragraph) => paragraph.trim().length > 0);
+  return (
+    <>
+      {paragraphs.map((paragraph, index) => (
+        <p key={index} className="mb-2 whitespace-pre-wrap">{paragraph}</p>
+      ))}
+    </>
+  );
+}
+
 function StreamingPart({ part }: { part: StreamingBlockPart }) {
   if (part.kind === "text") {
-    return <p className="whitespace-pre-wrap text-sm leading-relaxed">{part.text}</p>;
+    return <StreamingParagraphs text={part.text} />;
   }
   if (part.kind === "table") {
     return part.closed
@@ -312,7 +336,7 @@ function StreamingPart({ part }: { part: StreamingBlockPart }) {
     return (
       <Suspense
         fallback={
-          <pre className="bg-muted/30 rounded-lg p-4 overflow-x-auto text-sm font-mono">
+          <pre className="bg-hover/30 rounded-lg p-4 overflow-x-auto text-sm font-mono">
             <code>{part.code}</code>
           </pre>
         }
@@ -344,7 +368,7 @@ function StreamingPart({ part }: { part: StreamingBlockPart }) {
 function StreamingBody({ text }: { text: string }) {
   const parts = useMemo(() => splitStreamingBlocks(text), [text]);
   if (!parts.some((part) => part.kind !== "text")) {
-    return <p className="whitespace-pre-wrap text-sm leading-relaxed">{text}</p>;
+    return <StreamingParagraphs text={text} />;
   }
   return (
     <>
@@ -410,13 +434,13 @@ export function DeltaBlock({ text, isStreaming = true, showCursor = true }: Delt
   }, [displayed, renderCursor]);
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={`relative ${TURN_PROSE_CLASS}`}>
       {isStreaming ? (
         <StreamingBody text={displayed} />
       ) : (
         <Suspense
           fallback={
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">
+            <p className="whitespace-pre-wrap">
               {displayed}
             </p>
           }
@@ -439,7 +463,7 @@ export function DeltaBlock({ text, isStreaming = true, showCursor = true }: Delt
           position: "absolute",
           top: 0,
           left: 0,
-          width: "1.5px",
+          width: `${CARET_WIDTH_PX}px`,
           margin: 0,
           opacity: 0,
           pointerEvents: "none",

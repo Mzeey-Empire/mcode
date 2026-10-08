@@ -30,8 +30,8 @@ const checkPresentation = {
     tone: "bg-[var(--diff-remove-strong)]/75",
   },
   pending: { label: "Checks pending", tone: "bg-primary/75" },
-  neutral: { label: "Checks neutral", tone: "bg-muted-foreground/55" },
-  unknown: { label: "Checks unavailable", tone: "bg-muted-foreground/35" },
+  neutral: { label: "Checks neutral", tone: "bg-muted/55" },
+  unknown: { label: "Checks unavailable", tone: "bg-muted/35" },
 } as const;
 
 const statePresentation = {
@@ -41,7 +41,7 @@ const statePresentation = {
   },
   draft: {
     icon: GitPullRequestDraft,
-    tone: "text-muted-foreground/75",
+    tone: "text-muted/75",
   },
   closed: {
     icon: GitPullRequestClosed,
@@ -141,10 +141,10 @@ function PullRequestRowComponent({
       className={cn(
         "group h-auto w-full justify-start rounded-none px-5 py-4 text-left shadow-none transition-colors duration-150",
         detailOpen
-          ? "bg-muted/40 text-foreground hover:bg-muted/55"
+          ? "bg-hover/40 text-ink hover:bg-hover/55"
           : selected
-            ? "bg-foreground/[0.025] text-foreground hover:bg-foreground/[0.05]"
-            : "text-foreground/90 hover:bg-foreground/[0.035]",
+            ? "bg-ink/[0.025] text-ink hover:bg-ink/[0.05]"
+            : "text-ink/90 hover:bg-ink/[0.035]",
       )}
     >
       <span className="flex min-w-0 flex-1 items-start gap-3">
@@ -166,20 +166,20 @@ function PullRequestRowComponent({
         </span>
         <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1">
           <span className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-sm font-medium leading-5 tracking-[-0.01em]">
+            <span className="text-fade text-sm font-medium leading-5 tracking-[-0.01em]">
               {item.title}
             </span>
-            <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground/70">
+            <span className="shrink-0 font-mono text-xs tabular-nums text-muted/70">
               #{item.identity.number}
             </span>
           </span>
           <time
             dateTime={item.updatedAt}
-            className="justify-self-end text-right font-mono text-xs tabular-nums text-muted-foreground/80"
+            className="justify-self-end text-right font-mono text-xs tabular-nums text-muted/80"
           >
             {relativeTime(item.updatedAt)}
           </time>
-          <span className="flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground">
+          <span className="flex min-w-0 items-center gap-2 font-mono text-xs text-muted">
             {avatarUrl && (
               <img
                 src={avatarUrl}
@@ -189,15 +189,15 @@ function PullRequestRowComponent({
                 className="size-4 shrink-0 rounded-full opacity-85"
               />
             )}
-            <span className="truncate">
+            <span className="text-fade">
               {item.identity.owner}/{item.identity.repository}
             </span>
-            <span aria-hidden className="text-muted-foreground/35">
+            <span aria-hidden className="text-muted/35">
               ·
             </span>
-            <span className="truncate">{item.head.name}</span>
+            <span className="text-fade">{item.head.name}</span>
           </span>
-          <span className="flex items-center justify-end gap-2 font-mono text-xs font-medium tabular-nums text-muted-foreground/80">
+          <span className="flex items-center justify-end gap-2 font-mono text-xs font-medium tabular-nums text-muted/80">
             {item.additions > 0 && <span>+{item.additions}</span>}
             {item.deletions > 0 && <span>−{item.deletions}</span>}
           </span>

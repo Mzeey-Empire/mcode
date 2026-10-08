@@ -2,7 +2,7 @@ import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
@@ -12,54 +12,33 @@ import { AgentService } from "../../../agents/index.js";
 import { HandoffCheckoutService } from "../../../handoff/index.js";
 import { GitWatcherService, WorkspaceService } from "../../../projects/index.js";
 import { TERMINAL_BACKEND_TOKEN, type TerminalBackend } from "../../backends/terminal-backend.js";
+import { PtyHostSupervisor } from "../../host/pty-host-supervisor.js";
 import { TerminalDiagnosticsService } from "../terminal-diagnostics-service.js";
 
-const MODERN_CAPABILITIES = {
-  contractVersion: 1,
-  backend: "modern",
-  selectedAt: "2026-08-15T00:00:00.000Z",
-  publicFrameVersion: 1,
+const LEGACY_CAPABILITIES = {
+  contractVersion: 0,
+  backend: "legacy",
+  publicFrameVersion: 0,
   recovery: { replay: true, checkpoint: true, gap: true },
-  host: { state: "healthy" as const, generation: "7" },
-  sessionLimit: 20,
 };
 
 describe("Terminal diagnostics container wiring", () => {
   let database: Database | undefined;
   let temporaryDirectory: string | undefined;
-  let modernDiagnostics: TerminalDiagnosticsService;
-  const previousBackend = process.env.MCODE_TERMINAL_BACKEND;
   const previousDatabasePath = process.env.MCODE_DB_PATH;
 
   beforeEach(async () => {
     container.reset();
     temporaryDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-terminal-diagnostics-"));
-    process.env.MCODE_TERMINAL_BACKEND = "modern";
     process.env.MCODE_DB_PATH = NodePath.join(temporaryDirectory, "mcode.db");
     await setupContainer(temporaryDirectory);
     database = container.resolve<Database>("Database");
 
-    modernDiagnostics = new TerminalDiagnosticsService({
-      backend: () => "modern",
-      health: () => ({
-        contractVersion: 1,
-        state: "healthy",
-        hostGeneration: "7",
-        activeSessions: 2,
-        lastHeartbeatMsAgo: 11,
-        queueBytes: 43,
-        eventLoopLagMs: 5,
-        hostRssBytes: "2048",
-      }),
+    const host = container.resolve<PtyHostSupervisor>("PtyHost");
+    vi.spyOn(host, "health").mockReturnValue({ state: "healthy", hostGeneration: "7" });
+    vi.spyOn(host, "diagnostics").mockReturnValue({
+      lastHeartbeatMsAgo: 11, queueBytes: 43, eventLoopLagMs: 5, hostRssBytes: "2048",
     });
-    const modernBackend = {
-      capabilities: () => MODERN_CAPABILITIES,
-      listActiveSessions: () => {
-        throw new Error("Use terminal.session.list");
-      },
-      getDiagnosticsService: () => modernDiagnostics,
-    } as unknown as TerminalBackend;
-    container.register("ModernTerminalBackend", { useValue: modernBackend });
   });
 
   afterEach(async () => {
@@ -72,27 +51,24 @@ describe("Terminal diagnostics container wiring", () => {
     database?.close(true);
     database = undefined;
     container.reset();
-    if (previousBackend === undefined) delete process.env.MCODE_TERMINAL_BACKEND;
-    else process.env.MCODE_TERMINAL_BACKEND = previousBackend;
     if (previousDatabasePath === undefined) delete process.env.MCODE_DB_PATH;
     else process.env.MCODE_DB_PATH = previousDatabasePath;
     if (temporaryDirectory) NodeFS.rmSync(temporaryDirectory, { recursive: true, force: true });
     temporaryDirectory = undefined;
   });
 
-  it("routes backend-owned modern health measurements through diagnostics RPC", async () => {
+  it("routes host health measurements through diagnostics RPC", async () => {
     const diagnostics = container.resolve(TerminalDiagnosticsService);
-    expect(diagnostics).toBe(modernDiagnostics);
     const response = await routeMessage(JSON.stringify({
-      id: "modern_bundle",
+      id: "legacy_bundle",
       method: "terminal.diagnostics.getBundle",
       params: {},
     }), { terminalDiagnosticsService: diagnostics } as unknown as RouterDeps);
 
     expect(response).toMatchObject({
-      id: "modern_bundle",
+      id: "legacy_bundle",
       result: {
-        backend: "modern",
+        backend: "legacy",
         health: {
           lastHeartbeatMsAgo: 11,
           queueBytes: 43,
@@ -102,7 +78,7 @@ describe("Terminal diagnostics container wiring", () => {
       },
     });
     expect(container.resolve<TerminalBackend>(TERMINAL_BACKEND_TOKEN).capabilities()).toEqual(
-      MODERN_CAPABILITIES,
+      LEGACY_CAPABILITIES,
     );
   });
 
@@ -114,7 +90,6 @@ describe("Terminal diagnostics container wiring", () => {
   });
 
   it("caps legacy active sessions at the diagnostics schema limit", async () => {
-    process.env.MCODE_TERMINAL_BACKEND = "legacy";
     container.register<TerminalBackend>(TERMINAL_BACKEND_TOKEN, {
       useValue: {
         capabilities: () => ({

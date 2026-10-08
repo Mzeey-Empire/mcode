@@ -106,7 +106,7 @@ export function FileEditorPicker({
                 {entry.icon}
                 <span>{entry.label}</span>
                 {line !== undefined && (
-                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                  <span className="ml-auto font-mono text-[10px] text-muted">
                     :{line}
                   </span>
                 )}

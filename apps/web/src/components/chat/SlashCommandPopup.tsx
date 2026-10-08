@@ -160,7 +160,7 @@ export function SlashCommandPopup({
                   <div
                     aria-hidden="true"
                     className={cn(
-                      "pointer-events-none absolute inset-x-1 bottom-1 h-5 bg-gradient-to-t from-popover via-popover/90 to-transparent",
+                      "pointer-events-none absolute inset-x-1 bottom-1 h-5 bg-gradient-to-t from-panel via-panel/90 to-transparent",
                       tone === "dark" && "from-[#1e1e1e] via-[#1e1e1e]/90",
                     )}
                   />
@@ -219,25 +219,22 @@ function CommandRow({
             ? "bg-white/[0.12]"
             : "hover:bg-white/[0.06]"
           : selected
-            ? "bg-accent"
-            : "hover:bg-accent/50",
+            ? "bg-selected"
+            : "hover:bg-selected/50",
       )}
     >
       <CommandIdentityMark command={cmd} tone={tone} />
       <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
         <span className={cn(
-          "min-w-0 shrink truncate text-sm font-medium",
-          tone === "dark" ? "text-neutral-50" : "text-foreground",
+          "min-w-0 shrink text-fade text-sm font-medium",
+          tone === "dark" ? "text-neutral-50" : "text-ink",
         )}>
           {commandDisplayLabel(cmd)}
         </span>
         <span className={cn(
-          "min-w-12 flex-1 overflow-hidden whitespace-nowrap text-xs font-normal",
-          tone === "dark" ? "text-neutral-400" : "text-muted-foreground",
-        )} style={{
-          maskImage: "linear-gradient(to right, black calc(100% - 2.5rem), transparent)",
-          WebkitMaskImage: "linear-gradient(to right, black calc(100% - 2.5rem), transparent)",
-        }}>
+          "min-w-12 flex-1 text-fade text-xs font-normal",
+          tone === "dark" ? "text-neutral-400" : "text-muted",
+        )}>
           {cmd.description}
         </span>
       </span>
@@ -268,7 +265,7 @@ function CommandIdentityMark({
         "flex size-8 shrink-0 items-center justify-center rounded-md ring-1 ring-inset",
         tone === "dark"
           ? "bg-white/[0.06] text-neutral-400 ring-white/10"
-          : "bg-muted/65 text-muted-foreground ring-border/60",
+          : "bg-hover/65 text-muted ring-border/60",
       )}
     >
       <EntityIcon
@@ -348,7 +345,7 @@ function LoadingInline({ tone = "default" }: { tone?: "default" | "dark" }) {
       <span className="flex h-5 w-5 flex-shrink-0" />
       <span className={cn(
         "text-sm",
-        tone === "dark" ? "text-neutral-400" : "text-muted-foreground",
+        tone === "dark" ? "text-neutral-400" : "text-muted",
       )}>Loading commands...</span>
     </div>
   );
@@ -360,7 +357,7 @@ function EmptyState({ tone = "default" }: { tone?: "default" | "dark" }) {
       <span className="flex h-5 w-5 flex-shrink-0" />
       <span className={cn(
         "text-sm",
-        tone === "dark" ? "text-neutral-400" : "text-muted-foreground",
+        tone === "dark" ? "text-neutral-400" : "text-muted",
       )}>No commands match</span>
     </div>
   );
@@ -377,7 +374,7 @@ function ErrorRow({
 }) {
   return (
     <div role="alert" className="flex items-center gap-2 px-3 py-2 text-xs text-destructive">
-      <span className="flex-1 truncate">Couldn't load commands: {message}</span>
+      <span className="flex-1 text-fade">Couldn't load commands: {message}</span>
       <Button
         type="button"
         variant="ghost"
@@ -390,7 +387,7 @@ function ErrorRow({
           "h-6 rounded-md px-2 text-xs",
           tone === "dark"
             ? "text-neutral-100 hover:bg-white/10"
-            : "text-foreground hover:bg-accent",
+            : "text-ink hover:bg-selected",
         )}
       >
         Retry

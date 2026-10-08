@@ -1544,12 +1544,6 @@ work. The codebase is still migrating toward them; the foundation brief in
 `docs/plans/ready-for-build/sections/00-foundation.md` lists each gap and the
 ticket that closes it:
 
-- `apps/web/src/index.css` still uses shadcn token names (`--card`,
-  `--muted`, `--accent`, `--muted-foreground`, `--ring`) and several values
-  that differ from the theme contract, including an amber focus ring in the
-  light theme. Code `--muted` is a surface while Paper's `muted` is a text
-  color; do not copy a Paper `muted` value into a code `muted` utility until
-  the token rename lands.
 - Lucide is installed and used across the app at its default 2px stroke.
   `@phosphor-icons/react` is installed and imported by two files; both
   migrate to Lucide and the dependency goes. Do not add new Phosphor imports.

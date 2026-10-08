@@ -29,9 +29,9 @@ export function SettingRow({ label, hint, children, className }: SettingRowProps
       )}
     >
       <div className="min-w-0">
-        <span className="text-sm font-semibold text-foreground">{label}</span>
+        <span className="text-sm font-semibold text-ink">{label}</span>
         {hint && (
-          <p className="mt-1 max-w-[62ch] text-xs text-muted-foreground">
+          <p className="mt-1 max-w-[62ch] text-xs text-muted">
             {hint}
           </p>
         )}

@@ -139,24 +139,24 @@ export function NarrativeIndicator({
       )}
       data-state={phase}
     >
-      <span className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+      <span className="flex min-w-0 items-center gap-2 text-sm text-muted">
         <StackedLayersIcon
           animated={phase === "running"}
           className={stackedLayersIconClassName(phase === "running")}
         />
-        <span className="relative min-w-0 truncate">
+        <span className="relative min-w-0 text-fade">
           {statusLabel}
           {phase === "running" && (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 text-foreground startup-activity-shimmer startup-activity-shimmer-text"
+              className="pointer-events-none absolute inset-0 text-ink startup-activity-shimmer startup-activity-shimmer-text"
               data-startup-activity-shimmer-text={statusLabel}
             />
           )}
         </span>
       </span>
       {startTime !== undefined && (
-        <span className="shrink-0 text-xs text-muted-foreground/50">
+        <span className="shrink-0 text-xs text-muted/50">
           ({formatDuration(elapsed)})
         </span>
       )}

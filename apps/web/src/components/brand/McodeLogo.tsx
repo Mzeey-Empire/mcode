@@ -49,7 +49,7 @@ export function McodeLogo({ variant = "sidebar", markOnly = false }: McodeLogoPr
         <div
           aria-hidden="true"
           className={cn(
-            "flex items-baseline gap-1 font-mono font-semibold leading-none text-foreground",
+            "flex items-baseline gap-1 font-mono font-semibold leading-none text-ink",
             scale.wordmark,
           )}
         >

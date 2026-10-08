@@ -14,10 +14,12 @@ All UI primitives live in `apps/web/src/components/ui/`. **Always use these inst
 | `Command` | `command.tsx` | Custom search/autocomplete inputs |
 | `ContextMenu` | `context-menu.tsx` | Custom right-click menus |
 | `Popover` | `popover.tsx` | Custom floating panels |
+| `ProviderIcon`, `ProviderDiscStack` | `provider-icon.tsx` | Importing marks from `chat/ProviderIcons.tsx`, per-file provider maps, recoloured marks |
 | `ScrollArea` | `scroll-area.tsx` | `<div className="overflow-auto">` |
 | `Separator` | `separator.tsx` | `<hr>` or `<div className="border-b">` |
 | `Switch` | `switch.tsx` | Custom toggle implementations |
 | `Tooltip` | `tooltip.tsx` | `title` attributes or custom hover text |
+| `PathText` | `path-text.tsx` | Raw path strings, rtl tricks, or code that cuts a path |
 
 ## Composer overlay layers
 
@@ -73,6 +75,7 @@ the shared portal layers.
 3. **Never use styled `<span>` for status labels or counts.** Use `<Badge>` with the appropriate variant and size.
 4. **If no existing component fits**, create a new one in `components/ui/` with CVA variants following the existing pattern. Then use it wherever needed.
 5. **Stick to the documented Tailwind text scale** (`text-xs` through `text-5xl`). Do not use arbitrary values like `text-[10px]` or `text-[11px]` unless the value is an audited exception.
+6. **Fade overflowing text with `text-fade`** (or `text-fade-lines-N` for a vertical clamp). `mcode/no-ellipsis-truncation` rejects `truncate`, `text-ellipsis` and `line-clamp-*`. The fade is a mask over the element's whole box, so put `text-fade` on a text element without its own fill, border or shadow, and wrap the text in an inner span when it has one. The mask only applies while the element overflows: it rides a scroll-driven animation, so do not add another `animation` to the same element.
 
 ## Testing UI Changes
 

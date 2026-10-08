@@ -11,14 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  ClaudeIcon,
-  CodexIcon,
-  CopilotIcon,
-  CursorProviderIcon,
-  GeminiIcon,
-  OpenCodeIcon,
-} from "@/components/chat/ProviderIcons";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { threadControlKey, useThreadControlStore } from "@/stores/threadControlStore";
@@ -47,19 +40,6 @@ type ThreadControlUserMessage = Extract<
   ThreadControlProjection["messages"][number],
   { role: "user" }
 >;
-
-function ProviderIcon({ providerId }: { readonly providerId: string }) {
-  const props = { size: 14, className: "shrink-0" };
-  switch (providerId) {
-    case "claude": return <ClaudeIcon {...props} />;
-    case "codex": return <CodexIcon {...props} />;
-    case "copilot": return <CopilotIcon {...props} />;
-    case "cursor": return <CursorProviderIcon {...props} />;
-    case "gemini": return <GeminiIcon {...props} />;
-    case "opencode": return <OpenCodeIcon {...props} />;
-    default: return <span aria-hidden className="size-3.5 rounded-full border border-muted-foreground/60" />;
-  }
-}
 
 function statusLabel(state: ThreadObservedState): string {
   return state.status === "waiting_for_approval"
@@ -138,14 +118,14 @@ function RelationCard({
   return (
     <article className="border-b border-border/50 px-4 py-3" data-testid="coordination-relation">
       <div className="flex items-start gap-2">
-        <ProviderIcon providerId={destination.providerId} />
+        <ProviderIcon provider={destination.providerId} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <Button
               type="button"
               variant="link"
               size="sm"
-              className="min-w-0 truncate px-0 text-left text-sm font-medium"
+              className="min-w-0 text-fade px-0 text-left text-sm font-medium"
               onClick={() => void navigateToThread(destination)}
               aria-label={`Open destination Project and thread ${destination.title}`}
             >
@@ -155,10 +135,10 @@ function RelationCard({
               {destinationState}
             </Badge>
           </div>
-          <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+          <p className="mt-1 flex items-center gap-1 text-xs text-muted">
             <span>{PROVIDER_LABELS[destination.providerId] ?? destination.providerId}</span>
             <span aria-hidden>·</span>
-            <span className="truncate">{destination.workspaceId}</span>
+            <span className="text-fade">{destination.workspaceId}</span>
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => void navigateToThread(destination)}>
@@ -219,8 +199,8 @@ function OriginRow({
   const { source, sourceUnavailable, label } = getOriginRowDetails(origin);
   return (
     <div className="border-b border-border/40 px-4 py-2.5" data-testid="coordination-message-origin">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {origin.type === "thread" && <ProviderIcon providerId={origin.sourceProviderId} />}
+      <div className="flex items-center gap-2 text-xs text-muted">
+        {origin.type === "thread" && <ProviderIcon provider={origin.sourceProviderId} />}
         <span>{label}</span>
         {source && !sourceUnavailable && (
           <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={() => void navigateToThread(source)}>
@@ -229,33 +209,33 @@ function OriginRow({
         )}
       </div>
       {sourceUnavailable && (
-        <p className="mt-1 text-xs text-muted-foreground" role="status">
+        <p className="mt-1 text-xs text-muted" role="status">
           Historical source unavailable; navigation disabled.
         </p>
       )}
-      <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-sm text-foreground">{message.content}</p>
+      <p className="mt-1 text-fade-lines-2 whitespace-pre-wrap text-sm text-ink">{message.content}</p>
     </div>
   );
 }
 
 function CoordinationRelationSection({ relation }: { relation: ThreadControlProjection["relation"] }) {
   if (!relation) return null;
-  return <section aria-labelledby="coordination-relation-heading"><h3 id="coordination-relation-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Delegated from</h3><div className="px-4 pb-2">{relation.source ? <Button type="button" variant="outline" size="sm" onClick={() => void navigateToThread(relation.source!)}><ProviderIcon providerId={relation.source.providerId} /><ExternalLink size={13} aria-hidden />{relation.source.title}</Button> : <p className="text-xs text-muted-foreground">Source thread is no longer available.</p>}</div></section>;
+  return <section aria-labelledby="coordination-relation-heading"><h3 id="coordination-relation-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Delegated from</h3><div className="px-4 pb-2">{relation.source ? <Button type="button" variant="outline" size="sm" onClick={() => void navigateToThread(relation.source!)}><ProviderIcon provider={relation.source.providerId} /><ExternalLink size={13} aria-hidden />{relation.source.title}</Button> : <p className="text-xs text-muted">Source thread is no longer available.</p>}</div></section>;
 }
 
 function CoordinationChildrenSection({ children, identity, onRefresh }: { children: ThreadControlProjection["children"]; identity: ThreadControlIdentity; onRefresh: () => void }) {
   if (children.length === 0) return null;
-  return <section aria-labelledby="coordination-children-heading"><h3 id="coordination-children-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Delegated threads ({children.length})</h3>{children.map((relation) => <RelationCard key={relation.destination.threadId} relation={relation} sourceIdentity={identity} onRefresh={onRefresh} />)}</section>;
+  return <section aria-labelledby="coordination-children-heading"><h3 id="coordination-children-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Delegated threads ({children.length})</h3>{children.map((relation) => <RelationCard key={relation.destination.threadId} relation={relation} sourceIdentity={identity} onRefresh={onRefresh} />)}</section>;
 }
 
 function CoordinationApprovalsSection({ approvals, onRefresh }: { approvals: ThreadControlProjection["approvals"]; onRefresh: () => void }) {
   if (approvals.length === 0) return null;
-  return <section aria-labelledby="coordination-approvals-heading"><h3 id="coordination-approvals-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Approval requests ({approvals.length})</h3>{approvals.map((approval) => <div key={approval.requestId} className="border-b border-border/40 px-4 py-3" data-testid="coordination-approval"><p className="text-sm font-medium">{approval.title ?? approval.toolName}</p><p className="mt-1 text-xs text-muted-foreground">Owned by {approval.ownerThreadId ?? approval.threadId}</p><div className="mt-2 flex gap-2"><Button type="button" size="sm" onClick={() => void getTransport().respondToPermission(approval.requestId, "allow").then(onRefresh)}><Check size={13} aria-hidden />Allow</Button><Button type="button" variant="ghost" size="sm" onClick={() => void getTransport().respondToPermission(approval.requestId, "deny").then(onRefresh)}><X size={13} aria-hidden />Deny</Button></div></div>)}</section>;
+  return <section aria-labelledby="coordination-approvals-heading"><h3 id="coordination-approvals-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Approval requests ({approvals.length})</h3>{approvals.map((approval) => <div key={approval.requestId} className="border-b border-border/40 px-4 py-3" data-testid="coordination-approval"><p className="text-sm font-medium">{approval.title ?? approval.toolName}</p><p className="mt-1 text-xs text-muted">Owned by {approval.ownerThreadId ?? approval.threadId}</p><div className="mt-2 flex gap-2"><Button type="button" size="sm" onClick={() => void getTransport().respondToPermission(approval.requestId, "allow").then(onRefresh)}><Check size={13} aria-hidden />Allow</Button><Button type="button" variant="ghost" size="sm" onClick={() => void getTransport().respondToPermission(approval.requestId, "deny").then(onRefresh)}><X size={13} aria-hidden />Deny</Button></div></div>)}</section>;
 }
 
 function CoordinationOriginsSection({ messages }: { messages: ThreadControlProjection["messages"] }) {
   const userMessages = messages.filter((message) => message.role === "user");
-  return <section aria-labelledby="coordination-origins-heading"><h3 id="coordination-origins-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message origins</h3>{userMessages.length === 0 ? <p className="px-4 py-3 text-sm text-muted-foreground">No user messages yet.</p> : messages.map((message) => <OriginRow key={message.messageId} message={message} />)}</section>;
+  return <section aria-labelledby="coordination-origins-heading"><h3 id="coordination-origins-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Message origins</h3>{userMessages.length === 0 ? <p className="px-4 py-3 text-sm text-muted">No user messages yet.</p> : messages.map((message) => <OriginRow key={message.messageId} message={message} />)}</section>;
 }
 
 /** User-facing persisted thread coordination panel. */
@@ -273,10 +253,10 @@ export function CoordinationPanel({ workspaceId, threadId }: { readonly workspac
   const refresh = useCallback(() => { void load(identity, { force: true }); }, [identity, load]);
 
   if (entry?.loading && !projection) {
-    return <section className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground" aria-live="polite">Loading coordination…</section>;
+    return <section className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted" aria-live="polite">Loading coordination…</section>;
   }
   if (entry?.error && !projection) {
-    return <section className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-muted-foreground" role="alert">{entry.error}</section>;
+    return <section className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-muted" role="alert">{entry.error}</section>;
   }
   if (!projection) return null;
 
@@ -285,10 +265,10 @@ export function CoordinationPanel({ workspaceId, threadId }: { readonly workspac
       <header className="flex shrink-0 items-center justify-between border-b border-border/50 px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <ProviderIcon providerId={projection.thread.providerId} />
+            <ProviderIcon provider={projection.thread.providerId} />
             <h2 className="text-sm font-semibold">Coordination</h2>
           </div>
-          <p className="text-xs text-muted-foreground">{projection.thread.title}</p>
+          <p className="text-xs text-muted">{projection.thread.title}</p>
         </div>
         <Badge variant="outline" aria-live="polite" aria-label={`Current thread status: ${statusLabel(projection.thread.state)}`}>
           {statusLabel(projection.thread.state)}

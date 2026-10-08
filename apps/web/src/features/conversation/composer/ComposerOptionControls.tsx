@@ -62,7 +62,7 @@ export function AccessModeSelector({
             variant="ghost"
             size="xs"
             aria-label={`Access mode: ${selected.label}`}
-            className="gap-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
           >
             <Icon size={14} />
             <span className="text-sm">{selected.label}</span>
@@ -70,7 +70,7 @@ export function AccessModeSelector({
         }
       />
       <PopoverContent align="start" sideOffset={8} className="w-60 p-2">
-        <div className="px-1.5 pt-1 pb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+        <div className="px-1.5 pt-1 pb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-muted/70">
           Access mode
         </div>
         <div className="space-y-0.5">
@@ -90,10 +90,10 @@ export function AccessModeSelector({
                 }}
                 className="h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-xs font-normal whitespace-normal"
               >
-                <ModeIcon size={13} className="text-muted-foreground" />
+                <ModeIcon size={13} className="text-muted" />
                 <span className="min-w-0 flex-1 text-left">
-                  <span className="block text-foreground">{mode.label}</span>
-                  <span className="block text-muted-foreground">{mode.description}</span>
+                  <span className="block text-ink">{mode.label}</span>
+                  <span className="block text-muted">{mode.description}</span>
                 </span>
                 {accessMode === mode.id && <Check size={13} className="text-primary" />}
               </Button>
@@ -157,8 +157,8 @@ export function ComposerOptionsMenu({
           onClick={togglePlanPanel}
           aria-pressed={panelVisible}
           className={cn(
-            "gap-1.5 transition-colors hover:bg-muted/40",
-            panelVisible ? "text-primary hover:text-primary" : "text-muted-foreground hover:text-foreground",
+            "gap-1.5 transition-colors hover:bg-hover/40",
+            panelVisible ? "text-primary hover:text-primary" : "text-muted hover:text-ink",
           )}
         >
           <ListChecks size={14} />
