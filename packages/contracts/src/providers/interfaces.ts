@@ -253,7 +253,7 @@ export interface IAgentProvider {
     event: "permission_resolved",
     handler: (payload: { requestId: string; decision: PermissionDecision; optionLabel?: string }) => void,
   ): void;
-  /** Rewrites or deletes the session-owned plan file before Implement. */
+  /** Rewrites or deletes the session-owned plan file before Implement. Absent means skipped with "no-file". */
   prepareImplement?(input: {
     threadId: string;
     markdown: string;

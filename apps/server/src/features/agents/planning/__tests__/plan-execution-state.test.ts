@@ -13,6 +13,27 @@ const question = {
 };
 
 describe("PlanExecutionState", () => {
+  it("treats streamed assistant block boundaries as new lines", () => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    state.feedText("I checked the files.");
+    state.finishAssistantMessage();
+    state.feedText("````mcode-plan\n# Plan\nBuild it.\n````");
+    expect(state.consumeAssistantMessage("Summary.")).toEqual({
+      title: "Plan", contentMd: "# Plan\nBuild it.", sectionsJson: "[]", changeSummary: null,
+    });
+  });
+
+  it.each(["", "\n"])("retains message-only captures across all assistant messages with trailing %j", (newline) => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    state.observeAssistantMessage("I checked the files.");
+    state.observeAssistantMessage("````mcode-plan\n# Plan\nBuild it." + newline);
+    state.observeAssistantMessage("Then test it.\n````");
+    expect(state.consumeAssistantMessage("Summary.")).toEqual({
+      title: "Plan", contentMd: "# Plan\nBuild it.\nThen test it.", sectionsJson: "[]", changeSummary: null,
+    });
+  });
   it("publishes a question batch once", () => {
     const state = new PlanExecutionState();
     state.beginQuestionGeneration();

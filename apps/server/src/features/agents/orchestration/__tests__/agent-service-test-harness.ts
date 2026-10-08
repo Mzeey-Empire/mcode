@@ -356,6 +356,7 @@ function createTestFeatureEffects({ threadRepo, providerRegistry, writer, runtim
     buildQuestionPrompt: (content: string) => content,
     buildPlanOutputInstructions: () => "",
     onTextDelta: () => undefined,
+    finishAssistantMessage: () => undefined,
       observeAcceptedText: () => undefined,
       observeAssistantMessage: () => undefined,
       finishTurn: async () => undefined,

@@ -138,7 +138,7 @@ export class PlanQuestionService {
     return `
 Now generate the full implementation plan based on these decisions.
 
-Write a 1-2 sentence summary in chat. Put the full plan only in a four-backtick mcode-plan fence, starting with a single H1 title. Ordinary triple-backtick code blocks may appear inside the plan.
+Write a 1-2 sentence summary in chat. Put the full plan only in a four-backtick mcode-plan fence, starting with a single H1 title. Ordinary triple-backtick code blocks may appear inside the plan. If the plan contains a fence of four or more backticks, make the outer mcode-plan fence longer than any inner fence.
 
 \`\`\`\`mcode-plan
 # Short plan title

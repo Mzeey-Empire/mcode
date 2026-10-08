@@ -37,7 +37,7 @@ export class PlanFenceParser {
   /** Finish an assistant message, including a closing fence without a final newline. */
   finish(): string | null {
     if (this.captured) return null;
-    const result = this.line(this.pending);
+    const result = this.line(this.pending ? this.pending + "\n" : "");
     this.pending = "";
     return result;
   }
@@ -56,7 +56,7 @@ export class PlanFenceParser {
       const opening = /^ {0,3}(`{3,}|~{3,})([^`]*)$/.exec(line);
       if (opening) this.fence = {
         marker: opening[1][0], length: opening[1].length,
-        plan: opening[1][0] === "`" && opening[1].length >= 4 && opening[2].trim() === "mcode-plan",
+        plan: opening[1][0] === "`" && opening[2].trim() === "mcode-plan",
       };
       return null;
     }

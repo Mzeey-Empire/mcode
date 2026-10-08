@@ -29,6 +29,11 @@ export class TurnFeatureEffects {
     this.plans.observeAcceptedText(threadId, delta);
   }
 
+  /** Preserve an assistant block boundary in the streamed plan parser. */
+  finishAssistantMessage(threadId: string): void {
+    this.plans.finishAssistantMessage(threadId);
+  }
+
   /** Apply plan and goal reactions at an assistant-message boundary. */
   onAssistantMessage(providerId: ProviderId, event: AgentMessage): void {
     this.plans.observeAssistantMessage(event);
@@ -60,7 +65,11 @@ export class TurnFeatureEffects {
 
   /** Settle captured plans on termination and refresh goals after successful completion. */
   async refreshAfterTurn(threadId: string, outcome: TurnOutcome = "completed"): Promise<void> {
-    await this.plans.finishTurn(threadId);
+    try {
+      await this.plans.finishTurn(threadId);
+    } finally {
+      this.plans.clearTurn(threadId);
+    }
     if (outcome === "completed") this.goals.refreshAfterTurn(threadId);
   }
 

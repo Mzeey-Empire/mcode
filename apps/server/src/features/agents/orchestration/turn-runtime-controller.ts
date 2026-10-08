@@ -113,7 +113,7 @@ interface WorkerOwnedTurn {
   terminalCommitted: boolean;
   persistedPublished: boolean;
   terminalOutcome?: TurnOutcome;
-  releaseStarted: boolean;
+  releaseTask?: Promise<void>;
   deliveryFailed?: boolean;
   deliveryFailureHandling?: Promise<void>;
   stopInProgress?: boolean;
@@ -614,7 +614,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await worker.providerEvents.bind(execution, 1);
     this.workerTurns.set(execution.threadId, {
       execution, prepared, provider, deliveryAttempt: 1,
-      terminalCommitted: false, persistedPublished: false, releaseStarted: false,
+      terminalCommitted: false, persistedPublished: false,
     });
     if (provider.id === "codex") {
       const codex = this.codexProvider(provider);
@@ -779,17 +779,13 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   ): void {
     const event = result.parentEvent?.publication.event;
     this.applyWorkerPlanText(event);
-    if (event?.type === "message" && active.prepared.providerId === "codex") {
-      this.featureEffects.onAssistantMessage("codex", event);
-    }
-    for (const intent of result.parentEvent?.runtime ?? []) {
-      if (intent.kind === "assistant-message-feature") {
-        this.featureEffects.onAssistantMessage(active.prepared.providerId, intent.event);
-      }
+    if (event?.type === "message") {
+      this.featureEffects.onAssistantMessage(active.prepared.providerId, event);
     }
   }
 
   private applyWorkerPlanText(event: AgentEvent | undefined): void {
+    if (event?.type === "assistantMessageBoundary") this.featureEffects.finishAssistantMessage(event.threadId);
     if (event?.type === "textDelta" && event.isFinalResponse !== false) {
       this.featureEffects.observeAcceptedText(event.threadId, event.delta);
     }
@@ -826,9 +822,13 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     });
   }
 
-  private async releaseWorkerTurn(active: WorkerOwnedTurn): Promise<void> {
-    if (active.releaseStarted || active.stopInProgress || !active.terminalCommitted) return;
-    active.releaseStarted = true;
+  private releaseWorkerTurn(active: WorkerOwnedTurn): Promise<void> {
+    if (active.stopInProgress || !active.terminalCommitted) return Promise.resolve();
+    active.releaseTask ??= this.finishWorkerRelease(active);
+    return active.releaseTask;
+  }
+
+  private async finishWorkerRelease(active: WorkerOwnedTurn): Promise<void> {
     const { execution, provider, deliveryAttempt } = active;
     try {
       if (active.deliveryFailed) {
@@ -840,14 +840,14 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       }
       await this.requireWorkerRuntime().providerEvents.retire(execution);
       await this.requireWorkerRuntime().owner.release(execution);
-      if (active.terminalOutcome === "completed") await this.featureEffects.refreshAfterTurn(execution.threadId);
+      await this.featureEffects.refreshAfterTurn(execution.threadId, active.terminalOutcome);
       this.requireWorkerFiles().retire(execution.threadId, execution.executionId, deliveryAttempt);
       if (this.workerTurns.get(execution.threadId) === active) this.workerTurns.delete(execution.threadId);
       this.trackSessionEnded(execution.threadId, execution.executionId);
       this.disarmTurnRetryWindow(execution.threadId);
       this.clearTurnEndedState(execution.threadId);
     } catch (error) {
-      active.releaseStarted = false;
+      active.releaseTask = undefined;
       await this.requireWorkerRuntime().recoverRejected(execution);
       throw error;
     }
@@ -1141,8 +1141,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.publishWorkerPersistence(active, result);
     await worker.providerEvents.retire(execution);
     await worker.owner.release(execution);
-    if (active) this.requireWorkerFiles().retire(execution.threadId, execution.executionId, active.deliveryAttempt);
     this.workerTurns.delete(execution.threadId);
+    if (active) {
+      this.requireWorkerFiles().retire(execution.threadId, execution.executionId, active.deliveryAttempt);
+      await this.featureEffects.refreshAfterTurn(threadId, outcome);
+    }
     return true;
   }
 
@@ -1978,6 +1981,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    * Admit a complete turn command, then retain only runtime-owned provider dispatch.
    */
   async sendMessage(command: SendMessageCommand, canReserve?: () => boolean): Promise<void> {
+    // Accepted terminal progress can reach the client before plan persistence finishes.
+    await this.workerTurns.get(command.threadId)?.releaseTask;
     const admitted = await this.turnAdmissions.admit(command, this.runtimeAdmissionAuthority(), canReserve);
     if (admitted.kind !== "dispatch") return;
     await this.dispatchPreparedTurn(admitted);

@@ -1,5 +1,6 @@
-// Logging
 export { PlanFenceParser } from "./plan-fence-parser.js";
+
+// Logging
 
 export { logger, getLogPath, getRecentLogs } from "./logging/index.js";
 

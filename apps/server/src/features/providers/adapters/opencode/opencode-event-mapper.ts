@@ -291,12 +291,12 @@ function partTextRemainder(
 ): string {
   if (!text || !key || !forwarded) return text;
   const prev = forwarded.get(key) ?? "";
-  if (text === prev) return "";
   if (isDelta) {
-    if (prev.endsWith(text)) return "";
+    // Repeated deltas can be consecutive backticks, not replayed snapshots.
     rememberBounded(forwarded, key, prev + text, MAX_TRACKED_PART_TEXT);
     return text;
   }
+  if (text === prev) return "";
   if (text.startsWith(prev)) {
     const rest = text.slice(prev.length);
     rememberBounded(forwarded, key, text, MAX_TRACKED_PART_TEXT);

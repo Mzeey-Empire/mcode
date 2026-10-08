@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
 import type { WebSocket } from "ws";
 import { container } from "tsyringe";
-import type { AgentEvent, IAgentProvider, IProviderRegistry, TurnRequest } from "@mcode/contracts";
+import type { AgentEvent, IAgentProvider, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts";
 
 import { setupContainer } from "../../../../application/composition/container.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
@@ -657,8 +657,87 @@ describe("AgentService container composition", () => {
   });
 
   it.each([
+    ["fence", "completed"], ["native", "completed"], ["missing", "completed"],
+    ["fence", "cancelled"], ["native", "errored"],
+  ] as const)("settles a worker-owned Claude %s plan on %s while accepting the next send", async (source, outcome) => {
+    let request: TurnRequest | undefined;
+    const provider = Object.assign(fakeCodexProvider(async (sent) => { request = sent; }), {
+      id: "claude" as const, descriptor: { id: "claude" as const, capabilities: [] },
+    });
+    registerFakeCodex(provider);
+    const service = container.resolve(AgentService);
+    const publication = container.resolve(AgentEventPublicationRegistry);
+    publication.bind(() => undefined);
+    publication.start();
+    const pushes: Array<{ channel: string; data: unknown }> = [];
+    pushClient = capturePushes(pushes);
+    const workspace = await container.resolve(WorkspaceRepo).create("claude-plan", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Claude plan", "direct", "main", true, "claude");
+    subscribeClientToThread(pushClient, thread.id);
+    const plans = container.resolve(PlanTurnService);
+    const repo = container.resolve(PlanRepo);
+    const warnings = vi.spyOn(logger, "warn");
+    const errors = vi.spyOn(logger, "error");
+    plans.beginOutputGeneration(thread.id);
+    await service.sendMessage({ threadId: thread.id, content: "Plan it", provider: "claude", permissionMode: "default" });
+    const sent = requireValue(request, "Expected Claude dispatch");
+    const content = source === "missing" ? "Summary." : "Summary.\n````mcode-plan\n# Fence plan\nAdd passkeys.\n````";
+    await submitCodexEvent(workerRuntime!, sent, 1, { type: "message", threadId: thread.id,
+      turnExecutionId: sent.turnExecutionId, content, tokens: null }, "claude");
+    if (source === "native") plans.handlePlanCaptured({ threadId: thread.id, source, markdown: "# Native plan\nUse security keys." });
+    let releaseSave = () => {};
+    const ready = new Promise<void>((resolve) => { releaseSave = resolve; });
+    const create = repo.create.bind(repo);
+    const saving = vi.spyOn(repo, "create").mockImplementation(async (...args) => { await ready; return create(...args); });
+    let nextSend: Promise<unknown> | undefined;
+    await submitCodexEvent(workerRuntime!, sent, 2, { type: "ended", threadId: thread.id,
+      turnExecutionId: sent.turnExecutionId, outcome }, "claude");
+    try {
+      if (source !== "missing") {
+        await vi.waitFor(() => expect(saving).toHaveBeenCalledTimes(1));
+        expect(repo.listByThread(thread.id)).toEqual([]);
+        const progress = requireValue(container.resolve(WorkerOwnedTurnRuntime).progress, "Expected canonical progress owner");
+        progress.acceptLateHook(thread.id, sent.turnExecutionId, {
+          id: "plan-stop-hook", hookName: "Stop", toolName: null, phase: "stop", payload: "{}",
+          durationMs: 12, didBlock: false, startedAt: "2026-10-08T12:00:00.000Z",
+          endedAt: "2026-10-08T12:00:00.012Z", sortOrder: 9,
+        });
+        const notices = progress.acceptSynthesizedPublications(thread.id, [{ type: "system", threadId: thread.id,
+          subtype: "goal.paused", message: "Paused" }]);
+        expect(notices.map((notice) => notice.payload.type)).toEqual(["publication.recorded"]);
+        nextSend = service.sendMessage({ threadId: thread.id, content: "Build it", provider: "claude", permissionMode: "default" })
+          .then(() => "sent", (error: unknown) => error);
+      }
+    } finally {
+      releaseSave();
+    }
+    await vi.waitFor(() => expect(plans.needsAssistantMaterialization({ type: "message", threadId: thread.id,
+      messageId: "next", content: "", tokens: null })).toBe(false));
+    expect(errors.mock.calls).toEqual([]);
+    expect(plans.needsAssistantMaterialization({ type: "message", threadId: thread.id, messageId: "next", content: "", tokens: null })).toBe(false);
+    if (source === "missing") {
+      expect(repo.listByThread(thread.id)).toEqual([]);
+      expect(warnings.mock.calls.filter(([message]) => message === "Plan capture missing"))
+        .toEqual([["Plan capture missing", { threadId: thread.id, outcome: "missing" }]]);
+    } else {
+      const assistant = requireValue(container.resolve(MessageRepo).listByThread(thread.id, 10).messages.find((row) => row.role === "assistant"), "Expected assistant row");
+      expect(repo.listByThread(thread.id)).toHaveLength(1);
+      expect(repo.getLatestForThread(thread.id)).toMatchObject({ version: 1, messageId: assistant.id,
+        title: source === "native" ? "Native plan" : "Fence plan",
+        contentMd: source === "native" ? "# Native plan\nUse security keys." : "# Fence plan\nAdd passkeys.",
+      });
+    }
+    if (nextSend) await expect(nextSend).resolves.toBe("sent");
+    else await service.sendMessage({ threadId: thread.id, content: "Build it", provider: "claude", permissionMode: "default" });
+    expect(request?.turnExecutionId).not.toBe(sent.turnExecutionId);
+    await service.stopSession(thread.id);
+    expect(warnings.mock.calls.filter(([message]) => message === "Plan capture missing")).toHaveLength(source === "missing" ? 1 : 0);
+  });
+
+  it.each([
     ["fence", "turnComplete"], ["native", "turnComplete"], ["missing", "turnComplete"],
     ["fence", "ended"], ["native", "ended"], ["missing", "ended"],
+    ["missing", "rejected"],
   ] as const)(
     "settles a direct %s plan on %s before clearing capture state",
     async (source, terminal) => {
@@ -684,6 +763,8 @@ describe("AgentService container composition", () => {
       let releaseSave = () => {};
       const saveReady = new Promise<void>((resolve) => { releaseSave = resolve; });
       const messages = container.resolve(MessageRepo);
+      const rejectedFinalization = terminal === "rejected"
+        ? vi.spyOn(messages, "setAssistantOutcome").mockRejectedValueOnce(new Error("terminal storage unavailable")) : undefined;
       const createAssistant = messages.createAssistantIdempotent.bind(messages);
       const saving = vi.spyOn(messages, "createAssistantIdempotent").mockImplementation(async (input) => {
         await saveReady;
@@ -692,7 +773,7 @@ describe("AgentService container composition", () => {
       if (source === "native") plans.handlePlanCaptured({ threadId: thread.id, source, markdown: "# Native plan\nUse security keys." });
       const ingress = container.resolve(ProviderEventIngress);
       ingress.acceptProviderRuntime("codex", { event: message });
-      ingress.acceptProviderRuntime("codex", { event: terminal === "turnComplete" ? { type: "turnComplete", threadId: thread.id,
+      ingress.acceptProviderRuntime("codex", { event: terminal !== "ended" ? { type: "turnComplete", threadId: thread.id,
         turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
         tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2 } : {
         type: "ended", threadId: thread.id, turnExecutionId, outcome: "completed",
@@ -708,8 +789,11 @@ describe("AgentService container composition", () => {
       }
       await container.resolve(ProviderTurnEventApplication).drainPersistence();
       await vi.waitFor(() => expect(plans.needsAssistantMaterialization(message)).toBe(false));
-      expect(errors.mock.calls).toEqual([]);
-      expect(runtime.snapshot(thread.id)?.phase).toBe("completed");
+      if (rejectedFinalization) {
+        await vi.waitFor(() => expect(rejectedFinalization).toHaveBeenCalledTimes(1));
+        expect(errors.mock.calls.map(([message]) => message)).toContain("finalize failed on terminal event");
+      } else expect(errors.mock.calls).toEqual([]);
+      expect(runtime.snapshot(thread.id)).toMatchObject({ phase: "completed" });
       const missing = warnings.mock.calls.filter(([text]) => text === "Plan capture missing");
       if (source === "missing") {
         expect(repo.listByThread(thread.id)).toEqual([]);
@@ -762,15 +846,16 @@ async function submitCodexEvent(
   request: TurnRequest,
   sequence: number,
   event: AgentEvent,
+  providerId: ProviderId = "codex",
 ): Promise<WorkerOwnedProviderEventResult> {
-  const route = runtime.providerEvents.resolve(request.turnExecutionId, "codex");
+  const route = runtime.providerEvents.resolve(request.turnExecutionId, providerId);
   if (route.kind !== "worker") throw new Error("Codex turn did not bind its worker route");
   const itemId = `codex:${request.turnExecutionId}:item:${sequence}`;
   const eventId = `codex:${request.turnExecutionId}:event:${sequence}`;
   const timestamp = new Date().toISOString();
   return await route.submit({ threadId: request.threadId, turnId: request.turnId,
     executionId: request.turnExecutionId, phase: "running", deliveryAttempt: 1, batchId: eventId,
-    events: [{ eventId, sourceProviderId: "codex", sourceIdentities: [], sourceSequence: sequence,
+    events: [{ eventId, sourceProviderId: providerId, sourceIdentities: [], sourceSequence: sequence,
       providerTimestamp: timestamp,
       routing: { threadId: request.threadId, turnId: request.turnId,
         executionId: request.turnExecutionId, itemId },
@@ -780,6 +865,7 @@ async function submitCodexEvent(
         createdAt: timestamp, updatedAt: timestamp } } }],
   });
 }
+
 
 
 

@@ -29,7 +29,7 @@ type ClaudePlanAnswerModeProvider = {
 /** Owns plan-question turns and durable mcode-plan materialization. */
 @injectable()
 export class PlanTurnService {
-  private acceptedProgress: Pick<CanonicalAcceptedProgress, "recordSavedPlan" | "beforeDurableCommand" | "cancelDurableCommand"> | undefined;
+  private acceptedProgress: Pick<CanonicalAcceptedProgress, "recordSavedPlan"> | undefined;
   private readonly assistantByThread = new Map<string, PlanMessage>();
   private readonly executionByThread = new Map<string, PlanExecutionState>();
 
@@ -42,7 +42,7 @@ export class PlanTurnService {
   ) {}
 
   /** Keep canonical plan reads current after the turn's captured plan is saved. */
-  bindAcceptedProgress(progress: Pick<CanonicalAcceptedProgress, "recordSavedPlan" | "beforeDurableCommand" | "cancelDurableCommand">): void {
+  bindAcceptedProgress(progress: Pick<CanonicalAcceptedProgress, "recordSavedPlan">): void {
     this.acceptedProgress = progress;
   }
 
@@ -105,6 +105,11 @@ ${userMessage}`;
     this.executionByThread.get(threadId)?.feedText(delta);
   }
 
+  /** Preserve line boundaries between streamed assistant blocks. */
+  finishAssistantMessage(threadId: string): void {
+    this.executionByThread.get(threadId)?.finishAssistantMessage();
+  }
+
   /** Capture native plan markdown until its assistant message receives a durable identity. */
   handlePlanCaptured(capture: PlanCaptured): void {
     this.execution(capture.threadId).handleCapture(capture);
@@ -119,6 +124,7 @@ ${userMessage}`;
   /** Retain the accepted assistant identity until native and fenced captures have settled. */
   observeAssistantMessage(event: PlanMessage): void {
     if (!event.messageId || !this.executionByThread.has(event.threadId)) return;
+    if (this.assistantByThread.get(event.threadId) === event) return;
     this.executionByThread.get(event.threadId)?.observeAssistantMessage(event.content);
     this.assistantByThread.set(event.threadId, event);
   }
@@ -133,15 +139,16 @@ ${userMessage}`;
     const execution = this.executionByThread.get(threadId);
     const event = this.assistantByThread.get(threadId);
     if (!execution || !event?.messageId) return;
-    const ready = execution.consumeAssistantMessage(event.content);
+    const ready = execution.consumeAssistantMessage();
     if (!ready) return;
+    const reason = captureLimit(ready);
+    if (reason) {
+      logger.warn("Plan capture rejected", { threadId, reason });
+      return;
+    }
     try {
-      await this.acceptedProgress?.beforeDurableCommand(threadId);
-      try {
-        await this.persistPlan(threadId, event.messageId, ready, execution);
-      } finally {
-        this.acceptedProgress?.cancelDurableCommand(threadId);
-      }
+      // Terminal cleanup awaits this turn effect. A command fence would reject late hook publications.
+      await this.persistPlan(threadId, event.messageId, ready, execution);
     } catch (error) {
       logger.error("Plan capture persistence failed", {
         threadId, messageId: event.messageId, ...execution.outcome(),
@@ -216,4 +223,13 @@ ${userMessage}`;
     this.executionByThread.set(threadId, state);
     return state;
   }
+}
+
+function captureLimit(plan: PlanPersistenceReady): string | undefined {
+  if (plan.title.length > 512) return "title-limit";
+  if (plan.contentMd.length > 256 * 1024) return "content-limit";
+  if (plan.sectionsJson.length > 64 * 1024) return "sections-size-limit";
+  const sections: unknown = JSON.parse(plan.sectionsJson);
+  if (Array.isArray(sections) && sections.length > 128) return "sections-count-limit";
+  return undefined;
 }

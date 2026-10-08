@@ -34,6 +34,57 @@ async function fixture() {
 }
 
 describe("PlanTurnService output", () => {
+  it("captures earlier message blocks sharing the turn's durable assistant identity", async () => {
+    const { thread, messages, plans, service } = await fixture();
+    service.beginOutputGeneration(thread.id);
+    const assistant = await messages.create(thread.id, "assistant", "Summary.", 1);
+    for (const content of ["I checked the files.", "````mcode-plan\n# Plan\nBuild it.", "Then test it.\n````", "Summary."]) {
+      const event: Extract<AgentEvent, { type: "message" }> = { type: "message", threadId: thread.id,
+        messageId: assistant.id, content, tokens: null };
+      service.observeAssistantMessage(event);
+      await service.persistAssistantMessage(event);
+    }
+    await service.finishTurn(thread.id);
+    expect(plans.listByThread(thread.id)).toHaveLength(1);
+    expect(plans.getLatestForThread(thread.id)).toMatchObject({ messageId: assistant.id,
+      title: "Plan", contentMd: "# Plan\nBuild it.\nThen test it.", sectionsJson: [],
+    });
+  });
+  it.each([
+    ["# " + "x".repeat(513), "title-limit"],
+    ["# Plan\n" + "x".repeat(256 * 1024), "content-limit"],
+    ["# Plan\n" + "## Section\n".repeat(129), "sections-count-limit"],
+    ["# Plan\n" + ("## " + "x".repeat(1024) + "\n").repeat(64), "sections-size-limit"],
+  ])("rejects capture %# over its canonical bound", async (markdown, reason) => {
+    const { thread, messages, plans, service } = await fixture();
+    const { logger } = await import("@mcode/shared");
+    const warning = vi.spyOn(logger, "warn");
+    service.beginOutputGeneration(thread.id);
+    service.handlePlanCaptured({ threadId: thread.id, markdown, source: "native" });
+    const assistant = await messages.create(thread.id, "assistant", "Summary.", 1);
+    service.observeAssistantMessage({ type: "message", threadId: thread.id,
+      messageId: assistant.id, content: assistant.content, tokens: null });
+    await service.finishTurn(thread.id);
+    expect(plans.listByThread(thread.id)).toEqual([]);
+    expect(warning).toHaveBeenCalledWith("Plan capture rejected", { threadId: thread.id, reason });
+    warning.mockRestore();
+  });
+
+  it("accepts the exact title, content and section limits", async () => {
+    const { thread, messages, plans, service } = await fixture();
+    service.beginOutputGeneration(thread.id);
+    const prefix = "# " + "x".repeat(512) + "\n" + "## Step\n".repeat(128);
+    const markdown = prefix + "x".repeat(256 * 1024 - prefix.length);
+    service.handlePlanCaptured({ threadId: thread.id, markdown, source: "native" });
+    const assistant = await messages.create(thread.id, "assistant", "Summary.", 1);
+    service.observeAssistantMessage({ type: "message", threadId: thread.id,
+      messageId: assistant.id, content: assistant.content, tokens: null });
+    await service.finishTurn(thread.id);
+    expect(plans.listByThread(thread.id)).toHaveLength(1);
+    expect(plans.getLatestForThread(thread.id)?.contentMd).toBe(markdown);
+    expect(plans.getLatestForThread(thread.id)?.title).toBe("x".repeat(512));
+    expect(plans.getLatestForThread(thread.id)?.sectionsJson).toHaveLength(128);
+  });
   it.each(["fence", "native"] as const)("persists one %s plan after all captures settle", async (source) => {
     const { thread, messages, plans, service } = await fixture();
     service.beginOutputGeneration(thread.id);

@@ -160,9 +160,6 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     void finalization.then((persisted) => {
       if (persisted) {
         this.clearFinalizedEventState(command.threadId, executionId);
-        if (this.runtime.snapshot(command.threadId)?.turnExecutionId === executionId) {
-          this.featureEffects.clearTurn(command.threadId);
-        }
       }
     }, () => undefined);
     return finalization;
@@ -375,6 +372,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private applyAssistantMessageBoundary(event: Extract<AgentEvent, { type: "assistantMessageBoundary" }>): boolean {
+    this.featureEffects.finishAssistantMessage(event.threadId);
     const settlement = this.narrative.settleAssistantTextItem(event.threadId, event);
     if (event.isFinalResponse === true) {
       const finalText = settlement.kind === "promoted" ? settlement.text : "";

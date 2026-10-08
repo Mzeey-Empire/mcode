@@ -25,6 +25,7 @@ export type PlanCaptureOutcome = { outcome: "inactive" | "missing" } | {
 export class PlanExecutionState {
   private questionParser: PlanQuestionParser | undefined;
   private fenceParser: PlanFenceParser | undefined;
+  private messageParser: PlanFenceParser | undefined;
   private pending: Pick<PlanCaptured, "markdown" | "source"> | undefined;
   private captured = false;
   private source: PlanCaptured["source"] | undefined;
@@ -34,6 +35,7 @@ export class PlanExecutionState {
     const copy = new PlanExecutionState();
     copy.questionParser = this.questionParser?.fork();
     copy.fenceParser = this.fenceParser?.fork();
+    copy.messageParser = this.messageParser?.fork();
     copy.pending = this.pending && { ...this.pending };
     copy.captured = this.captured;
     copy.source = this.source;
@@ -48,6 +50,7 @@ export class PlanExecutionState {
   /** Arm fence capture for one planning or revision turn. */
   beginOutputGeneration(): void {
     this.fenceParser = new PlanFenceParser();
+    this.messageParser = new PlanFenceParser();
     this.pending = undefined;
     this.captured = false;
     this.source = undefined;
@@ -77,19 +80,22 @@ export class PlanExecutionState {
   /** Capture complete message text when a provider did not stream it. */
   observeAssistantMessage(content: string): void {
     if (!this.fenceParser || this.captured) return;
-    const streamed = this.fenceParser.finish();
-    if (streamed) this.handleCapture({ markdown: streamed, source: "fence" });
-    if (this.pending) return;
-    const parser = new PlanFenceParser();
-    const markdown = parser.feed(content) ?? parser.finish();
+    this.finishAssistantMessage();
+    const markdown = this.messageParser?.feed(content) ?? this.messageParser?.finish();
     if (markdown) this.handleCapture({ markdown, source: "fence" });
-    this.fenceParser = new PlanFenceParser();
+  }
+
+  /** Separate assistant blocks even when the provider omits their trailing newline. */
+  finishAssistantMessage(): void {
+    const streamed = this.fenceParser?.finish();
+    if (streamed) this.handleCapture({ markdown: streamed, source: "fence" });
   }
 
   /** Materialize only an explicit capture, never headings scraped from chat. */
-  consumeAssistantMessage(content: string): PlanPersistenceReady | null {
+  consumeAssistantMessage(content?: string): PlanPersistenceReady | null {
     if (this.captured) return null;
-    this.observeAssistantMessage(content);
+    if (content !== undefined) this.observeAssistantMessage(content);
+    else this.finishAssistantMessage();
     const capture = this.pending;
     if (!capture) return null;
     return extractMarkdown(capture.markdown);

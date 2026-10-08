@@ -18,6 +18,11 @@ import { loadPlanProtocolFixture, parsePlanProtocolFixture, projectPlanProtocolC
 import { providerFixtureSourceHash } from "../fixture-safety.js";
 import { containedPath, recordChildStderr } from "../plan-probes/runtime.js";
 import type { ProviderEventDraft } from "../../host-ports.js";
+import type { AgentEvent } from "@mcode/contracts";
+import { ClaudeEventMapper } from "../../private/claude/claude-event-mapper.js";
+import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
+import { mapCopilotEvent, type CopilotTurnState } from "../../private/copilot/copilot-event-mapper.js";
+import { mapOpenCodeEnvelope } from "../../../../../apps/server/src/features/providers/adapters/opencode/opencode-event-mapper.js";
 import {
   DeterministicCanonicalSink,
   ENABLED_PROVIDER_CONFORMANCE,
@@ -605,8 +610,52 @@ function omitGeneratedFields(
 }
 
 describe("synthetic plan captures", () => {
-  it.each(["claude", "codex", "copilot", "opencode"])("%s captures exactly one fenced plan", (provider) => {
+  it.each(["claude", "codex", "copilot", "opencode"])("%s captures exactly one fenced plan", async (provider) => {
     const fixture = loadProviderFixtureManifest(NodePath.resolve(import.meta.dirname, "../fixtures", `${provider}-core.synthetic.json`));
-    expect(runPlanCaptureProfile(fixture)).toEqual(["# Synthetic plan\n\n## Implement\nKeep the code simple."]);
+    const text = fixture.input.planCapture?.assistantText;
+    if (!text) throw new Error("Missing fixture plan text");
+    const events = await mapPlanText(provider, text);
+    expect(runPlanCaptureProfile(fixture, events)).toEqual(["# Synthetic plan\n\n## Implement\nKeep the code simple."]);
+    expect(() => runPlanCaptureProfile(fixture, [])).toThrow("Fixture plan capture count differs");
   });
 });
+
+async function mapPlanText(provider: string, text: string): Promise<AgentEvent[]> {
+  const events: AgentEvent[] = [];
+  if (provider === "claude") {
+    const mapper = new ClaudeEventMapper("SESSION_1", "THREAD_1", {
+      emit: (event) => { events.push(event); }, getSession: () => undefined,
+      captureSdkSessionId: () => true, observeNativeGoalCommands: () => undefined,
+      applyNativeGoalCommandResult: () => undefined, invalidateSdkSession: () => undefined,
+      markSessionPoisoned: () => undefined, updateUsage: () => ({}), invalidateUsage: () => undefined,
+      resolveBillingMode: async () => "unknown", isSessionStartHookSuppressed: () => false,
+      clearSessionStartHookSuppression: () => undefined,
+    });
+    for (const character of text) await mapper.map({ type: "stream_event", event: {
+      type: "content_block_delta", index: 0, delta: { type: "text_delta", text: character },
+    } });
+    return events;
+  }
+  if (provider === "codex") {
+    const mapper = new CodexEventMapper("THREAD_1");
+    return [...text].flatMap((delta) => mapper.mapNotification({ jsonrpc: "2.0",
+      method: "item/agentMessage/delta", params: { threadId: "SESSION_1", turnId: "TURN_1", itemId: "ITEM_1", delta },
+    }).map((runtime) => runtime.event));
+  }
+  if (provider === "copilot") {
+    const turn: CopilotTurnState = { nativeIdleObserved: false, tokensIn: 0, tokensOut: 0,
+      cacheRead: 0, cacheWrite: 0, tools: new Map(), pendingPermissions: new Map(),
+      settle: () => undefined, completed: Promise.resolve() };
+    return [...text].flatMap((deltaContent, index) => mapCopilotEvent({
+      id: `EVENT_${index}`, timestamp: "2026-10-08T12:00:00.000Z", parentId: null,
+      type: "assistant.message_delta", data: { messageId: "MESSAGE_1", deltaContent },
+    }, "THREAD_1", turn));
+  }
+  if (provider === "opencode") {
+    const forwardedText = new Map<string, string>();
+    return [...text].flatMap((delta) => mapOpenCodeEnvelope({ type: "message.part.delta",
+      properties: { messageID: "MESSAGE_1", partID: "PART_1", field: "text", delta },
+    }, { threadId: "THREAD_1", partRole: "assistant", forwardedText }).events);
+  }
+  throw new Error(`No plan mapper for ${provider}`);
+}

@@ -21,7 +21,6 @@ describe("PlanFenceParser", () => {
   });
 
   it.each([
-    "```mcode-plan\n# Plan\n```",
     "````mcode-plan extra\n# Plan\n````",
     "prefix ````mcode-plan\n# Plan\n````",
     "````mcode-plan\n# Plan\n```` suffix",
@@ -40,5 +39,15 @@ describe("PlanFenceParser", () => {
     const fork = parser.fork();
     expect(fork.feed("Branch\r\n````\r\n")).toBe("# Plan\r\nBranch");
     expect(parser.feed("Original\r\n````\r\n")).toBe("# Plan\r\nOriginal");
+  });
+
+  it.each([3, 4, 5])("accepts a %i-backtick opener at every chunk boundary", (length) => {
+    const fence = "`".repeat(length);
+    const text = `${fence}mcode-plan\n# Plan\nShip it.\n${fence}`;
+    for (let split = 0; split <= text.length; split++) {
+      const parser = new PlanFenceParser();
+      expect([parser.feed(text.slice(0, split)), parser.feed(text.slice(split)), parser.finish()]
+        .filter((value) => value !== null)).toEqual(["# Plan\nShip it."]);
+    }
   });
 });

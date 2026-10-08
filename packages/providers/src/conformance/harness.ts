@@ -90,14 +90,15 @@ export async function runCursorAcpTraceProfile(
   };
 }
 
-/** Replay a synthetic assistant stream through the same fence parser the server uses. */
-export function runPlanCaptureProfile(fixture: ProviderFixtureManifest): string[] {
+/** Count fenced captures from a fixture replayed through its production adapter. */
+export function runPlanCaptureProfile(fixture: ProviderFixtureManifest, events: readonly AgentEvent[]): string[] {
   const capture = validateProviderFixtureManifest(fixture).input.planCapture;
   if (!capture) throw new TypeError("Fixture has no plan capture stream");
   const parser = new PlanFenceParser();
   const plans: string[] = [];
-  for (const character of capture.assistantText) {
-    const plan = parser.feed(character);
+  for (const event of events) {
+    if (event.type !== "textDelta") continue;
+    const plan = parser.feed(event.delta);
     if (plan !== null) plans.push(plan);
   }
   const final = parser.finish();

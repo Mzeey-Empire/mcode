@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { stripPlanFences } from "@/lib/plan-fences";
 
 interface ComposerBranchBarProps {
   /** ID of the message being branched from; bar is hidden when absent. */
@@ -16,15 +17,16 @@ interface ComposerBranchBarProps {
  */
 export function ComposerBranchBar({ branchFromMessageId, branchFromMessageContent, onBranchModeExit }: ComposerBranchBarProps) {
   if (!branchFromMessageId) return null;
+  const excerpt = stripPlanFences(branchFromMessageContent ?? "").trim();
 
   return (
     <div className="flex items-start gap-2 px-3 py-2 animate-fade-up-in">
       <span className="shrink-0 text-sm text-primary/70 leading-none mt-0.5" aria-hidden="true">↳</span>
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium text-muted/60 leading-none mb-0.5">Forking from</p>
-        {branchFromMessageContent && (
+        {excerpt && (
           <p className="text-xs text-muted/50 text-fade italic">
-            {branchFromMessageContent}
+            {excerpt}
           </p>
         )}
       </div>
