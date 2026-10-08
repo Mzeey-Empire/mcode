@@ -518,7 +518,8 @@ describe("PreviewPanel: unavailable state", () => {
     rect.mockRestore();
   });
 
-  it("keeps the responsive toolbar available through the web Browser overflow menu", async () => {
+  // Drives several menus with userEvent (about 1s locally); a loaded CI runner pushed it past the 5s default.
+  it("keeps the responsive toolbar available through the web Browser overflow menu", { timeout: 15_000 }, async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     const user = userEvent.setup();
     render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
@@ -556,7 +557,8 @@ describe("PreviewPanel: unavailable state", () => {
     expect(screen.getByTestId("web-runtime-preview-iframe")).toBe(iframe);
   });
 
-  it("opens the toolbar in Fit presentation after a previous fixed zoom", async () => {
+  // Drives several menus with userEvent (about 1s locally); a loaded CI runner pushed it past the 5s default.
+  it("opens the toolbar in Fit presentation after a previous fixed zoom", { timeout: 15_000 }, async () => {
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     const user = userEvent.setup();
     render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
