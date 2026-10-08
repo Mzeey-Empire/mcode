@@ -367,7 +367,7 @@ function HandoffFallbackNotice({ threadId }: { threadId: string }) {
   if (!fallback) return null;
   return (
     <>
-      <Notice tone={fallback.copy.tone} title={fallback.copy.title} detail={fallback.copy.detail} action={{ label: "View doc", onClick: () => setDocOpen(true) }} onDismiss={fallback.dismiss} data-testid="handoff-fallback-notice" className="mx-4 mt-2" />
+      <Notice tone={fallback.copy.tone} title={fallback.copy.title} detail={fallback.copy.detail} action={{ label: "View doc", onClick: () => setDocOpen(true), emphasis: "neutral" }} onDismiss={fallback.dismiss} data-testid="handoff-fallback-notice" className="mx-4 mt-2" />
       <HandoffDocDialog threadId={threadId} open={docOpen} onOpenChange={setDocOpen} />
     </>
   );

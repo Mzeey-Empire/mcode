@@ -26,6 +26,11 @@ const TONE_ICON = {
 export interface NoticeAction {
   label: string;
   onClick: () => void;
+  /**
+   * `neutral` when another control on screen is already the amber next step,
+   * for example the composer's Send. Defaults to `primary`.
+   */
+  emphasis?: "primary" | "neutral";
 }
 
 /** Props for {@link Notice}. */
@@ -73,7 +78,7 @@ function NoticeDisclosure({ open, onToggle }: { open: boolean; onToggle: () => v
 function NoticeAction({ action }: { action: NoticeAction }) {
   return (
     <div className="pl-8 pt-1">
-      <Button type="button" onClick={action.onClick}>{action.label}</Button>
+      <Button type="button" variant={action.emphasis === "neutral" ? "secondary" : "default"} onClick={action.onClick}>{action.label}</Button>
     </div>
   );
 }
