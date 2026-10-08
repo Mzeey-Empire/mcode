@@ -54,7 +54,22 @@
       "rules": {
         "mcode/no-ellipsis-truncation": "error",
         "mcode/no-arbitrary-text-size": "error",
-        "mcode/no-numeric-z-index": "error"
+        "mcode/no-numeric-z-index": "error",
+        "mcode/no-raw-color": "error",
+        "mcode/no-raw-shadow": "error"
+      }
+    },
+    {
+      "files": ["apps/web/src/**/__tests__/**", "apps/web/src/**/*.test.*", "apps/web/src/**/*.spec.*", "apps/web/src/performance/**"],
+      "rules": {
+        "mcode/no-raw-color": "off",
+        "mcode/no-raw-shadow": "off"
+      }
+    },
+    {
+      "files": ["apps/web/src/**/EditorIcons.tsx", "apps/web/src/**/ProviderIcons.tsx", "apps/web/src/lib/file-icons.tsx", "apps/web/src/lib/vscode-icons.ts", "apps/web/src/components/chat/ImageAttachmentLightbox.tsx"],
+      "rules": {
+        "mcode/no-raw-color": "off"
       }
     }
   ],

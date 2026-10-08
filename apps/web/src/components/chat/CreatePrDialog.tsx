@@ -55,7 +55,7 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
             disabled={disabled}
             aria-label="Base branch"
             className={cn(
-              "flex h-8 w-full items-center justify-between rounded-lg border border-control-border bg-background pl-3 pr-2.5 text-sm shadow-xs transition-colors",
+              "flex h-8 w-full items-center justify-between rounded-lg border border-control-border bg-background pl-3 pr-2.5 text-sm transition-colors",
               "focus-visible:border-focus focus-visible:outline-none",
               "disabled:cursor-not-allowed disabled:opacity-50",
               open && "border-focus",
@@ -656,7 +656,7 @@ function PrDescriptionField({ form, isDisabled }: Pick<PrDescriptionPanelProps, 
         disabled={isDisabled}
         placeholder="PR description"
         className={cn(
-          "flex-1 min-h-0 w-full rounded-lg border border-control-border bg-background px-3 py-2.5 text-sm shadow-xs transition-colors",
+          "flex-1 min-h-0 w-full rounded-lg border border-control-border bg-background px-3 py-2.5 text-sm transition-colors",
           "font-mono resize-none overflow-y-auto",
           "placeholder:text-muted",
           "focus-visible:border-focus focus-visible:outline-none",

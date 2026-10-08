@@ -226,7 +226,7 @@ export function TerminalPanel() {
     {panelActive && (
       <div
         style={{ height: panelHeight }}
-        className="flex flex-col rounded-lg bg-background shadow-sm overflow-hidden"
+        className="flex flex-col rounded-lg bg-background overflow-hidden"
       >
         {/* Drag handle */}
         <div

@@ -332,7 +332,7 @@ function FileListToolbar({
   // rows collapse into one. Standalone renders fall back to a sticky bar.
   if (toolbarSlot) return createPortal(controls, toolbarSlot);
   return (
-    <div className="sticky top-0 z-(--layer-dropdown) flex items-center gap-0.5 bg-background/95 px-2 py-1.5 shadow-[0_8px_12px_-12px_oklch(0_0_0/0.35)] backdrop-blur-sm">
+    <div className="sticky top-0 z-(--layer-dropdown) flex items-center gap-0.5 bg-background/95 px-2 py-1.5 border-b border-border backdrop-blur-sm">
       {controls}
     </div>
   );

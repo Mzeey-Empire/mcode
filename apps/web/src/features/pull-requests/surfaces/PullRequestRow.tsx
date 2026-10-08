@@ -49,7 +49,7 @@ const statePresentation = {
   },
   merged: {
     icon: GitMerge,
-    tone: "text-violet-400 dark:text-violet-300",
+    tone: "text-pr-merged",
   },
 } as const;
 

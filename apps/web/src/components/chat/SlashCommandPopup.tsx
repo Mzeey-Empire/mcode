@@ -26,14 +26,7 @@ interface SlashCommandPopupProps {
   onSelect: (cmd: Command) => void;
   onDismiss: () => void;
   onRetry: () => void;
-  /**
-   * `"dark"` switches every surface, text, hover, and border token to dark
-   * hardcoded values so the popup coheres with the annotation bubble's
-   * intentionally dark palette (which must stay readable over arbitrary user
-   * web content regardless of the app theme). `"default"` (the default) leaves
-   * the Tailwind theme tokens untouched so the Composer's rendering is
-   * byte-identical to before this prop was added.
-   */
+  /** Compact annotation treatment; colours follow the app theme. */
   tone?: "default" | "dark";
   /** Extra class names for border/positioning overrides that don't belong in tone. */
   className?: string;
@@ -149,16 +142,16 @@ export function SlashCommandPopup({
                     aria-hidden="true"
                     className={cn(
                       "pointer-events-none absolute inset-x-1 bottom-1 h-5 bg-gradient-to-t from-panel via-panel/90 to-transparent",
-                      tone === "dark" && "from-[#1e1e1e] via-[#1e1e1e]/90",
+                      tone === "dark" && "from-panel via-panel/90",
                     )}
                   />
                 </div>
               </>
             );
           case "loading":
-            return <LoadingInline tone={tone} />;
+            return <LoadingInline />;
           case "empty":
-            return <EmptyState tone={tone} />;
+            return <EmptyState />;
         }
       })()}
     </ComposerOverlaySurface>
@@ -204,8 +197,8 @@ function CommandRow({
         "h-10 min-w-0 w-full justify-start gap-2 overflow-hidden rounded-md px-2 py-1.5 text-left transition-colors",
         tone === "dark"
           ? selected
-            ? "bg-white/[0.12]"
-            : "hover:bg-white/[0.06]"
+            ? "bg-selected"
+            : "hover:bg-hover"
           : selected
             ? "bg-selected"
             : "hover:bg-selected/50",
@@ -215,13 +208,13 @@ function CommandRow({
       <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
         <span className={cn(
           "min-w-0 shrink text-fade text-sm font-medium",
-          tone === "dark" ? "text-neutral-50" : "text-ink",
+          "text-ink",
         )}>
           {commandDisplayLabel(cmd)}
         </span>
         <span className={cn(
           "min-w-12 flex-1 text-fade text-xs font-normal",
-          tone === "dark" ? "text-neutral-400" : "text-muted",
+          "text-muted",
         )}>
           {cmd.description}
         </span>
@@ -230,7 +223,7 @@ function CommandRow({
         <Badge
           variant="outline"
           size="compact"
-          className={cn(tone === "dark" && "border-white/10 text-neutral-300")}
+          className={cn(tone === "dark" && "border-border text-muted")}
         >
           {origin}
         </Badge>
@@ -252,7 +245,7 @@ function CommandIdentityMark({
       className={cn(
         "flex size-8 shrink-0 items-center justify-center rounded-md ring-1 ring-inset",
         tone === "dark"
-          ? "bg-white/[0.06] text-neutral-400 ring-white/10"
+          ? "bg-hover text-muted ring-border"
           : "bg-hover/65 text-muted ring-border/60",
       )}
     >
@@ -322,7 +315,7 @@ function normalizePath(path: string): string {
  * the user has typed a filter that excludes every cached built-in AND a
  * skill load is still in flight -- an exceedingly rare combination.
  */
-function LoadingInline({ tone = "default" }: { tone?: "default" | "dark" }) {
+function LoadingInline() {
   return (
     <div
       aria-busy="true"
@@ -333,19 +326,19 @@ function LoadingInline({ tone = "default" }: { tone?: "default" | "dark" }) {
       <span className="flex h-5 w-5 flex-shrink-0" />
       <span className={cn(
         "text-sm",
-        tone === "dark" ? "text-neutral-400" : "text-muted",
+        "text-muted",
       )}>Loading commands...</span>
     </div>
   );
 }
 
-function EmptyState({ tone = "default" }: { tone?: "default" | "dark" }) {
+function EmptyState() {
   return (
     <div aria-live="polite" role="status" className="flex items-center gap-3 px-3 py-2">
       <span className="flex h-5 w-5 flex-shrink-0" />
       <span className={cn(
         "text-sm",
-        tone === "dark" ? "text-neutral-400" : "text-muted",
+        "text-muted",
       )}>No commands match</span>
     </div>
   );
@@ -374,7 +367,7 @@ function ErrorRow({
         className={cn(
           "h-6 rounded-md px-2 text-xs",
           tone === "dark"
-            ? "text-neutral-100 hover:bg-white/10"
+            ? "text-ink hover:bg-hover"
             : "text-ink hover:bg-selected",
         )}
       >

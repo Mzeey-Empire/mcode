@@ -29,14 +29,7 @@ interface FileTagPopupProps {
   selectedIndex: number;
   /** Viewport rect the popup opens above. The popup renders nothing until it is known. */
   anchorRect?: DOMRect | null;
-  /**
-   * `"dark"` switches every surface, text, hover, and border token to dark
-   * hardcoded values so the popup coheres with the annotation bubble's
-   * intentionally dark palette (which must stay readable over arbitrary user
-   * web content regardless of the app theme). `"default"` (the default) leaves
-   * the Tailwind theme tokens untouched so the Composer's rendering is
-   * byte-identical to before this prop was added.
-   */
+  /** Compact annotation treatment; colours follow the app theme. */
   tone?: "default" | "dark";
   /** Extra class names for border/positioning overrides that don't belong in tone. */
   className?: string;
@@ -53,21 +46,21 @@ function splitPath(path: string): { dir: string; name: string } {
 
 function getSuggestionRowClass(isDark: boolean, selected: boolean): string {
   const selectionClass = isDark
-    ? selected ? "bg-white/[0.12] text-neutral-100" : "hover:bg-white/[0.06] hover:text-neutral-100"
+    ? selected ? "bg-selected text-ink" : "hover:bg-hover hover:text-ink"
     : selected ? "bg-selected text-ink" : "hover:bg-selected hover:text-ink focus-visible:bg-selected focus-visible:text-ink focus-visible:outline-none";
   return cn("group h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors duration-100", isDark && "focus-visible:outline-none", selectionClass);
 }
 
 function SuggestionRowIcon({ item, isFile, isDark }: { item: MentionSuggestion; isFile: boolean; isDark: boolean }) {
-  return <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-md ring-1 ring-inset", isDark ? "bg-white/[0.06] text-neutral-400 ring-white/10" : "bg-hover/65 text-muted ring-border/60")}><EntityIcon kind={item.kind} filePath={isFile ? item.path : undefined} size={14} className="flex items-center justify-center" /></span>;
+  return <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-md ring-1 ring-inset", isDark ? "bg-hover text-muted ring-border" : "bg-hover/65 text-muted ring-border/60")}><EntityIcon kind={item.kind} filePath={isFile ? item.path : undefined} size={14} className="flex items-center justify-center" /></span>;
 }
 
 function AgentSuggestionRowText({ item, name, isDark }: { item: Extract<MentionSuggestion, { kind: "agent" }>; name: string; isDark: boolean }) {
-  return <span className="flex min-w-0 flex-1 items-baseline gap-1"><span className={cn("shrink-0 font-medium", isDark ? "text-neutral-100" : "")}>{name}</span>{item.description ? <span className={cn("min-w-0 text-fade", isDark ? "text-neutral-400 group-hover:text-neutral-300 group-aria-selected:text-neutral-300" : "text-muted group-hover:text-ink/70 group-focus-visible:text-ink/70 group-aria-selected:text-ink/70")}>{item.description}</span> : null}</span>;
+  return <span className="flex min-w-0 flex-1 items-baseline gap-1"><span className={cn("shrink-0 font-medium", isDark ? "text-ink" : "")}>{name}</span>{item.description ? <span className={cn("min-w-0 text-fade", isDark ? "text-muted group-hover:text-muted group-aria-selected:text-muted" : "text-muted group-hover:text-ink/70 group-focus-visible:text-ink/70 group-aria-selected:text-ink/70")}>{item.description}</span> : null}</span>;
 }
 
 function FileSuggestionRowText({ dir, name, isDark }: { dir: string; name: string; isDark: boolean }) {
-  return <span className="min-w-0 flex-1 text-fade"><span className={cn(isDark ? "text-neutral-400 group-hover:text-neutral-300 group-aria-selected:text-neutral-300" : "text-muted group-hover:text-ink/70 group-focus-visible:text-ink/70 group-aria-selected:text-ink/70")}>{dir}</span><span className={cn("font-medium", isDark ? "text-neutral-100" : "")}>{name}</span></span>;
+  return <span className="min-w-0 flex-1 text-fade"><span className={cn(isDark ? "text-muted group-hover:text-muted group-aria-selected:text-muted" : "text-muted group-hover:text-ink/70 group-focus-visible:text-ink/70 group-aria-selected:text-ink/70")}>{dir}</span><span className={cn("font-medium", isDark ? "text-ink" : "")}>{name}</span></span>;
 }
 
 /** Hook for keyboard navigation within the file tag popup. */
@@ -234,7 +227,7 @@ export function FileTagPopup({
                 data-group-header
                 className={cn(
                   "sticky top-0 z-(--layer-sticky) bg-inherit px-2 py-1 text-xs font-medium",
-                  tone === "dark" ? "text-neutral-400" : "text-muted/70",
+                  tone === "dark" ? "text-muted" : "text-muted/70",
                 )}
               >
                 {item.group}
