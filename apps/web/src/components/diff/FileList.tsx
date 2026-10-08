@@ -412,39 +412,29 @@ function ReviewOptionsMenu({
       <DropdownMenuContent align="end" sideOffset={6} className="min-w-[190px]">
         {refreshable ? (
           <DropdownMenuItem
+            label={refreshInProgress ? "Refreshing" : "Refresh"}
+            icon={refreshInProgress ? <Spinner size={16} /> : <RefreshCw />}
+            disabledReason={refreshInProgress ? "A refresh is already running" : null}
             onClick={onRefresh}
-            disabled={refreshInProgress}
             data-testid="review-option-refresh"
-            className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs"
-          >
-            {refreshInProgress ? <Spinner size={12} className="text-muted" /> : <RefreshCw size={13} className="text-muted" />}
-            {refreshInProgress ? "Refreshing" : "Refresh"}
-          </DropdownMenuItem>
+          />
         ) : null}
         <DropdownMenuItem
-          disabled={!activeThreadId}
+          label={lineWrap ? "Disable word wrap" : "Enable word wrap"}
+          icon={<TextWrap />}
+          disabledReason={activeThreadId ? null : "Open a thread to change word wrap"}
           onClick={() => {
             if (activeThreadId) toggleLineWrap(activeThreadId);
           }}
           data-testid="review-option-word-wrap"
-          className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs data-disabled:cursor-not-allowed"
-        >
-          <TextWrap size={13} className="text-muted" />
-          {lineWrap ? "Disable word wrap" : "Enable word wrap"}
-        </DropdownMenuItem>
+        />
         <DropdownMenuSeparator />
         <DropdownMenuItem
+          label={allExpanded ? "Collapse all" : "Expand all"}
+          icon={allExpanded ? <ChevronsDownUp /> : <ChevronsUpDown />}
           onClick={onToggleAll}
           data-testid="review-option-toggle-all"
-          className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs"
-        >
-          {allExpanded ? (
-            <ChevronsDownUp size={13} className="text-muted" />
-          ) : (
-            <ChevronsUpDown size={13} className="text-muted" />
-          )}
-          {allExpanded ? "Collapse all" : "Expand all"}
-        </DropdownMenuItem>
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );

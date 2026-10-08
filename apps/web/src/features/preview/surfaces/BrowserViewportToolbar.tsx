@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronDown, RotateCw, Smartphone, X } from "lucide-react";
+import { ChevronDown, RotateCw, Smartphone, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -64,16 +64,16 @@ function ViewportPresetMenu({ open, selected, onOpenChange, onResponsive, onPres
           </Button>
         }
       />
-      <DropdownMenuContent align="start" className="min-w-[210px]">
-        <DropdownMenuItem className="w-full justify-between gap-3 text-xs" onClick={onResponsive}>
-          <span>Responsive</span>
-          {!selected && <Check size={14} aria-hidden />}
-        </DropdownMenuItem>
+      <DropdownMenuContent align="start" className="min-w-[24rem]">
+        <DropdownMenuItem label="Responsive" checked={!selected} onClick={onResponsive} />
         {VIEWPORT_PRESETS.map((preset) => (
-          <DropdownMenuItem key={preset.id} className="w-full justify-between gap-3 text-xs" onClick={() => onPreset(preset)}>
-            <span className="min-w-0 text-fade">{preset.label}</span>
-            <span className="shrink-0 font-mono text-muted">{`${preset.width} × ${preset.height}`}</span>
-          </DropdownMenuItem>
+          <DropdownMenuItem
+            key={preset.id}
+            label={preset.label}
+            checked={selected?.id === preset.id}
+            trailing={<span className="text-caption tabular-nums text-muted">{`${preset.width} × ${preset.height}`}</span>}
+            onClick={() => onPreset(preset)}
+          />
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -121,14 +121,17 @@ function ViewportPresentationMenu({ open, scaleLabel, presentation, onOpenChange
           </Button>
         }
       />
-      <DropdownMenuContent align="end" className="min-w-[150px]">
-        <DropdownMenuItem className="justify-between gap-3 text-xs" onClick={() => onPresentation("fit")}><span>Fit to panel</span>{presentation === "fit" && <Check size={14} aria-hidden />}</DropdownMenuItem>
-        <DropdownMenuItem className="justify-between gap-3 text-xs" onClick={() => onPresentation("actual")}><span>Actual size</span>{presentation === "actual" && <Check size={14} aria-hidden />}</DropdownMenuItem>
+      <DropdownMenuContent align="end" className="min-w-[16rem]">
+        <DropdownMenuItem label="Fit to panel" checked={presentation === "fit"} onClick={() => onPresentation("fit")} />
+        <DropdownMenuItem label="Actual size" checked={presentation === "actual"} onClick={() => onPresentation("actual")} />
         <DropdownMenuSeparator />
         {VIEWPORT_ZOOM_PRESETS.map((nextPresentation) => (
-          <DropdownMenuItem key={nextPresentation} className="justify-between gap-3 text-xs" onClick={() => onPresentation(nextPresentation)}>
-            <span>{nextPresentation}</span>{presentation === nextPresentation && <Check size={14} aria-hidden />}
-          </DropdownMenuItem>
+          <DropdownMenuItem
+            key={nextPresentation}
+            label={nextPresentation}
+            checked={presentation === nextPresentation}
+            onClick={() => onPresentation(nextPresentation)}
+          />
         ))}
       </DropdownMenuContent>
     </DropdownMenu>

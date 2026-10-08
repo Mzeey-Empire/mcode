@@ -1,11 +1,14 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { MENU_LIST_CLASS, MENU_ROW_CLASS, MenuRowBody } from "./menu-row";
 import { POPOVER_SURFACE_CLASS } from "./overlay-surface";
 
 interface MenuItem {
   label: string;
   onClick: () => void;
+  icon?: ReactNode;
   destructive?: boolean;
   divider?: boolean;
 }
@@ -54,11 +57,16 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     <div
       ref={ref}
       style={{ position: "fixed", left: x, top: y, zIndex: "var(--layer-modal)" }}
-      className={cn("min-w-[160px] p-1", POPOVER_SURFACE_CLASS)}
+      role="menu"
+      className={cn("min-w-[160px]", MENU_LIST_CLASS, POPOVER_SURFACE_CLASS)}
     >
       {items.map((item, i) =>
         item.divider ? (
-          <div key={i} className="my-1 h-px bg-border" />
+          <div
+            key={i}
+            role="separator"
+            className="flex h-[0.9rem] shrink-0 items-center px-2 before:h-px before:flex-1 before:bg-border"
+          />
         ) : (
           <button
             key={i}
@@ -67,14 +75,11 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
               item.onClick();
               onClose();
             }}
-            className={cn(
-              "flex w-full items-center rounded-md px-3 py-1.5 text-sm",
-              item.destructive
-                ? "text-destructive hover:bg-destructive/10"
-                : "text-ink hover:bg-selected"
-            )}
+            type="button"
+            role="menuitem"
+            className={cn(MENU_ROW_CLASS, "hover:bg-hover")}
           >
-            {item.label}
+            <MenuRowBody label={item.label} icon={item.icon} destructive={item.destructive} />
           </button>
         )
       )}

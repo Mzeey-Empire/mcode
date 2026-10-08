@@ -1,4 +1,4 @@
-import { FolderOpen, Check, ChevronDown } from "lucide-react";
+import { FolderOpen, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
 import type { ComponentType } from "react";
@@ -86,18 +86,11 @@ export function ModeSelector({
           return (
             <DropdownMenuItem
               key={option.value}
+              label={option.label}
+              icon={<OptionIcon />}
+              checked={option.value === mode}
               onClick={() => onModeChange(option.value)}
-              className={cn(
-                "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs",
-                option.value === mode
-                  ? "bg-selected text-ink"
-                  : "text-ink",
-              )}
-            >
-              <OptionIcon size={12} />
-              <span className="flex-1 text-left">{option.label}</span>
-              {option.value === mode && <Check size={10} className="text-muted" />}
-            </DropdownMenuItem>
+            />
           );
         })}
       </DropdownMenuContent>

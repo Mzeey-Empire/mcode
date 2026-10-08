@@ -102,7 +102,7 @@ describe("ProjectAction controls", () => {
         onStart={vi.fn().mockResolvedValue(undefined)}
         onFocus={vi.fn()}
         onEdit={vi.fn()}
-        setupMenuItem={<DropdownMenuItem>Run Setup</DropdownMenuItem>}
+        setupMenuItem={<DropdownMenuItem label="Run Setup" />}
       />,
     );
 
@@ -114,9 +114,8 @@ describe("ProjectAction controls", () => {
       "Build",
       "Run Setup",
     ]);
-    expect(menuItems[0].firstElementChild).toHaveClass("lucide-pencil");
-    const play = menuItems[1].querySelector('[aria-label="Play"]');
-    expect(play).toBe(menuItems[1].lastElementChild);
+    expect(menuItems[0].firstElementChild?.firstElementChild).toHaveClass("lucide-pencil");
+    expect(menuItems[1].lastElementChild?.querySelector('[aria-label="Play"]')).not.toBeNull();
     const content = menuItems[0].closest('[data-slot="dropdown-menu-content"]');
     expect(content?.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(2);
   });
@@ -131,7 +130,7 @@ describe("ProjectAction controls", () => {
         onStart={vi.fn().mockResolvedValue(undefined)}
         onFocus={vi.fn()}
         onEdit={vi.fn()}
-        setupMenuItem={<DropdownMenuItem>Run Setup</DropdownMenuItem>}
+        setupMenuItem={<DropdownMenuItem label="Run Setup" />}
       />,
     );
 

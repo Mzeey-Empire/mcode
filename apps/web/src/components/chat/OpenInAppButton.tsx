@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { getTransport } from "@/transport";
 import { useOpenInApps } from "@/hooks/useOpenInApps";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -124,19 +124,15 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
               className={cn("transition-transform duration-150", menuOpen && "rotate-180")}
             />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" sideOffset={4} className="min-w-[170px] text-xs">
+          <DropdownMenuContent align="end" sideOffset={4} className="min-w-[170px]">
             {installed.map((app) => (
               <DropdownMenuItem
                 key={app.id}
+                label={app.label}
+                icon={openInAppIcon(app.iconKey, 16)}
+                checked={app.id === resolvedId}
                 onClick={() => pickApp(app.id)}
-                className="flex cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-xs"
-              >
-                <span className="flex items-center gap-2">
-                  {openInAppIcon(app.iconKey, 16)}
-                  <span>{app.label}</span>
-                </span>
-                {app.id === resolvedId && <Check size={14} className="opacity-75" />}
-              </DropdownMenuItem>
+              />
             ))}
           </DropdownMenuContent>
         </DropdownMenu>

@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -457,43 +456,33 @@ function ReviewViewMenuItem({
   readonly viewMode: DiffStoreState["viewMode"];
 }) {
   const active = viewMode === mode.id;
-  const disabled = isReviewViewUnavailable(mode, commitAvailability, branchAvailability);
+  const unavailableReason = reviewViewUnavailableReason(mode, commitAvailability, branchAvailability);
   return (
     <DropdownMenuItem
-      disabled={disabled}
+      label={mode.label}
+      checked={active}
+      disabledReason={unavailableReason}
       onClick={() => selectReviewView({
         activeThreadId,
-        disabled,
+        disabled: unavailableReason !== null,
         mode,
         setReviewViewForThread,
         setViewMode,
       })}
       data-testid={`review-view-${mode.id}`}
       data-active={active ? "true" : undefined}
-      aria-disabled={disabled ? "true" : undefined}
-      aria-current={active ? "true" : undefined}
-      className={cn(
-        "flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs",
-        disabled
-          ? "cursor-not-allowed text-muted/45"
-          : active
-            ? "text-ink"
-            : "text-ink",
-      )}
-    >
-      <span className="flex-1 text-left">{mode.label}</span>
-      {active ? <Check size={11} className="text-muted" /> : null}
-    </DropdownMenuItem>
+    />
   );
 }
 
-function isReviewViewUnavailable(
+function reviewViewUnavailableReason(
   mode: ReviewViewMode,
   commitAvailability: CommitAvailability,
   branchAvailability: BranchAvailability,
-): boolean {
-  return (mode.id === "commit" && commitAvailability === "empty") ||
-    (mode.id === "branch" && branchAvailability === "empty");
+): string | null {
+  if (mode.id === "commit" && commitAvailability === "empty") return "No commits to review";
+  if (mode.id === "branch" && branchAvailability === "empty") return "No branch changes to review";
+  return null;
 }
 
 function selectReviewView({

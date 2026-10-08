@@ -20,7 +20,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -154,43 +153,27 @@ function LifecycleRemoteActions({
   return (
     <DropdownMenuGroup>
       <DropdownMenuItem
-        disabled={Boolean(readinessReason)}
-        className="text-xs"
+        label={readinessActionLabel(nextReadiness)}
+        icon={<CircleDot />}
+        disabledReason={readinessReason}
         onClick={onOpenReadiness}
-      >
-        <CircleDot size={13} aria-hidden />
-        {readinessActionLabel(nextReadiness)}
-      </DropdownMenuItem>
+      />
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger disabled={Boolean(mergeReason)} className="text-xs">
-          <GitMerge size={13} aria-hidden />
-          Merge
-        </DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger label="Merge" icon={<GitMerge />} disabledReason={mergeReason} />
         <DropdownMenuSubContent className="min-w-52">
           <DropdownMenuGroup>
             {detail.mergeMethods.map((method) => (
               <DropdownMenuItem
                 key={method}
-                className="text-xs"
+                label={mergeMethodLabel(method)}
+                icon={<GitMerge />}
                 onClick={() => onOpenMerge(method)}
-              >
-                <GitMerge size={13} aria-hidden />
-                {mergeMethodLabel(method)}
-              </DropdownMenuItem>
+              />
             ))}
           </DropdownMenuGroup>
         </DropdownMenuSubContent>
       </DropdownMenuSub>
-      {mergeReason ? <MenuReason reason={mergeReason} /> : null}
     </DropdownMenuGroup>
-  );
-}
-
-function MenuReason({ reason }: { reason: string }) {
-  return (
-    <DropdownMenuLabel className="max-w-64 whitespace-normal text-xs font-normal leading-5 text-muted">
-      {reason}
-    </DropdownMenuLabel>
   );
 }
 
@@ -202,27 +185,26 @@ function RefreshMenuItem({
   onRefresh: () => void;
 }) {
   return (
-    <DropdownMenuItem disabled={refreshing} className="text-xs" onClick={onRefresh}>
-      {refreshing ? <Spinner size={12} aria-hidden /> : <RefreshCw size={13} aria-hidden />}
-      Refresh
-    </DropdownMenuItem>
+    <DropdownMenuItem
+      label="Refresh"
+      icon={refreshing ? <Spinner size={16} aria-hidden /> : <RefreshCw />}
+      disabledReason={refreshing ? "A refresh is already running" : null}
+      onClick={onRefresh}
+    />
   );
 }
 
 function ForkMenuItem({
   label,
-  allowed,
+  unavailableReason,
   onClick,
 }: {
   label: string;
-  allowed: boolean;
+  unavailableReason: string | null;
   onClick: () => void;
 }) {
   return (
-    <DropdownMenuItem disabled={!allowed} className="text-xs" onClick={onClick}>
-      <GitFork size={13} aria-hidden />
-      {label}
-    </DropdownMenuItem>
+    <DropdownMenuItem label={label} icon={<GitFork />} disabledReason={unavailableReason} onClick={onClick} />
   );
 }
 
@@ -243,42 +225,38 @@ function LifecycleUtilityActions({
   onForkInBackground,
   onRefresh,
 }: LifecycleUtilityActionsProps) {
+  const forkReason = forkAllowed ? null : forkUnavailableReason ?? "Forking is unavailable";
   return (
     <DropdownMenuGroup>
       <RefreshMenuItem refreshing={refreshing} onRefresh={onRefresh} />
-      {onFork ? <ForkMenuItem label="Fork" allowed={forkAllowed} onClick={onFork} /> : null}
+      {onFork ? <ForkMenuItem label="Fork" unavailableReason={forkReason} onClick={onFork} /> : null}
       {onForkInBackground ? (
         <ForkMenuItem
           label="Fork in background"
-          allowed={forkAllowed}
+          unavailableReason={forkReason}
           onClick={onForkInBackground}
         />
       ) : null}
-      {!forkAllowed && forkUnavailableReason ? <MenuReason reason={forkUnavailableReason} /> : null}
     </DropdownMenuGroup>
   );
 }
 
 function LifecycleCloseActions({
   closeReason,
-  readinessReason,
   onClose,
 }: {
   closeReason: string | null;
-  readinessReason: string | null;
   onClose: () => void;
 }) {
   return (
     <DropdownMenuGroup>
       <DropdownMenuItem
-        disabled={Boolean(closeReason)}
-        className="text-xs text-destructive"
+        label="Close pull request"
+        icon={<CircleX />}
+        destructive
+        disabledReason={closeReason}
         onClick={onClose}
-      >
-        <CircleX size={13} aria-hidden />
-        Close pull request
-      </DropdownMenuItem>
-      {readinessReason || closeReason ? <MenuReason reason={readinessReason ?? closeReason ?? ""} /> : null}
+      />
     </DropdownMenuGroup>
   );
 }
@@ -398,7 +376,6 @@ export function PullRequestLifecycleActions({
           <DropdownMenuSeparator />
           <LifecycleCloseActions
             closeReason={reasons.close}
-            readinessReason={reasons.readiness}
             onClose={() => setActiveEffect("close")}
           />
         </DropdownMenuContent>

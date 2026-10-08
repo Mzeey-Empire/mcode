@@ -107,6 +107,8 @@ export function BrowserOverflowMenu({
     [onSetZoom],
   );
 
+  const pageReason = hasLoadedPage ? null : "Load a page first";
+
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
@@ -125,81 +127,39 @@ export function BrowserOverflowMenu({
       <DropdownMenuContent
         align="end"
         sideOffset={4}
-        className="min-w-[210px]"
+        className="min-w-[24rem]"
         data-testid="browser-overflow-menu"
       >
-        <DropdownMenuItem
-          className="gap-2 px-3 py-1.5 text-xs"
-          onClick={onNewPage}
-        >
-          <Plus size={14} className="text-muted" aria-hidden />
-          New page
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="gap-2 px-3 py-1.5 text-xs"
-          disabled={!hasLoadedPage}
-          onClick={onForceReload}
-        >
-          <RotateCw size={14} className="text-muted" aria-hidden />
-          Force reload
-        </DropdownMenuItem>
+        <DropdownMenuItem label="New page" icon={<Plus />} onClick={onNewPage} />
+        <DropdownMenuItem label="Force reload" icon={<RotateCw />} disabledReason={pageReason} onClick={onForceReload} />
         <DropdownMenuSeparator />
+        <DropdownMenuItem label="Dump page content" icon={<FileText />} disabledReason={pageReason} onClick={onDumpContent} />
         <DropdownMenuItem
-          className="gap-2 px-3 py-1.5 text-xs"
-          disabled={!hasLoadedPage}
-          onClick={onDumpContent}
-        >
-          <FileText size={14} className="text-muted" aria-hidden />
-          Dump page content
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="gap-2 px-3 py-1.5 text-xs"
-          disabled={!hasLoadedPage}
+          label="Region capture"
+          icon={<SquareDashedMousePointer />}
+          disabledReason={pageReason}
           onClick={onRegionCapture}
-        >
-          <SquareDashedMousePointer
-            size={14}
-            className="text-muted"
-            aria-hidden
-          />
-          Region capture
-        </DropdownMenuItem>
+        />
         <DropdownMenuSeparator />
+        <DropdownMenuItem label="Developer tools" icon={<CodeXml />} disabledReason={pageReason} onClick={onOpenDevTools} />
         <DropdownMenuItem
-          disabled={!hasLoadedPage}
-          className="gap-2 px-3 py-1.5 text-xs"
-          onClick={onOpenDevTools}
-        >
-          <CodeXml size={14} className="text-muted" aria-hidden />
-          Developer tools
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={!onToggleViewportToolbar}
-          className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs"
+          label={viewportToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
+          icon={<Smartphone />}
+          disabledReason={onToggleViewportToolbar ? null : "This page has no device toolbar"}
           onClick={onToggleViewportToolbar}
-        >
-          <span className="flex items-center gap-2">
-            <Smartphone size={14} className="text-muted" aria-hidden />
-            {viewportToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
-          </span>
-        </DropdownMenuItem>
-        {automationController?.controller === "agent" && onStopAutomation ? (
-          <DropdownMenuItem
-            className="gap-2 px-3 py-1.5 text-xs"
-            onClick={onStopAutomation}
-            title={automationBusy ? "Stop the active operation and take control" : undefined}
-          >
-            <Hand size={14} className="text-muted" aria-hidden />
-            Take control
-          </DropdownMenuItem>
-        ) : null}
+        />
+        <TakeControlItem
+          automationController={automationController}
+          automationBusy={automationBusy}
+          onStopAutomation={onStopAutomation}
+        />
         <DropdownMenuSeparator />
         {/* Zoom is a control row, not a closeable menu item: a plain div keeps
             the popup open so −/+ can be tapped repeatedly without dismissing it,
             and avoids menu-item keyboard semantics fighting the nested buttons. */}
         <div
           className={cn(
-            "flex items-center justify-between px-3 py-1.5 text-xs",
+            "flex h-row-default items-center justify-between px-3 text-body-small",
             !hasLoadedPage && "opacity-50",
           )}
         >
@@ -242,23 +202,26 @@ export function BrowserOverflowMenu({
           </span>
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          className="gap-2 px-3 py-1.5 text-xs"
-          disabled={!hasLoadedPage}
-          onClick={onClearCookies}
-        >
-          <Cookie size={14} className="text-muted" aria-hidden />
-          Clear cookies
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="gap-2 px-3 py-1.5 text-xs"
-          disabled={!hasLoadedPage}
-          onClick={onClearCache}
-        >
-          <Trash2 size={14} className="text-muted" aria-hidden />
-          Clear cache
-        </DropdownMenuItem>
+        <DropdownMenuItem label="Clear cookies" icon={<Cookie />} disabledReason={pageReason} onClick={onClearCookies} />
+        <DropdownMenuItem label="Clear cache" icon={<Trash2 />} disabledReason={pageReason} onClick={onClearCache} />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Offered only while the agent drives the active tab, so the user can take it back. */
+function TakeControlItem({
+  automationController,
+  automationBusy,
+  onStopAutomation,
+}: Pick<BrowserOverflowMenuProps, "automationController" | "automationBusy" | "onStopAutomation">) {
+  if (automationController?.controller !== "agent" || !onStopAutomation) return null;
+  return (
+    <DropdownMenuItem
+      label="Take control"
+      icon={<Hand />}
+      onClick={onStopAutomation}
+      title={automationBusy ? "Stop the active operation and take control" : undefined}
+    />
   );
 }

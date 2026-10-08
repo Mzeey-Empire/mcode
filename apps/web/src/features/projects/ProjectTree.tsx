@@ -2610,10 +2610,10 @@ function ProjectRowActions({
       <DropdownMenu>
         <DropdownMenuTrigger aria-label={`Project options for ${workspace.name}`} onClick={(event) => event.stopPropagation()} className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted opacity-0 outline-none transition-colors hover:bg-background/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100"><MoreIcon size={13} /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={4} className="min-w-40">
-          <DropdownMenuItem onClick={onOpenInExplorer} className="flex cursor-pointer items-center gap-2"><FolderOpen size={13} />Open in Explorer</DropdownMenuItem>
-          <DropdownMenuItem onClick={onRename} className="flex cursor-pointer items-center gap-2"><Pencil size={13} />Rename project</DropdownMenuItem>
+          <DropdownMenuItem label="Open in Explorer" icon={<FolderOpen />} onClick={onOpenInExplorer} />
+          <DropdownMenuItem label="Rename project" icon={<Pencil />} onClick={onRename} />
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onDelete} className="flex cursor-pointer items-center gap-2 text-destructive focus:text-destructive"><Trash2 size={13} />Delete project</DropdownMenuItem>
+          <DropdownMenuItem label="Delete project" icon={<Trash2 />} destructive onClick={onDelete} />
         </DropdownMenuContent>
       </DropdownMenu>
       <Tooltip>

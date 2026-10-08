@@ -253,7 +253,7 @@ describe("ActivityRail expansion", () => {
     expect(terminal).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(terminal);
     expect(handlers.onCreate).not.toHaveBeenCalled();
-    fireEvent.focus(terminal.parentElement!);
+    fireEvent.focus(terminal);
     act(() => vi.runAllTimers());
     expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent("8 terminals are open. Close one to open another.");
   });

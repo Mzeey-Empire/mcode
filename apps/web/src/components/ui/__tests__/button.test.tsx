@@ -84,7 +84,7 @@ describe("SplitButton", () => {
       <SplitButton
         onClick={onAction}
         menuLabel="More commit options"
-        menu={<DropdownMenuItem onClick={onAlternate}>Commit and push</DropdownMenuItem>}
+        menu={<DropdownMenuItem label="Commit and push" onClick={onAlternate} />}
       >
         Commit 3 files
       </SplitButton>,
