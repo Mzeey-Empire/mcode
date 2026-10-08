@@ -168,7 +168,7 @@ describe("transport admission and shutdown drain", () => {
     const completed = deferred();
     let server: Server;
     const shutdown = vi.fn(() => { void server.stopAdmissionAndDrain().then(() => completed.resolve()); });
-    server = await startServer(async () => undefined, async () => undefined, shutdown);
+    server = await startServer(async () => undefined, shutdown);
     await expect(httpRequest(server, "/shutdown", "POST", true)).resolves.toEqual({
       status: 200, body: JSON.stringify({ status: "shutting_down" }),
     });

@@ -8,7 +8,6 @@ import * as NodeHTTP from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { logger } from "@mcode/shared";
 import {
-  TerminalBackendError,
   type DisconnectedTerminalCreate,
 } from "../../features/terminal/backends/terminal-backend.js";
 import {

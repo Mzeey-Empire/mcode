@@ -1,3 +1,6 @@
+/** Maximum retained terminal records per thread or workspace, including pending and exited records. */
+export const TERMINAL_MAX_PER_SCOPE = 8;
+
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 

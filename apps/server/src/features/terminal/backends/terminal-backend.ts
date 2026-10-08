@@ -1,4 +1,4 @@
-import type {
+import type { LegacyTerminalRecord, LegacyTerminalCreateResult,
   TerminalBackendCapabilities,
   TerminalErrorCode,
   TerminalProfileInUseData,
@@ -95,7 +95,7 @@ export interface PreparedTerminalCommandRequest {
 export abstract class TerminalBackend {
   abstract capabilities(): TerminalBackendCapabilities;
   abstract setSender(sender: TerminalBackendSender): void;
-  abstract create(scopeId: string): Promise<{ ptyId: string; shell: string }>;
+  abstract create(scopeId: string): Promise<LegacyTerminalCreateResult>;
   abstract pause(ptyId: string): void;
   abstract resume(ptyId: string): void;
   abstract onBufferedAmountTick(bufferedAmount: number): void;
@@ -110,7 +110,7 @@ export abstract class TerminalBackend {
   abstract setGracefulKill(enabled: boolean): void;
   abstract reattach(ptyId: string, lastSeq: number, cold?: boolean): TerminalReattachResult;
   abstract checkpoint(ptyId: string, seq: number, data: string): { accepted: boolean };
-  abstract listActiveSessions(): Array<{ ptyId: string; threadId: string }>;
+  abstract listActiveSessions(): LegacyTerminalRecord[];
   abstract hasChildren(ptyId: string): Promise<{ hasChildren: boolean }>;
 
   /** Starts one headless exact command session using this selected backend's capacity and tracking. */

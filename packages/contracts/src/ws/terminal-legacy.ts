@@ -1,11 +1,33 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 
-/** Frozen version 0 Terminal RPC definitions used by the legacy adapters. */
+/** Additive metadata shared by retained terminal records and create responses. */
+const terminalMetadata = () => ({
+  shell: z.string().max(64).optional(),
+  cwd: z.string().max(32_768).optional(),
+  kind: z.enum(["shell", "action"]).optional(),
+  actionId: z.string().max(256).optional(),
+  state: z.enum(["pending", "running", "exited"]).optional(),
+  exitCode: z.number().int().nullable().optional(),
+  createdAt: z.string().datetime().optional(),
+});
+
+/** Server-owned terminal record, retained until explicitly closed. */
+export const LegacyTerminalRecordSchema = lazySchema(() =>
+  z.object({ ptyId: z.string(), threadId: z.string(), ...terminalMetadata() }),
+);
+
+/** Terminal identity and optional metadata returned by a server. */
+export type LegacyTerminalRecord = z.infer<ReturnType<typeof LegacyTerminalRecordSchema>>;
+
+/** Create response with a required shell name for existing clients. */
+export type LegacyTerminalCreateResult = Omit<LegacyTerminalRecord, "threadId" | "shell"> & { shell: string };
+
+/** Version 0 Terminal RPC definitions with additive record metadata. */
 export const LegacyTerminalMethods = lazySchema(() => ({
   "terminal.create": {
     params: z.object({ threadId: z.string() }),
-    result: z.object({ ptyId: z.string(), shell: z.string().max(64) }),
+    result: z.object({ ptyId: z.string(), ...terminalMetadata(), shell: z.string().max(64) }),
   },
   "terminal.write": {
     params: z.object({
@@ -67,7 +89,7 @@ export const LegacyTerminalMethods = lazySchema(() => ({
   },
   "terminal.listActive": {
     params: z.object({}),
-    result: z.array(z.object({ ptyId: z.string(), threadId: z.string() })),
+    result: z.array(LegacyTerminalRecordSchema()),
   },
   "terminal.hasChildren": {
     params: z.object({ ptyId: z.string() }),
@@ -82,5 +104,5 @@ export const LegacyTerminalChannels = lazySchema(() => ({
     data: z.string(),
     seq: z.number().int().nonnegative().optional(),
   }),
-  "terminal.exit": z.object({ ptyId: z.string(), code: z.number() }),
+  "terminal.exit": z.object({ ptyId: z.string(), code: z.number(), exitCode: z.number().int().nullable().optional() }),
 } as const));

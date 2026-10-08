@@ -1247,6 +1247,7 @@ export {
   TERMINAL_U64_MAX,
   TERMINAL_MAX_PAYLOAD_BYTES,
   TERMINAL_MAX_CHECKPOINT_BYTES,
+  TERMINAL_MAX_PER_SCOPE,
   TERMINAL_MAX_SESSIONS,
   TERMINAL_DEFAULT_SESSION_LIMIT,
   TERMINAL_MAX_COLS,
@@ -1483,3 +1484,6 @@ export type {
   ProviderBillingMode,
   ProviderUsageInfo,
 } from "./providers/usage.js";
+
+export { LegacyTerminalRecordSchema } from "./ws/terminal-legacy.js";
+export type { LegacyTerminalRecord, LegacyTerminalCreateResult } from "./ws/terminal-legacy.js";

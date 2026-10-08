@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import type { TerminalBackendCapabilities } from "@mcode/contracts";
+import type { LegacyTerminalRecord, LegacyTerminalCreateResult, TerminalBackendCapabilities } from "@mcode/contracts";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import {
   TerminalBackend,
@@ -45,7 +45,7 @@ export class LegacyTerminalBackend extends TerminalBackend {
   }
 
   /** Creates one legacy PTY for a thread or workspace scope. */
-  async create(scopeId: string): Promise<{ ptyId: string; shell: string }> {
+  async create(scopeId: string): Promise<LegacyTerminalCreateResult> {
     const thread = this.threads.findById(scopeId);
     const profile = await this.profiles.resolveLaunchProfile({
       workspaceId: thread?.workspace_id ?? scopeId,
@@ -118,7 +118,7 @@ export class LegacyTerminalBackend extends TerminalBackend {
   }
 
   /** Lists all active legacy PTYs. */
-  listActiveSessions(): Array<{ ptyId: string; threadId: string }> {
+  listActiveSessions(): LegacyTerminalRecord[] {
     return this.terminalService.listActiveSessions();
   }
 
