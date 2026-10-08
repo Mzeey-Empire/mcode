@@ -94,7 +94,7 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
             render={
               <Button
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 className="text-ink/70 hover:text-ink hover:bg-hover/40 rounded-r-none"
                 onClick={openDefault}
                 disabled={disabled}

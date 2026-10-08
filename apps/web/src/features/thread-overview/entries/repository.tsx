@@ -112,7 +112,7 @@ function ThreadOverviewRepositoryRow({
           <ThreadOverviewTooltipButton content={repository.webUrl ?? label}>
             <Button
               variant="ghost"
-              size="sm"
+              size="compact"
               type="button"
               onClick={onOpen}
               data-testid="thread-overview-repository-link"

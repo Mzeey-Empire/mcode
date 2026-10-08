@@ -30,7 +30,7 @@ export function CopyButton({ text, label, className }: {
   return (
     <Tooltip>
       <TooltipTrigger render={
-        <Button type="button" variant="ghost" size="icon-xs" aria-label={label} onClick={() => void copy()} className={className}>
+        <Button type="button" variant="ghost" size="icon-compact" aria-label={label} onClick={() => void copy()} className={className}>
           <Icon aria-hidden="true" className="size-3.5" />
           <span className="sr-only" role="status">{status === "idle" ? "" : message}</span>
         </Button>

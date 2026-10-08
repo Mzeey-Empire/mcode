@@ -167,7 +167,7 @@ const SuggestionRow = memo(function SuggestionRow({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="compact"
       role="option"
       aria-selected={selected}
       data-file-item

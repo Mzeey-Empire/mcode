@@ -93,7 +93,7 @@ export function SettingsProviderPicker({
           <Button
             type="button"
             variant="outline"
-            size="sm"
+            size="compact"
             data-testid={testId}
             aria-expanded={open}
             aria-haspopup="dialog"

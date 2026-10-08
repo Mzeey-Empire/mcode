@@ -80,7 +80,7 @@ function PlatformCommandEditor({ idPrefix, command, onChange, firstControlRef }:
             aria-controls={`${idPrefix}-panel-${key}`}
             tabIndex={platform === key ? 0 : -1}
             variant={platform === key ? "secondary" : "ghost"}
-            size="sm"
+            size="compact"
             className="motion-reduce:transition-none"
             onClick={() => setPlatform(key)}
             onKeyDown={(event) => {
@@ -94,7 +94,7 @@ function PlatformCommandEditor({ idPrefix, command, onChange, firstControlRef }:
           </Button>
         ))}
       </div>
-      <div id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0} className="outline-none focus-visible:ring-3 focus-visible:ring-focus/50">
+      <div id={panelId} role="tabpanel" aria-labelledby={tabId} tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
         <Textarea
           ref={platform === "default" ? firstControlRef : undefined}
           id={`${idPrefix}-script-${platform}`}
@@ -145,7 +145,7 @@ function ActionEditor({ action, onChange, onRemove, nameRef }: ActionEditorProps
           />
         </div>
         <div className="flex items-end">
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove action ${action.name}`} onClick={onRemove}>
+          <Button type="button" variant="ghost" size="icon-compact" aria-label={`Remove action ${action.name}`} onClick={onRemove}>
             <Trash2 size={15} aria-hidden />
           </Button>
         </div>
@@ -363,7 +363,7 @@ function EnvironmentStorageOption({
 
 function ClearSharedApprovals({ storageMode, saving, onClearApprovals }: { storageMode: WorkspaceEnvironmentStorageMode; saving: boolean; onClearApprovals: () => Promise<void> }) {
   if (storageMode !== "shared") return null;
-  return <Button type="button" variant="ghost" size="sm" className="w-fit" disabled={saving} onClick={() => { void onClearApprovals(); }}>Clear shared command approvals</Button>;
+  return <Button type="button" variant="ghost" size="compact" className="w-fit" disabled={saving} onClick={() => { void onClearApprovals(); }}>Clear shared command approvals</Button>;
 }
 
 function EnvironmentSetupSection({
@@ -385,7 +385,7 @@ function EnvironmentSetupSection({
     <section aria-labelledby="project-environment-setup-title" className="space-y-3 border-t border-border/60 pt-6">
       <div className="flex items-center justify-between gap-3">
         <div><h2 id="project-environment-setup-title" className="text-base font-semibold">Setup</h2><p className="mt-1 text-xs text-muted">Optional setup command configuration for this Project.</p></div>
-        <Button ref={firstTaskRef} type="button" variant="outline" size="sm" onClick={() => onSetSetup(!setupEnabled)}>{setupEnabled ? "Remove Setup" : "Add Setup"}</Button>
+        <Button ref={firstTaskRef} type="button" variant="outline" size="compact" onClick={() => onSetSetup(!setupEnabled)}>{setupEnabled ? "Remove Setup" : "Add Setup"}</Button>
       </div>
       <EnvironmentSetupEditor setup={setupEnabled ? draft.setup : undefined} setupScriptRef={setupScriptRef} onDraftChange={onDraftChange} />
     </section>
@@ -422,7 +422,7 @@ function EnvironmentActionsSection({
     <section aria-labelledby="project-environment-actions-title" className="space-y-3 border-t border-border/60 pt-6">
       <div className="flex items-center justify-between gap-3">
         <div><h2 id="project-environment-actions-title" className="text-base font-semibold">Project actions</h2><p className="mt-1 text-xs text-muted">Save named commands for this Project.</p></div>
-        <Button type="button" variant="outline" size="sm" aria-label="Add action" onClick={onAddAction}><Plus size={15} aria-hidden /> Add action</Button>
+        <Button type="button" variant="outline" size="compact" aria-label="Add action" onClick={onAddAction}><Plus size={15} aria-hidden /> Add action</Button>
       </div>
       <EnvironmentActionList actions={actions} firstActionNameRef={firstActionNameRef} onUpdateAction={onUpdateAction} onRemoveAction={onRemoveAction} />
     </section>
@@ -570,10 +570,10 @@ export function ProjectEnvironmentPanel({ workspaceId, threadId, active = true }
         </div>
       </div>
       <footer className="flex shrink-0 justify-end gap-2 border-t border-border/60 px-3 py-2">
-        <Button type="button" variant="ghost" size="sm" onClick={() => void reload(true)} disabled={loading || saving}>
+        <Button type="button" variant="ghost" size="compact" onClick={() => void reload(true)} disabled={loading || saving}>
           <RefreshCw size={14} aria-hidden /> Reload
         </Button>
-        <Button type="button" size="sm" onClick={() => void save()} disabled={loading || saving}>
+        <Button type="button" size="compact" onClick={() => void save()} disabled={loading || saving}>
           <Save size={14} aria-hidden /> {saving ? "Saving..." : "Save"}
         </Button>
       </footer>

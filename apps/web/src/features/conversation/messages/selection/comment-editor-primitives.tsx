@@ -278,7 +278,7 @@ export function CommentEditorControls({
             render={(
               <Button
                 type="button"
-                size="icon-xs"
+                size="icon-compact"
                 className="order-2 rounded-full"
                 aria-label={editing ? "Save comment" : "Add comment"}
                 onClick={onSave}
@@ -296,7 +296,7 @@ export function CommentEditorControls({
             render={(
               <Button
                 type="button"
-                size="icon-xs"
+                size="icon-compact"
                 variant="ghost"
                 className="order-3 rounded-full text-destructive hover:text-destructive"
                 aria-label="Delete comment"
@@ -314,7 +314,7 @@ export function CommentEditorControls({
           render={(
             <Button
               type="button"
-              size="icon-xs"
+              size="icon-compact"
               variant="ghost"
               className="order-1 rounded-full"
               aria-label="Close comment editor"

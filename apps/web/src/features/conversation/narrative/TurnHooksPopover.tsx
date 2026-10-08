@@ -54,7 +54,7 @@ export function TurnHooksPopover({ hooks }: { hooks: readonly HookExecution[] })
         delay={150}
         closeDelay={150}
         onKeyUp={(event) => { if (event.key === "Tab") setOpen(true); }}
-        render={<Button variant="ghost" size="icon-xs" />}
+        render={<Button variant="ghost" size="icon-compact" />}
         aria-label={label}
         className={`size-7 ${needsAttention ? "text-destructive" : running ? "text-primary" : "text-muted"}`}
       >

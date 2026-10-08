@@ -63,7 +63,7 @@ export function SubagentStopControl({
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="compact"
         onClick={handleStop}
         disabled={pending}
         aria-busy={pending}

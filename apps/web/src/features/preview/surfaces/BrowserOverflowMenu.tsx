@@ -114,7 +114,7 @@ export function BrowserOverflowMenu({
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             aria-label="More browser tools"
             className="text-muted hover:text-ink"
           >
@@ -208,7 +208,7 @@ export function BrowserOverflowMenu({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               aria-label="Zoom out"
               disabled={!hasLoadedPage}
               onClick={() => applyZoom(zoom - ZOOM_STEP)}
@@ -221,7 +221,7 @@ export function BrowserOverflowMenu({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               aria-label="Zoom in"
               disabled={!hasLoadedPage}
               onClick={() => applyZoom(zoom + ZOOM_STEP)}
@@ -231,7 +231,7 @@ export function BrowserOverflowMenu({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               aria-label="Reset zoom"
               disabled={!hasLoadedPage}
               className="ml-1"

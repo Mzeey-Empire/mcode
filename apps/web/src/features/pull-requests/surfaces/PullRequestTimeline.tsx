@@ -432,7 +432,7 @@ function TimelineOlderActivityControl({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="compact"
       className="mx-4 my-2 text-xs text-muted"
       disabled={loadingOlder}
       onClick={onLoad}
@@ -563,7 +563,7 @@ function TimelineNewerActivityNotice({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           className="mt-1 w-full text-xs text-muted"
           disabled={loadingNewer}
           onClick={onLoadNewer}

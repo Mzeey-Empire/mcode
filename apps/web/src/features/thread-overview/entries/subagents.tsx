@@ -45,7 +45,7 @@ function SubagentsEntry({ thread }: { thread: Thread }) {
       </div>
       <Button
         variant="ghost"
-        size="sm"
+        size="compact"
         type="button"
         data-testid="thread-overview-subagents"
         onClick={() => openSubagentsRoster()}

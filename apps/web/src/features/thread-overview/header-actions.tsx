@@ -88,7 +88,7 @@ function ProjectSettings() {
       render={
         <Button
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           type="button"
           aria-label="Open Project settings"
           onClick={openProjectSettings}

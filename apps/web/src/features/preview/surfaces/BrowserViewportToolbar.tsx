@@ -58,7 +58,7 @@ function ViewportPresetMenu({ open, selected, onOpenChange, onResponsive, onPres
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger
         render={
-          <Button type="button" size="xs" variant="outline" className="w-32 shrink-0 justify-between gap-1 px-2 @max-[520px]:w-24 @max-[520px]:px-1" aria-label="Viewport preset">
+          <Button type="button" size="compact" variant="outline" className="w-32 shrink-0 justify-between gap-1 px-2 @max-[520px]:w-24 @max-[520px]:px-1" aria-label="Viewport preset">
             <span className="text-fade">{selected?.label ?? "Responsive"}</span>
             <ChevronDown size={13} aria-hidden />
           </Button>
@@ -116,7 +116,7 @@ function ViewportPresentationMenu({ open, scaleLabel, presentation, onOpenChange
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger
         render={
-          <Button type="button" size="xs" variant="outline" className="w-16 shrink-0 justify-between gap-1 px-2 @max-[520px]:w-14 @max-[520px]:px-1" aria-label="Viewport scale and presentation">
+          <Button type="button" size="compact" variant="outline" className="w-16 shrink-0 justify-between gap-1 px-2 @max-[520px]:w-14 @max-[520px]:px-1" aria-label="Viewport scale and presentation">
             {scaleLabel}<ChevronDown size={13} aria-hidden />
           </Button>
         }
@@ -238,7 +238,7 @@ export function BrowserViewportToolbar({
           render={
             <Button
               type="button"
-              size="icon-xs"
+              size="icon-compact"
               variant="ghost"
               className="@max-[520px]:size-7"
               onClick={() => submitSize({ width: requested.height, height: requested.width })}
@@ -263,7 +263,7 @@ export function BrowserViewportToolbar({
           render={
             <Button
               type="button"
-              size="icon-xs"
+              size="icon-compact"
               variant="ghost"
               className="ml-auto shrink-0 @max-[520px]:size-7"
               onClick={() => {

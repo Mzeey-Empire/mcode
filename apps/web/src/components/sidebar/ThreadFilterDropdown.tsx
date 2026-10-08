@@ -28,7 +28,7 @@ function FilterCheckbox({
     <Button
       type="button"
       variant="ghost"
-      size="xs"
+      size="compact"
       role="checkbox"
       aria-checked={checked}
       className="h-8 w-full justify-start gap-2 px-2 text-sm font-normal text-muted"
@@ -71,7 +71,7 @@ export function ThreadFilterDropdown({
           <Button
             type="button"
             variant="ghost"
-            size={showLabel ? "xs" : "icon-xs"}
+            size={showLabel ? "compact" : "icon-compact"}
             className={cn(
               "h-8 gap-1.5 text-muted",
               hasActiveFilters
@@ -133,7 +133,7 @@ export function ThreadFilterDropdown({
             <Button
               type="button"
               variant="ghost"
-              size="xs"
+              size="compact"
               className="h-8 w-full justify-start px-2 text-sm font-normal text-muted"
               onClick={() => {
                 clearFilters();

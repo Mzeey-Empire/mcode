@@ -65,7 +65,7 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
           render={
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               onClick={togglePanel}
               aria-label="Toggle panel"
               aria-pressed={panelVisible}

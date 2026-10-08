@@ -30,7 +30,7 @@ export function ComposerBranchBar({ branchFromMessageId, branchFromMessageConten
       </div>
       <Button
         variant="ghost"
-        size="icon-xs"
+        size="icon-compact"
         onClick={onBranchModeExit}
         disabled={!onBranchModeExit}
         className="shrink-0 text-muted/30 hover:bg-hover/40 hover:text-muted"

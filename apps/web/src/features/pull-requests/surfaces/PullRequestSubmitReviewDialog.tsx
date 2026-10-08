@@ -507,7 +507,7 @@ function OutdatedReviewNotice({ review }: { review: ReviewSubmission }) {
     <div className="flex items-center gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted">
       <ErrorIcon size={13} aria-hidden className="shrink-0 text-primary/80" />
       <span className="min-w-0 flex-1">The overall review targets an older snapshot.</span>
-      <Button type="button" variant="ghost" size="xs" disabled={review.mutationBlocked} onClick={review.startFresh}>
+      <Button type="button" variant="ghost" size="compact" disabled={review.mutationBlocked} onClick={review.startFresh}>
         Start fresh
       </Button>
     </div>

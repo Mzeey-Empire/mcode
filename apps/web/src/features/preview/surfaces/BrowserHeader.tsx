@@ -108,7 +108,7 @@ function BrowserNavigationControls({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button type="button" variant="ghost" size="icon-sm" className={cn("shrink-0", ICON_HIT_SLOP)} disabled={!canBack} onClick={onGoBack} aria-label="Back">
+            <Button type="button" variant="ghost" size="icon-compact" className={cn("shrink-0", ICON_HIT_SLOP)} disabled={!canBack} onClick={onGoBack} aria-label="Back">
               <ArrowLeft size={16} aria-hidden />
             </Button>
           }
@@ -118,7 +118,7 @@ function BrowserNavigationControls({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button type="button" variant="ghost" size="icon-sm" className={cn("shrink-0", ICON_HIT_SLOP)} disabled={!canFwd} onClick={onGoForward} aria-label="Forward">
+            <Button type="button" variant="ghost" size="icon-compact" className={cn("shrink-0", ICON_HIT_SLOP)} disabled={!canFwd} onClick={onGoForward} aria-label="Forward">
               <ArrowRight size={16} aria-hidden />
             </Button>
           }
@@ -129,7 +129,7 @@ function BrowserNavigationControls({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button type="button" variant="ghost" size="icon-sm" className={cn("shrink-0", ICON_HIT_SLOP)} onClick={onReload} aria-label="Reload">
+              <Button type="button" variant="ghost" size="icon-compact" className={cn("shrink-0", ICON_HIT_SLOP)} onClick={onReload} aria-label="Reload">
                 <RotateCw size={16} aria-hidden />
               </Button>
             }
@@ -294,7 +294,7 @@ function DesignAction({ threadId, designModeActive, elementPickBusy, onToggleDes
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button type="button" variant="ghost" size={designModeActive ? "sm" : "icon-sm"} aria-label="Design" aria-pressed={designModeActive} disabled={!threadId} onClick={onToggleDesign} className={cn("shrink-0", ICON_HIT_SLOP, designModeActive && "bg-primary/10 text-primary")}>
+          <Button type="button" variant="ghost" size={designModeActive ? "compact" : "icon-compact"} aria-label="Design" aria-pressed={designModeActive} disabled={!threadId} onClick={onToggleDesign} className={cn("shrink-0", ICON_HIT_SLOP, designModeActive && "bg-primary/10 text-primary")}>
             {elementPickBusy ? <Spinner size={16} className="text-current" /> : <PenTool size={16} aria-hidden />}
             {designModeActive ? <span>Design</span> : null}
           </Button>
@@ -310,7 +310,7 @@ function ScreenshotAction({ threadId, elementPickBusy, captureBusy, regionBusy, 
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Screenshot" disabled={!threadId || captureBusy || regionBusy || elementPickBusy} onClick={onScreenshot} className={cn("shrink-0", ICON_HIT_SLOP, captureBusy && "bg-primary/10 text-primary")}>
+          <Button type="button" variant="ghost" size="icon-compact" aria-label="Screenshot" disabled={!threadId || captureBusy || regionBusy || elementPickBusy} onClick={onScreenshot} className={cn("shrink-0", ICON_HIT_SLOP, captureBusy && "bg-primary/10 text-primary")}>
             {captureBusy ? <Spinner size={16} className="text-current" /> : <Camera size={16} aria-hidden />}
           </Button>
         }

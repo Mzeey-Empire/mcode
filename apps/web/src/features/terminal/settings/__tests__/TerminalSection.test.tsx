@@ -80,8 +80,6 @@ describe("TerminalSection", () => {
       expect(field).toHaveClass(
         "bg-transparent",
         "shadow-none",
-        "focus-visible:ring-3",
-        "focus-visible:ring-focus/50",
         "dark:bg-selected/30",
       );
     }

@@ -230,7 +230,7 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
             <SummaryTotals totals={totals} />
             <Button
               variant="outline"
-              size="xs"
+              size="compact"
               onClick={handleViewDiff}
               className="gap-1 border-border/60 text-muted/80 shadow-none hover:text-ink"
             >
@@ -308,7 +308,7 @@ function ChangedFileList({ rootFiles, dirs, hiddenCount, diffStats, onJump, onVi
       {hiddenCount > 0 && (
         <Button
           variant="ghost"
-          size="xs"
+          size="compact"
           onClick={onViewAll}
           className="mt-0.5 w-full justify-center text-muted/60 hover:text-ink/80"
         >

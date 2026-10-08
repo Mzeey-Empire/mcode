@@ -180,7 +180,7 @@ export function TaskBubble({
               ref={triggerRef}
               type="button"
               variant="outline"
-              size="sm"
+              size="compact"
               data-testid="task-bubble"
               aria-label={`${settled} of ${total} tasks settled${fileEffects?.fileCount ? `, ${fileEffects.fileCount} ${fileEffects.fileCount === 1 ? "file" : "files"} changed, ${fileEffects.additions} lines added, ${fileEffects.deletions} lines removed` : ""}`}
               onPointerDown={() => {

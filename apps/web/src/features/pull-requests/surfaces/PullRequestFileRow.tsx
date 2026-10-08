@@ -81,7 +81,7 @@ export function PullRequestFileRow({
             type="button"
             role="treeitem"
             variant="ghost"
-            size="sm"
+            size="compact"
             tabIndex={tabIndex}
             aria-label={fullLabel}
             aria-level={depth}
