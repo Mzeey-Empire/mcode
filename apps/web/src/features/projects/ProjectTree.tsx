@@ -1853,6 +1853,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
       }}
       className={cn(
         "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-[13px] cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
+        "has-[[data-status-mark=running]]:opacity-55",
         isActive ? "bg-selected text-ink" : "text-muted/85 hover:bg-selected/40 hover:text-ink",
         triggerClassName,
       )}
@@ -2154,7 +2155,7 @@ const WorkspaceCiRollupChip = memo(function WorkspaceCiRollupChip({
               chromeClass,
             )}
           >
-            {rollup.aggregate === "pending" ? (
+            {Icon === null ? (
               <Spinner size={12} className="text-current" />
             ) : (
               <Icon size={9} className="shrink-0" />
