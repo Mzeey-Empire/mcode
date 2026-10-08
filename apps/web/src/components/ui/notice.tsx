@@ -45,25 +45,71 @@ export interface NoticeProps {
   "data-testid"?: string;
 }
 
+function NoticeIcon({ tone, busy }: { tone: NoticeTone; busy: boolean }) {
+  const { Icon, className } = TONE_ICON[tone];
+  return (
+    <span className="flex size-5 shrink-0 items-center justify-center">
+      {busy ? <Spinner size={16} className="text-muted" /> : <Icon size={20} aria-hidden className={className} />}
+    </span>
+  );
+}
+
+function NoticeDisclosure({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-expanded={open}
+      aria-label={open ? "Hide details" : "Show details"}
+      onClick={onToggle}
+      className="text-muted"
+    >
+      {open ? <CollapseIcon aria-hidden /> : <ExpandIcon aria-hidden />}
+    </Button>
+  );
+}
+
+function NoticeAction({ action }: { action: NoticeAction }) {
+  return (
+    <div className="pl-8 pt-1">
+      <Button type="button" onClick={action.onClick}>{action.label}</Button>
+    </div>
+  );
+}
+
+interface NoticeHeaderProps {
+  tone: NoticeTone;
+  title: ReactNode;
+  busy?: boolean;
+  disclosure: { open: boolean; onToggle: () => void } | null;
+  onDismiss?: () => void;
+  dismissLabel?: string;
+}
+
+function NoticeHeader({ tone, title, busy = false, disclosure, onDismiss, dismissLabel = "Dismiss" }: NoticeHeaderProps) {
+  return (
+    <div className="flex items-center gap-3">
+      <NoticeIcon tone={tone} busy={busy} />
+      <div className="min-w-0 flex-1 text-body font-medium text-ink">{title}</div>
+      {disclosure ? <NoticeDisclosure open={disclosure.open} onToggle={disclosure.onToggle} /> : null}
+      {onDismiss ? (
+        <Button type="button" variant="ghost" size="icon" aria-label={dismissLabel} onClick={onDismiss} className="text-muted">
+          <CloseIcon aria-hidden />
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Inline notice: tone icon, title, detail and one action, on the panel surface.
  * Errors announce assertively; every other tone announces politely.
  */
-export function Notice({
-  tone,
-  title,
-  detail,
-  action,
-  busy = false,
-  collapsible = false,
-  onDismiss,
-  dismissLabel = "Dismiss",
-  className,
-  "data-testid": testId,
-}: NoticeProps) {
+export function Notice({ tone, title, detail, action, busy, collapsible = false, onDismiss, dismissLabel, className, "data-testid": testId }: NoticeProps) {
   const [open, setOpen] = useState(false);
-  const showDetail = detail !== undefined && (!collapsible || open);
-  const { Icon, className: toneClass } = TONE_ICON[tone];
+  const canCollapse = collapsible && detail !== undefined;
+  const showDetail = detail !== undefined && (!canCollapse || open);
 
   return (
     <div
@@ -72,36 +118,16 @@ export function Notice({
       data-testid={testId}
       className={cn("flex flex-col gap-2 rounded-xl border border-border bg-panel p-4", className)}
     >
-      <div className="flex items-center gap-3">
-        <span className="flex size-5 shrink-0 items-center justify-center">
-          {busy ? <Spinner size={16} className="text-muted" /> : <Icon size={20} aria-hidden className={toneClass} />}
-        </span>
-        <div className="min-w-0 flex-1 text-body font-medium text-ink">{title}</div>
-        {collapsible && detail !== undefined ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-expanded={open}
-            aria-label={open ? "Hide details" : "Show details"}
-            onClick={() => setOpen((value) => !value)}
-            className="text-muted"
-          >
-            {open ? <CollapseIcon aria-hidden /> : <ExpandIcon aria-hidden />}
-          </Button>
-        ) : null}
-        {onDismiss ? (
-          <Button type="button" variant="ghost" size="icon" aria-label={dismissLabel} onClick={onDismiss} className="text-muted">
-            <CloseIcon aria-hidden />
-          </Button>
-        ) : null}
-      </div>
+      <NoticeHeader
+        tone={tone}
+        title={title}
+        busy={busy}
+        disclosure={canCollapse ? { open, onToggle: () => setOpen((value) => !value) } : null}
+        onDismiss={onDismiss}
+        dismissLabel={dismissLabel}
+      />
       {showDetail ? <div className="pl-8 text-body-small text-muted">{detail}</div> : null}
-      {action ? (
-        <div className="pl-8 pt-1">
-          <Button type="button" onClick={action.onClick}>{action.label}</Button>
-        </div>
-      ) : null}
+      {action ? <NoticeAction action={action} /> : null}
     </div>
   );
 }
