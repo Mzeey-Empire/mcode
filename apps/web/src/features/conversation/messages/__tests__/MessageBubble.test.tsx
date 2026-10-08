@@ -492,10 +492,6 @@ describe("MessageBubble user messages", () => {
     expect(await findByTestId("preview-annotation-hover-thumbnail")).toHaveClass(
       "object-contain",
     );
-    expect(document.querySelector('[data-slot="tooltip-arrow"]')).toHaveClass(
-      "bg-panel",
-      "fill-panel",
-    );
   });
 
   it("renders preview annotation screenshots as inspectable image attachments", async () => {

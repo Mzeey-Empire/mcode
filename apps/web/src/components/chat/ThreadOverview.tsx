@@ -48,6 +48,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { sidePlacement } from "@/components/ui/side-placement";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -2238,6 +2239,8 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
   const canRunManualSetup = canRunManualProjectSetup(thread);
   const [localOpen, setLocalOpen] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
+  const localRowRef = useRef<HTMLButtonElement>(null);
+  const branchRowRef = useRef<HTMLButtonElement>(null);
   const branchCreation = useThreadOverviewBranchCreation(thread.id);
   const [loadedChangeSummary, setLoadedChangeSummary] = useState<LoadedChangeSummary | null>(null);
   const [loadedRepository, setLoadedRepository] = useState<LoadedRepository | null>(null);
@@ -2677,6 +2680,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
 
             <Popover open={localOpen} onOpenChange={setLocalOpen}>
               <PopoverTrigger
+                ref={localRowRef}
                 render={
                   <Button
                     variant="ghost"
@@ -2711,9 +2715,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
                 }
               />
               <PopoverContent
-                align="start"
-                side="left"
-                sideOffset={12}
+                {...sidePlacement(localRowRef)}
                 className="w-80 p-0"
               >
                 <ThreadOverviewLocalMenu worktreePath={dirPath} branch={checkoutLabel} />
@@ -2741,6 +2743,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
             <ThreadOverviewWhen when={!branchlessCreatePr}>
               <Popover open={branchOpen} onOpenChange={setBranchOpen}>
                 <PopoverTrigger
+                  ref={branchRowRef}
                   render={
                     <Button
                       variant="ghost"
@@ -2772,9 +2775,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
                   }
                 />
                 <PopoverContent
-                  align="start"
-                  side="left"
-                  sideOffset={12}
+                  {...sidePlacement(branchRowRef)}
                   className="w-72 p-0"
                 >
                   <ThreadOverviewBranchMenu
