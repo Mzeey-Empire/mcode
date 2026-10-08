@@ -12,6 +12,7 @@ export const THREAD_STARTUP_TRANSCRIPT_MAX_CHARS = 16_384;
 export const ThreadStartupKindSchema = z.enum([
   "direct",
   "managed-worktree",
+  "attached-worktree",
   "pull-request-review",
 ]);
 /** Startup flow selected before a durable thread may exist. */
@@ -20,6 +21,7 @@ export type ThreadStartupKind = z.infer<typeof ThreadStartupKindSchema>;
 /** Ordered lifecycle phases shared by startup flows. */
 export const ThreadStartupPhaseSchema = z.enum([
   "thread",
+  "fetch",
   "worktree",
   "setup",
   "agent",
@@ -59,11 +61,38 @@ export const ThreadStartupCancellationSchema = z.enum(["none", "requested"]);
 /** Intent to stop a startup flow. It does not imply process termination. */
 export type ThreadStartupCancellation = z.infer<typeof ThreadStartupCancellationSchema>;
 
+const fetchFields = {
+  ref: z.string().trim().min(1).max(256),
+  pullRequestNumber: z.number().int().positive().optional(),
+  branch: z.string().trim().min(1).max(256).optional(),
+};
+
+/** Arguments and outcomes retained for one startup phase, without script text. */
+export const ThreadStartupStepDetailSchema = lazySchema(() => z.discriminatedUnion("phase", [
+  z.object({ phase: z.literal("fetch"), ...fetchFields }).strict(),
+  z.object({
+    phase: z.literal("worktree"),
+    mode: z.enum(["created", "opened"]),
+    folderName: z.string().trim().min(1).max(256),
+    path: z.string().trim().min(1).max(4_096),
+  }).strict(),
+  z.object({
+    phase: z.literal("setup"),
+    exitCode: z.number().int().optional(),
+    skipReason: z.enum(["not-configured", "thread-running-here", "user-skipped"]).optional(),
+  }).strict(),
+]));
+/** Arguments and outcomes retained for one startup phase. */
+export type ThreadStartupStepDetail = z.infer<ReturnType<typeof ThreadStartupStepDetailSchema>>;
+
 /** One ordered phase snapshot within a startup record. */
 export const ThreadStartupStepSchema = lazySchema(() =>
   z.object({
     phase: ThreadStartupPhaseSchema,
     state: ThreadStartupStepStateSchema,
+    startedAt: z.string().datetime({ offset: true }).optional(),
+    endedAt: z.string().datetime({ offset: true }).optional(),
+    detail: ThreadStartupStepDetailSchema().optional(),
   }).strict(),
 );
 /** One ordered phase snapshot within a startup record. */
@@ -88,6 +117,7 @@ export const ThreadStartupErrorSchema = lazySchema(() =>
     code: z.string().trim().min(1).max(64),
     message: z.string().trim().min(1).max(512),
     retryable: z.boolean(),
+    detail: z.string().trim().min(1).max(2_000).optional(),
   }).strict(),
 );
 /** Structured startup failure detail. */
@@ -99,6 +129,7 @@ export const ThreadStartupBlockSchema = lazySchema(() =>
     code: z.string().trim().min(1).max(64),
     message: z.string().trim().min(1).max(512),
     actions: z.array(z.enum(["retry", "continue"])).min(1).max(2),
+    detail: z.string().trim().min(1).max(2_000).optional(),
   }).strict(),
 );
 /** Recoverable reason that keeps a startup waiting for a user decision. */
@@ -107,8 +138,17 @@ export type ThreadStartupBlock = z.infer<ReturnType<typeof ThreadStartupBlockSch
 const phasesByKind: Record<ThreadStartupKind, readonly ThreadStartupPhase[]> = {
   direct: ["thread", "agent"],
   "managed-worktree": ["thread", "worktree", "setup", "agent"],
+  "attached-worktree": ["thread", "worktree", "setup", "agent"],
   "pull-request-review": ["thread", "worktree", "agent"],
 };
+
+/** Ordered phases fixed at startup creation; PR fetch also applies to direct starts. */
+export function getThreadStartupPhases(kind: ThreadStartupKind, fetch = false): readonly ThreadStartupPhase[] {
+  const phases = phasesByKind[kind];
+  return fetch && (kind === "direct" || kind === "managed-worktree")
+    ? ["thread", "fetch", ...phases.slice(1)]
+    : phases;
+}
 
 /** Full server-authoritative startup lifecycle snapshot. */
 export interface ThreadStartup {
@@ -136,7 +176,7 @@ export const ThreadStartupSchema: () => z.ZodType<ThreadStartup> = lazySchema(()
     kind: ThreadStartupKindSchema,
     state: ThreadStartupStateSchema,
     phase: ThreadStartupPhaseSchema,
-    steps: z.array(ThreadStartupStepSchema()).min(1).max(4),
+    steps: z.array(ThreadStartupStepSchema()).min(1).max(5),
     transcript: z.array(ThreadStartupTranscriptEntrySchema())
       .max(THREAD_STARTUP_TRANSCRIPT_MAX_ENTRIES),
     cancellation: ThreadStartupCancellationSchema,
@@ -155,7 +195,10 @@ export const ThreadStartupStartInputSchema = lazySchema(() =>
     startupId: z.string().uuid(),
     workspaceId: z.string().trim().min(1).max(128),
     kind: ThreadStartupKindSchema,
-  }).strict(),
+    fetch: z.object(fetchFields).strict().optional(),
+  }).strict().refine((input) => !input.fetch || input.kind === "direct" || input.kind === "managed-worktree", {
+    path: ["fetch"], message: "Fetch applies only to direct and managed-worktree starts",
+  }),
 );
 /** Command used by an integration to open or reuse one startup record. */
 export type ThreadStartupStartInput = z.infer<ReturnType<typeof ThreadStartupStartInputSchema>>;
@@ -189,7 +232,7 @@ export const ThreadStartupCancelInputSchema = lazySchema(() =>
 export type ThreadStartupCancelInput = z.infer<ReturnType<typeof ThreadStartupCancelInputSchema>>;
 
 function validateThreadStartup(value: ThreadStartup, context: z.RefinementCtx): void {
-  const expectedPhases = phasesByKind[value.kind];
+  const expectedPhases = getThreadStartupPhases(value.kind, value.steps.some((step) => step.phase === "fetch"));
   validateSteps(value, expectedPhases, context);
   validateTranscript(value, context);
   validateState(value, expectedPhases, context);
@@ -209,6 +252,11 @@ function validateSteps(
   if (!expectedPhases.includes(value.phase)) {
     startupIssue(context, ["phase"], "Startup phase is not valid for its kind");
   }
+  value.steps.forEach((step, index) => {
+    if (step.detail && step.detail.phase !== step.phase) {
+      startupIssue(context, ["steps", index, "detail"], "Step detail must describe its own phase");
+    }
+  });
 }
 
 function validateTranscript(value: ThreadStartup, context: z.RefinementCtx): void {

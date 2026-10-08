@@ -62,8 +62,8 @@ export class ThreadStartupService {
   }
 
   /** Mark the current phase active or move to the next phase. */
-  advance(...input: Parameters<ThreadStartupStateStore["advance"]>): Promise<ThreadStartup> {
-    return this.commit(threadStartupStateWriteOperations.advance, [input, this.timestamp()]);
+  advance(...[startupId, phase, detail]: Parameters<ThreadStartupStateStore["advance"]>): Promise<ThreadStartup> {
+    return this.commit(threadStartupStateWriteOperations.advance, [[startupId, phase, detail], this.timestamp()]);
   }
 
   /** Bind the durable identity when a flow creates or reuses a thread. */
@@ -87,8 +87,8 @@ export class ThreadStartupService {
   }
 
   /** Keep the current phase blocked until the user retries or continues. */
-  block(...input: Parameters<ThreadStartupStateStore["block"]>): Promise<ThreadStartup> {
-    return this.commit(threadStartupStateWriteOperations.block, [input, this.timestamp()]);
+  block(...[startupId, block, detail]: Parameters<ThreadStartupStateStore["block"]>): Promise<ThreadStartup> {
+    return this.commit(threadStartupStateWriteOperations.block, [[startupId, block, detail], this.timestamp()]);
   }
 
   /** Resume the current blocked or interrupted phase. */
@@ -97,13 +97,13 @@ export class ThreadStartupService {
   }
 
   /** Skip the recoverable phase and enter the next phase. */
-  skip(...input: Parameters<ThreadStartupStateStore["skip"]>): Promise<ThreadStartup> {
-    return this.commit(threadStartupStateWriteOperations.skip, [input, this.timestamp()]);
+  skip(...[startupId, phase, detail]: Parameters<ThreadStartupStateStore["skip"]>): Promise<ThreadStartup> {
+    return this.commit(threadStartupStateWriteOperations.skip, [[startupId, phase, detail], this.timestamp()]);
   }
 
   /** Fail the active phase with its durable error. */
-  fail(...input: Parameters<ThreadStartupStateStore["fail"]>): Promise<ThreadStartup> {
-    return this.commit(threadStartupStateWriteOperations.fail, [input, this.timestamp()]);
+  fail(...[startupId, error, detail]: Parameters<ThreadStartupStateStore["fail"]>): Promise<ThreadStartup> {
+    return this.commit(threadStartupStateWriteOperations.fail, [[startupId, error, detail], this.timestamp()]);
   }
 
   /** Persist cancellation intent before the owning flow stops its work. */

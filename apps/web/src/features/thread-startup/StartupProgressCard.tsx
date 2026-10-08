@@ -92,12 +92,14 @@ const STABLE_ACTIVITIES: Partial<Record<ThreadStartup["state"], StartupActivity>
 };
 const STANDARD_ACTIVITIES: Record<ThreadStartup["phase"], StartupActivity> = {
   thread: { lead: "Creating a", changing: "thread", active: true },
+  fetch: { lead: "Creating a", changing: "thread", active: true },
   worktree: { lead: "Preparing", changing: "checkout", active: true },
   setup: { lead: "Running project", changing: "setup", active: true },
   agent: { lead: "Starting", changing: "agent", active: true },
 };
 const REVIEW_ACTIVITIES: Record<ThreadStartup["phase"], StartupActivity> = {
   thread: { lead: "Loading", changing: "pull request", active: true },
+  fetch: { lead: "Loading", changing: "pull request", active: true },
   worktree: { lead: "Preparing review", changing: "checkout", active: true },
   setup: { lead: "Preparing review", changing: "checkout", active: true },
   agent: { lead: "Starting", changing: "agent", active: true },

@@ -418,7 +418,7 @@ export class WorkspaceEnvironmentService {
       await this.settleStartupAfterDrain(input.threadId);
       return repository.snapshot(input.threadId);
     }
-    await this.skipStartupSetup(input.threadId);
+    await this.skipStartupSetup(input.threadId, "user-skipped");
     await this.drainReleasedAutomaticTurn(input.threadId);
     await this.settleStartupAfterDrain(input.threadId);
     this.requireAutomaticSetupThread(input.threadId);
@@ -1281,7 +1281,7 @@ export class WorkspaceEnvironmentService {
     threadId: string,
     attemptId: string,
   ): Promise<void> {
-    await this.skipStartupSetup(threadId);
+    await this.skipStartupSetup(threadId, "not-configured");
     await repository.releaseWithoutSetup(threadId, attemptId);
     await this.drainReleasedAutomaticTurn(threadId);
   }
@@ -1453,7 +1453,7 @@ export class WorkspaceEnvironmentService {
     }
     const completed = await repository.completeAttempt({ threadId, attemptId, ...result });
     if (completed && result.state === "failed") {
-      await this.blockStartupSetup(threadId, "SETUP_FAILED", "Project Setup did not complete successfully");
+      await this.blockStartupSetup(threadId, "SETUP_FAILED", "Project Setup did not complete successfully", result.exitCode ?? undefined);
     }
     if (completed && result.state === "passed") await this.drainReleasedAutomaticTurn(threadId);
   }
@@ -1488,10 +1488,15 @@ export class WorkspaceEnvironmentService {
     }
   }
 
-  private async blockStartupSetup(threadId: string, code: string, message: string): Promise<void> {
+  private async blockStartupSetup(threadId: string, code: string, message: string, exitCode?: number): Promise<void> {
     const startup = this.options.threadStartups?.findByThreadId(threadId);
     if (!startup || startup.phase !== "setup" || startup.state !== "running") return;
-    await this.options.threadStartups?.block(startup.startupId, { code, message, actions: ["retry", "continue"] });
+    const detail = startup.transcript.filter((entry) => entry.phase === "setup")
+      .map((entry) => entry.content).join("").split(/\r?\n/)
+      .reverse().find((line) => line.trim())?.trim().slice(0, 2_000);
+    await this.options.threadStartups?.block(startup.startupId,
+      { code, message, detail, actions: ["retry", "continue"] },
+      { phase: "setup", exitCode });
   }
 
   private async resumeStartupSetup(threadId: string): Promise<void> {
@@ -1500,10 +1505,11 @@ export class WorkspaceEnvironmentService {
     await this.options.threadStartups?.resume(startup.startupId);
   }
 
-  private async skipStartupSetup(threadId: string): Promise<void> {
+  private async skipStartupSetup(threadId: string, skipReason: "not-configured" | "user-skipped"): Promise<void> {
     const startup = this.options.threadStartups?.findByThreadId(threadId);
-    if (!startup || startup.phase !== "setup" || (startup.state !== "running" && startup.state !== "blocked")) return;
-    await this.options.threadStartups?.skip(startup.startupId, "setup");
+    if (!startup || startup.phase !== "setup") return;
+    if (startup.state !== "running" && startup.state !== "blocked" && startup.state !== "interrupted") return;
+    await this.options.threadStartups?.skip(startup.startupId, "setup", { phase: "setup", skipReason });
   }
 
   /**
