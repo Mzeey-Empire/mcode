@@ -172,7 +172,9 @@ vi.mock("./CreatePrDialog", () => ({
     ) : null,
 }));
 
-import { getThreadOverviewBrowserTabs, ThreadOverview, canStartBranchlessCreatePr } from "./ThreadOverview";
+import { getThreadOverviewBrowserTabs } from "@/features/thread-overview/entries/browser";
+import { ThreadOverview } from "./ThreadOverview";
+import { canStartBranchlessCreatePr } from "@/features/thread-overview/branch-creation";
 import { getSubagentIdentityPaletteIndex } from "@/features/subagents";
 import { ProjectEnvironmentPanel } from "@/features/projects/environment";
 
