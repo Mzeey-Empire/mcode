@@ -1,3 +1,4 @@
+import { isHiddenPlanFenceLanguage } from "@/lib/plan-fences";
 import { memo, useMemo, lazy, Suspense } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -495,7 +496,6 @@ function FencedMarkdownCode({
 }: Omit<MarkdownCodeProps, "variant" | "workspacePath"> & { isUser: boolean }) {
   const langMatch = className?.match(/language-(\S+)/);
   const rawFence = langMatch ? langMatch[1] : "";
-  if (rawFence === "plan-questions" || rawFence === "plan-output") return null;
 
   const code = String(children).replace(/\n$/, "");
   if (rawFence === "mermaid") {
@@ -550,6 +550,7 @@ function makeComponents(
   componentOverrides?: Partial<Components>,
 ) {
   const codeRenderer = ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+    if (isHiddenPlanFenceLanguage(className?.match(/language-(\S+)/)?.[1] ?? "")) return null;
     return (
       <MarkdownCode
         children={children}

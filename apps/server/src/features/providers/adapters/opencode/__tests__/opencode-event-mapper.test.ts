@@ -4,6 +4,15 @@ import { mapOpenCodeEnvelope } from "../opencode-event-mapper.js";
 const CTX = { threadId: "thread-1", turnExecutionId: "11111111-1111-4111-8111-111111111111" };
 
 describe("mapOpenCodeEnvelope", () => {
+  it("preserves repeated delta text while deduplicating full snapshots", () => {
+    const context = { ...CTX, forwardedText: new Map<string, string>() };
+    const events = ["```", "`", "`"].flatMap((delta) => mapOpenCodeEnvelope({ type: "message.part.delta",
+      properties: { messageID: "message", partID: "part", field: "text", delta } }, context).events);
+    expect(events.map((event) => event.type === "textDelta" ? event.delta : null)).toEqual(["```", "`", "`"]);
+    expect(mapOpenCodeEnvelope({ type: "message.part.updated", properties: {
+      part: { type: "text", messageID: "message", id: "part", text: "`````" },
+    } }, context).events).toEqual([]);
+  });
   it("maps text deltas in both envelope shapes", () => {
     const flat = mapOpenCodeEnvelope({
       type: "message.part.updated",

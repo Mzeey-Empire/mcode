@@ -48,7 +48,7 @@ export interface CursorAcpClientBridgeDeps {
   publishNativeTurnDiff: (entry: CursorAcpSessionEntry, update: SessionNotification["update"]) => void;
   emitPermissionRequest: (request: PermissionRequest) => void;
   emitPermissionResolved: (requestId: string, decision: PermissionDecision) => void;
-  emitExitPlanMode: (args: { threadId: string; planMarkdown: string }) => void;
+  emitPlanCaptured: (args: { threadId: string; markdown: string; source: "native" | "fence" }, entry: CursorAcpSessionEntry) => void;
 }
 
 /** Bridges ACP callbacks to Mcode events, permissions, and workspace file access. */
@@ -180,8 +180,10 @@ export class CursorAcpClientBridge {
   ): AcpExtMethodResponse {
     const record = toRecord(params) ?? {};
     const planMarkdown = extractCursorCreatePlanMarkdown(record);
-    if (planMarkdown) {
-      this.deps.emitExitPlanMode({ threadId: entry.threadId, planMarkdown });
+    if (planMarkdown && planMarkdown.length > 256 * 1024) {
+      logger.warn("Ignoring oversized native plan capture", { threadId: entry.threadId, length: planMarkdown.length });
+    } else if (planMarkdown) {
+      this.deps.emitPlanCaptured({ threadId: entry.threadId, markdown: planMarkdown, source: "native" }, entry);
     } else {
       logger.warn("cursor/create_plan missing plan markdown", {
         threadId: entry.threadId,

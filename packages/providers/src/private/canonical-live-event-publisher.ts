@@ -24,6 +24,7 @@ interface ProviderExecutionQueue {
   tail: Promise<void>;
   failure: Error | undefined;
   nativeEvents: Map<string, string>;
+  planCapture?: ProviderRuntimeEvent["planCapture"];
 }
 
 /** Source evidence supplied by a native protocol event. */
@@ -54,6 +55,16 @@ export class CanonicalLiveEventPublisher {
     private readonly failureLifetime: "provider" | "execution" = "provider",
   ) {}
 
+  /** Retain native plan evidence within its exact execution until an assistant message arrives. */
+  capturePlan(routing: CanonicalLiveEventRouting, capture: NonNullable<ProviderRuntimeEvent["planCapture"]>): void {
+    const queue = this.queues.get(this.queueKey(routing));
+    if (!this.admissionStopped && queue && !queue.failure) {
+      queue.planCapture = capture;
+      return;
+    }
+    logger.warn("Native plan capture arrived outside a live execution", { executionId: routing.executionId });
+  }
+
   /** Queues one runtime event; a replay ID alone does not imply a native timestamp. */
   publish(
     routing: CanonicalLiveEventRouting,
@@ -69,7 +80,16 @@ export class CanonicalLiveEventPublisher {
       return;
     }
     const queue = this.queueFor(routing);
+    if (queue.planCapture && runtimeEvent.event.type === AgentEventType.TurnComplete) {
+      // The plan record needs an assistant message to anchor to; a textless turn has none.
+      logger.warn("Native plan capture had no assistant message to attach to", { executionId: routing.executionId });
+      queue.planCapture = undefined;
+    }
     if (!this.admit(queue, routing, runtimeEvent, sourceIdentities, native)) return;
+    if (runtimeEvent.event.type === AgentEventType.Message && queue.planCapture) {
+      runtimeEvent = { ...runtimeEvent, planCapture: queue.planCapture };
+      queue.planCapture = undefined;
+    }
     const sourceSequence = queue.nextSourceSequence;
     queue.nextSourceSequence += 1;
     queue.pendingEventCount += 1;

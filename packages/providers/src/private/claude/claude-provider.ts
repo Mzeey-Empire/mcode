@@ -1060,14 +1060,29 @@ export class ClaudeProvider
     }
     const planMarkdown =
       typeof input.plan === "string" ? input.plan.trim() : "";
-    if (planMarkdown) {
-      this.planAnswerThreads.delete(threadId);
-      this.emit("exit_plan_mode", { threadId, planMarkdown });
+    if (planMarkdown.length > 256 * 1024) {
+      logger.warn("Ignoring oversized native plan capture", { threadId, length: planMarkdown.length });
+      return {
+        behavior: "deny" as const,
+        message: "The plan is too long for the client to capture. Shorten it and call ExitPlanMode again.",
+      };
     }
+    if (!planMarkdown) {
+      return {
+        behavior: "deny" as const,
+        message: "No plan was received. Write the full plan inside the ````mcode-plan fence in your reply instead.",
+      };
+    }
+    this.planAnswerThreads.delete(threadId);
+    const routing = this.runtime.get(`mcode-${threadId}`)?.executionRouting;
+    if (routing) this.canonicalEventPublisher.capturePlan(routing, { markdown: planMarkdown, source: "native" });
+    else logger.warn("Native plan capture has no live execution", { threadId });
+    this.emit("plan_captured", { threadId, markdown: planMarkdown, source: "native" });
+    // The plan record anchors to the turn's assistant message, so ask for the short summary the chat shows.
     return {
       behavior: "deny" as const,
       message:
-        "The client captured your proposed plan. Stop here and wait for the user to review it.",
+        "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it.",
     };
   }
 

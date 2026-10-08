@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { logger } from "@mcode/shared";
 import { AgentEventType, type AgentEvent } from "@mcode/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -47,8 +48,8 @@ describe("PlanTurnService output", () => {
     expect(broadcast).toHaveBeenCalledWith("plan.questions", { threadId: thread.id, questions: [question] });
 
     service.beginOutputGeneration(thread.id);
-    const output = { title: "Login plan", sections: [{ id: "s1", title: "Implement", level: 1, content: "Add passkeys." }] };
-    const block = `\`\`\`plan-output\n${JSON.stringify(output)}\n\`\`\``;
+    const output = "# Login plan\n\n## Implement\n\nAdd passkeys.";
+    const block = `\`\`\`\`mcode-plan\n${output}\n\`\`\`\``;
     service.onTextDelta(thread.id, block.slice(0, 24));
     service.onTextDelta(thread.id, block.slice(24));
     const assistant = await messages.create(thread.id, "assistant", "Plan response", 1);
@@ -61,10 +62,21 @@ describe("PlanTurnService output", () => {
     expect(plans.getLatestForThread(thread.id)).toMatchObject({
       messageId: assistant.id,
       title: "Login plan",
-      contentMd: "## Implement\n\nAdd passkeys.",
-      sectionsJson: [{ id: "s1", title: "Implement", level: 1 }],
+      contentMd: output,
+      sectionsJson: [{ id: "s1", title: "Implement", level: 2 }],
     });
     expect(service.needsAssistantMaterialization(event)).toBe(false);
+    service.clearTurn(thread.id);
+    service.beginOutputGeneration(thread.id);
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+    const prose = "# Findings\n## Status\nStill investigating.";
+    const reply = await messages.create(thread.id, "assistant", prose, 2);
+    service.onTextDelta(thread.id, prose);
+    await service.persistAssistantMessage({ ...event, messageId: reply.id, content: prose });
+    service.clearTurn(thread.id);
+    expect(plans.getLatestForThread(thread.id)?.version).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
     db.close(true);
   });
 });

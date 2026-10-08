@@ -10,6 +10,7 @@ import type {
 import { PROVIDER_CONFORMANCE_CONTRACT_VERSION } from "./types.js";
 import { ClaudeNativeTraceSchema } from "./claude-native-trace-schema.js";
 import { parseCopilotCapturedTrace } from "./copilot-trace.js";
+import { SyntheticPlanTraceSchema } from "./synthetic-plan-trace.js";
 
 const PROVIDER_IDS = new Set(["claude", "codex", "copilot", "cursor", "opencode"]);
 const PROFILES = new Set([
@@ -71,11 +72,18 @@ export function loadProviderFixtureManifest(filePath: string): ProviderFixtureMa
 export function validateProviderFixtureManifest(value: unknown): ProviderFixtureManifest {
   const manifest = requireRecord(value, "fixture manifest");
   const nativeInput = requireRecord(manifest.input, "input");
+  if (nativeInput.planTrace !== undefined) {
+    const trace = SyntheticPlanTraceSchema.parse(nativeInput.planTrace);
+    if (manifest.provenance !== "synthetic" || trace.providerId !== manifest.providerId) {
+      throw new TypeError("Synthetic plan trace requires its matching synthetic provider fixture");
+    }
+  }
+  const safeInput = { ...nativeInput, planTrace: undefined };
   if (nativeInput.claudeNativeTrace !== undefined) {
     if (manifest.providerId !== "claude") throw new TypeError("Claude native trace requires the Claude provider");
     ClaudeNativeTraceSchema.parse(nativeInput.claudeNativeTrace);
-    rejectForbiddenContent({ ...manifest, input: { ...nativeInput, claudeNativeTrace: undefined } });
-  } else rejectForbiddenContent(value);
+    rejectForbiddenContent({ ...manifest, input: { ...safeInput, claudeNativeTrace: undefined } });
+  } else rejectForbiddenContent({ ...manifest, input: safeInput });
   requireExactKeys(manifest, [
     "contractVersion",
     "providerId",
@@ -135,7 +143,7 @@ function validateManifestRedaction(value: unknown): void {
 function validateManifestInput(value: unknown, isCursor: boolean, providerId: unknown): void {
   const input = requireRecord(value, "input");
   const nativeKeys = nativeFixtureInputKeys(providerId);
-  requireExactKeys(input, isCursor ? ["events", "cursorAcpTrace"] : ["events", ...nativeKeys], "input");
+  requireExactKeys(input, ["events", "planTrace", ...(isCursor ? ["cursorAcpTrace"] : nativeKeys)], "input");
   if (!Array.isArray(input.events) || input.events.length === 0 || input.events.length > 10_000) {
     throw new TypeError("Provider fixture events are invalid");
   }
@@ -342,13 +350,13 @@ function parseCursorAcpExtMethodEnvelope(
     }
     case "cursor/create_plan": {
       const params = requireRecord(envelope.params, "Cursor ACP create_plan params");
-      requireExactKeys(params, ["markdown"], "Cursor ACP create_plan params");
-      requireBoundedString(params.markdown, "Cursor ACP plan markdown", 1_000);
+      requireExactKeys(params, ["plan"], "Cursor ACP create_plan params");
+      requireBoundedString(params.plan, "Cursor ACP plan markdown", 1_000);
       return {
         sequence: envelope.sequence as number,
         kind: "ext-method",
         method: envelope.method,
-        params: { markdown: params.markdown },
+        params: { plan: params.plan },
       };
     }
     case "cursor/continue": {
@@ -389,7 +397,7 @@ function parseCursorAcpExpected(value: unknown): CursorAcpTraceExpectedSemantics
   requireExactKeys(expected, [
     "emittedEventTypes",
     "toolNames",
-    "planExitCount",
+    "planCaptureCount",
     "permissionOutcomes",
     "unsupportedMethods",
     "ignoredForeignSessionUpdateCount",
@@ -402,8 +410,8 @@ function parseCursorAcpExpected(value: unknown): CursorAcpTraceExpectedSemantics
   if (toolNames.some((toolName) => !CURSOR_ACP_TOOL_NAMES.has(toolName))) {
     throw new TypeError("Cursor ACP trace toolNames are invalid");
   }
-  if (!Number.isSafeInteger(expected.planExitCount) || Number(expected.planExitCount) < 0) {
-    throw new TypeError("Cursor ACP trace planExitCount is invalid");
+  if (!Number.isSafeInteger(expected.planCaptureCount) || Number(expected.planCaptureCount) < 0) {
+    throw new TypeError("Cursor ACP trace planCaptureCount is invalid");
   }
   const permissionOutcomes = requireStringArrayOrEmpty(
     expected.permissionOutcomes,
@@ -430,7 +438,7 @@ function parseCursorAcpExpected(value: unknown): CursorAcpTraceExpectedSemantics
   return {
     emittedEventTypes: emittedEventTypes as CursorAcpTraceExpectedSemantics["emittedEventTypes"],
     toolNames: toolNames as CursorAcpTraceExpectedSemantics["toolNames"],
-    planExitCount: Number(expected.planExitCount),
+    planCaptureCount: Number(expected.planCaptureCount),
     permissionOutcomes: permissionOutcomes as CursorAcpTraceExpectedSemantics["permissionOutcomes"],
     unsupportedMethods: unsupportedMethods as CursorAcpTraceExpectedSemantics["unsupportedMethods"],
     ignoredForeignSessionUpdateCount: Number(expected.ignoredForeignSessionUpdateCount),

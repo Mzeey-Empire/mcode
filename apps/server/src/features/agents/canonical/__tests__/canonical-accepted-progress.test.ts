@@ -708,7 +708,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "toolUse", {
       toolCallId: "tasks", toolName: "TodoWrite", toolInput: { todos: [{ content: "Build", status: "in_progress", activeForm: "Building" }] } })] });
     expect(progress.getTasks(execution.threadId)).toMatchObject([{ content: "Build", status: "in_progress" }]);
-    const content = '```plan-output\n{"title":"Plan","sections":[{"id":"build","title":"Build","level":1,"content":"Build it"}]}\n```';
+    const content = '````mcode-plan\n# Plan\n\n## Build\nBuild it\n````';
     await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 2, "textDelta", { delta: content, isFinalResponse: true })] });
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "message", { content, tokens: null })] });
     const plan = progress.listPlans(execution.threadId)?.[0];
@@ -731,7 +731,7 @@ describe("accepted parent progress with the actual SQLite writer", () => {
   it("orders a saved plan status change under its original turn after the live owner restarts", async () => {
     const admission = start("codex");
     await send(1, { ...admission, parentLive: { ...admission.parentLive, precedingMessageId: `${execution.turnId}:user`, planFeature: "output" } });
-    const content = '```plan-output\n{"title":"Plan","sections":[{"id":"build","title":"Build","level":1,"content":"Build it"}]}\n```';
+    const content = '````mcode-plan\n# Plan\n\n## Build\nBuild it\n````';
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 1, "textDelta", { delta: content, isFinalResponse: true })] });
     await send(3, { kind: "event", phase: "running", nativeCursor: null,

@@ -46,6 +46,19 @@ function makeRectList(rect: Partial<DOMRect>): DOMRectList {
 }
 
 describe("DeltaBlock", () => {
+  it("hides every streamed plan prefix before the typewriter or code skeleton can render it", async () => {
+    const summary = "A short summary.\n";
+    const fence = "````mcode-plan\n# Hidden\n```ts\nsecret();\n```\n````";
+    const { container, rerender } = render(<DeltaBlock text={summary} isStreaming showCursor={false} />);
+    await waitFor(() => expect(container.textContent).toBe(summary));
+    for (let end = 1; end <= fence.length; end++) {
+      rerender(<DeltaBlock text={summary + fence.slice(0, end)} isStreaming showCursor={false} />);
+      expect(container.textContent).toBe(summary);
+      expect(container.querySelector('[data-testid="streaming-skeleton"]')).toBeNull();
+    }
+    rerender(<DeltaBlock text={summary + fence} isStreaming={false} showCursor={false} />);
+    await waitFor(() => expect(container.textContent).toBe(summary));
+  });
   afterEach(() => {
     vi.restoreAllMocks();
   });

@@ -20,6 +20,21 @@ function createSink(submit: (batch: ProviderEventBatch) => Promise<void>): Provi
 }
 
 describe("CursorCanonicalEventPublisher", () => {
+  it("carries one native plan with the assistant message and clears it after consumption", async () => {
+    const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
+    const publisher = new CursorCanonicalEventPublisher(createSink(submit));
+    const capture = { markdown: "# Cursor plan", source: "native" as const };
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnStarted, threadId: routing.threadId }), []);
+    publisher.capturePlan(routing, capture);
+    const message = providerRuntimeEvent({ type: AgentEventType.Message, threadId: routing.threadId, content: "Summary", tokens: null });
+    publisher.publish(routing, message, []);
+    publisher.publish(routing, message, []);
+    await publisher.waitForExecution(routing);
+    const captures = submit.mock.calls.flatMap(([batch]) => batch.events.flatMap((draft) =>
+      draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent"
+        && draft.payload.item.payload.runtimeEvent.planCapture ? [draft.payload.item.payload.runtimeEvent.planCapture] : []));
+    expect(captures).toEqual([capture]);
+  });
   it("serializes ordered drafts with canonical routing and volatile text", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<void>>().mockResolvedValue(undefined);
     const publisher = new CursorCanonicalEventPublisher(createSink(submit));

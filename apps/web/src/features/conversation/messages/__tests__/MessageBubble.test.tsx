@@ -74,6 +74,26 @@ function makeMessage(content: string): Message {
   };
 }
 
+describe("hidden plan messages", () => {
+  it.each([
+    '```plan-output\n{"title":"Historic plan"}\n```',
+    "````mcode-plan\n# Plan\n```ts\ncode();\n```\n````",
+  ])("leaves no empty assistant bubble for a protocol-only message", (content) => {
+    const message = { ...makeMessage(content), role: "assistant" as const };
+    const { container } = render(<MessageBubble message={message} />);
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("hides an unfinished plan fence while it streams and shows it once the message is finished uncaptured", () => {
+    const message = { ...makeMessage("````mcode-plan\n# Truncated plan"), role: "assistant" as const };
+    expect(render(<MessageBubble message={message} textIsStreaming />).container.innerHTML).toBe("");
+    // A thought can end the text stream at a boundary while the turn still streams the fence.
+    expect(render(<MessageBubble message={message} textIsStreaming={false} agentDisplayState={{ phase: "streaming" }} />)
+      .container.textContent).not.toContain("Truncated plan");
+    expect(render(<MessageBubble message={message} />).container.textContent).toContain("Truncated plan");
+  });
+});
+
 function makePreviewAnnotationBundle(): PreviewAnnotationBundle {
   return {
     schemaVersion: 1,

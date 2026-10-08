@@ -124,14 +124,12 @@ describe("CodexLiveEventEffects", () => {
 
   it("associates parsed plan output with the staged assistant body", () => {
     const { prepare } = setup("output");
-    const plan = { title: "Login plan", sections: [
-      { id: "s1", title: "Implementation", level: 1, content: "Add passkey login." },
-    ] };
-    prepare("textDelta", { delta: `\`\`\`plan-output\n${JSON.stringify(plan)}\n\`\`\`` });
+    const plan = "# Login plan\n\n## Implementation\n\nAdd passkey login.";
+    prepare("textDelta", { delta: `\`\`\`\`mcode-plan\n${plan}\n\`\`\`\`` });
     const result = prepare("message", { content: "Provider prose", tokens: null });
     expect(result.effects.planOutput).toEqual({ title: "Login plan",
-      contentMd: "## Implementation\n\nAdd passkey login.",
-      sectionsJson: '[{"id":"s1","title":"Implementation","level":1}]', changeSummary: null });
+      contentMd: plan,
+      sectionsJson: '[{"id":"s1","title":"Implementation","level":2}]', changeSummary: null });
     expect(result.effects.message?.content).toBe("Provider prose");
     expect(result.publication.event).toMatchObject({ messageId: result.effects.message?.messageId });
   });

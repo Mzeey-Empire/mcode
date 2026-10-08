@@ -25,6 +25,11 @@ describe("narrative activity", () => {
     expect(narrativeActivityLabel([tool({ toolName, toolInput: { command: "arbitrary command" } })])).toBe("Running a command...");
   });
 
+  it("never takes a heading from inside a hidden plan fence", () => {
+    const text = "## Checking the README\nSummary.\n````mcode-plan\n# Plan\n## Risks and open points\n- none\n";
+    expect(currentActivityHeading([{ text, startedAt: 1 }])).toBe("Checking the README");
+  });
+
   it("bounds labels and removes control characters", () => {
     expect(narrativeActivityLabel([tool({ toolInput: { description: "Run\n\u202etests" } })])).toBe("Run tests");
     expect(narrativeActivityLabel([tool({ toolInput: { description: "x".repeat(5000) } })])).toHaveLength(120);

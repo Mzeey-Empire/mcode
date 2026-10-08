@@ -61,6 +61,11 @@ export class TurnFeatureEffects {
     return this.subagents.stopDescendants(threadId);
   }
 
+  /** Acknowledge worker-owned plan persistence before terminal cleanup. */
+  onPlanPersisted(threadId: string): void {
+    this.plans.markPlanPersisted(threadId);
+  }
+
   /** Clear feature-local turn state after terminal cleanup. */
   clearTurn(threadId: string): void {
     this.plans.clearTurn(threadId);

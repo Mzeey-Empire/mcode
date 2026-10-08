@@ -58,7 +58,7 @@ export type CursorAcpTraceExtMethodEnvelope =
     sequence: number;
     kind: "ext-method";
     method: "cursor/create_plan";
-    params: { markdown: string };
+    params: { plan: string };
   }
   | {
     sequence: number;
@@ -88,7 +88,7 @@ export type CursorAcpTraceEnvelope =
 export interface CursorAcpTraceExpectedSemantics {
   emittedEventTypes: readonly ("toolUse" | "toolResult")[];
   toolNames: readonly ("Read" | "Agent")[];
-  planExitCount: number;
+  planCaptureCount: number;
   permissionOutcomes: readonly "selected"[];
   unsupportedMethods: readonly ("cursor/task" | "cursor/continue")[];
   ignoredForeignSessionUpdateCount: number;
@@ -123,6 +123,8 @@ export interface ProviderFixtureManifest {
   };
   input: {
     events: readonly SanitizedTraceEvent[];
+    /** Native synthetic events replayed through the provider's mapper or bridge. */
+    planTrace?: import("./synthetic-plan-trace.js").SyntheticPlanTrace;
     /** Cursor-only ACP envelopes. Generic ACP fixtures remain private. */
     cursorAcpTrace?: CursorAcpTraceFixture;
     /** Claude native structural envelopes; content fields contain only allowlisted tool shapes. */

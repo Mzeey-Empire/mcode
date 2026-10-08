@@ -20,6 +20,24 @@ function createSink(submit: ProviderEventSinkPort["submit"]): ProviderEventSinkP
 const receipt: ProviderEventSubmissionReceipt = { commit: { outcome: "committed", acceptedThrough: 1, durableThrough: 1, conversationRevision: 1, rosterRevision: 0, eventCount: 1 }, delivery: { ingress: "queued" } };
 
 describe("ClaudeCanonicalEventPublisher", () => {
+  it("binds a native plan to exactly one assistant message in its own attempt", async () => {
+    const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
+    const publisher = new ClaudeCanonicalEventPublisher(createSink(submit));
+    const capture = { markdown: "# Native plan", source: "native" as const };
+    publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnStarted, threadId: routing.threadId }), []);
+    publisher.capturePlan(routing, capture);
+    const message = providerRuntimeEvent({ type: AgentEventType.Message, threadId: routing.threadId, content: "Summary", tokens: null });
+    const retry = { ...routing, deliveryAttempt: 2 };
+    publisher.publish(retry, message, []);
+    publisher.publish(routing, message, []);
+    publisher.publish(routing, message, []);
+    await Promise.all([publisher.waitForExecution(routing), publisher.waitForExecution(retry)]);
+    const captures = submit.mock.calls.flatMap(([batch]) => batch.events.flatMap((draft) =>
+      draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent"
+        && draft.payload.item.payload.runtimeEvent.planCapture
+        ? [{ attempt: batch.deliveryAttempt, capture: draft.payload.item.payload.runtimeEvent.planCapture }] : []));
+    expect(captures).toEqual([{ attempt: 1, capture }]);
+  });
   it("submits a provider runtime event without a renderer publication claim", async () => {
     const submit = vi.fn<ProviderEventSinkPort["submit"]>().mockResolvedValue(receipt);
     const publisher = new ClaudeCanonicalEventPublisher(createSink(submit));

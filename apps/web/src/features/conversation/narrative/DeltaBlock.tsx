@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import { splitStreamingBlocks, type StreamingBlockPart } from "./streaming-blocks";
 import { CodeBlock } from "@/components/chat/CodeBlock";
 import { TURN_PROSE_CLASS } from "./narrative-layout";
+import { stripPlanFences } from "@/lib/plan-fences";
 
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
 const LazyMermaidBlock = lazy(() => import("@/components/chat/MermaidBlock"));
@@ -31,6 +32,11 @@ interface DeltaBlockProps {
    * cursor at its end. Defaults to true.
    */
   showCursor?: boolean;
+  /**
+   * When true, an unclosed plan fence stays hidden because more text may still close it.
+   * Defaults to `isStreaming`; the turn can still be running after the text's own stream ended.
+   */
+  textMayContinue?: boolean;
 }
 
 /**
@@ -377,8 +383,9 @@ function StreamingBody({ text }: { text: string }) {
   );
 }
 
-export function DeltaBlock({ text, isStreaming = true, showCursor = true }: DeltaBlockProps) {
-  const displayed = useTypewriter(text, isStreaming);
+export function DeltaBlock({ text, isStreaming = true, showCursor = true, textMayContinue = isStreaming }: DeltaBlockProps) {
+  const visibleText = useMemo(() => stripPlanFences(text, textMayContinue), [text, textMayContinue]);
+  const displayed = useTypewriter(visibleText, isStreaming);
   const rootRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
   /** Tracks whether the first-paint entry flight animation has already played. */

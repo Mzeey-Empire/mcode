@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "bun:sqlite";
 import type { WebSocket } from "ws";
 import { container } from "tsyringe";
-import type { AgentEvent, IAgentProvider, IProviderRegistry, TurnRequest } from "@mcode/contracts";
+import type { AgentEvent, IAgentProvider, IProviderRegistry, ProviderRuntimeEvent, TurnRequest } from "@mcode/contracts";
 
 import { setupContainer } from "../../../../application/composition/container.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
@@ -28,6 +28,8 @@ import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../../turns/turn-featu
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { PlanTurnService } from "../../planning/plan-turn-service.js";
+import { PlanRepo } from "../../planning/persistence/plan-repo.js";
 import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import type { WorkerOwnedProviderEventResult } from "../../../providers/composition/provider-host-ports.js";
@@ -156,6 +158,45 @@ describe("AgentService container composition", () => {
       && canonicalPayloadTypes(thread.id).includes("turn.completed"));
     expect(container.resolve(TurnRuntimeController).snapshot(thread.id)?.phase).toBe("completed");
     expect(workerRuntime?.scheduler.depth().activeExecutions).toBe(0);
+  });
+
+  it.each(["fence", "native"] as const)("captures the %s answer turn through production worker admission", async (source) => {
+    let providerError: unknown;
+    const markdown = "# Answered plan\n\n## Build\nUse passkeys.";
+    const provider = fakeCodexProvider(async (request) => {
+      try {
+        const content = source === "fence" ? "Summary.\n````mcode-plan\n" + markdown + "\n````" : "Summary.";
+        let sequence = 0;
+        await submitCodexEvent(workerRuntime!, request, ++sequence, { type: "textDelta", threadId: request.threadId,
+          turnExecutionId: request.turnExecutionId, delta: content, isFinalResponse: true });
+        await submitCodexEvent(workerRuntime!, request, ++sequence, { type: "message", threadId: request.threadId,
+          turnExecutionId: request.turnExecutionId, content, tokens: null }, source === "native" ? { markdown, source } : undefined);
+        await submitCodexEvent(workerRuntime!, request, ++sequence, { type: "turnComplete", threadId: request.threadId,
+          turnExecutionId: request.turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
+          tokensIn: 1, tokensOut: 2 });
+        await submitCodexEvent(workerRuntime!, request, ++sequence, { type: "ended", threadId: request.threadId,
+          turnExecutionId: request.turnExecutionId });
+      } catch (error) {
+        providerError = error;
+        throw error;
+      }
+    });
+    registerFakeCodex(provider);
+    const registry = container.resolve(AgentEventPublicationRegistry);
+    registry.bind(() => undefined);
+    registry.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("worker-plan-test", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Plan", "direct", "main", false, "codex");
+    await container.resolve(MessageRepo).create(thread.id, "assistant", "```plan-questions\n[]\n```", 1);
+    container.resolve(AgentService);
+    await container.resolve(PlanTurnService).answerQuestions(thread.id, [], "full");
+    await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
+    expect(providerError).toBeUndefined();
+    const plans = container.resolve(PlanRepo);
+    await waitFor(() => plans.getLatestForThread(thread.id) !== null);
+    expect(plans.getLatestForThread(thread.id)).toMatchObject({
+      version: 1, title: "Answered plan", contentMd: markdown,
+    });
   });
 
   it("admits a provider-started turn with its opening notice and releases it after Ended", async () => {
@@ -644,6 +685,7 @@ async function submitCodexEvent(
   request: TurnRequest,
   sequence: number,
   event: AgentEvent,
+  planCapture?: ProviderRuntimeEvent["planCapture"],
 ): Promise<WorkerOwnedProviderEventResult> {
   const route = runtime.providerEvents.resolve(request.turnExecutionId, "codex");
   if (route.kind !== "worker") throw new Error("Codex turn did not bind its worker route");
@@ -658,7 +700,7 @@ async function submitCodexEvent(
         executionId: request.turnExecutionId, itemId },
       payload: { type: "item.recorded", item: { id: itemId, threadId: request.threadId,
         turnId: request.turnId, kind: "system", providerIdentities: [],
-        payload: { projection: "providerRuntimeEvent", runtimeEvent: { event } },
+        payload: { projection: "providerRuntimeEvent", runtimeEvent: { event, ...(planCapture ? { planCapture } : {}) } },
         createdAt: timestamp, updatedAt: timestamp } } }],
   });
 }

@@ -4,6 +4,7 @@ import { ImageIcon, RotateCcw, Copy, Check, GitFork, Target } from "lucide-react
 import { ErrorIcon, WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
+import { stripPlanFences } from "@/lib/plan-fences";
 import { stripInjectedFiles } from "@/lib/file-tags";
 import {
   buildStoredAttachmentImageSrc,
@@ -31,6 +32,11 @@ import { basename } from "@/lib/path";
 import { SelectedTextCommentsComposerAttachment } from "../composer/SelectedTextCommentsComposerAttachment";
 import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
 
+/** Text may still arrive while the turn runs, even after its own text stream ended at a boundary. */
+function isTextStillArriving(textIsStreaming: boolean | undefined, agentDisplayState: AgentDisplayState | undefined): boolean {
+  return Boolean(textIsStreaming) || agentDisplayState?.phase === "streaming" || agentDisplayState?.phase === "finalizing";
+}
+
 /**
  * Returns true when the assistant message body collapses to nothing visible
  * after stripping content that other components render (the plan-questions
@@ -38,10 +44,8 @@ import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
  * an empty assistant bubble — which is what cursor-agent's strict "Output
  * ONLY the plan-questions block" obedience produces).
  */
-function isAssistantContentEmpty(content: string): boolean {
-  const stripped = content
-    .replace(/```plan-questions\n[\s\S]*?```/g, "")
-    .replace(/```plan-output\n[\s\S]*?```/g, "");
+function isAssistantContentEmpty(content: string, isStreaming: boolean): boolean {
+  const stripped = stripPlanFences(content, isStreaming);
   return stripped.trim().length === 0;
 }
 
@@ -862,10 +866,11 @@ function AssistantResponseText({
   return (
     <div className={`pt-1 ${TURN_PROSE_CLASS}`} data-testid="assistant-response-text" data-selected-text-content data-selected-text-eligible={isAgentResponseComplete ? "true" : "false"}>
       {renderDelta ? (
-        <DeltaBlock text={message.content} isStreaming={isStreaming} showCursor={isStreaming} />
+        <DeltaBlock text={message.content} isStreaming={isStreaming} showCursor={isStreaming}
+          textMayContinue={isTextStillArriving(textIsStreaming, agentDisplayState)} />
       ) : (
-        <Suspense fallback={<p className="whitespace-pre-wrap">{message.content}</p>}>
-          <LazyMarkdownContent content={message.content} isStreaming={false} threadId={message.thread_id} chatHighlighting />
+        <Suspense fallback={<p className="whitespace-pre-wrap">{stripPlanFences(message.content)}</p>}>
+          <LazyMarkdownContent content={stripPlanFences(message.content)} isStreaming={false} threadId={message.thread_id} chatHighlighting />
         </Suspense>
       )}
     </div>
@@ -968,7 +973,7 @@ function AssistantMessageContent({
   );
   const goal = parseGoalStatusNotice(textContent);
   if (goal) return <AssistantGoalNotice goal={goal} />;
-  const assistantContentEmpty = isAssistantContentEmpty(message.content);
+  const assistantContentEmpty = isAssistantContentEmpty(message.content, isTextStillArriving(textIsStreaming, agentDisplayState));
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
   if (assistantContentEmpty && !hasAttachments) return isAnsweredPlanMessage ? <AnsweredSummary content={message.content} messageId={message.id} /> : null;
   const resolvedAgentDisplayState = agentDisplayState ?? COMPLETED_AGENT_DISPLAY_STATE;

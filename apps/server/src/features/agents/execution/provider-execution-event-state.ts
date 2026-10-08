@@ -46,17 +46,17 @@ export class ProviderExecutionEventState {
 
   /** Validate the whole draft before any reducer state changes. Child evidence stays writer-owned. */
   prepare(drafts: readonly ProviderEventDraft[], allowTerminal = false): PreparedExecutionParentEvent {
-    const parents: AgentEvent[] = [];
+    const parents: ProviderRuntimeEvent[] = [];
     for (const draft of drafts) {
       const result = this.parentEvent(draft);
       if (result.kind === "rejected") return result;
-      if (result.kind === "parent") parents.push(result.event);
+      if (result.kind === "parent") parents.push(result.runtime);
     }
     if (parents.length === 0) return { kind: "writer-owned" };
     if (parents.length !== 1 || drafts.length !== 1) return { kind: "rejected" };
     const event = parents[0];
     if (!event) return { kind: "rejected" };
-    return this.reduceParent(event, allowTerminal);
+    return this.reduceParent(event.event, allowTerminal, event.planCapture);
   }
 
   /** Synthesize terminal projection from this execution's buffers without host-side reconstruction. */
@@ -77,20 +77,20 @@ export class ProviderExecutionEventState {
       turnExecutionId: this.execution.executionId }, false);
   }
 
-  private reduceParent(event: AgentEvent, allowTerminal: boolean): PreparedExecutionParentEvent {
+  private reduceParent(event: AgentEvent, allowTerminal: boolean, capture?: ProviderRuntimeEvent["planCapture"]): PreparedExecutionParentEvent {
     if (!allowTerminal && isTerminalEvent(event)) return { kind: "rejected" };
     switch (this.parent.kind) {
       case "codex": {
-        const reduction = this.parent.reducer.reduce(event);
+        const reduction = this.parent.reducer.reduce(event, capture);
         return reduction.kind === "reduced"
           ? { kind: "parent", prepared: this.parent.effects.prepare(reduction) } : { kind: "rejected" };
       }
-      case "generic": return prepareOtherParent(this.parent.effects, event);
+      case "generic": return preparedOtherResult(this.parent.effects.prepare(event, undefined, capture));
     }
   }
 
   private parentEvent(draft: ProviderEventDraft):
-    | { kind: "parent"; event: AgentEvent }
+    | { kind: "parent"; runtime: ProviderRuntimeEvent }
     | { kind: "writer-owned" }
     | { kind: "rejected" } {
     if (draft.sourceProviderId !== this.providerId || !this.matchesExecution(draft)) {
@@ -102,7 +102,7 @@ export class ProviderExecutionEventState {
     const runtime = this.validatedRuntimeEvent(draft, item);
     if (!runtime) return { kind: "rejected" };
     if (hasWriterOwnedExtension(runtime)) return { kind: "writer-owned" };
-    return { kind: "parent", event: runtime.event };
+    return { kind: "parent", runtime };
   }
 
   private validatedRuntimeEvent(
@@ -130,10 +130,6 @@ type ParentReducer =
 
 function createParentReducer(providerId: ExecutionLiveProviderId, execution: ExecutionIdentity, context: ExecutionParentStartContext): ParentReducer {
   return providerId === "codex" ? { kind: "codex", reducer: new CodexLiveEventReducer(execution, context.planFeature), effects: new CodexLiveEventEffects(execution, context.precedingMessageId) } : { kind: "generic", effects: new OtherProviderLiveEventEffects(providerId, execution, context.precedingMessageId, context.planFeature) };
-}
-
-function prepareOtherParent(effects: OtherProviderLiveEventEffects, event: AgentEvent): PreparedExecutionParentEvent {
-  return preparedOtherResult(effects.prepare(event));
 }
 
 function preparedOtherResult(prepared: ReturnType<OtherProviderLiveEventEffects["prepare"]>): PreparedExecutionParentEvent {

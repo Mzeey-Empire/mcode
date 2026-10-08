@@ -777,13 +777,26 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     active: WorkerOwnedTurn,
     result: Extract<ExecutionWorkerResult, { kind: "committed" | "accepted" }>,
   ): void {
+    this.reportWorkerPlanOutcome(active.execution.threadId, result);
     const event = result.parentEvent?.publication.event;
     if (event?.type === "message" && active.prepared.providerId === "codex") {
       this.featureEffects.onAssistantMessage("codex", event);
     }
     for (const intent of result.parentEvent?.runtime ?? []) {
+      if (intent.kind === "plan-captured") this.featureEffects.onPlanPersisted(active.execution.threadId);
       if (intent.kind === "assistant-message-feature") {
         this.featureEffects.onAssistantMessage(active.prepared.providerId, intent.event);
+      }
+    }
+  }
+
+  private reportWorkerPlanOutcome(
+    threadId: string,
+    result: Extract<ExecutionWorkerResult, { kind: "committed" | "accepted" }>,
+  ): void {
+    for (const intent of result.parentEvent?.runtime ?? []) {
+      if (intent.kind === "plan-capture-outcome" && intent.outcome === "missing") {
+        logger.warn("Planning turn produced no plan", { threadId, outcome: intent.outcome });
       }
     }
   }

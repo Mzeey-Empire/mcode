@@ -1,10 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
-vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: ({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+import { assert, describe, expect, it, vi } from "vitest";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import type { AgentEvent, PlanCapture } from "@mcode/contracts";
+import { createClaudeProvider } from "../../factories.js";
+import { fixtureHost } from "../../private/claude/__tests__/helpers/provider-fixture.js";
+import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
+import { mapCopilotEvent, type CopilotTurnState } from "../../private/copilot/copilot-event-mapper.js";
+import { mapOpenCodeEnvelope } from "../../../../../apps/server/src/features/providers/adapters/opencode/opencode-event-mapper.js";
+import { SYNTHETIC_PLAN_MARKDOWN, type SyntheticPlanTrace } from "../synthetic-plan-trace.js";
+const planReplay = vi.hoisted(() => ({ requests: [] as Array<{ toolName: string; input: { plan: string } }> }));
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: ({ prompt, options }: { prompt: AsyncIterable<unknown>; options: Options }) => {
   let turn = 0;
   const stream = (async function* () {
     for await (const _input of prompt) {
       await new Promise((resolve) => setTimeout(resolve, 25));
       turn++;
+      for (const request of planReplay.requests.splice(0)) {
+        if (!options.canUseTool) throw new Error("Missing Claude tool boundary");
+        await options.canUseTool(request.toolName, request.input, { signal: new AbortController().signal, toolUseID: "PLAN_1" });
+      }
       yield { type: "result", uuid: `RESULT_${turn}`, is_error: false };
     }
   })();
@@ -18,6 +31,7 @@ import { loadPlanProtocolFixture, parsePlanProtocolFixture, projectPlanProtocolC
 import { providerFixtureSourceHash } from "../fixture-safety.js";
 import { containedPath, recordChildStderr } from "../plan-probes/runtime.js";
 import type { ProviderEventDraft } from "../../host-ports.js";
+import { capturePlanFromAgentText, replayCursorPlanRequest } from "../harness.js";
 import {
   DeterministicCanonicalSink,
   ENABLED_PROVIDER_CONFORMANCE,
@@ -34,6 +48,68 @@ import {
 } from "../index.js";
 
 const planFixtureDirectory = NodePath.resolve(import.meta.dirname, "../fixtures/plan-protocol");
+describe("synthetic plan capture conformance", () => {
+  it.each(ENABLED_PROVIDER_CONFORMANCE)("captures exactly one plan from replayed $providerId events", async (registration) => {
+    const file = registration.fixtureFiles.find((path) => path.endsWith("-core.synthetic.json"));
+    if (!file) throw new Error("Missing core synthetic fixture");
+    const fixture = loadProviderFixtureManifest(file);
+    if (registration.providerId === "cursor") {
+      expect((await runCursorAcpTraceProfile(fixture)).planCaptureCount).toBe(1);
+      return;
+    }
+    const trace = fixture.input.planTrace;
+    assert(trace);
+    if (trace.providerId === "claude") {
+      expect(await replayClaudePlan(trace)).toEqual([{ threadId: "THREAD_1", source: "native", markdown: SYNTHETIC_PLAN_MARKDOWN }]);
+      return;
+    }
+    const emitted = replayPlanText(trace);
+    const deltas = emitted.flatMap((event) => event.type === "textDelta" ? [event.delta] : []);
+    expect(capturePlanFromAgentText(deltas, "THREAD_1")).toEqual([{
+      threadId: "THREAD_1", source: "fence",
+      markdown: SYNTHETIC_PLAN_MARKDOWN,
+    }]);
+  });
+
+  it("does not capture prose or an unfinished fence", () => {
+    expect(capturePlanFromAgentText(["# Prose\n## Status"], "THREAD_1")).toEqual([]);
+    expect(capturePlanFromAgentText(["````mcode-plan\n# Unfinished"], "THREAD_1")).toEqual([]);
+  });
+});
+
+function replayPlanText(trace: Exclude<SyntheticPlanTrace, { providerId: "claude" }>): AgentEvent[] {
+  if (trace.providerId === "codex") {
+    const mapper = new CodexEventMapper("THREAD_1", "SESSION_1");
+    return trace.events.flatMap((event) => mapper.mapNotification(event).map((runtime) => runtime.event));
+  }
+  if (trace.providerId === "opencode") {
+    const context = { threadId: "THREAD_1", partRole: "assistant", forwardedText: new Map<string, string>() };
+    return trace.events.flatMap((event) => mapOpenCodeEnvelope(event, context).events);
+  }
+  const state: CopilotTurnState = { nativeIdleObserved: false, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0,
+    tools: new Map(), pendingPermissions: new Map(), settle: () => undefined, completed: Promise.resolve() };
+  return trace.events.flatMap((event) => mapCopilotEvent(event, "THREAD_1", state));
+}
+
+async function replayClaudePlan(trace: Extract<SyntheticPlanTrace, { providerId: "claude" }>): Promise<PlanCapture[]> {
+  planReplay.requests.push(...trace.requests);
+  const sink = new DeterministicCanonicalSink();
+  const provider = createClaudeProvider({ configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 },
+    host: fixtureHost({ events: sink }), claude: { createForker: () => ({ fork: async () => { throw new Error("Unused fixture fork"); } }) } });
+  const captures: PlanCapture[] = [];
+  provider.on("plan_captured", (capture) => captures.push(capture));
+  provider.setPlanAnswerMode("THREAD_1", true);
+  try {
+    await provider.sendTurn({ turnId: "TURN_1", turnExecutionId: "00000000-0000-4000-8000-000000000001", deliveryAttempt: 1,
+      sessionId: "mcode-THREAD_1", workspaceId: "WORKSPACE_1", threadId: "THREAD_1", message: "fixture", cwd: process.cwd(),
+      model: "claude-sonnet-4-6", permissionMode: "full", providerOptions: { contextWindowMode: "auto", thinking: false } });
+    await vi.waitFor(() => expect(captures).toHaveLength(1));
+    return captures;
+  } finally {
+    await provider.shutdown();
+    planReplay.requests.length = 0;
+  }
+}
 const planMetadata = {
   providerId: "codex", scenario: "questions-free-text", cliVersion: "0.161.0", protocolVersion: "app-server-unversioned", sdk: null,
   end: { kind: "completed" }, capturedAt: "2026-10-08T12:00:00.000Z",
@@ -45,6 +121,33 @@ const privateQuestionExchange = [
 ];
 
 describe("Plan protocol research evidence", () => {
+  it("replays the captured Cursor create_plan request through the bridge", async () => {
+    const fixture = loadProviderFixtureManifest(NodePath.resolve(import.meta.dirname, "../fixtures/cursor-core.synthetic.json"));
+    const captured = loadPlanProtocolFixture(NodePath.join(planFixtureDirectory, "r1-cursor-plan-02.captured.json"));
+    const request = captured.input.messages.find((message) => message.kind === "request" && message.operation === "cursor/create_plan");
+    assert(request);
+    const params: Record<string, string | string[]> = {};
+    for (const field of request.fields) {
+      if (field.kind === "identity") params[field.at] = field.alias;
+      if (field.kind === "shape" && field.jsonType === "string") params[field.at] = `Fixture ${field.at}`;
+      if (field.kind === "shape" && field.jsonType === "array") params[field.at] = [];
+    }
+    expect(await replayCursorPlanRequest(fixture, params)).toEqual([
+      { threadId: "CURSOR_TRACE_THREAD", markdown: "Fixture plan", source: "native" },
+    ]);
+  });
+
+  it("rejects private text, extra fields and wrong provenance in synthetic native plan events", () => {
+    const fixture = loadProviderFixtureManifest(NodePath.resolve(import.meta.dirname, "../fixtures/claude-core.synthetic.json"));
+    for (const planTrace of [
+      { providerId: "claude", requests: [{ toolName: "ExitPlanMode", input: { plan: "Private text" } }] },
+      { ...fixture.input.planTrace, privateField: "private" },
+    ]) {
+      expect(() => validateProviderFixtureManifest({ ...fixture, input: { ...fixture.input, planTrace } })).toThrow();
+    }
+    expect(() => validateProviderFixtureManifest({ ...fixture, provenance: "captured" })).toThrow();
+    expect(() => validateProviderFixtureManifest({ ...fixture, providerId: "codex" })).toThrow();
+  });
   it("discovers and validates every committed capture without changing factory coverage", () => {
     const files = NodeFS.readdirSync(planFixtureDirectory);
     expect(files).toContain("s07-devin-01.captured.json");
@@ -374,6 +477,7 @@ describe("Provider conformance registry", () => {
         emittedEventTypes: ["toolUse", "toolUse", "toolResult", "toolUse", "toolUse", "toolResult"],
         toolNames: ["Read", "Read", "Agent", "Agent"],
         unsupportedMethods: ["cursor/task", "cursor/continue"],
+        planCaptureCount: 1,
       },
       {
         scenario: "captured Cursor ACP tool and child lifecycle envelope replay",
@@ -381,6 +485,7 @@ describe("Provider conformance registry", () => {
         emittedEventTypes: ["toolUse", "toolUse", "toolResult", "toolUse", "toolUse", "toolResult"],
         toolNames: ["Agent", "Agent", "Read", "Read"],
         unsupportedMethods: [],
+        planCaptureCount: 0,
       },
     ]);
   });

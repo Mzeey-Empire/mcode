@@ -291,9 +291,7 @@ function partTextRemainder(
 ): string {
   if (!text || !key || !forwarded) return text;
   const prev = forwarded.get(key) ?? "";
-  if (text === prev) return "";
   if (isDelta) {
-    if (prev.endsWith(text)) return "";
     rememberBounded(forwarded, key, prev + text, MAX_TRACKED_PART_TEXT);
     return text;
   }

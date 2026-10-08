@@ -93,7 +93,7 @@ import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
 import { RecoveryIncidentSchema } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
-import { PlanStatusSchema, PlanRecordSchema, PlanActionSchema } from "../models/plan-output.js";
+import { PlanStatusSchema, PlanRecordSchema, PlanActionSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
 import { ReviewComparisonSchema } from "../models/review-comparison.js";
 import {
@@ -344,7 +344,7 @@ export const SendMessageSchema = lazySchema(() => z.object({
     /** Highlighted text excerpt from the original message. Absent for full-message replies. */
     quotedText: z.string().max(2000).optional(),
     /**
-     * Plan-tab action hint. `revise` arms plan-output capture; `implement` runs
+     * Plan-tab action hint. `revise` enables plan capture; `implement` runs
      * in chat mode without the plan-questions wrapper.
      */
     planAction: PlanActionSchema().optional(),
