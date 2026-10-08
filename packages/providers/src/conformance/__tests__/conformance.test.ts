@@ -26,6 +26,7 @@ import {
   runFactoryCoreProfile,
   runCursorAcpTraceProfile,
   runMapperProfile,
+  runPlanCaptureProfile,
   sanitizeProviderFixtureFile,
   validateProviderConformanceRegistry,
   validateProviderFixtureManifest,
@@ -602,3 +603,10 @@ function omitGeneratedFields(
   } = fixture;
   return input;
 }
+
+describe("synthetic plan captures", () => {
+  it.each(["claude", "codex", "copilot", "opencode"])("%s captures exactly one fenced plan", (provider) => {
+    const fixture = loadProviderFixtureManifest(NodePath.resolve(import.meta.dirname, "../fixtures", `${provider}-core.synthetic.json`));
+    expect(runPlanCaptureProfile(fixture)).toEqual(["# Synthetic plan\n\n## Implement\nKeep the code simple."]);
+  });
+});

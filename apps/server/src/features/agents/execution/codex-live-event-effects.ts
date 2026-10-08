@@ -101,7 +101,6 @@ export class CodexLiveEventEffects {
       case "narrative-recovery": return this.narrativeEffects(intent, effects);
       case "feature-event": return this.featureEffects(intent, effects, runtime);
       case "plan-questions": return { ...effects, planQuestions: intent.questions };
-      case "plan-output": return { ...effects, planOutput: intent.output };
       case "notice-session":
       case "system-notice":
       case "session-cursor": return this.systemEffects(intent, effects);

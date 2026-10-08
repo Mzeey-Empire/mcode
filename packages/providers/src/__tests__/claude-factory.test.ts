@@ -233,9 +233,9 @@ describe("Claude public factory core and capabilities", () => {
     const canUseTool = options.canUseTool;
     assert(canUseTool);
     const plan = vi.fn();
-    provider.on("exit_plan_mode", plan);
+    provider.on("plan_captured", plan);
     await canUseTool("ExitPlanMode", { plan: "fixture plan" }, { signal: new AbortController().signal, toolUseID: "PLAN_1" });
-    expect(plan).toHaveBeenCalledWith({ threadId: "thread-1", planMarkdown: "fixture plan" });
+    expect(plan).toHaveBeenCalledWith({ threadId: "thread-1", markdown: "fixture plan", source: "native" });
     provider.setPlanAnswerMode("thread-1", false);
     expect(await provider.clearGoal("mcode-thread-1")).toBe(true);
     await provider.discardSession("mcode-thread-1");

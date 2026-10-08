@@ -4,6 +4,7 @@ import { ImageIcon, RotateCcw, Copy, Check, GitFork, Target } from "lucide-react
 import { ErrorIcon, WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
+import { stripPlanFences } from "@/lib/plan-fences";
 import { stripInjectedFiles } from "@/lib/file-tags";
 import {
   buildStoredAttachmentImageSrc,
@@ -39,10 +40,7 @@ import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
  * ONLY the plan-questions block" obedience produces).
  */
 function isAssistantContentEmpty(content: string): boolean {
-  const stripped = content
-    .replace(/```plan-questions\n[\s\S]*?```/g, "")
-    .replace(/```plan-output\n[\s\S]*?```/g, "");
-  return stripped.trim().length === 0;
+  return stripPlanFences(content).trim().length === 0;
 }
 
 /** Parses the message content of a synthetic agent-error system message. Returns the error text, or null if not an agent error. */
@@ -865,7 +863,7 @@ function AssistantResponseText({
         <DeltaBlock text={message.content} isStreaming={isStreaming} showCursor={isStreaming} />
       ) : (
         <Suspense fallback={<p className="whitespace-pre-wrap">{message.content}</p>}>
-          <LazyMarkdownContent content={message.content} isStreaming={false} threadId={message.thread_id} chatHighlighting />
+          <LazyMarkdownContent content={stripPlanFences(message.content)} isStreaming={false} threadId={message.thread_id} chatHighlighting />
         </Suspense>
       )}
     </div>

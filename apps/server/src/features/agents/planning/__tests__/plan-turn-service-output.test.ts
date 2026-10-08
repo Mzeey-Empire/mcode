@@ -18,53 +18,71 @@ import { broadcast } from "../../../../application/transport/push.js";
 
 afterEach(closeAgentStorageTestDatabases);
 
+
+async function fixture() {
+  const db = openMemoryDatabase();
+  const writer = agentStorageTestWriter(db);
+  const workspace = await new WorkspaceRepo(db, writer).create("plans", process.cwd(), false);
+  const threads = new ThreadRepo(db, writer);
+  const thread = await threads.create(workspace.id, "plan", "direct", "main", false, "codex");
+  const messages = new MessageRepo(db, writer);
+  const plans = new PlanRepo(db, writer);
+  const service = new PlanTurnService(threads, new ProviderRegistry([]),
+    new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db, writer)),
+    plans, new AgentTurnCommandPort(new AgentRuntimeCommandPort()));
+  return { thread, messages, plans, service };
+}
+
 describe("PlanTurnService output", () => {
-  it("publishes parsed questions and persists the plan at its assistant message", async () => {
-    const db = openMemoryDatabase();
-    const workspace = await new WorkspaceRepo(db, agentStorageTestWriter(db)).create("plans", process.cwd(), false);
-    const threads = new ThreadRepo(db, agentStorageTestWriter(db));
-    const thread = await threads.create(workspace.id, "plan", "direct", "main", false, "codex");
-    const messages = new MessageRepo(db, agentStorageTestWriter(db));
-    const plans = new PlanRepo(db, agentStorageTestWriter(db));
-    const questions = new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db, agentStorageTestWriter(db)));
-    const service = new PlanTurnService(
-      threads,
-      new ProviderRegistry([]),
-      questions,
-      plans,
-      new AgentTurnCommandPort(new AgentRuntimeCommandPort()),
-    );
-    const question = {
-      id: "q1", category: "AUTH", question: "Which login?",
-      options: [
-        { id: "o1", title: "Passkey", description: "Use passkeys." },
-        { id: "o2", title: "Password", description: "Use passwords." },
-      ],
-    };
-
-    service.beginQuestionGeneration(thread.id);
-    service.onTextDelta(thread.id, `\`\`\`plan-questions\n${JSON.stringify([question])}\n\`\`\``);
-    expect(broadcast).toHaveBeenCalledWith("plan.questions", { threadId: thread.id, questions: [question] });
-
+  it.each(["fence", "native"] as const)("persists one %s plan after all captures settle", async (source) => {
+    const { thread, messages, plans, service } = await fixture();
     service.beginOutputGeneration(thread.id);
-    const output = { title: "Login plan", sections: [{ id: "s1", title: "Implement", level: 1, content: "Add passkeys." }] };
-    const block = `\`\`\`plan-output\n${JSON.stringify(output)}\n\`\`\``;
-    service.onTextDelta(thread.id, block.slice(0, 24));
-    service.onTextDelta(thread.id, block.slice(24));
+    const block = "````mcode-plan\n# Login plan\n\n## Implement\nAdd passkeys.\n````";
+    service.observeAcceptedText(thread.id, block.slice(0, 24));
+    service.observeAcceptedText(thread.id, block.slice(24));
     const assistant = await messages.create(thread.id, "assistant", "Plan response", 1);
     const event: Extract<AgentEvent, { type: "message" }> = {
       type: AgentEventType.Message, threadId: thread.id, messageId: assistant.id, content: assistant.content, tokens: null,
     };
-
-    expect(service.needsAssistantMaterialization(event)).toBe(true);
     await service.persistAssistantMessage(event);
-    expect(plans.getLatestForThread(thread.id)).toMatchObject({
-      messageId: assistant.id,
-      title: "Login plan",
-      contentMd: "## Implement\n\nAdd passkeys.",
-      sectionsJson: [{ id: "s1", title: "Implement", level: 1 }],
+    expect(plans.getLatestForThread(thread.id)).toBeNull();
+    if (source === "native") service.handlePlanCaptured({ threadId: thread.id, markdown: "# Native plan\nShip it.", source });
+    await service.finishTurn(thread.id);
+    await service.finishTurn(thread.id);
+    expect(plans.listByThread(thread.id)).toHaveLength(1);
+    expect(plans.getLatestForThread(thread.id)).toMatchObject(source === "native" ? {
+      version: 1, messageId: assistant.id, title: "Native plan", contentMd: "# Native plan\nShip it.", sectionsJson: [],
+    } : {
+      version: 1, messageId: assistant.id, title: "Login plan", contentMd: "# Login plan\n\n## Implement\nAdd passkeys.",
+      sectionsJson: [{ id: "s1", title: "Implement", level: 2 }],
     });
     expect(service.needsAssistantMaterialization(event)).toBe(false);
-    db.close(true);
+    service.clearTurn(thread.id);
+  });
+
+  it("creates no version for prose with headings and logs the missing outcome", async () => {
+    const { thread, messages, plans, service } = await fixture();
+    const { logger } = await import("@mcode/shared");
+    const warning = vi.spyOn(logger, "warn");
+    service.beginOutputGeneration(thread.id);
+    const assistant = await messages.create(thread.id, "assistant", "# Status\n## Next\nNeed input.", 1);
+    await service.persistAssistantMessage({
+      type: AgentEventType.Message, threadId: thread.id, messageId: assistant.id, content: assistant.content, tokens: null,
+    });
+    await service.finishTurn(thread.id);
+    service.clearTurn(thread.id);
+    expect(plans.listByThread(thread.id)).toEqual([]);
+    expect(warning).toHaveBeenCalledWith("Plan capture missing", { threadId: thread.id, outcome: "missing" });
+    warning.mockRestore();
+  });
+
+  it("still publishes parsed questions without creating a plan", async () => {
+    const { thread, plans, service } = await fixture();
+    const question = { id: "q1", category: "AUTH", question: "Which login?",
+      options: [{ id: "o1", title: "Passkey", description: "Use passkeys." }, { id: "o2", title: "Password", description: "Use passwords." }] };
+    service.beginQuestionGeneration(thread.id);
+    service.onTextDelta(thread.id, "```plan-questions\n" + JSON.stringify([question]) + "\n```");
+    expect(broadcast).toHaveBeenCalledWith("plan.questions", { threadId: thread.id, questions: [question] });
+    expect(plans.listByThread(thread.id)).toEqual([]);
   });
 });

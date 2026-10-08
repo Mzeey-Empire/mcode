@@ -701,6 +701,18 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(next.turnId)).toEqual({ status: "Running" });
   });
 
+  async function capturePlan(ordinal: number, content: string) {
+    const messageId = deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`);
+    return send(ordinal, {
+      kind: "live-event", text: { kind: "unchanged" },
+      publication: { after: "writer", event: { type: "message", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, messageId, content, tokens: null } },
+      message: { precedingMessageId: `${execution.turnId}:user`, messageId, content, model: null, attachments: [] },
+      planOutput: { title: "Plan", contentMd: "# Plan\n\n## Build\nBuild it",
+        sectionsJson: '[{"id":"build","title":"Build","level":2}]', changeSummary: null },
+    });
+  }
+
   it("assigns live plan, task and notice projections before storage and persists those same identities", async () => {
     const admission = start("codex");
     await send(1, { ...admission, parentLive: { ...admission.parentLive, precedingMessageId: `${execution.turnId}:user`, planFeature: "output" } });
@@ -708,9 +720,9 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "toolUse", {
       toolCallId: "tasks", toolName: "TodoWrite", toolInput: { todos: [{ content: "Build", status: "in_progress", activeForm: "Building" }] } })] });
     expect(progress.getTasks(execution.threadId)).toMatchObject([{ content: "Build", status: "in_progress" }]);
-    const content = '```plan-output\n{"title":"Plan","sections":[{"id":"build","title":"Build","level":1,"content":"Build it"}]}\n```';
+    const content = '# Plan\n\n## Build\nBuild it';
     await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 2, "textDelta", { delta: content, isFinalResponse: true })] });
-    await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "message", { content, tokens: null })] });
+    await capturePlan(4, content);
     const plan = progress.listPlans(execution.threadId)?.[0];
     if (!plan) throw new Error("Expected accepted plan before saving");
     expect(progress.updatePlanStatus(plan.id, "accepted")).toBe(true);
@@ -731,11 +743,10 @@ describe("accepted parent progress with the actual SQLite writer", () => {
   it("orders a saved plan status change under its original turn after the live owner restarts", async () => {
     const admission = start("codex");
     await send(1, { ...admission, parentLive: { ...admission.parentLive, precedingMessageId: `${execution.turnId}:user`, planFeature: "output" } });
-    const content = '```plan-output\n{"title":"Plan","sections":[{"id":"build","title":"Build","level":1,"content":"Build it"}]}\n```';
+    const content = '# Plan\n\n## Build\nBuild it';
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 1, "textDelta", { delta: content, isFinalResponse: true })] });
-    await send(3, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("codex", 2, "message", { content, tokens: null })] });
+    await capturePlan(3, content);
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "turnComplete")],
       terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
     await expect.poll(() => progress.depth().pending).toBe(0);
@@ -761,6 +772,25 @@ describe("accepted parent progress with the actual SQLite writer", () => {
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(db.prepare("SELECT status FROM plans WHERE id = ?").get(original.id)).toEqual({ status: "accepted" });
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
+  });
+
+  it("installs terminal plan captures in an already loaded plan list", async () => {
+    const { PlanRepo } = await import("../../planning/persistence/plan-repo.js");
+    await progress.beforeDurableCommand(execution.threadId);
+    progress.cancelDurableCommand(execution.threadId);
+    expect(progress.listPlans(execution.threadId)).toEqual([]);
+    db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("capture-message", execution.threadId, "assistant", "Summary", 1, NOW);
+    const plans = new PlanRepo(reader, databaseWriter);
+    const first = await plans.create(execution.threadId, "capture-message", "First", "# First", "[]", null);
+    progress.recordSavedPlan(first);
+    expect(progress.listPlans(execution.threadId)).toEqual([first]);
+    const second = await plans.create(execution.threadId, "capture-message", "Second", "# Second", "[]", null);
+    progress.recordSavedPlan(second);
+    progress.recordSavedPlan(second);
+    expect(progress.listPlans(execution.threadId)).toEqual([{ ...first, status: "superseded" }, second]);
+    expect(plans.listByThread(execution.threadId).map((plan) => ({ version: plan.version, status: plan.status })))
+      .toEqual([{ version: 1, status: "superseded" }, { version: 2, status: "draft" }]);
   });
 
   it("leaves a legacy plan without canonical ownership to its existing durable repository", async () => {

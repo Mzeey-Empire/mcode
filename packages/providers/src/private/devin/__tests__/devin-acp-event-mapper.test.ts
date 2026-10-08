@@ -1,3 +1,4 @@
+import { PlanFenceParser } from "@mcode/shared";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
 import {
@@ -706,4 +707,21 @@ describe("devinPermissionPreview", () => {
     ).toBe("rm -rf build");
     expect(devinPermissionPreview({})).toBeUndefined();
   });
+});
+
+it("captures one fenced plan from Devin's actual text mapper", () => {
+  const state = createDevinAcpTurnState();
+  const parser = new PlanFenceParser();
+  const plans: string[] = [];
+  for (const text of ["Summary.\n``", "``mcode-plan\n# Devin plan\n```sh\necho ready\n```\n", "````\n"]) {
+    const events = mapDevinAcpSessionNotification({
+      sessionId: "acp-1", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+    }, THREAD, state);
+    for (const event of events) {
+      if (event.type !== "textDelta") continue;
+      const plan = parser.feed(event.delta);
+      if (plan !== null) plans.push(plan);
+    }
+  }
+  expect(plans).toEqual(["# Devin plan\n```sh\necho ready\n```"]);
 });

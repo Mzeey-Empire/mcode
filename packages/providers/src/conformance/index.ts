@@ -9,6 +9,7 @@ export {
   runFactoryCoreProfile,
   runCursorAcpTraceProfile,
   runMapperProfile,
+  runPlanCaptureProfile,
   validateProviderConformanceRegistry,
 } from "./harness.js";
 export type { CursorAcpTraceProfileResult, FactoryCoreProfileResult } from "./harness.js";

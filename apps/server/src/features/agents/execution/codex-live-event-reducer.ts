@@ -2,7 +2,7 @@ import type { AgentEvent, ParentNarrativeRecoveryItem, PlanQuestion, StoredAttac
 import { NarrativeTurnState, type NarrativeTurnStateEffect } from "../conversation/narrative/narrative-turn-state.js";
 import { AssistantExecutionState, type AssistantMaterializationInput } from "../turns/assistant-execution-state.js";
 import { NarrativeRecoveryDelta, type PreparedNarrativeRecoveryDelta } from "../turns/narrative-recovery-delta.js";
-import { PlanExecutionState, type PlanPersistenceReady } from "../planning/plan-execution-state.js";
+import { PlanExecutionState } from "../planning/plan-execution-state.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 
 type ToolUseEvent = Extract<AgentEvent, { type: "toolUse" }>;
@@ -80,7 +80,6 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "narrative-effect"; readonly effect: NarrativeTurnStateEffect }
   | { readonly kind: "feature-event"; readonly feature: "plan-text" | "assistant-message" | "task-tool" | "goal-refresh"; readonly event: AgentEvent }
   | { readonly kind: "plan-questions"; readonly questions: readonly PlanQuestion[] }
-  | { readonly kind: "plan-output"; readonly output: PlanPersistenceReady }
   | { readonly kind: "context-usage"; readonly tokensIn: number; readonly contextWindow?: number }
   | { readonly kind: "compaction-started" }
   | { readonly kind: "compaction-divider" }
@@ -125,9 +124,8 @@ export class CodexLiveEventReducer {
 
   constructor(readonly execution: ExecutionIdentity, readonly planFeature: CodexPlanFeature = "none") {
     this.narrative = new NarrativeTurnState(execution);
-    this.plan = planFeature === "none" ? null : new PlanExecutionState();
+    this.plan = planFeature === "questions" ? new PlanExecutionState() : null;
     if (planFeature === "questions") this.plan?.beginQuestionGeneration();
-    if (planFeature === "output") this.plan?.beginOutputGeneration();
   }
 
   /** Stage one event against accepted state before reserving its complete write intent. */
@@ -350,10 +348,6 @@ export class CodexLiveEventReducer {
       { kind: "assistant-body", content: body.content, model: body.model, attachments: body.attachments, tokens: event.tokens },
       { kind: "feature-event", feature: "assistant-message", event },
     ];
-    if (this.plan && this.planFeature === "output") {
-      const output = this.plan.consumeAssistantMessage(event.content);
-      if (output) writer.push({ kind: "plan-output", output });
-    }
     return writer;
   }
 

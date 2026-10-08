@@ -48,7 +48,7 @@ export interface CursorAcpClientBridgeDeps {
   publishNativeTurnDiff: (entry: CursorAcpSessionEntry, update: SessionNotification["update"]) => void;
   emitPermissionRequest: (request: PermissionRequest) => void;
   emitPermissionResolved: (requestId: string, decision: PermissionDecision) => void;
-  emitExitPlanMode: (args: { threadId: string; planMarkdown: string }) => void;
+  emitPlanCaptured: (args: { threadId: string; markdown: string; source: "native" | "fence" }) => void;
 }
 
 /** Bridges ACP callbacks to Mcode events, permissions, and workspace file access. */
@@ -181,7 +181,7 @@ export class CursorAcpClientBridge {
     const record = toRecord(params) ?? {};
     const planMarkdown = extractCursorCreatePlanMarkdown(record);
     if (planMarkdown) {
-      this.deps.emitExitPlanMode({ threadId: entry.threadId, planMarkdown });
+      this.deps.emitPlanCaptured({ threadId: entry.threadId, markdown: planMarkdown, source: "native" });
     } else {
       logger.warn("cursor/create_plan missing plan markdown", {
         threadId: entry.threadId,

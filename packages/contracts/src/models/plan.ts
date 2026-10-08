@@ -1,18 +1,6 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 
-/** A single section within a structured plan (full content, used in plan-output blocks). */
-export const PlanSectionSchema = lazySchema(() =>
-  z.object({
-    id: z.string(),
-    title: z.string(),
-    level: z.number().min(1).max(3),
-    content: z.string(),
-  }),
-);
-
-export type PlanSection = z.infer<ReturnType<typeof PlanSectionSchema>>;
-
 /** Lightweight section metadata for TOC navigation (no content body). */
 export const PlanSectionNavSchema = lazySchema(() =>
   z.object({
@@ -23,17 +11,6 @@ export const PlanSectionNavSchema = lazySchema(() =>
 );
 
 export type PlanSectionNav = z.infer<ReturnType<typeof PlanSectionNavSchema>>;
-
-/** Structured plan output emitted by the agent inside a ```plan-output fence. */
-export const PlanOutputSchema = lazySchema(() =>
-  z.object({
-    title: z.string(),
-    changeSummary: z.string().optional(),
-    sections: z.array(PlanSectionSchema()).min(1),
-  }),
-);
-
-export type PlanOutput = z.infer<ReturnType<typeof PlanOutputSchema>>;
 
 /** Plan status lifecycle. */
 export const PlanStatusSchema = lazySchema(() =>

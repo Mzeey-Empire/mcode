@@ -135,7 +135,7 @@ function validateManifestRedaction(value: unknown): void {
 function validateManifestInput(value: unknown, isCursor: boolean, providerId: unknown): void {
   const input = requireRecord(value, "input");
   const nativeKeys = nativeFixtureInputKeys(providerId);
-  requireExactKeys(input, isCursor ? ["events", "cursorAcpTrace"] : ["events", ...nativeKeys], "input");
+  requireExactKeys(input, isCursor ? ["events", "cursorAcpTrace", "planCapture"] : ["events", "planCapture", ...nativeKeys], "input");
   if (!Array.isArray(input.events) || input.events.length === 0 || input.events.length > 10_000) {
     throw new TypeError("Provider fixture events are invalid");
   }
@@ -145,8 +145,17 @@ function validateManifestInput(value: unknown, isCursor: boolean, providerId: un
       throw new TypeError("Provider fixture event sequences must be contiguous and start at 1");
     }
   }
+  validatePlanCapture(input.planCapture);
   if (isCursor) parseCursorAcpTrace(input.cursorAcpTrace);
   if (input.copilotNativeEvents !== undefined) parseCopilotCapturedTrace(input.copilotNativeEvents);
+}
+
+function validatePlanCapture(value: unknown): void {
+  if (value === undefined) return;
+  const capture = requireRecord(value, "planCapture");
+  requireExactKeys(capture, ["assistantText", "expectedCount"], "planCapture");
+  requireBoundedString(capture.assistantText, "planCapture assistantText", 10_000);
+  if (capture.expectedCount !== 1) throw new TypeError("Synthetic plan capture must expect one plan");
 }
 
 function nativeFixtureInputKeys(providerId: unknown): string[] {
@@ -342,13 +351,13 @@ function parseCursorAcpExtMethodEnvelope(
     }
     case "cursor/create_plan": {
       const params = requireRecord(envelope.params, "Cursor ACP create_plan params");
-      requireExactKeys(params, ["markdown"], "Cursor ACP create_plan params");
-      requireBoundedString(params.markdown, "Cursor ACP plan markdown", 1_000);
+      requireExactKeys(params, ["plan"], "Cursor ACP create_plan params");
+      requireBoundedString(params.plan, "Cursor ACP plan markdown", 1_000);
       return {
         sequence: envelope.sequence as number,
         kind: "ext-method",
         method: envelope.method,
-        params: { markdown: params.markdown },
+        params: { plan: params.plan },
       };
     }
     case "cursor/continue": {
@@ -389,7 +398,7 @@ function parseCursorAcpExpected(value: unknown): CursorAcpTraceExpectedSemantics
   requireExactKeys(expected, [
     "emittedEventTypes",
     "toolNames",
-    "planExitCount",
+    "planCaptureCount",
     "permissionOutcomes",
     "unsupportedMethods",
     "ignoredForeignSessionUpdateCount",
@@ -402,8 +411,8 @@ function parseCursorAcpExpected(value: unknown): CursorAcpTraceExpectedSemantics
   if (toolNames.some((toolName) => !CURSOR_ACP_TOOL_NAMES.has(toolName))) {
     throw new TypeError("Cursor ACP trace toolNames are invalid");
   }
-  if (!Number.isSafeInteger(expected.planExitCount) || Number(expected.planExitCount) < 0) {
-    throw new TypeError("Cursor ACP trace planExitCount is invalid");
+  if (!Number.isSafeInteger(expected.planCaptureCount) || Number(expected.planCaptureCount) < 0) {
+    throw new TypeError("Cursor ACP trace planCaptureCount is invalid");
   }
   const permissionOutcomes = requireStringArrayOrEmpty(
     expected.permissionOutcomes,
@@ -430,7 +439,7 @@ function parseCursorAcpExpected(value: unknown): CursorAcpTraceExpectedSemantics
   return {
     emittedEventTypes: emittedEventTypes as CursorAcpTraceExpectedSemantics["emittedEventTypes"],
     toolNames: toolNames as CursorAcpTraceExpectedSemantics["toolNames"],
-    planExitCount: Number(expected.planExitCount),
+    planCaptureCount: Number(expected.planCaptureCount),
     permissionOutcomes: permissionOutcomes as CursorAcpTraceExpectedSemantics["permissionOutcomes"],
     unsupportedMethods: unsupportedMethods as CursorAcpTraceExpectedSemantics["unsupportedMethods"],
     ignoredForeignSessionUpdateCount: Number(expected.ignoredForeignSessionUpdateCount),

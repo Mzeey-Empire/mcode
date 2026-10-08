@@ -241,6 +241,15 @@ export class CanonicalAcceptedProgress {
     }
   }
 
+  /** Install a plan saved after all captures for its completed turn have settled. */
+  recordSavedPlan(plan: PlanRecord): void {
+    const thread = this.threads.get(plan.threadId);
+    if (!thread) return;
+    thread.features.plans = thread.features.plans.filter((prior) => prior.id !== plan.id)
+      .map((prior) => prior.status === "draft" ? { ...prior, status: "superseded" } : prior);
+    thread.features.plans.push(plan);
+  }
+
   /** Plan cards and controls read their assigned identities before saving finishes. */
   listPlans(threadId: string): PlanRecord[] | undefined {
     const thread = this.threads.get(threadId);

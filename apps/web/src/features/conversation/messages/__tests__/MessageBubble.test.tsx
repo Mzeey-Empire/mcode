@@ -21,6 +21,34 @@ beforeEach(() => {
   }]]) });
 });
 
+const { MarkdownContent: RealMarkdownContent } = await vi.importActual<typeof import("@/components/chat/MarkdownContent")>("@/components/chat/MarkdownContent");
+
+describe("MessageBubble internal plan fences", () => {
+  it("shows historic prose without the JSON payload", async () => {
+    const message: Message = { ...makeMessage('Summary.\n```plan-output\n{"title":"Hidden plan"}\n```'), role: "assistant" };
+    const { container, findByText } = render(<MessageBubble message={message} />);
+    await findByText("Summary.");
+    expect(container.textContent).not.toContain("Hidden plan");
+    expect(container.textContent).not.toContain("plan-output");
+  });
+
+  it.each(['```plan-output\n{}\n```', '````mcode-plan\n# Hidden\n```ts\nconst x = 1;'])("leaves no empty bubble for %s", (content) => {
+    const message: Message = { ...makeMessage(content), role: "assistant" };
+    const { container } = render(<MessageBubble message={message} />);
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("never renders a streaming plan through the real MarkdownContent", () => {
+    const start = "Summary.\n````mcode-plan\n";
+    const rest = "# Hidden plan\n```ts\nconst value = 1;\n```\n````";
+    const { container, rerender } = render(<RealMarkdownContent content={start} isStreaming />);
+    for (let length = 0; length <= rest.length; length++) {
+      rerender(<RealMarkdownContent content={start + rest.slice(0, length)} isStreaming />);
+      expect(container.textContent).toBe("Summary.");
+    }
+  });
+});
+
 afterEach(() => {
   cleanup();
   resetThreadStoreForTests();

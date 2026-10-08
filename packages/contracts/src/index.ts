@@ -876,21 +876,17 @@ export type {
 
 // Plan output
 export {
-  PlanSectionSchema,
   PlanSectionNavSchema,
-  PlanOutputSchema,
   PlanStatusSchema,
   PlanActionSchema,
   PlanRecordSchema,
-} from "./models/plan-output.js";
+} from "./models/plan.js";
 export type {
-  PlanSection,
   PlanSectionNav,
-  PlanOutput,
   PlanStatus,
   PlanAction,
   PlanRecord,
-} from "./models/plan-output.js";
+} from "./models/plan.js";
 
 // Permissions
 export {
@@ -1417,6 +1413,9 @@ export type {
   ProviderId,
   SessionForkBehavior,
   IAgentProvider,
+  NativePlanFileRef,
+  NativePlanFileOutcome,
+  PlanCaptured,
   IApprovalReviewCapable,
   ITurnDiffSource,
   IChildTurnCancellable,
@@ -1478,6 +1477,8 @@ export {
   ProviderBillingModeSchema,
   ProviderUsageInfoSchema,
 } from "./providers/usage.js";
+
+export { NativePlanFileOutcomeSchema } from "./providers/interfaces.js";
 export type {
   TurnUsage,
   QuotaCategory,

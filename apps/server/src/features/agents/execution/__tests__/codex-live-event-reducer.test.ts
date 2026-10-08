@@ -235,21 +235,15 @@ describe("CodexLiveEventReducer", () => {
     });
   });
 
-  it("carries plan output data with the assistant body and bounds parser input", () => {
+  it("leaves plan capture to the turn service and bounds question parser input", () => {
     const reducer = new CodexLiveEventReducer(execution, "output");
-    const plan = { title: "Login plan", sections: [
-      { id: "s1", title: "Implementation", level: 1, content: "Add passkey login." },
-    ] };
-    const block = `\`\`\`plan-output\n${JSON.stringify(plan)}\n\`\`\``;
+    const block = "````mcode-plan\n# Login plan\nAdd passkeys.\n````";
     expect(reducer.reduce(event("turnStarted")).kind).toBe("reduced");
     expect(reducer.reduce(event("textDelta", { delta: block })).kind).toBe("reduced");
     const message = reducer.reduce(event("message", { content: "Provider prose", tokens: null }));
     expect(message.kind).toBe("reduced");
     if (message.kind !== "reduced") return;
-    expect(message.writer).toContainEqual({ kind: "plan-output", output: {
-      title: "Login plan", contentMd: "## Implementation\n\nAdd passkey login.",
-      sectionsJson: '[{"id":"s1","title":"Implementation","level":1}]', changeSummary: null,
-    } });
+    expect(message.writer.map((intent) => intent.kind)).toEqual(["assistant-body", "feature-event"]);
     expect(message.writer[0]).toMatchObject({ kind: "assistant-body", content: "Provider prose" });
 
     const bounded = new CodexLiveEventReducer(execution, "questions");

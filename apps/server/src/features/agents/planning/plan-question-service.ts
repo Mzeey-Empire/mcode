@@ -39,7 +39,7 @@ export interface PlanAnswerInput {
 
 /**
  * The payload the facade sends to resume planning after the user answers.
- * `content` is the full message body (human-readable answers + plan-output
+ * `content` is the full message body (human-readable answers + mcode-plan
  * instructions); `markPlanAnswerForMessageId` is the assistant message whose
  * fence is being answered, used to key the answered marker.
  */
@@ -133,31 +133,21 @@ export class PlanQuestionService {
     return assistantMessageId;
   }
 
-  /** Instructions appended when the model should emit a structured plan-output block. */
+  /** Instructions appended when the model should emit a structured mcode-plan block. */
   buildPlanOutputInstructions(): string {
     return `
 Now generate the full implementation plan based on these decisions.
 
-Write the plan as normal markdown in your response so the user can read it in the chat.
+Write a 1-2 sentence summary in chat. Put the full plan only in a four-backtick mcode-plan fence, starting with a single H1 title. Ordinary triple-backtick code blocks may appear inside the plan.
 
-Additionally, emit the plan in a structured format inside a fenced block so it can be displayed in the Plan tab. The block must contain valid JSON matching this schema:
+\`\`\`\`mcode-plan
+# Short plan title
 
-\`\`\`plan-output
-{
-  "title": "Short plan title",
-  "changeSummary": "One-line summary of what changed (omit for first version)",
-  "sections": [
-    {
-      "id": "unique-section-id",
-      "title": "Section Heading",
-      "level": 1,
-      "content": "Full markdown content of this section."
-    }
-  ]
-}
-\`\`\`
+## Implementation
+Full implementation steps, verification, and relevant tradeoffs.
+\`\`\`\`
 
-The fenced block can appear anywhere in your response. The sections should mirror the headings in your markdown plan. Level 1 = top-level heading, level 2 = subheading, level 3 = sub-subheading.`;
+Do not repeat the full plan outside the fence.`;
   }
 
   /**

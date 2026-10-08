@@ -4,7 +4,7 @@ import { ThreadStatusSchema } from "../models/enums.js";
 import { ThreadSchema } from "../models/thread.js";
 import { ProviderIdSchema, SettingsSchema } from "../models/settings.js";
 import { PlanQuestionSchema } from "../models/plan-questions.js";
-import { PlanRecordSchema } from "../models/plan-output.js";
+import { PlanRecordSchema } from "../models/plan.js";
 import { ChecksStatusSchema } from "../github.js";
 import { PermissionRequestSchema, PermissionDecisionSchema } from "../models/permission.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";

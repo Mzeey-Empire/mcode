@@ -1,3 +1,4 @@
+import { stripPlanFences } from "@/lib/plan-fences";
 import { memo, useMemo, lazy, Suspense } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -495,7 +496,6 @@ function FencedMarkdownCode({
 }: Omit<MarkdownCodeProps, "variant" | "workspacePath"> & { isUser: boolean }) {
   const langMatch = className?.match(/language-(\S+)/);
   const rawFence = langMatch ? langMatch[1] : "";
-  if (rawFence === "plan-questions" || rawFence === "plan-output") return null;
 
   const code = String(children).replace(/\n$/, "");
   if (rawFence === "mermaid") {
@@ -598,7 +598,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 
   return (
     <ReactMarkdown remarkPlugins={remarkPlugins} components={components} urlTransform={markdownUrlTransform}>
-      {content}
+      {stripPlanFences(content)}
     </ReactMarkdown>
   );
 });

@@ -2,6 +2,7 @@ import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import type {
   AgentEvent,
+  PlanCaptured,
   ContextWindowMode,
   IProviderRegistry,
   PermissionMode,
@@ -16,6 +17,7 @@ import {
 } from "../orchestration/agent-turn-command-port.js";
 import { PlanExecutionState, type PlanPersistenceReady } from "./plan-execution-state.js";
 import { PlanQuestionService, type PlanAnswerInput } from "./plan-question-service.js";
+import type { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import { PlanRepo } from "./persistence/plan-repo.js";
 
 type PlanMessage = Extract<AgentEvent, { type: "message" }>;
@@ -24,9 +26,11 @@ type ClaudePlanAnswerModeProvider = {
   setPlanAnswerMode(threadId: string, enabled: boolean): void;
 };
 
-/** Owns plan-question turns and durable plan-output materialization. */
+/** Owns plan-question turns and durable mcode-plan materialization. */
 @injectable()
 export class PlanTurnService {
+  private acceptedProgress: Pick<CanonicalAcceptedProgress, "recordSavedPlan" | "beforeDurableCommand" | "cancelDurableCommand"> | undefined;
+  private readonly assistantByThread = new Map<string, PlanMessage>();
   private readonly executionByThread = new Map<string, PlanExecutionState>();
 
   constructor(
@@ -37,12 +41,17 @@ export class PlanTurnService {
     @inject(AGENT_TURN_COMMAND_PORT) private readonly commands: AgentTurnCommandPort,
   ) {}
 
+  /** Keep canonical plan reads current after the turn's captured plan is saved. */
+  bindAcceptedProgress(progress: Pick<CanonicalAcceptedProgress, "recordSavedPlan" | "beforeDurableCommand" | "cancelDurableCommand">): void {
+    this.acceptedProgress = progress;
+  }
+
   /** Start parsing one plan-question generation turn. */
   beginQuestionGeneration(threadId: string): void {
     this.execution(threadId).beginQuestionGeneration();
   }
 
-  /** Start parsing one structured plan-output turn and arm its native provider mode. */
+  /** Start parsing one structured mcode-plan turn and arm its native provider mode. */
   beginOutputGeneration(threadId: string): void {
     this.execution(threadId).beginOutputGeneration();
     this.armNativeOutputMode(threadId);
@@ -80,7 +89,7 @@ Output format (must be valid JSON inside the fence):
 ${userMessage}`;
   }
 
-  /** Return instructions that require a structured plan-output block. */
+  /** Return instructions that require a structured mcode-plan block. */
   buildPlanOutputInstructions(): string {
     return this.questions.buildPlanOutputInstructions();
   }
@@ -91,9 +100,14 @@ ${userMessage}`;
     if (ready) broadcast("plan.questions", { threadId, questions: ready.questions });
   }
 
+  /** Observe accepted text; the canonical owner already publishes its parsed questions. */
+  observeAcceptedText(threadId: string, delta: string): void {
+    this.executionByThread.get(threadId)?.feedText(delta);
+  }
+
   /** Capture native plan markdown until its assistant message receives a durable identity. */
-  handleExitPlanMode(threadId: string, planMarkdown: string): void {
-    this.execution(threadId).handleNativeExit(planMarkdown);
+  handlePlanCaptured(capture: PlanCaptured): void {
+    this.execution(capture.threadId).handleCapture(capture);
   }
 
   /** Return whether a message needs early durable materialization for a plan record. */
@@ -102,12 +116,31 @@ ${userMessage}`;
     return this.executionByThread.get(event.threadId)?.needsAssistantMaterialization() ?? false;
   }
 
-  /** Persist the one plan record that an assistant message can materialize. */
+  /** Retain the accepted assistant identity until native and fenced captures have settled. */
+  observeAssistantMessage(event: PlanMessage): void {
+    if (!event.messageId || !this.executionByThread.has(event.threadId)) return;
+    this.executionByThread.get(event.threadId)?.observeAssistantMessage(event.content);
+    this.assistantByThread.set(event.threadId, event);
+  }
+
+  /** Retain a durably materialized compatibility message for terminal plan persistence. */
   async persistAssistantMessage(event: PlanMessage): Promise<void> {
-    if (!event.messageId) return;
-    const execution = this.executionByThread.get(event.threadId);
-    const ready = execution?.consumeAssistantMessage(event.content);
-    if (execution && ready) await this.persistPlan(event.threadId, event.messageId, ready, execution);
+    this.observeAssistantMessage(event);
+  }
+
+  /** Wait for all native captures before choosing the turn's one plan version. */
+  async finishTurn(threadId: string): Promise<void> {
+    const execution = this.executionByThread.get(threadId);
+    const event = this.assistantByThread.get(threadId);
+    if (!execution || !event?.messageId) return;
+    const ready = execution.consumeAssistantMessage(event.content);
+    if (!ready) return;
+    await this.acceptedProgress?.beforeDurableCommand(threadId);
+    try {
+      await this.persistPlan(threadId, event.messageId, ready, execution);
+    } finally {
+      this.acceptedProgress?.cancelDurableCommand(threadId);
+    }
   }
 
   /** Submit answers and dispatch the complete answer turn through the command facade. */
@@ -145,7 +178,10 @@ ${userMessage}`;
 
   /** Clear volatile plan state once a turn reaches its terminal lifecycle. */
   clearTurn(threadId: string): void {
+    const outcome = this.executionByThread.get(threadId)?.outcome();
+    if (outcome?.outcome === "missing") logger.warn("Plan capture missing", { threadId, ...outcome });
     this.executionByThread.delete(threadId);
+    this.assistantByThread.delete(threadId);
   }
 
   private armNativeOutputMode(threadId: string): void {
@@ -162,16 +198,10 @@ ${userMessage}`;
     execution: PlanExecutionState,
   ): Promise<void> {
     if (execution.hasPersistedPlan()) return;
-    try {
-      const plan = await this.planRepo.create(threadId, messageId, ready.title, ready.contentMd, ready.sectionsJson, ready.changeSummary);
-      execution.markPlanPersisted();
-      broadcast("plan.generated", { threadId, plan });
-    } catch (error) {
-      logger.error("Failed to persist plan output", {
-        threadId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const plan = await this.planRepo.create(threadId, messageId, ready.title, ready.contentMd, ready.sectionsJson, ready.changeSummary);
+    execution.markPlanPersisted();
+    this.acceptedProgress?.recordSavedPlan(plan);
+    broadcast("plan.generated", { threadId, plan });
   }
 
   private execution(threadId: string): PlanExecutionState {

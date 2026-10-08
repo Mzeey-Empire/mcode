@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { lazySchema } from "../utils/lazySchema.js";
 import type { ProviderRuntimeEvent } from "../events/provider-runtime-event.js";
 import type { ApprovalReviewMode, DevinMode, InteractionMode, OrchestrationMode, PermissionMode } from "../models/enums.js";
 import type { AttachmentMeta } from "../models/attachment.js";
@@ -13,6 +15,30 @@ import type { ProviderModelInfo } from "./models.js";
 import type { ProviderUsageInfo } from "./usage.js";
 import type { SessionForker } from "./session-forker.js";
 import type { Provider } from "../compat/agent-model.js";
+
+/** A provider-owned plan file proved by its session event. Never sent to clients. */
+export interface NativePlanFileRef {
+  path: string;
+  sessionId: string;
+  sha256: string;
+}
+
+/** Result of synchronizing a provider-owned plan file before implementation. */
+export const NativePlanFileOutcomeSchema = lazySchema(() => z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.enum(["synced", "deleted"]) }),
+  z.object({ outcome: z.literal("skipped"), reason: z.enum(["no-file", "unproven", "changed", "unsafe-path"]) }),
+]));
+
+/** Provider file preparation result, without exposing its private path. */
+export type NativePlanFileOutcome = z.infer<ReturnType<typeof NativePlanFileOutcomeSchema>>;
+
+/** Private provider-to-server plan capture. */
+export interface PlanCaptured {
+  threadId: string;
+  markdown: string;
+  source: "native" | "fence";
+  nativePlanFile?: NativePlanFileRef;
+}
 
 /**
  * Identifier for a supported AI provider.
@@ -108,6 +134,8 @@ export interface TurnRequest<P extends ProviderId = ProviderId> {
   approvalReviewMode: ApprovalReviewMode;
   /** Per-Turn interaction state. Plan suppresses Cursor's native auto-answer. */
   interactionMode: InteractionMode;
+  /** Plan-turn classification supplied by the server when that workflow is enabled. */
+  planTurn?: { kind: "questions" | "planning" | "revise"; planFilePath: string | null };
   /** Requests provider-native proactive delegation without changing reasoning effort. */
   orchestrationMode?: OrchestrationMode;
   reasoningLevel?: ReasoningLevel;
@@ -225,8 +253,15 @@ export interface IAgentProvider {
     event: "permission_resolved",
     handler: (payload: { requestId: string; decision: PermissionDecision; optionLabel?: string }) => void,
   ): void;
-  /** Subscribe to ExitPlanMode capture events (Claude SDK plan output). */
-  on(event: "exit_plan_mode", handler: (payload: { threadId: string; planMarkdown: string }) => void): void;
+  /** Rewrites or deletes the session-owned plan file before Implement. */
+  prepareImplement?(input: {
+    threadId: string;
+    markdown: string;
+    nativePlanFile: NativePlanFileRef | null;
+  }): Promise<NativePlanFileOutcome>;
+
+  /** Subscribe to private plan captures before server-side persistence. */
+  on(event: "plan_captured", handler: (payload: PlanCaptured) => void): void;
 }
 
 /** Provider-neutral result of inspecting automatic approval review support. */

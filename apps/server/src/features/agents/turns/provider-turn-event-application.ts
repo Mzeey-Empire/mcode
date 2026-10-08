@@ -470,8 +470,8 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       return false;
     }
     this.turnCompleteSeenByThread.add(event.threadId);
+    this.settlePlanCapture(event.threadId);
     this.beginTerminalProjection(event.threadId, "completed", "turnComplete");
-    this.featureEffects.refreshAfterTurn(event.threadId);
     this.recordContextUsage(event, false);
     return true;
   }
@@ -489,8 +489,8 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       this.warnRejectedTerminal(held.event.threadId, held.event.type, held.event.turnExecutionId);
       return;
     }
+    this.settlePlanCapture(held.event.threadId);
     this.beginTerminalProjection(held.event.threadId, "completed", "turnComplete");
-    this.featureEffects.refreshAfterTurn(held.event.threadId);
     this.recordContextUsage(held.event, false);
     if (held.publish) this.publishAfterDurability(held.event, true);
   }
@@ -750,6 +750,12 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private async persistAssistantFeatures(event: Extract<AgentEvent, { type: "message" }>): Promise<void> {
     if (this.featureEffects.needsAssistantMaterialization(event)) await this.finalizer.materializeAssistantRow(event.threadId);
     await this.featureEffects.persistAssistantMessage(event);
+  }
+
+  private settlePlanCapture(threadId: string): void {
+    const pending = [...this.persistenceByThread.get(threadId) ?? []];
+    const settlement = Promise.all(pending).then(() => this.featureEffects.refreshAfterTurn(threadId));
+    this.observePersistence(threadId, settlement, "Plan capture settlement");
   }
 
   private observePersistence(threadId: string, operation: Promise<unknown>, label: string): void {

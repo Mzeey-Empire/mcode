@@ -23,8 +23,14 @@ export class TurnFeatureEffects {
     this.plans.onTextDelta(threadId, delta);
   }
 
+  /** Feed accepted worker text without republishing canonical question batches. */
+  observeAcceptedText(threadId: string, delta: string): void {
+    this.plans.observeAcceptedText(threadId, delta);
+  }
+
   /** Apply plan and goal reactions at an assistant-message boundary. */
   onAssistantMessage(providerId: ProviderId, event: AgentMessage): void {
+    this.plans.observeAssistantMessage(event);
     this.goals.onAssistantMessage(providerId, event);
   }
 
@@ -52,7 +58,8 @@ export class TurnFeatureEffects {
   }
 
   /** Refresh goal state after the terminal turn reaches durable completion. */
-  refreshAfterTurn(threadId: string): void {
+  async refreshAfterTurn(threadId: string): Promise<void> {
+    await this.plans.finishTurn(threadId);
     this.goals.refreshAfterTurn(threadId);
   }
 

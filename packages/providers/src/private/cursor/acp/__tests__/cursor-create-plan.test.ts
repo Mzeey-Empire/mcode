@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import { extractCursorCreatePlanMarkdown } from "../cursor-create-plan.js";
 
 describe("extractCursorCreatePlanMarkdown", () => {
+  it("reads the native plan field", () => {
+    expect(extractCursorCreatePlanMarkdown({ plan: "# Native plan\n\nBody" })).toBe("# Native plan\n\nBody");
+  });
+
   it("reads a top-level markdown field", () => {
     expect(
       extractCursorCreatePlanMarkdown({ markdown: "# Plan\n\nBody" }),

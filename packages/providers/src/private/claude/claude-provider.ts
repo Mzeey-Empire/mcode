@@ -1062,7 +1062,7 @@ export class ClaudeProvider
       typeof input.plan === "string" ? input.plan.trim() : "";
     if (planMarkdown) {
       this.planAnswerThreads.delete(threadId);
-      this.emit("exit_plan_mode", { threadId, planMarkdown });
+      this.emit("plan_captured", { threadId, markdown: planMarkdown, source: "native" });
     }
     return {
       behavior: "deny" as const,

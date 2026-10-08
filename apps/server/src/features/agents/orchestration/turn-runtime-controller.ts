@@ -778,6 +778,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     result: Extract<ExecutionWorkerResult, { kind: "committed" | "accepted" }>,
   ): void {
     const event = result.parentEvent?.publication.event;
+    this.applyWorkerPlanText(event);
     if (event?.type === "message" && active.prepared.providerId === "codex") {
       this.featureEffects.onAssistantMessage("codex", event);
     }
@@ -785,6 +786,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       if (intent.kind === "assistant-message-feature") {
         this.featureEffects.onAssistantMessage(active.prepared.providerId, intent.event);
       }
+    }
+  }
+
+  private applyWorkerPlanText(event: AgentEvent | undefined): void {
+    if (event?.type === "textDelta" && event.isFinalResponse !== false) {
+      this.featureEffects.observeAcceptedText(event.threadId, event.delta);
     }
   }
 
@@ -833,10 +840,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       }
       await this.requireWorkerRuntime().providerEvents.retire(execution);
       await this.requireWorkerRuntime().owner.release(execution);
+      if (active.terminalOutcome === "completed") await this.featureEffects.refreshAfterTurn(execution.threadId);
       this.requireWorkerFiles().retire(execution.threadId, execution.executionId, deliveryAttempt);
       if (this.workerTurns.get(execution.threadId) === active) this.workerTurns.delete(execution.threadId);
       this.trackSessionEnded(execution.threadId, execution.executionId);
-      if (active.terminalOutcome === "completed") this.featureEffects.refreshAfterTurn(execution.threadId);
       this.disarmTurnRetryWindow(execution.threadId);
       this.clearTurnEndedState(execution.threadId);
     } catch (error) {

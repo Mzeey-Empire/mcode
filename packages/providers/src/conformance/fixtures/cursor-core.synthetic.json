@@ -6,7 +6,7 @@
   "provenance": "synthetic",
   "requiredProfiles": ["core", "build", "plan", "permissions", "session-eviction", "clean-fork", "browser-access", "thread-control"],
   "scenario": "synthetic Cursor ACP lifecycle and unsupported extension replay",
-  "sourceHash": "6f28a6271f5307b03290e02db7df504c1de1bcf3373d6c6993167a779fb06bb7",
+  "sourceHash": "d31b48f5f71cefedc942c2f72e2b85f265b91e5be1f3112a02041e650df1b68d",
   "redaction": { "reviewed": true, "removedFields": ["prompt", "response", "environment", "tool output", "absolute paths"] },
   "input": {
     "events": [
@@ -23,7 +23,7 @@
         { "sequence": 3, "kind": "session/update", "sessionId": "CURSOR_SYNTHETIC_SESSION", "update": { "sessionUpdate": "tool_call", "toolCallId": "CURSOR_SYNTHETIC_CHILD", "title": "Task: Subagent task", "kind": "other", "status": "pending" } },
         { "sequence": 4, "kind": "session/update", "sessionId": "CURSOR_SYNTHETIC_SESSION", "update": { "sessionUpdate": "tool_call_update", "toolCallId": "CURSOR_SYNTHETIC_CHILD", "status": "completed" } },
         { "sequence": 5, "kind": "ext-method", "method": "cursor/task", "params": { "toolCallId": "CURSOR_SYNTHETIC_CHILD" } },
-        { "sequence": 6, "kind": "ext-method", "method": "cursor/create_plan", "params": { "markdown": "# Synthetic plan" } },
+        { "sequence": 6, "kind": "ext-method", "method": "cursor/create_plan", "params": { "plan": "# Synthetic plan" } },
         { "sequence": 7, "kind": "request-permission", "request": { "sessionId": "CURSOR_SYNTHETIC_SESSION", "options": [{ "optionId": "CURSOR_SYNTHETIC_ALLOW", "kind": "allow_once", "name": "Allow" }], "toolCall": { "title": "Read File" } } },
         { "sequence": 8, "kind": "session/update", "sessionId": "CURSOR_SYNTHETIC_FOREIGN", "update": { "sessionUpdate": "session_info_update" } },
         { "sequence": 9, "kind": "ext-method", "method": "cursor/task", "params": null },
@@ -32,7 +32,7 @@
       "expected": {
         "emittedEventTypes": ["toolUse", "toolUse", "toolResult", "toolUse", "toolUse", "toolResult"],
         "toolNames": ["Read", "Read", "Agent", "Agent"],
-        "planExitCount": 1,
+        "planCaptureCount": 1,
         "permissionOutcomes": ["selected"],
         "unsupportedMethods": ["cursor/task", "cursor/continue"],
         "ignoredForeignSessionUpdateCount": 1

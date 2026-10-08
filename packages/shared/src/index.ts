@@ -1,4 +1,6 @@
 // Logging
+export { PlanFenceParser } from "./plan-fence-parser.js";
+
 export { logger, getLogPath, getRecentLogs } from "./logging/index.js";
 
 // Paths
