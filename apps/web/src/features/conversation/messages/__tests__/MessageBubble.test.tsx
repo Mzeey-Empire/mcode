@@ -493,8 +493,8 @@ describe("MessageBubble user messages", () => {
       "object-contain",
     );
     expect(document.querySelector('[data-slot="tooltip-arrow"]')).toHaveClass(
-      "bg-panel",
       "fill-panel",
+      "stroke-border",
     );
   });
 
