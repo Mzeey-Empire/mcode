@@ -4,7 +4,7 @@ import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useProjectSelectorStore } from "./state/projectSelectorStore";
 import { ProjectRow } from "./ProjectRow";
-import { Kbd } from "@/components/palette/Kbd";
+import { Kbd } from "@/components/ui/kbd";
 
 /**
  * Palette subview listing pinned and recently-opened workspaces.

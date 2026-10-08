@@ -12,7 +12,6 @@ export {
 export { TerminalSection } from "./settings/TerminalSection";
 export { useTerminalSettingsStore } from "./settings/terminalSettingsStore";
 export {
-  MAX_TERMINALS_PER_SCOPE,
   TERMINAL_PANEL_DEFAULTS,
   useTerminalStore,
 } from "./state/terminalStore";

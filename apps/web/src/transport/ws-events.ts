@@ -7,7 +7,6 @@ import {
 } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { pushEmitter } from "./ws-transport";
-import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { refreshTurnSnapshotsAfterPersist } from "@/lib/turn-snapshot-refresh";
@@ -192,13 +191,11 @@ export function startPushListeners(): void {
   // terminal.exit: broadcast exit event
   unsubs.push(
     pushEmitter.on("terminal.exit", (data) => {
-      const payload = data as { ptyId: string; code: number };
+      const payload = WS_CHANNELS["terminal.exit"].parse(data);
       emitPtyExit(payload);
-      // Remove the terminal from the store after a brief delay so the
-      // exit message has time to render.
-      setTimeout(() => {
-        useTerminalStore.getState().removeTerminal(payload.ptyId);
-      }, 2000);
+      useTerminalStore.getState().recordTerminalExit(payload.ptyId, {
+        code: payload.exitCode === undefined ? payload.code : payload.exitCode, signal: null, reason: "natural",
+      });
     }),
   );
 
@@ -468,35 +465,6 @@ export function startPushListeners(): void {
         .getState()
         .threads.find((candidate) => candidate.id === payload.threadId);
       if (thread) clearFileListCache(thread.workspace_id, payload.threadId);
-
-      try {
-        const transport = getTransport();
-        const snap = useDiffStore.getState();
-        const hasCommits = snap.commitsByThread[payload.threadId] !== undefined;
-
-        if (hasCommits) {
-          const thread = useWorkspaceStore
-            .getState()
-            .threads.find((t) => t.id === payload.threadId);
-          if (!thread) return;
-          transport
-            .getGitLog(thread.workspace_id, thread.branch, 100)
-            .then((commits) => {
-              const current = useDiffStore.getState().commitsByThread[payload.threadId];
-              if (
-                current &&
-                commits.length === current.length &&
-                commits.every((c, i) => c.sha === current[i].sha)
-              ) {
-                return;
-              }
-              useDiffStore.getState().setCommits(payload.threadId, commits);
-            })
-            .catch(() => { /* non-critical */ });
-        }
-      } catch {
-        // Transport not initialized — ignore (startup race / tests).
-      }
     }),
   );
 

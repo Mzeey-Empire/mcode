@@ -17,20 +17,9 @@ export interface NarrativeRowsProps {
   onOpenSubagents?: (target: SubagentRosterTarget) => void;
 }
 
-/** Returns the top margin for one narrative item. */
-export function narrativeRowMargin(item: NarrativeItem, index: number): string {
-  if (index === 0) return "mt-0";
-  switch (item.type) {
-    case "thought":
-      return "mt-3";
-    case "tool-group":
-    case "hook":
-    case "subagent":
-    case "active-tool":
-      return "mt-1";
-    case "delta":
-      return "mt-2";
-  }
+/** Returns the top margin for one narrative item: the Paper turn spaces every item 12px apart. */
+export function narrativeRowMargin(index: number): string {
+  return index === 0 ? "mt-0" : "mt-3";
 }
 
 /** Returns the stable row key for one narrative item. */
@@ -71,7 +60,7 @@ export function NarrativeRows({
             key={key}
             data-performance-row-id={narrativePerformanceRowId(key)}
             className={[
-              narrativeRowMargin(item, index),
+              narrativeRowMargin(index),
               animateEntry ? "narrative-row-enter" : "",
               "min-w-0 max-w-full",
             ].join(" ")}

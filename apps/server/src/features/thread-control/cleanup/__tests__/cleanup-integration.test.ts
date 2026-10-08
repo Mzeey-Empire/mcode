@@ -126,6 +126,7 @@ describe("Cleanup integration", () => {
       mockAttachmentService,
       mockThreadDeletion,
       {} as unknown as GitExecutor,
+      { killByThread: vi.fn().mockResolvedValue(undefined) },
     );
   });
 

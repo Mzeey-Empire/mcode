@@ -36,7 +36,8 @@ async function harness() {
     teardownThread,
     deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>) => remove(),
   };
-  const service = new WorkspaceService(workspaces, threads, owned.writer, { removeForThread }, deletion, new FakeGitExecutor());
+  const killByThread = vi.fn(async (_scopeId: string) => undefined);
+  const service = new WorkspaceService(workspaces, threads, owned.writer, { removeForThread }, deletion, new FakeGitExecutor(), { killByThread });
   const git: Pick<GitWorktreeService, "createWorktree" | "removeWorktree"> = {
     createWorktree: vi.fn(async () => ({ name: "test", path: "/fixture/.worktrees/test", branch: "feature/test", managed: true, createdBranch: true, warnings: [] })),
     removeWorktree: vi.fn(async () => true),
@@ -45,10 +46,23 @@ async function harness() {
     decide: vi.fn<Pick<SandboxWorktreeCleanupPolicy, "decide">["decide"]>(async ({ worktreePath }) => ({ action: "remove", worktreePath, branch: "feature/test" })),
   };
   const worktreeService = new ProjectWorktreeService(threads, workspaces, owned.writer, git, policy);
-  return { ...owned, reader, workspaces, threads, cleanup, workspace, service, removeForThread, teardownThread, git, policy, worktreeService };
+  return { ...owned, reader, workspaces, threads, cleanup, workspace, service, removeForThread, teardownThread, killByThread, git, policy, worktreeService };
 }
 
 describe("project lifecycle commands through the actual SQLite owner", () => {
+  it.each(["delete", "forceDelete"] as const)("%s closes threadless terminals before removing workspace data", async (operation) => {
+    const { workspace, workspaces, service, killByThread } = await harness();
+    killByThread.mockImplementationOnce(async () => {
+      expect(workspaces.findByIdIncludeDeleted(workspace.id)?.id).toBe(workspace.id);
+      throw new Error("PTY close failed");
+    });
+    await expect(service[operation](workspace.id)).rejects.toThrow(/PTY close failed/);
+    expect(killByThread).toHaveBeenCalledExactlyOnceWith(workspace.id);
+    expect(workspaces.findByIdIncludeDeleted(workspace.id)?.id).toBe(workspace.id);
+    await expect(service.forceDelete(workspace.id)).resolves.toBe(true);
+    expect(workspaces.findByIdIncludeDeleted(workspace.id)).toBeNull();
+  });
+
   it("rolls back the workspace, threads, lineage, and cleanup admission together on save failure", async () => {
     const { db, writer, workspace, workspaces, threads, cleanup } = await harness();
     const thread = await threads.create(workspace.id, "Fixture thread", "worktree", "feature/test");

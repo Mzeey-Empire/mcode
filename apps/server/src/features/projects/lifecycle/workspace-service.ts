@@ -15,6 +15,7 @@ import { logger } from "@mcode/shared";
 import type { GitExecutor } from "../git/execution/index.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { projectLifecycleWriteOperations } from "./project-lifecycle-write-operations.js";
+import { TerminalBackend, TERMINAL_BACKEND_TOKEN } from "../../terminal/backends/terminal-backend.js";
 
 /** Handles workspace creation, rename, listing, and two-phase deletion. */
 @injectable()
@@ -26,6 +27,7 @@ export class WorkspaceService {
     @inject(AttachmentService) private readonly attachmentService: Pick<AttachmentService, "removeForThread">,
     @inject(delay(() => ThreadDeletionTeardownService)) private readonly threadDeletion: Pick<ThreadDeletionTeardownService, "teardownThread" | "deletePersistentData">,
     @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
+    @inject(TERMINAL_BACKEND_TOKEN) private readonly terminals: Pick<TerminalBackend, "killByThread">,
   ) {}
 
   /**
@@ -87,6 +89,7 @@ export class WorkspaceService {
   async delete(id: string): Promise<boolean> {
     const admitted = await this.writer.execute(projectLifecycleWriteOperations.beginWorkspaceDeletion, [id]);
     if (!admitted) return false;
+    await this.terminals.killByThread(id);
     for (const threadId of admitted.threadIds) await this.threadDeletion.teardownThread(threadId);
     const deleted = await this.threadDeletion.deletePersistentData(admitted.threadIds,
       () => this.writer.execute(projectLifecycleWriteOperations.finishWorkspaceDeletion, [id]));
@@ -102,6 +105,7 @@ export class WorkspaceService {
   async forceDelete(id: string): Promise<boolean> {
     const threads = this.threadRepo.listAllByWorkspace(id);
 
+    await this.terminals.killByThread(id);
     for (const thread of threads) await this.threadDeletion.teardownThread(thread.id);
     const committed = await this.threadDeletion.deletePersistentData(threads.map((thread) => thread.id),
       () => this.writer.execute(projectLifecycleWriteOperations.forceDeleteWorkspace, [id]));

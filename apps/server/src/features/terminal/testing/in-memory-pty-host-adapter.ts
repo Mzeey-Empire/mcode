@@ -38,7 +38,7 @@ export class InMemoryPtyHostAdapter implements PtyHostAdapter {
 
   /** Starts the deterministic host generation. */
   async start(): Promise<PtyHostHealth> {
-    if (this.started) throw new Error("PTY host is already started");
+    if (this.started) return { hostGeneration: this.hostGeneration, state: "healthy" };
     this.protocol.sendToHost({
       contractVersion: 1,
       kind: "handshake",
@@ -171,6 +171,16 @@ export class InMemoryPtyHostAdapter implements PtyHostAdapter {
     const session = this.requireSession(sessionId);
     session.outputSeq += 1n;
     this.publish({ contractVersion: 1, kind: "output", sessionId, hostGeneration: this.hostGeneration, outputSeq: session.outputSeq.toString(), dataBase64: NodeBuffer.Buffer.from(data).toString("base64") });
+  }
+
+  /** Ends a shell naturally after its final output batch. */
+  emitExit(sessionId: string, code: number | null): void {
+    const session = this.requireSession(sessionId);
+    this.publish({
+      contractVersion: 1, kind: "exit", sessionId, hostGeneration: this.hostGeneration,
+      finalOutputSeq: session.outputSeq.toString(), code, signal: null, reason: "natural",
+    });
+    this.sessions.delete(sessionId);
   }
 
   private publish(event: PtyHostEvent): void {

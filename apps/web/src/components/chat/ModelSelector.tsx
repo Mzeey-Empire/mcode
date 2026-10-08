@@ -5,7 +5,6 @@ import {
   useCallback,
   useMemo,
   useId,
-  type ComponentType,
   type ReactNode,
 } from "react";
 import { ChevronDown, Lock, Check, Star } from "lucide-react";
@@ -34,30 +33,16 @@ import {
   type ModelFavoriteEntry,
 } from "@/stores/modelFavoritesStore";
 import { tokenizeSearch, matchesAllTokens } from "@/lib/searchTokens";
-import {
-  ClaudeIcon,
-  CodexIcon,
-  CursorProviderIcon,
-  DevinIcon,
-  OpenCodeIcon,
-  GeminiIcon,
-  CopilotIcon,
-} from "./ProviderIcons";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 
-type IconComponent = ComponentType<{ size?: number; className?: string }>;
 type ModelDefinition = ModelProvider["models"][number];
 
-const DEFAULT_PROVIDER_META = { icon: ClaudeIcon, color: "" };
+/** Provider shown when the selected model belongs to no known provider. */
+const DEFAULT_PROVIDER_ID = "claude";
 
-const PROVIDER_META: Record<string, { icon: IconComponent; color: string }> = {
-  claude: { icon: ClaudeIcon, color: "" },
-  codex: { icon: CodexIcon, color: "text-ink" },
-  copilot: { icon: CopilotIcon, color: "text-violet-400 dark:text-violet-300" },
-  cursor: { icon: CursorProviderIcon, color: "" },
-  devin: { icon: DevinIcon, color: "" },
-  opencode: { icon: OpenCodeIcon, color: "text-violet-400" },
-  gemini: { icon: GeminiIcon, color: "text-sky-400" },
-};
+function iconProviderIdFor(provider: ModelProvider | undefined): string {
+  return provider?.id ?? DEFAULT_PROVIDER_ID;
+}
 
 /** Matches Tailwind `w-[52px]` for header alignment and icon-first rail. */
 const LEFT_RAIL_WIDTH_CLASS = "w-[52px]";
@@ -109,8 +94,7 @@ interface SelectedModelPresentation {
   displayProvider?: ModelProvider;
   normalizedModelId: string;
   selectedProviderId?: string;
-  icon: IconComponent;
-  iconClass: string;
+  iconProviderId: string;
   shortLabel: string;
 }
 
@@ -220,13 +204,6 @@ interface ModelSelectorPanelProps extends ModelSelectorRightPanelProps {
   onSelectProvider: (provider: ModelProvider) => void;
 }
 
-function getProviderMeta(providerId: string | undefined): {
-  icon: IconComponent;
-  color: string;
-} {
-  return PROVIDER_META[providerId ?? ""] ?? DEFAULT_PROVIDER_META;
-}
-
 function findDisplayProvider(
   selectedProviderId: string | undefined,
   normalizedModelId: string,
@@ -246,7 +223,6 @@ function getSelectedModelPresentation(
   const model = findModelById(selectedModelId);
   const normalizedModelId = model?.id ?? selectedModelId;
   const displayProvider = findDisplayProvider(selectedProviderId, normalizedModelId);
-  const providerMeta = getProviderMeta(displayProvider?.id);
   const label = model?.label ?? selectedModelId;
   const shortLabel = model && displayProvider
     ? label.replace(`${displayProvider.name} `, "")
@@ -256,8 +232,7 @@ function getSelectedModelPresentation(
     displayProvider,
     normalizedModelId,
     selectedProviderId: selectedProviderId ?? displayProvider?.id,
-    icon: providerMeta.icon,
-    iconClass: providerMeta.color,
+    iconProviderId: iconProviderIdFor(displayProvider),
     shortLabel,
   };
 }
@@ -398,10 +373,6 @@ function getProviderRailTooltip(
   }
   if (provider.models.length === 1) return `Select ${provider.models[0].label}`;
   return `Browse ${provider.name} models`;
-}
-
-function getProviderRailIconClass(comingSoon: boolean, color: string): string {
-  return comingSoon ? "opacity-50" : color;
 }
 
 function getSearchAriaLabel(leftRailSelection: LeftRailSelection): string {
@@ -598,8 +569,6 @@ function FavoriteModelRow({
   isFavorite,
   onToggleFavorite,
 }: FavoriteModelRowProps) {
-  const providerMeta = getProviderMeta(entry.providerId);
-  const ProviderIcon = providerMeta.icon;
   const starred = isFavorite(entry.providerId, entry.modelId);
 
   return (
@@ -622,7 +591,7 @@ function FavoriteModelRow({
         onSelect={onSelect}
         label={entry.label}
       >
-        <ProviderIcon size={12} className={providerMeta.color} aria-hidden />
+        <ProviderIcon provider={entry.providerId} size={12} />
         <span className="text-fade text-left">{entry.label}</span>
       </ModelSelectionButton>
     </div>
@@ -989,8 +958,6 @@ function ProviderRailItem({
   selected,
   onClick,
 }: ProviderRailItemProps) {
-  const providerMeta = getProviderMeta(provider.id);
-  const ProviderIcon = providerMeta.icon;
   const unavailable = isProviderRailUnavailable(provider, providerDisabled);
   const tooltip = getProviderRailTooltip(provider, providerDisabled);
   const isCurrent = selected && provider.models.length !== 1 && !unavailable;
@@ -1015,9 +982,9 @@ function ProviderRailItem({
             )}
           >
             <ProviderIcon
-              size={18}
-              className={getProviderRailIconClass(provider.comingSoon, providerMeta.color)}
-              aria-hidden
+              provider={provider.id}
+              size={20}
+              className={cn(provider.comingSoon && "opacity-50")}
             />
             <ProviderUnavailableIndicator unavailable={unavailable} />
           </button>
@@ -1158,17 +1125,16 @@ function ModelSelectorPanel({
 }
 
 function LockedModelLabel({
-  icon: Icon,
-  iconClass,
+  iconProviderId,
   shortLabel,
-}: Pick<SelectedModelPresentation, "icon" | "iconClass" | "shortLabel">) {
+}: Pick<SelectedModelPresentation, "iconProviderId" | "shortLabel">) {
   return (
     <span
       className="flex flex-none max-w-full items-center gap-0.5 px-1.5 py-1 text-xs text-muted"
       aria-label={shortLabel}
       role="img"
     >
-      <Icon size={12} className={cn("shrink-0", iconClass)} aria-hidden />
+      <ProviderIcon provider={iconProviderId} size={12} />
       <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{shortLabel}</span>
       <Lock size={10} className="ml-0.5 shrink-0 opacity-75" aria-hidden />
     </span>
@@ -1252,8 +1218,6 @@ export function ModelSelector({
     return <LockedModelLabel {...presentation} />;
   }
 
-  const TriggerIcon = presentation.icon;
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -1264,7 +1228,7 @@ export function ModelSelector({
             data-testid="model-selector-trigger"
             className="max-w-full shrink whitespace-normal text-muted transition-colors hover:bg-hover/40 hover:text-ink"
           >
-            <TriggerIcon size={14} className={cn("shrink-0", presentation.iconClass)} aria-hidden />
+            <ProviderIcon provider={presentation.iconProviderId} size={16} />
             <span className="min-w-0 whitespace-normal text-sm [overflow-wrap:anywhere]">{presentation.shortLabel}</span>
             <ChevronDown size={11} className="shrink-0" aria-hidden />
           </Button>

@@ -54,7 +54,7 @@ export function PathText({ path, home, className }: PathTextProps) {
           </span>
         }
       />
-      <TooltipContent variant="surface" className="max-w-72 break-all font-mono">
+      <TooltipContent className="max-w-72 break-all font-mono">
         {path}
       </TooltipContent>
     </Tooltip>

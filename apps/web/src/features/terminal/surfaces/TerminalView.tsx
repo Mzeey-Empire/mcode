@@ -474,6 +474,7 @@ function terminalStatusMessage(
 ): string {
   if (recoveryNotice !== null) return recoveryNotice;
   if (sessionState === "failed") return "This terminal failed. Its completed output is retained.";
+  if (exit?.code === null) return "This terminal exited without an exit code. Its completed output is retained.";
   return `This terminal exited with code ${exit?.code ?? 0}. Its completed output is retained.`;
 }
 
@@ -1485,9 +1486,10 @@ export const TerminalView = memo(function TerminalView({
     setRecoveryNotice("Starting a replacement terminal.");
     void getTransport()
       .terminalCreate(ownerScopeId, ptyId)
-      .then(({ ptyId: replacementPtyId, shell }) => {
-        useTerminalStore.getState().removeTerminal(ptyId);
-        useTerminalStore.getState().addTerminal(ownerScopeId, replacementPtyId, shell);
+      .then(({ ptyId: replacementPtyId, shell, ...metadata }) => {
+        useTerminalStore.getState().replaceTerminal(ptyId, {
+          ptyId: replacementPtyId, threadId: ownerScopeId, shell, ...metadata,
+        });
       })
       .catch(() => {
         setRecoveryAction(null);

@@ -147,6 +147,53 @@ describe("DeltaBlock", () => {
     });
   });
 
+  it("renders streaming and settled text as 16/28 prose", async () => {
+    const { container, rerender } = render(<DeltaBlock text="answer" isStreaming showCursor={false} />);
+    const root = container.firstElementChild;
+    expect(root?.classList.contains("text-prose")).toBe(true);
+    await waitFor(() => expect(container.querySelector("p.whitespace-pre-wrap")).not.toBeNull());
+    expect(container.querySelector("p.whitespace-pre-wrap")?.classList.contains("text-sm")).toBe(false);
+
+    rerender(<DeltaBlock text="answer" isStreaming={false} showCursor={false} />);
+    await waitFor(() => expect(screen.getByTestId("markdown-content")).toBeTruthy());
+    expect(container.firstElementChild?.classList.contains("text-prose")).toBe(true);
+  });
+
+  it("streams blank-line paragraphs as the same spaced paragraphs markdown settles to", async () => {
+    const { container: streaming } = render(
+      <DeltaBlock text={"First paragraph.\n\nSecond paragraph.\n\n \n\n "} isStreaming showCursor={false} />,
+    );
+
+    await waitFor(() =>
+      expect([...streaming.querySelectorAll("p")].map((p) => p.textContent)).toEqual([
+        "First paragraph.",
+        "Second paragraph.",
+      ]),
+    );
+    const paragraphs = [...streaming.querySelectorAll("p")];
+    expect(paragraphs.every((p) => p.classList.contains("mb-2"))).toBe(true);
+  });
+
+  it("parks a 2x18 caret after the last word, centred on its line", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, right: 400, bottom: 56, width: 400, height: 56, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+    vi.spyOn(document, "createRange").mockReturnValue({
+      setStart: vi.fn(),
+      setEnd: vi.fn(),
+      getClientRects: vi.fn(() => makeRectList({ right: 120, top: 28, height: 28 })),
+    } as unknown as Range);
+
+    const { container } = render(<DeltaBlock text={"word ".repeat(40)} isStreaming showCursor />);
+    const caret = container.querySelector<HTMLElement>(".typing-cursor");
+
+    expect(caret?.style.width).toBe("2px");
+    expect(caret?.style.height).toBe("18px");
+    expect(caret?.style.transform).toBe("translate3d(122px, 33px, 0)");
+    // Trap 4: the caret is an overlay sibling of the text, never moved into React-owned paragraphs.
+    expect(caret?.parentElement).toBe(container.firstElementChild);
+  });
+
   it("does not re-measure the cursor when displayed text is unchanged", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       left: 0,

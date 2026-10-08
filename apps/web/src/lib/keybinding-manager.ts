@@ -128,26 +128,26 @@ export function getKeybindingForCommand(
 }
 
 /**
- * Format a keybinding string for display.
+ * Split a keybinding into display keys, one per keycap.
  *
  * @param key - Raw keybinding string (e.g., "mod+shift+n")
- * @param isMac - Whether to use Mac symbols (Cmd/⌘) or Windows labels (Ctrl+)
+ * @param isMac - Whether to use Mac symbols (⌘ ⇧ ⌥) or Windows labels (Ctrl, Shift, Alt)
  */
-export function formatKeybinding(key: string, isMac: boolean): string {
+export function keybindingKeycaps(key: string, isMac: boolean): string[] {
   const parts = key.split("+");
   const keyPart = parts.pop()!;
   const modifiers = parts.map((p) => p.toLowerCase());
 
-  const segments: string[] = [];
+  const keycaps: string[] = [];
 
   if (modifiers.includes("mod")) {
-    segments.push(isMac ? "\u2318" : "Ctrl+");
+    keycaps.push(isMac ? "⌘" : "Ctrl");
   }
   if (modifiers.includes("shift")) {
-    segments.push(isMac ? "\u21E7" : "Shift+");
+    keycaps.push(isMac ? "⇧" : "Shift");
   }
   if (modifiers.includes("alt")) {
-    segments.push(isMac ? "\u2325" : "Alt+");
+    keycaps.push(isMac ? "⌥" : "Alt");
   }
 
   // Human-readable display names for special keys
@@ -159,11 +159,19 @@ export function formatKeybinding(key: string, isMac: boolean): string {
     ",": ",",
   };
 
-  const displayKey =
-    keyDisplay[keyPart.toLowerCase()] ?? keyPart.toUpperCase();
-  segments.push(displayKey);
+  keycaps.push(keyDisplay[keyPart.toLowerCase()] ?? keyPart.toUpperCase());
 
-  return segments.join("");
+  return keycaps;
+}
+
+/**
+ * Format a keybinding string for display.
+ *
+ * @param key - Raw keybinding string (e.g., "mod+shift+n")
+ * @param isMac - Whether to use Mac symbols (Cmd/⌘) or Windows labels (Ctrl+)
+ */
+export function formatKeybinding(key: string, isMac: boolean): string {
+  return keybindingKeycaps(key, isMac).join(isMac ? "" : "+");
 }
 
 /** Remove all keybindings (for testing). */

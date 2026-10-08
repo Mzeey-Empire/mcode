@@ -167,18 +167,11 @@ import {
   filterThreadRecapMessages,
   resetThreadRecapRequestStateForTest,
 } from "@/hooks/useThreadRecap";
-import {
-  getRepositoryFaviconUrl,
-  getSafeRepositoryWebUrl,
-  getCiStatusRingStyle,
-  getThreadOverviewCiDot,
-  formatThreadOverviewSessionCost,
-  formatThreadOverviewUsage,
-  hasVisibleThreadOverviewChangeSummary,
-  resolveThreadOverviewChangeSummary,
-  resolveThreadOverviewRepository,
-  summarizeThreadChangeStats,
-} from "./ThreadOverview";
+import { getRepositoryFaviconUrl, getSafeRepositoryWebUrl, resolveThreadOverviewRepository } from "@/features/thread-overview/entries/repository";
+import { getCiStatusRingStyle } from "@/features/thread-overview/entries/pull-request";
+import { getThreadOverviewCiDot } from "@/features/thread-overview/overview-state";
+import { formatThreadOverviewSessionCost, formatThreadOverviewUsage } from "@/features/thread-overview/use-overview-usage";
+import { hasVisibleThreadOverviewChangeSummary, resolveThreadOverviewChangeSummary, summarizeThreadChangeStats } from "@/features/thread-overview/entries/changes";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {

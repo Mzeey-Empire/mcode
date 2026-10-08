@@ -99,6 +99,7 @@ describe("WorkspaceService", () => {
         deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove(),
       },
       new FakeGitExecutor(),
+      { killByThread: vi.fn().mockResolvedValue(undefined) },
     );
   });
 

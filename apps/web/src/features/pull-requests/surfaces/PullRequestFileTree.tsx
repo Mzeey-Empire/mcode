@@ -65,7 +65,6 @@ function OverflowPathLabel({ label, path }: OverflowPathLabelProps) {
       <TooltipContent
         side="left"
         align="start"
-        variant="surface"
         className="max-w-72 break-all whitespace-normal text-left font-mono leading-relaxed"
       >
         {path}

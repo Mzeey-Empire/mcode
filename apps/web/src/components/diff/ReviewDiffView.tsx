@@ -11,7 +11,7 @@ import {
   type CodeViewReactOptions,
 } from "@pierre/diffs/react";
 import { ChevronRight, MessageCircle } from "lucide-react";
-import { inlineDiffCacheKey, useDiffStore, type SelectedFile } from "@/stores/diffStore";
+import { inlineDiffCacheKey, useDiffStore, type DiffSource } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   usePreviewAnnotationStore,
@@ -46,7 +46,7 @@ const DIFF_COMMENT_FRAME_CLASS =
 const EMPTY_PATCHES: Record<string, string> = {};
 
 /** Comparison sources whose old/new contents can be read from git refs. */
-const HYDRATABLE_SOURCES: ReadonlySet<SelectedFile["source"]> = new Set([
+const HYDRATABLE_SOURCES: ReadonlySet<DiffSource> = new Set([
   "unstaged",
   "staged",
   "commit",
@@ -62,7 +62,7 @@ type RefReader = (ref: string, path: string) => Promise<FileContents>;
  * collapsed without expansion.
  */
 async function resolveHydrationFiles(
-  source: SelectedFile["source"],
+  source: DiffSource,
   id: string,
   fileDiff: FileDiffMetadata,
   at: RefReader,
@@ -221,7 +221,7 @@ function joinPaths(base: string, rel: string): string {
 /** Props for the Review comparison diff surface. */
 interface ReviewDiffViewProps {
   readonly files: ReviewFileChange[];
-  readonly source: SelectedFile["source"];
+  readonly source: DiffSource;
   readonly id: string;
   readonly threadId: string;
   readonly cacheVersion?: string | number;

@@ -200,7 +200,6 @@ interface DiffPanelStore {
   readonly snapshots: DiffStoreState["snapshotsByThread"][string] | undefined;
   readonly snapshotsLoading: boolean;
   readonly snapshotsPending: boolean;
-  readonly subagentScope: DiffStoreState["subagentReviewScopeByThread"][string] | undefined;
   readonly viewMode: DiffViewMode;
 }
 
@@ -216,9 +215,6 @@ function useDiffPanelStore(): DiffPanelStore {
   });
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const viewMode = useDiffStore((state) => state.viewMode);
-  const subagentScope = useDiffStore((state) =>
-    activeThreadId ? state.subagentReviewScopeByThread[activeThreadId] : undefined,
-  );
   const snapshots = useDiffStore((state) =>
     activeThreadId ? state.snapshotsByThread[activeThreadId] : undefined,
   );
@@ -274,7 +270,6 @@ function useDiffPanelStore(): DiffPanelStore {
     snapshots,
     snapshotsLoading,
     snapshotsPending,
-    subagentScope,
     viewMode,
   };
 }
@@ -344,7 +339,6 @@ interface ComparisonController {
   readonly comparisonLoading: boolean;
   readonly comparisonPending: boolean;
   readonly onRefreshComparison: () => void;
-  readonly scopedCumulative: boolean;
   readonly visibleComparison: ReviewComparison | null;
   readonly visibleSettled: SettledComparison | null;
 }
@@ -404,12 +398,8 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   ]);
   const currentSettled = settled?.comparison.turnDiff?.phase === "live" && settled.liveRevision !== mutableComparisonRevision ? null : settled;
   const visibleSettled = getVisibleSettledComparison(currentSettled, comparisonIdentity);
-  const visibleComparison = useMemo(
-    () => projectVisibleComparison(visibleSettled, store.subagentScope, store.viewMode),
-    [store.subagentScope, store.viewMode, visibleSettled],
-  );
+  const visibleComparison = visibleSettled?.comparison ?? null;
   const comparisonFiles = visibleComparison?.files ?? [];
-  const scopedCumulative = isScopedCumulative(store.viewMode, store.subagentScope);
 
   comparisonIdentityRef.current = comparisonIdentity;
 
@@ -497,7 +487,6 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
       comparisonIdentity,
     ),
     onRefreshComparison,
-    scopedCumulative,
     visibleComparison,
     visibleSettled,
   };
@@ -545,35 +534,6 @@ function getVisibleSettledComparison(
   comparisonIdentity: string,
 ): SettledComparison | null {
   return settled?.identity === comparisonIdentity ? settled : null;
-}
-
-function projectVisibleComparison(
-  settled: SettledComparison | null,
-  subagentScope: DiffPanelStore["subagentScope"],
-  viewMode: DiffViewMode,
-): ReviewComparison | null {
-  const comparison = settled?.comparison ?? null;
-  if (!subagentScope || viewMode !== "cumulative") return comparison;
-  const settledFilesByPath = new Map(comparison?.files.map((file) => [file.path, file]));
-  return {
-    files: subagentScope.paths.map(
-      (path): ReviewFileChange => settledFilesByPath.get(path) ?? {
-        path,
-        previousPath: null,
-        changeType: "modified",
-        binary: false,
-      },
-    ),
-    additions: subagentScope.additions,
-    deletions: subagentScope.deletions,
-  };
-}
-
-function isScopedCumulative(
-  viewMode: DiffViewMode,
-  subagentScope: DiffPanelStore["subagentScope"],
-): boolean {
-  return viewMode === "cumulative" && subagentScope !== undefined;
 }
 
 function toReviewDiffStat(comparison: ReviewComparison | null): DiffStoreState["reviewDiffStat"] {
@@ -708,7 +668,6 @@ export function DiffPanel() {
     filesVisible,
     requestReviewFileJump,
     setReviewFilesVisible,
-    subagentScope,
     viewMode,
   } = store;
   useWorkspaceFileRefresh(activeWorkspaceId, activeThreadId);
@@ -749,8 +708,6 @@ export function DiffPanel() {
       onRefreshComparison={comparison.onRefreshComparison}
       panelRootRef={panelRootRef}
       requestReviewFileJump={requestReviewFileJump}
-      scopedCumulative={comparison.scopedCumulative}
-      subagentScopeLabel={subagentScope?.label}
       viewMode={viewMode}
       visibleComparison={comparison.visibleComparison}
       visibleSettled={comparison.visibleSettled}
@@ -778,8 +735,6 @@ function DiffPanelLayout({
   onRefreshComparison,
   panelRootRef,
   requestReviewFileJump,
-  scopedCumulative,
-  subagentScopeLabel,
   viewMode,
   visibleComparison,
   visibleSettled,
@@ -803,13 +758,11 @@ function DiffPanelLayout({
   readonly onRefreshComparison: () => void;
   readonly panelRootRef: RefObject<HTMLDivElement | null>;
   readonly requestReviewFileJump: DiffStoreState["requestReviewFileJump"];
-  readonly scopedCumulative: boolean;
-  readonly subagentScopeLabel: string | undefined;
   readonly viewMode: DiffViewMode;
   readonly visibleComparison: ReviewComparison | null;
   readonly visibleSettled: SettledComparison | null;
 }) {
-  const filesLoading = !visibleSettled && comparisonErrorIdentity !== comparisonIdentity && !scopedCumulative;
+  const filesLoading = !visibleSettled && comparisonErrorIdentity !== comparisonIdentity;
   const [fileControlsSlot, setFileControlsSlot] = useState<HTMLDivElement | null>(null);
   const handleActivateFile = (path: string) => {
     onActiveWorktreePathChange(path);
@@ -828,8 +781,6 @@ function DiffPanelLayout({
             comparisonLoading={comparisonLoading}
             comparisonPending={comparisonPending}
             onRefreshComparison={onRefreshComparison}
-            scopedCumulative={scopedCumulative}
-            subagentScopeLabel={subagentScopeLabel}
             viewMode={viewMode}
             visibleComparison={visibleComparison}
             visibleSettled={visibleSettled}
@@ -862,8 +813,6 @@ function DiffPanelView({
   comparisonLoading,
   comparisonPending,
   onRefreshComparison,
-  scopedCumulative,
-  subagentScopeLabel,
   viewMode,
   visibleComparison,
   visibleSettled,
@@ -873,8 +822,6 @@ function DiffPanelView({
   readonly comparisonLoading: boolean;
   readonly comparisonPending: boolean;
   readonly onRefreshComparison: () => void;
-  readonly scopedCumulative: boolean;
-  readonly subagentScopeLabel: string | undefined;
   readonly viewMode: DiffViewMode;
   readonly visibleComparison: ReviewComparison | null;
   readonly visibleSettled: SettledComparison | null;
@@ -896,8 +843,6 @@ function DiffPanelView({
         comparisonLoading={comparisonLoading}
         comparisonPending={comparisonPending}
         onRefreshComparison={onRefreshComparison}
-        scopedCumulative={scopedCumulative}
-        subagentScopeLabel={subagentScopeLabel}
         threadId={activeThreadId}
         viewMode={viewMode}
         visibleComparison={visibleComparison}
@@ -949,8 +894,6 @@ function ThreadComparisonView({
   comparisonLoading,
   comparisonPending,
   onRefreshComparison,
-  scopedCumulative,
-  subagentScopeLabel,
   threadId,
   viewMode,
   visibleComparison,
@@ -959,21 +902,18 @@ function ThreadComparisonView({
   readonly comparisonLoading: boolean;
   readonly comparisonPending: boolean;
   readonly onRefreshComparison: () => void;
-  readonly scopedCumulative: boolean;
-  readonly subagentScopeLabel: string | undefined;
   readonly threadId: string;
   readonly viewMode: DiffViewMode;
   readonly visibleComparison: ReviewComparison | null;
   readonly visibleSettled: SettledComparison | null;
 }) {
-  const state = getThreadComparisonViewState(comparisonPending, visibleSettled, scopedCumulative, viewMode);
+  const state = getThreadComparisonViewState(comparisonPending, visibleSettled, viewMode);
   if (state === "loading") return <LoadingPulse />;
   if (state === "cumulative") {
     return (
       <CumulativeComparisonView
         comparisonLoading={comparisonLoading}
         onRefreshComparison={onRefreshComparison}
-        scopeLabel={subagentScopeLabel}
         threadId={threadId}
         visibleComparison={visibleComparison}
         visibleSettled={visibleSettled}
@@ -995,24 +935,21 @@ function ThreadComparisonView({
 function getThreadComparisonViewState(
   comparisonPending: boolean,
   visibleSettled: SettledComparison | null,
-  scopedCumulative: boolean,
   viewMode: DiffViewMode,
 ): "cumulative" | "last-turn" | "loading" {
-  if (comparisonPending && !visibleSettled && !scopedCumulative) return "loading";
+  if (comparisonPending && !visibleSettled) return "loading";
   return viewMode === "cumulative" ? "cumulative" : "last-turn";
 }
 
 function CumulativeComparisonView({
   comparisonLoading,
   onRefreshComparison,
-  scopeLabel,
   threadId,
   visibleComparison,
   visibleSettled,
 }: {
   readonly comparisonLoading: boolean;
   readonly onRefreshComparison: () => void;
-  readonly scopeLabel: string | undefined;
   readonly threadId: string;
   readonly visibleComparison: ReviewComparison | null;
   readonly visibleSettled: SettledComparison | null;
@@ -1024,7 +961,6 @@ function CumulativeComparisonView({
       cacheVersion={visibleSettled?.cacheVersion ?? ""}
       refreshing={comparisonLoading}
       onRefresh={onRefreshComparison}
-      scopeLabel={scopeLabel}
     />
   );
 }

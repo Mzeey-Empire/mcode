@@ -114,10 +114,10 @@ const terminalManagementHandlers: TerminalManagementHandlers = {
 const terminalClassicHandlers: TerminalClassicHandlers = {
   "terminal.capabilities": (deps) => deps.terminalService.capabilities(),
   "terminal.create": async (deps, params) => {
-    if (!serverWorkTrace) return deps.terminalService.create(params.threadId);
+    if (!serverWorkTrace) return deps.terminalService.create(params.threadId, params.replacesPtyId);
     const started = NodePerfHooks.performance.now();
     try {
-      return await deps.terminalService.create(params.threadId);
+      return await deps.terminalService.create(params.threadId, params.replacesPtyId);
     } finally {
       serverWorkTrace.record("terminal-create", params.threadId, undefined, NodePerfHooks.performance.now() - started);
     }
@@ -197,12 +197,8 @@ export async function routeTerminalRpc(
   method: WsMethodName,
   params: any,
   deps: TerminalRouterDeps,
-  client: WebSocket | undefined,
+  _client: WebSocket | undefined,
 ): Promise<unknown> {
-  if (method.startsWith("terminal.session.")) {
-    if (!client) throw new Error("Terminal v1 client identity is unavailable");
-    return deps.terminalService.routeV1(method, params, client);
-  }
   if (isTerminalManagementMethod(method)) {
     return await routeTerminalManagement(method, params, deps);
   }

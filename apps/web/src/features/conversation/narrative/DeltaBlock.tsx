@@ -1,9 +1,16 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { splitStreamingBlocks, type StreamingBlockPart } from "./streaming-blocks";
 import { CodeBlock } from "@/components/chat/CodeBlock";
+import { TURN_PROSE_CLASS } from "./narrative-layout";
 
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
 const LazyMermaidBlock = lazy(() => import("@/components/chat/MermaidBlock"));
+
+/** Typing caret size from the Paper boards: a 2×18 bar centred on the prose line. */
+const CARET_WIDTH_PX = 2;
+const CARET_HEIGHT_PX = 18;
+/** Gap between the last glyph and the caret. */
+const CARET_GAP_PX = 2;
 
 interface DeltaBlockProps {
   /** The streamed response text to display. */
@@ -60,16 +67,17 @@ function measureCaretPosition(
   if (lastTextNode.parentElement?.closest("p")) {
     const caretRect = getCaretRectAtEnd(lastTextNode);
     if (!caretRect) return null;
+    const lineHeight = caretRect.height || CARET_HEIGHT_PX;
     return {
-      x: caretRect.right - rootRect.left,
-      y: caretRect.top - rootRect.top,
-      h: Math.min(Math.max(caretRect.height || 16, 12), 28),
+      x: caretRect.right - rootRect.left + CARET_GAP_PX,
+      y: caretRect.top - rootRect.top + (lineHeight - CARET_HEIGHT_PX) / 2,
+      h: CARET_HEIGHT_PX,
     };
   }
   const lastBlock = cursor.previousElementSibling;
   if (!lastBlock) return null;
   const blockRect = lastBlock.getBoundingClientRect();
-  return { x: blockRect.left - rootRect.left, y: blockRect.bottom - rootRect.top, h: 16 };
+  return { x: blockRect.left - rootRect.left, y: blockRect.bottom - rootRect.top, h: CARET_HEIGHT_PX };
 }
 
 /**
@@ -295,9 +303,25 @@ function StreamingTable({ header, rows }: { header: string[]; rows: string[][] }
   );
 }
 
+/**
+ * Streaming prose split on blank lines into the same `mb-2` paragraphs the
+ * settled markdown renders, so the row keeps its height at the swap instead of
+ * collapsing each blank line from a full prose line to an 8px margin.
+ */
+function StreamingParagraphs({ text }: { text: string }) {
+  const paragraphs = text.split(/\n\s*\n/).filter((paragraph) => paragraph.trim().length > 0);
+  return (
+    <>
+      {paragraphs.map((paragraph, index) => (
+        <p key={index} className="mb-2 whitespace-pre-wrap">{paragraph}</p>
+      ))}
+    </>
+  );
+}
+
 function StreamingPart({ part }: { part: StreamingBlockPart }) {
   if (part.kind === "text") {
-    return <p className="whitespace-pre-wrap text-sm leading-relaxed">{part.text}</p>;
+    return <StreamingParagraphs text={part.text} />;
   }
   if (part.kind === "table") {
     return part.closed
@@ -344,7 +368,7 @@ function StreamingPart({ part }: { part: StreamingBlockPart }) {
 function StreamingBody({ text }: { text: string }) {
   const parts = useMemo(() => splitStreamingBlocks(text), [text]);
   if (!parts.some((part) => part.kind !== "text")) {
-    return <p className="whitespace-pre-wrap text-sm leading-relaxed">{text}</p>;
+    return <StreamingParagraphs text={text} />;
   }
   return (
     <>
@@ -410,13 +434,13 @@ export function DeltaBlock({ text, isStreaming = true, showCursor = true }: Delt
   }, [displayed, renderCursor]);
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={`relative ${TURN_PROSE_CLASS}`}>
       {isStreaming ? (
         <StreamingBody text={displayed} />
       ) : (
         <Suspense
           fallback={
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">
+            <p className="whitespace-pre-wrap">
               {displayed}
             </p>
           }
@@ -439,7 +463,7 @@ export function DeltaBlock({ text, isStreaming = true, showCursor = true }: Delt
           position: "absolute",
           top: 0,
           left: 0,
-          width: "1.5px",
+          width: `${CARET_WIDTH_PX}px`,
           margin: 0,
           opacity: 0,
           pointerEvents: "none",
