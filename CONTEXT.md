@@ -890,8 +890,8 @@ workspace root). Creating another shell session creates another Terminal
 tab. Selecting a Terminal tab shows only that tab's shell session. Closing
 a Terminal tab closes its shell session and terminates the entire process
 tree rooted at that shell. If closing it leaves no right-panel tabs, the
-right panel closes. When a shell exits on its own, its Terminal tab may show
-the exit status briefly, then closes automatically.
+right panel closes. When a shell exits on its own, its Terminal tab keeps the
+exit status and retained output until the user closes it or deletes its scope.
 
 ### Terminal scope
 The thread or workspace a shell session runs against. When a thread is
