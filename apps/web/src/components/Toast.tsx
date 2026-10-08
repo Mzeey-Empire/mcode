@@ -94,7 +94,7 @@ export function ToastContainer() {
   return (
     <div
       aria-live="polite"
-      className="app-toast-stack pointer-events-none fixed bottom-1.5 right-1.5 z-50 flex flex-col-reverse items-end gap-2 overflow-hidden"
+      className="app-toast-stack pointer-events-none fixed bottom-1.5 right-1.5 z-(--layer-modal) flex flex-col-reverse items-end gap-2 overflow-hidden"
     >
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} />

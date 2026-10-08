@@ -296,20 +296,20 @@ function RegeneratingSummary({
 }) {
   return (
     <div className="relative flex flex-col gap-3 p-4">
-      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/80">
+      <div className="absolute inset-0 z-(--layer-sticky) flex flex-col items-center justify-center gap-3 bg-background/80">
         <div role="status" aria-live="polite" aria-busy="true">
           <SummaryDots />
         </div>
-        <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted/40">
+        <span className="font-mono text-caption uppercase tracking-[0.16em] text-muted/40">
           Regenerating
         </span>
         <CancelSummaryButton onCancel={onCancel} />
       </div>
-      <div className="prose prose-sm dark:prose-invert text-[13px] leading-relaxed opacity-40">
+      <div className="prose prose-sm dark:prose-invert text-body-small leading-relaxed opacity-40">
         <MarkdownContent content={summary.content} />
       </div>
       <div className="flex items-center justify-between border-t border-border/30 pt-3">
-        <SummaryModel className="text-[11px] text-muted text-fade max-w-[200px]" model={summary.model} />
+        <SummaryModel className="text-caption text-muted text-fade max-w-[200px]" model={summary.model} />
         <SummaryTiming summary={summary} />
       </div>
     </div>
@@ -325,7 +325,7 @@ function InitialSummaryLoading({ onCancel }: { readonly onCancel: () => void }) 
       aria-busy="true"
     >
       <SummaryDots />
-      <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-muted/40">
+      <span className="font-mono text-caption uppercase tracking-[0.16em] text-muted/40">
         Summarizing
       </span>
       <CancelSummaryButton onCancel={onCancel} />
@@ -339,7 +339,7 @@ function CancelSummaryButton({ onCancel }: { readonly onCancel: () => void }) {
       variant="ghost"
       size="xs"
       onClick={onCancel}
-      className="gap-1 text-[11px] text-muted hover:text-ink"
+      className="gap-1 text-caption text-muted hover:text-ink"
     >
       <X size={12} />
       Cancel
@@ -349,7 +349,7 @@ function CancelSummaryButton({ onCancel }: { readonly onCancel: () => void }) {
 
 function SummaryTiming({ summary }: { readonly summary: SummaryRecord }) {
   return (
-    <span className="text-[11px] text-muted">
+    <span className="text-caption text-muted">
       <SummaryTimestamp createdAt={summary.createdAt} />
       {" · "}{summary.turnCount} {summary.turnCount === 1 ? "turn" : "turns"}
     </span>
@@ -391,11 +391,11 @@ function RenderedSummary({
     <div className="flex flex-col gap-3 p-4">
       <SummaryError error={error} />
       <NewTurnsNotice newTurnCount={newTurnCount} />
-      <div className="prose prose-sm dark:prose-invert text-[13px] leading-relaxed">
+      <div className="prose prose-sm dark:prose-invert text-body-small leading-relaxed">
         <MarkdownContent content={summary.content} />
       </div>
       <div className="flex items-center justify-between border-t border-border/30 pt-3">
-        <span className="flex items-center gap-1 text-[11px] text-muted min-w-0">
+        <span className="flex items-center gap-1 text-caption text-muted min-w-0">
           <SummaryModel className="text-fade max-w-[140px]" model={summary.model} />
           <span className="shrink-0">
             {" · "}
@@ -426,7 +426,7 @@ function RenderedSummary({
             variant="ghost"
             size="xs"
             onClick={actions.onGenerate}
-            className="gap-1 text-[11px] text-muted hover:text-ink"
+            className="gap-1 text-caption text-muted hover:text-ink"
           >
             <RefreshCw size={12} />
             Regenerate
@@ -442,7 +442,7 @@ function NewTurnsNotice({ newTurnCount }: { readonly newTurnCount: number }) {
   return (
     <div className="flex items-center gap-2 border-b border-border/30 pb-2">
       <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
-      <span className="font-mono text-[10.5px] text-muted/60">
+      <span className="font-mono text-caption text-muted/60">
         {newTurnCount} new {newTurnCount === 1 ? "turn" : "turns"} since summary
       </span>
     </div>
@@ -463,7 +463,7 @@ function EmptySummary({
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-14">
       <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted/20">Σ</span>
-      <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/40">
+      <p className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
         no summary
       </p>
       <SummaryError error={error} />
@@ -472,7 +472,7 @@ function EmptySummary({
         size="xs"
         onClick={onGenerate}
         disabled={!hasFileChanges || !activeThreadId}
-        className="mt-1 text-[11px] text-muted hover:text-ink"
+        className="mt-1 text-caption text-muted hover:text-ink"
         aria-describedby={!hasFileChanges ? "generate-hint" : undefined}
       >
         {error ? "Try again" : "Generate"}

@@ -27,7 +27,7 @@ export function LastTurnView({ threadId, comparison, cacheVersion, refreshing, o
         <span aria-hidden="true" className="font-mono text-2xl leading-none text-muted/15">
           ⊘
         </span>
-        <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/40">
+        <p className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
           No changes yet
         </p>
       </div>
@@ -37,10 +37,10 @@ export function LastTurnView({ threadId, comparison, cacheVersion, refreshing, o
   return (
     <div data-testid="review-last-turn" className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border/15">
-        <span className="font-mono text-[11px] tabular-nums text-ink/70">
+        <span className="font-mono text-caption tabular-nums text-ink/70">
           {comparison.files.length}
         </span>
-        <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted">
+        <span className="font-mono text-caption uppercase tracking-[0.14em] text-muted">
           {turnLabel(comparison)}
         </span>
         <TurnDiffSource comparison={comparison} />

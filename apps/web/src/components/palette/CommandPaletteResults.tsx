@@ -29,7 +29,7 @@ export function CommandPaletteResults({ groups, onSelect, footer }: Props) {
         <CommandGroup
           key={group.heading}
           heading={
-            <span className="px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted/70">
+            <span className="px-3 py-1.5 font-mono text-caption uppercase tracking-[0.18em] text-muted/70">
               {group.heading}
             </span>
           }
@@ -40,11 +40,11 @@ export function CommandPaletteResults({ groups, onSelect, footer }: Props) {
               value={item.value}
               keywords={item.searchTerms}
               onSelect={() => onSelect(item.value)}
-              className="flex items-center gap-2 px-3 py-2 text-[13px]"
+              className="flex items-center gap-2 px-3 py-2 text-body-small"
             >
               <span className="flex-1 text-fade">{item.title}</span>
               {item.description && (
-                <span className="ml-2 text-fade font-mono text-[11px] text-muted/60">
+                <span className="ml-2 text-fade font-mono text-caption text-muted/60">
                   {item.description}
                 </span>
               )}

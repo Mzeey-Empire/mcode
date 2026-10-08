@@ -53,6 +53,8 @@
       "files": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"],
       "rules": {
         "mcode/no-ellipsis-truncation": "error",
+        "mcode/no-arbitrary-text-size": "error",
+        "mcode/no-numeric-z-index": "error",
         "mcode/no-raw-color": "error",
         "mcode/no-raw-shadow": "error"
       }

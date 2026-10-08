@@ -159,7 +159,7 @@ function RefName({
         render={
           <span
             className={cn(
-              "min-w-0 flex-1 text-fade whitespace-nowrap font-mono text-[11px]",
+              "min-w-0 flex-1 text-fade whitespace-nowrap font-mono text-caption",
               active ? "text-ink" : "text-ink/80",
             )}
           />
@@ -220,11 +220,11 @@ function RefCombobox({
         <Command>
           <CommandInput
             placeholder="Search refs..."
-            className="h-8 text-[11.5px]"
+            className="h-8 text-caption"
             data-testid="branch-target-filter"
           />
           <CommandList>
-            <CommandEmpty className="py-4 text-[11px]">No refs found</CommandEmpty>
+            <CommandEmpty className="py-4 text-caption">No refs found</CommandEmpty>
 
             {REF_SECTIONS.map(({ type, heading }) => {
               const sectionRefs = groups[type];
@@ -249,7 +249,7 @@ function RefCombobox({
                         {active ? (
                           <Check size={11} className="shrink-0 text-muted" />
                         ) : (
-                          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted/45">
+                          <span className="shrink-0 font-mono text-caption tabular-nums text-muted/45">
                             {ref.shortSha}
                           </span>
                         )}
@@ -302,7 +302,7 @@ interface BranchRefPickerProps {
 }
 
 function BranchRefPickerPlaceholder({ children }: { children: string }) {
-  return <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted/40">{children}</span>;
+  return <span className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">{children}</span>;
 }
 
 function BranchRefPickerContent({ comparison, onSelect }: { comparison: BranchComparison | null; onSelect: (target: string) => void }) {

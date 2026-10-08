@@ -33,7 +33,7 @@ export function PreviewPerfHud() {
   return (
     <div
       data-testid="preview-perf-hud"
-      className="pointer-events-auto fixed right-2 bottom-2 z-50 max-w-[18rem] rounded-md border border-border/40 bg-background/95 px-2 py-1.5 font-mono text-[10px] leading-tight shadow-floating"
+      className="pointer-events-auto fixed right-2 bottom-2 z-(--layer-modal) max-w-[18rem] rounded-md border border-border/40 bg-background/95 px-2 py-1.5 font-mono text-caption shadow-floating"
     >
       <div className="mb-1 font-semibold uppercase tracking-[0.12em] text-muted">
         preview perf

@@ -883,7 +883,7 @@ function ActivityRailView({
       data-testid="activity-rail"
       data-expanded={expanded ? "true" : "false"}
       className={cn(
-        "relative z-30 flex-none bg-background transition-[width,margin-right] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+        "relative z-(--layer-floating-panel) flex-none bg-background transition-[width,margin-right] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
         expanded ? "w-40 -mr-28" : "w-12",
       )}
       onPointerEnter={onPointerEnter}

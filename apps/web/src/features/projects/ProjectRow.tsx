@@ -76,7 +76,7 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
         }
       }}
       className={cn(
-        "group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-sm px-3 py-2 text-[13px] transition-colors outline-none focus-visible:ring-1 focus-visible:ring-focus max-[520px]:flex-col max-[520px]:items-stretch max-[520px]:gap-1.5",
+        "group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-sm px-3 py-2 text-body-small transition-colors outline-none focus-visible:ring-1 focus-visible:ring-focus max-[520px]:flex-col max-[520px]:items-stretch max-[520px]:gap-1.5",
         // group-aria-selected/cmd responds to parent CommandItem keyboard focus in the palette.
         // has no effect in landing page context (no parent with group/cmd).
         "hover:bg-selected/60 data-[active=true]:bg-selected group-aria-selected/cmd:bg-selected",
@@ -133,7 +133,7 @@ function ProjectRowMetadata({
   lastOpenedLabel: string | null;
 }) {
   return (
-    <div className="flex shrink-0 min-w-0 max-w-[52%] flex-col items-end gap-0.5 font-mono text-[11px] text-muted/60 max-[520px]:max-w-none max-[520px]:flex-row max-[520px]:items-center max-[520px]:justify-between">
+    <div className="flex shrink-0 min-w-0 max-w-[52%] flex-col items-end gap-0.5 font-mono text-caption text-muted/60 max-[520px]:max-w-none max-[520px]:flex-row max-[520px]:items-center max-[520px]:justify-between">
       {enrichment ? <ProjectRowEnrichment enrichment={enrichment} /> : null}
       {lastOpenedLabel ? <span className="whitespace-nowrap tabular-nums">{lastOpenedLabel}</span> : null}
     </div>

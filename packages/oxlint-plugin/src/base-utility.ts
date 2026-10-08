@@ -1,4 +1,4 @@
-/** Removes Tailwind variants and important modifiers without splitting arbitrary values. */
+/** Strip Tailwind variants and important modifiers while preserving bracketed values. */
 export function baseUtility(token: string): string {
   let depth = 0;
   let start = 0;

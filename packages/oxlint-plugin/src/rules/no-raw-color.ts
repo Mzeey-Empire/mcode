@@ -1,5 +1,5 @@
 import { defineRule, type ESTree } from "@oxlint/plugins";
-import { baseUtility } from "./base-utility.ts";
+import { baseUtility } from "../base-utility.ts";
 
 const PALETTE_CLASS = /^(?:bg|text|border(?:-[xytrblse])?|ring(?:-offset)?|fill|stroke|from|to|via|outline|divide|decoration|placeholder|caret|accent|shadow)-(?:(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|sage|clay)-\d{2,3}|white|black)(?:\/.*)?$/;
 const HEX_VALUE = /^\s*#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})\s*$/i;

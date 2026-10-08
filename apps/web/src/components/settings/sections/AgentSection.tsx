@@ -67,10 +67,10 @@ export function AgentSection() {
       </SettingRow>
 
       <div className="mt-6 mb-1 flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted/50">
+        <span className="text-caption font-semibold uppercase tracking-widest text-muted/50">
           Guardrails
         </span>
-        <span className="inline-flex items-center rounded-full border border-border bg-hover px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-muted">
+        <span className="inline-flex items-center rounded-full border border-border bg-hover px-2 py-0.5 text-caption font-bold uppercase tracking-widest text-muted">
           Beta
         </span>
       </div>

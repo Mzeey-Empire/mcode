@@ -1,5 +1,5 @@
 import { defineRule, type ESTree } from "@oxlint/plugins";
-import { baseUtility } from "./base-utility.ts";
+import { baseUtility } from "../base-utility.ts";
 
 const ELLIPSIS = "…";
 
