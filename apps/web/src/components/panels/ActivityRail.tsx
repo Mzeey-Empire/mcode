@@ -25,7 +25,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { Kbd } from "@/components/palette/Kbd";
+import { Kbd } from "@/components/ui/kbd";
 import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import {

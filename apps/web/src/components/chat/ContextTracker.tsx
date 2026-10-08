@@ -108,7 +108,7 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
           </div>
         }
       />
-      <TooltipContent side="top" align="end" sideOffset={8} variant="surface" className="w-72 max-w-none p-3">
+      <TooltipContent side="top" align="end" sideOffset={8} className="w-72 max-w-none p-3">
         <div className="flex w-full flex-col gap-3">
           <div className="flex items-center justify-between gap-4">
             <span className="font-medium">Context window</span>
