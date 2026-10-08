@@ -1,8 +1,9 @@
 import type {
+  LegacyTerminalRecord,
+  LegacyTerminalCreateResult,
   TerminalDiagnosticsBundle,
   TerminalExitMetadata,
   TerminalGap,
-  TerminalSessionState,
 } from "@mcode/contracts";
 
 /** Upper bound for renderer-side Terminal cleanup RPCs. */
@@ -15,10 +16,10 @@ export type TerminalClientReattachResult =
   | { mode: "reset"; discardThrough: number };
 
 /** Raw JSON RPC function used by Terminal client adapters. */
-export type TerminalRpcCall = <T>(
+export type TerminalRpcCall = (
   method: string,
   params: Record<string, unknown>,
-) => Promise<T>;
+) => Promise<unknown>;
 
 /** Resolves or rejects one Terminal operation within the cleanup deadline. */
 export function withTerminalTimeout<T>(promise: Promise<T>): Promise<T> {
@@ -68,16 +69,11 @@ export interface TerminalCheckpoint {
 }
 
 /** Server-authoritative Terminal session projected into the renderer store. */
-export interface TerminalActiveSession {
-  readonly ptyId: string;
-  readonly threadId: string;
-  readonly state: TerminalSessionState;
-  readonly exit?: TerminalExitMetadata;
-}
+export type TerminalActiveSession = LegacyTerminalRecord;
 
-/** Client-side adapter for the Terminal backend selected at server boot. */
+/** Client-side adapter for the legacy Terminal backend. */
 export interface TerminalClient {
-  create(threadId: string, replacesSessionId?: string): Promise<{ ptyId: string; shell: string }>;
+  create(threadId: string, replacesSessionId?: string): Promise<LegacyTerminalCreateResult>;
   write(ptyId: string, data: string): Promise<void>;
   resize(ptyId: string, cols: number, rows: number): Promise<void>;
   kill(ptyId: string): Promise<void>;
@@ -103,5 +99,4 @@ export interface TerminalClient {
   hasChildren(ptyId: string): Promise<{ hasChildren: boolean }>;
   /** Returns the typed, bounded, already-redacted diagnostics bundle. */
   diagnostics(): Promise<TerminalDiagnosticsBundle>;
-  acknowledgeOutput?(ptyId: string, seq: number): void;
 }

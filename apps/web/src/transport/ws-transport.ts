@@ -267,8 +267,7 @@ export function shouldReattachSelectedTerminal(
   selectedTerminalId: string | null,
 ): boolean {
   return session.ptyId === selectedTerminalId &&
-    (session.state === "running" || session.state === "starting" ||
-      session.state === "exited" || session.state === "failed");
+    session.state !== "pending";
 }
 
 interface PendingCall {
@@ -608,8 +607,8 @@ export function createWsTransport(
 
       // Reattach active terminals after reconnect.
       // Deferred import avoids a circular dependency at module evaluation time.
-      void reattachActiveTerminals().catch(() => {
-        // Best-effort; terminal output from the gap window is already lost.
+      void reattachActiveTerminals().catch((error: unknown) => {
+        console.warn("[terminal] Could not restore terminal records", error);
       });
     };
 
@@ -1381,7 +1380,6 @@ export function createWsTransport(
       withTerminalClient((client) => client.diagnostics()),
     ptySetLastSeq: (ptyId, seq) => {
       ptyLastSeqMap.set(ptyId, seq);
-      terminalClient.acknowledgeOutput?.(ptyId, seq);
     },
     ptyDeleteLastSeq: (ptyId) => { ptyLastSeqMap.delete(ptyId); },
 

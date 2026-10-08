@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useTerminalStore } from "@/features/terminal/state/terminalStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   createWsTransport,
   parseLateTerminalCreateId,
@@ -101,6 +103,39 @@ describe("interactive RPC timeout recovery", () => {
     transport.close();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("restores server records on the first connection and refreshes them after reconnect", async () => {
+    useTerminalStore.setState({ terminals: {}, ptyToThread: {}, terminalPanelByThread: {}, hasHydrated: false });
+    useWorkspaceStore.setState({ activeWorkspaceId: null, activeThreadId: null });
+    socket.respond(latestRequest(socket, "terminal.capabilities"), LEGACY_CAPABILITIES);
+    await vi.advanceTimersByTimeAsync(0);
+    socket.respond(latestRequest(socket, "terminal.listActive"), [
+      { ptyId: "second", threadId: "thread", shell: "bash", createdAt: "2026-10-08T12:01:00.000Z" },
+      { ptyId: "first", threadId: "thread", shell: "pwsh", state: "exited", exitCode: 7, createdAt: "2026-10-08T12:00:00.000Z" },
+      { ptyId: "workspace-shell", threadId: "workspace", shell: "zsh" },
+    ]);
+    await vi.waitFor(() => expect(useTerminalStore.getState().hasHydrated).toBe(true));
+    expect(useTerminalStore.getState().terminals.thread.map(({ id, label, state, exitCode }) =>
+      [id, label, state, exitCode])).toEqual([
+      ["first", "pwsh", "exited", 7], ["second", "bash", "running", undefined],
+    ]);
+    expect(useTerminalStore.getState().terminals.workspace.map(({ id, label }) => [id, label])).toEqual([["workspace-shell", "zsh"]]);
+
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const reconnected = TimeoutSocket.instances[1];
+    if (!reconnected) throw new Error("Expected reconnect socket");
+    reconnected.open();
+    await vi.advanceTimersByTimeAsync(0);
+    reconnected.respond(latestRequest(reconnected, "terminal.capabilities"), LEGACY_CAPABILITIES);
+    await vi.advanceTimersByTimeAsync(0);
+    reconnected.respond(latestRequest(reconnected, "terminal.listActive"), [
+      { ptyId: "second", threadId: "thread", shell: "bash", state: "exited", exitCode: 2 },
+    ]);
+    await vi.waitFor(() => expect(useTerminalStore.getState().ptyToThread).toEqual({ second: "thread" }));
+    expect(useTerminalStore.getState().terminals.thread.map(({ id, state, exitCode }) => [id, state, exitCode])).toEqual([["second", "exited", 2]]);
+    expect(useTerminalStore.getState().terminals.workspace).toBeUndefined();
   });
 
   it("checks every five seconds and reconnects after three missed reply checks", async () => {

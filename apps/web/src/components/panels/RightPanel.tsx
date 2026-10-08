@@ -1,3 +1,4 @@
+import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { useShallow } from "zustand/shallow";
 import type { BrowserTabSet } from "@mcode/contracts";
@@ -37,7 +38,6 @@ import {
   type BrowserSessionLifecycleTab,
 } from "@/features/preview";
 import {
-  MAX_TERMINALS_PER_SCOPE,
   TerminalPoolSlot,
   useTerminalStore,
   type TerminalInstance,
@@ -892,7 +892,7 @@ function RightPanelActivityRail({
       })}
       onReorder={(instanceId, direction) =>
         reorderRightPanelTab(activeWorkspaceId, activeThreadId, instanceId, direction)}
-      terminalCapReached={scopeTerminals.length >= MAX_TERMINALS_PER_SCOPE}
+      terminalCapReached={scopeTerminals.length >= TERMINAL_MAX_PER_SCOPE}
       terminalLabels={railTerminalLabels}
       onCreate={onCreateTab}
       onSelectBrowserPage={(instanceId, pageId) => {
@@ -1113,9 +1113,17 @@ export function RightPanel() {
     [busyPreviewScopeIdList],
   );
   const terminalsByScope = useTerminalStore((s) => s.terminals);
+  const terminalsHydrated = useTerminalStore((s) => s.hasHydrated);
   const scopeTerminals = panelScopeId
     ? (terminalsByScope[panelScopeId] ?? EMPTY_SCOPE_TERMINALS)
     : EMPTY_SCOPE_TERMINALS;
+  useEffect(() => {
+    if (!activeWorkspaceId || !panelScopeId || !terminalsHydrated) return;
+    const selected = useTerminalStore.getState().getTerminalPanel(panelScopeId).activeTerminalId;
+    useDiffStore.getState().reconcileRightPanelTerminals(
+      activeWorkspaceId, activeThreadId, scopeTerminals.map((terminal) => terminal.id), selected,
+    );
+  }, [activeWorkspaceId, activeThreadId, panelScopeId, scopeTerminals, terminalsHydrated]);
   const terminalLabels = useMemo(() => {
     const occurrences = new Map<string, number>();
     for (const terminal of scopeTerminals) {

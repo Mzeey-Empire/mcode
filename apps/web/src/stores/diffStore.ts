@@ -553,6 +553,13 @@ interface DiffState {
     threadId: string | null | undefined,
     instanceId: string,
   ) => void;
+  /** Rebuilds terminal tabs from the scope's server-owned records without opening the panel. */
+  reconcileRightPanelTerminals: (
+    workspaceId: string,
+    threadId: string | null | undefined,
+    ptyIds: readonly string[],
+    selectedPtyId: string | null,
+  ) => void;
   /** Append or focus one PTY-backed Terminal rail tab. */
   addRightPanelTerminalTab: (
     workspaceId: string,
@@ -756,6 +763,27 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       return writeRightPanel(state, workspaceId, threadId, {
         ...current,
         activeTabId: instance.id,
+      });
+    }),
+
+  reconcileRightPanelTerminals: (workspaceId, threadId, ptyIds, selectedPtyId) =>
+    set((state) => {
+      const current = effectiveRightPanel(state, workspaceId, threadId);
+      const pending: RightPanelTabInstance[] = ptyIds.map((id) => ({ id: rightPanelTerminalId(id), type: "terminal" }));
+      const tabInstances = rightPanelTabInstances(current).flatMap((instance) => {
+        if (instance.type !== "terminal") return [instance];
+        const next = pending.shift();
+        return next ? [next] : [];
+      }).concat(pending);
+      const activeTabId = tabInstances.some((instance) => instance.id === current.activeTabId)
+        ? current.activeTabId
+        : selectedPtyId ? rightPanelTerminalId(selectedPtyId) : tabInstances[0]?.id ?? null;
+      if (current.activeTabId === activeTabId &&
+        current.tabInstances.length === tabInstances.length &&
+        current.tabInstances.every((instance, index) => instance.id === tabInstances[index].id)) return state;
+      return writeRightPanel(state, workspaceId, threadId, {
+        ...current, tabInstances, activeTabId,
+        visible: current.visible && tabInstances.length > 0,
       });
     }),
 
