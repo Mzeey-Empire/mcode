@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { SubagentIdentityGlyph } from "@/components/ui/SubagentIdentityGlyph";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { formatSubagentIdentity } from "../identity/format-subagent-identity";
 import { SubagentStopControl } from "../lifecycle/SubagentStopControl";
 import {
@@ -26,7 +26,6 @@ import { NarrativeDetailView } from "../detail/NarrativeDetailView";
 import {
   dedupeNarrativeRoster,
   narrativeRowStatus,
-  narrativePaletteSeed,
   narrativeRowTab,
   resolveCanonicalSubagentSelection,
   resolveNarrativeSubagentSelection,
@@ -38,7 +37,12 @@ export { resolveCanonicalSubagentSelection } from "./narrative-subagents";
 import { getTransport } from "@/transport";
 import { resolveModelDisplayLabel } from "@/lib/format-model-label";
 import { formatRelative } from "@/lib/format-relative";
-import { getConversationResidency, MessageList } from "@/features/conversation";
+import {
+  getConversationResidency,
+  MessageList,
+  SubagentProviderScope,
+  useSubagentProvider,
+} from "@/features/conversation";
 import {
   formatSubagentDisplayName,
   type CanonicalSubagentRoster,
@@ -140,6 +144,7 @@ function CanonicalRosterRow({
   const status = canonicalStatus(row);
   const lineage = canonicalLineage(row, rows);
   const configuration = canonicalConfiguration(row);
+  const provider = useSubagentProvider();
   return (
     <div data-testid={testId} className="flex w-full min-w-0 items-center rounded-none transition-colors duration-150 motion-reduce:transition-none hover:bg-hover/30">
       <Button
@@ -150,14 +155,7 @@ function CanonicalRosterRow({
         data-subagent-id={row.id}
         className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none px-6 py-2.5 text-left focus-visible:ring-inset"
       >
-        <SubagentIdentityGlyph
-          identity={canonicalIdentity(row)}
-          hasExplicitIdentity={row.identity !== undefined}
-          paletteSeed={row.id}
-          animated={active}
-          className="size-6"
-          size={15}
-        />
+        <ProviderIcon provider={provider} size={20} />
         <CanonicalRosterMetadata row={row} active={active} status={status} lineage={lineage} configuration={configuration} />
       </Button>
       <SubagentStopControl
@@ -241,7 +239,7 @@ function NarrativeRosterRow({
   const title = row.task ? formatSubagentDisplayName(row.task) : identity;
   const status = narrativeRowStatus(row);
   const active = narrativeRowTab(row) === "active";
-  const paletteSeed = narrativePaletteSeed(row);
+  const provider = useSubagentProvider();
   const lastActiveAt = new Date(row.activityAt).toISOString();
   const lastActiveLabel = active ? null : formatRelative(lastActiveAt);
   return (
@@ -254,14 +252,7 @@ function NarrativeRosterRow({
         data-subagent-id={row.id}
         className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none px-6 py-2.5 text-left focus-visible:ring-inset"
       >
-        <SubagentIdentityGlyph
-          identity={identity}
-          hasExplicitIdentity={row.hasExplicitIdentity}
-          paletteSeed={paletteSeed}
-          animated={active}
-          className="size-6"
-          size={15}
-        />
+        <ProviderIcon provider={provider} size={20} />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
             <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{title}</span>
@@ -289,14 +280,12 @@ function NarrativeRosterRow({
 function CanonicalDetailView({
   row,
   rows,
-  paletteSeed,
   onBack,
   onStop,
   onTerminal,
 }: {
   readonly row: CanonicalSubagentRosterRow;
   readonly rows: readonly CanonicalSubagentRosterRow[];
-  readonly paletteSeed: string;
   readonly onBack: () => void;
   readonly onStop: () => Promise<CanonicalSubagentStopResult>;
   readonly onTerminal: () => Promise<void> | void;
@@ -306,6 +295,7 @@ function CanonicalDetailView({
   const lineage = canonicalLineage(row, rows);
   const active = canonicalIsActive(row);
   const configuration = canonicalConfiguration(row);
+  const provider = useSubagentProvider();
   const [displayLeaseAcquired, setDisplayLeaseAcquired] = useState(false);
   useEffect(() => {
     const residency = getConversationResidency();
@@ -321,7 +311,7 @@ function CanonicalDetailView({
           <ArrowLeft size={15} aria-hidden />
         </Button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <SubagentIdentityGlyph identity={identity} hasExplicitIdentity={row.identity !== undefined} paletteSeed={paletteSeed} className="size-6" size={15} />
+          <ProviderIcon provider={provider} size={20} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-sm font-semibold">{title}</h2>
             {row.task && <p className="truncate text-xs text-muted">{identity}</p>}
@@ -837,7 +827,16 @@ function SubagentRosterList({
 }
 
 /** Renders the canonical child roster for the selected parent thread. */
+/** Sub-agents roster and detail for one parent thread. */
 export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
+  return (
+    <SubagentProviderScope threadId={threadId}>
+      <SubagentsPanelContent threadId={threadId} />
+    </SubagentProviderScope>
+  );
+}
+
+function SubagentsPanelContent({ threadId }: { readonly threadId: string }) {
   const { state: canonicalState, refresh: refreshRoster } = useCanonicalRoster(threadId);
   const clearDetail = useClearSubagentDetail();
   const detail = useCanonicalDetail(threadId, canonicalState);
@@ -866,7 +865,6 @@ export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
       key={selectedCanonicalRow.id}
       row={selectedCanonicalRow}
       rows={detail.rows}
-      paletteSeed={selection.id}
       onStop={() => getTransport().stopCanonicalSubagent(selectedCanonicalRow.owningParentThreadId, selectedCanonicalRow.id)}
       onTerminal={refreshRoster}
       onBack={backToRoster(threadId, selection.scrollTop, detail.viewportRef, selectedCanonicalRow.id, clearDetail)}
@@ -877,7 +875,6 @@ export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
     return <NarrativeDetailView
       key={selectedNarrativeRow.id}
       row={selectedNarrativeRow}
-      paletteSeed={selection.id}
       onBack={backToRoster(threadId, selection.scrollTop, detail.viewportRef, selectedNarrativeRow.id, clearDetail)}
     />;
   }

@@ -3,7 +3,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SubagentRow } from "../SubagentRow";
 import type { ToolCall } from "@/transport/types";
-import { getSubagentIdentityPaletteIndex } from "@/components/ui/SubagentIdentityGlyph";
+import { createMockThread } from "@/__tests__/mocks/transport";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { SubagentProviderScope } from "../subagent-provider";
 import { createSubagentPresentation } from "@mcode/contracts";
 
 const { openSubagentDetail } = vi.hoisted(() => ({ openSubagentDetail: vi.fn() }));
@@ -43,14 +45,25 @@ describe("SubagentRow", () => {
     openSubagentDetail.mockReset();
   });
 
-  it("uses the parent task as the row title and keeps identity on the glyph", () => {
+  it("uses the parent task as the row title", () => {
     renderRow(agent());
 
     expect(screen.getByRole("button", { name: "Show Read detection module subagent details" })).toBeInTheDocument();
     expect(screen.getByText("started working")).toBeInTheDocument();
     expect(screen.queryByTestId("subagent-lifecycle-dot")).not.toBeInTheDocument();
     expect(screen.getByText("Read detection module")).toBeInTheDocument();
-    expect(document.querySelector('[data-subagent-identity-glyph="Explorer"]')).toBeInTheDocument();
+  });
+
+  it("shows the owning thread's provider icon", () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "codex-thread", provider: "codex" })] });
+    const toolCall = agent();
+    render(
+      <SubagentProviderScope threadId="codex-thread">
+        <SubagentRow toolCall={toolCall} participants={[toolCall]} lifecycle="started" children={[]} hooks={[]} />
+      </SubagentProviderScope>,
+    );
+
+    expect(document.querySelector('[data-provider-icon="codex"]')).toBeInTheDocument();
   });
 
   it("formats an underscored parent task as a sentence title", () => {
@@ -89,24 +102,6 @@ describe("SubagentRow", () => {
     expect(screen.getByRole("button", { name: "Open Correct identity subagent details" })).toBeInTheDocument();
     expect(screen.queryByText("wrong_raw_identity")).not.toBeInTheDocument();
     expect(screen.queryByText("Private task")).not.toBeInTheDocument();
-  });
-
-  it("keeps one identity color stable across rerenders", () => {
-    const view = renderRow(agent());
-    const firstPalette = document.querySelector('[data-subagent-identity-glyph="Explorer"]')?.getAttribute("data-subagent-palette");
-
-    const updatedAgent = agent({ output: "Provider update" });
-    view.rerender(<SubagentRow toolCall={updatedAgent} participants={[updatedAgent]} lifecycle="updated" children={[]} hooks={[]} onSubagentSelect={openSubagentDetail} />);
-
-    expect(document.querySelector('[data-subagent-identity-glyph="Explorer"]')).toHaveAttribute("data-subagent-palette", firstPalette);
-  });
-
-  it("uses the bounded identity palette across distinct agents", () => {
-    const identities = ["Explorer", "Reviewer", "Implementer"];
-    const paletteSlots = identities.map(getSubagentIdentityPaletteIndex);
-
-    expect(new Set(paletteSlots).size).toBeGreaterThan(1);
-    expect(paletteSlots.every((slot) => slot >= 0 && slot < 5)).toBe(true);
   });
 
   it("shows updated without exposing provider output", () => {
@@ -149,12 +144,6 @@ describe("SubagentRow", () => {
     expect(screen.getByRole("button", { name: "Show Private task subagent details" })).toBeInTheDocument();
     expect(screen.queryByText("Private prompt")).not.toBeInTheDocument();
     expect(screen.getByText("Private task")).toBeInTheDocument();
-    const glyph = document.querySelector('[data-subagent-identity-glyph="Subagent"]');
-    expect(glyph).toHaveAttribute(
-      "data-subagent-palette",
-      String(getSubagentIdentityPaletteIndex("agent-1")),
-    );
-    expect(glyph?.getAttribute("style")).toContain("--subagent-identity-color");
   });
 
   it("shows unavailable detail when the presentation is absent", async () => {
@@ -170,25 +159,7 @@ describe("SubagentRow", () => {
     expect(screen.getByTestId("subagent-transcript-unavailable")).toBeInTheDocument();
   });
 
-  it("gives anonymous agents stable per-agent colors", () => {
-    const first = agent({ id: "agent-1", toolInput: {} });
-    const second = agent({ id: "agent-2", toolInput: {} });
-    render(
-      <SubagentRow
-        toolCall={first}
-        participants={[first, second]}
-        lifecycle="started"
-        children={[]}
-        hooks={[]}
-      />,
-    );
-
-    const palettes = [...document.querySelectorAll('[data-subagent-identity-glyph="Subagent"]')]
-      .map((glyph) => glyph.getAttribute("data-subagent-palette"));
-    expect(palettes).toEqual(["0", "4"]);
-  });
-
-  it("uses the canonical child ID for navigation and color", async () => {
+  it("uses the canonical child ID for navigation", async () => {
     const firstTurn = agent({
       id: "spawn-worker",
       toolInput: { receiverThreadIds: ["child-worker"] },
@@ -219,13 +190,6 @@ describe("SubagentRow", () => {
         onSubagentSelect={openSubagentDetail}
       />,
     );
-
-    const palettes = [...document.querySelectorAll('[data-subagent-identity-glyph="Subagent"]')]
-      .map((glyph) => glyph.getAttribute("data-subagent-palette"));
-    expect(palettes).toEqual([
-      String(getSubagentIdentityPaletteIndex("thread:codex-child:worker")),
-      String(getSubagentIdentityPaletteIndex("thread:codex-child:worker")),
-    ]);
 
     await userEvent.click(screen.getAllByRole("button", { name: "Open Subagent subagent details" })[1]!);
     expect(openSubagentDetail).toHaveBeenLastCalledWith("thread:codex-child:worker", "finished");
@@ -305,17 +269,6 @@ describe("SubagentRow", () => {
     expect(openSubagentDetail).not.toHaveBeenCalled();
   });
 
-  it("colors an explicitly named Subagent instead of treating the label as anonymous", () => {
-    renderRow(agent({ toolInput: { agentName: "Subagent" } }));
-
-    const glyph = document.querySelector('[data-subagent-identity-glyph="Subagent"]');
-    expect(glyph).toHaveAttribute(
-      "data-subagent-palette",
-      String(getSubagentIdentityPaletteIndex("Subagent")),
-    );
-    expect(glyph?.getAttribute("style")).toContain("--subagent-identity-color");
-  });
-
   it("keeps child calls and settled output out of chat", () => {
     const child: ToolCall = {
       id: "shell-1",
@@ -388,7 +341,7 @@ describe("SubagentRow", () => {
       expect(lifecycle).toHaveClass("shrink-0");
       expect(lifecycle).not.toHaveAttribute("role", "button");
     }
-    expect(document.querySelector('[data-subagent-identity-glyph="Implementer"]')).toHaveClass("size-4");
+    expect(targetButton.querySelector("[data-provider-icon]")).toBeInTheDocument();
     expect(container.querySelector("[data-lucide='chevron-right']")).not.toBeInTheDocument();
 
     await userEvent.click(sourceButton);

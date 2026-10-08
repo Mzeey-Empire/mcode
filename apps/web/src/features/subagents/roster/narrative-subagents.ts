@@ -95,11 +95,6 @@ export function narrativeRowTab(row: ProjectedSubagentRow): "active" | "finished
   return "status" in row ? "finished" : "active";
 }
 
-/** Match the chat card glyph, which seeds from the identity/alias target. */
-export function narrativePaletteSeed(row: ProjectedSubagentRow): string {
-  return row.logicalIdentityKey ?? row.id;
-}
-
 /**
  * Projects the thread's live calls and persisted narrative into a sub-agent
  * roster. In-thread subagents (Devin, Claude Task) have no canonical child

@@ -14,6 +14,7 @@ All UI primitives live in `apps/web/src/components/ui/`. **Always use these inst
 | `Command` | `command.tsx` | Custom search/autocomplete inputs |
 | `ContextMenu` | `context-menu.tsx` | Custom right-click menus |
 | `Popover` | `popover.tsx` | Custom floating panels |
+| `ProviderIcon`, `ProviderDiscStack` | `provider-icon.tsx` | Importing marks from `chat/ProviderIcons.tsx`, per-file provider maps, recoloured marks |
 | `ScrollArea` | `scroll-area.tsx` | `<div className="overflow-auto">` |
 | `Separator` | `separator.tsx` | `<hr>` or `<div className="border-b">` |
 | `Switch` | `switch.tsx` | Custom toggle implementations |

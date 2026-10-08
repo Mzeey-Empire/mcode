@@ -5,7 +5,7 @@ import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
-import { getSubagentIdentityPaletteIndex } from "@/components/ui/SubagentIdentityGlyph";
+import { createMockThread } from "@/__tests__/mocks/transport";
 
 const harness = vi.hoisted(() => ({
   loadCanonicalSubagentRoster: vi.fn(),
@@ -223,6 +223,8 @@ describe("SubagentsPanel", () => {
       subagentReviewScopeByThread: {},
     });
 
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1", provider: "codex" })] });
+
     render(<SubagentsPanel threadId="thread-1" />);
 
     expect(await screen.findAllByTestId("shared-message-list")).toHaveLength(1);
@@ -230,10 +232,8 @@ describe("SubagentsPanel", () => {
       "data-display-thread-id",
       "canonical-chat-child",
     );
-    expect(document.querySelector('[data-subagent-identity-glyph="Selected child"]')).toHaveAttribute(
-      "data-subagent-palette",
-      String(getSubagentIdentityPaletteIndex("canonical-chat-child")),
-    );
+    expect(screen.getByRole("region", { name: "Selected child subagent details" })
+      .querySelector('[data-provider-icon="codex"]')).toBeInTheDocument();
     expect(screen.queryByText("Other child")).not.toBeInTheDocument();
   });
 

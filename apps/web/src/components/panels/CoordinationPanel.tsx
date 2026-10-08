@@ -11,14 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  ClaudeIcon,
-  CodexIcon,
-  CopilotIcon,
-  CursorProviderIcon,
-  GeminiIcon,
-  OpenCodeIcon,
-} from "@/components/chat/ProviderIcons";
+import { ProviderIcon } from "@/components/ui/provider-icon";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { threadControlKey, useThreadControlStore } from "@/stores/threadControlStore";
@@ -47,19 +40,6 @@ type ThreadControlUserMessage = Extract<
   ThreadControlProjection["messages"][number],
   { role: "user" }
 >;
-
-function ProviderIcon({ providerId }: { readonly providerId: string }) {
-  const props = { size: 14, className: "shrink-0" };
-  switch (providerId) {
-    case "claude": return <ClaudeIcon {...props} />;
-    case "codex": return <CodexIcon {...props} />;
-    case "copilot": return <CopilotIcon {...props} />;
-    case "cursor": return <CursorProviderIcon {...props} />;
-    case "gemini": return <GeminiIcon {...props} />;
-    case "opencode": return <OpenCodeIcon {...props} />;
-    default: return <span aria-hidden className="size-3.5 rounded-full border border-muted/60" />;
-  }
-}
 
 function statusLabel(state: ThreadObservedState): string {
   return state.status === "waiting_for_approval"
@@ -138,7 +118,7 @@ function RelationCard({
   return (
     <article className="border-b border-border/50 px-4 py-3" data-testid="coordination-relation">
       <div className="flex items-start gap-2">
-        <ProviderIcon providerId={destination.providerId} />
+        <ProviderIcon provider={destination.providerId} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <Button
@@ -220,7 +200,7 @@ function OriginRow({
   return (
     <div className="border-b border-border/40 px-4 py-2.5" data-testid="coordination-message-origin">
       <div className="flex items-center gap-2 text-xs text-muted">
-        {origin.type === "thread" && <ProviderIcon providerId={origin.sourceProviderId} />}
+        {origin.type === "thread" && <ProviderIcon provider={origin.sourceProviderId} />}
         <span>{label}</span>
         {source && !sourceUnavailable && (
           <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={() => void navigateToThread(source)}>
@@ -240,7 +220,7 @@ function OriginRow({
 
 function CoordinationRelationSection({ relation }: { relation: ThreadControlProjection["relation"] }) {
   if (!relation) return null;
-  return <section aria-labelledby="coordination-relation-heading"><h3 id="coordination-relation-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Delegated from</h3><div className="px-4 pb-2">{relation.source ? <Button type="button" variant="outline" size="sm" onClick={() => void navigateToThread(relation.source!)}><ProviderIcon providerId={relation.source.providerId} /><ExternalLink size={13} aria-hidden />{relation.source.title}</Button> : <p className="text-xs text-muted">Source thread is no longer available.</p>}</div></section>;
+  return <section aria-labelledby="coordination-relation-heading"><h3 id="coordination-relation-heading" className="px-4 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">Delegated from</h3><div className="px-4 pb-2">{relation.source ? <Button type="button" variant="outline" size="sm" onClick={() => void navigateToThread(relation.source!)}><ProviderIcon provider={relation.source.providerId} /><ExternalLink size={13} aria-hidden />{relation.source.title}</Button> : <p className="text-xs text-muted">Source thread is no longer available.</p>}</div></section>;
 }
 
 function CoordinationChildrenSection({ children, identity, onRefresh }: { children: ThreadControlProjection["children"]; identity: ThreadControlIdentity; onRefresh: () => void }) {
@@ -285,7 +265,7 @@ export function CoordinationPanel({ workspaceId, threadId }: { readonly workspac
       <header className="flex shrink-0 items-center justify-between border-b border-border/50 px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <ProviderIcon providerId={projection.thread.providerId} />
+            <ProviderIcon provider={projection.thread.providerId} />
             <h2 className="text-sm font-semibold">Coordination</h2>
           </div>
           <p className="text-xs text-muted">{projection.thread.title}</p>
