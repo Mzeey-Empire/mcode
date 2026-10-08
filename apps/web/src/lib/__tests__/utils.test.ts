@@ -26,4 +26,9 @@ describe("cn", () => {
   it("lets a later line clamp replace an earlier one", () => {
     expect(cn("text-fade-lines-2", "text-fade-lines-3")).toBe("text-fade-lines-3");
   });
+
+  it("lets a later radius replace an earlier radius role", () => {
+    expect(cn("rounded-menu", "rounded-lg")).toBe("rounded-lg");
+    expect(cn("rounded-md", "rounded-dialog")).toBe("rounded-dialog");
+  });
 });
