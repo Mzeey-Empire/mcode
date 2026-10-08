@@ -112,7 +112,7 @@ export function PreviewAnnotationBundleChip({
             )}
           >
             <MessageCircle size={14} aria-hidden />
-            <span className="truncate">{label}</span>
+            <span className="text-fade">{label}</span>
             {onRemove ? (
               <Button
                 type="button"
@@ -167,7 +167,7 @@ export function PreviewAnnotationBundleChip({
                       {isComment ? "Comment" : "Annotation"}
                     </span>
                     <span aria-hidden className="text-muted/45">·</span>
-                    <span className="min-w-0 truncate font-mono text-[1.1rem] font-normal text-muted">
+                    <span className="min-w-0 text-fade font-mono text-[1.1rem] font-normal text-muted">
                       {feedbackTargetLabel(item)}
                     </span>
                   </div>

@@ -19,7 +19,7 @@ export function ToolOutputTruncationNotice({ toolCall }: ToolOutputTruncationNot
 
   const notice = (
     <div
-      className="max-w-full truncate font-mono text-xs font-normal leading-5 text-muted/65"
+      className="max-w-full text-fade font-mono text-xs font-normal leading-5 text-muted/65"
       aria-label={`Output truncated${total}${saved}`}
     >
       Output truncated{total}{saved}

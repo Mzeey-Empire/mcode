@@ -19,7 +19,7 @@ export function PlanSkeleton({ title }: PlanSkeletonProps) {
         <Tooltip>
           <TooltipTrigger
             render={
-              <h1 className="truncate px-4 pt-4 text-[15px] font-semibold leading-snug opacity-35">
+              <h1 className="text-fade px-4 pt-4 text-[15px] font-semibold leading-snug opacity-35">
                 {title}
               </h1>
             }

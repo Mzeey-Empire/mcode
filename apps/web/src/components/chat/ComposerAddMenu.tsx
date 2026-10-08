@@ -40,14 +40,7 @@ function ComposerAddMenuLabel({ title, description }: ComposerAddMenuLabelProps)
   return (
     <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
       <span className="shrink-0 text-sm font-medium leading-none text-ink">{title}</span>
-      <span
-        className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs font-normal leading-none text-muted"
-        style={{
-          maskImage: "linear-gradient(to right, black calc(100% - 1.5rem), transparent)",
-        }}
-      >
-        {description}
-      </span>
+      <span className="flex-1 text-fade text-xs font-normal leading-none text-muted">{description}</span>
     </span>
   );
 }

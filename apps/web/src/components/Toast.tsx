@@ -57,7 +57,7 @@ function ToastItem({ toast }: { toast: ToastData }) {
       <div className="flex-1 min-w-0">
         <p className="text-xs font-medium text-ink leading-snug">{toast.title}</p>
         {toast.message && (
-          <p className="mt-0.5 text-xs text-muted leading-snug line-clamp-2">
+          <p className="mt-0.5 text-xs text-muted leading-snug text-fade-lines-2">
             {toast.message}
           </p>
         )}

@@ -204,7 +204,7 @@ export const TerminalList = memo(function TerminalList({
                 />
                 <span
                   className={cn(
-                    "truncate text-xs",
+                    "text-fade text-xs",
                     isActive && "font-semibold",
                   )}
                 >

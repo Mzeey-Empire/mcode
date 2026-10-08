@@ -19,7 +19,7 @@ vi.mock("@/transport", async () => ({
 
 describe("SubagentsPanel real thread store path", () => {
   beforeEach(() => {
-    useDiffStore.setState({ subagentDetailByThread: {}, subagentReviewScopeByThread: {} });
+    useDiffStore.setState({ subagentDetailByThread: {} });
     useThreadStore.setState({
       currentThreadId: "thread-1",
       records: new Map(),

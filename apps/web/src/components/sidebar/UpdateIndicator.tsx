@@ -64,7 +64,7 @@ export function UpdateIndicator() {
       <div className="flex items-center justify-between gap-2 px-1.5 py-1">
         <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted">
           <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-          <span className="truncate">Update available</span>
+          <span className="text-fade">Update available</span>
           <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink/40">
             v{status.version}
           </span>
@@ -113,7 +113,7 @@ export function UpdateIndicator() {
           ) : (
             <CircleArrowUp size={12} aria-hidden="true" />
           )}
-          <span className="truncate">{busy ? "Restarting…" : "Restart to update"}</span>
+          <span className="text-fade">{busy ? "Restarting…" : "Restart to update"}</span>
         </span>
         <span className="shrink-0 font-mono text-[10px] tabular-nums text-primary/70">
           v{status.version}

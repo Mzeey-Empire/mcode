@@ -225,7 +225,7 @@ function ProjectActionMenuItem({
       onKeyDown={(event) => recordProjectActionKeyboard(event, row, focusAction, pointerActivation, keyboardActivation)}
       onClick={() => activateProjectAction(row, run, focusAction, onStart, onFocus, pointerActivation, keyboardActivation)}
     >
-      <span className="min-w-0 flex-1 truncate">{row.actionName}</span>
+      <span className="min-w-0 flex-1 text-fade">{row.actionName}</span>
       <ActionStatus status={run?.status ?? null} finishedAt={run?.finishedAt ?? null} />
     </DropdownMenuItem>
   );
@@ -427,7 +427,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
       aria-label={`${run.actionName} terminal`}
     >
       <div className="flex h-9 items-center gap-2 border-b border-border/50 px-3 text-xs">
-        <span className="min-w-0 flex-1 truncate font-medium text-ink">{run.actionName}</span>
+        <span className="min-w-0 flex-1 text-fade font-medium text-ink">{run.actionName}</span>
         <Tooltip>
           <TooltipTrigger
             render={

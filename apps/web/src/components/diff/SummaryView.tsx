@@ -309,7 +309,7 @@ function RegeneratingSummary({
         <MarkdownContent content={summary.content} />
       </div>
       <div className="flex items-center justify-between border-t border-border/30 pt-3">
-        <SummaryModel className="text-[11px] text-muted truncate max-w-[200px]" model={summary.model} />
+        <SummaryModel className="text-[11px] text-muted text-fade max-w-[200px]" model={summary.model} />
         <SummaryTiming summary={summary} />
       </div>
     </div>
@@ -396,7 +396,7 @@ function RenderedSummary({
       </div>
       <div className="flex items-center justify-between border-t border-border/30 pt-3">
         <span className="flex items-center gap-1 text-[11px] text-muted min-w-0">
-          <SummaryModel className="truncate max-w-[140px]" model={summary.model} />
+          <SummaryModel className="text-fade max-w-[140px]" model={summary.model} />
           <span className="shrink-0">
             {" · "}
             <SummaryTimestamp createdAt={summary.createdAt} />

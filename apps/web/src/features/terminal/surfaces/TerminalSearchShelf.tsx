@@ -166,7 +166,7 @@ function SearchMatchStatus({
 
   return (
     <output
-      className="min-w-0 flex-1 truncate whitespace-nowrap text-xs tabular-nums text-muted"
+      className="min-w-0 flex-1 text-fade whitespace-nowrap text-xs tabular-nums text-muted"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -252,7 +252,7 @@ function TerminalSearchControls({
           aria-label="Find in terminal"
           aria-invalid={invalidRegex || searchError !== null}
           maxLength={TERMINAL_SEARCH_QUERY_MAX_LENGTH}
-          className="min-w-0 flex-1 truncate whitespace-nowrap"
+          className="min-w-0 flex-1 text-fade whitespace-nowrap"
           size="sm"
         />
         <Button

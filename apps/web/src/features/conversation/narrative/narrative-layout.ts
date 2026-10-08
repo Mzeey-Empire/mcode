@@ -20,5 +20,5 @@ export function narrativeToolDetailClass(size: "sm" | "md"): string {
     size === "md"
       ? "text-sm text-muted/80"
       : "text-xs text-muted/65";
-  return `font-mono ${tone} truncate flex-1 min-w-0 [overflow-wrap:anywhere]`;
+  return `font-mono ${tone} text-fade flex-1 min-w-0 [overflow-wrap:anywhere]`;
 }

@@ -966,7 +966,7 @@ function InspectorRow({
 }) {
   return (
     <div className="grid grid-cols-[5.25rem_minmax(0,1fr)] items-center gap-2 text-xs text-neutral-300">
-      <span className="truncate text-neutral-300/90">{label}</span>
+      <span className="text-fade text-neutral-300/90">{label}</span>
       {children}
     </div>
   );
@@ -1496,7 +1496,7 @@ function ExpandableQuadGroup({
               : undefined;
         return (
           <Fragment key={entry.key}>
-            <span className="truncate text-neutral-300/[0.85]">{entry.label}</span>
+            <span className="text-fade text-neutral-300/[0.85]">{entry.label}</span>
             <div className="flex items-center justify-center">
               {link ? (
                 <VisualLinkButton
@@ -4114,7 +4114,7 @@ export function PreviewPanel({
                 <div
                   className="flex items-center justify-between border-b border-white/[0.08] bg-white/[0.04] px-4 py-1.5 text-xs text-neutral-200"
                 >
-                  <span className="max-w-[15rem] truncate font-semibold leading-5">
+                  <span className="max-w-[15rem] text-fade font-semibold leading-5">
                     {annotationBubbleTargetLabel(visibleOpenBubbleBase)}
                   </span>
                   <GripVertical

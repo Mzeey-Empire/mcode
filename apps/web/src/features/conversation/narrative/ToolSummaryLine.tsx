@@ -181,7 +181,7 @@ function ToolGroupDetails({
         icon={<LeadingIcon className="h-3 w-3 shrink-0 text-muted/55" />}
         badge={worstBadge ? <StatusBadge status={worstBadge} /> : undefined}
       >
-        <span className="min-w-0 flex-1 truncate font-medium text-ink/75">
+        <span className="min-w-0 flex-1 text-fade font-medium text-ink/75">
           {summaryText}
         </span>
       </NarrativeSummaryLine>

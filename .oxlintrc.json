@@ -48,6 +48,14 @@
     "unicorn/no-useless-spread": "warn",
     "unicorn/no-useless-fallback-in-spread": "warn"
   },
+  "overrides": [
+    {
+      "files": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"],
+      "rules": {
+        "mcode/no-ellipsis-truncation": "error"
+      }
+    }
+  ],
   "ignorePatterns": [
     "dist/**",
     "out/**",

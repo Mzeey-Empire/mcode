@@ -125,7 +125,7 @@ function RelationCard({
               type="button"
               variant="link"
               size="sm"
-              className="min-w-0 truncate px-0 text-left text-sm font-medium"
+              className="min-w-0 text-fade px-0 text-left text-sm font-medium"
               onClick={() => void navigateToThread(destination)}
               aria-label={`Open destination Project and thread ${destination.title}`}
             >
@@ -138,7 +138,7 @@ function RelationCard({
           <p className="mt-1 flex items-center gap-1 text-xs text-muted">
             <span>{PROVIDER_LABELS[destination.providerId] ?? destination.providerId}</span>
             <span aria-hidden>·</span>
-            <span className="truncate">{destination.workspaceId}</span>
+            <span className="text-fade">{destination.workspaceId}</span>
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => void navigateToThread(destination)}>
@@ -213,7 +213,7 @@ function OriginRow({
           Historical source unavailable; navigation disabled.
         </p>
       )}
-      <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-sm text-ink">{message.content}</p>
+      <p className="mt-1 text-fade-lines-2 whitespace-pre-wrap text-sm text-ink">{message.content}</p>
     </div>
   );
 }

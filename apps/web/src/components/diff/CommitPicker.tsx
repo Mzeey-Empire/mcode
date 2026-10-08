@@ -25,7 +25,7 @@ function mergeFirstPageCommits(current: GitCommit[], firstPage: GitCommit[]): Gi
   ];
 }
 
-/** Format an ISO date to a compact relative string (mirrors CommitEntry's scale). */
+/** Format an ISO date to a compact relative string. */
 function relativeTime(isoDate: string): string {
   const then = new Date(isoDate).getTime();
   if (!isFinite(then)) return "";
@@ -229,7 +229,7 @@ function CommitPickerScope({
           {selected?.shortSha ?? (loadingInitial ? "..." : "-")}
         </span>
         {selected && (
-          <span className="min-w-0 truncate text-[11px] text-muted">
+          <span className="min-w-0 text-fade text-[11px] text-muted">
             {selected.message}
           </span>
         )}
@@ -264,7 +264,7 @@ function CommitPickerScope({
                   <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink/60">
                     {commit.shortSha}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink/80">
+                  <span className="min-w-0 flex-1 text-fade text-[11.5px] text-ink/80">
                     {commit.message}
                   </span>
                   <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted/45">

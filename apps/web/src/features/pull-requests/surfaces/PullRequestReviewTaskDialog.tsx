@@ -183,15 +183,15 @@ function SourceReadout({ source }: { source: PullRequestReviewSource }) {
       </p>
       <div className="mt-2 flex min-w-0 items-center gap-2 text-sm text-ink/90">
         <GitPullRequest size={14} aria-hidden className="shrink-0 text-primary/85" />
-        <span className="truncate font-medium">
+        <span className="text-fade font-medium">
           {source.identity.owner}/{source.identity.repository} #{source.identity.number}
         </span>
       </div>
-      <p className="mt-1 truncate text-xs text-muted">{source.title}</p>
+      <p className="mt-1 text-fade text-xs text-muted">{source.title}</p>
       <p className="mt-3 flex min-w-0 items-center gap-2 font-mono text-xs text-ink/80">
-        <span className="truncate">{source.base.name}</span>
+        <span className="text-fade">{source.base.name}</span>
         <span aria-hidden className="text-muted/45">←</span>
-        <span className="truncate text-ink">{source.head.name}</span>
+        <span className="text-fade text-ink">{source.head.name}</span>
         <span className="ml-auto shrink-0 text-muted">
           {source.expectedHeadOid.slice(0, 7)}
         </span>
@@ -364,8 +364,8 @@ function ReviewTaskPreparationError({
               {candidates.map((candidate) => (
                 <SelectItem key={candidate.id} value={candidate.id}>
                   <span className="min-w-0">
-                    <span className="block truncate">{candidate.name}</span>
-                    <span className="block truncate font-mono text-xs text-muted">{candidate.path}</span>
+                    <span className="block text-fade">{candidate.name}</span>
+                    <span className="block text-fade font-mono text-xs text-muted">{candidate.path}</span>
                   </span>
                 </SelectItem>
               ))}
@@ -438,7 +438,7 @@ function ReviewTaskPreparedContent({
         <div className="flex items-center gap-2 text-xs text-muted">
           <MapPin size={13} aria-hidden />
           <span>Project</span>
-          <span className="ml-auto truncate text-ink/85">{prepared.workspace.name}</span>
+          <span className="ml-auto text-fade text-ink/85">{prepared.workspace.name}</span>
         </div>
         {confirmationRequired ? (
           <ReviewTaskNewWorktreeFields

@@ -165,13 +165,13 @@ export function HookRow({ hook }: HookRowProps) {
       >
 
         {/* Hook name */}
-        <span className="min-w-0 truncate text-ink/80 flex-1">
+        <span className="min-w-0 text-fade text-ink/80 flex-1">
           {hook.hookName}
         </span>
 
         {/* Trigger label */}
         {hook.toolName && (
-          <span className="min-w-0 truncate font-mono text-xs text-muted/65">
+          <span className="min-w-0 text-fade font-mono text-xs text-muted/65">
             on {hook.toolName}
           </span>
         )}

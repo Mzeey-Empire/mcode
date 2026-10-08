@@ -449,7 +449,7 @@ function CustomProfileRow({
 }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 px-3 py-2 text-xs">
-      <span className="min-w-0 truncate">
+      <span className="min-w-0 text-fade">
         {profile.name}
         <span className="ml-2 text-muted">{profile.executable}</span>
       </span>
@@ -483,7 +483,7 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
           {!model.profilesLoading && model.certifiedProfiles.length === 0 ? <p className="text-xs text-muted">No certified profiles detected.</p> : null}
           {model.certifiedProfiles.map((profile) => (
             <div key={profile.id} className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border/50 px-3 py-2 text-xs">
-              <span className="min-w-0 truncate">
+              <span className="min-w-0 text-fade">
                 {profile.name}
                 <span className="ml-2 text-muted">{profile.executable}</span>
               </span>
@@ -505,7 +505,7 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
           ))}
           {model.recovery?.blockedProfiles.map((profile) => (
             <div key={`recovered-${profile.id}`} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 px-3 py-2 text-xs">
-              <span className="min-w-0 truncate">
+              <span className="min-w-0 text-fade">
                 {profile.name}
                 <span className="ml-2 text-muted">{profile.executable}</span>
               </span>

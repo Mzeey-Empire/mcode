@@ -72,7 +72,7 @@ export function QuotePreview({ quote }: { readonly quote: string }) {
         ref={quoteRef}
         className={isExpanded
           ? "whitespace-pre-wrap break-words text-sm leading-5"
-          : "line-clamp-3 overflow-hidden whitespace-pre-wrap break-words text-sm leading-5"}
+          : "text-fade-lines-3 overflow-hidden whitespace-pre-wrap break-words text-sm leading-5"}
       >
         {quote}
       </p>
@@ -497,7 +497,7 @@ export function ComposerCommentAttachmentShell({
             className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-ink hover:bg-hover focus-visible:z-10"
           >
             <MessageCircle size={16} aria-hidden />
-            <span className="min-w-0 truncate">{label}</span>
+            <span className="min-w-0 text-fade">{label}</span>
           </Button>
           {!readOnly && onRemove && (
             <Button

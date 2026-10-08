@@ -263,7 +263,7 @@ function GoalPill({ label, condition, hint }: { label: string; condition?: strin
                   aria-expanded="false"
                   aria-label="Expand full goal condition"
                   dir="auto"
-                  className="min-w-0 cursor-pointer truncate text-left font-serif text-sm italic leading-snug text-ink hover:text-ink/80"
+                  className="min-w-0 cursor-pointer text-fade text-left font-serif text-sm italic leading-snug text-ink hover:text-ink/80"
                 >
                   &ldquo;{condition}&rdquo;
                 </button>
@@ -337,7 +337,7 @@ function ImageThumbnail({
       <div className={frame}>
         <div className="flex items-center gap-2 rounded-xl bg-hover/50 px-3 py-2.5">
           <ImageIcon size={14} className="shrink-0 text-muted" />
-          <span className="truncate text-xs text-muted">{name}</span>
+          <span className="text-fade text-xs text-muted">{name}</span>
         </div>
       </div>
     );
@@ -459,7 +459,6 @@ function QuoteBlock({
   }
 
   const label = "Reply";
-  const displayText = quotedText.slice(0, 150) + (quotedText.length > 150 ? "..." : "");
 
   return (
     <button
@@ -468,7 +467,7 @@ function QuoteBlock({
       className="mb-1.5 w-full cursor-pointer rounded-md border-l-2 border-primary/40 bg-hover/30 px-2.5 py-1.5 text-left transition-colors hover:bg-hover/50 select-none"
     >
       <p className="text-xs font-semibold text-primary/60 leading-none mb-0.5">{label}</p>
-      <p className="text-xs text-muted/60 truncate italic">{displayText}</p>
+      <p className="text-xs text-muted/60 text-fade italic">{quotedText}</p>
     </button>
   );
 }

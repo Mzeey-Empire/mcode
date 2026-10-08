@@ -118,7 +118,7 @@ export function PlanChrome({
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="min-w-0 truncate text-[11px] leading-snug text-muted">
+              <span className="min-w-0 text-fade text-[11px] leading-snug text-muted">
                 {plan.changeSummary}
               </span>
             }

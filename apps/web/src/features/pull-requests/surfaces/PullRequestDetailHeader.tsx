@@ -118,7 +118,7 @@ function PullRequestBranchRow({ model }: { model: PullRequestDetail | PullReques
   return (
     <div className="grid min-w-0 grid-cols-[1.25rem_5.25rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[1.25rem_6.5rem_minmax(0,1fr)]">
       <GitBranch size={14} aria-hidden className="text-muted/80" /><dt className="text-muted">Branch</dt>
-      <dd className="flex min-w-0 items-center gap-2 font-mono"><span aria-label={`Head branch ${model.head.name}`} className="min-w-0 truncate text-ink/90">{model.head.name}</span><ChevronRight size={13} aria-hidden className="shrink-0 text-muted/55" /><span aria-label={`Base branch ${model.base.name}`} className="min-w-0 truncate text-ink/90">{model.base.name}</span>{model.additions > 0 ? <span aria-label={`${model.additions} additions`} className="ml-1 shrink-0 text-[var(--diff-add-strong)]">+{model.additions}</span> : null}{model.deletions > 0 ? <span aria-label={`${model.deletions} deletions`} className="shrink-0 text-[var(--diff-remove-strong)]">−{model.deletions}</span> : null}</dd>
+      <dd className="flex min-w-0 items-center gap-2 font-mono"><span aria-label={`Head branch ${model.head.name}`} className="min-w-0 text-fade text-ink/90">{model.head.name}</span><ChevronRight size={13} aria-hidden className="shrink-0 text-muted/55" /><span aria-label={`Base branch ${model.base.name}`} className="min-w-0 text-fade text-ink/90">{model.base.name}</span>{model.additions > 0 ? <span aria-label={`${model.additions} additions`} className="ml-1 shrink-0 text-[var(--diff-add-strong)]">+{model.additions}</span> : null}{model.deletions > 0 ? <span aria-label={`${model.deletions} deletions`} className="shrink-0 text-[var(--diff-remove-strong)]">−{model.deletions}</span> : null}</dd>
     </div>
   );
 }

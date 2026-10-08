@@ -350,7 +350,7 @@ function ThreadDeleteWorktreeOption({
       <GitBranch size={14} className="shrink-0 text-muted" />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">Delete worktree</div>
-        <div className="truncate text-xs text-muted">{dialog.worktreePath}</div>
+        <div className="text-fade text-xs text-muted">{dialog.worktreePath}</div>
       </div>
       <Switch checked={deleteWorktree} onCheckedChange={(checked) => { if (!isDeleting) onChange(checked); }} disabled={isDeleting} className="data-[checked]:bg-destructive" aria-label="Delete worktree" />
     </div>
@@ -2004,7 +2004,7 @@ function ThreadRowTitle({ thread, presentation }: Pick<ThreadRowVisualProps, "th
     <>
       <span
         className={cn(
-          "truncate flex-1",
+          "text-fade flex-1",
           presentation.isUserCompleted && "text-muted/55 line-through decoration-muted/55 decoration-1",
           presentation.isStaleWorktree && "text-[var(--diff-remove-strong)]/85 line-through",
         )}
@@ -2054,7 +2054,7 @@ function ThreadProviderUnavailable({
 
 function ThreadCleanupStatus({ isEditing, statusLabel }: { isEditing: boolean; statusLabel: string | null }) {
   if (isEditing || !statusLabel) return null;
-  return <span role="status" className="shrink-0 truncate text-xs text-muted">{statusLabel}</span>;
+  return <span role="status" className="shrink-0 text-fade text-xs text-muted">{statusLabel}</span>;
 }
 
 function ThreadCleanupRetry({
@@ -2262,14 +2262,14 @@ function SidebarThreadPreview({
           className="flex min-w-0 items-center gap-2"
         >
           <Folder size={13} aria-hidden className="shrink-0 opacity-75" />
-          <span className="truncate text-xs">{workspaceName}</span>
+          <span className="text-fade text-xs">{workspaceName}</span>
         </div>
         <div
           aria-label={`Branch, ${checkoutLabel}`}
           className="flex min-w-0 items-center gap-2"
         >
           <GitBranch size={13} aria-hidden className="shrink-0 opacity-75" />
-          <span className="truncate font-mono text-xs">{checkoutLabel}</span>
+          <span className="text-fade font-mono text-xs">{checkoutLabel}</span>
         </div>
       </div>
     </div>
@@ -2569,7 +2569,7 @@ function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: (
     <Tooltip>
       <TooltipTrigger render={
         <Button type="button" variant="ghost" size="xs" aria-label={`Open project ${workspace.name}`} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 dark:hover:bg-transparent">
-          <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap font-medium tracking-tight group-hover/ws:[mask-image:linear-gradient(to_right,black_calc(100%_-_1.5rem),transparent)] group-focus-within/ws:[mask-image:linear-gradient(to_right,black_calc(100%_-_1.5rem),transparent)] group-hover/ws:[-webkit-mask-image:linear-gradient(to_right,black_calc(100%_-_1.5rem),transparent)] group-focus-within/ws:[-webkit-mask-image:linear-gradient(to_right,black_calc(100%_-_1.5rem),transparent)]">{workspace.name}</span>
+          <span className="flex-1 text-fade font-medium tracking-tight">{workspace.name}</span>
         </Button>
       } />
       <TooltipContent side="right" className="text-xs">{workspace.name}</TooltipContent>
@@ -2887,7 +2887,7 @@ function DraftRow({
         <span className="shrink-0 text-[11px] font-medium text-muted/60">
           Draft
         </span>
-        <span className="min-w-0 flex-1 truncate text-muted/75">
+        <span className="min-w-0 flex-1 text-fade text-muted/75">
           {preview}
         </span>
         <span className="shrink-0 text-[11px] text-muted/50">

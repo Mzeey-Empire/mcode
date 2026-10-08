@@ -69,7 +69,7 @@ export function DiffViewer({ snapshotId, filePath, changeType = "modified" }: Di
       >
         <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
         <FileText className="h-3 w-3 shrink-0" />
-        <span className="truncate font-mono">{filePath}</span>
+        <span className="text-fade font-mono">{filePath}</span>
         <span className="ml-auto text-xs opacity-60">{changeLabel}</span>
         {loading && <span className="text-xs">Loading...</span>}
       </button>

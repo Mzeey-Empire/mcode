@@ -63,7 +63,7 @@ export function PlanAnnotation({
     <div className="my-2.5 overflow-hidden rounded-lg bg-panel shadow-lg shadow-black/25 ring-1 ring-border/60 transition-shadow duration-200 focus-within:ring-primary/35 animate-wizard-float-rise">
       <div className="flex items-center gap-2 px-3.5 pt-3 pb-2">
         <span className="size-1.5 shrink-0 rounded-full bg-primary/70" aria-hidden />
-        <span className="min-w-0 truncate font-mono text-[9px] uppercase tracking-[0.18em] text-muted/55">
+        <span className="min-w-0 text-fade font-mono text-[9px] uppercase tracking-[0.18em] text-muted/55">
           Note <span className="text-muted/30">·</span>{" "}
           <span className="text-muted/75 normal-case tracking-normal">{sectionTitle}</span>
         </span>

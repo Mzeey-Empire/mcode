@@ -607,7 +607,7 @@ function FavoriteModelRow({
         label={entry.label}
       >
         <ProviderIcon provider={entry.providerId} size={12} />
-        <span className="truncate text-left">{entry.label}</span>
+        <span className="text-fade text-left">{entry.label}</span>
       </ModelSelectionButton>
     </div>
   );
@@ -633,7 +633,7 @@ function GatedModelRow({ model }: { model: ModelDefinition }) {
               aria-label={`${model.label}, no longer available`}
               className="flex min-w-0 flex-1 cursor-not-allowed items-center gap-2 rounded px-2 py-1.5 text-xs text-muted/60"
             >
-              <span className="flex-1 truncate text-left">{model.label}</span>
+              <span className="flex-1 text-fade text-left">{model.label}</span>
               <span className="text-xs tabular-nums shrink-0">Ended {endDate}</span>
             </button>
           }
@@ -711,7 +711,7 @@ function AvailableModelRow({
         onSelect={onSelect}
         label={model.label}
       >
-        <span className="flex-1 truncate text-left">{model.label}</span>
+        <span className="flex-1 text-fade text-left">{model.label}</span>
         <ModelMetadata model={model} />
         {selected && <Check size={10} className="shrink-0 text-ink" aria-hidden />}
       </ModelSelectionButton>

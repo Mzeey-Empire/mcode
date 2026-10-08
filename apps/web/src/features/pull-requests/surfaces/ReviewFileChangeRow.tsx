@@ -67,7 +67,7 @@ export function ReviewFileChangeRow({
             <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
               <FileTypeIcon filePath={file.path} size={14} />
             </span>
-            <span className="min-w-0 flex-1 truncate text-left font-mono text-xs">{name}</span>
+            <span className="min-w-0 flex-1 text-fade text-left font-mono text-xs">{name}</span>
             {file.binary ? (
               <Badge variant="ghost" size="sm" className="max-w-20 px-1 font-mono uppercase tracking-wide">
                 Binary

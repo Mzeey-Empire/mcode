@@ -12,7 +12,7 @@ import {
 import { MoreIcon } from "@/components/ui/icon-map";
 import type { ReviewFileChange } from "@mcode/contracts";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
-import { useDiffStore, type SelectedFile } from "@/stores/diffStore";
+import { useDiffStore, type DiffSource } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -53,7 +53,7 @@ const pierrePoolOptions = {
 /** Props for FileList. */
 interface FileListProps {
   files: ReviewFileChange[];
-  source: SelectedFile["source"];
+  source: DiffSource;
   id: string;
   /** Thread that owns these files, used to scope the inline diff cache. */
   threadId: string;
@@ -525,9 +525,9 @@ function FileJumpItem({ filePath, onSelect }: FileJumpItemProps) {
     >
       <FileTypeIcon filePath={filePath} size={14} className="mt-0.5" />
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-mono text-[11px] text-ink/85">{basename}</span>
+        <span className="block text-fade font-mono text-[11px] text-ink/85">{basename}</span>
         {parent && (
-          <span className="block truncate font-mono text-[10px] text-muted/65">
+          <span className="block text-fade font-mono text-[10px] text-muted/65">
             {parent}/
           </span>
         )}

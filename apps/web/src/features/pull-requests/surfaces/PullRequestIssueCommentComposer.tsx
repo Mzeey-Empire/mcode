@@ -323,7 +323,7 @@ function TimelineCommentMetadata({
             <p
               id="pull-request-comment-status"
               role={composer.localError ? "alert" : "status"}
-              className="min-w-0 flex-1 truncate text-xs text-muted"
+              className="min-w-0 flex-1 text-fade text-xs text-muted"
             >
               {commentStatus}
             </p>

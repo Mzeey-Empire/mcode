@@ -8,6 +8,7 @@ import { normalizeWorktreePath, worktreeBranchLabel } from "@/lib/worktree";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { Spinner } from "@/components/ui/spinner";
+import { PathText } from "@/components/ui/path-text";
 
 interface WorktreePickerProps {
   worktrees: WorktreeInfo[];
@@ -70,10 +71,12 @@ function WorktreePickerContent({
                     : "text-ink",
                 )}
               >
-                <span className="font-medium">{worktree.name}</span>
-                <span className="text-xs text-muted">
-                  {worktreeBranchLabel(worktree)} &middot; {truncatePath(worktree.path)}
-                  {!worktree.managed && <Badge variant="secondary" size="sm" className="ml-1">external</Badge>}
+                <span className="max-w-full text-fade font-medium">{worktree.name}</span>
+                <span className="flex w-full min-w-0 items-baseline gap-1 text-xs text-muted">
+                  <span className="max-w-1/2 shrink-0 text-fade">{worktreeBranchLabel(worktree)}</span>
+                  <span aria-hidden>&middot;</span>
+                  <PathText path={worktree.path} className="flex-1" />
+                  {!worktree.managed && <Badge variant="secondary" size="sm" className="shrink-0">external</Badge>}
                 </span>
               </CommandItem>
             ))}
@@ -122,12 +125,6 @@ export function WorktreePicker({
       </PopoverContent>
     </Popover>
   );
-}
-
-function truncatePath(path: string): string {
-  const parts = path.replace(/\\/g, "/").split("/");
-  if (parts.length <= 4) return path;
-  return ".../" + parts.slice(-3).join("/");
 }
 
 export default WorktreePicker;

@@ -166,7 +166,7 @@ function PullRequestRowComponent({
         </span>
         <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1">
           <span className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-sm font-medium leading-5 tracking-[-0.01em]">
+            <span className="text-fade text-sm font-medium leading-5 tracking-[-0.01em]">
               {item.title}
             </span>
             <span className="shrink-0 font-mono text-xs tabular-nums text-muted/70">
@@ -189,13 +189,13 @@ function PullRequestRowComponent({
                 className="size-4 shrink-0 rounded-full opacity-85"
               />
             )}
-            <span className="truncate">
+            <span className="text-fade">
               {item.identity.owner}/{item.identity.repository}
             </span>
             <span aria-hidden className="text-muted/35">
               ·
             </span>
-            <span className="truncate">{item.head.name}</span>
+            <span className="text-fade">{item.head.name}</span>
           </span>
           <span className="flex items-center justify-end gap-2 font-mono text-xs font-medium tabular-nums text-muted/80">
             {item.additions > 0 && <span>+{item.additions}</span>}

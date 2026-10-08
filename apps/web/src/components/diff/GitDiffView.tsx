@@ -1,5 +1,5 @@
 import type { ReviewComparison } from "@mcode/contracts";
-import type { SelectedFile } from "@/stores/diffStore";
+import type { DiffSource } from "@/stores/diffStore";
 import { FileList } from "./FileList";
 
 /** The threadless git working-tree views the Review tab renders against the workspace root. */
@@ -8,7 +8,7 @@ export type GitView = "unstaged" | "staged" | "commit" | "branch";
 /** One settled git comparison consumed by both the diff and Files projections. */
 export interface ResolvedGitComparison {
   comparison: ReviewComparison;
-  source: SelectedFile["source"];
+  source: DiffSource;
   id: string;
   cacheVersion: string | number;
 }

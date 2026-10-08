@@ -300,7 +300,7 @@ function MarkdownLinkAnchor({
                 imageTestId="markdown-link-favicon"
               />
             )}
-            <span className="min-w-0 truncate">{label}</span>
+            <span className="min-w-0 text-fade">{label}</span>
             {safeHref ? <ExternalLink size={12} aria-hidden className="shrink-0 text-muted" /> : null}
           </a>
         }

@@ -228,7 +228,7 @@ function SubagentParticipant({
         aria-describedby={`subagent-status-${participant.id}`}
       >
         <ProviderIcon provider={provider} size={16} />
-        <span className="min-w-0 truncate text-xs font-medium text-ink/85">
+        <span className="min-w-0 text-fade text-xs font-medium text-ink/85">
           {view.title}
         </span>
       </Button>

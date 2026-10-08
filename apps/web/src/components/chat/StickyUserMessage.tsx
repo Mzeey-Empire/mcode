@@ -143,7 +143,7 @@ export function StickyUserMessage({
             <p
               className={cn(
                 "break-words",
-                expanded ? "max-h-40 overflow-y-auto whitespace-pre-wrap" : "line-clamp-2",
+                expanded ? "max-h-40 overflow-y-auto whitespace-pre-wrap" : "text-fade-lines-2",
               )}
             >
               {preview}

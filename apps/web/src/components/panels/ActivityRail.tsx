@@ -306,7 +306,7 @@ function RailTab({
           <span
             aria-hidden
             className={cn(
-              "absolute left-8 right-8 truncate text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+              "absolute left-8 right-8 text-fade text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
               expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
             )}
           >
@@ -426,7 +426,7 @@ function BrowserPageRailTab({
           <span
             aria-hidden
             className={cn(
-              "absolute left-8 right-8 truncate text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+              "absolute left-8 right-8 text-fade text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
               expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
             )}
           >
@@ -587,7 +587,7 @@ function RailAddControl({
           <span
             aria-hidden
             className={cn(
-              "absolute left-8 right-2 truncate text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+              "absolute left-8 right-2 text-fade text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
               expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
             )}
           >
@@ -613,7 +613,7 @@ function RailAddControl({
               <span
                 aria-hidden
                 className={cn(
-                  "absolute left-8 right-2 truncate text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+                  "absolute left-8 right-2 text-fade text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
                   expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
                 )}
               >
@@ -713,7 +713,7 @@ function RailHeader({
           <span
             aria-hidden
             className={cn(
-              "absolute left-8 right-8 truncate text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+              "absolute left-8 right-8 text-fade text-left text-xs font-medium transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
               expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
             )}
           >

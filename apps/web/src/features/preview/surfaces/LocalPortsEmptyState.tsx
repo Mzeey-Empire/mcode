@@ -78,7 +78,7 @@ export function LocalPortsEmptyState({
                   </span>
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-ink">
+                  <span className="block text-fade text-sm font-medium text-ink">
                     {p.name}
                   </span>
                   <span className="block text-xs text-muted">

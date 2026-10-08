@@ -159,9 +159,9 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
                   <div className="flex h-[72px] w-[140px] flex-col justify-center gap-0.5 px-3 py-1">
                     <div className="flex min-h-0 items-center gap-2">
                       <FileText size={18} className="shrink-0 text-primary" />
-                      <span className="truncate text-xs font-medium text-ink">Page context</span>
+                      <span className="text-fade text-xs font-medium text-ink">Page context</span>
                     </div>
-                    <span className="block max-w-[120px] truncate pl-[26px] text-xs leading-tight text-muted">
+                    <span className="block max-w-[120px] text-fade pl-[26px] text-xs leading-tight text-muted">
                       {spill ? spill.line : "No image"}
                     </span>
                     {removeButton(att.name, att.id)}
@@ -202,9 +202,10 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
                     {spill ? (
                       <Tooltip>
                         <TooltipTrigger
-                          render={<span className="absolute bottom-0.5 left-0.5 right-0.5 z-10 truncate rounded bg-background/85 px-0.5 text-center text-xs font-medium text-ink/90 shadow-sm" />}
+                          render={<span className="absolute bottom-0.5 left-0.5 right-0.5 z-10 flex justify-center rounded bg-background/85 px-0.5 text-xs font-medium text-ink/90 shadow-sm" />}
                         >
-                          + spill file
+                          {/* The fade mask covers its whole box, so it sits inside the pill to keep the pill fill solid. */}
+                          <span className="text-fade">+ spill file</span>
                         </TooltipTrigger>
                         <TooltipContent>{spill.title}</TooltipContent>
                       </Tooltip>

@@ -155,7 +155,7 @@ const PullRequestSummaryPanel = memo(function PullRequestSummaryPanel({
           role="status"
           className="flex items-center gap-2 bg-primary/8 px-4 py-2 text-xs text-muted"
         >
-          <span className="min-w-0 flex-1 truncate">
+          <span className="min-w-0 flex-1 text-fade">
             {summaryStale
               ? "Stale Summary data."
               : "Summary data is unavailable."}{" "}
@@ -266,7 +266,7 @@ const PullRequestTimelinePanel = memo(function PullRequestTimelinePanel({
           role="status"
           className="flex items-center gap-2 bg-primary/8 px-4 py-2 text-xs text-muted"
         >
-          <span className="min-w-0 flex-1 truncate">
+          <span className="min-w-0 flex-1 text-fade">
             {presentation.stale ? "Stale Timeline data." : "Timeline is unavailable."}{" "}
             {presentation.error.message}
           </span>
@@ -666,7 +666,7 @@ function PullRequestDetailLoadedContent({
     <>
       {detailLane.stale && detailLane.error && (
         <div className="flex items-center gap-2 bg-destructive/8 px-4 py-2 text-xs text-muted">
-          <span className="min-w-0 flex-1 truncate">
+          <span className="min-w-0 flex-1 text-fade">
             Stale detail. {detailLane.error.message}
           </span>
           <Button
