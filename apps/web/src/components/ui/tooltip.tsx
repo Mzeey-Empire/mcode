@@ -82,8 +82,9 @@ function TooltipContent({
             className={cn(
               // A 10px square keeps Base UI's centring right on every side; the SVG draws the
               // 10x6 arrow in its top half and the box rotates so the tip faces the trigger.
-              // The fill covers the popup border under the arrow's base.
-              "size-2.5 fill-panel stroke-border data-[side=bottom]:bottom-full data-[side=bottom]:rotate-180 data-[side=inline-end]:right-full data-[side=inline-end]:rotate-90 data-[side=inline-start]:left-full data-[side=inline-start]:-rotate-90 data-[side=left]:left-full data-[side=left]:-rotate-90 data-[side=right]:right-full data-[side=right]:rotate-90 data-[side=top]:top-full",
+              // The arrow is placed against the positioner's outer edge, so it starts 1px
+              // inside it and its fill covers the popup border under the base.
+              "size-2.5 fill-panel stroke-border data-[side=bottom]:bottom-[calc(100%-1px)] data-[side=bottom]:rotate-180 data-[side=inline-end]:right-[calc(100%-1px)] data-[side=inline-end]:rotate-90 data-[side=inline-start]:left-[calc(100%-1px)] data-[side=inline-start]:-rotate-90 data-[side=left]:left-[calc(100%-1px)] data-[side=left]:-rotate-90 data-[side=right]:right-[calc(100%-1px)] data-[side=right]:rotate-90 data-[side=top]:top-[calc(100%-1px)]",
               arrowClassName
             )}
           >
