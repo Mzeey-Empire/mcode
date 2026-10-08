@@ -86,7 +86,7 @@ export interface AgentRouterDeps {
   >;
   gitWatcherService?: Pick<GitWatcherService, "watchThreadWorktree">;
   hookExecutionRepo: Pick<HookExecutionRepo, "listByMessage">;
-  messageRepo: ConversationPageDeps["messageRepo"] & Pick<MessageRepo, "findByIdInThread">;
+  messageRepo: ConversationPageDeps["messageRepo"] & Pick<MessageRepo, "confirmUserMessage">;
   narrativeStore: Pick<NarrativeStore, "load">;
   planQuestionAnswersRepo: ConversationPageDeps["planQuestionAnswersRepo"];
   planRepo: Pick<PlanRepo, "updateStatus" | "listByThread">;
@@ -152,7 +152,7 @@ const agentHandlers: AgentRpcHandlerMap = {
       await Promise.all(pending);
       pending = pendingMessageAdmissions.get(key);
     }
-    return { admitted: deps.messageRepo.findByIdInThread(params.threadId, params.messageId)?.role === "user" };
+    return { admitted: await deps.messageRepo.confirmUserMessage(params.threadId, params.messageId) };
   },
   "agent.recoveryIncident": (deps) => deps.turnRecoveryService.currentRecoveryIncident(),
   "agent.retry": async (deps, params) => {

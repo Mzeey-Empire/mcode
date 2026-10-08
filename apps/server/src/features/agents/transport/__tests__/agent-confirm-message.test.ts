@@ -66,7 +66,10 @@ function routerDeps(sendMessage: AgentRouterDeps["agentService"]["sendMessage"],
   };
 }
 
-async function fixture(beforeCommit: () => Promise<void> = async () => {}) {
+async function fixture(
+  beforeCommit: () => Promise<void> = async () => {},
+  startParentTurn: (commit: () => Promise<unknown>) => Promise<unknown> = (commit) => commit(),
+) {
   const db = openAgentStorageTestDatabase();
   const writer = agentStorageTestWriter(db);
   const threads = new ThreadRepo(db, writer);
@@ -87,7 +90,10 @@ async function fixture(beforeCommit: () => Promise<void> = async () => {}) {
   const canonical = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), () => {});
   const commands = new AgentRuntimeCommandPort();
   const plans = new PlanTurnService(threads, providers, new PlanQuestionService(messages, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer), new AgentTurnCommandPort(commands));
-  const owner: TurnParentStartOwner = { start: async ({ parentTurn }) => { await beforeCommit(); await canonical.startParentTurn(parentTurn); } };
+  const owner: TurnParentStartOwner = { start: async ({ parentTurn }) => {
+    await beforeCommit();
+    await startParentTurn(() => canonical.startParentTurn(parentTurn));
+  } };
   const admission = new TurnAdmissionDispatchCoordinator(
     threads, workspaces, messages, worktrees, new AttachmentService(), providers,
     new ProviderAvailabilityService(settings, providers), canonical, settings, plans,
@@ -112,7 +118,7 @@ async function fixture(beforeCommit: () => Promise<void> = async () => {}) {
   const messageId = NodeCrypto.randomUUID();
   const params = { threadId: thread.id, messageId };
   return {
-    deps, messages, params, providerFinished,
+    db, writer, deps, messages, params, providerFinished,
     send: () => routeAgentRpc("agent.send", { ...params, content: "Review these comments" }, deps),
     confirm: () => routeAgentRpc("agent.confirmMessage", params, deps),
   };
@@ -171,6 +177,35 @@ describe("agent.confirmMessage", () => {
     const message = await f.messages.create(f.params.threadId, "user", "Previously queued", 1);
     await expect(routeAgentRpc("agent.confirmMessage", { ...f.params, messageId: message.id }, f.deps))
       .resolves.toEqual({ admitted: true });
+  });
+
+  it.each([true, false])("waits for a queued start write after admission rejects, committed: %s", async (committed) => {
+    const failure = new Error("Execution worker lost");
+    const write = Promise.withResolvers<unknown>();
+    const outcome = write.promise.then(() => "committed", () => "failed");
+    const f = await fixture(undefined, async (commit) => {
+      f.db.run("BEGIN IMMEDIATE");
+      if (!committed) f.db.run("DELETE FROM threads WHERE id = ?", [f.params.threadId]);
+      void commit().then(write.resolve, write.reject);
+      throw failure;
+    });
+    try {
+      await expect(f.send()).rejects.toBe(failure);
+      expect(f.messages.findByIdInThread(f.params.threadId, f.params.messageId)).toBeNull();
+      const events: string[] = [];
+      const drained = f.writer.barrier().then(() => { events.push("writes settled"); });
+      const confirmation = f.confirm().then((result) => { events.push("confirmed"); return result; });
+      f.db.run("COMMIT");
+      await expect(confirmation).resolves.toEqual({ admitted: committed });
+      await drained;
+      expect(events).toEqual(["writes settled", "confirmed"]);
+      await expect(outcome).resolves.toBe(committed ? "committed" : "failed");
+      expect(f.messages.findByIdInThread(f.params.threadId, f.params.messageId)?.role ?? null)
+        .toBe(committed ? "user" : null);
+    } finally {
+      if (f.db.inTransaction) f.db.run("ROLLBACK");
+      await outcome;
+    }
   });
 
   it("does not count an assistant row or a user row in another thread", async () => {

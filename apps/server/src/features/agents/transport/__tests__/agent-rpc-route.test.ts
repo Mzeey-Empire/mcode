@@ -12,7 +12,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
     agentService: { sendMessage, createAndSend: unused, stopSession: unused, runtimeAccess: unused },
     agentPermissionService: { respondToPermission: unused, listPendingPermissions: unused },
     hookExecutionRepo: { listByMessage: unused },
-    messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, findByIdInThread: unused },
+    messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, confirmUserMessage: unused },
     narrativeStore: { load: unused },
     planQuestionAnswersRepo: { listAnsweredForThread: unused },
     planRepo: { updateStatus: unused, listByThread: unused },
