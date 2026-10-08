@@ -888,7 +888,7 @@ function colorSwatchValue(
 function linkedPairActiveClass(active: boolean): string {
   return active
     ? "border-control-border bg-selected text-ink"
-    : "border-border bg-selected text-muted hover:border-border hover:text-ink";
+    : "border-border bg-selected text-muted hover:border-control-border hover:text-ink";
 }
 
 function VisualLinkButton({
@@ -1277,7 +1277,7 @@ function ColorInspectorControl({
                           aria-label={`Pick ${label} from screen`}
                           disabled={!EyeDropperApi}
                           onClick={pickFromScreen}
-                          className="size-6 rounded-full text-ink hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:text-muted"
+                          className="size-6 rounded-full text-ink hover:bg-hover disabled:cursor-not-allowed disabled:text-muted"
                         >
                           <Pipette size={14} aria-hidden />
                         </Button>
@@ -4213,7 +4213,7 @@ export function PreviewPanel({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-7 rounded-full px-3 text-ink hover:bg-hover hover:text-ink"
+                    className="h-7 rounded-full px-3 text-ink hover:bg-hover"
                     onClick={() => {
                       usePreviewAnnotationStore
                         .getState()
