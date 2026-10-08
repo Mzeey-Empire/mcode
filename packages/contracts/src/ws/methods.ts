@@ -1037,6 +1037,15 @@ export const WS_METHODS = lazySchema(() => ({
     params: SendMessageSchema() as z.ZodType<SendMessageInput>,
     result: z.void(),
   },
+  /**
+   * Waits for in-flight agent.send admissions with this messageId in this server
+   * process to settle, then reports whether the thread holds that user message.
+   * After a restart no admission is in flight, so the answer is final.
+   */
+  "agent.confirmMessage": {
+    params: z.object({ threadId: z.string().min(1), messageId: z.string().uuid() }).strict(),
+    result: z.object({ admitted: z.boolean() }).strict(),
+  },
   /** Read the current restart-scoped recovery incident, if one exists. */
   "agent.recoveryIncident": {
     params: z.object({}).strict(),

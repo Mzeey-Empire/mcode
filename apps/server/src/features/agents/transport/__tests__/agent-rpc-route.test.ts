@@ -12,7 +12,7 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
     agentService: { sendMessage, createAndSend: unused, stopSession: unused, runtimeAccess: unused },
     agentPermissionService: { respondToPermission: unused, listPendingPermissions: unused },
     hookExecutionRepo: { listByMessage: unused },
-    messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused },
+    messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, findByIdInThread: unused },
     narrativeStore: { load: unused },
     planQuestionAnswersRepo: { listAnsweredForThread: unused },
     planRepo: { updateStatus: unused, listByThread: unused },
@@ -80,7 +80,7 @@ describe("routeMessage Agent RPCs", () => {
       content: "Retry this work",
       displayContent: "Retry this work",
       model: "gpt-5",
-      onTurnStarted: expect.any(Function),
+      onAdmissionComplete: expect.any(Function),
     });
   });
 
@@ -195,8 +195,7 @@ describe("routeAgentRpc", () => {
     const fixture = admissionFixture(sendMessage);
     try {
       const rpc = routeAgentRpc("agent.send", { threadId: "thread-1", content: "Long work" }, fixture.deps);
-      expect(command?.onTurnStarted).toBeDefined();
-      command?.onTurnStarted?.({ threadId: "thread-1", turnExecutionId: "execution-1", phase: "running" });
+      command?.onAdmissionComplete?.();
       await expect(rpc).resolves.toBeUndefined();
       finish();
       await dispatch;

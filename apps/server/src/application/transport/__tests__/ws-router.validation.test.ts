@@ -819,7 +819,7 @@ mcode-preview-annotations:end -->`,
       permissionMode: "full",
       thinking: false,
       previewAnnotations,
-      onTurnStarted: expect.any(Function),
+      onAdmissionComplete: expect.any(Function),
     });
     const stagingId = "00000000-0000-4000-8000-000000000003";
     sendMessage.mockRejectedValueOnce(new DraftImageMissingError(stagingId));

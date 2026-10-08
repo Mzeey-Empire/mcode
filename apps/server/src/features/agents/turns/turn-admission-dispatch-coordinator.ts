@@ -82,6 +82,8 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   mutationReservationToken?: string;
   /** Resolves the authoritative first-turn handshake before provider I/O continues. */
   onTurnStarted?: (snapshot: TurnRuntimeSnapshot) => void;
+  /** Acknowledges successful admission, including queued rows, before provider dispatch. */
+  onAdmissionComplete?: () => void;
   /** Starts a new provider execution instead of continuing the thread's prior native session. */
   forceFreshSession?: boolean;
   /** Interrupted execution consumed atomically when the replacement turn starts. */
@@ -219,7 +221,9 @@ export class TurnAdmissionDispatchCoordinator {
       ? this.attachments.leaseDraftImages(command.threadId, command.stagedDraftImageIds)
       : undefined;
     try {
-      return await this.admitLeased(command, runtime, canReserve);
+      const admitted = await this.admitLeased(command, runtime, canReserve);
+      command.onAdmissionComplete?.();
+      return admitted;
     } finally {
       release?.();
     }
