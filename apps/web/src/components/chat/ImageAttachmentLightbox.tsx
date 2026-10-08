@@ -133,12 +133,12 @@ function LightboxNavigation({ onPrevious, onNext }: { onPrevious: (event: MouseE
     <>
       <div className="pointer-events-none absolute inset-y-8 left-2 z-20 flex items-center sm:left-5">
         <button type="button" className={navBtnClass} aria-label="Previous image" onClick={onPrevious}>
-          <ChevronLeft className="size-6" strokeWidth={2} aria-hidden />
+          <ChevronLeft className="size-6" aria-hidden />
         </button>
       </div>
       <div className="pointer-events-none absolute inset-y-8 right-2 z-20 flex items-center sm:right-5">
         <button type="button" className={navBtnClass} aria-label="Next image" onClick={onNext}>
-          <ChevronRight className="size-6" strokeWidth={2} aria-hidden />
+          <ChevronRight className="size-6" aria-hidden />
         </button>
       </div>
     </>
@@ -362,7 +362,7 @@ export const ImageAttachmentLightbox = memo(function ImageAttachmentLightbox({
                 <button type="button" className={closeBtnClass} aria-label="Close image preview" />
               }
             >
-              <XIcon className="size-[18px]" strokeWidth={2.25} aria-hidden />
+              <XIcon className="size-[18px]" aria-hidden />
             </DialogClose>
 
             <div

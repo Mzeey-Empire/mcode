@@ -7,15 +7,15 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  FileCode2,
-  FileJson,
+  FileCodeCorner,
+  FileBraces,
   FileText,
   FileImage,
   FileType,
   File,
   FileSpreadsheet,
-  FileVideo,
-  FileAudio,
+  FilePlay,
+  FileHeadphone,
   Cog,
   Database,
   Globe,
@@ -30,30 +30,30 @@ import {
  */
 const EXT_ICON: Record<string, LucideIcon> = {
   // JavaScript / TypeScript
-  js: FileCode2, jsx: FileCode2, ts: FileCode2, tsx: FileCode2,
-  mjs: FileCode2, cjs: FileCode2, mts: FileCode2, cts: FileCode2,
+  js: FileCodeCorner, jsx: FileCodeCorner, ts: FileCodeCorner, tsx: FileCodeCorner,
+  mjs: FileCodeCorner, cjs: FileCodeCorner, mts: FileCodeCorner, cts: FileCodeCorner,
   // Web
-  html: Globe, htm: Globe, vue: FileCode2, svelte: FileCode2,
+  html: Globe, htm: Globe, vue: FileCodeCorner, svelte: FileCodeCorner,
   // Styles
   css: Palette, scss: Palette, sass: Palette, less: Palette,
   // Data / Config (JSON-like)
-  json: FileJson, jsonc: FileJson, json5: FileJson,
+  json: FileBraces, jsonc: FileBraces, json5: FileBraces,
   // Data / Config (YAML/TOML)
   yaml: Braces, yml: Braces, toml: Braces,
   // Markdown / Text
   md: FileText, mdx: FileText, txt: FileText, rst: FileText,
   // Python
-  py: FileCode2, pyi: FileCode2, pyx: FileCode2,
+  py: FileCodeCorner, pyi: FileCodeCorner, pyx: FileCodeCorner,
   // Rust
-  rs: FileCode2,
+  rs: FileCodeCorner,
   // Go
-  go: FileCode2,
+  go: FileCodeCorner,
   // C / C++
-  c: FileCode2, h: FileCode2, cpp: FileCode2, hpp: FileCode2, cc: FileCode2,
+  c: FileCodeCorner, h: FileCodeCorner, cpp: FileCodeCorner, hpp: FileCodeCorner, cc: FileCodeCorner,
   // Java / Kotlin
-  java: FileCode2, kt: FileCode2, kts: FileCode2,
+  java: FileCodeCorner, kt: FileCodeCorner, kts: FileCodeCorner,
   // Ruby
-  rb: FileCode2, rake: FileCode2,
+  rb: FileCodeCorner, rake: FileCodeCorner,
   // Shell
   sh: Hash, bash: Hash, zsh: Hash, fish: Hash, ps1: Hash, bat: Hash, cmd: Hash,
   // SQL / Database
@@ -67,9 +67,9 @@ const EXT_ICON: Record<string, LucideIcon> = {
   png: FileImage, jpg: FileImage, jpeg: FileImage, gif: FileImage,
   svg: FileImage, webp: FileImage, ico: FileImage, bmp: FileImage, avif: FileImage,
   // Video
-  mp4: FileVideo, webm: FileVideo, avi: FileVideo, mov: FileVideo,
+  mp4: FilePlay, webm: FilePlay, avi: FilePlay, mov: FilePlay,
   // Audio
-  mp3: FileAudio, wav: FileAudio, ogg: FileAudio, flac: FileAudio,
+  mp3: FileHeadphone, wav: FileHeadphone, ogg: FileHeadphone, flac: FileHeadphone,
   // Spreadsheet
   csv: FileSpreadsheet, tsv: FileSpreadsheet, xls: FileSpreadsheet, xlsx: FileSpreadsheet,
 };
@@ -80,16 +80,16 @@ const EXT_ICON: Record<string, LucideIcon> = {
 const NAME_ICON: Record<string, LucideIcon> = {
   dockerfile: Cog,
   makefile: Cog,
-  rakefile: FileCode2,
-  gemfile: FileCode2,
+  rakefile: FileCodeCorner,
+  gemfile: FileCodeCorner,
   procfile: Cog,
   ".gitignore": Cog,
   ".eslintrc": Cog,
   ".prettierrc": Cog,
   ".env": Cog,
   ".env.local": Cog,
-  "tsconfig.json": FileJson,
-  "package.json": FileJson,
+  "tsconfig.json": FileBraces,
+  "package.json": FileBraces,
 };
 
 /**

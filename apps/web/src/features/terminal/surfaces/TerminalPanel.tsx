@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TerminalSquare } from "lucide-react";
+import { TerminalIcon } from "@/components/ui/icon-map";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useTerminalStore, TERMINAL_PANEL_DEFAULTS, type TerminalInstance } from "@/features/terminal/state/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -245,7 +245,7 @@ export function TerminalPanel() {
         {/* Terminal views + optional split list */}
         {terminals.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-            <TerminalSquare className="h-10 w-10 opacity-40" />
+            <TerminalIcon className="h-10 w-10 opacity-40" />
             <p className="text-sm">No terminals</p>
             <Button variant="outline" size="sm" onClick={createTerminal}>
               New terminal

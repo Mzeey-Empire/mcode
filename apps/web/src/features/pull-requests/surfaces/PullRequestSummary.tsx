@@ -9,10 +9,9 @@ import type {
 } from "@mcode/contracts";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  AlertCircle,
   ChevronDown,
   CircleCheck,
-  CircleHelp,
+  CircleQuestionMark,
   CircleMinus,
   CircleX,
   Loader2,
@@ -20,6 +19,7 @@ import {
   UserRound,
   type LucideIcon,
 } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import {
   memo,
   useCallback,
@@ -39,7 +39,6 @@ import {
 } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
-import { CI_ICON_STROKE } from "@/lib/ci-status";
 import { formatRelative } from "@/lib/format-relative";
 import { cn } from "@/lib/utils";
 import {
@@ -194,7 +193,7 @@ function checkVisual(state: PullRequestCheckState): {
   if (state === "neutral" || state === "skipped") {
     return { icon: CircleMinus, className: "text-muted-foreground" };
   }
-  return { icon: CircleHelp, className: "text-muted-foreground" };
+  return { icon: CircleQuestionMark, className: "text-muted-foreground" };
 }
 
 function boundedMessage(
@@ -256,7 +255,7 @@ function BoundedDataNotice({
       data-bounded-reason={marker.reason}
       className="mt-2 flex items-start gap-2 bg-muted/30 px-2.5 py-2 text-xs text-muted-foreground"
     >
-      <AlertCircle
+      <ErrorIcon
         size={13}
         aria-hidden
         className="mt-0.5 shrink-0 text-primary/80"
@@ -372,7 +371,6 @@ const CheckRow = memo(function CheckRow({
     <>
       <CheckIcon
         size={15}
-        strokeWidth={CI_ICON_STROKE}
         data-check-state={check.state}
         aria-hidden
         className={cn("shrink-0", visual.className)}
@@ -722,7 +720,7 @@ function SummaryDescription({
           data-bounded-reason={boundedData.reason}
           className="mt-2 flex items-start gap-2 bg-muted/30 px-2.5 py-2 text-xs text-muted-foreground"
         >
-          <AlertCircle
+          <ErrorIcon
             size={13}
             aria-hidden
             className="mt-0.5 shrink-0 text-primary/80"

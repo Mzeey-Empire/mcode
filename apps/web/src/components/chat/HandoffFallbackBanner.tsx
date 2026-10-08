@@ -11,7 +11,8 @@
  */
 
 import { useState, useEffect } from "react";
-import { AlertCircle, RotateCcw, FileText, X } from "lucide-react";
+import { RotateCcw, FileText, X } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -171,7 +172,7 @@ export function HandoffFallbackBanner({ threadId }: Props) {
         data-testid="handoff-fallback-banner"
         className="flex items-start gap-3 border-b border-border bg-muted/40 px-4 py-2 text-sm"
       >
-        <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
+        <ErrorIcon className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
         <span className="flex-1 min-w-0">
           <span className="font-medium text-foreground/80">{copy.title}</span>
           <span className="block text-xs text-muted-foreground mt-0.5">{copy.sub}</span>

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Key, KeyboardEvent, ReactNode, RefObject, MutableRefObject } from "react";
 import type { PullRequestError, PullRequestState } from "@mcode/contracts";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
@@ -290,7 +291,7 @@ function PullRequestInboxNotices({
       {teamLimitation ? (
         <div className="mx-auto w-full max-w-[720px] px-5">
           <p className="mb-2 flex items-start gap-2 bg-muted/35 px-2.5 py-2 text-xs text-muted-foreground">
-            <AlertCircle size={13} aria-hidden className="mt-0.5 shrink-0 text-primary/80" />
+            <ErrorIcon size={13} aria-hidden className="mt-0.5 shrink-0 text-primary/80" />
             {teamLimitationMessage(teamLimitation)}
           </p>
         </div>
@@ -328,7 +329,7 @@ function PullRequestInboxBody({
     return <div className="flex flex-1 items-center justify-center text-muted-foreground"><Spinner size="sm" aria-label="Loading pull requests" /></div>;
   }
   if (errorEmpty) {
-    return <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"><AlertCircle size={22} aria-hidden className="text-destructive/70" /><p className="text-sm text-foreground">{error?.message ?? "Pull request read failed"}</p><Button type="button" variant="outline" size="sm" onClick={onRefresh}>Retry</Button></div>;
+    return <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"><ErrorIcon size={22} aria-hidden className="text-destructive/70" /><p className="text-sm text-foreground">{error?.message ?? "Pull request read failed"}</p><Button type="button" variant="outline" size="sm" onClick={onRefresh}>Retry</Button></div>;
   }
   if (!hasRows) {
     return <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground"><span aria-hidden className="font-mono text-3xl opacity-35">∅</span><p className="font-mono text-xs uppercase tracking-widest">{emptyLabel}</p></div>;

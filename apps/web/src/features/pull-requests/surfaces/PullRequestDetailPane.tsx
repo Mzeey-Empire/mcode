@@ -10,7 +10,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { AlertCircle } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import type {
   PullRequestBoundedDataMarker,
   PullRequestCapability,
@@ -504,7 +504,7 @@ function PullRequestDetailLoadingContent({
       <div className="flex min-h-0 flex-1 items-center justify-center">
         {unavailable ? (
           <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center">
-            <AlertCircle
+            <ErrorIcon
               size={22}
               aria-hidden
               className="text-destructive/75"
@@ -607,7 +607,7 @@ function PullRequestDetailTabPanel({
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
       <div>
-        <AlertCircle
+        <ErrorIcon
           size={18}
           aria-hidden
           className="mx-auto text-muted-foreground/55"

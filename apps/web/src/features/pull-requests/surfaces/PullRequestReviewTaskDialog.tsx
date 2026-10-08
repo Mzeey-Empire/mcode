@@ -9,7 +9,8 @@ import {
   type PullRequestReviewWorktreeCandidate,
   type PullRequestWorkspaceCandidate,
 } from "@mcode/contracts";
-import { AlertCircle, GitBranch, GitPullRequest, MapPin } from "lucide-react";
+import { GitBranch, GitPullRequest, MapPin } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import {
   useCallback,
   useEffect,
@@ -349,7 +350,7 @@ function ReviewTaskPreparationError({
   return (
     <div className="space-y-4 px-5 py-5">
       <div role="alert" className="flex items-start gap-2 bg-destructive/8 px-3 py-2.5 text-xs">
-        <AlertCircle size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" />
+        <ErrorIcon size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" />
         <p className="text-foreground/85">{errorCopy(error)}</p>
       </div>
       {ambiguous ? (
@@ -469,7 +470,7 @@ function ReviewTaskPreparedContent({
 function ReviewTaskErrorNotice({ error, onRefresh }: { error: PullRequestError; onRefresh: () => void }) {
   return (
     <div role="alert" className="flex items-start gap-2 bg-destructive/8 px-3 py-2.5 text-xs">
-      <AlertCircle size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" />
+      <ErrorIcon size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" />
       <p className="min-w-0 flex-1 text-foreground/85">{errorCopy(error)}</p>
       <Button variant="ghost" size="xs" onClick={onRefresh}>Refresh</Button>
     </div>

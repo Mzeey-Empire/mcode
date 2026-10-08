@@ -7,13 +7,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
 } from "react";
-import {
-  ArrowClockwise,
-  CaretDown,
-  CaretUp,
-  SlidersHorizontal,
-  X,
-} from "@phosphor-icons/react";
+import { ChevronDown, ChevronUp, SlidersHorizontal } from "lucide-react";
+import { CloseIcon, RetryIcon } from "@/components/ui/icon-map";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -267,7 +262,7 @@ function TerminalSearchControls({
           aria-label="Close terminal search"
           onClick={onClose}
         >
-          <X aria-hidden />
+          <CloseIcon aria-hidden />
         </Button>
       </div>
       <div
@@ -291,7 +286,7 @@ function TerminalSearchControls({
             disabled={navigationDisabled}
             onClick={() => onNavigate("previous")}
           >
-            <CaretUp aria-hidden />
+            <ChevronUp aria-hidden />
           </Button>
           <Button
             type="button"
@@ -301,7 +296,7 @@ function TerminalSearchControls({
             disabled={navigationDisabled}
             onClick={() => onNavigate("next")}
           >
-            <CaretDown aria-hidden />
+            <ChevronDown aria-hidden />
           </Button>
           {addonState === "failed" ? (
             <Button
@@ -311,7 +306,7 @@ function TerminalSearchControls({
               aria-label="Retry terminal search"
               onClick={onRetry}
             >
-              <ArrowClockwise aria-hidden />
+              <RetryIcon aria-hidden />
             </Button>
           ) : null}
           <SearchOptionsPopover options={options} onChange={onOptionChange} />

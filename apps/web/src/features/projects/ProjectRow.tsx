@@ -113,7 +113,7 @@ function ProjectRowIdentity({
                 }}
                 aria-label={pinLabel}
               >
-                <Pin size={11} strokeWidth={2} className={workspace.pinned ? "fill-primary/80" : ""} />
+                <Pin size={11} className={workspace.pinned ? "fill-primary/80" : ""} />
               </button>
             }
           />
@@ -163,7 +163,7 @@ function ProjectRowEnrichment({
         />
         <TooltipContent>{workingTreeLabel}</TooltipContent>
       </Tooltip>
-      <GitBranch size={10} strokeWidth={2} className="shrink-0 opacity-70" aria-hidden />
+      <GitBranch size={10} className="shrink-0 opacity-70" aria-hidden />
       <Tooltip>
         <TooltipTrigger render={<span className="min-w-0 truncate text-right">{branch}</span>} />
         <TooltipContent>{branch}</TooltipContent>
@@ -199,7 +199,7 @@ function ProjectRowRemoveAction({ workspaceId, onRemove }: Pick<Props, "onRemove
             }}
             aria-label="Remove from recents"
           >
-            <X size={11} strokeWidth={2.25} aria-hidden />
+            <X size={11} aria-hidden />
           </button>
         }
       />

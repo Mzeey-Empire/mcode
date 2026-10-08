@@ -508,7 +508,7 @@ function BrowseEntries({
           onSelect={onAscend}
           className="h-[40px] gap-3 px-[12px] text-[14px] text-foreground/85"
         >
-          <ArrowUp size={14} strokeWidth={2.25} className="shrink-0 text-primary/80" />
+          <ArrowUp size={14} className="shrink-0 text-primary/80" />
           <span className="font-mono">..</span>
           <span className="ml-auto text-[12px] text-muted-foreground/55">Parent folder</span>
         </CommandItem>
@@ -521,7 +521,7 @@ function BrowseEntries({
           onSelect={() => onSelect(entry.name)}
           className="h-[40px] gap-3 px-[12px] text-[14px]"
         >
-          <Folder size={15} strokeWidth={1.8} className="shrink-0 text-muted-foreground/70" />
+          <Folder size={15} className="shrink-0 text-muted-foreground/70" />
           <span className="truncate text-foreground">{entry.name}</span>
         </CommandItem>
       ))}

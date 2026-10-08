@@ -1,5 +1,5 @@
 import { Spinner } from "@/components/ui/spinner";
-import { getCiVisual, CI_ICON_STROKE, getCiOverviewSummaryLabel } from "@/lib/ci-status";
+import { getCiVisual, getCiOverviewSummaryLabel } from "@/lib/ci-status";
 import { relativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import type { ChecksStatus } from "@mcode/contracts";
@@ -74,7 +74,7 @@ function ThreadStateSpinner({ marker, dim }: { marker: Extract<ThreadStateMarker
 function CiStateMarker({ marker, dim }: { marker: Extract<ThreadStateMarkerModel, { kind: "ci" }>; dim: boolean }) {
   const { icon: Icon, color } = getCiVisual(marker.aggregate);
   if (marker.aggregate === "pending") return <Spinner size={13} aria-label={marker.label} className={cn(color, dim && "opacity-[0.72]")} />;
-  return <Icon size={13} strokeWidth={CI_ICON_STROKE} aria-label={marker.label} className={cn("shrink-0", color, dim && "opacity-[0.72]")} />;
+  return <Icon size={13} aria-label={marker.label} className={cn("shrink-0", color, dim && "opacity-[0.72]")} />;
 }
 
 function ThreadStatusDot({ marker, dim }: { marker: Exclude<ThreadStateMarkerModel, { kind: "time" | "setup" | "running" | "ci" }>; dim: boolean }) {

@@ -11,13 +11,12 @@ import { createPortal } from "react-dom";
 import {
   CircleCheck,
   CircleX,
-  MinusCircle,
+  CircleMinus,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { CI_ICON_STROKE } from "@/lib/ci-status";
 import type { ChecksStatus, CheckRun } from "@mcode/contracts";
 
 /** Props for {@link ChecksPopover}. */
@@ -78,7 +77,7 @@ function getRunVisual(run: CheckRun): CheckRunVisual {
       };
     default:
       return {
-        icon: MinusCircle,
+        icon: CircleMinus,
         iconClassName: "text-muted-foreground/80",
         label: run.conclusion ? run.conclusion.replace(/_/g, " ") : "Completed",
         labelClassName: "text-muted-foreground",
@@ -229,7 +228,6 @@ function RunRow({ run }: { run: CheckRun }) {
         ) : Icon ? (
           <Icon
             size={16}
-            strokeWidth={CI_ICON_STROKE}
             className={cn("shrink-0", visual.iconClassName)}
           />
         ) : null}

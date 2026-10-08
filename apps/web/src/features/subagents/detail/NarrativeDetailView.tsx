@@ -1,4 +1,4 @@
-import { ArrowLeft, CheckCircle2, CircleDashed, XCircle } from "lucide-react";
+import { ArrowLeft, CircleCheck, CircleDashed, CircleX } from "lucide-react";
 import { formatSubagentDisplayName } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -17,12 +17,12 @@ function narrativeConfiguration(row: ProjectedSubagentRow): string {
 
 function ActivityStatusIcon({ activity }: { readonly activity: SubagentDetailActivity }) {
   if (activity.isError) {
-    return <XCircle size={13} aria-hidden className="shrink-0 text-destructive" />;
+    return <CircleX size={13} aria-hidden className="shrink-0 text-destructive" />;
   }
   if (!activity.isComplete) {
     return <CircleDashed size={13} aria-hidden className="shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />;
   }
-  return <CheckCircle2 size={13} aria-hidden className="shrink-0 text-muted-foreground" />;
+  return <CircleCheck size={13} aria-hidden className="shrink-0 text-muted-foreground" />;
 }
 
 function NarrativeActivityRow({ activity }: { readonly activity: SubagentDetailActivity }) {

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Code2, FileText, ClipboardCopy, ExternalLink } from "lucide-react";
+import { CodeXml, FileText, ClipboardCopy, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
@@ -107,7 +107,7 @@ export function FileActionBar({
             }}
             className={cn(ACTION_BUTTON_CLASS, !previewMode && ACTION_BUTTON_ACTIVE)}
           >
-            <Code2 size={13} />
+            <CodeXml size={13} />
           </Button>
           <Button
             type="button"

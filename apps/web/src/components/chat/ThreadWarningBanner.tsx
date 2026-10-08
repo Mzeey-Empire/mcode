@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { AlertTriangle, ChevronRight, X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
+import { WarningIcon } from "@/components/ui/icon-map";
 import {
   Collapsible,
   CollapsibleContent,
@@ -31,7 +32,7 @@ export function ThreadWarningBanner({
                 type="button"
                 className="flex flex-1 items-center gap-2 text-left text-sm font-medium text-amber-600 dark:text-amber-400"
               >
-                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <WarningIcon className="h-4 w-4 shrink-0" />
                 <span className="flex-1">
                   Post-checkout hook encountered an error
                 </span>

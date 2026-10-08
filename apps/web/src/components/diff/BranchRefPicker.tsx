@@ -310,7 +310,7 @@ function BranchRefPickerContent({ comparison, onSelect }: { comparison: BranchCo
   return <div className="flex min-w-0 max-w-[min(46vw,390px)] items-center gap-1 overflow-hidden" data-testid="branch-ref-picker" role="group" aria-label="Branch comparison range">
     <CurrentRefChip value={comparison?.base ?? null} />
     <div className="flex min-w-0 flex-1 items-center gap-0.5 border-l border-border/25 pl-1">
-      <span aria-hidden="true" data-testid="branch-range-arrow" className="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground/50"><ArrowRight size={12} strokeWidth={1.8} /></span>
+      <span aria-hidden="true" data-testid="branch-range-arrow" className="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground/50"><ArrowRight size={12} /></span>
       <RefCombobox value={comparison?.target ?? null} refs={refs} onSelect={onSelect} />
     </div>
   </div>;

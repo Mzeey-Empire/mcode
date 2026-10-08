@@ -7,7 +7,8 @@ import type {
 } from "@mcode/contracts";
 import type { Thread } from "@/transport";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
-import { AlertCircle, GitFork } from "lucide-react";
+import { GitFork } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Composer } from "@/features/conversation";
 import { StartupProgressCard, useThreadStartup } from "@/features/thread-startup";
@@ -176,7 +177,7 @@ function PullRequestForkError({
   const selectedWorkspace = candidates.find((candidate) => candidate.id === selectedWorkspaceId);
   return (
     <div className="space-y-4 px-5 py-5">
-      <div role="alert" className="flex items-start gap-2 bg-destructive/8 px-3 py-2.5 text-xs"><AlertCircle size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" /><p className="text-foreground/85">{errorCopy(error)}</p></div>
+      <div role="alert" className="flex items-start gap-2 bg-destructive/8 px-3 py-2.5 text-xs"><ErrorIcon size={14} aria-hidden className="mt-0.5 shrink-0 text-destructive" /><p className="text-foreground/85">{errorCopy(error)}</p></div>
       {error.code === "workspace_mapping_ambiguous" && candidates.length > 0 ? <div className="space-y-1.5"><label className="text-xs text-muted-foreground" htmlFor="fork-workspace">Project</label><Select value={selectedWorkspaceId} onValueChange={setSelectedWorkspaceId}><SelectTrigger id="fork-workspace" className="w-full"><SelectValue>{selectedWorkspace ? selectedWorkspace.name : "Choose a project"}</SelectValue></SelectTrigger><SelectContent>{candidates.map((candidate: PullRequestWorkspaceCandidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.name}</SelectItem>)}</SelectContent></Select></div> : null}
       <div className="flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Cancel</Button>{error.code === "workspace_mapping_missing" ? <Button onClick={() => { onClose(); requestAnimationFrame(() => { useCommandPaletteStore.getState().open({ intent: "addProject" }); }); }}>Add project</Button> : <Button disabled={error.code === "workspace_mapping_ambiguous" && !selectedWorkspaceId} onClick={() => onPrepare(selectedWorkspaceId ?? undefined)}>Retry</Button>}</div>
     </div>

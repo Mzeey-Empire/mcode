@@ -4,7 +4,7 @@ import type {
   PullRequestMutationError as MutationError,
   PullRequestMutationExpected,
 } from "@mcode/contracts";
-import { AlertCircle } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -92,7 +92,7 @@ export function PullRequestMutationError({
       tabIndex={-1}
       className="flex items-start gap-2 bg-destructive/8 px-3 py-2.5 text-xs outline-none"
     >
-      <AlertCircle
+      <ErrorIcon
         size={14}
         aria-hidden
         className="mt-0.5 shrink-0 text-destructive"

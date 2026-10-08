@@ -726,6 +726,12 @@ diffs-container:has([data-jump-highlight="true"]) {
   * {
     @apply border-border outline-ring/50;
   }
+  /* lucide-react writes stroke-width="2" as an attribute on every icon. Author
+     CSS outranks presentation attributes, so this one rule gives direct Lucide
+     imports the product stroke that icon-map.tsx sets on its icons. */
+  .lucide {
+    stroke-width: 1.5;
+  }
   html {
     @apply font-sans;
     font-size: 62.5%;

@@ -159,7 +159,6 @@ function ComposerModelPreferencesTrigger({
             {state.hasCodexFast && state.codexFastMode && (
               <Zap
                 size={12}
-                strokeWidth={2.5}
                 aria-hidden="true"
                 data-testid="composer-fast-mode-icon"
                 className="shrink-0 text-foreground/80"

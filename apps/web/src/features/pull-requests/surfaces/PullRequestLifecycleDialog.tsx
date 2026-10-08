@@ -7,12 +7,12 @@ import {
   type PullRequestReadiness,
 } from "@mcode/contracts";
 import {
-  AlertCircle,
   GitBranch,
   GitMerge,
   GitPullRequest,
   ShieldOff,
 } from "lucide-react";
+import { ErrorIcon } from "@/components/ui/icon-map";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -257,7 +257,7 @@ function ReadinessDetails({
 function LifecycleReason({ reason }: { reason: string }) {
   return (
     <p role="status" className="flex items-start gap-2 bg-primary/8 px-3 py-2.5 text-xs text-muted-foreground">
-      <AlertCircle size={13} aria-hidden className="mt-0.5 shrink-0 text-primary/80" />
+      <ErrorIcon size={13} aria-hidden className="mt-0.5 shrink-0 text-primary/80" />
       {reason}
     </p>
   );

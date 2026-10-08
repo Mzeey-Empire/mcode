@@ -3,13 +3,13 @@ import { createPortal } from "react-dom";
 import {
   FileSearch,
   Files,
-  WrapText,
+  TextWrap,
   Columns2,
-  MoreHorizontal,
   RefreshCw,
   ChevronsDownUp,
   ChevronsUpDown,
 } from "lucide-react";
+import { MoreIcon } from "@/components/ui/icon-map";
 import type { ReviewFileChange } from "@mcode/contracts";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { useDiffStore, type SelectedFile } from "@/stores/diffStore";
@@ -406,7 +406,7 @@ function ReviewOptionsMenu({
         data-testid="review-options-menu"
         className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground/50 outline-none transition-colors hover:bg-muted/40 hover:text-foreground/70 focus-visible:ring-1 focus-visible:ring-ring"
       >
-        <MoreHorizontal size={13} />
+        <MoreIcon size={13} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className="min-w-[190px]">
         {refreshable ? (
@@ -428,7 +428,7 @@ function ReviewOptionsMenu({
           data-testid="review-option-word-wrap"
           className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs data-disabled:cursor-not-allowed"
         >
-          <WrapText size={13} className="text-muted-foreground" />
+          <TextWrap size={13} className="text-muted-foreground" />
           {lineWrap ? "Disable word wrap" : "Enable word wrap"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />

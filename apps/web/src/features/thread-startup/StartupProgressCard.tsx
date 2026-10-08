@@ -220,14 +220,14 @@ function StepNode({ state }: { state: ThreadStartupStepState }) {
   if (state === "completed") {
     return (
       <span aria-label={label} className={cn(NODE_BASE, "border-transparent bg-primary text-primary-foreground")}>
-        <Check size={11} strokeWidth={3} className="startup-node-pop" />
+        <Check size={11} className="startup-node-pop" />
       </span>
     );
   }
   if (state === "failed") {
     return (
       <span aria-label={label} className={cn(NODE_BASE, "border-transparent bg-destructive/15 text-destructive")}>
-        <X size={11} strokeWidth={3} className="startup-node-pop" />
+        <X size={11} className="startup-node-pop" />
       </span>
     );
   }
@@ -241,7 +241,7 @@ function StepNode({ state }: { state: ThreadStartupStepState }) {
   if (state === "skipped" || state === "cancelled" || state === "interrupted") {
     return (
       <span aria-label={label} className={cn(NODE_BASE, "border-border bg-card text-muted-foreground/60")}>
-        <Minus size={10} strokeWidth={2.5} className="startup-node-pop" />
+        <Minus size={10} className="startup-node-pop" />
       </span>
     );
   }

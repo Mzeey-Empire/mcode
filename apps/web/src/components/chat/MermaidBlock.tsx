@@ -1,5 +1,5 @@
 import { memo, useState, useEffect, useCallback, useRef, useId, useMemo } from "react";
-import { Copy, Check, Code2, GitGraph } from "lucide-react";
+import { Copy, Check, CodeXml, GitGraph } from "lucide-react";
 import { useShikiTheme } from "@/hooks/useTheme";
 import { MermaidPreviewDialog } from "./MermaidPreviewDialog";
 
@@ -223,7 +223,7 @@ function MermaidToolbar({ copied, onCopy, view, onToggleView }: MermaidToolbarPr
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             aria-label={view === "diagram" ? "View code" : "View diagram"}
           >
-            {view === "diagram" ? <Code2 size={13} /> : <GitGraph size={13} />}
+            {view === "diagram" ? <CodeXml size={13} /> : <GitGraph size={13} />}
           </button>
         ) : null}
         <button

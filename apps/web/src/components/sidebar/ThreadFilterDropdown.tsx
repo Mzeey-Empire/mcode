@@ -41,7 +41,7 @@ function FilterCheckbox({
             : "border-border"
         }`}
       >
-        {checked && <Check size={8} strokeWidth={3} />}
+        {checked && <Check size={8} />}
       </span>
       {label}
     </Button>

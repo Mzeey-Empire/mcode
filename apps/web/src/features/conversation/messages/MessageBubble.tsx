@@ -1,6 +1,7 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, useSyncExternalStore, lazy, Suspense, type ReactNode } from "react";
 import type { Message } from "@/transport";
-import { ImageIcon, RotateCcw, Copy, Check, GitFork, AlertCircle, AlertTriangle, Target } from "lucide-react";
+import { ImageIcon, RotateCcw, Copy, Check, GitFork, Target } from "lucide-react";
+import { ErrorIcon, WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
 import { stripInjectedFiles } from "@/lib/file-tags";
@@ -798,7 +799,7 @@ function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) 
   if (agentError) {
     return (
       <div className="flex items-start gap-2.5 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm">
-        <AlertCircle size={14} className="mt-0.5 shrink-0 text-destructive/60" />
+        <ErrorIcon size={14} className="mt-0.5 shrink-0 text-destructive/60" />
         <p className="text-muted-foreground leading-relaxed">{agentError}</p>
       </div>
     );
@@ -806,7 +807,7 @@ function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) 
   if (message.systemNotice?.kind === "security") {
     return (
       <div className="flex items-start gap-2.5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm" role="alert">
-        <AlertTriangle size={14} className="mt-0.5 shrink-0 text-destructive" />
+        <WarningIcon size={14} className="mt-0.5 shrink-0 text-destructive" />
         <div><p className="font-medium">Security warning</p><p className="text-muted-foreground leading-relaxed">{message.content}</p></div>
       </div>
     );

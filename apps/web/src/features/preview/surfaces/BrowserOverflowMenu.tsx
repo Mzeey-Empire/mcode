@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Code2,
+  CodeXml,
   Cookie,
   EllipsisVertical,
   FileText,
@@ -170,7 +170,7 @@ export function BrowserOverflowMenu({
           className="gap-2 px-3 py-1.5 text-xs"
           onClick={onOpenDevTools}
         >
-          <Code2 size={14} className="text-muted-foreground" aria-hidden />
+          <CodeXml size={14} className="text-muted-foreground" aria-hidden />
           Developer tools
         </DropdownMenuItem>
         <DropdownMenuItem
