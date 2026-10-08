@@ -389,11 +389,11 @@ export function PullRequestForkDialog({
         restorePreviousContext();
         useToastStore
           .getState()
-          .show(
-            "info",
-            "Fork started",
-            "The task is running in the background.",
-          );
+          .show({
+            kind: "info",
+            title: "Fork started",
+            meta: "The task is running in the background.",
+          });
       } else {
         useOverviewStore.getState().requestOpen(thread.id);
         useUiStore.getState().setPrimarySurface("chat");

@@ -261,12 +261,11 @@ export function ModelSection() {
     const sig = `${provider}:${modelId}`;
     if (staleDefaultToastSigRef.current === sig) return;
     staleDefaultToastSigRef.current = sig;
-    useToastStore.getState().show(
-      "info",
-      "Saved model not in catalog",
-      `'${modelId}' is missing from the latest ${provider} model list. Pick another model in Settings.`,
-      8000,
-    );
+    useToastStore.getState().show({
+      kind: "info",
+      title: "Saved model not in catalog",
+      meta: `'${modelId}' is missing from the latest ${provider} model list. Pick another model in Settings.`,
+    });
   }, [modelsLoading, mergedCatalogModels, modelId, provider]);
 
   const defaultModelStale = isModelStale(modelId, modelsLoading, mergedCatalogModels);

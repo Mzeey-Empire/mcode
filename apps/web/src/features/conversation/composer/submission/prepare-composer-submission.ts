@@ -28,7 +28,10 @@ export async function prepareComposerSubmission({
   if (await form.attachmentBindings.awaitPreparation()) return null;
   const editorDismissalAnnouncement = form.requestSelectedTextCommentEditorDismissal();
   if (editorDismissalAnnouncement) {
-    useToastStore.getState().show("error", editorDismissalAnnouncement);
+    useToastStore.getState().show({
+      kind: "failed",
+      title: editorDismissalAnnouncement,
+    });
     return null;
   }
 
@@ -84,9 +87,9 @@ function isEmptySubmission(
 
 /** Displays a payload-normalization failure without mutating the current draft. */
 function showPreparationFailure(error: unknown): void {
-  useToastStore.getState().show(
-    "error",
-    "Could not send message",
-    error instanceof Error ? error.message : "Invalid page preview payload",
-  );
+  useToastStore.getState().show({
+    kind: "failed",
+    title: "Could not send message",
+    meta: error instanceof Error ? error.message : "Invalid page preview payload",
+  });
 }

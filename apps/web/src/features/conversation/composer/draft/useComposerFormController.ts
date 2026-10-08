@@ -657,21 +657,21 @@ export function useComposerFormController({
     const { acceptedCount, droppedCount } = appendAttachments(incoming);
     if (acceptedCount === 0) {
       queueMicrotask(() =>
-        useToastStore.getState().show(
-          "error",
-          "Composer attachment limit reached",
-          "Remove an attachment before adding a preview picture reference.",
-        ),
+        useToastStore.getState().show({
+          kind: "failed",
+          title: "Composer attachment limit reached",
+          meta: "Remove an attachment before adding a preview picture reference.",
+        }),
       );
       return;
     }
     if (droppedCount > 0) {
       queueMicrotask(() =>
-        useToastStore.getState().show(
-          "error",
-          "Composer attachment limit reached",
-          `${droppedCount} preview reference(s) were not added.`,
-        ),
+        useToastStore.getState().show({
+          kind: "failed",
+          title: "Composer attachment limit reached",
+          meta: `${droppedCount} preview reference(s) were not added.`,
+        }),
       );
     }
   }, [appendAttachments, previewReferenceQueueSignal, previewReferenceScopeId]);

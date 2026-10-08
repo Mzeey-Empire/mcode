@@ -27,13 +27,21 @@ export function KeyboardShortcutsSection() {
     if (!window.desktopBridge) {
       useToastStore
         .getState()
-        .show("error", "Desktop integration unavailable", "Keybindings cannot be opened in this environment");
+        .show({
+          kind: "failed",
+          title: "Desktop integration unavailable",
+          meta: "Keybindings cannot be opened in this environment",
+        });
       return;
     }
     window.desktopBridge.openKeybindingsFile().catch((err) => {
       useToastStore
         .getState()
-        .show("error", "Could not open keybindings file", String(err?.message ?? err));
+        .show({
+          kind: "failed",
+          title: "Could not open keybindings file",
+          meta: String(err?.message ?? err),
+        });
     });
   };
 

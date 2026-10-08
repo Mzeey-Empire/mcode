@@ -68,11 +68,11 @@ export function FileEditorPicker({
       .catch((err: unknown) =>
         useToastStore
           .getState()
-          .show(
-            "error",
-            `Could not open ${label}`,
-            String((err as { message?: string })?.message ?? err),
-          ),
+          .show({
+            kind: "failed",
+            title: `Could not open ${label}`,
+            meta: String((err as { message?: string })?.message ?? err),
+          }),
       );
   };
 
@@ -83,11 +83,11 @@ export function FileEditorPicker({
       .catch((err: unknown) =>
         useToastStore
           .getState()
-          .show(
-            "error",
-            "Couldn't open file manager",
-            String((err as { message?: string })?.message ?? err),
-          ),
+          .show({
+            kind: "failed",
+            title: "Couldn't open file manager",
+            meta: String((err as { message?: string })?.message ?? err),
+          }),
       );
   };
 

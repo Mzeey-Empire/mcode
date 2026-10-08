@@ -349,7 +349,7 @@ describe("Thread Lifecycle Behavior", () => {
     expect(useThreadStore.getState().records.get(threadId)?.runtimePhase).toBe("running");
     expect(useThreadStore.getState().records.get(threadId)?.error).toBeNull();
     expect(useToastStore.getState().toasts).toMatchObject([{
-      level: "error", title: "Couldn't stop this turn", message: "Try Stop again. connection lost",
+      kind: "failed", title: "Couldn't stop this turn", meta: "Try Stop again. connection lost",
     }]);
   });
 

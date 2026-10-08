@@ -212,11 +212,11 @@ export function useComposerSubmissionController({
     }
     const target = execution.target;
     if (!isComposerTargetReady(target)) {
-      useToastStore.getState().show(
-        "error",
-        "Choose a worktree",
-        "Select an existing worktree before sending.",
-      );
+      useToastStore.getState().show({
+        kind: "failed",
+        title: "Choose a worktree",
+        meta: "Select an existing worktree before sending.",
+      });
       return "complete";
     }
     const checkoutPending = await requestCheckoutConfirmation({
@@ -383,9 +383,9 @@ function createCheckoutConfirmation({
 
 /** Displays a failed transport without clearing the submitted form state. */
 function showDispatchFailure(error: unknown, keptSelectedTextComments: boolean): void {
-  useToastStore.getState().show(
-    "error",
-    keptSelectedTextComments ? "Message not sent. Comments kept." : "Could not send message",
-    error instanceof Error ? error.message : "Message dispatch failed",
-  );
+  useToastStore.getState().show({
+    kind: "failed",
+    title: keptSelectedTextComments ? "Message not sent. Comments kept." : "Could not send message",
+    meta: error instanceof Error ? error.message : "Message dispatch failed",
+  });
 }

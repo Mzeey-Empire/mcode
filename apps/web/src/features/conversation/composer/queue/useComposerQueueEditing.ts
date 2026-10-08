@@ -191,7 +191,11 @@ export function useComposerQueueEditing({
     void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
     useToastStore
       .getState()
-      .show("info", "Removed from queue", `Slot ${String(slot + 1).padStart(2, "0")}`);
+      .show({
+        kind: "info",
+        title: "Removed from queue",
+        meta: `Slot ${String(slot + 1).padStart(2, "0")}`,
+      });
     return true;
   }, [annotations, editing, finishEditing, threadId]);
 

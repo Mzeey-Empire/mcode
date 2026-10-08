@@ -2470,11 +2470,11 @@ function ProjectWorkspaceRow({
   const openInExplorer = useCallback((event: React.MouseEvent) => {
     event.stopPropagation();
     void getTransport().openIn(FILE_EXPLORER_ID, workspace.path).catch((error: unknown) => {
-      useToastStore.getState().show(
-        "error",
-        "Couldn't open File Explorer",
-        String((error as { message?: string })?.message ?? error),
-      );
+      useToastStore.getState().show({
+        kind: "failed",
+        title: "Couldn't open File Explorer",
+        meta: String((error as { message?: string })?.message ?? error),
+      });
     });
   }, [workspace.path]);
   return (

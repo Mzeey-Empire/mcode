@@ -80,16 +80,27 @@ export function FileActionBar({
     if (!clipboard?.writeText) {
       useToastStore
         .getState()
-        .show("error", "Couldn't copy path", "Clipboard API is unavailable in this environment.");
+        .show({
+          kind: "failed",
+          title: "Couldn't copy path",
+          meta: "Clipboard API is unavailable in this environment.",
+        });
       return;
     }
     void clipboard
       .writeText(payload)
-      .then(() => useToastStore.getState().show("info", "Path copied"))
+      .then(() => useToastStore.getState().show({
+        kind: "info",
+        title: "Path copied",
+      }))
       .catch((err: unknown) =>
         useToastStore
           .getState()
-          .show("error", "Couldn't copy path", String((err as { message?: string })?.message ?? err)),
+          .show({
+            kind: "failed",
+            title: "Couldn't copy path",
+            meta: String((err as { message?: string })?.message ?? err),
+          }),
       );
   }, [absolutePath, filePath]);
 

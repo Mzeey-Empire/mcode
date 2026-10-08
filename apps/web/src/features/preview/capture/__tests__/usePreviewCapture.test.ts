@@ -185,7 +185,7 @@ describe("usePreviewCapture", () => {
       });
 
       expect(mockShow).toHaveBeenCalledOnce();
-      expect(mockShow).toHaveBeenCalledWith("error", "Could not capture preview", expect.any(String));
+      expect(mockShow).toHaveBeenCalledWith({ kind: "failed", title: "Could not capture preview", meta: expect.any(String) });
       expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
@@ -244,7 +244,7 @@ describe("usePreviewCapture", () => {
         await result.current.onAddPictureReference();
       });
 
-      expect(mockShow).toHaveBeenCalledWith("error", "Could not capture preview", "Screenshot failed.");
+      expect(mockShow).toHaveBeenCalledWith({ kind: "failed", title: "Could not capture preview", meta: "Screenshot failed." });
       expect(result.current.captureBusy).toBe(false);
     });
 
@@ -641,7 +641,7 @@ describe("usePreviewCapture", () => {
         await result.current.onAddPageContextOnly();
       });
 
-      expect(mockShow).toHaveBeenCalledWith("error", "Could not capture preview", "Context capture failed.");
+      expect(mockShow).toHaveBeenCalledWith({ kind: "failed", title: "Could not capture preview", meta: "Context capture failed." });
       expect(result.current.contextBusy).toBe(false);
     });
 
