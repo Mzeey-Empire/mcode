@@ -123,12 +123,12 @@ function PullRequestItem({ pullRequest, selectedBranch, fetchingBranch, onSelect
           : "text-ink hover:bg-selected/50 hover:text-ink",
       )}
     >
-      <div className="flex flex-col items-start gap-0.5 text-fade">
-        <span className="flex items-center gap-1">
-          <GitPullRequest size={10} />
-          #{pullRequest.number} {pullRequest.title}
+      <div className="flex min-w-0 flex-col items-start gap-0.5">
+        <span className="flex max-w-full items-center gap-1">
+          <GitPullRequest size={10} className="shrink-0" />
+          <span className="text-fade">#{pullRequest.number} {pullRequest.title}</span>
         </span>
-        <span className="text-xs text-muted">
+        <span className="max-w-full text-fade text-xs text-muted">
           {pullRequest.branch} &middot; {pullRequest.author}
         </span>
       </div>

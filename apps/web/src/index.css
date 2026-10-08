@@ -358,21 +358,27 @@
    inactive when its scroller has nothing to scroll, so the animation that
    carries the mask does not apply to text that fits. That needs a scroll
    container, which is why this uses `overflow: hidden` and not `clip`.
-   Without scroll-driven animation support the text clips with no fade. */
+   Without scroll-driven animation support the text clips with no fade; the
+   animation sits behind @supports because a timeline-less 0s animation with
+   fill `both` would pin the mask on text that fits. */
 @utility text-fade {
   overflow: hidden;
   white-space: nowrap;
   min-width: 0;
-  animation: text-fade-inline linear both;
-  animation-timeline: scroll(self inline);
+  @supports (animation-timeline: scroll()) {
+    animation: text-fade-inline linear both;
+    animation-timeline: scroll(self inline);
+  }
 }
 
 /* Vertical clamp to N lines that ends in a 24px bottom fade when clamped. */
 @utility text-fade-lines-* {
   overflow: hidden;
   max-height: calc(--value(integer) * 1lh);
-  animation: text-fade-block linear both;
-  animation-timeline: scroll(self block);
+  @supports (animation-timeline: scroll()) {
+    animation: text-fade-block linear both;
+    animation-timeline: scroll(self block);
+  }
 }
 
 @keyframes text-fade-inline {
