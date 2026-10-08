@@ -352,7 +352,7 @@ function ThreadDeleteWorktreeOption({
         <div className="text-sm font-medium">Delete worktree</div>
         <div className="text-fade text-xs text-muted">{dialog.worktreePath}</div>
       </div>
-      <Switch checked={deleteWorktree} onCheckedChange={(checked) => { if (!isDeleting) onChange(checked); }} disabled={isDeleting} className="data-[checked]:border-destructive data-[checked]:bg-destructive data-[checked]:hover:border-button-destructive-hover data-[checked]:hover:bg-button-destructive-hover" aria-label="Delete worktree" />
+      <Switch checked={deleteWorktree} onCheckedChange={(checked) => { if (!isDeleting) onChange(checked); }} disabled={isDeleting} className="data-[checked]:not-aria-invalid:border-destructive data-[checked]:bg-destructive data-[checked]:hover:not-aria-invalid:border-button-destructive-hover data-[checked]:hover:bg-button-destructive-hover" aria-label="Delete worktree" />
     </div>
   );
 }
