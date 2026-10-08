@@ -77,6 +77,15 @@ describe("durable draft images", () => {
     expect(service.removeExpiredDraftImages(() => now)).toBe(1);
   });
 
+  it("ages a staged file from staging time, not from its source file", async () => {
+    const attachment = source("old-capture.png");
+    const sourceTime = new Date(Date.now() - 40 * day);
+    NodeFS.utimesSync(attachment.sourcePath, sourceTime, sourceTime);
+    const staged = await service.stageDraft(threadId, attachment);
+    expect(service.removeExpiredDraftImages()).toBe(0);
+    expect(NodeFS.existsSync(stagedPath(staged.stagingId))).toBe(true);
+  });
+
   it("thread deletion removes draft storage", async () => {
     await service.stageDraft(threadId, source());
     service.removeForThread(threadId);

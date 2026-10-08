@@ -109,6 +109,9 @@ export class AttachmentService {
     await NodeFSPromises.mkdir(directory, { recursive: true });
     try {
       await NodeFSPromises.copyFile(attachment.sourcePath, destination);
+      // Retention ages a staged file from staging time; copyFile keeps the source mtime on some platforms.
+      const stagedAt = new Date();
+      await NodeFSPromises.utimes(destination, stagedAt, stagedAt);
       await NodeFSPromises.writeFile(NodePath.join(directory, `${stagingId}.json`), JSON.stringify(image));
     } catch (error) {
       await NodeFSPromises.rm(destination, { force: true });
