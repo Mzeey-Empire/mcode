@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { DIALOG_FADE_CLASS, FLOATING_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 4;
@@ -124,9 +125,7 @@ function MermaidPreviewDialogCanvas({
         <DialogPrimitive.Popup
           className={cn(
             "app-viewport-fixed fixed z-50 flex min-h-0 flex-col bg-background outline-none",
-            "data-open:animate-in data-open:fade-in-0 data-open:duration-150",
-            "data-closed:animate-out data-closed:fade-out-0 data-closed:duration-100",
-            "motion-reduce:animate-none",
+            DIALOG_FADE_CLASS,
           )}
         >
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/60 px-4">
@@ -178,7 +177,7 @@ function MermaidPreviewDialogCanvas({
             </div>
 
             <div className="absolute inset-x-0 bottom-5 flex justify-center px-4">
-              <div className="flex items-center rounded-lg bg-panel p-1 ring-1 ring-border shadow-sm">
+              <div className={cn("flex items-center p-1", FLOATING_SURFACE_CLASS)}>
                 <button
                   type="button"
                   className={controlClass}

@@ -4,6 +4,8 @@ import type { RefObject } from "react";
 import { useFileTagPopup, FileTagPopup } from "./FileTagPopup";
 import type { MentionSuggestion } from "./useFileAutocomplete";
 
+const ANCHOR_RECT = new DOMRect(0, 400, 320, 20);
+
 const items: MentionSuggestion[] = [
   {
     id: "agent:planner",
@@ -218,6 +220,7 @@ describe("FileTagPopup", () => {
       <FileTagPopup
         items={items}
         isOpen={true}
+        anchorRect={ANCHOR_RECT}
         onSelect={onSelect}
         listRef={mockListRef}
         selectedIndex={0}
@@ -236,6 +239,7 @@ describe("FileTagPopup", () => {
       <FileTagPopup
         items={items}
         isOpen={true}
+        anchorRect={ANCHOR_RECT}
         onSelect={onSelect}
         listRef={mockListRef}
         selectedIndex={0}
@@ -251,6 +255,7 @@ describe("FileTagPopup", () => {
       <FileTagPopup
         items={items}
         isOpen={true}
+        anchorRect={ANCHOR_RECT}
         onSelect={onSelect}
         listRef={mockListRef}
         selectedIndex={0}
@@ -270,6 +275,7 @@ describe("FileTagPopup", () => {
       <FileTagPopup
         items={items}
         isOpen={true}
+        anchorRect={ANCHOR_RECT}
         onSelect={onSelect}
         listRef={mockListRef}
         selectedIndex={0}
@@ -287,6 +293,7 @@ describe("FileTagPopup", () => {
       <FileTagPopup
         items={items}
         isOpen={true}
+        anchorRect={ANCHOR_RECT}
         onSelect={onSelect}
         listRef={mockListRef}
         selectedIndex={1}

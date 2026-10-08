@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockMessage } from "@/__tests__/mocks/transport";
@@ -11,7 +11,6 @@ import { ComposerProviderNoticeSurface } from "./ComposerProviderNoticeSurface";
 const THREAD_A = "thread-a";
 const THREAD_B = "thread-b";
 const originalResizeObserver = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
-const originalVisualViewport = Object.getOwnPropertyDescriptor(window, "visualViewport");
 
 class ResizeObserverMock {
   observe(): void {}
@@ -55,6 +54,13 @@ function seedThread(
   });
 }
 
+/** The notice floats in a Base UI positioner, which places it with a transform or left offset. */
+function positionerLeft(notice: HTMLElement): number {
+  const positioner = notice.parentElement as HTMLElement;
+  const match = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(positioner.style.transform);
+  return match ? Number(match[1]) : parseFloat(positioner.style.left);
+}
+
 function NoticeHarness({
   threadId = THREAD_A,
   isMentionPickerOpen = false,
@@ -86,10 +92,6 @@ describe("ComposerProviderNoticeSurface", () => {
       configurable: true,
       value: ResizeObserverMock,
     });
-    Object.defineProperty(window, "visualViewport", {
-      configurable: true,
-      value: { width: 1600, height: 900 },
-    });
     resetThreadStoreForTests({
       records: new Map([
         [THREAD_A, createEmptyThreadRecord()],
@@ -101,8 +103,6 @@ describe("ComposerProviderNoticeSurface", () => {
   afterEach(() => {
     if (originalResizeObserver) Object.defineProperty(globalThis, "ResizeObserver", originalResizeObserver);
     else Reflect.deleteProperty(globalThis, "ResizeObserver");
-    if (originalVisualViewport) Object.defineProperty(window, "visualViewport", originalVisualViewport);
-    else Reflect.deleteProperty(window, "visualViewport");
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -232,12 +232,13 @@ describe("ComposerProviderNoticeSurface", () => {
     expect(screen.getByTestId("composer-provider-notice")).toBeInTheDocument();
   });
 
-  it("keeps the fixed notice aligned when a layout transition moves Composer", () => {
+  it("keeps the floating notice aligned when a layout transition moves Composer", async () => {
     seedThread(THREAD_A, [providerNotice("warning", THREAD_A, "security")]);
     let anchorRect = new DOMRect(334, 700, 960, 40);
-    let animationFrameCallback: FrameRequestCallback | undefined;
+    // Base UI's positioner schedules frames too, so queue every callback and flush them together.
+    let animationFrameCallbacks: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
-      animationFrameCallback = callback;
+      animationFrameCallbacks.push(callback);
       return 1;
     }));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
@@ -246,14 +247,19 @@ describe("ComposerProviderNoticeSurface", () => {
     const composer = screen.getByTestId("composer-anchor");
     vi.spyOn(composer, "getBoundingClientRect").mockImplementation(() => anchorRect);
     act(() => window.dispatchEvent(new Event("resize")));
-    expect(screen.getByTestId("composer-provider-notice")).toHaveStyle({ left: "348px", width: "932px" });
+    const notice = screen.getByTestId("composer-provider-notice");
+    expect(notice).toHaveStyle({ width: "932px" });
+    await waitFor(() => expect(positionerLeft(notice)).toBe(348));
 
     anchorRect = new DOMRect(498, 700, 960, 40);
     act(() => {
       document.dispatchEvent(new Event("transitionrun"));
-      animationFrameCallback?.(0);
+      const callbacks = animationFrameCallbacks;
+      animationFrameCallbacks = [];
+      callbacks.forEach((callback) => callback(0));
     });
-    expect(screen.getByTestId("composer-provider-notice")).toHaveStyle({ left: "512px", width: "932px" });
+    expect(screen.getByTestId("composer-provider-notice")).toHaveStyle({ width: "932px" });
+    await waitFor(() => expect(positionerLeft(screen.getByTestId("composer-provider-notice"))).toBe(512));
     act(() => document.dispatchEvent(new Event("transitionend")));
     expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
   });

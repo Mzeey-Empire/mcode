@@ -14,6 +14,7 @@ import { SelectionListView } from "./views/SelectionListView";
 import { ThreadSearchView } from "./views/ThreadSearchView";
 import { isBrowseQuery, getPaletteMode } from "./CommandPalette.logic";
 import { cn } from "@/lib/utils";
+import { DIALOG_FADE_CLASS, DIALOG_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 
 type PaletteView = ReturnType<typeof useCommandPaletteStore.getState>["viewStack"][number];
 
@@ -103,14 +104,14 @@ export function CommandPalette() {
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={(o) => !o && close()} modal="trap-focus">
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="app-viewport-fixed fixed z-50 bg-black/55 backdrop-blur-xs duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 motion-reduce:animate-none" />
+        <DialogPrimitive.Backdrop className={cn("app-viewport-fixed fixed z-50 bg-black/55 backdrop-blur-xs", DIALOG_FADE_CLASS)} />
         <DialogPrimitive.Popup
           data-testid="command-palette"
           aria-label="Command palette"
-          className={cn("fixed left-1/2 top-[clamp(4rem,14vh,8rem)] z-50 w-full -translate-x-1/2 px-4 outline-none duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 motion-reduce:animate-none", paletteDetails.widthClass)}
+          className={cn("fixed left-1/2 top-[clamp(4rem,14vh,8rem)] z-50 w-full -translate-x-1/2 px-4 outline-none", DIALOG_FADE_CLASS, paletteDetails.widthClass)}
         >
           <Command
-            className="overflow-hidden rounded-xl bg-panel shadow-lg ring-1 ring-ink/10"
+            className={cn("overflow-hidden", DIALOG_SURFACE_CLASS)}
             // We do all filtering/ranking ourselves (filterCommandPaletteGroups,
             // BrowseView's leaf prefix filter, ProjectsView's substring filter),
             // so disable cmdk's built-in filter. Letting it run against the raw

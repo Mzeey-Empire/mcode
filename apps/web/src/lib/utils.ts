@@ -4,8 +4,9 @@ import { extendTailwindMerge, validators } from "tailwind-merge"
 // tailwind-merge reads an unknown `text-*` class as a colour, so without these
 // entries `cn("text-muted", "text-caption")` would drop the colour,
 // and `cn("text-fade", "text-xs")` would drop the fade.
-// The radius and spacing roles from index.css are registered so a caller's
-// `rounded-*` or `min-h-*` replaces them instead of losing to them.
+// The radius, spacing and elevation roles from index.css are registered so a
+// caller's `rounded-*`, `min-h-*` or `shadow-*` replaces them instead of both
+// classes surviving and CSS order picking one.
 const twMerge = extendTailwindMerge<"text-fade">({
   extend: {
     theme: {
@@ -16,6 +17,7 @@ const twMerge = extendTailwindMerge<"text-fade">({
         "row-compact", "row-default", "row-comfortable", "target-touch",
         "icon-metadata", "icon-compact", "icon-standard", "icon-large", "icon-display",
       ],
+      shadow: ["popover", "floating", "dialog"],
     },
     classGroups: {
       "font-size": [{ text: ["body", "prose", "body-small", "caption", "label", "button", "code"] }, "type-link"],

@@ -5,6 +5,7 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { CheckIcon, ChevronRightIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { POPOVER_FADE_CLASS, POPOVER_SURFACE_CLASS } from "./overlay-surface"
 
 /**
  * Dropdown menu root that allows pointer interaction outside the popup by default.
@@ -34,7 +35,9 @@ function DropdownMenuContent({
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
           className={cn(
-            "pointer-events-auto min-w-[8rem] overflow-hidden rounded-lg border border-border bg-panel p-1 text-ink shadow-md",
+            "pointer-events-auto min-w-[8rem] overflow-hidden p-1",
+            POPOVER_SURFACE_CLASS,
+            POPOVER_FADE_CLASS,
             className,
           )}
           {...props}
@@ -168,7 +171,9 @@ function DropdownMenuSubContent({
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-sub-content"
           className={cn(
-            "pointer-events-auto max-h-(--available-height) min-w-[8rem] overflow-y-auto rounded-lg border border-border bg-panel p-1 text-ink shadow-lg",
+            "pointer-events-auto max-h-(--available-height) min-w-[8rem] overflow-y-auto p-1",
+            POPOVER_SURFACE_CLASS,
+            POPOVER_FADE_CLASS,
             className,
           )}
           {...props}

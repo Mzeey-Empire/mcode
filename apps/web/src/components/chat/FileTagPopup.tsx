@@ -27,12 +27,7 @@ interface FileTagPopupProps {
   listRef: React.RefObject<HTMLDivElement | null>;
   /** Controlled selection index driven by useFileTagPopup state. */
   selectedIndex: number;
-  /**
-   * When provided, the popup renders at a fixed position derived from this
-   * rect (anchored above the rect, like SlashCommandPopup) instead of using
-   * `absolute bottom-full`. Required when the popup would otherwise be clipped
-   * by an `overflow-hidden` ancestor (e.g. the annotation bubble).
-   */
+  /** Viewport rect the popup opens above. The popup renders nothing until it is known. */
   anchorRect?: DOMRect | null;
   /**
    * `"dark"` switches every surface, text, hover, and border token to dark
@@ -209,7 +204,7 @@ export function FileTagPopup({
     }
   }, [selectedIndex, isOpen, items]);
 
-  if (!isOpen || items.length === 0) return null;
+  if (!isOpen || items.length === 0 || !anchorRect) return null;
 
   const maxHeight = Math.min(
     VISIBLE_ITEMS * ITEM_HEIGHT,
@@ -259,41 +254,20 @@ export function FileTagPopup({
     </div>
   );
 
-  if (anchorRect) {
-    return (
-      <ComposerOverlaySurface
-        data-file-popup
-        ref={listRef}
-        role="listbox"
-        aria-label="Mention suggestions"
-        anchorRect={anchorRect}
-        estimatedHeight={maxHeight}
-        minWidth={presentation === "composer" ? 0 : 260}
-        maxWidth={presentation === "composer" ? undefined : 360}
-        attached={presentation === "composer"}
-        tone={tone}
-        className={className}
-      >
-        {list}
-      </ComposerOverlaySurface>
-    );
-  }
-
   return (
-    <div
+    <ComposerOverlaySurface
       data-file-popup
       ref={listRef}
       role="listbox"
       aria-label="Mention suggestions"
-      className={cn(
-        "composer-autocomplete-surface absolute bottom-full left-0 mb-1 w-full overflow-hidden rounded-xl border border-border/70 animate-composer-popup-enter",
-        tone === "dark"
-          ? "border-white/10 bg-[#1e1e1e] text-neutral-100"
-          : "bg-panel text-ink",
-        className,
-      )}
+      anchorRect={anchorRect}
+      minWidth={presentation === "composer" ? 0 : 260}
+      maxWidth={presentation === "composer" ? undefined : 360}
+      attached={presentation === "composer"}
+      tone={tone}
+      className={className}
     >
       {list}
-    </div>
+    </ComposerOverlaySurface>
   );
 }

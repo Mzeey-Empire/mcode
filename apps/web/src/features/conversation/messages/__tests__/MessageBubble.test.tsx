@@ -199,7 +199,7 @@ describe("MessageBubble user messages", () => {
 
     expect(attachment).toHaveAttribute("data-selected-text-exclude", "true");
     expect(attachment.compareDocumentPosition(textBubble!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(attachment).toHaveClass("flex", "justify-end", "relative", "z-10");
+    expect(attachment).toHaveClass("flex", "justify-end");
     expect(getByTestId("selected-text-comment-chip")).toHaveClass("h-8");
     expect(queryByRole("button", { name: "Remove 1 annotation" })).not.toBeInTheDocument();
 
@@ -491,10 +491,6 @@ describe("MessageBubble user messages", () => {
     );
     expect(await findByTestId("preview-annotation-hover-thumbnail")).toHaveClass(
       "object-contain",
-    );
-    expect(document.querySelector('[data-slot="tooltip-arrow"]')).toHaveClass(
-      "fill-panel",
-      "stroke-border",
     );
   });
 

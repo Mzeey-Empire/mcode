@@ -40,6 +40,10 @@ type DiffRowMeta =
 
 type DiffItem = CodeViewItem<DiffRowMeta>;
 
+/** An in-flow card under the diff line. It scrolls with the code, so it has no overlay shadow. */
+const DIFF_COMMENT_FRAME_CLASS =
+  "mx-3 my-1.5 w-[calc(100%-1.5rem)] overflow-hidden rounded-composer border border-border bg-panel text-ink";
+
 const EMPTY_PATCHES: Record<string, string> = {};
 
 /** Comparison sources whose old/new contents can be read from git refs. */
@@ -526,7 +530,7 @@ export function ReviewDiffView({
     if (meta.kind === "draft") {
       if (!editTarget || editTarget.kind !== "draft") return null;
       return (
-        <div className="mx-3 my-1.5 w-[calc(100%-1.5rem)]">
+        <div className={DIFF_COMMENT_FRAME_CLASS} data-comment-editor-frame>
           <DiffCommentEditor
             threadId={threadId}
             target={{
@@ -546,7 +550,7 @@ export function ReviewDiffView({
     if (!saved) return null;
     if (editingAnnotation?.id === saved.id) {
       return (
-        <div className="mx-3 my-1.5 w-[calc(100%-1.5rem)]">
+        <div className={DIFF_COMMENT_FRAME_CLASS} data-comment-editor-frame>
           <DiffCommentEditor
             threadId={threadId}
             target={{

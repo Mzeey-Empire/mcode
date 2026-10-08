@@ -9,8 +9,6 @@ import { EntityIcon } from "./EntityToken";
 
 const ITEM_HEIGHT = 40;
 const VISIBLE_ITEMS = 8;
-const STATUS_ROW_HEIGHT = ITEM_HEIGHT;
-const LIST_SURFACE_PADDING = 8;
 const LIST_BOTTOM_FADE_HEIGHT = 20;
 function commandDisplayLabel(command: Command): string {
   if (command.capabilityKind === "plugin") return `@${command.name}`;
@@ -92,22 +90,12 @@ export function SlashCommandPopup({
 
   const listMaxHeight = VISIBLE_ITEMS * ITEM_HEIGHT + LIST_BOTTOM_FADE_HEIGHT;
 
-  // Estimate the rendered popup height before positioning. The scrollport is
-  // inset from the surface so its native scrollbar clears the rounded corner.
-  const willRenderList = state.kind === "ready" || state.kind === "staleRevalidating";
-  const renderedListHeight = Math.min(
-    items.length * ITEM_HEIGHT + LIST_BOTTOM_FADE_HEIGHT,
-    listMaxHeight,
-  );
-  const estimatedHeight =
-    willRenderList ? renderedListHeight + LIST_SURFACE_PADDING : STATUS_ROW_HEIGHT;
   const popup = (
     // The listbox role belongs to the scrolling options container. The error
     // branch renders its Retry control outside that semantic container.
     <ComposerOverlaySurface
       data-slash-popup
       anchorRect={anchorRect}
-      estimatedHeight={estimatedHeight}
       attached
       tone={tone}
       className={className}

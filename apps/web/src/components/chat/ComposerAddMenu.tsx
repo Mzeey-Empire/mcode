@@ -23,7 +23,6 @@ interface ComposerAddMenuProps {
   getComposerRect: () => DOMRect | null;
 }
 
-const ADD_MENU_HEIGHT = 256;
 
 const CAPABILITY_ICONS = {
   plan: ListChecks,
@@ -72,20 +71,15 @@ export function ComposerAddMenu({
       setOpen(false);
       setAnchorRect(null);
     };
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      setAnchorRect(null);
-      triggerRef.current?.focus();
-    };
-
     document.addEventListener("mousedown", dismiss);
-    document.addEventListener("keydown", dismissOnEscape);
-    return () => {
-      document.removeEventListener("mousedown", dismiss);
-      document.removeEventListener("keydown", dismissOnEscape);
-    };
+    return () => document.removeEventListener("mousedown", dismiss);
   }, [open]);
+
+  const closeFromEscape = () => {
+    setOpen(false);
+    setAnchorRect(null);
+    triggerRef.current?.focus();
+  };
 
   useEffect(() => {
     if (!open || !anchorRect) return;
@@ -172,8 +166,8 @@ export function ComposerAddMenu({
           role="menu"
           aria-label="Add to composer"
           anchorRect={anchorRect}
-          estimatedHeight={ADD_MENU_HEIGHT}
           className="composer-add-menu-surface"
+          onEscapeKeyDown={closeFromEscape}
         >
           <div ref={menuRef} className="p-1" onKeyDown={handleMenuKeyDown}>
             <div

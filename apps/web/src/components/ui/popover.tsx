@@ -3,6 +3,7 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 
 import { cn } from "@/lib/utils"
+import { POPOVER_FADE_CLASS, POPOVER_SURFACE_CLASS } from "./overlay-surface"
 
 function Popover({ ...props }: PopoverPrimitive.Root.Props) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />
@@ -49,7 +50,9 @@ function PopoverContent({
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(
-            "pointer-events-auto w-72 rounded-lg border border-border bg-panel p-4 text-ink shadow-md outline-none",
+            "pointer-events-auto w-72 p-4 outline-none",
+            POPOVER_SURFACE_CLASS,
+            POPOVER_FADE_CLASS,
             className,
           )}
           {...props}
@@ -59,4 +62,7 @@ function PopoverContent({
   )
 }
 
-export { Popover, PopoverContent, PopoverTrigger }
+/** Why a popover opened or closed, as passed to `onOpenChange`. */
+type PopoverRootChangeEventDetails = PopoverPrimitive.Root.ChangeEventDetails
+
+export { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails }

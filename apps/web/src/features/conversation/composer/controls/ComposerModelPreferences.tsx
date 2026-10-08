@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Check, ChevronDown, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 import { supports1MContextWindow, supportsThinkingToggle } from "@/lib/model-registry";
@@ -136,45 +137,39 @@ function getModelPreferenceState(
   };
 }
 
-function ComposerModelPreferencesTrigger({
-  state,
-  onClick,
-}: {
-  state: ModelPreferenceState;
-  onClick(): void;
-}) {
+function ComposerModelPreferencesTrigger({ state }: { state: ModelPreferenceState }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={(event) => {
-              event.stopPropagation();
-              onClick();
-            }}
-            className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
-          >
-            {state.hasCodexFast && state.codexFastMode && (
-              <Zap
-                size={12}
-                aria-hidden="true"
-                data-testid="composer-fast-mode-icon"
-                className="shrink-0 text-ink/80"
-              />
-            )}
-            <span className="text-sm">{state.preferenceLabel}</span>
-            {state.reasoningLevels.length > 0 && state.has1M && state.contextWindow === "1m" && (
-              <span
-                data-testid="composer-1m-badge"
-                className="rounded-sm bg-ink/5 px-1 py-px text-xs font-medium uppercase tracking-wide text-ink/80 ring-1 ring-inset ring-ink/10 tabular-nums"
+          <PopoverTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="xs"
+                className="gap-1.5 text-muted transition-colors hover:bg-hover/40 hover:text-ink"
               >
-                1M
-              </span>
-            )}
-            <ChevronDown size={11} />
-          </Button>
+                {state.hasCodexFast && state.codexFastMode && (
+                  <Zap
+                    size={12}
+                    aria-hidden="true"
+                    data-testid="composer-fast-mode-icon"
+                    className="shrink-0 text-ink/80"
+                  />
+                )}
+                <span className="text-sm">{state.preferenceLabel}</span>
+                {state.reasoningLevels.length > 0 && state.has1M && state.contextWindow === "1m" && (
+                  <span
+                    data-testid="composer-1m-badge"
+                    className="rounded-sm bg-ink/5 px-1 py-px text-xs font-medium uppercase tracking-wide text-ink/80 ring-1 ring-inset ring-ink/10 tabular-nums"
+                  >
+                    1M
+                  </span>
+                )}
+                <ChevronDown size={11} />
+              </Button>
+            }
+          />
         }
       />
       <TooltipContent>{state.preferenceTooltip}</TooltipContent>
@@ -333,26 +328,19 @@ function ComposerFastModeOption({
 }
 
 function ComposerModelPreferenceMenu({
-  open,
   state,
   actionProps,
 }: {
-  open: boolean;
   state: ModelPreferenceState;
   actionProps: ModelPreferenceActionProps;
 }) {
-  if (!open) return null;
-
   return (
-    <div
-      onClick={(event) => event.stopPropagation()}
-      className="absolute bottom-full left-0 z-20 mb-1 min-w-[224px] rounded-md border border-border bg-panel p-1 shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150"
-    >
+    <PopoverContent side="top" align="start" className="w-auto min-w-[224px] p-1">
       <ComposerReasoningOptions state={state} actionProps={actionProps} />
       <ComposerContextWindowOptions state={state} actionProps={actionProps} />
       <ComposerThinkingOptions state={state} actionProps={actionProps} />
       <ComposerFastModeOption state={state} actionProps={actionProps} />
-    </div>
+    </PopoverContent>
   );
 }
 
@@ -374,21 +362,12 @@ export function ComposerModelPreferences({
     setShowPreferences(false);
   }
 
-  useEffect(() => {
-    const closePreferences = () => setShowPreferences(false);
-    document.addEventListener("click", closePreferences);
-    return () => document.removeEventListener("click", closePreferences);
-  }, []);
-
   if (!show || !state.canShowPreferences) return null;
 
   return (
-    <div className="relative">
-      <ComposerModelPreferencesTrigger
-        state={state}
-        onClick={() => setShowPreferences((open) => !open)}
-      />
-      <ComposerModelPreferenceMenu open={showPreferences} state={state} actionProps={actionProps} />
-    </div>
+    <Popover open={showPreferences} onOpenChange={setShowPreferences}>
+      <ComposerModelPreferencesTrigger state={state} />
+      <ComposerModelPreferenceMenu state={state} actionProps={actionProps} />
+    </Popover>
   );
 }

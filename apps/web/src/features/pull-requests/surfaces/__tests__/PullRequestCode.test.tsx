@@ -457,7 +457,9 @@ describe("PullRequestCode", () => {
     ).not.toBeInTheDocument();
     const navigator = screen.getByTestId("pull-request-changed-files-pane");
     expect(navigator).toBeVisible();
-    expect(navigator.parentElement).toHaveClass("absolute", "right-0");
+    const sheet = screen.getByRole("dialog", { name: "Changed files" });
+    expect(sheet).toContainElement(navigator);
+    expect(sheet).toHaveClass("absolute", "right-0");
     expect(
       screen.getByRole("textbox", { name: "Search changed files" }),
     ).toBeVisible();
@@ -476,6 +478,15 @@ describe("PullRequestCode", () => {
       screen.getByRole("button", { name: "Show changed files" }),
     );
     expect(screen.getByTestId("pull-request-changed-files-pane")).toBeVisible();
+
+    // Escape belongs to whatever holds focus: the diff keeps it, the sheet closes on it.
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByTestId("pull-request-changed-files-pane")).toBeVisible();
+    await userEvent.click(screen.getByRole("textbox", { name: "Search changed files" }));
+    await userEvent.keyboard("{Escape}");
+    expect(
+      screen.queryByTestId("pull-request-changed-files-pane"),
+    ).not.toBeInTheDocument();
   });
 
   it("docks the reusable file view when the Code workspace can fit it", async () => {
@@ -505,8 +516,8 @@ describe("PullRequestCode", () => {
     const rendered = renderCode(transport, true);
 
     expect(await screen.findByTestId("code-viewport-seam")).toBeInTheDocument();
-    const navigator = screen.getByTestId("pull-request-changed-files-pane");
-    expect(navigator.parentElement).not.toHaveClass("absolute");
+    expect(screen.getByTestId("pull-request-changed-files-pane")).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "Changed files" })).not.toBeInTheDocument();
 
     layout.codeWidth = 700;
     rendered.rerender(
@@ -522,9 +533,9 @@ describe("PullRequestCode", () => {
     );
 
     await waitFor(() =>
-      expect(
-        screen.getByTestId("pull-request-changed-files-pane").parentElement,
-      ).toHaveClass("absolute", "right-0"),
+      expect(screen.getByRole("dialog", { name: "Changed files" })).toContainElement(
+        screen.getByTestId("pull-request-changed-files-pane"),
+      ),
     );
     expect(screen.getByTestId("pull-request-code-toolbar")).toHaveAttribute(
       "data-layout",

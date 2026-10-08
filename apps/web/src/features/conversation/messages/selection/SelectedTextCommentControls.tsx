@@ -519,7 +519,8 @@ function SelectedTextCommentEditorPopoverContent({
       initialFocus={() => document.getElementById("selected-text-comment-note")}
       finalFocus={false}
       style={editorStyle}
-      className="border-0 bg-transparent p-0 shadow-none"
+      className="overflow-hidden p-0"
+      data-comment-editor-frame
     >
       <SelectedTextCommentEditor
         key={`${overlay.source.messageId}:${overlay.source.start}:${overlay.source.end}`}

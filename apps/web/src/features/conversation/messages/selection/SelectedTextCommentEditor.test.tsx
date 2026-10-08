@@ -216,7 +216,7 @@ describe("SelectedTextCommentEditor", () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onAnnouncement).not.toHaveBeenCalledWith("Repeat this action to discard this comment.");
-    expect(screen.getByRole("dialog", { name: "Comment on selected text" })).not.toHaveClass("animate-preview-annotation-shake");
+    expect(screen.getByRole("dialog", { name: "Comment on selected text" })).not.toHaveAttribute("data-shaking");
   });
 
   it("deletes a saved comment with its required announcement", () => {

@@ -3,7 +3,6 @@ import type { LexicalEditor } from "lexical";
 import { MessageCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { DraftDiffComment, MessageMention } from "@mcode/contracts";
-import { cn } from "@/lib/utils";
 import { basename } from "@/lib/path";
 import {
   CommentEditorComposer,
@@ -64,7 +63,9 @@ export interface DiffCommentEditorProps {
  * same compact ComposerEditor, controls, and dismissal policy as the
  * transcript "Add comment" feature. Saved comments and the open editor's
  * unsaved text and mentions persist in the thread's composer draft, so they
- * survive pierre's virtualizer unmounting the row and a reload.
+ * survive pierre's virtualizer unmounting the row and a reload. The diff row
+ * frames it: the editor sits in the row's flow rather than floating, because the
+ * virtualizer unmounts rows that a floating anchor would point at.
  */
 export function DiffCommentEditor({
   threadId,
@@ -130,10 +131,8 @@ export function DiffCommentEditor({
       ref={rootRef}
       role="dialog"
       aria-label={`Comment on ${target.filePath} line ${target.line}`}
-      className={cn(
-        "relative overflow-hidden rounded-2xl border border-border/70 bg-panel text-ink shadow-lg",
-        isShaking && "animate-preview-annotation-shake",
-      )}
+      className="relative overflow-hidden"
+      data-shaking={isShaking || undefined}
     >
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
         <MessageCircle size={12} className="shrink-0 text-muted" aria-hidden />

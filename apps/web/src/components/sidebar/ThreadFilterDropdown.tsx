@@ -98,7 +98,7 @@ export function ThreadFilterDropdown({
         side="bottom"
         align="end"
         sideOffset={4}
-        className="w-44 rounded-md border border-border bg-panel p-1 shadow-lg"
+        className="w-44 p-1"
       >
         <div className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted">
           Status

@@ -184,7 +184,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
           className="max-h-[var(--available-height)]"
           viewportClassName="max-h-[var(--available-height)]"
         >
-          <div data-testid="thread-overview-body" className="animate-overview-enter">
+          <div data-testid="thread-overview-body">
             <div data-testid="thread-overview-masthead" className="flex h-9 items-center bg-hover/20 px-3">
               <span className="text-xs font-semibold text-ink/90">Overview</span>
               <div data-testid="thread-overview-masthead-controls" className="ml-auto flex items-center gap-0.5">

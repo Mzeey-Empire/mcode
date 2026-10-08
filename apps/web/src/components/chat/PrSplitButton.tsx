@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronDown, ExternalLink, GitPullRequest, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { sidePlacement } from "@/components/ui/side-placement";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -59,11 +60,13 @@ export function PrSplitButton({
   newPrButtonTestId,
 }: PrSplitButtonProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const rowRef = useRef<HTMLButtonElement>(null);
 
   return (
     <div data-testid="workspace-menu-open-pr-split">
       <Popover open={menuOpen} onOpenChange={setMenuOpen}>
         <PopoverTrigger
+          ref={rowRef}
           render={
             <Button
               variant="ghost"
@@ -109,8 +112,8 @@ export function PrSplitButton({
             </Button>
           }
         />
-        <PopoverContent align="start" side="left" sideOffset={12} className="w-72 p-0">
-          <div data-testid="thread-overview-pr-popover" className="animate-popover-enter space-y-1 p-2">
+        <PopoverContent {...sidePlacement(rowRef)} className="w-72 p-0">
+          <div data-testid="thread-overview-pr-popover" className="space-y-1 p-2">
             <Tooltip>
               <TooltipTrigger
                 render={

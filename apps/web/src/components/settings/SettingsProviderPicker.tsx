@@ -111,7 +111,7 @@ export function SettingsProviderPicker({
         align={align}
         side="bottom"
         sideOffset={4}
-        className="flex h-[min(340px,calc(100vh-10rem))] w-[min(92vw,320px)] flex-col overflow-hidden p-0 shadow-lg"
+        className="flex h-[min(340px,calc(100vh-10rem))] w-[min(92vw,320px)] flex-col overflow-hidden p-0"
       >
         <Command shouldFilter={false} className="min-h-0 flex-1 rounded-lg border-0">
           <CommandInput

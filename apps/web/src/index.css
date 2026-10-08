@@ -471,30 +471,6 @@
 .animate-chip-enter {
   animation: chip-enter 150ms ease-out;
 }
-@keyframes popover-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-2px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.animate-popover-enter {
-  animation: popover-enter 160ms cubic-bezier(0.22, 1, 0.36, 1);
-  transform-origin: top right;
-}
-@keyframes composer-popup-enter {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
 .composer-autocomplete-surface {
   /* Composer menus sit below application overlay primitives (z-50). */
   z-index: 40;
@@ -507,19 +483,6 @@
 .composer-provider-notice-surface {
   /* Autocomplete must stay available while a notice is visible. */
   z-index: 30;
-}
-.animate-composer-popup-enter {
-  animation: composer-popup-enter 140ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-/* Softer entrance for the thread Overview: it should settle into the top-right
- * like a panel, not zoom out of the trigger icon, so it drops in without the
- * corner-scale of the standard popover. */
-@keyframes overview-enter {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.animate-overview-enter {
-  animation: overview-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes thread-overview-loading {
   from { transform: translateX(-120%); }
@@ -555,12 +518,9 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-up-in,
   .animate-chip-enter,
-  .animate-popover-enter,
-  .animate-composer-popup-enter,
   .animate-thread-overview-loading::after,
   .animate-thread-overview-usage-fill,
   .animate-thread-overview-row-reveal,
-  .animate-overview-enter,
   .animate-collapsible-down,
   .animate-collapsible-up {
     animation: none;
@@ -867,7 +827,9 @@ diffs-container:has([data-jump-highlight="true"]) {
   60% { transform: translateX(-3px); }
   80% { transform: translateX(3px); }
 }
-.animate-preview-annotation-shake {
+/* A comment editor flags `data-shaking`; its frame (popover or composer card) shakes as one. */
+.animate-preview-annotation-shake,
+[data-comment-editor-frame]:has([data-shaking]) {
   animation: preview-annotation-shake 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -876,7 +838,8 @@ diffs-container:has([data-jump-highlight="true"]) {
     width: 100% !important;
     opacity: 0.5;
   }
-  .animate-preview-annotation-shake {
+  .animate-preview-annotation-shake,
+  [data-comment-editor-frame]:has([data-shaking]) {
     animation: none;
   }
 }

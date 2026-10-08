@@ -1,13 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactElement,
-} from "react";
-import { createPortal } from "react-dom";
+import { useMemo, useRef, type ReactElement } from "react";
 import {
   CircleCheck,
   CircleX,
@@ -15,6 +6,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Popover, PopoverContent, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
+import { sidePlacement } from "@/components/ui/side-placement";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ChecksStatus, CheckRun } from "@mcode/contracts";
@@ -38,16 +31,6 @@ interface CheckRunVisual {
   labelClassName: string;
   spinning?: boolean;
 }
-
-interface FlyoutPosition {
-  left: number;
-  top: number;
-}
-
-const FLYOUT_WIDTH = 356;
-const FLYOUT_MAX_HEIGHT = 320;
-const FLYOUT_GAP = 8;
-const VIEWPORT_PADDING = 8;
 
 function getRunVisual(run: CheckRun): CheckRunVisual {
   if (run.status !== "completed") {
@@ -95,30 +78,6 @@ function formatDuration(ms: number): string {
   return remainSecs > 0 ? `${mins}m ${remainSecs}s` : `${mins}m`;
 }
 
-function getMeasuredTrigger(trigger: HTMLElement): HTMLElement {
-  return trigger.firstElementChild instanceof HTMLElement
-    ? trigger.firstElementChild
-    : trigger;
-}
-
-function calculateFlyoutPosition(trigger: HTMLElement): FlyoutPosition {
-  const rect = getMeasuredTrigger(trigger).getBoundingClientRect();
-  const canOpenRight =
-    rect.right + FLYOUT_GAP + FLYOUT_WIDTH + VIEWPORT_PADDING <= window.innerWidth;
-  const preferredLeft = canOpenRight
-    ? rect.right + FLYOUT_GAP
-    : rect.left - FLYOUT_GAP - FLYOUT_WIDTH;
-  const left = Math.max(
-    VIEWPORT_PADDING,
-    Math.min(preferredLeft, window.innerWidth - FLYOUT_WIDTH - VIEWPORT_PADDING),
-  );
-  const top = Math.max(
-    VIEWPORT_PADDING,
-    Math.min(rect.top, window.innerHeight - FLYOUT_MAX_HEIGHT - VIEWPORT_PADDING),
-  );
-  return { left, top };
-}
-
 /**
  * Flat CI job flyout anchored to the Overview CI summary row.
  */
@@ -129,8 +88,6 @@ export function ChecksPopover({
   onOpenChange,
 }: ChecksPopoverProps) {
   const triggerRef = useRef<HTMLDivElement | null>(null);
-  const flyoutRef = useRef<HTMLDivElement | null>(null);
-  const [position, setPosition] = useState<FlyoutPosition | null>(null);
 
   const sortedRuns = useMemo(() => {
     const priority = (run: CheckRun): number => {
@@ -142,49 +99,25 @@ export function ChecksPopover({
     return [...checks.runs].sort((a, b) => priority(a) - priority(b));
   }, [checks.runs]);
 
-  const updatePosition = useCallback(() => {
-    if (!triggerRef.current) return;
-    setPosition(calculateFlyoutPosition(triggerRef.current));
-  }, []);
+  // The row's own button toggles the flyout, so a press on it is not an outside press.
+  const handleOpenChange = (nextOpen: boolean, details: PopoverRootChangeEventDetails) => {
+    const target = details.event?.target;
+    if (details.reason === "outside-press" && target instanceof Node && triggerRef.current?.contains(target)) {
+      return;
+    }
+    onOpenChange?.(nextOpen);
+  };
 
-  useEffect(() => {
-    if (!open) return;
-    updatePosition();
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [open, updatePosition]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const closeOnOutsidePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (triggerRef.current?.contains(target) || flyoutRef.current?.contains(target)) return;
-      onOpenChange?.(false);
-    };
-
-    document.addEventListener("pointerdown", closeOnOutsidePointerDown);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointerDown);
-    };
-  }, [onOpenChange, open]);
-
-  const flyoutStyle: CSSProperties | undefined = position
-    ? { left: position.left, top: position.top, width: FLYOUT_WIDTH }
-    : undefined;
-  const flyout =
-    open && position ? (
-      <div
+  return (
+    <Popover open={open ?? false} onOpenChange={handleOpenChange}>
+      <div ref={triggerRef} className="w-full">
+        {children}
+      </div>
+      <PopoverContent
+        {...sidePlacement(triggerRef)}
         role="dialog"
         data-testid="thread-overview-ci-popover"
-        ref={flyoutRef}
-        style={flyoutStyle}
-        className="fixed z-50 overflow-hidden rounded-lg border border-border bg-panel p-0 text-ink shadow-xl"
+        className="w-[356px] overflow-hidden p-0"
       >
         <div className="max-h-[320px] overflow-y-auto py-1 scrollbar-on-hover">
           {sortedRuns.length > 0 ? (
@@ -195,17 +128,8 @@ export function ChecksPopover({
             <div className="px-4 py-3 text-xs text-muted">No checks configured</div>
           )}
         </div>
-      </div>
-    ) : null;
-
-  return (
-    <>
-      <div ref={triggerRef} className="w-full">
-        {children}
-      </div>
-
-      {flyout ? createPortal(flyout, document.body) : null}
-    </>
+      </PopoverContent>
+    </Popover>
   );
 }
 

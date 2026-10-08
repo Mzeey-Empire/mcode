@@ -81,7 +81,6 @@ export function DiffCommentsComposerAttachment({
         testId="diff-comment-attachment"
         chipTestId="diff-comment-chip"
         previewTestId="diff-comment-preview"
-        commentCount={comments.length}
         onRemove={() => clearVisibleDiffComments(scopeId)}
       >
         {comments.map((annotation) => {

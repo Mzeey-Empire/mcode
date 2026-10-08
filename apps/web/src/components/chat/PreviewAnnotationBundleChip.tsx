@@ -6,7 +6,7 @@ import {
 import { FileCodeCorner, ImageIcon, MessageCircle, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { buildStoredAttachmentImageSrc } from "@/lib/attachment-url";
 import {
   composerFeedbackAccessibleLabel,
@@ -99,8 +99,10 @@ export function PreviewAnnotationBundleChip({
   const accessibleLabel = composerFeedbackAccessibleLabel(bundle);
 
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <Popover>
+      <PopoverTrigger
+        openOnHover
+        nativeButton={false}
         render={
           <div
             data-testid={testId}
@@ -131,11 +133,11 @@ export function PreviewAnnotationBundleChip({
           </div>
         }
       />
-      <TooltipContent
+      <PopoverContent
         side="top"
         align="end"
         sideOffset={8}
-        className="w-[min(32rem,calc(100vw-1.6rem))] max-w-none items-stretch rounded-xl bg-panel p-3 text-ink ring-1 ring-inset ring-border/70"
+        className="w-[min(32rem,calc(100vw-1.6rem))] p-3"
       >
         <div className="max-h-80 min-w-0 divide-y divide-border/45 overflow-y-auto">
           {bundle.annotations.map((item) => {
@@ -179,7 +181,7 @@ export function PreviewAnnotationBundleChip({
             );
           })}
         </div>
-      </TooltipContent>
-    </Tooltip>
+      </PopoverContent>
+    </Popover>
   );
 }

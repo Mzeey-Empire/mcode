@@ -52,8 +52,8 @@ describe("composer capabilities", () => {
     await user.click(screen.getByRole("button", { name: "Add to composer" }));
 
     const menu = screen.getByRole("menu", { name: "Add to composer" });
-    expect(menu.parentElement).toBe(document.body);
-    expect(menu).toHaveStyle({ position: "fixed" });
+    expect(menu).toHaveAttribute("data-slot", "popover-content");
+    await waitFor(() => expect(menu.parentElement).toHaveAttribute("data-side", "top"));
     expect(screen.getByTestId("composer-overlay-host")).toBeEmptyDOMElement();
   });
 

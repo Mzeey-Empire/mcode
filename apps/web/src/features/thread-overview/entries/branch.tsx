@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { sidePlacement } from "@/components/ui/side-placement";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
@@ -10,7 +11,7 @@ import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { cn } from "@/lib/utils";
 import { getTransport, type GitBranch as GitBranchRecord, type Thread } from "@/transport";
 import { Check, ChevronDown, GitBranch, Plus, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   OVERVIEW_ROW_CLASS,
   ThreadOverviewTooltipButton,
@@ -147,7 +148,7 @@ function ThreadOverviewBranchMenu({
   return (
     <div
       data-testid="thread-overview-branch-popover"
-      className="animate-popover-enter p-2"
+      className="p-2"
     >
       <div className="relative">
         <Search
@@ -313,10 +314,12 @@ export const { Provider: BranchEntryState, useEntryState: useBranchEntryState } 
 function BranchEntry({ thread }: { thread: Thread }) {
   const { branchCreation, branchlessCreatePr, hasCommitsAhead } = useOverviewContext();
   const [branchOpen, setBranchOpen] = useBranchEntryState();
+  const branchRowRef = useRef<HTMLButtonElement>(null);
   const checkoutLabel = resolveThreadCheckoutLabel(thread);
   return (<ThreadOverviewWhen when={!branchlessCreatePr}>
     <Popover open={branchOpen} onOpenChange={setBranchOpen}>
       <PopoverTrigger
+        ref={branchRowRef}
         render={
           <Button
             variant="ghost"
@@ -348,9 +351,7 @@ function BranchEntry({ thread }: { thread: Thread }) {
         }
       />
       <PopoverContent
-        align="start"
-        side="left"
-        sideOffset={12}
+        {...sidePlacement(branchRowRef)}
         className="w-72 p-0"
       >
         <ThreadOverviewBranchMenu

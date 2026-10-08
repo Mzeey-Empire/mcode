@@ -1,6 +1,7 @@
 import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { sidePlacement } from "@/components/ui/side-placement";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
@@ -8,7 +9,7 @@ import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
 import { Check, ChevronDown, Copy, Laptop } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { OVERVIEW_ROW_CLASS } from "@/features/thread-overview/overview-row";
 
 type LocalCopyTarget = "path" | "branch";
@@ -39,7 +40,7 @@ function ThreadOverviewLocalMenu({ worktreePath, branch }: ThreadOverviewLocalMe
   }, []);
 
   return (
-    <div data-testid="thread-overview-local-popover" className="animate-popover-enter p-2">
+    <div data-testid="thread-overview-local-popover" className="p-2">
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
           <span className="min-w-0">
@@ -100,10 +101,12 @@ export const { Provider: LocalEntryState, useEntryState: useLocalEntryState } = 
 function LocalEntry({ thread }: { thread: Thread }) {
   const { dirPath } = useOverviewContext();
   const [localOpen, setLocalOpen] = useLocalEntryState();
+  const localRowRef = useRef<HTMLButtonElement>(null);
   const { label: modeLabel, Icon: LocalModeIcon } = getThreadOverviewLocalMode(thread);
   const checkoutLabel = resolveThreadCheckoutLabel(thread);
   return (<Popover open={localOpen} onOpenChange={setLocalOpen}>
     <PopoverTrigger
+      ref={localRowRef}
       render={
         <Button
           variant="ghost"
@@ -138,9 +141,7 @@ function LocalEntry({ thread }: { thread: Thread }) {
       }
     />
     <PopoverContent
-      align="start"
-      side="left"
-      sideOffset={12}
+      {...sidePlacement(localRowRef)}
       className="w-80 p-0"
     >
       <ThreadOverviewLocalMenu worktreePath={dirPath} branch={checkoutLabel} />

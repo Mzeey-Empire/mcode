@@ -25,10 +25,6 @@ import { extractComposerMessage } from "../lexical/cursor-utils";
 // tests that share the same jsdom instance.
 const originalResizeObserver = globalThis.ResizeObserver;
 const originalScrollIntoView = Element.prototype.scrollIntoView;
-const originalVisualViewport = Object.getOwnPropertyDescriptor(
-  window,
-  "visualViewport",
-);
 
 beforeAll(() => {
   if (typeof window.ResizeObserver === "undefined") {
@@ -39,10 +35,6 @@ beforeAll(() => {
     };
   }
   Element.prototype.scrollIntoView = () => {};
-  Object.defineProperty(window, "visualViewport", {
-    configurable: true,
-    value: { width: 1024, height: 768 },
-  });
 });
 
 afterAll(() => {
@@ -53,13 +45,12 @@ afterAll(() => {
     globalThis.ResizeObserver = originalResizeObserver;
   }
   Element.prototype.scrollIntoView = originalScrollIntoView;
-  if (originalVisualViewport) {
-    Object.defineProperty(window, "visualViewport", originalVisualViewport);
-  } else {
-    // @ts-expect-error -- intentional cleanup of the test viewport
-    delete window.visualViewport;
-  }
 });
+
+function positionerTop(positioner: HTMLElement): number {
+  const match = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(positioner.style.transform);
+  return match ? Number(match[2]) : parseFloat(positioner.style.top);
+}
 
 /** Minimal DOMRect-like object for anchorRect. */
 function makeAnchorRect(): DOMRect {
@@ -228,7 +219,7 @@ describe("SlashCommandPopup selection indicator", () => {
     ["empty", "No commands match"],
     ["loading", "Loading commands..."],
     ["error", "Couldn't load commands: network failed"],
-  ] as const)("positions the %s state above the anchor without overlap", (state, text) => {
+  ] as const)("positions the %s state above the anchor without overlap", async (state, text) => {
     renderStatusPopup(state);
     const row =
       state === "error"
@@ -237,6 +228,10 @@ describe("SlashCommandPopup selection indicator", () => {
     if (row === null) throw new Error(`${state} popup row not found`);
     const popup = row.closest("[data-slash-popup]") as HTMLElement;
 
-    expect(popup.style.bottom).toBe("368px");
+    const positioner = popup.parentElement as HTMLElement;
+
+    await waitFor(() => expect(positioner).toHaveAttribute("data-side", "top"));
+    // jsdom gives the popup no height, so its top is the anchor's top minus the 4px gap.
+    expect(positionerTop(positioner)).toBe(makeAnchorRect().top - 4);
   });
 });

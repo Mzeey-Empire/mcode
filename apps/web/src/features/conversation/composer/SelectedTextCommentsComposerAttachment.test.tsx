@@ -77,17 +77,32 @@ describe("SelectedTextCommentsComposerAttachment", () => {
 
     rerender(<SelectedTextCommentsComposerAttachment comments={[comments[0]!]} readOnly {...handlers} />);
 
-    expect(getByTestId("selected-text-comment-attachment")).toHaveClass("relative", "z-10", "flex", "justify-end", "pt-2");
+    expect(getByTestId("selected-text-comment-attachment")).toHaveClass("flex", "justify-end", "pt-2");
     expect(getByTestId("selected-text-comment-attachment")).not.toHaveClass("px-3");
   });
 
-  it("opens a sent preview below its chip when the message viewport has no room above", async () => {
-    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function getBoundingClientRect(this: HTMLElement) {
-      if (this.classList.contains("overflow-y-auto")) return new DOMRect(0, 100, 1_000, 600);
-      if (this.dataset.testid === "selected-text-comment-preview") return new DOMRect(0, 0, 600, 200);
-      if (this.classList.contains("inline-flex") && this.classList.contains("relative")) return new DOMRect(700, 140, 160, 32);
+  it.each([
+    ["above", 400, "top"],
+    ["below", 140, "bottom"],
+  ] as const)("opens a sent preview %s its chip by the room in the message viewport", async (_placement, chipTop, side) => {
+    const rectFor = (element: Element): DOMRect => {
+      if (element instanceof HTMLElement && element.style.overflowY === "auto") return new DOMRect(0, 100, 1_000, 600);
+      const preview = "[data-testid='selected-text-comment-preview']";
+      if (element.matches(preview) || element.querySelector(preview)) return new DOMRect(0, 0, 600, 200);
+      if (element.matches("[aria-label='1 annotation. Preview available.']")) return new DOMRect(700, chipTop, 160, 32);
       return new DOMRect();
+    };
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      return rectFor(this);
     });
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return rectFor(this).width;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return rectFor(this).height;
+    });
+    vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(1_440);
+    vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(900);
     const handlers = {
       onRemove: vi.fn(),
       onOpenSource: vi.fn(),
@@ -100,7 +115,7 @@ describe("SelectedTextCommentsComposerAttachment", () => {
     const user = userEvent.setup();
     render(
       <div data-testid="message-list">
-        <div className="overflow-y-auto">
+        <div style={{ overflowY: "auto" }}>
           <SelectedTextCommentsComposerAttachment comments={[comments[0]!]} readOnly {...handlers} />
         </div>
       </div>,
@@ -108,14 +123,14 @@ describe("SelectedTextCommentsComposerAttachment", () => {
 
     await user.hover(screen.getByRole("button", { name: "1 annotation. Preview available." }));
 
-    const preview = screen.getByTestId("selected-text-comment-preview");
-    expect(preview).toHaveClass("top-[calc(100%+0.25rem)]");
-    await user.hover(preview);
-    expect(preview).toHaveClass("top-[calc(100%+0.25rem)]");
-    rectSpy.mockRestore();
+    const positioner = screen.getByTestId("selected-text-comment-preview").parentElement as HTMLElement;
+    await waitFor(() => expect(positioner).toHaveAttribute("data-side", side));
+    await user.hover(screen.getByTestId("selected-text-comment-preview"));
+    expect(positioner).toHaveAttribute("data-side", side);
+    vi.restoreAllMocks();
   });
 
-  it("lifts its transcript row above later rows while the sent preview is open", async () => {
+  it("renders the sent preview outside its transcript row so later rows cannot cover it", async () => {
     const handlers = {
       onRemove: vi.fn(),
       onOpenSource: vi.fn(),
@@ -141,15 +156,16 @@ describe("SelectedTextCommentsComposerAttachment", () => {
 
     const chip = screen.getByRole("button", { name: "1 annotation. Preview available." });
     const row = document.querySelector("[data-transcript-key='row-1']")!.parentElement as HTMLElement;
-    expect(row.style.zIndex).toBe("");
 
     await user.hover(chip);
 
-    expect(screen.getByTestId("selected-text-comment-preview")).toBeVisible();
-    expect(row.style.zIndex).toBe("50");
+    const preview = screen.getByTestId("selected-text-comment-preview");
+    expect(preview).toBeVisible();
+    expect(row).not.toContainElement(preview);
 
     await user.unhover(chip);
-    await waitFor(() => expect(row.style.zIndex).toBe(""));
+    await user.hover(document.body);
+    await waitFor(() => expect(screen.queryByTestId("selected-text-comment-preview")).toBeNull());
   });
 
   it("anchors a sent preview inside the message viewport's right inset", async () => {
@@ -171,9 +187,8 @@ describe("SelectedTextCommentsComposerAttachment", () => {
 
     await user.hover(screen.getByRole("button", { name: "1 annotation. Preview available." }));
 
-    const preview = screen.getByTestId("selected-text-comment-preview");
-    expect(preview).toHaveClass("right-0", "left-auto");
-    expect(preview).not.toHaveClass("left-0");
+    const positioner = screen.getByTestId("selected-text-comment-preview").parentElement as HTMLElement;
+    await waitFor(() => expect(positioner).toHaveAttribute("data-align", "end"));
   });
 
   it("assigns each attachment chip its own preview relationship", () => {
@@ -216,7 +231,6 @@ describe("SelectedTextCommentsComposerAttachment", () => {
 
     const preview = screen.getByTestId("selected-text-comment-preview");
     expect(preview).toHaveClass("w-[min(38rem,calc(100vw-1.5rem))]");
-    expect(preview).toHaveClass("bottom-[calc(100%+0.25rem)]");
     const firstItem = within(preview).getByTestId("selected-text-comment-preview-item-1");
     expect(firstItem).toHaveTextContent(/1\. Selected text:[\s\S]*First quote[\s\S]*User comment:[\s\S]*First note/);
     expect(within(preview).getByText("2. Selected text:")).toBeVisible();
@@ -241,6 +255,7 @@ describe("SelectedTextCommentsComposerAttachment", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Delete comment 1" })).toBeNull());
 
     await user.unhover(annotationCount);
+    await user.hover(document.body);
     await waitFor(() => expect(screen.queryByTestId("selected-text-comment-preview")).toBeNull());
 
     await user.click(screen.getByRole("button", { name: "Remove 2 annotations" }));
@@ -270,10 +285,14 @@ describe("SelectedTextCommentsComposerAttachment", () => {
     expect(within(preview).queryByRole("button", { name: "Delete comment 1" })).toBeNull();
 
     await user.tab();
-    await user.tab();
 
     expect(screen.getByRole("button", { name: "Open source for comment 1" })).toHaveFocus();
     expect(screen.queryByRole("button", { name: "Edit comment 1" })).toBeNull();
+
+    await user.tab();
+
+    expect(screen.getByRole("button", { name: "Remove 1 annotation" })).toHaveFocus();
+    await waitFor(() => expect(screen.queryByTestId("selected-text-comment-preview")).toBeNull());
   });
 
   it("shows quote controls only after rendered overflow, then collapses an expanded quote", async () => {
@@ -315,6 +334,45 @@ describe("SelectedTextCommentsComposerAttachment", () => {
 
     expect(await screen.findByRole("textbox", { name: "Comment note" })).toHaveTextContent(/First note\s*keeps its spacing\./);
     expect(screen.queryByRole("button", { name: "Edit comment 1" })).toBeNull();
+  });
+
+  it("keeps a dirty card editor open when the first outside press only warns", async () => {
+    const user = userEvent.setup();
+    const editor = {
+      source: comments[0]!.source,
+      commentId: comments[0]!.id,
+      note: "Unsaved edit",
+      mentions: [],
+      escapeWarned: false,
+      outsideWarned: false,
+      anchor: "card" as const,
+    };
+    const { onEditorChange } = renderAttachment({ comments: [comments[0]!], editor });
+
+    await user.hover(screen.getByRole("button", { name: "1 annotation. Preview available." }));
+    const note = await screen.findByRole("textbox", { name: "Comment note" });
+
+    await user.click(document.body);
+
+    expect(onEditorChange).toHaveBeenLastCalledWith(expect.objectContaining({ outsideWarned: true }));
+    expect(screen.getByTestId("selected-text-comment-preview")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Comment note" })).toBe(note);
+  });
+
+  it("stays closed after Escape returns focus to the chip", async () => {
+    const user = userEvent.setup();
+    renderAttachment({ comments: [comments[0]!] });
+
+    await user.tab();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Open source for comment 1" })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    const chip = screen.getByRole("button", { name: "1 annotation. Preview available." });
+    await waitFor(() => expect(chip).toHaveFocus());
+    await waitFor(() => expect(screen.queryByTestId("selected-text-comment-preview")).toBeNull());
+    expect(chip).toHaveAttribute("aria-expanded", "false");
   });
 
   it("returns focus to an unavailable source card after its editor closes", async () => {
