@@ -368,7 +368,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const executionId = this.turnRuntime.snapshot(threadId)?.turnExecutionId;
     this.trackSessionEnded(threadId, executionId);
     this.disarmTurnRetryWindow(threadId);
-    this.clearTurnEndedState(threadId);
+    this.clearTurnAccess(threadId);
   }
 
   /** Materialize one terminal outcome through the pipeline's ordering fence. */
@@ -1573,9 +1573,13 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Clear resources that belong to a turn after terminal handling owns the outcome. */
   private clearTurnEndedState(threadId: string): void {
+    this.clearTurnAccess(threadId);
+    this.featureEffects.clearTurn(threadId);
+  }
+
+  private clearTurnAccess(threadId: string): void {
     this.threadControlMcp?.revoke(`mcode-${threadId}`);
     this.scopedPreGrant.clear(threadId);
-    this.featureEffects.clearTurn(threadId);
   }
 
   /** Release the shared mutation token without forcing provider-session teardown. */

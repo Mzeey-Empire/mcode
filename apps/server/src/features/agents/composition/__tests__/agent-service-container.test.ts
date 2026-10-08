@@ -29,6 +29,10 @@ import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
+import { PlanTurnService } from "../../planning/plan-turn-service.js";
+import { PlanRepo } from "../../planning/persistence/plan-repo.js";
+import { ProviderEventIngress } from "../../../providers/composition/provider-event-ingress.js";
+import { logger } from "@mcode/shared";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import type { WorkerOwnedProviderEventResult } from "../../../providers/composition/provider-host-ports.js";
 import { addClient, removeClient, subscribeClientToThread } from "../../../../application/transport/push.js";
@@ -66,6 +70,7 @@ describe("AgentService container composition", () => {
     else process.env.MCODE_DB_PATH = previousDatabasePath;
     if (temporaryDirectory) NodeFS.rmSync(temporaryDirectory, { recursive: true, force: true });
     temporaryDirectory = undefined;
+    vi.restoreAllMocks();
   });
 
   it("resolves AgentService through the production container with explicit feature effects", () => {
@@ -608,6 +613,119 @@ describe("AgentService container composition", () => {
     expect(workerRuntime?.owner.current(peer.id)?.execution.executionId).toBe(peerAssignment.execution.executionId);
     expect((await service.stopSession(peer.id)).status).toBe("cancelled");
   });
+
+  it("releases the worker turn when saving its captured plan rejects", async () => {
+    let request: TurnRequest | undefined;
+    const provider = fakeCodexProvider(async (sent) => { request = sent; });
+    registerFakeCodex(provider);
+    const service = container.resolve(AgentService);
+    const publication = container.resolve(AgentEventPublicationRegistry);
+    publication.bind(() => undefined);
+    publication.start();
+    const workspace = await container.resolve(WorkspaceRepo).create("plan-release", temporaryDirectory!);
+    const thread = await container.resolve(ThreadRepo).create(workspace.id, "Plan release", "direct", "main", true, "codex");
+    const plans = container.resolve(PlanTurnService);
+    plans.beginOutputGeneration(thread.id);
+    const failure = vi.spyOn(container.resolve(PlanRepo), "create").mockRejectedValue(new Error("plan storage unavailable"));
+    const errors = vi.spyOn(logger, "error");
+    await service.sendMessage({ threadId: thread.id, content: "Plan it", permissionMode: "default" });
+    const sent = requireValue(request, "Expected provider dispatch");
+    const content = "Summary.\n````mcode-plan\n# Login plan\nAdd passkeys.\n````";
+    await submitCodexEvent(workerRuntime!, sent, 1, { type: "message", threadId: thread.id,
+      turnExecutionId: sent.turnExecutionId, messageId: "plan-release-message", content, tokens: null });
+    await submitCodexEvent(workerRuntime!, sent, 2, { type: "turnComplete", threadId: thread.id,
+      turnExecutionId: sent.turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
+      tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2, contextWindow: undefined, cacheReadTokens: undefined });
+    await submitCodexEvent(workerRuntime!, sent, 3, { type: "ended", threadId: thread.id,
+      turnExecutionId: sent.turnExecutionId });
+    await vi.waitFor(() => expect(failure).toHaveBeenCalledTimes(1));
+    const messageId = failure.mock.calls[0][1];
+    expect(errors).toHaveBeenCalledWith("Plan capture persistence failed", {
+      threadId: thread.id, messageId, outcome: "captured", source: "fence",
+      error: "plan storage unavailable",
+    });
+    await vi.waitFor(() => expect(plans.needsAssistantMaterialization({ type: "message", threadId: thread.id,
+      messageId: "plan-release-message", content, tokens: null })).toBe(false));
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(workerRuntime?.owner.current(thread.id)).toBeUndefined();
+    expect(workerRuntime?.scheduler.depth().activeExecutions).toBe(0);
+    expect(container.resolve(TurnRuntimeController).snapshot(thread.id)?.phase).toBe("completed");
+    expect(container.resolve(ExecutionFileEvidenceCoordinator).retire(thread.id, sent.turnExecutionId, 1)).toBe(false);
+    await service.sendMessage({ threadId: thread.id, content: "Continue", permissionMode: "default" });
+    expect(request?.turnExecutionId).not.toBe(sent.turnExecutionId);
+    await service.stopSession(thread.id);
+  });
+
+  it.each([
+    ["fence", "turnComplete"], ["native", "turnComplete"], ["missing", "turnComplete"],
+    ["fence", "ended"], ["native", "ended"], ["missing", "ended"],
+  ] as const)(
+    "settles a direct %s plan on %s before clearing capture state",
+    async (source, terminal) => {
+      registerFakeCodex(fakeCodexProvider(async () => undefined));
+      container.resolve(AgentService);
+      const publication = container.resolve(AgentEventPublicationRegistry);
+      publication.bind(() => undefined);
+      publication.start();
+      const workspace = await container.resolve(WorkspaceRepo).create("direct-plan", temporaryDirectory!);
+      const thread = await container.resolve(ThreadRepo).create(workspace.id, "Direct plan", "direct", "main", true, "codex");
+      const runtime = container.resolve(TurnRuntimeController);
+      const turnExecutionId = runtime.beginProviderTurn(thread.id);
+      expect(workerRuntime?.owner.current(thread.id)).toBeUndefined();
+      const plans = container.resolve(PlanTurnService);
+      const repo = container.resolve(PlanRepo);
+      const warnings = vi.spyOn(logger, "warn");
+      const errors = vi.spyOn(logger, "error");
+      plans.beginOutputGeneration(thread.id);
+      const content = source === "missing" ? "Summary." : "Summary.\n````mcode-plan\n# Fence plan\nAdd passkeys.\n````";
+      await container.resolve(MessageRepo).create(thread.id, "user", "Plan it", 1);
+      const message: AgentEvent = { type: "message", threadId: thread.id, turnExecutionId,
+        messageId: "provider-message", content, tokens: null };
+      let releaseSave = () => {};
+      const saveReady = new Promise<void>((resolve) => { releaseSave = resolve; });
+      const messages = container.resolve(MessageRepo);
+      const createAssistant = messages.createAssistantIdempotent.bind(messages);
+      const saving = vi.spyOn(messages, "createAssistantIdempotent").mockImplementation(async (input) => {
+        await saveReady;
+        return createAssistant(input);
+      });
+      if (source === "native") plans.handlePlanCaptured({ threadId: thread.id, source, markdown: "# Native plan\nUse security keys." });
+      const ingress = container.resolve(ProviderEventIngress);
+      ingress.acceptProviderRuntime("codex", { event: message });
+      ingress.acceptProviderRuntime("codex", { event: terminal === "turnComplete" ? { type: "turnComplete", threadId: thread.id,
+        turnExecutionId, providerId: "codex", reason: "end_turn", costUsd: null,
+        tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2 } : {
+        type: "ended", threadId: thread.id, turnExecutionId, outcome: "completed",
+      } });
+      ingress.acceptProviderRuntime("codex", { event: { type: "ended", threadId: thread.id, turnExecutionId } });
+      await ingress.waitForThread(thread.id);
+      try {
+        await vi.waitFor(() => expect(saving).toHaveBeenCalledTimes(1));
+        expect(plans.needsAssistantMaterialization(message)).toBe(true);
+        expect(repo.listByThread(thread.id)).toEqual([]);
+      } finally {
+        releaseSave();
+      }
+      await container.resolve(ProviderTurnEventApplication).drainPersistence();
+      await vi.waitFor(() => expect(plans.needsAssistantMaterialization(message)).toBe(false));
+      expect(errors.mock.calls).toEqual([]);
+      expect(runtime.snapshot(thread.id)?.phase).toBe("completed");
+      const missing = warnings.mock.calls.filter(([text]) => text === "Plan capture missing");
+      if (source === "missing") {
+        expect(repo.listByThread(thread.id)).toEqual([]);
+        expect(missing).toEqual([["Plan capture missing", { threadId: thread.id, outcome: "missing" }]]);
+      } else {
+        const assistant = requireValue(container.resolve(MessageRepo).listByThread(thread.id, 10).messages.find((row) => row.role === "assistant"), "Expected saved assistant message");
+        expect(assistant.content).toBe(content);
+        expect(repo.listByThread(thread.id)).toHaveLength(1);
+        expect(repo.getLatestForThread(thread.id)).toMatchObject({ version: 1, messageId: assistant.id,
+          title: source === "native" ? "Native plan" : "Fence plan",
+          contentMd: source === "native" ? "# Native plan\nUse security keys." : "# Fence plan\nAdd passkeys.",
+        });
+        expect(missing).toEqual([]);
+      }
+    },
+  );
 
   function registerFakeCodex(provider: IAgentProvider): void {
     container.registerInstance<IProviderRegistry>("IProviderRegistry", {

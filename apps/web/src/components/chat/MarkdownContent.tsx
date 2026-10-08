@@ -598,7 +598,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 
   return (
     <ReactMarkdown remarkPlugins={remarkPlugins} components={components} urlTransform={markdownUrlTransform}>
-      {stripPlanFences(content)}
+      {stripPlanFences(content, isStreaming)}
     </ReactMarkdown>
   );
 });

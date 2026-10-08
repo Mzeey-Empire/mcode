@@ -3,6 +3,7 @@ import { GoalLifecycleService } from "../goals/goal-lifecycle-service.js";
 import { PlanTurnService } from "../planning/plan-turn-service.js";
 import { SubagentLifecycleService } from "../collaboration/subagent-lifecycle-service.js";
 import { TaskPersistenceService } from "../tasks/task-persistence-service.js";
+import type { TurnOutcome } from "./turn-outcome.js";
 
 type AgentMessage = Extract<AgentEvent, { type: "message" }>;
 
@@ -57,10 +58,10 @@ export class TurnFeatureEffects {
     await this.tasks.onToolUse(threadId, event);
   }
 
-  /** Refresh goal state after the terminal turn reaches durable completion. */
-  async refreshAfterTurn(threadId: string): Promise<void> {
+  /** Settle captured plans on termination and refresh goals after successful completion. */
+  async refreshAfterTurn(threadId: string, outcome: TurnOutcome = "completed"): Promise<void> {
     await this.plans.finishTurn(threadId);
-    this.goals.refreshAfterTurn(threadId);
+    if (outcome === "completed") this.goals.refreshAfterTurn(threadId);
   }
 
   /** Stop every descendant before the parent provider session is stopped. */

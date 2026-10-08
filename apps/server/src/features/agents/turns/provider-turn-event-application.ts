@@ -151,13 +151,19 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     if (this.terminalFinalizedThreads.has(command.threadId)) return null;
     this.terminalFinalizedThreads.add(command.threadId);
     const executionId = this.runtime.snapshot(command.threadId)?.turnExecutionId;
+    this.settlePlanCapture(command.threadId, command.outcome);
     const pending = [...this.persistenceByThread.get(command.threadId) ?? []];
     const finalization = this.fileEffects.finalize(
       command.threadId, command.outcome, executionId ?? undefined, command.source,
       Promise.all(pending),
     );
     void finalization.then((persisted) => {
-      if (persisted) this.clearFinalizedEventState(command.threadId, executionId);
+      if (persisted) {
+        this.clearFinalizedEventState(command.threadId, executionId);
+        if (this.runtime.snapshot(command.threadId)?.turnExecutionId === executionId) {
+          this.featureEffects.clearTurn(command.threadId);
+        }
+      }
     }, () => undefined);
     return finalization;
   }
@@ -470,7 +476,6 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       return false;
     }
     this.turnCompleteSeenByThread.add(event.threadId);
-    this.settlePlanCapture(event.threadId);
     this.beginTerminalProjection(event.threadId, "completed", "turnComplete");
     this.recordContextUsage(event, false);
     return true;
@@ -489,7 +494,6 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       this.warnRejectedTerminal(held.event.threadId, held.event.type, held.event.turnExecutionId);
       return;
     }
-    this.settlePlanCapture(held.event.threadId);
     this.beginTerminalProjection(held.event.threadId, "completed", "turnComplete");
     this.recordContextUsage(held.event, false);
     if (held.publish) this.publishAfterDurability(held.event, true);
@@ -752,9 +756,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     await this.featureEffects.persistAssistantMessage(event);
   }
 
-  private settlePlanCapture(threadId: string): void {
+  private settlePlanCapture(threadId: string, outcome: FinalizeTurnCommand["outcome"]): void {
     const pending = [...this.persistenceByThread.get(threadId) ?? []];
-    const settlement = Promise.all(pending).then(() => this.featureEffects.refreshAfterTurn(threadId));
+    const settlement = Promise.all(pending).then(() => this.featureEffects.refreshAfterTurn(threadId, outcome));
     this.observePersistence(threadId, settlement, "Plan capture settlement");
   }
 

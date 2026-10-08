@@ -862,7 +862,7 @@ function AssistantResponseText({
       {renderDelta ? (
         <DeltaBlock text={message.content} isStreaming={isStreaming} showCursor={isStreaming} />
       ) : (
-        <Suspense fallback={<p className="whitespace-pre-wrap">{message.content}</p>}>
+        <Suspense fallback={<p className="whitespace-pre-wrap">{stripPlanFences(message.content)}</p>}>
           <LazyMarkdownContent content={stripPlanFences(message.content)} isStreaming={false} threadId={message.thread_id} chatHighlighting />
         </Suspense>
       )}

@@ -135,11 +135,18 @@ ${userMessage}`;
     if (!execution || !event?.messageId) return;
     const ready = execution.consumeAssistantMessage(event.content);
     if (!ready) return;
-    await this.acceptedProgress?.beforeDurableCommand(threadId);
     try {
-      await this.persistPlan(threadId, event.messageId, ready, execution);
-    } finally {
-      this.acceptedProgress?.cancelDurableCommand(threadId);
+      await this.acceptedProgress?.beforeDurableCommand(threadId);
+      try {
+        await this.persistPlan(threadId, event.messageId, ready, execution);
+      } finally {
+        this.acceptedProgress?.cancelDurableCommand(threadId);
+      }
+    } catch (error) {
+      logger.error("Plan capture persistence failed", {
+        threadId, messageId: event.messageId, ...execution.outcome(),
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

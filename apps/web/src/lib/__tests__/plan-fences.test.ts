@@ -23,7 +23,10 @@ describe("stripPlanFences", () => {
       "`````text\n````mcode-plan\nExample\n````\n`````",
       "Inline `mcode-plan` stays.",
     ];
-    for (const text of examples) expect(stripPlanFences(text)).toBe(text);
+    for (const text of examples) {
+      expect(stripPlanFences(text)).toBe(text);
+      expect(stripPlanFences(text, true)).toBe(text);
+    }
   });
 
   it("requires a matching closing marker and fence length", () => {
