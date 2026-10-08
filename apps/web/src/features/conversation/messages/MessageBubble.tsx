@@ -21,6 +21,7 @@ import { useThreadRecord } from "../state";
 import { AnsweredSummary } from "@/components/chat/plan-questions/AnsweredSummary";
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 import { DeltaBlock } from "../narrative/DeltaBlock";
+import { TURN_PROSE_CLASS } from "../narrative/narrative-layout";
 import { PersistedTurnHooks } from "../narrative/PersistedTurnHooks";
 import { parseGoalStatusNotice } from "@/lib/goal-message";
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
@@ -859,11 +860,11 @@ function AssistantResponseText({
   const isStreaming = textIsStreaming ?? agentDisplayState?.phase === "streaming";
   const renderDelta = textIsStreaming !== undefined || isStreaming || agentDisplayState?.phase === "finalizing";
   return (
-    <div className="text-sm text-ink" data-testid="assistant-response-text" data-selected-text-content data-selected-text-eligible={isAgentResponseComplete ? "true" : "false"}>
+    <div className={`pt-1 ${TURN_PROSE_CLASS}`} data-testid="assistant-response-text" data-selected-text-content data-selected-text-eligible={isAgentResponseComplete ? "true" : "false"}>
       {renderDelta ? (
         <DeltaBlock text={message.content} isStreaming={isStreaming} showCursor={isStreaming} />
       ) : (
-        <Suspense fallback={<p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>}>
+        <Suspense fallback={<p className="whitespace-pre-wrap">{message.content}</p>}>
           <LazyMarkdownContent content={message.content} isStreaming={false} threadId={message.thread_id} chatHighlighting />
         </Suspense>
       )}

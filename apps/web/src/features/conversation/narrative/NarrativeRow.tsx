@@ -133,7 +133,11 @@ function renderItem(
     case "active-tool":
       return <ActiveToolRow toolCall={item.toolCall} />;
     case "delta":
-      return <DeltaBlock text={item.text} />;
+      return (
+        <div className="pt-1">
+          <DeltaBlock text={item.text} />
+        </div>
+      );
   }
 }
 
