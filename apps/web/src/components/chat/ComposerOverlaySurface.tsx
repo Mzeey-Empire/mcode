@@ -1,7 +1,7 @@
 import { createContext, forwardRef, useContext, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
-import { ATTACHED_RAIL_SURFACE_CLASS, POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
+import { ATTACHED_RAIL_SURFACE_CLASS, POPOVER_MOUNT_FADE_CLASS, POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import { computeFixedPopupPosition } from "./popup-position";
 
 const ComposerOverlayHost = createContext<HTMLDivElement | null>(null);
@@ -88,7 +88,8 @@ export const ComposerOverlaySurface = forwardRef<HTMLDivElement, ComposerOverlay
         data-composer-autocomplete="true"
         style={attachedHost ? { width: "calc(100% - 28px)", marginLeft: 14, maxHeight: style.maxHeight } : style}
         className={cn(
-          "composer-autocomplete-surface overflow-hidden animate-composer-popup-enter",
+          "composer-autocomplete-surface overflow-hidden",
+          POPOVER_MOUNT_FADE_CLASS,
           attached ? ATTACHED_RAIL_SURFACE_CLASS : POPOVER_SURFACE_CLASS,
           surfaceToneClass(tone),
           className,

@@ -113,7 +113,7 @@ export function PrSplitButton({
           }
         />
         <PopoverContent {...sidePlacement(rowRef)} className="w-72 p-0">
-          <div data-testid="thread-overview-pr-popover" className="animate-popover-enter space-y-1 p-2">
+          <div data-testid="thread-overview-pr-popover" className="space-y-1 p-2">
             <Tooltip>
               <TooltipTrigger
                 render={

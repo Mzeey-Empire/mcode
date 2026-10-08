@@ -4,6 +4,7 @@ type Side = "left" | "right";
 
 interface VirtualAnchor {
   getBoundingClientRect: () => DOMRect;
+  readonly contextElement: Element | undefined;
 }
 
 /** Positioner props that open a surface beside a boundary element, top-aligned to a trigger row. */
@@ -37,6 +38,11 @@ export function sidePlacement(rowRef: RefObject<Element | null>, side: Side = "l
           row?.closest(FLOATING_CARD_SELECTOR)?.getBoundingClientRect(),
           row?.getBoundingClientRect(),
         );
+      },
+      // Floating UI attaches scroll and resize listeners to this element's ancestors, so the
+      // surface follows the row when the card scrolls.
+      get contextElement() {
+        return rowRef.current ?? undefined;
       },
     },
     side,

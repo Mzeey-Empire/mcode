@@ -1,7 +1,7 @@
 // apps/web/src/components/chat/FileTagPopup.tsx
 import { useRef, useEffect, useCallback, useState, memo } from "react";
 import { cn } from "@/lib/utils";
-import { POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
+import { POPOVER_MOUNT_FADE_CLASS, POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import type { MentionSuggestion } from "./useFileAutocomplete";
 import { ComposerOverlaySurface } from "./ComposerOverlaySurface";
 import { EntityIcon } from "./EntityToken";
@@ -287,8 +287,9 @@ export function FileTagPopup({
       role="listbox"
       aria-label="Mention suggestions"
       className={cn(
-        "composer-autocomplete-surface absolute bottom-full left-0 mb-1 w-full overflow-hidden animate-composer-popup-enter",
+        "composer-autocomplete-surface absolute bottom-full left-0 mb-1 w-full overflow-hidden",
         POPOVER_SURFACE_CLASS,
+        POPOVER_MOUNT_FADE_CLASS,
         tone === "dark" && "border-white/10 bg-[#1e1e1e] text-neutral-100",
         className,
       )}

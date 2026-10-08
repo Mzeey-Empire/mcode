@@ -1233,7 +1233,7 @@ function ThreadOverviewLocalMenu({ worktreePath, branch }: ThreadOverviewLocalMe
   }, []);
 
   return (
-    <div data-testid="thread-overview-local-popover" className="animate-popover-enter p-2">
+    <div data-testid="thread-overview-local-popover" className="p-2">
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
           <span className="min-w-0">
@@ -1383,7 +1383,7 @@ function ThreadOverviewBranchMenu({
   return (
     <div
       data-testid="thread-overview-branch-popover"
-      className="animate-popover-enter p-2"
+      className="p-2"
     >
       <div className="relative">
         <Search
@@ -2553,7 +2553,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
 
   function renderOverviewBody() {
     return (
-    <div data-testid="thread-overview-body" className="animate-overview-enter">
+    <div data-testid="thread-overview-body">
       <div
         data-testid="thread-overview-masthead"
         className="flex h-9 items-center bg-hover/20 px-3"
