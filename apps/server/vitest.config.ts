@@ -15,9 +15,6 @@ export default defineConfig({
     // Electron child processes are heavier than Node's. Two workers keep Windows
     // process-integration tests within their timing bounds without serializing the suite.
     maxWorkers: 2,
-    // Polls wait on real SQLite writer workers. Under CI's loaded workers those writes can take
-    // over a second, so Vitest's 1s default fails passing tests; a slow write still fails at 5s.
-    expect: { poll: { timeout: 5_000 } },
     env: {
       MCODE_DATA_DIR: testDataDir,
       MCODE_DRIZZLE_MIGRATIONS_DIR: NodePath.resolve(serverPackageRoot, "drizzle"),
