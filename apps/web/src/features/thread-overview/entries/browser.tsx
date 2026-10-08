@@ -15,6 +15,7 @@ import {
   usePreviewTabSet,
   usePreviewTabsStore,
 } from "@/features/preview";
+import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { cn } from "@/lib/utils";
@@ -238,9 +239,16 @@ function ThreadOverviewBrowserSection({ rows, onOpen }: ThreadOverviewBrowserSec
   );
 }
 
-function BrowserEntry({ thread }: { thread: Thread }) {
+function useBrowserTabSet(thread: Thread) {
+  return { tabSet: usePreviewTabSet(thread.id, thread.workspace_id) };
+}
 
-  const browserTabSet = usePreviewTabSet(thread.id, thread.workspace_id);
+/** Keeps the tab listing and its update subscription alive while the overview is closed. */
+export const { Provider: BrowserEntryState, useEntryState: useBrowserEntryTabSet } =
+  createOverviewEntryState(useBrowserTabSet);
+
+function BrowserEntry({ thread }: { thread: Thread }) {
+  const { tabSet: browserTabSet } = useBrowserEntryTabSet();
   const browserLifecycleTabs = useBrowserAutomationStore((state) => state.lifecycleTabs);
   const browserLiveTargets = useBrowserAutomationStore((state) => state.liveTargets);
   const browserControllers = useBrowserAutomationStore((state) => state.controllers);

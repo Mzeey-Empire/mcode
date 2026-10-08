@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { BranchEntryBlock, BranchEntryState } from "./entries/branch";
-import { BrowserEntryBlock } from "./entries/browser";
+import { BrowserEntryBlock, BrowserEntryState } from "./entries/browser";
 import { ChangesEntryBlock, ChangesEntryState } from "./entries/changes";
 import { CommitEntryBlock } from "./entries/commit";
 import { CreateBranchEntryBlock } from "./entries/create-branch";
@@ -56,7 +56,7 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "usage", section: "summary", order: 90, subjects: ["thread"], Entry: UsageEntryBlock },
   { id: "subagents", section: "activity", order: 100, subjects: ["thread"], Entry: SubagentsEntryBlock },
   { id: "pull-request", section: "lane", order: 110, subjects: ["thread"], Entry: PullRequestEntryBlock },
-  { id: "browser", section: "activity", order: 120, subjects: ["thread"], Entry: BrowserEntryBlock },
+  { id: "browser", section: "activity", order: 120, subjects: ["thread"], Entry: BrowserEntryBlock, State: BrowserEntryState },
   { id: "sources", section: "activity", order: 130, subjects: ["thread"], Entry: SourcesEntryBlock },
   { id: "recap", section: "summary", order: 140, subjects: ["thread"], Entry: RecapEntryBlock, State: RecapEntryState },
 ];

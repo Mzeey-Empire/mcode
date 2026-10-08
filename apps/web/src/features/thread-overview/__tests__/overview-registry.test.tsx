@@ -139,6 +139,30 @@ describe("overview registry", () => {
     expect(mockTransport.listWorkspaceActionRuns).toHaveBeenCalledTimes(1);
   });
 
+  it("lists browser tabs once and stays subscribed while the popover is closed", async () => {
+    const off = vi.fn();
+    const tabs = {
+      list: vi.fn().mockResolvedValue({ ok: false }),
+      onUpdated: vi.fn().mockReturnValue(off),
+    };
+    vi.stubGlobal("desktopBridge", { preview: { tabs } });
+    try {
+      render(<ThreadOverview thread={thread} threadPaneWidth={600} />);
+      expect(screen.queryByTestId("thread-overview-body")).not.toBeInTheDocument();
+      expect(tabs.list).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByTestId("header-workspace-menu"));
+      await screen.findByTestId("thread-overview-body");
+      await closeOverview();
+      fireEvent.click(screen.getByTestId("header-workspace-menu"));
+      await screen.findByTestId("thread-overview-body");
+      expect(tabs.list).toHaveBeenCalledTimes(1);
+      expect(tabs.onUpdated).toHaveBeenCalledTimes(1);
+      expect(off).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("retries a failed repository load on reopen", async () => {
     mockLoadedEntries();
     vi.mocked(mockTransport.getRemoteUrl).mockRejectedValueOnce(new Error("Remote unavailable"));

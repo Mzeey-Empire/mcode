@@ -3,7 +3,7 @@ import type { Thread } from "@/transport";
 import type { OverviewSubject } from "./overview-subject";
 
 /** Keeps an entry's hook mounted independently of its popover row. */
-export function createOverviewEntryState<State>(useValue: (thread: Thread) => State) {
+export function createOverviewEntryState<State extends object>(useValue: (thread: Thread) => State) {
   const Context = createContext<State | null>(null);
 
   function ThreadProvider({ thread, children }: { thread: Thread; children: ReactNode }) {
