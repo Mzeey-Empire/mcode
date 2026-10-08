@@ -20,4 +20,20 @@ describe("SwipeVelocity", () => {
 
     expect(velocity.pxPerMs({ x: 120, time: 480 })).toBeCloseTo(0.25);
   });
+
+  it("reads a flick when the first move after a hold is also the last", () => {
+    const velocity = new SwipeVelocity();
+    velocity.reset({ x: 0, time: 0 });
+    velocity.track({ x: 20, time: 1000 });
+
+    expect(velocity.pxPerMs({ x: 80, time: 1020 })).toBeCloseTo(3);
+  });
+
+  it("reads a pause before release as no flick", () => {
+    const velocity = new SwipeVelocity();
+    velocity.reset({ x: 0, time: 0 });
+    velocity.track({ x: 60, time: 40 });
+
+    expect(velocity.pxPerMs({ x: 60, time: 300 })).toBe(0);
+  });
 });

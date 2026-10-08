@@ -153,4 +153,40 @@ describe("ToastLane", () => {
 
     expect(store().toasts).toHaveLength(1);
   });
+
+  it("dismisses on a short, fast trackpad flick", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(340);
+    renderLane();
+    show({ kind: "failed", title: "Bump Electron" });
+    const card = within(lane()).getByRole("alert");
+
+    // 80px is under the 119px distance threshold; 40px per 16ms is a flick.
+    for (let step = 0; step < 2; step++) {
+      fireEvent.wheel(card, { deltaX: -40, deltaY: 0 });
+      act(() => void vi.advanceTimersByTime(16));
+    }
+    act(() => void vi.advanceTimersByTime(200));
+    act(() => void vi.advanceTimersByTime(200));
+
+    expect(store().toasts).toEqual([]);
+  });
+
+  it("lets a pointer swipe win over a trackpad gesture still settling", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(340);
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    renderLane();
+    show({ kind: "failed", title: "Bump Electron" });
+    const card = within(lane()).getByRole("alert");
+
+    fireEvent.wheel(card, { deltaX: -10, deltaY: 0 });
+    fireEvent.pointerDown(card, { button: 0, pointerId: 1, clientX: 0 });
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 150 });
+    // Released before the wheel gesture's quiet gap ends.
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: 150 });
+    // Separate steps let React render between the wheel end (120ms) and the fly-out (160ms), as a browser would.
+    act(() => void vi.advanceTimersByTime(130));
+    act(() => void vi.advanceTimersByTime(300));
+
+    expect(store().toasts).toEqual([]);
+  });
 });

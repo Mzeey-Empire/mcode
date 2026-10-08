@@ -283,6 +283,13 @@ interface SwipeState {
   readonly width: number;
 }
 
+interface WheelGesture {
+  dx: number;
+  peakPxPerMs: number;
+  readonly velocity: SwipeVelocity;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 interface DragStart {
   readonly x: number;
   readonly pointerId: number;
@@ -311,7 +318,7 @@ function useSwipeToDismiss(onDismiss: () => void) {
   const start = useRef<DragStart | null>(null);
   const dragged = useRef(false);
   const velocity = useRef(new SwipeVelocity());
-  const wheel = useRef<{ dx: number; timer: ReturnType<typeof setTimeout> | null }>({ dx: 0, timer: null });
+  const wheel = useRef<WheelGesture>({ dx: 0, peakPxPerMs: 0, velocity: new SwipeVelocity(), timer: null });
   const [swipe, setSwipe] = useState<SwipeState>({ phase: "idle", dx: 0, width: 1 });
 
   useEffect(() => {
@@ -320,7 +327,16 @@ function useSwipeToDismiss(onDismiss: () => void) {
     return () => clearTimeout(timer);
   }, [swipe.phase, onDismiss]);
 
-  useEffect(() => () => clearTimeout(wheel.current.timer ?? undefined), []);
+  // Called on unmount and when a pointer drag takes over, so a stale wheel end can't undo the drag.
+  const cancelWheel = useCallback(() => {
+    const gesture = wheel.current;
+    clearTimeout(gesture.timer ?? undefined);
+    gesture.timer = null;
+    gesture.dx = 0;
+    gesture.peakPxPerMs = 0;
+  }, []);
+
+  useEffect(() => cancelWheel, [cancelWheel]);
 
   const follow = (dx: number, width: number) => {
     if (!prefersReducedMotion()) setSwipe({ phase: "dragging", dx, width });
@@ -351,6 +367,7 @@ function useSwipeToDismiss(onDismiss: () => void) {
     if (!dragged.current && Math.abs(dx) < DRAG_SLOP_PX) return;
     if (!dragged.current) {
       dragged.current = true;
+      cancelWheel();
       event.currentTarget.setPointerCapture(event.pointerId);
     }
     follow(dx, event.currentTarget.offsetWidth);
@@ -370,19 +387,22 @@ function useSwipeToDismiss(onDismiss: () => void) {
   };
 
   // A trackpad swipe arrives as horizontal wheel deltas with no end event; a short quiet gap ends it.
-  // Momentum scrolling keeps deltas flowing after a fast flick, so distance alone decides.
+  // Momentum decays the speed toward the end, so the gesture's peak speed decides a flick.
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (swipe.phase === "flung" || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+    if (start.current || swipe.phase === "flung" || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
     const width = event.currentTarget.offsetWidth;
     const gesture = wheel.current;
+    if (gesture.timer === null) gesture.velocity.reset({ x: 0, time: event.timeStamp });
     gesture.dx -= event.deltaX;
+    const sample = { x: gesture.dx, time: event.timeStamp };
+    gesture.peakPxPerMs = Math.max(gesture.peakPxPerMs, gesture.velocity.pxPerMs(sample));
+    gesture.velocity.track(sample);
     follow(gesture.dx, width);
     clearTimeout(gesture.timer ?? undefined);
     gesture.timer = setTimeout(() => {
-      const dx = gesture.dx;
-      gesture.dx = 0;
-      gesture.timer = null;
-      release(dx, width, 0);
+      const { dx, peakPxPerMs } = gesture;
+      cancelWheel();
+      release(dx, width, peakPxPerMs);
     }, WHEEL_GESTURE_END_MS);
   };
 
