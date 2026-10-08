@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import type {
   WorkspaceEnvironmentAction,
@@ -10,6 +10,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getTransport, RpcError } from "@/transport";
@@ -314,50 +315,51 @@ function EnvironmentStorageSection({
         <h2 id="project-environment-storage-title" className="text-sm font-semibold">Environment storage</h2>
         <p className="text-xs text-muted">Choose where Mcode saves this Project’s Setup and actions.</p>
       </div>
-      <div role="radiogroup" aria-label="Environment storage" className="mt-3 grid gap-2">
+      <RadioGroup
+        aria-label="Environment storage"
+        value={storageMode}
+        disabled={saving}
+        onValueChange={(mode: WorkspaceEnvironmentStorageMode) => {
+          if (mode === "system") void onChangeStorageMode("system");
+          else onConfirmSharedStorage(true);
+        }}
+        className="mt-3"
+      >
         <EnvironmentStorageOption
           mode="system"
-          storageMode={storageMode}
           descriptionId={systemStorageDescriptionId}
           description="Only available on this computer."
-          disabled={saving}
-          onClick={() => { if (storageMode !== "system") void onChangeStorageMode("system"); }}
         />
         <EnvironmentStorageOption
           mode="shared"
-          storageMode={storageMode}
           descriptionId={sharedStorageDescriptionId}
           description="Save in .mcode/environment.json for this Project."
-          disabled={saving}
-          onClick={() => { if (storageMode !== "shared") onConfirmSharedStorage(true); }}
         />
-        <ClearSharedApprovals storageMode={storageMode} saving={saving} onClearApprovals={onClearApprovals} />
-      </div>
+      </RadioGroup>
+      <ClearSharedApprovals storageMode={storageMode} saving={saving} onClearApprovals={onClearApprovals} />
     </section>
   );
 }
 
 function EnvironmentStorageOption({
   mode,
-  storageMode,
   descriptionId,
   description,
-  disabled,
-  onClick,
 }: {
   mode: WorkspaceEnvironmentStorageMode;
-  storageMode: WorkspaceEnvironmentStorageMode;
   descriptionId: string;
   description: string;
-  disabled: boolean;
-  onClick: () => void;
 }) {
-  const selected = storageMode === mode;
+  const labelId = useId();
   const label = mode === "system" ? "System storage" : "Shared storage";
   return (
-    <Button type="button" role="radio" aria-checked={selected} aria-label={label} aria-describedby={descriptionId} variant={selected ? "secondary" : "outline"} disabled={disabled} className="h-auto justify-start px-3 py-3 text-left" onClick={onClick}>
-      <span className="flex min-w-0 flex-col gap-1"><span>{label}</span><span id={descriptionId} className="text-xs font-normal text-muted">{description}</span></span>
-    </Button>
+    <label className="flex items-start gap-2 text-label text-ink has-data-[disabled]:[&>span]:opacity-50">
+      <RadioGroupItem value={mode} aria-labelledby={labelId} aria-describedby={descriptionId} />
+      <span className="flex min-w-0 flex-col gap-1">
+        <span id={labelId}>{label}</span>
+        <span id={descriptionId} className="text-caption font-normal text-muted">{description}</span>
+      </span>
+    </label>
   );
 }
 
