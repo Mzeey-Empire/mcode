@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import type { WebSocket } from "ws";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { routeMessage, type RouterDeps } from "../ws-router.js";
-import { DraftImageMissingError } from "../../../features/attachments/storage/attachment-service.js";
+import { DraftImageMissingError } from "../../../features/attachments/storage/draft-image-missing-error.js";
 import { CodexCatalogService } from "../../../features/providers/catalog/codex-catalog-service.js";
 import { ProviderCatalogService } from "../../../features/providers/catalog/provider-catalog-service.js";
 import { ProviderCatalogSnapshotRepo } from "../../../features/providers/catalog/persistence/provider-catalog-snapshot-repo.js";

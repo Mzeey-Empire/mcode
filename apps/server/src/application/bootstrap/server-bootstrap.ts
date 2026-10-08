@@ -747,6 +747,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   prDraftService,
   ciWatcherService,
   threadRepo,
+  attachmentService: container.resolve(AttachmentService),
   workspaceRepo,
   enricher,
   filesystemBrowser,

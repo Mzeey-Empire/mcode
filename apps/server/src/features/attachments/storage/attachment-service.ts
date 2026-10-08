@@ -11,6 +11,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import { getMcodeDir } from "@mcode/shared";
+import { DraftImageMissingError } from "./draft-image-missing-error.js";
 import type { AttachmentMeta, StoredAttachment, StagedDraftImage } from "@mcode/contracts";
 import {
   StagedDraftImageSchema,
@@ -29,13 +30,7 @@ const MAX_GENERATED_IMAGE_SIZE = 16 * 1024 * 1024;
  */
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
-/** Missing durable image, mapped to a structured RPC failure by the router. */
-export class DraftImageMissingError extends Error {
-  readonly code = "draft_image_missing";
-  constructor(readonly stagingId: string) {
-    super(`Draft image is missing: ${stagingId}`);
-  }
-}
+export { DraftImageMissingError };
 
 function isMissingFile(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";

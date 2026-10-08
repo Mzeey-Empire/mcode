@@ -4,9 +4,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { getExtension, type WsMethodName, WS_METHODS } from "@mcode/contracts";
 import type { z } from "zod";
-import { container } from "tsyringe";
-import { AttachmentService } from "../storage/attachment-service.js";
-import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import type { AttachmentService } from "../storage/attachment-service.js";
+import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 
 type AttachmentRpcMethod = "clipboard.saveFile" | "attachments.stageDraft";
 
@@ -14,19 +13,26 @@ type AttachmentRpcParamsByMethod = {
   [Method in AttachmentRpcMethod]: z.input<ReturnType<typeof WS_METHODS>[Method]["params"]>;
 };
 
+/** Services the attachment RPC family needs from the router. */
+export interface AttachmentRouterDeps {
+  attachmentService: Pick<AttachmentService, "stageDraft">;
+  threadRepo: Pick<ThreadRepo, "findById">;
+}
+
 type AttachmentHandlerMap = {
   [Method in AttachmentRpcMethod]: (
     params: AttachmentRpcParamsByMethod[Method],
+    deps: AttachmentRouterDeps,
   ) => Promise<unknown> | unknown;
 };
 
 const attachmentHandlers: AttachmentHandlerMap = {
   // JSON-RPC remains available for clients that cannot upload a binary frame.
   "clipboard.saveFile": saveClipboardFile,
-  "attachments.stageDraft": ({ threadId, attachment }) => {
-    const thread = container.resolve(ThreadRepo).findById(threadId);
+  "attachments.stageDraft": ({ threadId, attachment }, deps) => {
+    const thread = deps.threadRepo.findById(threadId);
     if (!thread || thread.deleted_at != null) throw new Error("Draft image thread does not exist");
-    return container.resolve(AttachmentService).stageDraft(threadId, attachment);
+    return deps.attachmentService.stageDraft(threadId, attachment);
   },
 };
 
@@ -39,8 +45,9 @@ export function isAttachmentRpcMethod(method: WsMethodName): method is Attachmen
 export async function routeAttachmentRpc<Method extends AttachmentRpcMethod>(
   method: Method,
   params: AttachmentRpcParamsByMethod[Method],
+  deps: AttachmentRouterDeps,
 ): Promise<unknown> {
-  return await attachmentHandlers[method](params);
+  return await attachmentHandlers[method](params, deps);
 }
 
 async function saveClipboardFile(
