@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as iconMap from "../icon-map";
 
 const productIcons = Object.entries(iconMap).filter(
-  (entry): entry is [string, (props: iconMap.ProductIconProps) => React.ReactElement] =>
+  (entry): entry is [string, Exclude<(typeof entry)[1], number>] =>
     typeof entry[1] === "function",
 );
 
