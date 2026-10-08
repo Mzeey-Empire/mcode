@@ -75,7 +75,7 @@ const MARK_STATE: Record<Exclude<ThreadStateMarkerModel["kind"], "time" | "ci">,
   running: "running",
   completed: "success",
   failed: "error",
-  interrupted: "warning",
+  interrupted: "attention",
 };
 
 function CiStateMarker({ marker, dim }: { marker: Extract<ThreadStateMarkerModel, { kind: "ci" }>; dim: boolean }) {

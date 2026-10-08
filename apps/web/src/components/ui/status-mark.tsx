@@ -5,13 +5,12 @@ import { cn } from "@/lib/utils";
  * What a status mark shows. `attention` is a thread waiting on the user;
  * `running` is a neutral spinner; the rest are settled outcomes.
  */
-export type StatusMarkState = "running" | "attention" | "success" | "error" | "warning";
+export type StatusMarkState = "running" | "attention" | "success" | "error";
 
 const DOT_CLASS: Record<Exclude<StatusMarkState, "running">, string> = {
   attention: "border-[1.5px] border-primary",
   success: "bg-success",
   error: "bg-error",
-  warning: "bg-warning",
 };
 
 /** Props for {@link StatusMark}. */

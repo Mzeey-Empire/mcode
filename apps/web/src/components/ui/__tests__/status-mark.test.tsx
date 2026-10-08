@@ -18,7 +18,6 @@ describe("StatusMark", () => {
     ["attention", "Action required"],
     ["success", "Completed"],
     ["error", "Failed"],
-    ["warning", "Interrupted"],
   ] as const)("names the %s mark with its label", (state, label) => {
     render(<StatusMark state={state} label={label} />);
 
@@ -36,7 +35,7 @@ describe("ThreadStateMarker", () => {
     ["a thread waiting on a setup response", markerInput({ isSetupAwaitingResponse: true }), "Awaiting response", "attention"],
     ["a finished thread", markerInput({ thread: { ...idleThread, status: "completed" } }), "Completed", "success"],
     ["a failed thread", markerInput({ thread: { ...idleThread, status: "errored" } }), "Failed", "error"],
-    ["an interrupted thread", markerInput({ thread: { ...idleThread, status: "interrupted" } }), "Interrupted", "warning"],
+    ["an interrupted thread", markerInput({ thread: { ...idleThread, status: "interrupted" } }), "Interrupted", "attention"],
   ] as const)("announces %s as %s", (_case, input, label, state) => {
     render(<ThreadStateMarker marker={getThreadStateMarker(input)} />);
 
