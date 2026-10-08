@@ -61,7 +61,7 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
               open && "border-focus",
             )}
           >
-            <span className="truncate">{value}</span>
+            <span className="text-fade">{value}</span>
             <ChevronDown
               className={cn("size-3.5 text-muted transition-transform duration-150", open && "rotate-180")}
               aria-hidden="true"
@@ -84,7 +84,7 @@ function BaseBranchSelect({ branches, value, onChange, disabled }: BaseBranchSel
                   b.name === value && "bg-selected text-ink",
                 )}
               >
-                <span className="truncate">{b.name}</span>
+                <span className="text-fade">{b.name}</span>
                 {b.isCurrent && (
                   <Badge variant="secondary" size="sm" className="ml-2 shrink-0">current</Badge>
                 )}
@@ -460,11 +460,11 @@ function PrDialogHeader({ branch, baseBranch, isDraft }: PrDialogHeaderProps) {
       <div className="min-w-0 flex-1">
         <DialogTitle className="text-sm font-medium leading-none">Create pull request</DialogTitle>
         <DialogDescription className="mt-1 flex min-w-0 items-center gap-1.5 text-xs">
-          <span className="min-w-0 max-w-[min(200px,40vw)] truncate font-mono text-ink/80">
+          <span className="min-w-0 max-w-[min(200px,40vw)] text-fade font-mono text-ink/80">
             {branch}
           </span>
           <span className="shrink-0 text-muted/50" aria-hidden="true">→</span>
-          <span className="min-w-0 max-w-[min(200px,40vw)] truncate font-mono text-muted">
+          <span className="min-w-0 max-w-[min(200px,40vw)] text-fade font-mono text-muted">
             {baseBranch}
           </span>
         </DialogDescription>

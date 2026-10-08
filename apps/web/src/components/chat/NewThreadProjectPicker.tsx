@@ -89,7 +89,7 @@ export function NewThreadProjectPicker({
                 className="gap-2.5 px-2 py-1.5 text-sm"
               >
                 <Folder size={13} className="text-muted" aria-hidden />
-                <span className="truncate">{workspace.name}</span>
+                <span className="text-fade">{workspace.name}</span>
               </CommandItem>
             ))}
           </CommandList>

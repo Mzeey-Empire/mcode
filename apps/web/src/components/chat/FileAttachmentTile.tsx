@@ -70,7 +70,7 @@ export function FileAttachmentTile({
             >
               <div className="flex min-w-0 items-center gap-2">
                 {icon}
-                <span className="truncate text-xs font-medium text-ink">{name}</span>
+                <span className="text-fade text-xs font-medium text-ink">{name}</span>
               </div>
               <span className="pl-[26px] text-xs tabular-nums text-muted">
                 {formatAttachmentByteSize(sizeBytes)}

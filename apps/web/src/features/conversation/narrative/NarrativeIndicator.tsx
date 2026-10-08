@@ -144,7 +144,7 @@ export function NarrativeIndicator({
           animated={phase === "running"}
           className={stackedLayersIconClassName(phase === "running")}
         />
-        <span className="relative min-w-0 truncate">
+        <span className="relative min-w-0 text-fade">
           {statusLabel}
           {phase === "running" && (
             <span

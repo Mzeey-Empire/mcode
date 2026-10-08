@@ -96,7 +96,7 @@ export function PanelEmptyState({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-ink">{type.label}</span>
-                  <span className="block truncate text-xs text-muted">{type.blurb}</span>
+                  <span className="block text-fade text-xs text-muted">{type.blurb}</span>
                 </span>
                 {type.comingSoon ? <SoonBadge /> : keycap && <Kbd>{keycap}</Kbd>}
               </Button>

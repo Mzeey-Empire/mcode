@@ -522,7 +522,7 @@ function BrowseEntries({
           className="h-[40px] gap-3 px-[12px] text-[14px]"
         >
           <Folder size={15} className="shrink-0 text-muted/70" />
-          <span className="truncate text-ink">{entry.name}</span>
+          <span className="text-fade text-ink">{entry.name}</span>
         </CommandItem>
       ))}
     </CommandGroup>

@@ -41,7 +41,7 @@ export function TurnEntry({ snapshot, turnNumber, defaultExpanded = false }: Tur
           {ordinal}
         </span>
 
-        <span className="flex-1 truncate text-[11.5px] text-ink/65">
+        <span className="flex-1 text-fade text-[11.5px] text-ink/65">
           Turn {turnNumber}
         </span>
 

@@ -17,4 +17,13 @@ describe("cn", () => {
   it("treats font-code as a font family", () => {
     expect(cn("font-mono", "font-code")).toBe("font-code");
   });
+
+  it("keeps the text fade beside a font size and a text colour", () => {
+    expect(cn("text-fade", "text-xs", "text-muted")).toBe("text-fade text-xs text-muted");
+    expect(cn("text-fade-lines-2 text-sm", "text-ink")).toBe("text-fade-lines-2 text-sm text-ink");
+  });
+
+  it("lets a later line clamp replace an earlier one", () => {
+    expect(cn("text-fade-lines-2", "text-fade-lines-3")).toBe("text-fade-lines-3");
+  });
 });

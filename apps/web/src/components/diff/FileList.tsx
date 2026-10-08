@@ -525,9 +525,9 @@ function FileJumpItem({ filePath, onSelect }: FileJumpItemProps) {
     >
       <FileTypeIcon filePath={filePath} size={14} className="mt-0.5" />
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-mono text-[11px] text-ink/85">{basename}</span>
+        <span className="block text-fade font-mono text-[11px] text-ink/85">{basename}</span>
         {parent && (
-          <span className="block truncate font-mono text-[10px] text-muted/65">
+          <span className="block text-fade font-mono text-[10px] text-muted/65">
             {parent}/
           </span>
         )}

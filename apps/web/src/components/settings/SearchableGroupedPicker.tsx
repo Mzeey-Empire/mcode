@@ -112,7 +112,7 @@ export function SearchableGroupedPicker({
               (disabled || loading) && "opacity-60",
             )}
           >
-            <span className="min-w-0 flex-1 truncate text-left">{loading ? "Loading…" : selectedLabel}</span>
+            <span className="min-w-0 flex-1 text-fade text-left">{loading ? "Loading…" : selectedLabel}</span>
             <ChevronDown className="size-4 shrink-0 text-muted" aria-hidden />
           </Button>
         }
@@ -150,7 +150,7 @@ export function SearchableGroupedPicker({
                     }}
                     className="text-xs"
                   >
-                    <span className="flex-1 truncate">{o.label}</span>
+                    <span className="flex-1 text-fade">{o.label}</span>
                     {value === o.value && <Check className="size-3.5 shrink-0" aria-hidden />}
                   </CommandItem>
                 ))}

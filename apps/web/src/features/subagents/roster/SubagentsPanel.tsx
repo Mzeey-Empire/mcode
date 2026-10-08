@@ -190,12 +190,12 @@ function CanonicalRosterMetadata({
   return (
     <span className="min-w-0 flex-1">
       <span className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{canonicalTitle(row)}</span>
+        <span className="min-w-0 flex-1 text-fade text-sm font-medium text-ink">{canonicalTitle(row)}</span>
         <CanonicalRosterTimestamp active={active} status={status} lastActiveAt={lastActiveAt} lastActiveLabel={lastActiveLabel} />
       </span>
-      {lineage && <span className="mt-0.5 block truncate text-xs text-muted" aria-label={`Lineage: ${lineage}`}>{lineage}</span>}
-      {row.task && <span className="mt-0.5 block truncate text-xs text-muted">{canonicalIdentity(row)}</span>}
-      {configuration && <span className="mt-0.5 block truncate font-mono text-xs text-muted">{configuration}</span>}
+      {lineage && <span className="mt-0.5 block text-fade text-xs text-muted" aria-label={`Lineage: ${lineage}`}>{lineage}</span>}
+      {row.task && <span className="mt-0.5 block text-fade text-xs text-muted">{canonicalIdentity(row)}</span>}
+      {configuration && <span className="mt-0.5 block text-fade font-mono text-xs text-muted">{configuration}</span>}
       {!active && row.hasActiveDescendant && <span className="mt-0.5 block text-xs text-primary">Active descendant</span>}
     </span>
   );
@@ -264,7 +264,7 @@ function NarrativeRosterRow({
         />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{title}</span>
+            <span className="min-w-0 flex-1 text-fade text-sm font-medium text-ink">{title}</span>
             {!active && (
               <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums text-muted">
                 {status !== "Completed" && <span>{status}</span>}
@@ -278,8 +278,8 @@ function NarrativeRosterRow({
               </span>
             )}
           </span>
-          {row.task && <span className="mt-0.5 block truncate text-xs text-muted">{identity}</span>}
-          {row.activity && <span className="mt-0.5 block truncate text-xs text-muted">{row.activity}</span>}
+          {row.task && <span className="mt-0.5 block text-fade text-xs text-muted">{identity}</span>}
+          {row.activity && <span className="mt-0.5 block text-fade text-xs text-muted">{row.activity}</span>}
         </span>
       </Button>
     </div>
@@ -323,9 +323,9 @@ function CanonicalDetailView({
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <SubagentIdentityGlyph identity={identity} hasExplicitIdentity={row.identity !== undefined} paletteSeed={paletteSeed} className="size-6" size={15} />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold">{title}</h2>
-            {row.task && <p className="truncate text-xs text-muted">{identity}</p>}
-            {lineage && <p className="truncate text-xs text-muted">{lineage}</p>}
+            <h2 className="text-fade text-sm font-semibold">{title}</h2>
+            {row.task && <p className="text-fade text-xs text-muted">{identity}</p>}
+            {lineage && <p className="text-fade text-xs text-muted">{lineage}</p>}
           </div>
           <span role="status" className="sr-only">
             {canonicalStatus(row)}

@@ -285,9 +285,8 @@ describe("SlashCommandPopup row presentation", () => {
     const badge = within(localRow).getByText("Local");
 
     expect(localRow).toHaveClass("min-w-0", "overflow-hidden");
-    expect(title).toHaveClass("min-w-0", "truncate");
-    expect(description).toHaveClass("min-w-12", "overflow-hidden");
-    expect(description).not.toHaveClass("truncate");
+    expect(title).toHaveClass("min-w-0", "text-fade");
+    expect(description).toHaveClass("min-w-12", "text-fade");
     expect(title.parentElement).toHaveClass("min-w-0", "overflow-hidden", "items-baseline");
     expect(badge).toHaveClass("shrink-0");
   });
@@ -328,11 +327,8 @@ describe("SlashCommandPopup row presentation", () => {
     renderPopup();
 
     const description = screen.getByText("A plugin skill");
-    expect(description).toHaveClass("overflow-hidden", "whitespace-nowrap");
-    expect(description).not.toHaveClass("truncate");
-    expect(description).toHaveStyle({
-      maskImage: "linear-gradient(to right, black calc(100% - 2.5rem), transparent)",
-    });
+    expect(description).toHaveClass("text-fade");
+    expect(description.getAttribute("style") ?? "").not.toMatch(/mask-image/i);
   });
 
   it("keeps slash syntax on genuine commands", () => {

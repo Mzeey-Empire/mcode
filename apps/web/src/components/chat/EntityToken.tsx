@@ -138,7 +138,7 @@ export function EntityToken({
         commandName={isCommandInvocation ? displayLabel : undefined}
         className="flex size-3.5 items-center justify-center text-current"
       />
-      <span className="min-w-0 truncate">{displayLabel}</span>
+      <span className="min-w-0 text-fade">{displayLabel}</span>
     </span>
   );
 }

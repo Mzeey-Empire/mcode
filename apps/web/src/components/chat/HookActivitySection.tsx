@@ -108,11 +108,11 @@ function HookRowContent({ hook, hasOutput, detailOpen }: { hook: HookExecution; 
         />
       )}
       {!hasOutput && <span className="w-2.5 shrink-0" />}
-      <span className="font-mono text-xs text-ink truncate">
+      <span className="font-mono text-xs text-ink text-fade">
         {hook.hookName}
       </span>
       {hook.toolName && (
-        <span className="text-xs text-muted/50 truncate shrink-0">
+        <span className="text-xs text-muted/50 text-fade shrink-0">
           triggered by {hook.toolName}
         </span>
       )}

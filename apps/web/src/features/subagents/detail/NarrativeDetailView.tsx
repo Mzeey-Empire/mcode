@@ -35,7 +35,7 @@ function NarrativeActivityRow({ activity }: { readonly activity: SubagentDetailA
       <ActivityStatusIcon activity={activity} />
       <span className="shrink-0 text-xs font-medium text-ink/80">{activity.label}</span>
       {activity.detail && activity.detail !== activity.label && (
-        <span className="min-w-0 flex-1 truncate text-xs text-muted">{activity.detail}</span>
+        <span className="min-w-0 flex-1 text-fade text-xs text-muted">{activity.detail}</span>
       )}
     </li>
   );
@@ -72,8 +72,8 @@ export function NarrativeDetailView({
             size={15}
           />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold">{title}</h2>
-            {row.task && <p className="truncate text-xs text-muted">{identity}</p>}
+            <h2 className="text-fade text-sm font-semibold">{title}</h2>
+            {row.task && <p className="text-fade text-xs text-muted">{identity}</p>}
           </div>
           <span role="status" className="sr-only">
             {narrativeRowStatus(row)}

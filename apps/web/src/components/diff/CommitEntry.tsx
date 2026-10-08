@@ -75,7 +75,7 @@ export function CommitEntry({ commit, threadId }: CommitEntryProps) {
         </span>
 
         {/* Commit message */}
-        <span className="flex-1 min-w-0 truncate text-[11.5px] text-ink/80">
+        <span className="flex-1 min-w-0 text-fade text-[11.5px] text-ink/80">
           {commit.message}
         </span>
 

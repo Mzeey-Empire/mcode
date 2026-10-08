@@ -273,7 +273,7 @@ function QueueRowPreview({ msg, onEdit }: Pick<QueueRowProps, "msg" | "onEdit">)
             className="min-w-0 flex-1 cursor-text text-left"
           >
             {previewText
-              ? <span className="block truncate text-xs leading-snug text-ink/90">{previewText}</span>
+              ? <span className="block text-fade text-xs leading-snug text-ink/90">{previewText}</span>
               : <span className="sr-only">{emptyMessageLabel}</span>}
           </button>
         }

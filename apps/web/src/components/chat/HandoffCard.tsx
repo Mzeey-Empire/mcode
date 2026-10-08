@@ -72,7 +72,7 @@ export const HandoffCard = memo(function HandoffCard({ content }: HandoffCardPro
                 </span>
                 <ul className="space-y-px pl-4">
                   {metadata.recentFilesChanged.map((f) => (
-                    <li key={f} className="truncate font-mono text-ink/80">{f}</li>
+                    <li key={f} className="text-fade font-mono text-ink/80">{f}</li>
                   ))}
                 </ul>
               </div>

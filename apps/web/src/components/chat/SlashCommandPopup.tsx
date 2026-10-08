@@ -226,18 +226,15 @@ function CommandRow({
       <CommandIdentityMark command={cmd} tone={tone} />
       <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
         <span className={cn(
-          "min-w-0 shrink truncate text-sm font-medium",
+          "min-w-0 shrink text-fade text-sm font-medium",
           tone === "dark" ? "text-neutral-50" : "text-ink",
         )}>
           {commandDisplayLabel(cmd)}
         </span>
         <span className={cn(
-          "min-w-12 flex-1 overflow-hidden whitespace-nowrap text-xs font-normal",
+          "min-w-12 flex-1 text-fade text-xs font-normal",
           tone === "dark" ? "text-neutral-400" : "text-muted",
-        )} style={{
-          maskImage: "linear-gradient(to right, black calc(100% - 2.5rem), transparent)",
-          WebkitMaskImage: "linear-gradient(to right, black calc(100% - 2.5rem), transparent)",
-        }}>
+        )}>
           {cmd.description}
         </span>
       </span>
@@ -377,7 +374,7 @@ function ErrorRow({
 }) {
   return (
     <div role="alert" className="flex items-center gap-2 px-3 py-2 text-xs text-destructive">
-      <span className="flex-1 truncate">Couldn't load commands: {message}</span>
+      <span className="flex-1 text-fade">Couldn't load commands: {message}</span>
       <Button
         type="button"
         variant="ghost"

@@ -218,7 +218,7 @@ function PullRequestForkComposer({
     );
   }
   return (
-    <div className="min-h-0 bg-background"><div className="flex items-center gap-2 border-b border-border/35 px-5 py-2 text-xs text-muted"><span className="font-medium text-ink/85">{target.mode === "existing-worktree" ? "Existing worktree" : "New worktree"}</span><span aria-hidden>·</span><span className="min-w-0 truncate font-mono">{target.branch}</span>{mode === "background" ? <span className="ml-auto shrink-0">The pull request stays open</span> : null}</div><Composer isNewThread workspaceId={target.workspaceId} onThreadPreparing={onThreadPreparing} onThreadCreationFailed={onThreadCreationFailed} onThreadCreated={onThreadCreated} /></div>
+    <div className="min-h-0 bg-background"><div className="flex items-center gap-2 border-b border-border/35 px-5 py-2 text-xs text-muted"><span className="font-medium text-ink/85">{target.mode === "existing-worktree" ? "Existing worktree" : "New worktree"}</span><span aria-hidden>·</span><span className="min-w-0 text-fade font-mono">{target.branch}</span>{mode === "background" ? <span className="ml-auto shrink-0">The pull request stays open</span> : null}</div><Composer isNewThread workspaceId={target.workspaceId} onThreadPreparing={onThreadPreparing} onThreadCreationFailed={onThreadCreationFailed} onThreadCreated={onThreadCreated} /></div>
   );
 }
 

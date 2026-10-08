@@ -1,7 +1,7 @@
 import { Pin, GitBranch, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { PathLabel } from "./PathLabel";
+import { PathText } from "@/components/ui/path-text";
 import { useProjectSelectorStore } from "./state/projectSelectorStore";
 
 /** Props for ProjectRow. */
@@ -23,7 +23,7 @@ interface Props {
   onPin: (id: string, pinned: boolean) => void;
   /** Called when the user removes the workspace from recents. Optional — row hides the button if absent. */
   onRemove?: (id: string) => void;
-  /** Home directory prefix used by PathLabel to collapse the path to ~. */
+  /** Home directory prefix used by PathText to collapse the path to ~. */
   home?: string;
 }
 
@@ -99,7 +99,7 @@ function ProjectRowIdentity({
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-1.5">
-        <span className="truncate font-medium">{workspace.name}</span>
+        <span className="text-fade font-medium">{workspace.name}</span>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -120,7 +120,7 @@ function ProjectRowIdentity({
           <TooltipContent>{`${pinLabel} project`}</TooltipContent>
         </Tooltip>
       </div>
-      <PathLabel path={workspace.path} home={home} />
+      <PathText path={workspace.path} home={home} />
     </div>
   );
 }
@@ -146,7 +146,7 @@ function ProjectRowEnrichment({
   enrichment: NonNullable<ReturnType<typeof useProjectSelectorStore.getState>["enrichmentCache"] extends Map<string, infer Value> ? Value : never>;
 }) {
   if (!enrichment.isGit) {
-    return <span className="col-span-4 truncate justify-self-end text-muted/40">not a git repo</span>;
+    return <span className="col-span-4 text-fade justify-self-end text-muted/40">not a git repo</span>;
   }
   const branch = enrichment.branch ?? "detached";
   const workingTreeLabel = enrichment.isClean ? "Clean working tree" : "Uncommitted changes";
@@ -165,7 +165,7 @@ function ProjectRowEnrichment({
       </Tooltip>
       <GitBranch size={10} className="shrink-0 opacity-70" aria-hidden />
       <Tooltip>
-        <TooltipTrigger render={<span className="min-w-0 truncate text-right">{branch}</span>} />
+        <TooltipTrigger render={<span className="min-w-0 justify-self-end text-fade">{branch}</span>} />
         <TooltipContent>{branch}</TooltipContent>
       </Tooltip>
       <ProjectRowThreadCount count={enrichment.threadCount} />

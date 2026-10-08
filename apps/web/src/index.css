@@ -353,6 +353,42 @@
   font-variant-ligatures: none;
 }
 
+/* Overflowing text fades its last 24px instead of ending in an ellipsis.
+   The mask only applies while the element overflows: a scroll timeline is
+   inactive when its scroller has nothing to scroll, so the animation that
+   carries the mask does not apply to text that fits. That needs a scroll
+   container, which is why this uses `overflow: hidden` and not `clip`.
+   Without scroll-driven animation support the text clips with no fade; the
+   animation sits behind @supports because a timeline-less 0s animation with
+   fill `both` would pin the mask on text that fits. */
+@utility text-fade {
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+  @supports (animation-timeline: scroll()) {
+    animation: text-fade-inline linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
+
+/* Vertical clamp to N lines that ends in a 24px bottom fade when clamped. */
+@utility text-fade-lines-* {
+  overflow: hidden;
+  max-height: calc(--value(integer) * 1lh);
+  @supports (animation-timeline: scroll()) {
+    animation: text-fade-block linear both;
+    animation-timeline: scroll(self block);
+  }
+}
+
+@keyframes text-fade-inline {
+  from, to { mask-image: linear-gradient(to right, black calc(100% - var(--spacing-text-fade)), transparent); }
+}
+
+@keyframes text-fade-block {
+  from, to { mask-image: linear-gradient(to bottom, black calc(100% - var(--spacing-text-fade)), transparent); }
+}
+
 
 @keyframes fade-up-in {
   from { opacity: 0; transform: translateY(4px); }

@@ -299,7 +299,7 @@ function PullRequestInboxNotices({
       {stale && error ? (
         <div className="mx-auto w-full max-w-[720px] px-5">
           <div className="mb-2 flex items-center gap-2 bg-destructive/10 px-2.5 py-2 text-xs text-muted">
-            <span className="min-w-0 flex-1 truncate">Stale data. {error.message}</span>
+            <span className="min-w-0 flex-1 text-fade">Stale data. {error.message}</span>
             <Button type="button" variant="ghost" size="xs" onClick={onRefresh} className="h-6">Retry</Button>
           </div>
         </div>

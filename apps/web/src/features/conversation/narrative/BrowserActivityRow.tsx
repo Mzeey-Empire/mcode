@@ -370,7 +370,7 @@ export function BrowserActivitySummary({
         onToggle={virtualExpansion?.onToggle ?? (() => setOpen((current) => !current))}
         icon={<SquareMousePointer className="size-4 shrink-0 text-muted/55" aria-hidden="true" />}
       >
-        <span className="min-w-0 flex-1 truncate font-medium text-ink/75">
+        <span className="min-w-0 flex-1 text-fade font-medium text-ink/75">
           {buildBrowserActivitySummary(calls, active)}
         </span>
       </NarrativeSummaryLine>

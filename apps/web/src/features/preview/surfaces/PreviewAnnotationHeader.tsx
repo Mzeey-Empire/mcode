@@ -95,7 +95,7 @@ export function PreviewAnnotationHeader({
                 className="flex min-w-0 flex-1 items-center"
                 data-testid="preview-annotation-title"
               >
-                <span className="min-w-0 truncate text-sm text-muted">
+                <span className="min-w-0 text-fade text-sm text-muted">
                   {titleLabel}
                 </span>
               </div>
