@@ -30,7 +30,7 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "app-viewport-fixed fixed isolate z-50 bg-ink/10 supports-backdrop-filter:backdrop-blur-xs",
+        "app-viewport-fixed fixed isolate z-(--layer-modal) bg-ink/10 supports-backdrop-filter:backdrop-blur-xs",
         DIALOG_FADE_CLASS,
         className
       )}
@@ -53,7 +53,7 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-5 p-5 text-sm outline-none sm:max-w-md [&_[data-slot=dialog-header]]:pr-9",
+          "fixed top-1/2 left-1/2 z-(--layer-modal) grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-5 p-5 text-sm outline-none sm:max-w-md [&_[data-slot=dialog-header]]:pr-9",
           DIALOG_SURFACE_CLASS,
           DIALOG_FADE_CLASS,
           className

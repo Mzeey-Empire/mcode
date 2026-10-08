@@ -233,7 +233,7 @@ export function FileTagPopup({
               <div
                 data-group-header
                 className={cn(
-                  "sticky top-0 z-10 bg-inherit px-2 py-1 text-xs font-medium",
+                  "sticky top-0 z-(--layer-sticky) bg-inherit px-2 py-1 text-xs font-medium",
                   tone === "dark" ? "text-neutral-400" : "text-muted/70",
                 )}
               >

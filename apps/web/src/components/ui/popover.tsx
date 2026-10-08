@@ -45,7 +45,7 @@ function PopoverContent({
         positionMethod={positionMethod}
         side={side}
         sticky={sticky}
-        className="pointer-events-none isolate z-50"
+        className="pointer-events-none isolate z-(--layer-modal)"
       >
         <PopoverPrimitive.Popup
           data-slot="popover-content"

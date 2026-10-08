@@ -144,7 +144,7 @@ function PullRequestSurfaceLayout({
 
   return (
     <section ref={surfaceRef} aria-labelledby="pull-request-surface-title" data-layout={isWide ? "master-detail" : "narrow"} className="relative flex h-full min-h-0 flex-col bg-page">
-      {showSidebarReveal && <div className="absolute left-3 top-3 z-10"><SidebarRevealButton /></div>}
+      {showSidebarReveal && <div className="absolute left-3 top-3 z-(--layer-sticky)"><SidebarRevealButton /></div>}
       <div className="flex min-h-0 flex-1">
         <PullRequestInboxPane activeKey={activeKey} isWide={isWide} isNarrow={isNarrow} transport={transport} activateDetail={activateDetail} listboxRef={listboxRef} showSidebarReveal={showSidebarReveal} />
         <PullRequestDetailPanel activeKey={activeKey} isWide={isWide} detailWidth={detailWidth} defaultDetailWidth={defaultDetailWidth} detailMaxWidth={detailMaxWidth} width={width} setDetailWidthOverride={setDetailWidthOverride} detailReveal={detailReveal} />

@@ -104,11 +104,11 @@ export function CommandPalette() {
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={(o) => !o && close()} modal="trap-focus">
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className={cn("app-viewport-fixed fixed z-50 bg-black/55 backdrop-blur-xs", DIALOG_FADE_CLASS)} />
+        <DialogPrimitive.Backdrop className={cn("app-viewport-fixed fixed z-(--layer-modal) bg-black/55 backdrop-blur-xs", DIALOG_FADE_CLASS)} />
         <DialogPrimitive.Popup
           data-testid="command-palette"
           aria-label="Command palette"
-          className={cn("fixed left-1/2 top-[clamp(4rem,14vh,8rem)] z-50 w-full -translate-x-1/2 px-4 outline-none", DIALOG_FADE_CLASS, paletteDetails.widthClass)}
+          className={cn("fixed left-1/2 top-[clamp(4rem,14vh,8rem)] z-(--layer-modal) w-full -translate-x-1/2 px-4 outline-none", DIALOG_FADE_CLASS, paletteDetails.widthClass)}
         >
           <Command
             className={cn("overflow-hidden", DIALOG_SURFACE_CLASS)}

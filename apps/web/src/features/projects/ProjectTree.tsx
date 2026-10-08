@@ -1090,7 +1090,7 @@ export function ProjectTree() {
         </Tooltip>
       </div>
 
-      <div className="relative min-h-0 flex-1">
+      <div className="relative isolate min-h-0 flex-1">
         <div
           ref={containerRef}
           data-testid="thread-list"
@@ -2602,7 +2602,7 @@ function ProjectRowActions({
   onCreateThread,
 }: { workspace: Workspace; isExpanded: boolean; onToggle: () => void; onOpenInExplorer: (event: React.MouseEvent) => void; onRename: (event: React.MouseEvent) => void; onDelete: (event: React.MouseEvent) => void; onCreateThread: (event: React.MouseEvent) => void }) {
   return (
-    <div data-testid={`project-row-actions-${workspace.id}`} className="pointer-events-none absolute inset-y-0 right-1.5 z-10 flex items-center justify-end gap-1 bg-transparent px-0.5 opacity-0 transition-opacity duration-150 group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100 motion-reduce:transition-none">
+    <div data-testid={`project-row-actions-${workspace.id}`} className="pointer-events-none absolute inset-y-0 right-1.5 z-(--layer-sticky) flex items-center justify-end gap-1 bg-transparent px-0.5 opacity-0 transition-opacity duration-150 group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100 motion-reduce:transition-none">
       <Button type="button" variant="ghost" size="icon-xs" aria-label={`Toggle threads for ${workspace.name}`} aria-expanded={isExpanded} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggle(); }} className="size-6 shrink-0 text-muted opacity-0 transition-opacity hover:bg-transparent hover:text-muted dark:hover:bg-transparent group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100">
         <ChevronRight size={14} className={cn("transition-transform duration-150 motion-reduce:transition-none", isExpanded && "rotate-90")} />
       </Button>
@@ -2744,7 +2744,7 @@ const SortableProjectRow = memo(function SortableProjectRow({
   const style: CSSProperties = {
     transform: transform ? CSS.Translate.toString(transform) : undefined,
     transition,
-    ...(isDragging ? { opacity: 0.35, zIndex: 2 } : {}),
+    ...(isDragging ? { opacity: 0.35, zIndex: "var(--layer-sticky)" } : {}),
   };
   const indicatorEdge =
     ctx.dropIndicator?.id === row.workspace.id ? ctx.dropIndicator.edge : null;
@@ -2755,7 +2755,7 @@ const SortableProjectRow = memo(function SortableProjectRow({
           data-testid="drop-indicator"
           aria-hidden="true"
           className={cn(
-            "pointer-events-none absolute inset-x-0 z-10 h-1 rounded-full bg-primary",
+            "pointer-events-none absolute inset-x-0 z-(--layer-sticky) h-1 rounded-full bg-primary",
             indicatorEdge === "top" ? "top-0" : "bottom-0",
           )}
         />

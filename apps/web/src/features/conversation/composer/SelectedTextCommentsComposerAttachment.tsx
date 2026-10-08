@@ -106,7 +106,7 @@ function CommentPreviewActions<T extends { readonly id: string; readonly display
 }) {
   if (!sourceUnavailable && !multipleComments) return null;
   return (
-    <div className="absolute top-2 right-0 z-20 flex items-center gap-0.5">
+    <div className="absolute top-2 right-0 z-(--layer-dropdown) flex items-center gap-0.5">
       {sourceUnavailable && (
         <Tooltip>
           <TooltipTrigger
@@ -178,7 +178,7 @@ function MutableCommentPreviewControls<T extends { readonly id: string; readonly
           size="sm"
           aria-label={`Open source for comment ${comment.displayNumber}`}
           onClick={() => onOpenSource(comment)}
-          className="absolute inset-0 z-0 h-auto w-full rounded-md p-0 focus-visible:z-10"
+          className="absolute inset-0 z-(--layer-base) h-auto w-full rounded-md p-0 focus-visible:z-(--layer-sticky)"
         />
       )}
       {areActionsVisible && (
@@ -239,7 +239,7 @@ export function ComposerCommentPreviewItem<T extends ComposerCommentCardData>({
     if (actionCloseTimerRef.current !== undefined) window.clearTimeout(actionCloseTimerRef.current);
   }, []);
   const content = (
-    <div className="relative z-10 min-w-0 space-y-1 px-1 py-1.5 pointer-events-none">
+    <div className="relative z-(--layer-sticky) min-w-0 space-y-1 px-1 py-1.5 pointer-events-none">
       <p className="text-xs text-muted">{`${item.displayNumber}. ${item.sourceLabel}:`}</p>
       <QuotePreview quote={item.quote} />
       {sourceUnavailable && <p className="text-xs text-muted">Source unavailable</p>}
@@ -450,7 +450,7 @@ export function ComposerCommentAttachmentShell({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-ink hover:bg-hover focus-visible:z-10"
+                className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-ink hover:bg-hover focus-visible:z-(--layer-sticky)"
               />
             }
           >
@@ -464,7 +464,7 @@ export function ComposerCommentAttachmentShell({
               size="icon-xs"
               aria-label={`Remove ${label}`}
               onClick={onRemove}
-              className="rounded-none border-0 bg-transparent text-muted hover:bg-hover hover:text-ink focus-visible:z-10"
+              className="rounded-none border-0 bg-transparent text-muted hover:bg-hover hover:text-ink focus-visible:z-(--layer-sticky)"
             >
               <X size={16} aria-hidden />
             </Button>

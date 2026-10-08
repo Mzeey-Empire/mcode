@@ -296,7 +296,7 @@ function RegeneratingSummary({
 }) {
   return (
     <div className="relative flex flex-col gap-3 p-4">
-      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/80">
+      <div className="absolute inset-0 z-(--layer-sticky) flex flex-col items-center justify-center gap-3 bg-background/80">
         <div role="status" aria-live="polite" aria-busy="true">
           <SummaryDots />
         </div>

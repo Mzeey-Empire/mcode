@@ -156,7 +156,7 @@ export function ComposerQueueList({
           wrapper, the rows' DOM parent is the outer <section> (which
           includes the header), and dragging a row up would push the ghost
           into the header strip. */}
-      <div>
+      <div className="isolate">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -220,7 +220,7 @@ const QueueRow = memo(function QueueRow({
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    ...(isDragging ? { opacity: 0.55, zIndex: 2 } : {}),
+    ...(isDragging ? { opacity: 0.55, zIndex: "var(--layer-sticky)" } : {}),
   };
 
   // useSortable adds role/tabIndex; we apply listeners to the grip only,

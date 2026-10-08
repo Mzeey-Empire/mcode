@@ -242,8 +242,8 @@ describe("SelectedTextCommentMarkers", () => {
 
     await waitFor(() => expect(screen.getAllByTestId("selected-text-comment-marker")).toHaveLength(2));
     expect(screen.getAllByTestId("selected-text-comment-highlight")).toHaveLength(2);
-    expect(screen.getAllByTestId("selected-text-comment-highlight")[0]!.parentElement).toHaveClass("z-[1]");
-    expect(screen.getAllByTestId("selected-text-comment-marker")[0]!.parentElement).toHaveClass("z-[2]");
+    expect(screen.getAllByTestId("selected-text-comment-highlight")[0]!.parentElement).toHaveClass("z-(--layer-base)");
+    expect(screen.getAllByTestId("selected-text-comment-marker")[0]!.parentElement).toHaveClass("z-(--layer-sticky)");
     expect(screen.getAllByTestId("selected-text-comment-marker")[0]).toHaveAccessibleName("Open comment 1");
     expect(screen.getAllByTestId("selected-text-comment-marker")[1]).toHaveAccessibleName("Open comment 2");
 

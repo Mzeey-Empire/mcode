@@ -182,7 +182,7 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
 function NewThreadSurface({ state, onPromptSelect }: { state: ChatViewState; onPromptSelect: (text: string) => void }) {
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background">
-      {state.sidebarCollapsed && <div className="absolute left-2 top-2 z-10"><SidebarRevealButton /></div>}
+      {state.sidebarCollapsed && <div className="absolute left-2 top-2 z-(--layer-sticky)"><SidebarRevealButton /></div>}
       <NewThreadWelcome projectName={state.activeWorkspaceName || undefined} onPromptSelect={onPromptSelect} />
       <Composer isNewThread workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />
     </div>

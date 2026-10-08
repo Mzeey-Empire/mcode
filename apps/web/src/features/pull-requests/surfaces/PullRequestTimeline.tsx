@@ -341,7 +341,7 @@ const TimelineRow = memo(
             aria-hidden
             data-timeline-marker={item.kind}
             className={cn(
-              "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full border border-border/70 bg-page text-muted transition-colors duration-150 group-hover:border-ink/25 group-hover:text-ink motion-reduce:transition-none",
+              "relative z-(--layer-sticky) flex size-6 shrink-0 items-center justify-center rounded-full border border-border/70 bg-page text-muted transition-colors duration-150 group-hover:border-ink/25 group-hover:text-ink motion-reduce:transition-none",
               item.kind === "commit" &&
                 "border-primary/40 bg-primary/8 text-primary group-hover:border-primary/65 group-hover:text-primary",
             )}

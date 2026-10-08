@@ -115,7 +115,7 @@ describe("ActivityRail expansion", () => {
     renderRail();
     const rail = screen.getByTestId("activity-rail");
 
-    expect(rail).toHaveClass("z-30", "w-12", "flex-none");
+    expect(rail).toHaveClass("z-(--layer-floating-panel)", "w-12", "flex-none");
     expect(rail.firstElementChild).toHaveClass("absolute", "w-full");
 
     fireEvent.focus(screen.getByRole("button", { name: "Terminal" }));
@@ -281,16 +281,16 @@ describe("ActivityRail expansion", () => {
       >
         <div
           data-testid="renderer-guest"
-          className="absolute inset-0 z-0"
+          className="absolute inset-0 z-(--layer-base)"
           onPointerDown={guestPointerDown}
         />
         <div
           data-testid="browser-automation-overlay"
-          className="pointer-events-none absolute inset-0 z-20"
+          className="pointer-events-none absolute inset-0 z-(--layer-dropdown)"
         />
         <span
           data-testid="browser-automation-pointer"
-          className="pointer-events-none absolute z-30"
+          className="pointer-events-none absolute z-(--layer-floating-panel)"
         />
         {railElement()}
       </div>,
@@ -319,7 +319,7 @@ describe("ActivityRail expansion", () => {
       act(() => vi.advanceTimersByTime(EXPECTED_EXPAND_DELAY_MS));
 
       expect(rail).toHaveAttribute("data-expanded", "true");
-      expect(rail).toHaveClass("w-40", "-mr-28", "z-30");
+      expect(rail).toHaveClass("w-40", "-mr-28", "z-(--layer-floating-panel)");
       expect(railOverlay).toHaveClass("absolute", "w-full");
       expect(document.elementFromPoint(100, 200)).toBe(terminal);
       expect(document.elementFromPoint(300, 200)).toBe(guest);

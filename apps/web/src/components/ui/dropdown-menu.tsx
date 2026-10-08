@@ -30,7 +30,7 @@ function DropdownMenuContent({
       <MenuPrimitive.Positioner
         sideOffset={sideOffset}
         align={align}
-        className="pointer-events-none isolate z-50"
+        className="pointer-events-none isolate z-(--layer-modal)"
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
@@ -166,7 +166,7 @@ function DropdownMenuSubContent({
         positionMethod="fixed"
         collisionPadding={collisionPadding}
         collisionAvoidance={cascadingMenuCollisionAvoidance}
-        className="pointer-events-none isolate z-50"
+        className="pointer-events-none isolate z-(--layer-modal)"
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-sub-content"

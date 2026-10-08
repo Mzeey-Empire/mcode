@@ -626,7 +626,7 @@ export function ReviewDiffView({
         <button
           type="button"
           aria-label={`Add comment on line in ${item.id}`}
-          className="relative z-10 flex h-5 w-5 items-center justify-center rounded-md bg-ink text-background shadow-sm transition-colors hover:bg-ink/90"
+          className="relative z-(--layer-sticky) flex h-5 w-5 items-center justify-center rounded-md bg-ink text-background shadow-sm transition-colors hover:bg-ink/90"
           // Pierre's line-number span overlaps the utility slot, so the button
           // must stack above it to be clickable; press events are stopped so a
           // click on "+" cannot start a line-range selection.
