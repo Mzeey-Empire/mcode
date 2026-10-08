@@ -26,24 +26,33 @@ describe("Button loading", () => {
   it("swaps the leading icon for the spinner and keeps the label", () => {
     render(
       <Button loading>
-        <Plus data-testid="leading-icon" />
+        <Plus data-icon="inline-start" data-testid="leading-icon" />
         New thread
       </Button>,
     );
 
-    expect(screen.queryByTestId("leading-icon")).not.toBeInTheDocument();
-    expect(screen.getByRole("button")).toHaveTextContent("New thread");
+    expect(screen.getByTestId("leading-icon").parentElement).toHaveClass("opacity-0");
+    expect(screen.getByText("New thread")).not.toHaveClass("opacity-0");
+    expect(screen.getByRole("button", { name: "New thread" })).toBeInTheDocument();
   });
 
-  it("keeps a fragment or text label as the accessible name while loading", () => {
+  it("keeps a fragment or label-component child in place as the accessible name", () => {
+    function ActionLabel() {
+      return <span>Create pull request</span>;
+    }
     render(
-      <Button loading>
-        <>Create pull request</>
-      </Button>,
+      <>
+        <Button loading>
+          <>Open diff</>
+        </Button>
+        <Button loading>
+          <ActionLabel />
+        </Button>
+      </>,
     );
 
+    expect(screen.getByRole("button", { name: "Open diff" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create pull request" })).toBeInTheDocument();
-    expect(screen.getByText("Create pull request")).not.toHaveClass("invisible");
   });
 });
 

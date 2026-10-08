@@ -1,6 +1,6 @@
 "use client"
 
-import type { ReactNode } from "react"
+import { useRef, type ReactNode } from "react"
 import { ChevronDown } from "lucide-react"
 
 import { Button, type ButtonProps } from "@/components/ui/button"
@@ -36,6 +36,10 @@ interface SplitButtonProps {
   className?: string
   /** Extra props for the action half, such as a test id or a longer accessible name. */
   actionProps?: Omit<ButtonProps, "children" | "onClick" | "variant" | "size" | "disabled" | "loading"> & DataAttributes
+  /** Menu placement against the whole control, e.g. `left` to open beside a column. */
+  menuSide?: "top" | "bottom" | "left" | "right"
+  menuAlign?: "start" | "center" | "end"
+  menuSideOffset?: number
   /** Extra props for the chevron half. */
   menuTriggerProps?: Omit<ButtonProps, "children" | "variant" | "size" | "disabled" | "aria-label"> & DataAttributes
 }
@@ -57,9 +61,14 @@ function SplitButton({
   className,
   actionProps,
   menuTriggerProps,
+  menuSide = "bottom",
+  menuAlign = "end",
+  menuSideOffset,
 }: SplitButtonProps) {
+  // The menu belongs to the whole control, so it positions against both halves, not the chevron.
+  const rootRef = useRef<HTMLDivElement>(null)
   return (
-    <div data-slot="split-button" className={cn("inline-flex min-w-0 rounded-control", className)}>
+    <div ref={rootRef} data-slot="split-button" className={cn("inline-flex min-w-0 rounded-control", className)}>
       <Button
         {...actionProps}
         variant={variant}
@@ -92,7 +101,9 @@ function SplitButton({
             </Button>
           }
         />
-        <DropdownMenuContent align="end">{menu}</DropdownMenuContent>
+        <DropdownMenuContent anchor={rootRef} side={menuSide} align={menuAlign} sideOffset={menuSideOffset}>
+          {menu}
+        </DropdownMenuContent>
       </DropdownMenu>
     </div>
   )

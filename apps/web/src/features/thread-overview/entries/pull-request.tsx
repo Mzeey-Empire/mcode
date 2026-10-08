@@ -279,6 +279,9 @@ function ThreadOverviewPrActiveRow({
         variant="ghost"
         className="w-full"
         menuLabel="More pull request actions"
+        menuSide="left"
+        menuAlign="start"
+        menuSideOffset={12}
         onClick={(event) => onOpenPr(pr.url, event)}
         actionProps={{
           "data-testid": "workspace-menu-open-pr",

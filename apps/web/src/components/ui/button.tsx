@@ -1,6 +1,6 @@
 "use client"
 
-import { Children, Fragment, isValidElement, type MouseEvent, type ReactNode } from "react"
+import { Children, isValidElement, type MouseEvent, type ReactNode } from "react"
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 
@@ -84,28 +84,31 @@ type ButtonProps = ButtonPrimitive.Props &
     loading?: boolean
   }
 
-/** An icon is a leaf element: an `<svg>` or an icon component with no children. */
+/** A leading icon is marked `data-icon="inline-start"`; guessing from element shape mistakes label components for icons. */
 function isLeadingIcon(node: ReactNode): boolean {
-  if (!isValidElement<{ children?: ReactNode }>(node) || node.type === Fragment) return false
-  if (typeof node.type === "string" && node.type !== "svg") return false
-  return node.props.children == null
+  return isValidElement<{ "data-icon"?: string }>(node) && node.props["data-icon"] === "inline-start"
+}
+
+/** Covers `content` with a centred spinner; the content keeps its box and stays in the accessibility tree. */
+function withSpinnerOver(content: ReactNode, spinner: ReactNode, key?: string): ReactNode {
+  return (
+    <span key={key} className="relative inline-flex shrink-0 items-center justify-center gap-[inherit]">
+      {/* opacity-0, not invisible: hidden text must stay the button's accessible name. */}
+      <span className="inline-flex items-center gap-[inherit] opacity-0">{content}</span>
+      <span className="absolute inset-0 flex items-center justify-center">{spinner}</span>
+    </span>
+  )
 }
 
 /**
- * Swaps the leading icon for the spinner so the label and width stay put. Text-first
- * content has no icon slot, so the spinner overlays the content, which keeps its box.
+ * Puts the spinner over the marked leading icon and keeps the label visible; without a
+ * marked icon it covers the whole content. Either way every box keeps its size.
  */
 function renderLoadingContent(children: ReactNode, spinnerPx: number): ReactNode {
   const [first, ...rest] = Children.toArray(children)
-  const spinner = <Spinner key="loading-spinner" size={spinnerPx} className="text-current" />
-  if (isLeadingIcon(first)) return [spinner, ...rest]
-  // opacity-0, not invisible: the hidden label must stay the button's accessible name.
-  return (
-    <>
-      <span className="inline-flex items-center gap-[inherit] opacity-0">{children}</span>
-      <span className="absolute inset-0 flex items-center justify-center">{spinner}</span>
-    </>
-  )
+  const spinner = <Spinner size={spinnerPx} className="text-current" />
+  if (isLeadingIcon(first)) return [withSpinnerOver(first, spinner, "loading-icon"), ...rest]
+  return withSpinnerOver(children, spinner)
 }
 
 /** Shared button primitive: six Paper variants plus the round and ink fills, three sizes, and loading. */
