@@ -12,6 +12,12 @@ describe("ProviderIcon", () => {
     expect(mark).toHaveAttribute("height", "20");
   });
 
+  it("carries a size class so Button's descendant SVG sizing does not override it", () => {
+    const { container } = render(<ProviderIcon provider="codex" size={12} />);
+
+    expect(container.querySelector("svg")).toHaveClass("size-3");
+  });
+
   it("renders a placeholder for an unknown provider", () => {
     const { container } = render(<ProviderIcon provider="toString" />);
 

@@ -17,6 +17,14 @@ import { cn } from "@/lib/utils";
  */
 export type ProviderIconSize = 12 | 16 | 20;
 
+// A size class, not only width and height attributes: parents such as Button
+// size every descendant SVG that lacks a `size-*` class.
+const SIZE_CLASS: Record<ProviderIconSize, string> = {
+  12: "size-3",
+  16: "size-4",
+  20: "size-5",
+};
+
 type ProviderMark = ComponentType<{ size?: number; className?: string }>;
 
 const PROVIDER_MARKS: Record<SettingsProviderId, ProviderMark> = {
@@ -48,7 +56,8 @@ export interface ProviderIconProps {
 
 /**
  * The one way to show a provider. Renders the provider's authentic mark with no
- * recolour: monochrome marks take `currentColor`, Claude keeps its own fill.
+ * recolour: monochrome marks are ink even inside muted text, Claude keeps its
+ * own fill.
  * An unknown id renders a muted placeholder ring of the same size so rows keep
  * their alignment.
  */
@@ -59,14 +68,13 @@ export function ProviderIcon({ provider, size = 16, className }: ProviderIconPro
       <span
         aria-hidden
         data-provider-icon="unknown"
-        className={cn("inline-block shrink-0 rounded-full border border-muted/60", className)}
-        style={{ width: size, height: size }}
+        className={cn("inline-block shrink-0 rounded-full border border-muted/60", SIZE_CLASS[size], className)}
       />
     );
   }
   return (
-    <span aria-hidden data-provider-icon={provider} className={cn("inline-flex shrink-0", className)}>
-      <Mark size={size} />
+    <span aria-hidden data-provider-icon={provider} className={cn("inline-flex shrink-0 text-ink", className)}>
+      <Mark size={size} className={SIZE_CLASS[size]} />
     </span>
   );
 }
@@ -93,7 +101,7 @@ export function ProviderDiscStack({ providers, max = 3, className }: ProviderDis
     <span
       aria-hidden
       data-testid="provider-disc-stack"
-      className={cn("relative block shrink-0 text-ink", className)}
+      className={cn("relative block shrink-0", className)}
       style={{ width: DISC_SIZE_PX + DISC_STEP_PX * (visible.length - 1), height: DISC_SIZE_PX }}
     >
       {visible.map((provider, index) => (
