@@ -7,7 +7,10 @@ All UI primitives live in `apps/web/src/components/ui/`. **Always use these inst
 | Component | File | Use Instead Of |
 |-----------|------|----------------|
 | `Button` | `button.tsx` | `<button className="...">` |
-| `Input` | `input.tsx` | `<input className="...">` |
+| `Input`, `Textarea` | `input.tsx`, `textarea.tsx` | `<input className="...">`, `<textarea className="...">` |
+| `FieldError` | `field-error.tsx` | Ad hoc red text under an invalid field |
+| `Checkbox` | `checkbox.tsx` | `<input type="checkbox">`; pass `checked="mixed"` for a partly checked parent row |
+| `RadioGroup`, `RadioGroupItem` | `radio-group.tsx` | Buttons with `role="radio"` and hand-written arrow-key handling |
 | `Badge` | `badge.tsx` | `<span className="rounded px-1.5 py-0.5 text-xs ...">` |
 | `Dialog` | `dialog.tsx` | Custom modal divs |
 | `DropdownMenu` | `dropdown-menu.tsx` | Custom dropdown implementations |
