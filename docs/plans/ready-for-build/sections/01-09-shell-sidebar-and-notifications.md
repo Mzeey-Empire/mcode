@@ -1,6 +1,6 @@
 # 01 · 09 · Shell, sidebar and in-app notifications: build brief
 
-The window loses its separate title bar: the sidebar header and the canvas header share one 48px strip, with the native caption buttons (Windows, Linux) or traffic lights (macOS) inside it. The sidebar becomes 304 wide and resizable, starts composer-first with a project slot when there are no projects, accepts a dropped folder, and ends in an icon footer with a notifications bell and a ten-state update button. Every thread row reads one state model: running rows fade, threads that need the user get an amber ring and a visible label, finished and failed turns leave a dot and a line until the thread is opened. Thread events also raise a toast in one lane at the top centre of the conversation column, and an OS notification when Mcode is in the background. The bell opens a Providers popover with live provider conditions (signed out, CLI update, new model).
+The window loses its separate title bar, and on Windows and Linux its in-app File, Edit, View and Help menu: the sidebar header and the canvas header share one 48px strip, with the native caption buttons (Windows, Linux) or traffic lights (macOS) inside it. The sidebar becomes 304 wide and resizable, starts composer-first with a project slot when there are no projects, accepts a dropped folder, and ends in an icon footer with a notifications bell and a ten-state update button. Every thread row reads one state model: running rows fade, threads that need the user get an amber ring and a visible label, finished and failed turns leave a dot and a line until the thread is opened. Thread events also raise a toast in one lane at the top centre of the conversation column, and an OS notification when Mcode is in the background. The bell opens a Providers popover that lists only providers that need something (signed out, rate limited, CLI update, new model) and stays quiet otherwise.
 
 Surfaces: web (`apps/web`), desktop shell (`apps/desktop`), server (`apps/server`), contracts (`packages/contracts`), provider adapters (`packages/providers`, `apps/server/src/features/providers/adapters`).
 
@@ -10,14 +10,14 @@ Page "05 · Ready for build" (`p-6-0`): https://app.paper.design/file/01M3V9R04V
 
 | Board | Node | Shows |
 |---|---|---|
-| 01 · Empty workspace · Dark | `1ZDG-2` | No title bar; sidebar 304 (header 48, Search + New thread, Projects header with +, empty drop well, footer icons + update); canvas header 48 with caption overlay `width=env(titlebar-area-width)`; resize seam 1px (2px focus ring on hover/focus, 220 to 340); heading "What should we build in [choose a project]?", "Select project" tab on the composer, "Pick a project to work in code, or start a chat without a project." |
+| 01 · Empty workspace · Dark | `1ZDG-2` | No title bar; sidebar 304 (header 48, Search + New thread, Projects header with +, empty drop well, footer icons + update); canvas header 48 with caption overlay `width=env(titlebar-area-width)`; resize seam 1px (2px focus ring on hover/focus, 220 to 340); heading "What should we build in [choose a project]?", "Select project" tab on the composer, "Pick a project to work in code, or start a chat without a project." The "or start a chat without a project" clause is not built (N9). |
 | 01 · Sidebar · Drag over · Dark | `2BMJ-2` | Drop well while a folder is dragged over: `--color-hover` fill, 1px `--color-control-border`, "Drop to add project". Header (44) and footer (no bell, no update button) are stale; use `1ZDG-2` and `2CF0-2`. |
 | 01 · Sidebar header · macOS · Dark | `2BO9-2` | Traffic lights in a 68px slot (padding-left 2, gap 8, 12px lights), toggle, logo mark only (no wordmark), spacer, back, forward. |
 | 01 · Sidebar footer · Notifications and updates · Dark | `2CF0-2` | Ten states: rest, checking, up to date (3s), available, downloading, ready, install dialog, failed, unread (bell dot), nightly (tooltip with full version). |
 | 09a · Toast · Another thread finished · Dark | `25IT-2` | Toast top centre of the conversation column, 8px under the header; sidebar row "Finished". |
 | 09b · Toast · Events and stacking · Dark | `2DN0-2` | Finished (green dot), Approval required (amber ring), Failed (clay dot); stack of 3, newest on top, gap 10. |
 | 09c · Bell open · Live status (direction A) · Dark | `25RF-2` | Providers popover above the bell (380 wide). |
-| 09d · Bell · Providers · States · Dark | `2DPF-2` | Needs you (Sign in, Update, Try, quiet ready row with usage); Working (spinner, "Updating to 0.48.0"). |
+| 09d · Bell · Providers · States · Dark | `2DPF-2` | Needs you (Sign in, Update, Try, quiet ready row with usage); Working (spinner, "Updating to 0.48.0"). The quiet ready row with usage is not built (N2). |
 | 09e · Update button hover · Release notes · Dark | `2DRR-2` | "What's new" card above the footer, 5 items, "Full release notes" link. |
 | 09f · Toast motion · Click, hover, swipe away · Dark | `2DSS-2` | Enter, hover and click, swipe away, stack closes up. |
 | 08d · Finished in the background · Dark | `207O-2` | Sidebar Finished row (8px green dot, green "Finished" line, no fill) and the OS-drawn notification ("Finished: <title>", "Changed 2 files · mcode-3f2a"). |
@@ -30,13 +30,15 @@ Page "05 · Ready for build" (`p-6-0`): https://app.paper.design/file/01M3V9R04V
 
 - Sidebar 304 (`--container-sidebar`), resizable 220 to 340. Paper wins over DESIGN.md's 256 (screen-pass todo, Open decisions).
 - No title bar. Windows/Linux caption overlay 48 high; read its width from `env(titlebar-area-width)`, never hard-code. macOS traffic lights at y=18, hidden in full screen (implementation notes, Shell and sidebar).
+- No in-app menu on Windows and Linux (user, 2026-10-08, N1). File, Edit, View, Help and their Alt mnemonics are removed, with no replacement menu. Every item keeps another way in, a shortcut or a command palette entry (Backend architecture F). macOS keeps its native menu bar (`application-menu.ts:49-106`): the OS draws it, and its Edit roles carry Cmd+C, V, X, A and Z.
 - Truncation is a 24px right-edge fade, never an ellipsis (2026-10-07). F-02.
 - Row states (2026-10-07): running fades to ~55% with a spinner and no text; needs-you is never faded, amber ring and a visible label ("Approval required", "Answers required", "Plan ready", "Interrupted"); Finished is an 8px green dot plus a green "Finished" third line, no file count, no fill; Failed is a clay dot plus "Failed"; stopped shows nothing; outcome states clear when the thread is opened; needs-you outranks finished. Rename visible "Errored" to "Failed" everywhere, toasts included (08f).
 - Live conditions stay while the thread is open: 06a shows "Approval required" on the selected row.
 - Footer: bell plus a right-aligned update button with ten states; neutral icons, no colour coding; filled button from "available" to "ready"; filled hover uses `--color-button-secondary-hover`; nightly shows the channel name with the full version (`0.13.0-nightly.YYYYMMDD.N`) in tooltip and dialog; install dialog when agents run with "When they finish" (2026-10-07).
 - Toast lane (09, approved 2026-10-07): top centre of the conversation column, 8px under the 48 header, slides down from under it. 340 wide, `--color-selected` fill, radius 18, no border, shadow `#00000066 0 8px 24px`, padding 12/10/12/16, status mark, title (fade), meta `Label · HH:MM`, close ×. Whole toast is the button; hover lifts the fill to `--color-border`; click opens the thread and dismisses. Enter 240ms `cubic-bezier(.2,0,0,1)`; swipe past 35% width or flick slides off in 160ms, else springs back; the stack closes the gap in 200ms; × and auto-hide reverse the enter. Finished auto-hides after 8s, paused on hover; needs-you and Failed stay until opened or closed. At most 3, newest on top. No toast for the thread on screen.
 - Thread events never go to the bell; their memory is the sidebar row (user, 2026-10-07). This overrides the 09b caption "the rest go straight to the bell".
-- Bell = provider and model setup, direction A (2026-10-07): one "Providers" popover, rows derived from live checks; the bell dot shows only when a row has an action; the one stored thing is a per-announcement seen flag. No "all ready" state.
+- Bell = provider and model setup, direction A (2026-10-07): one "Providers" popover, rows derived from live checks; the one stored thing is a per-announcement seen flag. No "all ready" state.
+- The bell shows only what needs the user (user, 2026-10-08, N2). The popover lists only providers that are signed out, rate limited (with the reset time, N7), have a CLI update, or have a new model. No quiet ready rows and no usage rows: Mcode never shows information it is not sure of. With nothing to list, the popover shows its header only, the bell has no dot, and its tooltip is just its name. The dot shows while the popover has a row.
 - Release notes on hover of Download / Install after 300ms: "What's new", first five items, "Full release notes".
 - OS notification on finish only when notifications are on and Mcode is not focused; click opens the thread (08d).
 
@@ -46,7 +48,7 @@ Page "05 · Ready for build" (`p-6-0`): https://app.paper.design/file/01M3V9R04V
 
 - Desktop renders a separate full-width `DesktopTitleBar` above everything (`apps/web/src/app/App.tsx:340-347`): logo, toggle sidebar, back, forward, and an in-app File/Edit/View/Help menu with Alt mnemonics on Windows/Linux (`apps/web/src/components/desktop/DesktopTitleBar.tsx:156-165,180-195`). It reserves a hard-coded `pr-[138px]` for caption buttons (`DesktopTitleBar.tsx:205`).
 - Windows/Linux: `titleBarStyle: "hidden"`, `titleBarOverlay { color: transparent, symbolColor: "#8a8a92", height: 48 }`; macOS: `hiddenInset`, `trafficLightPosition { x: 14, y: 12 }` (`apps/desktop/src/features/desktop-window/lifecycle/create-window.ts:84-101`). No full-screen signal reaches the renderer (the window bridge exposes only `platform`, `isDevelopment`, `onCommand`, `perform`, `apps/web/src/transport/desktop-bridge.d.ts:438-448`).
-- Non-macOS has no native menu (`application-menu.ts:35-39` sets it to null), so the title bar menu is the only File/Edit/View/Help on Windows/Linux.
+- Non-macOS has no native menu (`application-menu.ts:35-39` sets it to null), so the title bar menu is the only File/Edit/View/Help on Windows/Linux. Its items call `executeCommand` or the allowlisted native actions (`window-actions.ts:6-39`). The title bar is the only caller of `window.perform` (`DesktopTitleBar.tsx:34-36`), and its zoom, full-screen, reload and developer-tools items are the only way to reach those actions on Windows/Linux: no keybinding exists for them (`default-keybindings.json`), and Electron binds those keys only through menu roles (inferred).
 - `--desktop-title-bar-height: 3rem` drives `.app-viewport-fixed` (dialog, palette, lightbox backdrops) and `.app-panel-top-inset` (floating sidebar) (`apps/web/src/index.css:11-12,70-86`). `ConnectionBanner` renders full width under the title bar (`App.tsx:348`).
 
 ### Sidebar
@@ -97,7 +99,7 @@ Page "05 · Ready for build" (`p-6-0`): https://app.paper.design/file/01M3V9R04V
 | Design element | Today | Change | Layers |
 |---|---|---|---|
 | No title bar, shared 48 strip | Separate `DesktopTitleBar` | Sidebar header + canvas header; caption reserve from `env(titlebar-area-*)`; lights (14,18); full-screen signal | web, desktop |
-| App menu on Windows/Linux | Title bar menus | Open question Q1 | web |
+| No app menu on Windows/Linux (N1) | Title bar menus with Alt mnemonics | Remove the menu; each item keeps a shortcut or palette command; add zoom, full-screen, development reload and DevTools, Keyboard settings and About commands (F) | web, desktop |
 | Sidebar 304, resizable 220 to 340 | Fixed 288 in two places | Width store (localStorage), seam with keyboard support, layout reads live width | web |
 | Search field + New thread icon, footer icons | Three text buttons, Settings text button | Go zone and footer strip | web |
 | Empty drop well, drop a folder | Mono "No projects yet" + button; no drop | Drop well, drag-over state, path via `getPathForFile`, hand-off to add-project palette | web, desktop |
@@ -113,7 +115,7 @@ Page "05 · Ready for build" (`p-6-0`): https://app.paper.design/file/01M3V9R04V
 | Update button 10 states | Indicator hidden at rest, error toast | `UpdateButton` state map, Up to date flash, Failed + Retry, nightly label | web, desktop |
 | Install while agents run | Installs immediately | Dialog with live count; "When they finish" arms install-when-idle in desktop main | web, desktop |
 | Release notes hover | Data unused | Plain-text parser + hover card | web |
-| Bell + Providers popover | None | Provider status contract and service, popover | contracts, server, providers, web |
+| Bell + Providers popover | None | Provider status contract and service; popover lists only providers that need something, no usage (N2) | contracts, server, providers, web |
 | CLI update available + Update | Floors only (Codex, Copilot) | Shared version policy, latest-version feed, update runner | server, providers |
 | New model announcement | None | Model sightings table, seen flag, Try | server, web |
 
@@ -298,7 +300,7 @@ Update button display is a pure map from `UpdateStatus` plus two renderer flags:
 | 6 Ready | downloaded | filled, arrow-up icon, "Install", version; click → `agent.activeCount`; 0 → `installUpdate()`; >0 → dialog 7 |
 | 7 Install dialog | user clicked Install with agents running | 384 card: "Install update", full version mono, "N agents are running. Installing restarts Mcode and stops them.", ghost "Restart now", amber "When they finish" |
 | 8 Failed | error | ghost text button, alert icon, "Retry update"; tooltip carries `friendlyUpdateError(message)`; Retry repeats the failed step (check, download or install) |
-| 9 Unread | any Providers row with an action | bell shows a 6px `--color-ink` dot ring `--color-page` (bell, not the update button) |
+| 9 Unread | the Providers popover has any row (N2) | bell shows a 6px `--color-ink` dot ring `--color-page` (bell, not the update button) |
 | 10 Nightly | version contains `-nightly.` | "nightly" replaces the version text in states 4 to 6; tooltip `Install 0.13.0-nightly.20260812.1`; dialog shows the full version |
 
 Filled hover uses `--color-button-secondary-hover`. Values: `2CF0-2` nodes `2CJ0-2`, `2CJQ-2`, `2CIC-2`, `2CKN-2`.
@@ -339,15 +341,21 @@ export const ProviderCliStatusSchema = z.object({
     z.object({ state: z.literal("failed"), target: z.string(), reason: z.string().max(240) }),
   ]),
 });
+export const ProviderRateLimitSchema = z.object({
+  resetsAt: z.string().nullable(),               // ISO UTC; null when the provider gave no reset time
+  limitType: z.string().max(64).nullable(),      // "five_hour", "seven_day"; labels as in 04-08f section J
+});
 export const ProviderStatusSchema = lazySchema(() => z.object({
   providerId: ProviderIdSchema,
   auth: ProviderAuthSchema,
   cli: ProviderCliStatusSchema.nullable(),
-  usage: ProviderUsageInfoSchema().nullable(),   // existing schema, via getUsage
+  rateLimit: ProviderRateLimitSchema.nullable(), // latest active RateLimited event; null when none
   newModels: z.array(z.object({ modelId: z.string(), label: z.string() })).max(5),
   checkedAt: z.string(),
 }).strict());
 ```
+
+No `usage` field (N2). The bell was the only planned reader of provider usage in this contract; the thread overview's Usage rows keep reading `provider.getUsage` (`methods.ts:1470-1472`, called at `threadStore.ts:4253`), so that method stays and the bell never calls it.
 
 Wire: `providers.listStatus {}` → `ProviderStatus[]` (enabled providers only); push `providers.statusChanged` (one status); `providers.signIn { providerId }`; `providers.updateCli { providerId }`; `providers.acknowledgeModels { providerId }`.
 
@@ -356,20 +364,50 @@ Service: `ProviderStatusService` in `apps/server/src/features/providers/status/`
 - Version policy (ADR 0001): extract `meetsMinVersion` from `codex-version.ts:130` into `packages/providers/src/version-policy.ts` with `isNewer(latest, installed)`. Discovery stays in each adapter.
 - Latest-version feed: a provider-blind npm registry reader (`GET https://registry.npmjs.org/<pkg>/latest`, 5s timeout, cached 24h, failure = `latest: null`, no row). Each adapter names its package; the feed never runs a binary.
 - Update runner: fixed argv from the adapter, no shell, 5-minute timeout, output captured and trimmed to a 240-char reason on failure. Runs only when the adapter can state how the CLI was installed; otherwise no Update row.
-- Sign in: `providers.signIn` opens a Terminal tab running `signIn.argv` (Q6 decides scope); when it exits, re-check auth.
+- Sign in: `providers.signIn` opens a Terminal tab running `signIn.argv` in the right panel, scoped to the active project and no thread, so the user signs in calmly (N6). With no project open, it opens an external terminal (ADR 0006). When it exits, re-check auth.
 - Announcements: new table `provider_model_sightings (provider_id, model_id, first_seen_at, acknowledged_at NULL, PK(provider_id, model_id))`. On each successful `ModelCacheService` refresh, insert unseen ids. The first refresh for a provider with no rows inserts everything already acknowledged (baseline, so upgrades do not announce the whole catalog). `acknowledgeModels` sets `acknowledged_at` for that provider's open sightings. Try selects the newest announced model for the next thread and acknowledges.
-- Rate limit: the latest `RateLimited` event per provider is kept in memory and shown in the quiet row text ("5-hour limit reached, resets 16:00") (Q8).
+- Rate limit (N7): the server keeps the latest `RateLimited { active: true }` event per provider in memory (`agent-event.ts:256-268`), with `resetsAt` = receipt time + `retryAfterMs`. It clears on `active: false`, when `resetsAt` passes, or after a restart. No reset time known means no time is shown, never a guess.
+- Update checks can be turned off (N10): a `settings.updates.providerCliChecks` boolean, default on (S09-05).
 
-Rows (web): signed out (amber detail "Signed out · threads on X can't start", Sign in) › CLI update available ("CLI 0.48.0 available · you have 0.41.2", Update; Working shows the spinner and "Updating to 0.48.0"; failure shows the reason and Retry) › new model ("Fable 5.1 is new in the model menu", Try) › quiet row ("Copilot ready · 5-hour use 62%, resets 16:00"). One row per provider, the most urgent condition wins. The bell dot shows while any row has an action.
+Rows (web), one per provider that needs something; the most urgent condition wins: signed out (amber detail "Signed out · threads on X can't start", Sign in) › rate limited ("5-hour limit reached · resets 16:00", or "Rate limited" with no time; no action) › CLI update available ("CLI 0.48.0 available · you have 0.41.2", Update; Working shows the spinner and "Updating to 0.48.0"; failure shows the reason and Retry) › new model ("Fable 5.1 is new in the model menu", Try). A provider with nothing to report has no row. With no rows, the popover shows its header only. The bell dot shows while any row exists. The bell tooltip is its name, "Providers", and never carries a status (proposed; no board draws the tooltip).
 
-| Provider | Sign-in state | Sign in | Installed version | Latest / Update | Usage | Announcements |
+| Provider | Sign-in state | Sign in | Installed version | Latest / Update | Rate limit | Announcements |
 |---|---|---|---|---|---|---|
-| Claude | signed in when the OAuth token reader (`oauth-usage-source.ts:32`) returns a token or `ANTHROPIC_API_KEY` is set; 401 → signed out | terminal: bundled CLI login (inferred; Q7) | bundled → `managedBy: "mcode"`, no update row; custom command → `--version` | custom command only: npm `@anthropic-ai/claude-code`, `claude update` (inferred) | yes (`getUsage`) | yes (static catalog, `claude-static-fallback.ts`) |
-| Codex | app-server `account/read` (`codex-types.ts:237`, add the call; empty result → signed out, inferred) | `codex login` (inferred) | `checkCodexVersion` | npm `@openai/codex`; update only when the resolved path sits under the npm global prefix (inferred) | yes (`account/rateLimits/read`) | yes (`model/list`, ADR 0018) |
-| Cursor | `cursor-agent status` (inferred) | `cursor-agent login` (inferred) | `cursor-agent --version` (inferred) | none: no feed; cursor-agent updates itself (inferred) | no | yes (ACP model list) |
-| Copilot | SDK auth status call (inferred name, SDK `^0.2.2`) | `copilot` login flow (inferred) | `copilot-cli-resolver` version + source | npm `@github/copilot` when source is npm-global | yes (`getUsage`) | yes (SDK `listModels`) |
-| Devin (ACP) | credentials present via `resolveDevinAcpCredentials` (`devin-credentials.ts:26`) | `devin auth login` (`devin-credentials.ts:22`) | unknown → `cli: null` | no row | no | yes (`listModels`) |
-| OpenCode | `unknown` (it fronts many upstream providers) | no row | `opencode --version` | npm `opencode-ai`, `opencode upgrade` (inferred) | no | no: its list mirrors every configured upstream model and would announce noise |
+| Claude | signed in when the OAuth token reader (`oauth-usage-source.ts:32`) returns a token or `ANTHROPIC_API_KEY` is set; 401 → signed out | terminal: bundled CLI login (inferred; Q7) | bundled → `managedBy: "mcode"`, no update row; custom command → `--version` | custom command only: npm `@anthropic-ai/claude-code`, `claude update` (inferred) | the only `RateLimited` emitter (`claude-event-mapper.ts:569-575`); active on `rejected` only after S05-03 | yes (static catalog, `claude-static-fallback.ts`) |
+| Codex | app-server `account/read` (`codex-types.ts:237`, add the call; empty result → signed out, inferred) | `codex login` (inferred) | `checkCodexVersion` | npm `@openai/codex`; update only when the resolved path sits under the npm global prefix (inferred) | no `RateLimited` emitter today; no row until one exists | yes (`model/list`, ADR 0018) |
+| Cursor | `cursor-agent status` (inferred) | `cursor-agent login` (inferred) | `cursor-agent --version` (inferred) | none: no feed; cursor-agent updates itself (inferred) | no signal; no row | yes (ACP model list) |
+| Copilot | SDK auth status call (inferred name, SDK `^0.2.2`) | `copilot` login flow (inferred) | `copilot-cli-resolver` version + source | npm `@github/copilot` when source is npm-global | no signal (inferred); no row | yes (SDK `listModels`) |
+| Devin (ACP) | credentials present via `resolveDevinAcpCredentials` (`devin-credentials.ts:26`) | `devin auth login` (`devin-credentials.ts:22`) | unknown → `cli: null` | no row | no signal; no row | yes (`listModels`) |
+| OpenCode | `unknown` (it fronts many upstream providers) | no row | `opencode --version` | npm `opencode-ai`, `opencode upgrade` (inferred) | no signal; no row | no: its list mirrors every configured upstream model and would announce noise |
+
+### F. Windows and Linux menu removal (S01-01)
+
+The in-app File, Edit, View and Help menu and its Alt mnemonics go, with no replacement (N1). Every item of today's Windows and Linux menu (`DesktopTitleBar.tsx:57-153`) keeps another way in. The macOS native menu (`application-menu.ts:49-106`) is unchanged.
+
+| Menu item | Today | Other way in after S01-01 | S01-01 adds |
+|---|---|---|---|
+| File › New project | `workspace.new` | Ctrl+Shift+N (`default-keybindings.json:7`), palette "New Project" (`App.tsx:734-745`), the Projects + in the sidebar (S01-02) | nothing |
+| File › New thread | `thread.new` | Ctrl+N (`default-keybindings.json:5`), palette "New Thread" (`App.tsx:718-725`), the sidebar New thread icon (S01-02) | nothing |
+| File › Close window | `perform("closeWindow")` | the caption close button; Alt+F4 on Windows (drawn and handled by the OS) | nothing |
+| File › Quit | `perform("quit")` | the same as Close window: closing the only window quits on Windows and Linux (`main.ts:580-584`) | nothing |
+| Edit › Undo, Redo, Cut, Copy, Paste, Select all | `perform(...)` calling `webContents.undo()` and the rest (`window-actions.ts:46-51`) | Chromium's own editing keys in text fields: Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z, Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A. Outside macOS they need no menu (inferred; the live check proves it) | nothing |
+| View › Back, Forward | `navigateHistory` | the header back and forward buttons, Alt+Left and Alt+Right, Ctrl+[ and Ctrl+] (`default-keybindings.json:14-17`), palette "Back" and "Forward" (`App.tsx:661-672`) | nothing |
+| View › Toggle sidebar | `sidebar.toggle` | the header toggle, Ctrl+\ (`default-keybindings.json:13`), palette "Toggle Sidebar" | nothing |
+| View › Toggle right panel | `rightPanel.toggle` | Ctrl+Alt+B (`default-keybindings.json:18`), the chat header toggle (`HeaderActions.tsx:42-46`), palette "Toggle Right Panel" | nothing |
+| View › Zoom in, Zoom out, Actual size | `perform("zoomIn")`, `perform("zoomOut")`, `perform("zoomReset")` | none | commands `window.zoomIn` "Zoom In" (Ctrl+= and Ctrl+Plus), `window.zoomOut` "Zoom Out" (Ctrl+-), `window.zoomReset` "Actual Size" (Ctrl+0) |
+| View › Toggle full screen | `perform("toggleFullScreen")` | none | command `window.toggleFullScreen` "Toggle Full Screen" (F11) |
+| View › Reload, Developer tools (development builds only, `DesktopTitleBar.tsx:130-140`) | `perform("reload")`, `perform("toggleDevTools")`, both no-ops outside development (`window-actions.ts:68-76`) | none: development builds open DevTools once at load (`create-window.ts:153-158`) and cannot reopen them | development-only palette commands `window.reload` "Reload Window" and `window.toggleDevTools` "Toggle Developer Tools", with no shortcut |
+| Help › Keyboard shortcuts | opens Settings › Keyboard | Settings (Ctrl+, at `default-keybindings.json:20`, or the footer Settings icon, S01-02), then Keyboard; the shortcut sheet `shortcuts.help` (Ctrl+Shift+?, `default-keybindings.json:21-25`) | palette command `settings.keyboard` "Keyboard Settings" |
+| Help › About Mcode | opens Settings › About | Settings, then About | palette command `settings.about` "About Mcode" |
+| Alt+F, Alt+E, Alt+V, Alt+H, and the menu button below 721px wide (`DesktopTitleBar.tsx:156-195,268-290`) | open the menus | not needed: the menus are gone | nothing; the keys become free |
+
+Rules for the new commands:
+
+- They register with the other commands in `App.tsx` (`App.tsx:650-858`), on desktop only (`window.desktopBridge` present). The palette lists every registered command with its shortcut (`RootView.tsx:63-78`), so each one is reachable by name.
+- Zoom and full-screen keybindings apply on Windows and Linux only; on macOS the native menu roles stay their one owner. The bindings have no `inputFocused` guard, so zoom works while typing. The keybinding parser splits on `+` (`keybinding-manager.ts:31-41`), so Ctrl+Plus needs a `plus` key name that matches `event.key === "+"`.
+- `settings.keyboard` and `settings.about` become registered commands. The macOS menu already sends those ids (`renderer-commands.ts:4-10`), so the special case in the desktop command listener (`App.tsx:870-879`) goes and every menu command runs through `executeCommand`.
+- The window action allowlist keeps only what the commands use: `zoomIn`, `zoomOut`, `zoomReset`, `toggleFullScreen`, `reload` and `toggleDevTools`. `closeWindow`, `quit`, `undo`, `redo`, `cut`, `copy`, `paste` and `selectAll` lose their only caller and leave `window-actions.ts:6-39` and `desktop-bridge.d.ts:536-550`, which shrinks the IPC surface.
+- Mouse-only Cut, Copy and Paste go away on Windows and Linux. Mcode has no right-click edit menu (`rg -n "context-menu" apps/desktop/src` finds none), and N1 adds none.
 
 ## Components
 
@@ -390,7 +428,8 @@ Rows (web): signed out (amber detail "Signed out · threads on X can't start", S
 ### Changed
 
 - `create-window.ts`: `trafficLightPosition { x: 14, y: 18 }`; overlay `symbolColor` matches `--color-muted`; forward `enter-full-screen` / `leave-full-screen`.
-- `App.tsx` `AppLayout`: drops the title bar row; sidebar and main each own their 48 header; `ConnectionBanner` moves under the canvas header (17 redesigns it).
+- `App.tsx` `AppLayout`: drops the title bar row; sidebar and main each own their 48 header; `ConnectionBanner` moves under the canvas header (17 redesigns it). The command list gains the window, `settings.keyboard` and `settings.about` commands (F).
+- `default-keybindings.json`: zoom and full-screen keys for Windows and Linux (F). `window-actions.ts` and its tests, and `desktop-bridge.d.ts`: the narrowed action allowlist (F).
 - `Sidebar.tsx`: new zones, gap 16, padding 12, no border lines; width from `sidebarWidthStore`.
 - `composer-layout.ts`: replaces `SIDEBAR_WIDTH_PX` with the live width.
 - `ProjectTree.tsx` `ThreadRow`: three-line anatomy (Components `CYU-0` / `DFT-0`, values from `207O-2` node `2095-2`: min-height 64, padding 12/8/12/4, gap 8, radius 8, title 14/20 500 with fade, mono 12/16 branch line with a 52px trailing time and mode slot, 12/16 third line), trailing hover actions ✓ and ⋯; presentation from `deriveThreadRowState`.
@@ -405,7 +444,10 @@ Rows (web): signed out (amber detail "Signed out · threads on X can't start", S
 
 | Remove | Where | Replaced by | Deleted in ticket | Proof it is gone |
 |---|---|---|---|---|
-| `DesktopTitleBar` and its menus | `apps/web/src/components/desktop/DesktopTitleBar.tsx`, `App.tsx:341-347` | `SidebarHeader`, `CanvasHeader` (menu per Q1) | S01-01 | `rg -n "DesktopTitleBar\|desktop-title-bar" apps packages` empty |
+| `DesktopTitleBar` and its File, Edit, View and Help menus, including the narrow-window menu button | `apps/web/src/components/desktop/DesktopTitleBar.tsx`, `App.tsx:341-347` | `SidebarHeader`, `CanvasHeader`; each menu item's shortcut or palette command (F) | S01-01 | `rg -n "DesktopTitleBar\|desktop-title-bar\|Application menu" apps packages` empty |
+| Alt mnemonics: `MENU_LABELS`, the `handleMnemonic` keydown listener, `aria-keyshortcuts` Alt+F/E/V/H | `DesktopTitleBar.tsx:156-165,180-195,255` | Nothing (N1); the keys become free | S01-01 | `rg -n "MENU_LABELS\|handleMnemonic\|mnemonic" apps/web/src` empty |
+| Window actions left without a caller: `closeWindow`, `quit`, `undo`, `redo`, `cut`, `copy`, `paste`, `selectAll`, their handlers and tests | `window-actions.ts:6-39,44-51`, `desktop-bridge.d.ts:536-544`, `actions/__tests__/window-actions.test.ts`, `actions/__tests__/handlers.test.ts`, `__tests__/desktop-window-feature.test.ts:154` | The OS caption close and Chromium's editing keys (F) | S01-01 | `rg -n '"closeWindow"\|"quit"\|"undo"\|"redo"\|"cut"\|"copy"\|"paste"\|"selectAll"' apps/desktop/src apps/web/src/transport` empty |
+| Special case for `settings.keyboard` and `settings.about` in the desktop command listener | `App.tsx:870-879` | Registered `settings.keyboard` and `settings.about` commands (F) | S01-01 | `rg -n 'command === "settings.keyboard"' apps/web/src` empty |
 | Title bar CSS | `index.css:11-12,70-86` (`--desktop-title-bar-height`, `--z-desktop-title-bar`, `.app-viewport-fixed`, `.app-panel-top-inset`) | `inset-0` / `top-1.5` at the 6 call sites | S01-01 | `rg -n "desktop-title-bar-height\|app-viewport-fixed\|app-panel-top-inset" apps/web/src` empty |
 | Hard-coded caption padding | `DesktopTitleBar.tsx:205` | `--caption-reserve` | S01-01 | `rg -n "138px\|146px" apps/web/src` empty |
 | `SidebarTitle` | `Sidebar.tsx:39-44` | `SidebarHeader` on every platform | S01-01 | `rg -n "SidebarTitle" apps/web/src` empty |
@@ -415,7 +457,7 @@ Rows (web): signed out (amber detail "Signed out · threads on X can't start", S
 | `ThreadStateMarker`, `getThreadStateMarker`, `ThreadStateMarkerModel` | `components/sidebar/ThreadStateMarker.tsx` | `deriveThreadRowState` + `ThreadStatusLane` | S01-04 | `rg -n "ThreadStateMarker" apps` empty |
 | Leading lifecycle circle | `ProjectTree.tsx:1907-1964` | trailing ✓ hover action | S01-04 | `rg -n "ThreadLifecycleButton" apps/web/src` empty |
 | Recovery store read in rows | `ProjectTree.tsx:1462-1464` | `lastTurn.outcome === "interrupted"` | S01-04 | `rg -n "hasRecoveryEntry" apps/web/src/features/projects` empty (store stays for ChatView; S08 decides its fate) |
-| `status-pulse` in the project tree | `ThreadStateMarker.tsx:82-86`, PR checks pending dot `ProjectTree.tsx:2369`, project running dot `ProjectTree.tsx:2614-2617` | static ring; static PR mark per `DFT-0`; project roll-up per Q9 | S01-04 | `rg -n "status-pulse" apps/web/src/features/projects apps/web/src/components/sidebar` empty |
+| `status-pulse` in the project tree | `ThreadStateMarker.tsx:82-86`, PR checks pending dot `ProjectTree.tsx:2369`, project running dot `ProjectTree.tsx:2614-2617` | static ring; static PR mark per `DFT-0`; project roll-up per Q9 (N8) | S01-04 | `rg -n "status-pulse" apps/web/src/features/projects apps/web/src/components/sidebar` empty |
 | Bottom-right toast container, level chips, `MAX_TOASTS = 5`, `.app-toast-stack` | `Toast.tsx`, `toastStore.ts:15`, `index.css:84-86`, mount at `App.tsx:41, 384` | F-07b toast lane | F-07b | `rg -n "app-toast-stack\|MAX_TOASTS = 5\|components/Toast\b" apps/web/src` empty |
 | `thread.markViewed` and every caller: the server status-flip handler, its route, the transport method, the debounced open call and the unfocused end-of-turn call | `methods.ts:814-817`; `thread-service.ts:180-183`; `workspace-thread-rpc.ts:58, 106`; `ws-transport.ts:1183`; `transport/types.ts:498`; `__tests__/mocks/transport.ts:229`; `workspaceStore.ts:188-205, 1766`; `threadStore.ts:2473-2476` | `thread.acknowledgeSeen` from the attention store | S01-03 | `rg -n "markViewed\|markThreadViewed\|MARK_VIEWED" apps packages -g '!*.ndjson'` empty |
 | `UpdateIndicator` | `components/sidebar/UpdateIndicator.tsx` | `UpdateButton` | S01-05 | `rg -n "UpdateIndicator" apps` empty |
@@ -430,17 +472,22 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
 
 - **Blocked by:** F-01b Token vocabulary rename; F-03 Button primitives.
 - **Boards:** 01 · Empty workspace (`1ZDG-2`), 01 · Sidebar header · macOS (`2BO9-2`)
-- **Delivers:** On desktop the separate title bar is gone. The sidebar header (toggle, logo, wordmark, back, forward) and the canvas header share one 48 strip; on Windows/Linux the native caption buttons sit at its right edge and nothing overlaps them at any display scale; on macOS the traffic lights sit at (14,18) inside the sidebar header and their slot collapses in full screen. Empty header space drags the window.
-- **Build notes:** web shell components, `create-window.ts` (position, symbol colour, full-screen events), preload + bridge (`onFullScreenChange`). Caption reserve via `env(titlebar-area-*)`; F-05 reuses `--caption-reserve` when the right panel owns the top-right. Collapsed sidebar: the canvas header gains the toggle and back/forward (and the macOS lights reserve). Move `ConnectionBanner` under the canvas header. Rewrite the 6 `.app-viewport-fixed` / `.app-panel-top-inset` users.
-- **Deletes:** DesktopTitleBar, title bar CSS, hard-coded caption padding, `SidebarTitle`.
+- **Delivers:** On desktop the separate title bar is gone. The sidebar header (toggle, logo, wordmark, back, forward) and the canvas header share one 48 strip; on Windows/Linux the native caption buttons sit at its right edge and nothing overlaps them at any display scale; on macOS the traffic lights sit at (14,18) inside the sidebar header and their slot collapses in full screen. Empty header space drags the window. On Windows and Linux there is no in-app File, Edit, View or Help menu and no Alt mnemonic; every former menu item still works by shortcut or command palette (N1), and macOS keeps its native menu.
+- **Build notes:** web shell components, `create-window.ts` (position, symbol colour, full-screen events), preload + bridge (`onFullScreenChange`). Caption reserve via `env(titlebar-area-*)`; F-05 reuses `--caption-reserve` when the right panel owns the top-right. Collapsed sidebar: the canvas header gains the toggle and back/forward (and the macOS lights reserve). Move `ConnectionBanner` under the canvas header. Rewrite the 6 `.app-viewport-fixed` / `.app-panel-top-inset` users. Menu removal per Backend architecture F: register `window.zoomIn`, `window.zoomOut`, `window.zoomReset`, `window.toggleFullScreen`, the development-only `window.reload` and `window.toggleDevTools`, `settings.keyboard` and `settings.about`; add the zoom and full-screen keys for Windows and Linux (with the `plus` key name); route every desktop menu command through `executeCommand`; narrow the window action allowlist on both sides of the IPC boundary. Leave `application-menu.ts` unchanged.
+- **Deletes:** DesktopTitleBar and its menus, Alt mnemonics, the window actions left without a caller, the `settings.*` special case in the desktop command listener, title bar CSS, hard-coded caption padding, `SidebarTitle`.
 - **Acceptance criteria:**
   - [ ] No element with `data-testid="desktop-title-bar"` renders.
   - [ ] Windows at 100%, 125%, 150% scaling: caption buttons fully visible, top actions end left of them.
   - [ ] macOS: lights centred on the 48 row at x=14; entering full screen removes the 68px slot.
   - [ ] Dragging empty header space moves the window; every button still clicks.
   - [ ] Web build renders the same headers with no reserve.
-  - [ ] App menu behaviour follows the Q1 decision.
-- **Verify:** unit test for the reserve calc and full-screen attribute; `create-window.test.ts` (prior art) for options. Live: Electron live-testing skill (`.agents/skills/electorn-live-testing/SKILL.md`); screenshot the 48 strip on Windows; drag the window by the spacer.
+  - [ ] On Windows and Linux no in-app menu renders at any window width, and Alt+F, Alt+E, Alt+V and Alt+H open nothing.
+  - [ ] Each row of the table in F reaches its action by the listed other way in: Ctrl+= and Ctrl+Plus zoom in, Ctrl+- zooms out, Ctrl+0 resets, F11 toggles full screen, including while a text field has focus; "Keyboard Settings" and "About Mcode" in the palette open those Settings sections.
+  - [ ] In a text field, Ctrl+Z, Ctrl+X, Ctrl+C, Ctrl+V and Ctrl+A work with no app menu.
+  - [ ] "Reload Window" and "Toggle Developer Tools" appear in the palette only in a development build.
+  - [ ] The IPC handler rejects `closeWindow`, `undo` and the other removed actions as invalid.
+  - [ ] macOS: the native menu template is unchanged, and its Keyboard Shortcuts and About Mcode items still open those Settings sections.
+- **Verify:** unit test for the reserve calc and full-screen attribute; `create-window.test.ts` (prior art) for options. `bun run --cwd apps/web test -- src/__tests__/keybinding-manager.test.ts src/__tests__/shortcuts.test.ts src/__tests__/App.test.tsx` (the `plus` key, the platform-scoped bindings, the new commands and the desktop command listener). `bun run --cwd apps/desktop test -- src/features/desktop-window/actions/__tests__/window-actions.test.ts src/features/desktop-window/actions/__tests__/handlers.test.ts src/features/desktop-window/menu/__tests__/application-menu.test.ts src/features/desktop-window/__tests__/desktop-window-feature.test.ts`. Live: Electron live-testing skill (`.agents/skills/electorn-live-testing/SKILL.md`); screenshot the 48 strip on Windows; drag the window by the spacer; on Windows press each shortcut in the F table and open each new palette command, and cut, copy and paste text in the composer.
 
 ### S01-02 Sidebar frame, resize, footer strip, empty workspace drop
 
@@ -503,7 +550,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
 - **Blocked by:** S01-02 Sidebar frame, resize, footer strip, empty workspace drop; F-03 Button primitives; F-07a Overlay surfaces and side placement.
 - **Boards:** `2CF0-2`, 09e (`2DRR-2`)
 - **Delivers:** The footer always shows the update control: check, checking, "Up to date" for 3s after a manual check, Download, progress, Install, Retry update, nightly labels. Installing with agents running asks first; "When they finish" installs once no agent runs, and the user can cancel that. Hovering Download or Install for 300ms shows "What's new" with up to five items and a link.
-- **Build notes:** (D). Count from `agent.activeCount` at click; arming lives in desktop main; `downloaded.installWhenIdle` drives the armed look (Q3). Release notes parser in plain text.
+- **Build notes:** (D). Count from `agent.activeCount` at click; arming lives in desktop main; `downloaded.installWhenIdle` drives the armed look (Q3, default stands): the button reads "Installs when idle", and clicking it opens a menu (F-04) with "Cancel scheduled install" (proposed copy, no board). Release notes parser in plain text.
 - **Deletes:** UpdateIndicator, `bannerDismissed` / `dismissBanner`, update error toast.
 - **Acceptance criteria:**
   - [ ] Each of the ten states renders from a fixture status.
@@ -535,7 +582,7 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
 - **Blocked by:** S09-02 Thread-event toasts.
 - **Boards:** 08d (`207O-2`)
 - **Delivers:** With notifications on and Mcode unfocused, a finished, failed, or needs-you thread raises an OS notification; clicking it brings Mcode forward on that thread. Turning the setting off stops them.
-- **Build notes:** bridge `notifications` (C); main-process validation and click routing; reads `settings.notifications.enabled`; optional: gate the updater's "update ready" notification on the same setting (Q5).
+- **Build notes:** bridge `notifications` (C); main-process validation and click routing; reads `settings.notifications.enabled`; the notification set is Finished, Failed and the needs-you labels that toast (Q5, default stands). Optional, not part of that decision: gate the updater's "update ready" notification on the same setting.
 - **Deletes:** none (wires the dead setting).
 - **Acceptance criteria:**
   - [ ] Unfocused + enabled → notification; focused → toast only; disabled → neither OS notification.
@@ -547,14 +594,16 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
 
 - **Blocked by:** S01-02 Sidebar frame, resize, footer strip, empty workspace drop; F-06 Provider icon and disc stack; F-07a Overlay surfaces and side placement.
 - **Boards:** 09c (`25RF-2`), 09d (`2DPF-2`), footer state 9 (`2CF0-2`)
-- **Delivers:** The bell opens a Providers popover with one row per provider: signed out with Sign in, and quiet ready rows with usage. The bell dot shows while a row has an action. Signing in clears the row. The 08f "Sign in" end notice calls the same action.
-- **Build notes:** contract and service (E) with `auth` and `usage`; per-adapter `describeStatus` for the auth column of the table; `providers.signIn` opens a terminal per Q6; popover values from `25ZO-2` (380 wide, radius 18, padding 6, header 36, rows padding 8/6/8/10, action pill 28 radius full).
+- **Delivers:** The bell opens a Providers popover that lists only providers that need something: signed out with Sign in, and rate limited with its reset time. A provider with nothing to report has no row and no usage is shown (N2). With no rows, the popover shows its header only, the bell has no dot, and its tooltip is just its name. The dot shows while any row exists. Signing in clears the row. The 08f "Sign in" end notice calls the same action.
+- **Build notes:** contract and service (E) with `auth` and `rateLimit`, and no `usage` field; the bell never calls `provider.getUsage`. Per-adapter `describeStatus` for the auth column of the table. The rate-limit store keeps the latest active `RateLimited` per provider in memory (E). `providers.signIn` opens a Terminal tab in the right panel scoped to the project and no thread, or an external terminal with no project open (N6). Popover values from `25ZO-2` (380 wide, radius 18, padding 6, header 36, rows padding 8/6/8/10, action pill 28 radius full); the rate-limited row reuses that row with no action pill.
 - **Deletes:** none.
 - **Acceptance criteria:**
   - [ ] With no Devin credentials in its environment, Devin's row shows "Signed out" with Sign in; once credentials are present and status refreshes, the row clears.
-  - [ ] Providers with nothing to say follow the Q2 decision.
+  - [ ] With every provider signed in, not rate limited and up to date, the popover shows only its header, the bell has no dot, and hovering the bell shows only its name.
+  - [ ] No popover row shows usage, and opening the bell makes no `provider.getUsage` request (spy test).
+  - [ ] A Claude `RateLimited { active: true }` with `retryAfterMs` shows "5-hour limit reached · resets 16:00" and the dot; `active: false`, or the reset time passing, removes the row. Without `retryAfterMs` the row reads "Rate limited" with no time.
   - [ ] A status refresh failure for one provider leaves the others intact.
-- **Verify:** service tests with fake adapters next to `provider-availability-service.test.ts`, including a Devin adapter fed an empty environment and then a placeholder key; web popover test. Live, in an isolated provider home only:
+- **Verify:** service tests with fake adapters next to `provider-availability-service.test.ts`, including a Devin adapter fed an empty environment and then a placeholder key, and a scripted `RateLimited` sequence for the rate-limit store; web popover test for the empty state, the tooltip and the no-usage spy. Live, in an isolated provider home only:
   1. Stop the runtime with `agent:down`. From a shell where `HOME`, `USERPROFILE`, `APPDATA` and `XDG_DATA_HOME` point at an empty directory under `.dev/verification/provider-home/`, and where `WINDSURF_API_KEY` and `DEVIN_API_KEY` are unset, run `agent:up`. `agent:up` passes the shell environment to the server (`scripts/agent/agent-up.mjs:237-238`) and still pins Mcode's own data to `.dev/` (`scripts/agent/runtime-contract.mjs:74-75`), so only provider lookups move.
   2. Devin now finds no credentials (`packages/providers/src/private/devin/devin-credentials.ts:20-53`). Open the bell and confirm its Signed out row with Sign in. Other providers may also read Signed out in this home; that is expected.
   3. Write a placeholder `devin/credentials.toml` with a dummy `windsurf_api_key` (`devin-credentials.ts:63`) into the scratch home, never a real key. Restart the runtime from the same shell and confirm the row clears.
@@ -565,11 +614,12 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
 - **Blocked by:** S09-04 Provider status contract and the bell.
 - **Boards:** 09c (`25RF-2`), 09d Working (`2DPF-2`)
 - **Delivers:** When a newer CLI exists for a provider Mcode can update, the row reads "CLI 0.48.0 available · you have 0.41.2" with Update; Update shows progress in place, success removes the row, failure says why and offers Retry.
-- **Build notes:** shared version policy (ADR 0001 consequence), npm feed, update runner (E); per-provider decisions from the table. The runner decides npm ownership by comparing the resolved CLI path with `npm prefix -g` evaluated in the server's own environment, and runs `npm install -g <package>@<target>` in that same environment. A scratch prefix set for the server process is therefore honored by construction, and the runner never reaches outside the prefix it detected.
+- **Build notes:** shared version policy (ADR 0001 consequence), npm feed, update runner (E); per-provider decisions from the table. The runner decides npm ownership by comparing the resolved CLI path with `npm prefix -g` evaluated in the server's own environment, and runs `npm install -g <package>@<target>` in that same environment. A scratch prefix set for the server process is therefore honored by construction, and the runner never reaches outside the prefix it detected. The registry is read at most once a day per provider (N10). Add `settings.updates.providerCliChecks` (boolean, default true) beside `autoDownload`, with a switch in Settings › About next to Auto-download (`AboutSection.tsx:47`), label "Provider CLI checks", hint "Ask the npm registry once a day for newer provider CLIs." (proposed copy). Off means no registry request and no update rows.
 - **Deletes:** Codex-private `meetsMinVersion` export moves (`packages/providers/src/availability.ts` re-exports the shared one).
 - **Acceptance criteria:**
   - [ ] Claude with the bundled CLI never shows an update row.
   - [ ] Registry timeout → no row, no error surfaced.
+  - [ ] Two refreshes within 24 hours make one registry request per provider; with Provider CLI checks off, none, and no update row shows.
   - [ ] A failing update shows a reason of at most 240 chars and Retry.
   - [ ] A CLI whose resolved path is outside the detected npm prefix shows no Update action.
 - **Verify:** unit tests for `isNewer` (including prerelease) and the runner with a fake process host, including a CLI outside the detected prefix. Live, with a scratch CLI prefix only:
@@ -599,18 +649,18 @@ Order: S01-01 can start first. S01-03 starts once S06-01 lands, because its appr
 
 ## Risks and open questions
 
-1. **App menu on Windows/Linux (user).** Removing the title bar removes the only File/Edit/View/Help menu and the Alt mnemonics (`application-menu.ts:35-39` nulls the native one). Recommendation: the logo/wordmark in the sidebar header opens the same names-only menu (F-04) and keeps Alt+F/E/V/H. Alternative: drop it and rely on ⌘K.
-2. **Bell with nothing to report (user).** "No all-ready state" and the quiet ready row on 09c/09d pull in different directions. Recommendation: quiet rows only for providers with usage (Claude, Codex, Copilot); if no rows exist the bell stays clickable and shows the header with no rows.
-3. **Armed install look (user).** Not drawn. Recommendation: button keeps "Install vX"; tooltip "Installs when agents finish"; clicking reopens the dialog with "Restart now" and "Cancel scheduled install".
-4. **App toast lifetimes and marks (user; F-07b implements).** Recommendation: info and error both auto-hide after 8s with hover pause; error gets the clay dot, info no mark. Sticky errors would pile up with the 3-toast cap.
-5. **Notification set (user).** 08d only draws Finished. Recommendation: one rule, whatever toasts while focused notifies the OS while unfocused (Finished, Failed, Approval/Answers/Plan). Also gate the updater's "update ready" notification on `notifications.enabled`.
-6. **Where Sign in runs (user).** A terminal is needed for interactive logins. Recommendation: a Terminal tab in the right panel of the active project; with no project open, an external terminal (ADR 0006).
+1. **App menu on Windows/Linux.** Decided (user, 2026-10-08, N1): remove File, Edit, View, Help and the Alt mnemonics entirely, with no replacement menu; every item keeps a shortcut or palette command (Backend architecture F); macOS keeps its native menu. Consequence: Cut, Copy and Paste become keyboard-only on Windows and Linux, because there is no right-click edit menu.
+2. **Bell with nothing to report.** Decided (user, 2026-10-08, N2): no dot, nothing on hover, no usage rows, no quiet ready rows. The popover lists only providers that need something; with none it shows its header only.
+3. **Armed install look.** Decided (user, 2026-10-08, default stands): the button reads "Installs when idle" and its menu holds "Cancel scheduled install". Not drawn; the copy is proposed.
+4. **App toast lifetimes and marks.** Decided (user, 2026-10-08, default stands): info hides after 8s, paused on hover; errors stay until closed. F-07b builds it (its rule already says failed persists).
+5. **Notification set.** Decided (user, 2026-10-08, default stands): Finished, Failed and needs-you all notify the OS while Mcode is unfocused. Gating the updater's "update ready" notification on `notifications.enabled` stays optional in S09-03.
+6. **Where Sign in runs.** Decided (user, 2026-10-08, N6): a Terminal tab in the right panel scoped to no thread, so the user can sign in calmly. With no project open there is no right panel, so it opens an external terminal (ADR 0006).
 7. **Claude sign-in with the bundled CLI (check).** The login command for the SDK-bundled CLI is unverified; confirm the SDK exposes a runnable entry, else fall back to "Sign in with `claude` in a terminal" when a system CLI exists.
-8. **Rate limits in the bell (user).** Not drawn beyond usage text. Recommendation: keep it inside the quiet row text; no new row type.
-9. **Collapsed project row roll-up (user).** Today a pulsing amber dot marks a project with running threads (`ProjectTree.tsx:2614-2617`); Components `DUA-0` shows "2 running" with an amber spinner (superseded colour); needs-you children are hidden when collapsed. Recommendation: neutral spinner + "N running", and the amber ring on the project row when any child needs you.
+8. **Rate limits in the bell.** Decided (user, 2026-10-08, N7 with N2): on the provider's own row with the reset time, as a row type of its own, because quiet rows no longer exist.
+9. **Collapsed project row roll-up.** Decided (user, 2026-10-08, default stands): a collapsed project row shows the highest-priority mark among its threads, ranked as in B (needs-you ring, then a neutral running spinner, then the failed and finished dots). Today a pulsing amber dot marks a project with running threads (`ProjectTree.tsx:2614-2617`); Components `DUA-0` shows "2 running" with an amber spinner (superseded colour).
 10. **Setup failed label (S04 author / user).** Proposed "Setup failed" as a needs-you label; S04 and S12 own setup's future.
-11. **"Start a chat" without a project (S03 author).** `threads.workspace_id` is required (`schema.ts:83-85`); a projectless thread is new backend work. S01 renders the link only; S03 should own the behaviour.
+11. **"Start a chat" without a project.** Decided (user, 2026-10-08, N9): out of this program; the empty workspace asks for a project first, and S01 renders no "start a chat" link. A standalone epic, "Start a chat without a project (needs scoping)", holds it. `threads.workspace_id` is required (`schema.ts:83-85`), so a projectless thread is new backend work.
 12. **Plan ready forever (S07).** Until S07 marks plan versions accepted or superseded, a `plan` waiting source would keep every planned thread amber. S07 must ship status wiring with its source.
 13. **Docs (implementer).** CONTEXT.md "Turn outcome" says canonical persistence lacks `Cancelled`, but `canonical-agent-store.ts:856` queries it; check and fix the note. Add glossary terms "Thread attention" and "Needs you" once S01-03 lands, and define the seen marker as an acknowledged settled sequence. F-07b updates the `docs/internals/renderer/ui-components.md` toast rows for the lane.
 14. **Electron `env(titlebar-area-*)` on Linux (check).** Works with `titleBarOverlay` on Windows; confirm on Linux before removing the fallback (inferred).
-15. **npm registry calls (user, privacy).** Latest-version checks call the public npm registry once a day per provider; say so in Settings › About or allow turning them off.
+15. **npm registry calls.** Decided (user, 2026-10-08, N10): once a day per provider is acceptable and can change later. Settings › About gets a "Provider CLI checks" switch that turns the checks off (S09-05).

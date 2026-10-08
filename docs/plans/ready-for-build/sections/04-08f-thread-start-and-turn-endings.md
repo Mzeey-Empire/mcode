@@ -20,7 +20,7 @@ All boards are on page p-6-0: https://app.paper.design/file/01M3V9R04VVSFTYQ76BR
 | `04f · Thread starting · Step states · Dark` | `2BW7-2` | 11 states: fetching, running setup, starting, started (collapsed), setup failed, setup needs approval, fetch failed, worktree failed, thread didn't start, cancelled, existing worktree with setup skipped |
 | `04g · Thread starting · First send motion · Dark` | `2CQU-2` | Keyframes 0/60/240ms, a 0 to 420ms timeline, easing, reduced motion, build note |
 | `08f · Turn did not finish · Stopped, interrupted, failed · Dark` | `2C3A-2` | Stopped by you, stopped before the provider started, interrupted, provider retrying, failed (retryable, details open, usage limit, signed out), sidebar rows |
-| `05f · Running · In-turn states · Dark`, state 7 | `2CQL-2` | Related only: "Rate limited, retrying in 12s" belongs to the section 05 status indicator, not to this section |
+| `05f · Running · In-turn states · Dark`, state 7 | `2CQL-2` | Related only: section 05 owns the short "Rate limited" status label; the countdown and attempt are on this section's quiet retry line (S08F-09, decision R7) |
 
 Exact values below come from `get_jsx` and `get_computed_styles` on these nodes.
 
@@ -104,12 +104,13 @@ From `source/screen-pass-todo.md` and `source/implementation-notes.md`. Do not r
 - Section 12 (2026-10-07/08): the setup command becomes project actions marked "Run on startup". The server runs them in setup order, in real terminals, with one terminal renderer for everything.
 - 08f (added 2026-10-07): the work fold names the ending ("Stopped after 48s", "Interrupted after 30s", "Failed after 1m 02s"). Partial answers and the changes bar stay. One end notice closes the turn with an icon, a cause, a detail and one primary action. The mapping from outcome to notice lives in one table.
   - Stopped: a quiet "You stopped" with no button. Revert this turn lives in the turn's ⋯ menu (section 08e).
-  - Stopped before the provider started: no work fold. The user bubble stays with a quiet "Stopped before Codex started" and no action (user, 2026-10-07).
+  - Stopped before the provider started: no work fold. The user bubble stays with a quiet "Stopped before Codex started" and no action (user, 2026-10-07). That ending is the only result: the composer is not refilled with the prompt (user, 2026-10-08, E6).
   - Interrupted: amber pause icon, "Mcode closed while Codex was working", Resume. Resume continues the same session when the provider can resume it. Otherwise it starts a new session seeded with the thread.
-  - Failed, retryable: clay icon, a plain cause with the status ("Codex stopped responding", "502 Bad Gateway after 3 retries"). Details expands the raw error in mono with Copy, in place. Retry sends the same prompt as a new turn, and the agent sees the partial edits.
+  - Failed, retryable: clay icon, a plain cause with the status ("Codex stopped responding", "502 Bad Gateway after 3 retries"). Details expands the raw error in mono with Copy, in place. Retry sends the same prompt as a new attempt of the same turn, and the agent sees the partial edits.
   - Failed, usage limit: amber clock, "Claude usage limit reached · 5-hour limit, resets 16:00", Switch model, and "Retry at 16:00". That retry is scheduled, not immediate.
   - Failed, signed out: "Cursor is signed out" and Sign in. Once signed in, the button becomes Retry. This is the same action as the bell's Providers row.
   - Provider retrying: a quiet line with a spinner, "Codex is retrying · 502 Bad Gateway · attempt 2 of 10 · next in 8s". No action and no red. It clears when output resumes and becomes Failed if retries run out.
+  - Retry and Resume replace the attempt (user, 2026-10-08, E2). The transcript shows the user message once, then the latest attempt only. Once a replacement attempt exists, the failed or interrupted attempt's work fold, partial answer, changes bar and end notice are not rendered. There is no "Retried" or "Resumed" receipt and no second copy of the message. Mcode keeps every attempt's records (PRODUCT.md principle 13); only the view hides them. The attempts of one turn are one logical turn, so Review's Turn view for it starts at the first attempt's baseline (section 10 owns that). If the replacement attempt also fails, its own Failed notice shows, with Retry one-shot per attempt.
   - Sidebar: Interrupted gets an amber ring and an amber line (it needs the user). Failed gets a clay dot and a clay line. Stopped shows nothing. All clear when the thread is opened.
   - Rename the visible "Errored" to "Failed" everywhere, toasts included.
 - The error needs a `kind` on the wire (retryable, usage_limit, auth, fatal) plus status, retryAfterMs, provider and attempt info. Each adapter classifies its own errors.
@@ -179,7 +180,8 @@ From `source/screen-pass-todo.md` and `source/implementation-notes.md`. Do not r
   - UI: `InterruptedSessionsBanner` "Retry all" (`apps/web/src/components/chat/InterruptedSessionsBanner.tsx`, mounted at `ChatViewSurface.tsx:351`).
   - Retry consumption is already one-shot for interrupted and errored checkpoints (`canonical-parent-turn-lifecycle.ts:397-406`).
 - Automatic transient retry exists. `TurnErrorPolicy` holds a regex allowlist with at most 2 attempts (`apps/server/src/features/agents/turns/turn-error-policy.ts:25-40`). The `CONTEXT.md` "Behaviour pending" note under Transient failure is therefore stale.
-- Stop before dispatch: `AgentStopResult.dispatchState` (`packages/contracts/src/models/turn-runtime.ts:69-84`) drives `composerRecallFromStop`, which refills the composer with the prompt (`threadStore.ts:2840-2847`). Nothing durable records whether the provider ever produced output.
+- Stop before dispatch: `AgentStopResult.dispatchState` (`packages/contracts/src/models/turn-runtime.ts:69-84`) drives `composerRecallFromStop`, which refills the composer with the prompt (`threadStore.ts:2839-2848,3588-3596`; the editor effect at `useComposerFormController.ts:816-826`). Nothing durable records whether the provider ever produced output.
+- A replacement turn today is a new turn with a full copy of the user message: `TurnRecoveryService.retryCommand` rebuilds a send from the stored message (`turn-recovery-service.ts:118-146`). The start input carries `retryOfExecutionId` (`canonical-runtime-write-operations.ts:43`), which only marks the old checkpoint `retried` (`canonical-parent-turn-lifecycle.ts:397-406`). `AgentTurn` has no link to the attempt it replaces (`packages/agent-model/src/records.ts:84-101`).
 
 ### Bugs found
 
@@ -211,11 +213,12 @@ From `source/screen-pass-todo.md` and `source/implementation-notes.md`. Do not r
 | Error kind on the wire | `error: string` | `failure: TurnFailure` on `Error`, classified per adapter | contracts, providers, server |
 | Persisted cause | Text only in event and checkpoint | `AgentTurn.ending` (failure or interruption cause) and `providerStartedAt` | agent-model, server (migration), web |
 | End notice | Footer label and client-only red box | `TurnEndNotice` from one table | web |
-| Stopped before provider started | Not distinguishable | `providerStartedAt === null` on a cancelled turn | agent-model, web |
+| Stopped before provider started | Not distinguishable; the composer refills with the prompt | `providerStartedAt === null` on a cancelled turn; the quiet ending only, no refill (E6) | agent-model, web |
 | Stopped by Mcode, not the user | Every cancelled turn reads as a user stop | `ending.stop` on cancelled turns: `user` or `mcode` with a reason | agent-model, server, web |
 | Retry | Incident-only `agent.retry` | `turn.retry` for errored turns | contracts, server, web |
 | Resume | Same as retry, fresh unseeded session | `turn.resume`: native session resume or a seeded session | contracts, server, providers, web |
 | Retry at reset | None | `turn.retry.schedule` with a persisted schedule and cancel | contracts, server (migration), web |
+| One logical turn across attempts (E2) | A retry adds a turn with a full copy of the message; no attempt link | `AgentTurn.attemptOf` (S10-03); the transcript shows the message once and the latest attempt only (S08F-05) | agent-model and server (S10-03), web |
 | Sign in then Retry | None | Uses the S09 provider condition and its Sign in action | web (S09 dependency) |
 | Provider retrying line | `RetryBanner` in the composer | Quiet line under the work, keeping `errorStatus` | web, providers (Codex, Cursor, OpenCode) |
 | "Failed" wording | "Errored" in sidebar, filter and status | "Failed" | web |
@@ -352,7 +355,8 @@ The one Setup rule for a new thread, shared with S07-08: a thread whose checkout
 - Live-sibling check: before setup starts, the environment service asks for another non-deleted thread with the same normalized `worktree_path` whose runtime phase is running or finalizing, or whose startup is nonterminal.
   - If one exists, skip setup with `skipReason: "thread-running-here"` and release the gate as not required.
   - Serialize the check and the setup launch per worktree path, so two simultaneous starts cannot both run setup (inferred risk, see Risks).
-- The locked decision "Existing worktree runs setup on every thread start" governs threads the user starts in the composer's Existing worktree mode. The continuation skip extends the existing branch behavior to Implement in a new thread; open question 13 asks the user to confirm it.
+- The locked decision "Existing worktree runs setup on every thread start" governs threads the user starts in the composer's Existing worktree mode. The continuation skip extends the existing branch behavior to Implement in a new thread; the user confirmed it on 2026-10-08 (E9, open question 13).
+- "Implement vN in a new worktree" (S07-08b) is not a continuation: it creates a new managed worktree, so Setup runs as for any New worktree thread.
 - This ticket changes which threads get a setup step, not what runs in it. S04-07 lands on the single-script executor; S12T-11 later swaps the executor and keeps this eligibility and both skips unchanged.
 - Docs: rewrite `docs/internals/projects/environment.md:40-82`. It currently says automatic setup is for a "managed New worktree" and manual setup runs in an "unmanaged existing worktree".
 
@@ -536,15 +540,22 @@ The server side extends `TurnRecoveryService` (`apps/server/src/features/agents/
 
 Shared preconditions, each rejected with a typed error:
 
-- The turn is the thread's latest turn.
+- The turn is the thread's latest attempt.
 - The thread has no running turn or nonterminal startup.
-- The turn was not already retried. `consumeRetry` makes this one-shot (`canonical-parent-turn-lifecycle.ts:397-406`), so a second call conflicts.
+- The attempt was not already retried or resumed. `consumeRetry` makes this one-shot per attempt (`canonical-parent-turn-lifecycle.ts:397-406`), so a second call on the same attempt conflicts.
+
+Attempts (E2). Retry, Resume and Retry at reset start a new attempt of the same logical turn, never a new turn of their own:
+
+- The link is `AgentTurn.attemptOf: AgentTurnId | null`: the id of the logical turn's first attempt, null on a first attempt, so chains stay flat. It is stored in a nullable `attempt_of` column on `canonical_agent_turns`. S10-03 adds the field and the column, because Review needs them first: the parent start derives `attemptOf` whenever `retryOfExecutionId` is set (`canonical-runtime-write-operations.ts:43`), in the same transaction as `consumeRetry` (`canonical-parent-turn-lifecycle.ts:397-406`). Retry and Resume therefore get the link by passing `retryOfExecutionId`, which they do on every path. There is no second link.
+- Records stay: every attempt keeps its turn, messages, items, checkpoint and ending. Only the transcript projection folds them.
+- Transcript rule (S08F-05), in the web projection (`apps/web/src/features/conversation/messages/virtual-items.ts`): for each logical turn, render the first attempt's user message, then only the latest attempt's work fold, answer, changes bar and end notice. A later attempt's own user message (Retry's copy, or Resume's hidden continuation) never renders, and neither does anything from an earlier attempt once a later one exists. While the replacement attempt runs, the turn shows it running.
+- Review treats the attempts as one turn: the Turn view diff of a retried turn starts at the first attempt's baseline, so partial edits from a failed attempt still show. Section 10 owns that comparison (see section 10, S10-03).
 
 `retry`:
 
 - Requires status Errored.
 - Loads the accepted user message (`loadUserMessage(turnId)`, `:102`) and the attachments (`prepareRetryAttachments`, `:108`).
-- Dispatches a normal `SendMessageCommand` with the same content, mentions and annotations, `model: input.model ?? thread.model`, `retryOfExecutionId` and `recoveryMode: "retry"`.
+- Dispatches a normal `SendMessageCommand` with the same content, mentions and annotations, `model: input.model ?? thread.model`, `retryOfExecutionId` (from which the start derives `attemptOf`) and `recoveryMode: "retry"`. The stored copy of the message is the new attempt's record; the transcript does not show it.
 - It does not set `forceFreshSession`. The provider session continues, so the agent sees its partial edits and history.
 
 `resume`:
@@ -564,7 +575,7 @@ Scheduled retry (new `turn-retry-scheduler.ts` and `turn-retry-schedule-store.ts
 - Firing calls `retry`. If that fails, the turn stays Failed with the new failure.
 - This complies with ADR-0022: the user scheduled the retry, so it is not an automatic replay.
 
-Transcript: a replacement turn shows a compact user receipt instead of the full prompt again: "Retried" or "Resumed", with "in a new session" for the seeded path. The model is the compact "Implement plan v1" message from 07f. Open question 2.
+Transcript: a replacement attempt shows no receipt and no copy of the prompt; it takes the failed or interrupted attempt's place under the one user message (Attempts, above; decided, open question 2).
 
 ### I. Per-provider decisions
 
@@ -613,6 +624,7 @@ This table lives in `apps/web/src/features/conversation/turn-ending/turn-ending-
 Notes:
 
 - Details shows `failure.message`, then a final line `turn {executionId first 8}`, with a Copy button. "Hide details" collapses it.
+- The table runs only for a logical turn's latest attempt. An attempt that a Retry or Resume replaced renders no notice (section H, Attempts).
 - "Stopped by Mcode" and "Stopped by another thread" are not drawn in Paper; they reuse the quiet "You stopped" style, and the copy needs the designer's check (open question 11).
 - Status phrases come from a small table keyed by status (502 is "Bad Gateway").
 - Limit labels: `five_hour` is "5-hour limit" and `seven_day` is "Weekly limit". Other values pass through.
@@ -656,12 +668,12 @@ Rule, in one place in the store:
 - **Contracts**
   - `models/turn-failure.ts`.
   - Additions to `models/turn-recovery.ts` and to the `ws/methods.ts` and `ws/channels.ts` entries.
-- **Agent model**: `turn.provider-started`, `providerStartedAt`, `ending`, `InterruptionCause`, `TurnStopCause`, and the `session-resume` capability.
+- **Agent model**: `turn.provider-started`, `providerStartedAt`, `ending`, `InterruptionCause`, `TurnStopCause`, and the `session-resume` capability. `attemptOf` comes from S10-03.
 - **Server**
   - `thread-startup/startup-agent-phase-observer.ts`.
   - `agents/recovery/turn-retry-scheduler.ts` and `turn-retry-schedule-store.ts`.
   - A worktree occupancy check inside the environment service.
-  - Migrations for `canonical_agent_turns` (2 columns) and `turn_retry_schedules`.
+  - Migrations for `canonical_agent_turns` (2 columns: `provider_started_at`, `ending_json`; S10-03 adds `attempt_of`) and `turn_retry_schedules`.
 - **Providers**
   - One pure classifier per adapter, for example `claude-failure-classifier.ts`, from native shapes to `TurnFailure`, tested with fixtures.
   - `ProviderTurnError` and `SessionResumeUnavailableError`.
@@ -718,6 +730,7 @@ Rule, in one place in the store:
 | `Error` events without `failure` (the name `AgentEventType.Error` stays) | Every `type: AgentEventType.Error` emit site | Required `failure` | S08F-01 | `bun run --cwd packages/contracts test -- src/events/__tests__/agent-event.test.ts` passes with a case that rejects an `Error` without `failure` |
 | `TurnFooter` outcome labels (`outcomeLabel`, `TurnFooterStatus`, `data-testid="turn-outcome"`) | `TurnFooter.tsx:16-23,45-53,93,102` | Work fold label (S05) and `TurnEndNotice` | S08F-05 | `rg -n "outcomeLabel\|TurnFooterStatus\|data-testid=\"turn-outcome\"" apps/web/src` returns nothing |
 | Client-only `agent_error` system message and its red box | `threadStore.ts:2657-2659,2667`, `MessageBubble.tsx:281-291,797-805` | Persisted `ending` and `TurnEndNotice` | S08F-05 | `rg -n "agent_error" apps/web/src` returns nothing |
+| `composerRecallFromStop`, the composer refill after a Stop that lands before the provider starts: the record field, `recallCancelledUndispatchedMessage` and its `latestUserMessageContent` helper, the stop-time write, the `clearComposerRecallFromStop` action and the editor effect | `thread-record.ts:167`, `threadStore.ts:541,2831-2848,3583-3596,4322-4324`, `useComposerFormController.ts:290-296,816-826`, the two recall cases in `__tests__/thread-lifecycle.test.ts:356-416` | The quiet "Stopped before {Provider} started" ending (E6) | S08F-05 | `rg -n "composerRecallFromStop\|recallCancelledUndispatchedMessage" apps/web/src` returns nothing |
 | Clearing queued input when a turn errors (`clearQueue` itself stays for Clear and thread deletion) | `threadStore.ts:2687-2688` in `handleErrorEvent` | A paused queue with an explicit send | S08F-05 | `bun run --cwd apps/web test -- src/__tests__/threadStore-ending-queue.test.ts` passes (new; an error, an interruption and a Mcode stop each keep the queue paused) |
 | `agent.retry` (incident-scoped), `retryTurn`, `TurnRecoveryService.retry` and `consumeRecoveryIncidentEntry` | `methods.ts:1042-1046`, `agent-rpc.ts:39,128-135`, `transport/types.ts:414`, `ws-transport.ts:1216`, `turn-recovery-service.ts:90-117` | `turn.resume` and `turn.retry` | S08F-06 | `rg -n "\"agent.retry\"\|retryTurn\b" apps packages` returns nothing |
 | `InterruptedSessionsBanner` with "Retry all", its test, client `recoveryIncidentStore`, `getRecoveryIncident`, `agent.recoveryIncident` | `components/chat/InterruptedSessionsBanner.tsx(.test.tsx)`, `features/recovery/state/recoveryIncidentStore.ts`, `App.tsx:23,402-442`, `ChatView.tsx:4,217-219,292-302,339-340`, `ChatViewSurface.tsx:13,351`, `ProjectTree.tsx:20,1462`, `methods.ts:1037-1041` | Per-thread Interrupted notice and the S01 Interrupted row (open question 5) | S08F-06 | `rg -n "InterruptedSessionsBanner\|recoveryIncidentStore\|agent.recoveryIncident" apps packages` returns nothing |
@@ -730,8 +743,8 @@ Not retired, deliberately:
 - `TurnErrorPolicy`: the automatic-attempt gate.
 - `classifyProviderError` (`apps/server/src/features/handoff/orchestration/error-classifier.ts:19-41`): handoff side-channel routing, a different domain. See Risks.
 - `CliErrorBanner`: a missing CLI belongs to section 17.
-- `composerRecallFromStop`: open question 6.
 - `startup-activity-shimmer`: still used by narrative rows.
+- `AgentStopResult.dispatchState`: the server still uses it to skip the provider stop for an undispatched turn (`turn-runtime-controller.ts:1377`); only the client refill that read it goes (E6).
 
 Owned in other ledgers, so they are not repeated here: the single-script setup launcher, the recovery shell (`openAutomaticSetupTerminal`), the gate-snapshot reads and `ProjectCommandApprovalDialog` belong to S12T-11 in the 12a ledger; visible "Errored" belongs to F-10 in the foundation ledger.
 
@@ -1003,38 +1016,41 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
 
 ### S08F-05 End notice and Retry
 
-- **Blocked by:** S08F-01 Turn failure and ending on the wire; S04-02 First provider frame: "Starting thread" holds until the provider answers; S08-01 Finished turn layout: work fold, merged meta line, actions row; F-03 Button primitives; F-10 Status marks, spinner, badges and notices; S05-10 Queue rows in the tray: Send now, Edit, Remove.
+- **Blocked by:** S08F-01 Turn failure and ending on the wire; S04-02 First provider frame: "Starting thread" holds until the provider answers; S08-01 Finished turn layout: work fold, merged meta line, actions row; F-03 Button primitives; F-10 Status marks, spinner, badges and notices; S05-10 Queue rows in the tray: Send now, Edit, Remove; S10-03 Truthful comparison outcomes and turn list.
 - **Reconciled:** Also owns queue retention: an error or ending never silently clears queued user input. The queue pauses visibly with an explicit send action.
 - **Boards:** `08f` states Stopped by you, Stopped before the provider started, Failed · can retry, Failed · details open (`2C3A-2`)
 - **Delivers:**
-  - Turns the user stopped end with a quiet "You stopped", or "Stopped before Codex started" with no work fold.
+  - Turns the user stopped end with a quiet "You stopped", or "Stopped before Codex started" with no work fold. A Stop before the provider started never refills the composer (E6).
   - Turns Mcode stopped end with a quiet "Stopped by Mcode" (for example after an approval it could not answer) or "Stopped by another thread", never "You stopped".
   - Failed turns end with the filled notice: cause, status line, Details that expands the raw error with Copy, and Retry.
-  - Retry sends the same prompt as a new turn (a replacement turn) on the same session.
+  - Retry sends the same prompt as a new attempt of the same turn on the same session. The new attempt replaces the failed one in the transcript: the user message shows once, then the latest attempt, with no "Retried" receipt (E2). The failed attempt's records stay.
   - The work fold reads "Stopped after 48s" or "Failed after 1m 02s".
   - Queued follow-ups survive any ending that is not a completion. The queue shows "Paused" and waits for an explicit send.
 - **Build notes:**
   - Section J table and `TurnEndNotice`. The `turn.retry` server path is section H. The cancelled rows read `ending.stop` (section G).
   - Section K queue rule in `threadStore.ts`, plus the "Paused" label in the queue component that exists when this lands (`ComposerQueueList` today; S05-10's tray rows keep it).
-  - The replacement turn shows a compact "Retried" receipt (open question 2).
+  - Attempts (section H): the transcript projection renders a logical turn as its first user message plus its latest attempt, reading `AgentTurn.attemptOf` from S10-03. `turn.retry` passes `retryOfExecutionId`, from which the start derives the link. No receipt.
+  - Delete `composerRecallFromStop` and the refill (ledger row, E6). Stop before the first frame ends in the quiet "Stopped before {Provider} started" ending only.
   - The startup turn's ending is suppressed while the trail owns it.
-  - Update the CONTEXT.md Turn outcome and Replacement turn entries; Turn outcome names who can stop a turn.
-- **Deletes:** ledger rows "`TurnFooter` outcome labels", "Client-only `agent_error`" and "Clearing queued input when a turn errors".
+  - Update the CONTEXT.md Turn outcome and Replacement turn entries; Turn outcome names who can stop a turn, and Replacement turn says it is a new attempt of the same turn that replaces the old one in the transcript.
+- **Deletes:** ledger rows "`TurnFooter` outcome labels", "Client-only `agent_error`", "`composerRecallFromStop`" and "Clearing queued input when a turn errors".
 - **Acceptance criteria:**
   - [ ] Every row of the section J table for cancelled and errored has a passing table test, including both Mcode stop reasons.
   - [ ] A turn stopped through the approval fail-closed path shows "Stopped by Mcode", not "You stopped", and keeps that after reload.
   - [ ] Details shows the exact persisted message and copies it.
-  - [ ] Retry on the latest errored turn starts a new turn with the same content and attachments.
-  - [ ] A second Retry returns a conflict.
-  - [ ] Retry is hidden on a turn that is not the latest.
+  - [ ] Retry on the latest errored attempt starts a new attempt with the same content and attachments, and `attemptOf` set to the first attempt's turn id.
+  - [ ] After Retry the transcript shows the user message once and only the new attempt: no copy of the message, no "Retried" text, and none of the failed attempt's work fold, partial answer, changes bar or notice. The failed attempt's turn, messages and ending are still in the canonical store, and reloading shows the same transcript.
+  - [ ] If the new attempt fails too, its own Failed notice shows with Retry; a second Retry on the same attempt returns a conflict.
+  - [ ] Retry is hidden on an attempt that is not the latest.
+  - [ ] Stop before the provider's first frame leaves the composer empty (or holding whatever the user typed since) and shows "Stopped before {Provider} started" under the user message.
   - [ ] Reloading keeps the notice.
   - [ ] With two queued messages, an error, an interruption, a user Stop and a Mcode stop each leave both messages queued, auto-drain off and "Paused" visible.
   - [ ] A transport reconnect after an error keeps the paused queue.
   - [ ] Send now on the first queued row sends it and resumes auto-drain; Retry and Resume leave the queue paused.
   - [ ] A completed turn still drains the queue as today.
 - **Verify:**
-  - Unit: `turn-ending-notice.test.ts` (table), `TurnEndNotice.test.tsx`, server `turn-recovery-service.test.ts` (retry preconditions and `consumeRetry` conflict), and `bun run --cwd apps/web test -- src/__tests__/threadStore-ending-queue.test.ts` (new, the queue rule; prior art `threadStore-reconnect-queue.test.ts`, `queueStore.test.ts`, `ComposerQueueList.lifecycle.test.tsx`). Prior art for the notice: `TurnFooter.test.tsx`, `PersistedNarrative.thread.test.tsx`.
-  - Live: in the fixture repo, Stop mid-turn and confirm "You stopped". Stop within the first second of a send and confirm "Stopped before {Provider} started". Queue a follow-up during a turn, force a fatal (invalid model), confirm Failed with the follow-up still queued and "Paused", then Retry after fixing the model and send the follow-up with Send now.
+  - Unit: `turn-ending-notice.test.ts` (table), `TurnEndNotice.test.tsx`, server `turn-recovery-service.test.ts` (retry preconditions, the new attempt's `attemptOf`, and the per-attempt `consumeRetry` conflict), and `bun run --cwd apps/web test -- src/__tests__/threadStore-ending-queue.test.ts src/__tests__/virtual-items.test.ts src/__tests__/thread-lifecycle.test.ts` (the queue rule; the attempt fold in the transcript; the two recall cases rewritten to assert no refill). Prior art for the queue: `threadStore-reconnect-queue.test.ts`, `queueStore.test.ts`, `ComposerQueueList.lifecycle.test.tsx`. Prior art for the notice: `TurnFooter.test.tsx`, `PersistedNarrative.thread.test.tsx`.
+  - Live: in the fixture repo, Stop mid-turn and confirm "You stopped". Stop within the first second of a send and confirm "Stopped before {Provider} started" and an empty composer. Queue a follow-up during a turn, force a fatal (invalid model), confirm Failed with the follow-up still queued and "Paused", then Retry after fixing the model: the message shows once and the failed attempt's notice is gone. Send the follow-up with Send now.
 
 ### S08F-06 Resume interrupted turns
 
@@ -1045,11 +1061,12 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - Section H `turn.resume`, and the `session-resume` capability declared by each adapter (all six support a native session resume today, per section I).
   - `TurnRequest.resumeRequired` and `SessionResumeUnavailableError` in each adapter, per the section I resume column.
   - Seeded fallback through the handoff path D builder.
-  - Compact "Resumed" receipt.
+  - Both Resume paths start a new attempt with `retryOfExecutionId`, so it carries `attemptOf` (section H, Attempts) and replaces the interrupted one in the transcript. No "Resumed" receipt (E2).
   - Update the CONTEXT.md Recovery incident entry.
 - **Deletes:** ledger rows "agent.retry ..." and "InterruptedSessionsBanner ...".
 - **Acceptance criteria:**
   - [ ] Resume after `agent:down`/`agent:up` on Codex continues the same native thread, and the result is `native-session`.
+  - [ ] After Resume, on either path, the transcript shows the user message once and only the resumed attempt; the hidden continuation message and the interrupted attempt's notice do not render, and the interrupted attempt's records remain.
   - [ ] When the native session is gone, the result is `seeded-session`, the provider receives the handoff, and nothing restarts fresh silently.
   - [ ] Every adapter, given `resumeRequired`, throws instead of starting fresh (one unit test per adapter).
   - [ ] `ProjectTree` no longer reads a recovery incident store.
@@ -1149,18 +1166,18 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
 Product calls for the user:
 
 1. **Fatal failures.** Should the notice show Retry? Recommended yes: Details plus Retry. The user may have fixed the cause outside Mcode, and the alternative forces retyping. The board draws only retryable, usage limit and signed out.
-2. **Replacement turn in the transcript.** Repeat the full user bubble, or show a compact "Retried" or "Resumed" receipt? Recommended compact, matching 07f's "Implement plan v1". Paper does not draw the post-Retry state.
+2. **Replacement turn in the transcript.** Decided (user, 2026-10-08, E2): neither a repeated bubble nor a receipt. The new attempt replaces the failed or interrupted one: the user message shows once, then the latest attempt only. Every attempt's records are kept, and Review treats the attempts as one turn (section H, Attempts). Paper does not draw the post-Retry state.
 3. **Switch model scope.** Cross-provider switch is not implemented on the server (`rg -i "switch.?provider" apps/server/src` finds nothing), so Switch model can offer only the same provider's models. Usage limits such as Claude's 5-hour window are often account-wide, so a same-provider switch may not help. Options: keep the button, limited to the same provider; hide it until cross-provider switch exists; or build cross-provider switch first. Recommended: keep it, same provider.
 4. **Overdue scheduled retry.** If Mcode was closed at the reset time, should the retry fire on the next launch? Recommended: fire if overdue by 15 minutes or less, otherwise drop it and show Retry. The ADR-0022 spirit argues against surprise replays hours later.
 5. **The restart banner.** Retire `InterruptedSessionsBanner` and its "Retry all" in favor of per-thread Resume and amber sidebar rows? Recommended yes. Section 17 (interrupted sessions) is not designed, and can add a bulk action if wanted.
-6. **`composerRecallFromStop`.** It refills the composer when Stop lands before dispatch. Keep it, or remove it to honor "no action"? Recommended keep: it is invisible and helps editing.
+6. **`composerRecallFromStop`.** Decided (user, 2026-10-08, E6): delete it and its refill. A Stop before the provider starts ends in the quiet "Stopped before {Provider} started" ending only (S08F-05 ledger row).
 7. **"412 packages".** 04f state 2 shows "bun install · 412 packages" while 04a and 04b show "bun install". Is the live progress tail intended? No generic source exists, so the recommendation is to drop it.
 8. **Worktree copy.** The decision says the startup step shows the folder name and "a copy button copies the full path". Only the overview Worktree row on 04a draws a copy icon. Recommended: the copy lives in the overview row, and the step shows a full-path tooltip. Add a hover copy to the step only if wanted.
 9. **Section 12 copy.** Decided (T10): the Run on startup hint reads "When a thread starts in a worktree"; S12T-13 uses it.
 10. **Devin `tool_rejected`.** It still maps to interrupted. It is likely a user denial, which reads better as stopped. Needs a Devin trace to decide (Devin owner).
 11. **Mcode stop copy** (designer). "Stopped by Mcode" with "Mcode couldn't answer an approval request", and "Stopped by another thread", are not drawn. They reuse the quiet "You stopped" style with no action. S06's receipt names the request that failed.
 12. **Startup readiness, T3** (user). S12T-11 awaits each startup action until it exits 0, so a dev server or watcher marked Run on startup holds the first turn until Skip setup. Whether a "Keeps running" toggle follows as its own ticket is decision T3 (12a Risks).
-13. **Setup for Implement in a new thread.** The new thread continues its source in the same checkout, so it skips Setup like a branched thread (section D), even though no other thread is live there. The alternative runs Setup and holds the durable Implement request, the source thread's reservation and its plan edits through Setup approval, retry and skip, for as long as Setup takes. Recommended: skip. Decides: user (confirm).
+13. **Setup for Implement in a new thread.** The new thread continues its source in the same checkout, so it skips Setup like a branched thread (section D), even though no other thread is live there. Decided (user, 2026-10-08, E9): skip, with reason `plan-implement`. A user who wants Setup picks "Implement vN in a new worktree" (S07-08b), which runs Setup and holds the request and the source thread's reservation for as long as Setup takes.
 
 Facts to check while building:
 
@@ -1169,7 +1186,7 @@ Facts to check while building:
 - **Placeholder surface**: rendering the normal thread surface for a client placeholder id may trigger conversation loading for a non-durable id. S04-03 keeps a preparing variant of the conversation for that reason (inferred).
 - **Occupancy race**: two simultaneous starts in one existing worktree need per-path serialization in the environment service. Without it, both may run setup.
 - **Two classifiers**: `classifyProviderError` (handoff) and the new adapter classifiers overlap in vocabulary (quota and auth versus usage_limit and auth). Converge only if the handoff ladder can consume `TurnFailure` (follow-up, tech lead).
-- **Migrations**: S04-02, S08F-01 and S08F-07 each add Drizzle migrations. Regenerate on rebase to avoid number clashes (`apps/server/drizzle/`, currently at 0068).
+- **Migrations**: S04-02, S08F-01 and S08F-07 each add Drizzle migrations (S10-03 adds `attempt_of`). Regenerate on rebase to avoid number clashes (`apps/server/drizzle/`, currently at 0068).
 - **Owned elsewhere**: `CliErrorBanner` and `ProviderUnavailable` (missing or disabled CLI) are not turn endings in this design. Section 17 owns them.
 - **Queue landing order**: S08F-05 adds the "Paused" label to whichever queue component exists when it lands. If S05-10 lands later, its tray rows must keep the label and the explicit send.
 - **Thread-control stops**: the `thread_control` stop reason assumes `ThreadControlService.stopTarget` runs when one thread stops another through thread control (inferred from its name and its `interrupted` status write, `thread-control-service.ts:1767-1770`). Confirm the source before writing the notice copy.

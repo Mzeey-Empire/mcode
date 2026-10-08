@@ -38,7 +38,7 @@ Build the screens on the Paper page "05 · Ready for build", sections 01 to 12, 
 
 Shell, sidebar and notifications
 
-1. As a developer, I want the window to have no title bar and the window controls to share the top row, so that the app gives its height to my work.
+1. As a developer, I want the window to have no title bar and no in-app menu bar, with the window controls sharing the top row, so that the app gives its height to my work.
 2. As a developer, I want the sidebar to default to 304px and resize between 220 and 340, so that thread titles fit without crowding the conversation.
 3. As a developer, I want each thread row to say "Approval required", "Answers required", "Plan ready" or "Interrupted" with an amber ring, so that I know what a thread needs without opening it.
 4. As a developer, I want a thread that needs me never to be dimmed, so that it stands out from running threads.
@@ -50,7 +50,7 @@ Shell, sidebar and notifications
 10. As a developer, I want finished toasts to hide after 8 seconds unless I hover them, and needs-you toasts to stay, so that the important ones wait for me.
 11. As a developer, I want to click a toast to open its thread and swipe it away to dismiss it, so that toasts are fast to act on.
 12. As a developer, I want an OS notification when a thread finishes while Mcode is in the background, so that I can work in another app and come back on time.
-13. As a developer, I want the bell to list providers that need signing in, a CLI update, or that have a new model, so that setup problems reach me before a turn fails.
+13. As a developer, I want the bell to list only providers that need signing in, a CLI update, or that are rate limited or have a new model, and to stay quiet otherwise, so that setup problems reach me before a turn fails and it never claims more than Mcode knows.
 14. As a developer, I want the update button to show checking, up to date, available, downloading, ready and failed states, so that I always know where an update stands.
 15. As a developer, I want to choose "When they finish" when installing an update while agents run, so that an update never kills a running turn.
 16. As a developer, I want to hover the update button to read the release notes, so that I can decide whether to update now.
@@ -86,8 +86,8 @@ Running turn
 37. As a developer, I want the status line to say "Answering" while the answer streams, and to show compacting, rate limits and retries when they happen, so that I trust what it says.
 38. As a developer, I want durations shown as m:ss in mono, so that times line up and read quickly.
 39. As a developer, I want subagents shown with their provider icon, and the overview to show up to three icons with the total in text, so that I can see delegated work at a glance.
-40. As a developer, I want the task list docked above the composer with one segment per task, so that I can see progress without scrolling.
-41. As a developer, I want queued follow-ups in the same tray with Send now, Edit and Remove, so that I can manage what goes next.
+40. As a developer, I want the task list docked above the composer with one segment per task, titled with the plan's title when the tasks come from a plan and "Tasks" otherwise, so that I can see progress without scrolling.
+41. As a developer, I want queued follow-ups in the same tray with Edit, Remove, and Send now (which steers into the running turn, shown only when the provider can steer), so that I can manage what goes next.
 42. As a developer, I want "Jump to latest" when I scroll up during a turn, so that I can read back and return in one click.
 43. As a developer, I want Stop and the Full access chip to be neutral, not red or amber, so that the screen is calm while the agent works.
 44. As a developer, I want the thread overview to list changes, tasks and usage while a turn runs, so that I see the thread's state in one place.
@@ -117,7 +117,7 @@ Plan mode
 62. As a developer, I want open comments to ride my next message as a removable chip, so that the agent revises with my notes.
 63. As a developer, I want a follow-up in Plan ready to revise the plan, not rerun the questions, so that iteration is fast.
 64. As a developer, I want Implement to send exactly the version on screen and mark it Accepted and read-only, so that I know what the agent was told to build.
-65. As a developer, I want to implement in a new thread from the same menu, so that I can start with a clean context.
+65. As a developer, I want to implement in a new thread in the same checkout, or in a new worktree, from the same menu, so that I can start with a clean context or isolate the work.
 66. As a developer, I want Ctrl+Shift+Enter and the command palette to implement without opening the panel, so that the keyboard path is complete.
 67. As a developer, I want a clear state when a provider does not return a structured plan, so that I know why there is nothing to edit.
 68. As a developer, I want the plan file path passed to the agent, so that it keeps track of the plan even across providers.
@@ -128,9 +128,9 @@ Finished turn and turn endings
 70. As a developer, I want an end-of-turn changes bar listing every changed file with a neutral Review button, so that I can open the diff from where I am.
 71. As a developer, I want to revert a whole turn with a confirmation and an Undo, so that I can throw away an agent's attempt safely.
 72. As a developer, I want a "Since you looked" review scope, so that I see only what changed since I last opened the thread.
-73. As a developer, I want a stopped turn to say "You stopped" quietly, so that my own action is not shown as an error.
+73. As a developer, I want a stopped turn to say "You stopped", or "Stopped before Codex started" when the provider never began, quietly and without refilling my composer, so that my own action is not shown as an error.
 74. As a developer, I want an interrupted turn to offer Resume, so that a closed app does not lose the agent's work.
-75. As a developer, I want a failed turn to name the cause in plain words, show the raw error under Details, and offer Retry, so that I can recover in one click.
+75. As a developer, I want a failed turn to name the cause in plain words, show the raw error under Details, and offer Retry, which replaces the failed attempt in the thread, so that I can recover in one click.
 76. As a developer, I want a usage-limit failure to offer "Retry at" the reset time and Switch model, so that I do not have to watch the clock.
 77. As a developer, I want a signed-out provider to offer Sign in, which then becomes Retry, so that the fix is in place.
 78. As a developer, I want a quiet line while the provider retries ("attempt 2 of 10, next in 8s"), so that a transient error does not look like a failure.
@@ -143,8 +143,8 @@ Review
 82. As a developer, I want a commit sheet where I pick files, edit a generated message, and commit or commit and push, so that committing is a real action I control.
 83. As a developer, I want commit failures from hooks shown in the sheet, so that I can fix them without guessing.
 84. As a developer, I want to pick both sides of a Branch comparison and search all commits on the server, so that I can review any range.
-85. As a developer, I want to revert one file from the Turn view, so that I can keep the rest of a turn.
-86. As a developer, I want the file list docked when the panel is wide and a popover when it is narrow, with the active file following my scroll, so that I always know where I am.
+85. As a developer, I want to revert one file from the Turn or All turns view, so that I can keep the rest of the work.
+86. As a developer, I want the file list docked when the panel is wide and a popover when it is narrow, with the active file following my scroll and one toggle to expand or collapse every file, so that I always know where I am.
 87. As a developer, I want my Review comments to survive a reload until I send them, so that I never lose a review in progress.
 
 Browser
@@ -155,8 +155,8 @@ Browser
 91. As a developer, I want a new page to show my project's dev servers and recent pages, so that I can open the app in one click.
 92. As a developer, I want to click an element in Design mode and attach a note, so that I can point the agent at exactly what to change.
 93. As a developer, I want my design notes to ride the composer as one tile per page or a stacked tile for several pages, so that they go with my next message.
-94. As a developer, I want to see when the agent is driving the page and take control, and the agent not to take it back until I hand it back, so that I am in charge of my browser.
-95. As a developer, I want plain error pages ("Can't reach localhost:5173") with Start web and Retry, so that I can recover from a stopped server.
+94. As a developer, I want to see when the agent is driving the page and take control, and the agent not to take it back until I hand it back (sending a message does not), so that I am in charge of my browser.
+95. As a developer, I want plain error pages ("Can't reach localhost:5173") with Start web and Retry, and a certificate warning I can proceed past as in a browser, so that I can recover from a stopped server or a self-signed dev certificate.
 96. As a developer, I want a device toolbar with presets, custom sizes and rotate, so that I can check layouts at other sizes.
 
 Right panel, Terminal, Files, Subagents, Project settings
@@ -200,10 +200,10 @@ Thread attention (one model for every section)
 Contracts and server services (new or changed)
 
 - **Approval v2.** Two urgent bugs are fixed first (an unreadable request hangs the agent; Cursor deny can pick an allow option). Each request then carries a kind, the tool call id, the provider, a diff where one exists, its origin (thread or subagent), and every genuine choice with its stated scope. Routing identity stays outside the display payload. Answers report resolved, no longer pending, or failed. Invalid requests are denied upstream and leave a receipt only after the provider acknowledges. Scope is never truncated into a misleading grant. Thread-operation approvals belong to the thread that asked. Receipts and deny-note delivery persist.
-- **Turn endings.** The error event carries a classified failure (retryable, usage limit, auth, fatal) with status, retry-after and attempt detail, classified in each adapter. A first-provider-frame event marks when the provider actually started. New commands: retry, resume, schedule and cancel a retry.
+- **Turn endings.** The error event carries a classified failure (retryable, usage limit, auth, fatal) with status, retry-after and attempt detail, classified in each adapter. A first-provider-frame event marks when the provider actually started. New commands: retry, resume, schedule and cancel a retry. A retry or resume replaces the failed or interrupted attempt in the transcript; every attempt stays recorded, and Review treats the attempts as one turn from the first attempt's baseline. Stop before the provider starts ends the turn quietly and no longer refills the composer.
 - **Startup record v2.** It adds per-step times and arguments, a fetch phase, and an attached-worktree kind. The project action runner is the only startup executor; the trail is a projection of the frozen action and run ids. Retry reruns from the first failed action. A startup action is ready only when it exits 0; a detected port is shown to the user but never releases Setup, because another process can answer on the same port.
-- **Plan record v2.** A bounded investigation of all six providers' plan protocols comes first. The record adds versions with authorship and status (draft, ready, accepted, superseded), comments anchored to text ranges, the thread's plan phase, and a materialized plan file. Saves send a base revision the server checks. One plan service owns user writes. Implement is a durable request; the version becomes Accepted in the same transaction that admits the turn, so Accepted never exists without an admitted turn. Plan capture is one seam with a fenced fallback for every provider, plus native capture where the provider has it; native plan mode turns on only together with its question handling. Mcode touches a provider's own plan file only when it can prove the file belongs to the session. Old plan fences in historic messages still render.
-- **Turn revert.** It is a preview, apply and undo operation on the working tree only. A preview token is a precondition over each path's presence, type, mode and content; a client request id is the operation identity, so a retry replays and a new click acts again. Recovery material is persisted and pinned before the first write, and unfinished operations recover on startup. It holds the per-repo git lock. Revert this turn and Revert file share it.
+- **Plan record v2.** A bounded investigation of all six providers' plan protocols comes first. The record adds versions with authorship and status (draft, ready, accepted, superseded), comments anchored to text ranges, the thread's plan phase, and a materialized plan file. Saves send a base revision the server checks. One plan service owns user writes. Implement is a durable request that targets the same thread, a new thread in the same checkout (Setup skipped), or a new worktree (Setup runs); the version becomes Accepted in the same transaction that admits the turn, so Accepted never exists without an admitted turn. Plan capture is one seam with a fenced fallback for every provider, plus native capture where the provider has it; native plan mode turns on only together with its question handling. Mcode touches a provider's own plan file only when it can prove the file belongs to the session. Old plan fences in historic messages still render.
+- **Turn revert.** It is a preview, apply and undo operation on the working tree only. A preview token is a precondition over each path's presence, type, mode and content; a client request id is the operation identity, so a retry replays and a new click acts again. Recovery material is persisted and pinned before the first write, and unfinished operations recover on startup. It holds the per-repo git lock. Revert this turn and Revert file share it; Revert file in the All turns view covers the view's range of turns.
 - **Review comparisons.** They return ready, too many files, unavailable, or failed with details. Unstaged includes untracked files via a temporary index (an empty one when the repo has no index yet). A branch comparison takes both refs from the user. Commit, commit search and message generation are server operations. A commit request is durable: its identity, inputs, original HEAD, result SHA and push outcome survive a lost response or restart.
 - **Snapshot pinning.** Turn snapshots, dirty pre-turn baselines and revert safety material are pinned under `refs/mcode/<storeId>/` so `git gc` cannot prune them before they expire. Each database sweeps only its own namespace.
 - **Drafts.** Everything that rides the next message (Review comments, design notes, file comments, plan comment chip selection) lives in the persisted composer draft, including durable snapshot references. Plan comments themselves are records.
@@ -213,8 +213,8 @@ Contracts and server services (new or changed)
 - **Project icon.** A workspace-relative `icon_path`, a resolver with bounded probes and a cache, and an authenticated image route restricted to image files inside the workspace.
 - **Files.** A capped tree listing, change marks from one git status, and a typed file read (text with encoding and changed lines, image, binary, too large), with path checks per segment.
 - **Subagent roster.** One contract every adapter fills: title, provider, status, times, detail tier (transcript, steps, or meta), the parent's prompt, and stop capability. It is pushed instead of polled.
-- **Provider status.** Each adapter reports its sign-in state and CLI version, with a shared version comparison, an update runner, and stored new-model sightings.
-- **Browser.** One profile per project, with each page bound exactly to its own project's partition when it is prepared, attached or adopted. Partitions are deleted when the project is removed. User control holds until Hand back, enforced in the broker. The design-note payload moves to v2 (one snapshot per page), and old messages still render.
+- **Provider status.** Each adapter reports its sign-in state and CLI version, with a shared version comparison, an update runner, and stored new-model sightings. The bell lists only providers that need action and shows no usage.
+- **Browser.** One profile per project, with each page bound exactly to its own project's partition when it is prepared, attached or adopted. Partitions are deleted when the project is removed. User control holds until Hand back, enforced in the broker; sending a message does not hand it back. A certificate error shows a warning page; proceeding trusts that host and certificate in the project's profile until Mcode quits, and the agent never proceeds on its own. The design-note payload moves to v2 (one snapshot per page), and old messages still render.
 
 Provider decisions
 
@@ -248,6 +248,9 @@ Right panel
 - New project, Git URL and GitHub clone sources in Add project, until they have boards (S02-04 waits on that).
 - Live streaming of shell output inside tool rows.
 - Switching providers mid-thread (Switch model offers the same provider's models only).
+- The other model picker extras on the polished picker board (reasoning, context and Fast flyout, Ctrl+1 to 4 favourites, folded legacy models). A standalone epic, "Model picker extras (needs scoping)", holds them.
+- Starting a chat without a project. A standalone epic, "Start a chat without a project (needs scoping)", holds it.
+- The in-app File, Edit, View and Help menu on Windows and Linux. It is removed, not replaced (decision N1).
 - Native rewind features of Claude and Codex; revert is git-level.
 
 ## Further Notes

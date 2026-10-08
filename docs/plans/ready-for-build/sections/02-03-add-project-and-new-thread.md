@@ -491,8 +491,8 @@ Server:
 
 - **Blocked by:** F-01b Token vocabulary rename; F-02 Fade truncation primitive.
 - **Boards:** `03` (`1ZHP-2`, column `1ZQ7-2`), `01` (`1ZDG-2`) for the empty variant
-- **Delivers:** A new thread shows "What should we build in **{project}**?" with the amber dashed slot, the rail and the 760 composer centred, and the below-composer line. The composer is 760 wide here and in threads.
-- **Build notes:** `NewThreadStartColumn`, `ProjectSlotHeading`; composer max width `var(--container-reading)` via one constant replacing `PRIMARY_CONTENT_RAIL_CLASS` in `Composer.tsx:639` only (the message column belongs to section 05). Mount the canvas header on the new-thread surface (breadcrumb "{project} / New thread", top actions) so S03-07 can place the toggle; if Section 01 owns the header shell, consume it. "Start a chat" link wires to Section 01's projectless action.
+- **Delivers:** A new thread shows "What should we build in **{project}**?" with the amber dashed slot, the rail and the 760 composer centred, and no below-composer line: "Start a chat without a project instead." on board 03 is not built, because a projectless chat is out of this program (decision N9, user 2026-10-08; its own scoping epic). The composer is 760 wide here and in threads.
+- **Build notes:** `NewThreadStartColumn`, `ProjectSlotHeading`; composer max width `var(--container-reading)` via one constant replacing `PRIMARY_CONTENT_RAIL_CLASS` in `Composer.tsx:639` only (the message column belongs to section 05). Mount the canvas header on the new-thread surface (breadcrumb "{project} / New thread", top actions) so S03-07 can place the toggle; if Section 01 owns the header shell, consume it.
 - **Deletes:** `NewThreadWelcome`, `NEW_THREAD_STARTERS`, the logo on the new-thread canvas.
 - **Acceptance criteria:**
   - [ ] Heading type 32/40 600 −0.02em; slot `--color-primary` with a 2px dashed underline; slot opens the project chooser (S02-03; until then the existing chooser).

@@ -1,6 +1,6 @@
 # 10 · Review panel: build brief
 
-Review is the right-panel tab that shows one diff at a time. When this section ships, the tab has a two-row header with a names-only view menu. The menu lists six views: Turn (with a turn picker that follows the latest turn), All turns, Unstaged (now including untracked files), Staged, Commit, and Branch, where both sides are pickable. Every failure or limit shows its own state, and none of them pretends to be "No changes". A Files navigator docks at 800px and wider and opens as a popover below that, and it follows the file in view. Pierre headers show the file name first. Turn views get a per-file Revert icon. A floating Commit button opens a real Commit sheet: pick files, edit a message from the utility model, then commit, optionally pushing. Line comments persist as drafts. Surfaces: `apps/web` Review components and stores, `packages/contracts` git, turn-diff and annotation schemas, and the `apps/server` git, snapshot and turn-diff services. No provider adapter changes.
+Review is the right-panel tab that shows one diff at a time. When this section ships, the tab has a two-row header with a names-only view menu. The menu lists six views: Turn (with a turn picker that follows the latest turn), All turns, Unstaged (now including untracked files), Staged, Commit, and Branch, where both sides are pickable. Every failure or limit shows its own state, and none of them pretends to be "No changes". A Files navigator docks at 800px and wider and opens as a popover below that, and it follows the file in view. Pierre headers show the file name first. The Turn and All turns views get a per-file Revert icon, and a retried turn reads as one turn from its first attempt. A floating Commit button opens a real Commit sheet: pick files, edit a message from the utility model, then commit, optionally pushing. Line comments persist as drafts. Surfaces: `apps/web` Review components and stores, `packages/contracts` git, turn-diff and annotation schemas, and the `apps/server` git, snapshot and turn-diff services. No provider adapter changes.
 
 Paper page: https://app.paper.design/file/01M3V9R04VVSFTYQ76BRHHA83K/p-6-0
 
@@ -31,10 +31,11 @@ Exact values to copy (get_jsx, read 2026-10-08):
 
 From `source/screen-pass-todo.md` and `source/implementation-notes.md` ("Review (10)", "Diffs"). Dated 2026-10-07 unless noted.
 
-- **Header.** Row 1 holds the view picker, the diff stat, and the round expand and panel-toggle buttons in the caption overlay (F-05). Row 2 is fixed and always present: the view's operand on the left and round view controls on the right (refresh, unified/split pill, wrap, whitespace, Files). They never overlay the diff. Commit floats alone bottom-right. Wrap starts on.
+- **Header.** Row 1 holds the view picker, the diff stat, and the round expand and panel-toggle buttons in the caption overlay (F-05). Row 2 is fixed and always present: the view's operand on the left and round view controls on the right (refresh, unified/split pill, wrap, whitespace, the expand/collapse-all toggle, Files). They never overlay the diff. The toggle is not on 10a; the user kept Expand all and Collapse all as one row-2 icon (user, 2026-10-08, V8). Commit floats alone bottom-right. Wrap starts on.
 - **Views.** Last turn merges into Turn, which opens on the latest turn and reads "Turn 3 latest". The menu lists names only, in three groups split by dividers (Turn, All turns / Unstaged, Staged / Commit, Branch), with no labels, counts or operands. Unavailable views stay listed and dimmed, with the reason in a tooltip ("Nothing staged", "No commits ahead of origin/main"). A thread never defaults to an unavailable Branch view.
 - **Unstaged** includes untracked files, and the dirty probe must see them too.
-- **Revert file.** Turn views get an icon in the file header. It opens the 08 revert confirmation in place, scoped to one file. No staging, no discard in other views, no viewed state.
+- **Revert file.** The Turn view and the All turns view get an icon in the file header. It opens the 08 revert confirmation in place, scoped to one file. In All turns it reverts the file to before the earliest turn in the view's range (user, 2026-10-08, V7). No staging, no discard in the git views, no viewed state.
+- **Attempts are one turn** (user, 2026-10-08, E2). Retry and Resume replace the failed or interrupted attempt in the transcript. Review treats every attempt of one turn as that turn: its diff starts at the first attempt's baseline, so a failed attempt's partial edits still show.
 - **Commit is a real commit** and replaces the agent prefill.
   - The floating Commit opens a sheet listing every uncommitted file in the worktree, tracked and untracked. All are checked except new (untracked) files. The sheet has an "N of M files" select-all and per-file +/-.
   - The message is prefilled by `settings.model.utility` through `UtilityCompletionService`, the same path as PR drafts. It stays editable. The footer reads "Written by <utility model>" (a label, not a picker), with a round 28px regenerate button (tooltip "Regenerate message").
@@ -82,6 +83,14 @@ Paths are under `apps/web/src` unless they start with `apps/`, `packages/` or `d
 - Live evidence is discarded on each revision bump (`DiffPanel.tsx:405`), so Last turn flashes to loading. Verified.
 - TurnPicker ordinals count only turns with changes (`components/diff/TurnPicker.tsx:34-41`), and it mirrors the server's file-count rule on the client (`TurnPicker.tsx:18-24`).
 - Badges render in `LastTurnView.tsx:78`: "Agent changes", "Tracked file evidence", "Git fallback: same-file edits may appear". All turns shows a "New changes available" banner instead of refreshing (`CumulativeView.tsx:38`).
+- **Attempts (Retry and Resume).** Verified by reading:
+  - A retry is a new send. `TurnRecoveryService.retry` dispatches a `SendMessageCommand` with the accepted message's content and `retryOfExecutionId` (`apps/server/src/features/agents/recovery/turn-recovery-service.ts:91-111,144`). Admission gives it a new turn id (`turn-admission-dispatch-coordinator.ts:432`) and, unless the command carries `persistedUserMessage`, a new user message row (`:739-753`).
+  - Each canonical turn has exactly one execution (`canonical_agent_turns.execution_id` is unique, `runtime/persistence/sqlite/schema.ts:641`), so every attempt is its own turn row. Its trigger is always `{ kind: "user" }` (`canonical-agent-store.ts:2605`).
+  - The only trace of the retry is on the old execution: `consumeRetry` sets its checkpoint `phase` to `retried` in the replacement's start transaction (`canonical-parent-turn-lifecycle.ts:89,397-407`). Nothing records which execution replaced it.
+  - Snapshots are per assistant message, not per turn (`turn_snapshots.message_id`, `schema.ts:556-577`). The assistant row names its execution in `outcome_execution_id` (`schema.ts:359`, written at `turn-finalizer.ts:313` and `canonical-parent-turn-write.ts:490`).
+  - The finalizer writes a snapshot for every outcome, failed and stopped included, whenever both refs exist (`turn-finalizer.ts:518-531,576-614`). A native patch is kept only for a completed attempt (`canonical-parent-turn-write.ts:537`).
+  - An execution that a restart interrupts gets no snapshot: startup recovery projects the interruption only (`turn-recovery-service.ts:62-75`), and the baseline ref lived in memory (`turn-runtime-controller.ts:598-608`).
+  - Result: a retried turn's Turn view and changes bar start at the retry's own baseline, which already contains the failed attempt's edits, so those edits never show.
 
 **Snapshots**
 - Dirty-tree snapshots are `write-tree` output from a temporary index. Nothing references them (`snapshot-service.ts:386-418`). Clean-tree snapshots are `HEAD^{tree}` (`snapshot-service.ts:224-233`).
@@ -126,11 +135,12 @@ Paths are under `apps/web/src` unless they start with `apps/`, `packages/` or `d
 | Row 1: view picker, stat, expand, toggle | One wrapping toolbar row with a count pill (`DiffToolbar.tsx:293-322`) | Fill F-05's row 1 slot: picker plus "N files +A -D". Expand and toggle belong to F-05. | web |
 | View menu | Seven entries, two disabled with no reason, git views hidden off-git | Six names in three divider groups (F-04). Dimmed with a reason from `git.reviewState` and the turn list. | contracts, server, web |
 | Turn view "Turn 3 latest" | Separate Last turn and Turn. Ordinals count changed turns only. | One `turn` view with a follow-latest operand. Stable ordinals come from the server (`turnDiff.listTurns`). | contracts, server, web |
+| A retried or resumed turn is one turn | Each attempt is its own turn; the retry's diff starts at its own baseline, so the failed attempt's edits never show | The attempts of one turn are read as one range from the first attempt's baseline (Backend §3) | server, contracts, web |
 | Default view | Can land on an unavailable Branch | Turn (latest) if any turn changed files, else Unstaged if dirty, else Branch if available, else Unstaged | web |
 | Unstaged includes untracked | `git diff` only | Temporary intent-to-add index, copied from the real index or created empty only when no index exists. Files carry `untracked: true`. | server, contracts |
 | Dirty probe | `git diff --name-only` | `git.reviewState` reads `git status --porcelain=v2` | server, contracts, web |
 | Row 2 operand | Commit and Turn sit inline; Branch wraps to its own line (`DiffToolbar.tsx:589-613`) | Row 2 left: turn picker, commit picker, or the compare and base pickers | web |
-| Row 2 controls | Portaled from `FileList`, plus an options menu (Refresh, wrap, expand all) | A fixed row of refresh, unified/split pill, wrap, whitespace and Files. The options menu and expand all go away. | web |
+| Row 2 controls | Portaled from `FileList`, plus an options menu (Refresh, wrap, expand all) | A fixed row of refresh, unified/split pill, wrap, whitespace, the expand/collapse-all toggle and Files. The options menu goes away; its Expand all and Collapse all item becomes the toggle. | web |
 | Refresh everywhere | Lost when empty or errored. Blocked in Commit. | Always in row 2, in every view and state | web |
 | Commit picker | 100 per page, filters loaded commits | `git.searchCommits`: server search and paging, "N matches in M commits" | contracts, server, web |
 | Branch pickers | Current-branch chip plus one combobox, with a swap | `compare → base`, both pickable, Local / Origin tabs over S03-04's qualified-ref listing with the Review purpose. Local and origin twins stay separate refs. The contract is renamed so the swap goes away. | contracts, server, web |
@@ -142,7 +152,7 @@ Paths are under `apps/web/src` unless they start with `apps/`, `packages/` or `d
 | Scroll-spy, rail order | Click only; two different orders | `CodeView.onScroll` plus one shared order for tree, diff and sheet | web |
 | Filename-first header | Pierre default (full path, rtl ellipsis) | `renderCustomHeader` with Mcode actions | web |
 | Ligatures off | On | `unsafeCSS` font features off | web |
-| Revert file | None | Header icon (Turn view) that opens the S08 confirm inset | web (server owned by S08) |
+| Revert file | None | Header icon in the Turn and All turns views that opens the S08 confirm inset. In All turns it covers the view's range of turns. | web (server owned by S08) |
 | Floating Commit and sheet | Prefill "Commit and push the current changes." | `git.generateCommitMessage` and `git.commit` (+push) as a durable commit request that reconciles after a lost response or restart. Sheet UI. Prefill removed. | contracts, server, web |
 | Comments persist, limit, mentions | In memory, mentions dropped, 4,000 vs 100,000 | The persisted `ComposerDraft` becomes the one next-message draft store (Review, Files and Browser comments, plan-comment selection, staged snapshots). One limit. `mentions` on the payload. | contracts, web, server |
 | Evidence badges, stale banner | Badges plus the "New changes available" banner | Not drawn. Proposal: drop both, keep a Git-fallback info icon (Q6), refresh All turns in place. | web |
@@ -215,11 +225,12 @@ This is one cheap call:
 
 It replaces the three client probes and the thread overview's probes (`ThreadOverview.tsx:907-950`, `1312-1313`). It is refetched on `diffRevision` bumps and when the view menu opens, as the probes are today. It is also the dirty signal for ADR-0011, the source of Commit-button visibility (`staged + unstaged + untracked > 0`), and the source of the Commit sheet's `expectedHead`.
 
-### 3. Turn list (S10-03)
+### 3. Turn list and attempts (S10-03)
 
 ```ts
 "turnDiff.listTurns": { params: { threadId },
-  result: Array<{ messageId: string; ordinal: number;          // 1-based among the thread's user turns, stable after expiry
+  result: Array<{ messageId: string;                           // the turn's latest attempt's assistant message
+                  ordinal: number;                             // 1-based among the thread's turns (attempts share one), stable after expiry
                   createdAt: string; phase: "live" | "settled";
                   fileCount: number; additions: number | null; deletions: number | null;
                   evidence: "native" | "tracked" | "git" | null;
@@ -229,6 +240,17 @@ It replaces the three client probes and the thread overview's probes (`ThreadOve
 - The server owns the rendered-file rule. TurnPicker stops mirroring it (`TurnPicker.tsx:18-24`).
 - Ordinals come from message order, not snapshot rows, so a turn whose snapshot expired keeps its number. The message-ordering query is not designed yet; the turn repository is the likely home, but I have not confirmed it.
 - Pruned detection stays lazy, done in `getComparison`, to avoid one `cat-file` per row.
+
+**Attempts of one turn (E2, user 2026-10-08).** A turn in Review is one user turn and every attempt that ran it: the first attempt plus each replacement that Retry or Resume started with `retryOfExecutionId` (section 08f, Backend H). Today nothing groups them (How it works today, Turns).
+
+- **The link** is the one section 08f defines (Backend H, Attempts): `AgentTurn.attemptOf`, the turn id of the first attempt (null on a first attempt, so chains stay flat), stored in a nullable, indexed `attempt_of` column on `canonical_agent_turns` (`schema.ts:623-644`). S10-03 adds it, because Review needs it long before section 08f's Retry lands: the parent start derives it whenever `retryOfExecutionId` is set, as the replaced turn's `attemptOf` or, when that is null, its id, in the same transaction as `consumeRetry` (`canonical-parent-turn-lifecycle.ts:78-99,397-407`). Today's incident retry already passes `retryOfExecutionId`, and so do section 08f's Retry and Resume, so every caller gets the link without setting it. The transcript rule reads the same field; there is no second link. A snapshot row maps to its attempt through its assistant message's `outcome_execution_id` and the unique `execution_id` of the turn (`schema.ts:641`); its turn key is that turn's `attempt_of`, or its id.
+- **The range.** New `diffs/snapshots/turn-snapshot-range.ts` exports `turnSnapshotRange(threadId, messageId, fromMessageId?)`. It resolves `messageId` to its turn key and returns the range rows: each earlier attempt row that attributes at least one path, then the latest attempt's row when it has one. `refBefore` is the first row's `ref_before`, `refAfter` the last row's `ref_after`, and the paths are `collectAttributedWorkspacePathGroups(rows)` (`snapshot-attribution.ts:58-68`), the helpers All turns already uses (`snapshot-rpc.ts:103-144`). With `fromMessageId` it returns every turn from that one through `messageId`'s, each turn whole (S08-03's All turns revert). An earlier attempt that attributed nothing does not join, so a retry after a failure that edited nothing reads exactly as today. A row whose message has no `outcome_execution_id` (legacy) is a one-attempt turn.
+- **Readers.** Every read keyed by one turn goes through the range: `turnDiff.getComparison`, `turnDiff.getFileDiff`, `turnDiff.listTurns`, `snapshot.getDiff` and `snapshot.getDiffStats` (a snapshot id means that row's turn), S08-03's revert preview and apply, and S08-08's `afterSequence` filter. Any attempt's message id or snapshot id resolves to the same turn. A one-row range reads exactly as today.
+- **Evidence.** A range of two or more rows is git evidence over `refBefore..refAfter`: names, kinds and counts come from `getDiffStats` over the range. The latest attempt's native patch (`turn-diff-rpc.ts:49` prefers it today) and its `file_effects` counts cover that attempt only, so neither is used for such a turn.
+- **`attempt_count`.** `TurnSnapshot` on `snapshot.listByThread` gains `attempt_count: number`, the number of rows in that row's range. It is 1 for a turn that was never retried, or was retried after an attempt that edited nothing. The changes bar (S08-02) reads it.
+- **Turn list.** One entry per turn, keyed by the latest attempt's assistant message. A replacement never takes a new ordinal, and a user message row that a replacement adds does not count. For a range turn, `fileCount` is the size of the path union and `additions` and `deletions` are null; the comparison read fills them.
+- **Live.** While a replacement runs, the Turn view's live evidence covers the running attempt only. The range applies once it settles.
+- **Restart.** An attempt that a restart interrupted has no snapshot today. S10-12 writes one at startup from its pinned baseline (section 6), so Resume after "Mcode closed" keeps the interrupted attempt's edits in the range.
 
 ### 4. Branch refs and commit search (S10-05)
 
@@ -346,13 +368,14 @@ Refs live in the repository's common git dir, so every linked worktree and every
 
 - **Store id.** A one-row table `store_identity (store_id TEXT NOT NULL, database_path TEXT NOT NULL, created_at TEXT NOT NULL)` holds a UUID minted on first start. At every start the server compares the normalized real path of the open database file with `database_path`. When they differ the file was copied, for example by `agent:setup`'s SQLite backup into a worktree, so the server mints a new `store_id` and records the new path. A cloned development database therefore never shares an owner with the live app. Every Mcode ref lives under `refs/mcode/<storeId>/`.
 - **Captures under the lock.** Every snapshot capture (`turn-runtime-controller.ts:598-608`, `turn-file-effects.ts:158`, `turn-execution-file-evidence.ts:81`, `turn-finalizer.ts:556`) moves inside `RepositoryGitMutationLock.run(cwd)`, so a capture and its pin never interleave with a revert or a commit on the same checkout (section 08 relies on this ordering).
-- **Baseline pin at capture.** Every turn-start capture (`turn-runtime-controller.ts:598-608`, `turn-file-effects.ts:158`) pins its tree as soon as it exists, inside the same lock: `B = git commit-tree <ref_before>`, then `git update-ref refs/mcode/<storeId>/baselines/<threadId>/<ref_before> B`. Clean baselines (`HEAD^{tree}`) are pinned too, because HEAD can be rebased away during a turn. The pin survives a restart, so a turn that recovery resumes or finalizes later still has its baseline.
+- **Baseline pin at capture.** Every turn-start capture (`turn-runtime-controller.ts:598-608`, `turn-file-effects.ts:158`) pins its tree as soon as it exists, inside the same lock: `B = git commit-tree <ref_before>`, then `git update-ref refs/mcode/<storeId>/baselines/<threadId>/<executionId> B`. The pin is named by the admitted execution so that startup can find an interrupted attempt's baseline. The id is in scope at both sites: `execution.executionId` at the worker site (`turn-runtime-controller.ts:596`), and `lease.turnExecutionId` at the `ensureTurnFileTracking` call that reaches `turn-file-effects.ts:158` (`turn-runtime-controller.ts:579`). A provider-originated generation with no admitted execution (`beginResumed`, `turn-file-effects.ts:57-60`) names its pin by its tree instead. Clean baselines (`HEAD^{tree}`) are pinned too, because HEAD can be rebased away during a turn. The pin survives a restart.
+- **Snapshot for an attempt a restart interrupted.** Startup recovery projects the interruption but writes no snapshot (`turn-recovery-service.ts:62-75`). After `reconcileOnStartup` (`server-bootstrap.ts:563`) and before the sweep, take each execution it returns in `interrupted` that has a baseline pin, an assistant row (its `outcome_execution_id`, set at `canonical-parent-turn-lifecycle.ts:254`) and no snapshot row. Under the lock, capture `ref_after`, write the snapshot through `persistTurnSnapshot` with `files_changed` from `git diff --name-only` and no file effects (the tracker's effects lived in memory), then move the baseline pin into a snapshot pin as finalization does. Edits made while Mcode was closed land in this snapshot, the same limit as any git-fallback turn. An attempt with no assistant row recorded no tool calls (recovered narrative requires one, `canonical-parent-turn-lifecycle.ts:217-218`), so it gets no snapshot. This row is what keeps an interrupted attempt's edits in S10-03's range after Resume.
 - **Snapshot pin at finalization.** After the snapshot row persists (`writeTurnSnapshot`, `turn-finalizer.ts:584-614`), `A = git commit-tree <ref_after> -p B` (B is the baseline commit, recreated if its ref is missing), then `git update-ref refs/mcode/<storeId>/snapshots/<snapshotId> A`, then `update-ref -d` the baseline ref. A turn that writes no snapshot releases its baseline ref at finalization.
 - **Identity.** Use a fixed `GIT_AUTHOR_*` and `GIT_COMMITTER_*` (`Mcode`, `mcode@localhost`) so a repo without `user.email` works. T3 Code pins its checkpoints the same way under `refs/t3/checkpoints` (`.opensrc/…/t3code/main/apps/server/src/vcs/GitVcsDriverCore.ts:1037-1072`; read-only prior art).
 - **Sweep.** It runs at startup, after `removeExpiredSnapshots` (`server-bootstrap.ts:610-616`) and after turn recovery has settled or resumed interrupted turns, and again after `snapshot.cleanup`. For each repo this database knows, it runs `for-each-ref refs/mcode/<storeId>/` only:
   - `snapshots/<id>` with no row: `update-ref -d`.
   - A row whose trees still validate but has no pin in this namespace, including rows inherited from a copied database: pin it (backfill).
-  - `baselines/<threadId>/*` whose thread has no running or resumable turn: `update-ref -d`.
+  - `baselines/<threadId>/<executionId>` whose execution is not running, and a tree-named baseline whose thread has no running turn: `update-ref -d`. At startup this runs after the step above, so every usable interrupted baseline is already a snapshot pin.
   - `reverts/*`: S08-03's rules (section 08, Backend §4).
 
   Never list, read or delete refs under another store id.
@@ -416,6 +439,7 @@ type DraftSubmission = {
 |---|---|---|---|---|---|---|
 | Comparisons, states, pickers, Files, header | no change | no change | no change | no change | no change | no change |
 | Turn list and turn outcomes | no change; evidence source is already provider-neutral | no change | no change | no change | no change | no change |
+| Retried turn read as one range | no change; attempts are grouped from Mcode's own records. A range turn uses git evidence, so an adapter's native patch (kept only for a completed attempt) is not shown for it. | same | same | same | same | same |
 | Revert file | no change (S08 operation works on snapshots) | no change | no change | no change | no change | no change |
 | Commit message | no change; utility model through `UtilityCompletionService`, independent of the thread's provider | no change | no change | no change | no change | no change |
 | Comment drafts and mentions | no change; rides the existing annotation bundle | no change | no change | no change | no change | no change |
@@ -431,12 +455,12 @@ type DraftSubmission = {
   - Branch: "No commits yet" when unborn, "No branch to compare against" when there is no base.
   - Any git view in a non-git workspace: "Not a git repository". Unstaged is never dimmed in a git repo.
 - `ReviewStatSummary`: "N files +A -D" for row 1, hidden while loading or empty.
-- `ReviewControlsRow`: fixed row 2. The operand slot is on the left and `ReviewViewControls` on the right: refresh, unified/split pill, wrap, whitespace (S10-13), and Files. All controls are F-03 round buttons.
+- `ReviewControlsRow`: fixed row 2. The operand slot is on the left and `ReviewViewControls` on the right: refresh, unified/split pill, wrap, whitespace (S10-13), the expand/collapse-all toggle, and Files. All controls are F-03 round buttons. The toggle shows Lucide `chevrons-down-up` with the tooltip "Collapse all" when files are expanded, else `chevrons-up-down` with "Expand all". "Expanded" means the last `bulkDiffExpand` command, else the view's default, as `FileList.tsx:130` decides today. Clicking it calls `setBulkDiffExpand` (`stores/diffStore.ts:1046-1047`), which `ReviewDiffView` already applies (`ReviewDiffView.tsx:365-374`). Its place between whitespace and Files is proposed; 10a does not draw it.
 - `TurnOperandPicker`: "Turn N" plus a muted "latest" while following, opening an F-04 picker over `turnDiff.listTurns` (turns with changes, plus the latest turn). The store keeps `selectedTurnByThread: "latest" | messageId`. Choosing the newest row sets `"latest"`.
 - `CommitOperandPicker`: the 10e Commit picker (sha 56w mono muted, subject with F-02 fade, relative time, check) over `git.searchCommits`, with footer "N matches in M commits".
 - `BranchOperandPickers`: `compare ⌄ → base ⌄`, each an F-04 picker with Local / Origin tabs over S03-04's qualified-ref listing (Review purpose). Selections are full ref names. The last tab per side is remembered in session memory. The empty list offers "N in Origin" when the other side has matches.
 - `ReviewStateBody`: the 10c bodies (loading pulse, empty, couldn't load with Details that expand raw output in place with Copy, too many files, turn gone), driven by `ReviewComparisonResult`.
-- `ReviewFileHeader`: the Pierre `renderCustomHeader` with chevron, change icon, name, faded folder, `-N +N`, and actions (copy path, open in editor, revert in the Turn view, plus the existing markdown preview toggle, which is not drawn but kept). Actions show only on expanded files, as today.
+- `ReviewFileHeader`: the Pierre `renderCustomHeader` with chevron, change icon, name, faded folder, `-N +N`, and actions (copy path, open in editor, revert in the Turn and All turns views, plus the existing markdown preview toggle, which is not drawn but kept). Actions show only on expanded files, as today.
 - `FilesNavigator`: the filter row (F-04 search row) and tree, built from one shared order. It has two hosts: `FilesDockedPane` (FilesPanel 320, 280–480) and `FilesPopover` (300w, anchored under Files, closes on pick or Esc).
 - `useReviewScrollSpy(viewerRef, orderedPaths)`: `onScroll` throttled to one update per animation frame. It binary-searches `getTopForItem` to find the active path. Jumps set the active path immediately.
 - `lib/review-file-order.ts`: `orderReviewFiles(files)`, the depth-first order of `buildPullRequestFileTree` (folders first, numeric). The diff, the tree and the Commit sheet all use it.
@@ -473,7 +497,6 @@ type DraftSubmission = {
 | `last-turn` view, "Last turn" label, `LastTurnView`, `LastTurnComparisonView`, evidence badges | `lib/review-views.ts:60`, `stores/diffStore.ts:40,721`, `LastTurnView.tsx`, `DiffPanel.tsx:1032-1062` | Turn view following the latest turn | S10-04 | `rg -n "last-turn\|Last turn\|LastTurnView\|Tracked file evidence\|Agent changes" apps/web/src CONTEXT.md docs/internals` returns nothing |
 | Old view dropdown and count pill (`ReviewViewMenu`, `ReviewFileCount`, `reviewFileCount` and `setReviewFileCount`) | `DiffToolbar.tsx:375-440`, `FileList.tsx:110-117`, `stores/diffStore.ts:509` | F-04 `ReviewViewMenu`, `ReviewStatSummary` | S10-04 | `rg -n "ReviewFileCount\|reviewFileCount\|review-file-count" apps/web/src` returns nothing |
 | Toolbar portal (`ReviewToolbarSlotContext`, `controlsSlotRef`, `review-file-controls-slot`), `FileListToolbar`, `ReviewOptionsMenu`, `RenderModeToggle`, `FilesToggle` | `components/diff/review-toolbar-slot.ts`, `FileList.tsx:279-450`, `540-577` | `ReviewControlsRow` | S10-04 | `rg -n "ReviewToolbarSlotContext\|ReviewOptionsMenu\|review-file-controls-slot\|FileListToolbar" apps/web/src` returns nothing |
-| Expand/Collapse all (`bulkDiffExpand`, `setBulkDiffExpand`) | `stores/diffStore.ts:513`, `ReviewDiffView.tsx:279` | nothing (not in design; Q9) | S10-04 | `rg -n -a "bulkDiffExpand" apps/web/src` returns nothing (`-a`: `ReviewDiffView.tsx` contains NUL bytes, so plain `rg` skips it as binary) |
 | `ReviewActions` in Review | `components/diff/ReviewActions.tsx` | Create PR stays in the overview and header; Commit becomes the floating sheet (S10-09) | S10-04 | `rg -n "ReviewActions" apps/web/src` returns nothing |
 | `DiffToolbar` | `components/diff/DiffToolbar.tsx` | F-05 row 1 content plus `ReviewControlsRow` | S10-04 | `rg -n "DiffToolbar" apps/web/src` returns nothing |
 | Single-side branch picker (`CurrentRefChip`, `RefCombobox`, `normalizeToCurrentComparison`), client swap `getBranchRange`, `BranchComparison.target` and `.refs`, `setBranchBase` and `setBranchTarget` semantics | `BranchRefPicker.tsx`, `DiffPanel.tsx:510-515`, `packages/contracts/src/git.ts:57-71` | `BranchOperandPickers`, `{compare, base}`, S03-04's qualified-ref listing | S10-05 | `rg -n "normalizeToCurrentComparison\|getBranchRange\|CurrentRefChip\|branchComparison\.target" apps/web/src apps/server/src packages/contracts/src` returns nothing |
@@ -537,8 +560,10 @@ type DraftSubmission = {
   - An expired or pruned turn says "Turn 1's changes are gone".
   - Empty views name what is empty.
   - All turns refreshes in place.
+  - A retried or resumed turn reads as one turn with one number. Its Turn view starts at the first attempt's baseline, so a failed attempt's partial edits still show (E2).
 - **Build notes:**
   - `ReviewComparisonResult` on `git.reviewComparison`, `turnDiff.getComparison` and the cumulative reads. Strict path resolution. The typed cap error, plus `--shortstat` for the true count. `validateRef` for pruned snapshots. `turnDiff.listTurns` with stable ordinals.
+  - Attempts (Backend §3, "Attempts of one turn"): `AgentTurn.attemptOf` in `packages/agent-model/src/records.ts:84-101`, the `attempt_of` column with its index and migration, and its derivation in the parent start from `retryOfExecutionId`; `turnSnapshotRange` with its optional `fromMessageId`; every reader listed there; git evidence for a range turn; `attempt_count` on `TurnSnapshot`; one `listTurns` entry per turn. It works with today's incident retry (`TurnRecoveryService.retry`), so it does not wait for section 08f. S08F-05 Retry and S08F-06 Resume pass `retryOfExecutionId` (08f Backend H), so their attempts get `attemptOf` with no further work, and their transcript rule reads it.
   - Web: `ReviewStateBody`. `DiffPanel` maps the status to a body, and the pulse waits for the result.
   - Empty copy:
     - Turn: "No file changes in Turn N" / "The agent answered without editing files".
@@ -556,7 +581,12 @@ type DraftSubmission = {
   - [ ] A message without a snapshot row returns `snapshot-expired`. A snapshot whose tree fails `cat-file -t` returns `snapshot-pruned`.
   - [ ] A thread whose worktree folder was deleted returns `worktree-missing`, not a read of the workspace root.
   - [ ] No code path renders a failure as "No changes".
-- **Verify:** Extend `git-comparison-service.test.ts` and `diffs/transport/__tests__/snapshot-rpc.test.ts`, and add `turn-diff-rpc.test.ts`. Web: extend `GitDiffView.test.tsx` and `DiffPanel.files.test.tsx` per status. Live: point a fixture thread's Branch base at a bad ref and see Couldn't load and Retry. Delete a worktree folder and see Couldn't load.
+  - [ ] A replacement's start stores `attemptOf` = the first attempt's turn id in the same transaction that marks the replaced checkpoint `retried`; a replacement of a replacement stores the same id. A start that fails writes neither.
+  - [ ] In a real repo, attempt 1 edits `a.ts` and `b.ts`, then fails; its replacement edits `b.ts` and `c.ts` and completes with a native patch. `turnDiff.getComparison` for either attempt's message lists `a.ts`, `b.ts` and `c.ts` as git evidence, with counts from attempt 1's `ref_before` to the replacement's `ref_after`. `snapshot.getDiffStats` for either row returns the same files, and both rows carry `attempt_count: 2`.
+  - [ ] Failed, failed again, then completed: the range starts at the first attempt.
+  - [ ] A failed attempt that edited nothing does not join: the replacement reads exactly as its own snapshot, native patch included, with `attempt_count: 1`.
+  - [ ] `turnDiff.listTurns` lists the retried turn once, keyed by the replacement's message, with the first attempt's ordinal. The next turn's ordinal does not move.
+- **Verify:** Extend `git-comparison-service.test.ts` and `diffs/transport/__tests__/snapshot-rpc.test.ts`, and add `turn-diff-rpc.test.ts`. Attempts: new `diffs/snapshots/__tests__/turn-snapshot-range.integration.test.ts` (real git in a temp repo, snapshot rows linked through checkpoints; prior art `snapshot-service.integration.test.ts`), and extend `agents/recovery/__tests__/turn-recovery-service.test.ts` for `attemptOf` (prior art: its `retried` phase assertion at `:689`). Web: extend `GitDiffView.test.tsx` and `DiffPanel.files.test.tsx` per status. Live: point a fixture thread's Branch base at a bad ref and see Couldn't load and Retry. Delete a worktree folder and see Couldn't load.
 
 ### S10-04 Two-row header, names-only view menu, merged Turn view
 
@@ -564,7 +594,8 @@ type DraftSubmission = {
 - **Boards:** 10a `2241-2`, 10b `2DV5-2`, 08c-2 `2D33-2` (Commit row; Branch row comes in S10-05)
 - **Delivers:**
   - Row 1 reads "Turn ⌄ · 2 files +10 -10".
-  - Row 2 holds the operand (left) and refresh, unified/split, wrap and Files (right), in every view and state.
+  - Row 2 holds the operand (left) and refresh, unified/split, wrap, the expand/collapse-all toggle and Files (right), in every view and state.
+  - The toggle reads "Collapse all" (`chevrons-down-up`) while files are expanded and "Expand all" (`chevrons-up-down`) otherwise, and expands or collapses every file in the diff (V8).
   - The menu has six names in three groups. Unavailable views are dimmed with a tooltip reason.
   - Turn opens on "Turn N latest" and follows new turns, including live ones, without flashing to loading. Picking an older turn pins it.
   - The default never lands on an unavailable view.
@@ -576,6 +607,7 @@ type DraftSubmission = {
   - The ADR-0011 default goes through `defaultReviewView(scope, changeState, availability)`.
   - `TurnChangeSummary` pins its messageId.
   - The whitespace slot stays empty until S10-13.
+  - The expand/collapse-all toggle keeps `bulkDiffExpand` and `setBulkDiffExpand` (`stores/diffStore.ts:513,1046-1047`) and moves the state that `FileList` computes for the options menu item (`FileList.tsx:128-130,208`) into `ReviewControlsRow` (Components). The options menu itself goes with the other S10-04 ledger rows.
   - Update `CONTEXT.md` (Review tab, Turn view, Last turn removed) and `docs/internals/review/turn-diff-review.md`.
 - **Deletes:** ledger rows S10-04.
 - **Acceptance criteria:**
@@ -584,7 +616,8 @@ type DraftSubmission = {
   - [ ] Row 2 stays 40px and Refresh stays visible in loading, empty, error and too-many states.
   - [ ] When a new turn starts while the view follows the latest turn, the view moves to it and keeps the previous diff on screen until the new one settles.
   - [ ] Wrap starts on. The unified/split pill shows the active segment filled.
-- **Verify:** New `lib/__tests__/review-views.test.ts`. Extend `TurnPicker.test.tsx` (follow and pin, ordinals) and `DiffPanel.files.test.tsx`. Live: Electron live-testing skill on a fixture thread with three turns. Compare row 1 and row 2 against 10a and the menu against 10b. Take screenshots before and after.
+  - [ ] With three files, the toggle collapses all three, then expands all three, and its icon and tooltip follow. It is present in every view, including empty and error states.
+- **Verify:** New `lib/__tests__/review-views.test.ts`. Extend `TurnPicker.test.tsx` (follow and pin, ordinals) and `DiffPanel.files.test.tsx` (the toggle; prior art for the bulk command: `ReviewDiffView.refresh.test.tsx`). Live: Electron live-testing skill on a fixture thread with three turns. Compare row 1 and row 2 against 10a and the menu against 10b. Take screenshots before and after.
 
 ### S10-05 Commit and Branch pickers with server search and paging
 
@@ -616,7 +649,7 @@ type DraftSubmission = {
 - **Blocked by:** S10-02 Comparison data: per-file counts, untracked in Unstaged, review state probe; S10-04 Two-row header, names-only view menu, merged Turn view; F-01b Token vocabulary rename; F-02 Fade truncation primitive.
 - **Boards:** 10a `2241-2`, 08c-3 `24OA-2`
 - **Delivers:**
-  - Each file header reads `▾ ⧈ ThreadActionsMenu.tsx apps/web/src/features/thread-actions… -9 +4` with copy, open and (Turn) revert slots.
+  - Each file header reads `▾ ⧈ ThreadActionsMenu.tsx apps/web/src/features/thread-actions… -9 +4` with copy, open and revert slots (revert only in the Turn and All turns views).
   - Collapsed files still show their counts.
   - `=>` renders as two glyphs.
   - "17 unmodified lines" bands run edge to edge.
@@ -718,23 +751,37 @@ type DraftSubmission = {
   - [ ] A dropped connection during Commit resends the same `requestId`; the sheet shows one commit and its push result.
 - **Verify:** New `components/diff/__tests__/CommitSheet.test.tsx`. Update `HeaderActions.test.tsx` and `useThreadGitActions.branchless-pr.test.tsx`. Live: in the fixture repo, edit two files, add one, and commit two. Then add `.git/hooks/pre-commit` that exits 1 and see the failure. Video for the PR.
 
-### S10-10 Revert file in the Turn view
+### S10-10 Revert file in the Turn and All turns views
 
 - **Blocked by:** S08-03 Turn revert server operation (preview, apply, undo); S08-04 Revert this turn: menu item, inline confirm, receipt with Undo; S10-06 Diff presentation: filename-first header, ligatures off, full-width bands.
-- **Boards:** 10a `2241-2`, 10c `2E31-2` ("Revert file")
+- **Boards:** 10a `2241-2`, 10c `2E31-2` ("Revert file"). The All turns variant has no board; its copy below is proposed.
 - **Delivers:**
-  - In the Turn view, each expanded file header has a Revert icon (tooltip "Revert file").
-  - It opens S08's confirm inset under the header: "Revert ThreadActionsMenu.tsx to before Turn 3? / Only this file changes. The turn's other edits stay." with Cancel and Revert.
-  - On success the inset closes and the conversation shows S08's receipt. On `stale` the inset re-renders from the fresh preview; on `failed` it shows S08's copy for that outcome in place.
-- **Build notes:** Web only, through S08-04's `useTurnRevert` and `RevertConfirm`. It calls S08-03's `turn.revert.preview { threadId, messageId, scope: { kind: "file", path } }`, then `turn.revert.apply { threadId, messageId, scope, previewToken, requestId }` with the token from that preview and a new `requestId` per Revert click. `useTurnRevert` keeps the `requestId` until a result arrives and resends it after a reconnect; Retry is a new click with a new id. The receipt's Undo is S08's. Pinning (S10-12) protects the baseline. All turns and git views have no icon (Q8).
+  - In the Turn view and the All turns view, each expanded file header has the same Revert icon as 10a (tooltip "Revert file"). Since you looked and the git views have none.
+  - Turn view: it opens S08's confirm inset under the header: "Revert ThreadActionsMenu.tsx to before Turn 3? / Only this file changes. The turn's other edits stay." with Cancel and Revert. For a retried turn, "before Turn 3" means before its first attempt (E2).
+  - All turns (V7): it reverts the file to before the earliest turn in the view's range, which is the earliest turn whose snapshot All turns still has. Proposed copy for the 10c inset:
+    - Title: "Revert ThreadActionsMenu.tsx to before Turn 1?"
+    - Body: "Only this file changes. Its changes from Turns 1–5 are undone, and other files stay."
+    - A change after the range adds S08's sentence in its range form: "ThreadActionsMenu.tsx changed after Turn 5. Reverting removes those changes too."
+    - When the range holds one turn, the Turn view copy is used.
+  - The receipt names the file: "↶ Reverted ThreadActionsMenu.tsx · Turn 3" from the Turn view, "↶ Reverted ThreadActionsMenu.tsx · Turns 1–5" from All turns, each with S08's Undo (proposed copy).
+  - On success the inset closes and the conversation shows the receipt. On `stale` the inset re-renders from the fresh preview; on `failed` it shows S08's copy for that outcome in place.
+- **Build notes:** Web only, through S08-04's `useTurnRevert` and `RevertConfirm`.
+  - Turn view: S08-03's `turn.revert.preview { threadId, messageId, scope: { kind: "file", path } }`, then `turn.revert.apply { threadId, messageId, scope, previewToken, requestId }`.
+  - All turns: the same calls with `scope: { kind: "file", path, fromMessageId }`. `fromMessageId` is the `message_id` of the first and `messageId` that of the last `snapshot.listByThread` row with both refs, the rows the All turns comparison covers (`snapshot-rpc.ts:152-156`). The server expands both ends to whole turns, so a range that starts or ends with a retried turn covers all its attempts. Ordinals for the copy come from `turnDiff.listTurns`.
+  - Both use the token from that preview and a new `requestId` per Revert click. `useTurnRevert` keeps the `requestId` until a result arrives and resends it after a reconnect; Retry is a new click with a new id. The receipt's Undo is S08's.
+  - Extend S08-04's `TurnRevertReceipt` with the file and range labels, read from the record's `path` and `fromMessageId`.
+  - Pinning (S10-12) protects the baselines.
 - **Deletes:** none.
 - **Acceptance criteria:**
-  - [ ] The icon appears only in the Turn view.
+  - [ ] The icon appears in the Turn and All turns views only.
   - [ ] Cancel leaves the file untouched.
   - [ ] Revert changes only that file in the worktree.
   - [ ] Two clicks on Revert for the same file, with an Undo between them, send two different `requestId`s and revert twice.
+  - [ ] All turns over Turns 1–3, where Turns 1 and 3 edit `a.ts`: the inset reads "Revert a.ts to before Turn 1?" with the range body, apply sends `fromMessageId` = Turn 1's message and `messageId` = Turn 3's, `a.ts` returns to its content before Turn 1, and no other file changes. The receipt reads "Reverted a.ts · Turns 1–3", and Undo restores the bytes from after Turn 3.
+  - [ ] A thread with one turn shows the Turn view copy in All turns.
+  - [ ] In the Turn view of a retried turn, reverting a file that only the failed attempt edited restores it to its content before the first attempt.
   - [ ] The inset is keyboard reachable, and Esc cancels.
-- **Verify:** Component test beside `FileActionBar.test.tsx`. Live: revert one file of a two-file fixture turn and check `git status`.
+- **Verify:** Component test beside `FileActionBar.test.tsx`, covering both views and both receipt labels. Live: revert one file of a two-file fixture turn and check `git status`. Then have two turns edit the same fixture file, revert it from All turns, check that it matches its content before the first turn, and Undo.
 
 ### S10-11 Comment drafts persist, one limit, mentions kept
 
@@ -773,23 +820,25 @@ type DraftSubmission = {
 - **Blocked by:** None (can start immediately).
 - **Reconciled:** Owns snapshot pinning for every section, namespaced by the owning database: `refs/mcode/<storeId>/snapshots/<id>` (a cloned dev database gets its own storeId). Sweep only refs under this store's namespace. Pin the dirty pre-turn baseline when it is captured, not at finalization. S08-03 adds `reverts/` beside it.
 - **Boards:** 10c `2E31-2` ("Turn no longer available", pruned case becomes rare)
-- **Delivers:** Turn diffs, revert baselines and the baseline of a turn still running stay readable for the full 30-day retention, even after `git gc --prune=now`. Each runtime database pins and sweeps only its own refs, so a development clone can never delete the live app's pins.
-- **Build notes:** Section 6. New `apps/server/src/features/projects/diffs/snapshots/snapshot-ref-pins.ts` (store id, baseline, snapshot and sweep helpers; S08-03 adds its `reverts/` helpers here). The `store_identity` table and migration. Move all four snapshot capture sites inside the repo mutation lock, pin baselines there at the two turn-start sites, transfer or release them in `writeTurnSnapshot`, and run the sweep after `removeExpiredSnapshots`, after turn recovery and after `snapshot.cleanup`. Document the namespace, the clone rule and `git log --all` visibility in `docs/internals/review/turn-diff-review.md`.
+- **Delivers:** Turn diffs, revert baselines and the baseline of a turn still running stay readable for the full 30-day retention, even after `git gc --prune=now`. Each runtime database pins and sweeps only its own refs, so a development clone can never delete the live app's pins. An attempt that a restart interrupted keeps a snapshot, so its edits stay reviewable and, after Resume, stay in the turn (E2).
+- **Build notes:** Section 6. New `apps/server/src/features/projects/diffs/snapshots/snapshot-ref-pins.ts` (store id, baseline, snapshot and sweep helpers; S08-03 adds its `reverts/` helpers here). The `store_identity` table and migration. Move all four snapshot capture sites inside the repo mutation lock, pin baselines there at the two turn-start sites under the execution id, transfer or release them in `writeTurnSnapshot`, and run the sweep after `removeExpiredSnapshots`, after turn recovery and after `snapshot.cleanup`. At startup, write the snapshot of each attempt that `reconcileOnStartup` interrupted (section 6, "Snapshot for an attempt a restart interrupted") before the sweep runs. Document the namespace, the clone rule and `git log --all` visibility in `docs/internals/review/turn-diff-review.md`.
 - **Deletes:** none.
 - **Acceptance criteria:**
   - [ ] After `git gc --prune=now`, a pinned dirty-tree snapshot still diffs.
   - [ ] A dirty baseline survives `git gc --prune=now` while its turn is still running, and survives a server restart before finalization. Finalization moves it into the snapshot pin and deletes the baseline ref. A turn that writes no snapshot releases it.
+  - [ ] Baseline pins are named `baselines/<threadId>/<executionId>`.
+  - [ ] Restart: a turn that edited `a.ts` is interrupted by a server restart (a fresh service on the same database and repo). Startup writes a snapshot row for that attempt on its assistant message, with the pinned baseline as `ref_before`, a startup capture as `ref_after` and `a.ts` in `files_changed`, and replaces the baseline pin with a snapshot pin. The row still diffs after `git gc --prune=now`.
+  - [ ] An interrupted attempt that already has a snapshot row, or has no assistant row, gets no new row, and the sweep then deletes its baseline pin.
   - [ ] Two databases with different store ids share one repo and a linked worktree. Either one's sweep deletes only its own orphaned refs, and every ref under the other store's id survives, including hand-made `reverts/` refs that stand in for S08-03.
   - [ ] A database file copied to a new path mints a new store id on its first start; the original keeps its id.
   - [ ] After the row expires and the sweep runs, the ref is gone. A row without a pin, including one inherited from a copied database, is pinned by the sweep.
   - [ ] Works in a linked worktree and in a repo with no `user.email`.
   - [ ] Pinning failures are logged and never fail the turn.
-- **Verify:** `bun run --cwd apps/server test -- src/features/projects/diffs/snapshots/__tests__/snapshot-ref-pins.integration.test.ts src/features/projects/diffs/snapshots/__tests__/snapshot-service.integration.test.ts` (the first is new: real git, two temp database files, a linked worktree, `git gc --prune=now`).
+- **Verify:** `bun run --cwd apps/server test -- src/features/projects/diffs/snapshots/__tests__/snapshot-ref-pins.integration.test.ts src/features/projects/diffs/snapshots/__tests__/snapshot-service.integration.test.ts` (the first is new: real git, two temp database files, a linked worktree, `git gc --prune=now`, and the restart cases, with a fresh service on the same database file standing in for the restart).
 
 ### S10-13 Whitespace control
 
 - **Blocked by:** S10-04 Two-row header, names-only view menu, merged Turn view.
-- **Needs decision:** Whether the whitespace button hides whitespace changes or shows invisible characters.
 - **Boards:** 10a `2241-2` ("Show whitespace", off at rest)
 - **Delivers:** The fourth row-2 control, with the behaviour chosen in Q2.
 - **Build notes:**
@@ -802,7 +851,7 @@ type DraftSubmission = {
 
 ## Tests
 
-- **Server, highest seam.** Test the services against real temporary repos (prior art: `apps/server/src/features/projects/diffs/snapshots/__tests__/snapshot-service.integration.test.ts`). Cover untracked files, rename pairing, an absent index, intent-to-add, conflicts, index immutability, commits of selected paths, hooks (including a `commit-msg` rewrite), durable commit requests across a second service on the same database file (including an external same-subject commit after a crash, which must reconcile to `unknown` and never push), a bare remote for push, draft image leases, admission copies and the retention sweep, gc with pinning, and two store ids on one repo. Use `FakeGitExecutor` (`git/execution/fake-git-executor.ts`) for timeouts (`killed: true`), the cap, and stderr classification (prior art `git-comparison-service.test.ts`, `git-service-push.test.ts`). Test RPC routing at `routeGitRpc` and `routeTurnDiffRpc`.
+- **Server, highest seam.** Test the services against real temporary repos (prior art: `apps/server/src/features/projects/diffs/snapshots/__tests__/snapshot-service.integration.test.ts`). Cover untracked files, rename pairing, an absent index, intent-to-add, conflicts, index immutability, commits of selected paths, hooks (including a `commit-msg` rewrite), durable commit requests across a second service on the same database file (including an external same-subject commit after a crash, which must reconcile to `unknown` and never push), a bare remote for push, draft image leases, admission copies and the retention sweep, gc with pinning, two store ids on one repo, a retried turn read as one range, and the snapshot of an attempt a restart interrupted. Use `FakeGitExecutor` (`git/execution/fake-git-executor.ts`) for timeouts (`killed: true`), the cap, and stderr classification (prior art `git-comparison-service.test.ts`, `git-service-push.test.ts`). Test RPC routing at `routeGitRpc` and `routeTurnDiffRpc`.
 - **Web.** Test the pure `lib/review-views.ts` availability and defaults, and `lib/review-file-order.ts`. Test components with mocked transport: `DiffPanel.files.test.tsx` per result status, `TurnPicker.test.tsx` for follow and pin, `PierreCodeView.test.tsx` for the custom header, `FileList.test.tsx` for order, and the new `CommitSheet.test.tsx`. Test comments with `DiffCommentEditor.test.tsx`, `DiffCommentsComposerAttachment.test.tsx`, `lib/composer-draft-storage.test.ts` for every new draft field and write failures, and `draft-submission.test.ts` for freezing and settling submissions.
 - **Commands.** Run `bun run --cwd apps/server test -- <files>` and `bun run --cwd apps/web test -- <files>`, one command per workspace. Then run `bun run lint` and `bun run typecheck` for the changed scope.
 - **Live.** Use `bun run --shell system agent:up --desktop`, then `bun run agent:ready`, and drive the app with `.agents/skills/electorn-live-testing/SKILL.md` on `.dev/fixture-repo` threads only. UI tickets need before and after screenshots or video for the PR.
@@ -821,8 +870,8 @@ Product calls go to the user. The rest are facts for the ticket owner to prove.
 5. **Q5 (user): Summary lens.** The AI prose for All turns, `settings.diffSummary` and CONTEXT "Summary" are not drawn. Recommend retiring them, because thread Recap (ADR-0013) covers this. Decision V4 defaults to retire, so S10-03 retires them; a "keep" answer removes that ledger row and build note.
 6. **Q6 (user): evidence labels.** The labels are not drawn. Recommend dropping "Agent changes" and "Tracked file evidence". Keep the Git-fallback caveat as a muted info icon after the turn picker, with the tooltip "Git fallback: edits to the same files by other tools may appear".
 7. **Q7 (user): branchless threads.** Recommend disabling "Commit and push" with the tooltip "Create a branch to push". The alternative is the Create PR flow, which asks for a branch name first (ADR-0015).
-8. **Q8 (user, S08): Revert in All turns.** Recommend the Turn view only. The 10c copy is per turn, and S08's operation is per turn.
-9. **Q9 (user): Expand/Collapse all.** It is not in the design and is removed in S10-04. Confirm that losing it is acceptable.
+8. **Q8: Revert in All turns.** Decided (user, 2026-10-08): keep it. All turns file headers get Revert file, which reverts the file to before the earliest turn in the view's range. S08-03's file scope takes an optional `fromMessageId` for the range, and S10-10 builds the icon and the proposed All turns copy.
+9. **Q9: Expand/Collapse all.** Decided (user, 2026-10-08): keep them as one toggle icon in row 2 (`chevrons-down-up` / `chevrons-up-down`, tooltip "Collapse all" or "Expand all"). `bulkDiffExpand` stays, and S10-04 builds the toggle in `ReviewControlsRow`.
 10. **Q10 (user, open since 08): docked tree search style.** Recommend one F-04 search row in both hosts, with the placeholder "Filter files".
 11. **Q11 (user, ADR): Branch default direction on the default branch.** ADR-0007 rule 1 says `main...origin/main` (incoming). The shipped client sends `origin/main...main` (unpushed) because of the swap. Recommend keeping "unpushed", which matches ADR-0007's own context, and recording it in the new Branch ADR.
 12. **S10 call, flagged: turn ordinals.** Ordinals count every user turn, so "Turn 2" can be the empty state 10c draws and numbers survive snapshot expiry. The picker lists turns with changes plus the latest turn. Today ordinals count only turns with changes.
@@ -838,6 +887,7 @@ Product calls go to the user. The rest are facts for the ticket owner to prove.
     - F-04 owns the menu, picker, segmented tabs and paging.
     - S03-04 owns the qualified-ref listing; S10-05 only consumes it.
     - S08 owns the revert operation, confirm component and receipt.
+    - S10-03 adds the attempt link (`AgentTurn.attemptOf`, as section 08f defines it) and the turn range that the changes bar (S08-02), revert (S08-03) and Since you looked (S08-08) read. Section 08f's transcript rule, which hides a replaced attempt, reads the same field.
     - S12P-07 (Files line comments), S11-15 (Browser note pages) and S07-06 (plan-comment chip and unsaved plan-comment editor) keep their next-message state in S10-11's draft store and use its element revisions and submissions. None of them adds a second in-flight mark.
     - The thread overview owner must accept the "Commit…" row change.
     - `chat/DiffViewer.tsx` (no callers) belongs to S06 (the approval dock preview).

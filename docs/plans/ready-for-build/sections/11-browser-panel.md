@@ -52,8 +52,9 @@ From `source/screen-pass-todo.md` (section 11 approved by the user 2026-10-07, a
 - Sent message (11f): the stack rides above the bubble as a compact tile (64×44 stacked thumbnail, amber pointer, "4 notes", page names muted), replacing today's chip and "Annotation N screenshot.png" files. Hover opens the same grouped list, read-only; clicking a note opens that page's snapshot with markers in the image viewer.
 - Notes persist as drafts like Review comments (today memory only).
 - Agent in control (11b, 11c): edge glow and amber pointer on the page; Design and Screenshot give way to the agent pill (provider icon, Take control); the URL pill gets a 1px amber ring. Shown only while the agent acts, so Take control is never offered for an idle agent.
-- You took control (11b): clicking the page or Take control stops the agent; row 2 shows "Hand back". The agent does not reclaim the page until Hand back.
+- You took control (11b): clicking the page or Take control stops the agent; row 2 shows "Hand back". The agent does not reclaim the page until Hand back. Sending a message to the thread does not hand control back; only Hand back does (user, 2026-10-08, W1).
 - Errors: plain copy, not the Chromium error name. Connection refused on a project port: "Can't reach localhost:5173", "Nothing is listening on this port. web in mcode usually runs here.", Start web and Retry. Still undrawn: 404/500, crash, certificate, discarded page (proposals below).
+- Certificate errors (user, 2026-10-08, W5): a browser-style warning page with the error, details, Back to safety and "Proceed to {host} (unsafe)". Proceeding trusts that host and certificate fingerprint in the project's partition until Mcode quits. The agent never proceeds on its own; it sees the error. The address bar shows a "Not secure" mark while the exception is in use.
 - Thread overview (11e): one Browser row in Activity, only while the thread has pages. States: open (globe, title, host), several pages (+N), agent acting (amber pointer, live step, page title), you took control (Paused, Hand back), server not running (clay dot, "web isn't running", Start web). Clicking the row opens the Browser on that page.
 - Cookies: one session per project instead of the shared `persist:mcode-preview`, so Clear cookies clears one project. Marked "default" in the notes, not confirmed by the user (see Q4).
 
@@ -69,7 +70,7 @@ Paths under `apps/web/src` unless noted. Re-verified from `source/11-preview-int
 
 **Navigation.** `apps/desktop/src/features/preview/navigation/resolve-target.ts`: `looksLikeBareDomain` accepts `localhost`, `localhost:N` and IPv4 literals (`:53-54`), then `https://` is prefixed (`:81`), so dev servers fail unless typed with `http://` (verified). `*.localhost` also gets https; bare `[::1]` becomes a Google search. No test file exists for this module.
 
-**Errors.** The webview adapter emits `load-failed` with Chromium's `errorDescription` (`ElectronWebviewBrowserSurfaceAdapter.ts:366-379`). `navigation/nav-errors.ts:104-123` turns a network failure into `{ kind: "network", message: error }`, so the headline is the raw name such as `ERR_CONNECTION_REFUSED` (verified). `apps/desktop/src/features/preview/navigation/load-result.ts` holds friendly copy and an HTTP classifier, but only its test imports it (verified by `rg classifyLoadResult`). HTTP status is never classified in production; the server's own error page shows. `render-process-gone` emits `surface-lost` (`:417-419`).
+**Errors.** The webview adapter emits `load-failed` with Chromium's `errorDescription` (`ElectronWebviewBrowserSurfaceAdapter.ts:366-379`). `navigation/nav-errors.ts:104-123` turns a network failure into `{ kind: "network", message: error }`, so the headline is the raw name such as `ERR_CONNECTION_REFUSED` (verified). `apps/desktop/src/features/preview/navigation/load-result.ts` holds friendly copy and an HTTP classifier, but only its test imports it (verified by `rg classifyLoadResult`). HTTP status is never classified in production; the server's own error page shows. `render-process-gone` emits `surface-lost` (`:417-419`). Nothing handles certificate errors: `apps/desktop/src` has no `certificate-error` listener and no `setCertificateVerifyProc` (verified with `rg -i certificate`). Electron's default rejects the certificate, the load fails with a net error between -200 and -299, and the page shows its raw name. The agent's navigation fails with the generic "Browser navigation failed" (`apps/desktop/src/features/preview/automation/kernel.ts:1409,1438`).
 
 **New page.** `LocalPortsEmptyState.tsx` lists `localhost:{port}` from `useLocalPorts.ts`, which polls `desktopBridge.preview.detectLocalPorts` every 5 s. That method is declared optional (`transport/desktop-bridge.d.ts:187,265`) and has no desktop implementation (verified), so the list is always empty. Nothing links project actions to ports: `WorkspaceEnvironmentActionRunSchema` has no port field (`packages/contracts/src/models/workspace-environment.ts:332-349`), and action runs are per `{threadId, actionId}` (`:386-388`).
 
@@ -106,6 +107,7 @@ Paths under `apps/web/src` unless noted. Re-verified from `source/11-preview-int
 | Recent pages for this project | None | Desktop per-project history store | desktop, web |
 | http for localhost and IPs | https prefix | Scheme rule in `resolve-target.ts` | desktop |
 | Plain error copy, Start web on project ports | Raw Chromium name | One renderer classifier; new kinds; project-port lookup | contracts, web; delete desktop `load-result.ts` |
+| Certificate warning with Proceed, "Not secure" mark | Rejected by Electron's default; raw `ERR_CERT_*` name | Warning page; per-project, in-memory exceptions answered from main's `certificate-error` handler; the mark and a way to stop trusting | desktop, web |
 | Per-project cookies and cache | One shared partition | Partition bound to exactly one workspace at prepare, attach and adopt; clear acts on the window's project; deletion follows the server's workspace removal | desktop, web, docs |
 | Design: amber button, hover box, mono tip, bubble, markers on the live page | Picker plus "Designing" bar, markers only in snapshots | Explicit picker state; live markers per page; delete the bar | web, desktop (overlay) |
 | Notes as one composer tile per page or a stack | Chip with "..." | Tile and stacked tile with hover card | web |
@@ -237,7 +239,7 @@ export function reduceBrowserControl(state: BrowserThreadControl, event: Browser
 | user | hand-back | none | Epoch +1 on the held tab; the agent re-inspects |
 | user | agent-turn-ended | user | Hold stays; "Paused · Hand back" stays visible |
 | user | tab-closed (held tab) | none | The hold ends with the tab |
-| user | user sends a message to the thread | none | Proposed default (Q1) |
+| user | user sends a message to the thread | user | Not a control event; the reducer has no such event and nothing on the send path calls Hand back (user, 2026-10-08, W1). The new turn's first effect is refused as in the "agent-effect" row, and "Paused · Hand back" stays visible. |
 
 Effect operations are `open`, `act`, `tabs` and `evaluate`. `inspect` and `status` never claim control, so Plan mode never shows the glow or pill.
 
@@ -320,9 +322,21 @@ Browser notes ride the one persisted composer draft that S10-11 owns, beside Rev
 - **Dispatch guard.** S11-15 retires the Browser half of today's clear-everything dispatch guard (`apps/web/src/features/conversation/composer/submission/composer-submission-annotations.ts:13-38`).
 - **Live store.** `previewAnnotationStore.byThread` stops owning preview notes; it reads and writes current notes through the draft, as S10-11 does for `diffByThread`.
 
-### 8. Error classification (renderer, one classifier)
+### 8. Error classification and certificate exceptions
 
 `nav-errors.ts` becomes the only classifier; `load-result.ts` and its test are deleted. `PreviewPageErrorSchema.kind` (`packages/contracts/src/models/preview-page-status.ts:31`) becomes `"network" | "connection-refused" | "certificate" | "crash" | "file-not-found" | "blocked"`. `"http"` is removed if Q5 keeps server-rendered HTTP errors. `ERR_CONNECTION_REFUSED` (-102) maps to `connection-refused`; codes -200 to -299 map to `certificate`; `surface-lost` maps to `crash`. To choose between "Start web" and Retry-only copy, the panel matches the failed URL's port against `run.port.port` on this thread's action runs, current or history; a match names the action. Copy is in S11-10.
+
+**Certificate exceptions (desktop main, S11-10; decision W5).** New `apps/desktop/src/features/preview/security/certificate-exceptions.ts` holds the exceptions and answers Electron. Nothing handles certificates today (How it works today, Errors).
+
+- **Hook.** One `app.on("certificate-error", (event, webContents, url, error, certificate, callback, isMainFrame))` listener in main. It finds the workspace by exact session identity through a reverse lookup that S11-10 adds to S11-03's `BrowserProfiles`: `workspaceForSession(webContents.session)`. A session that is not a project profile, such as the app's own windows, gets no answer from Mcode, so Electron's default rejects it.
+- **Decision.** Exceptions live only in memory: `Map<workspaceId, Set<host + "\0" + fingerprint>>`, with `host` from `new URL(url).hostname` and `certificate.fingerprint`. A pair in the set gets `event.preventDefault()` and `callback(true)`. Any other gets `callback(false)`; for a main frame, the handler also records the failure for that guest `webContents`: `{ host, error, fingerprint, subjectName, issuerName, validStart, validExpiry }`, latest only. A subresource failure (`isMainFrame` false) never shows a warning page, as in browsers.
+- **Why not `setCertificateVerifyProc`.** Electron documents that "the result of this procedure is cached by the network service" (Electron 35.7.5, `apps/desktop/package.json:41`; `Session.setCertificateVerifyProc` in its `electron.d.ts`), so Proceed and Stop trusting could keep a stale answer. The `certificate-error` event asks each time a certificate fails, so the in-memory set stays the only source of truth. Whether Chromium also remembers an allowed certificate per host after `callback(true)` is inferred not to happen in Electron; S11-10's revoke test proves it.
+- **IPC** (renderer to main; only the warning page and the "Not secure" menu call it, on a user click):
+  - `preview:certificate.state (surfaceId) → { failure: CertificateFailure | null; exceptionInUse: boolean }`. `exceptionInUse` is true when the guest's main-frame URL is https and its host has an exception in that workspace's set. The renderer reads it after each load failure and each committed navigation of the active tab; nothing polls.
+  - `preview:certificate.proceed (surfaceId, fingerprint) → boolean`. It adds the pair only when it equals the failure recorded for that surface's guest, so a renderer cannot trust a certificate that never failed there. The renderer then reloads.
+  - `preview:certificate.revoke (surfaceId) → void`. It removes the active host's pairs from the workspace's set and calls `session.closeAllConnections()` so an open TLS connection does not keep the old trust; the renderer reloads and the warning returns.
+- **Lifetime.** Nothing is written to disk, so quitting Mcode clears every exception. `profiles.remove(workspaceId)` also drops that workspace's set. Clear cookies and Clear cache leave exceptions alone.
+- **The agent never proceeds.** The warning page is Mcode chrome drawn above the surface, not guest content, so `browser_act` cannot press its buttons, and no automation operation or MCP tool adds an exception. When the agent's `open` hits a certificate failure, the kernel throws `NAVIGATION_FAILED` with "Certificate error for {host} ({error}). Only the user can proceed past it in the Browser." in place of the generic text (`kernel.ts:1409,1438`); `PreviewGuestLoadResult` already carries `errorNumber` (`navigation/guest-navigation.ts:4-11,57-63`). After the user proceeds, agent tabs in that project load the host too, because they share the partition.
 
 ### 9. Per-provider decisions
 
@@ -333,6 +347,7 @@ Browser notes ride the one persisted composer draft that S10-11 owns, beside Rev
 | Agent pill provider icon | Thread's provider via F-06 | Same | Same | Same | Never shown | Never shown |
 | Design notes (bundle v2, page snapshots) | Fenced JSON plus images through the existing attachment path; no change | Same | Same | Same | Same; notes work without browser tools | Same |
 | Per-project cookies | Agent tabs use the project partition; no change | Same | Same | Same | n/a | n/a |
+| Certificate errors | No adapter change; `open` fails with `NAVIGATION_FAILED` naming the certificate error, and no tool can proceed. Agent tabs use exceptions the user made in that project. | Same | Same | Same | n/a | n/a |
 
 The pill's provider icon comes from the thread's current provider; no contract field is added. After a mid-turn handoff it can show the new provider while the old session finishes its last step (risk R5).
 
@@ -347,13 +362,13 @@ The pill's provider icon comes from the thread's current provider; no contract f
 - `features/preview/surfaces/BrowserControlPill.tsx`: provider icon plus "Take control" or "Hand back".
 - `features/preview/surfaces/BrowserDeviceRow.tsx`: third row; reuses the existing viewport coordinator.
 - `features/preview/surfaces/BrowserNewPage.tsx`: server tiles and recent pages.
-- `features/preview/surfaces/BrowserErrorPage.tsx`: replaces `PreviewErrorPanel.tsx` with the new copy and buttons.
+- `features/preview/surfaces/BrowserErrorPage.tsx`: replaces `PreviewErrorPanel.tsx` with the new copy and buttons, including the certificate warning variant.
 - `features/preview/design/DesignLayer.tsx` and `design/designPickerMachine.ts`: picker states (off, picking, editing) with explicit transitions; live markers and outlines.
 - `features/preview/notes/BrowserNotesTile.tsx`, `BrowserNotesHoverCard.tsx`, `SentBrowserNotesTile.tsx`, `notes/renderPageSnapshot.ts` (marker composite).
 - `features/preview/state/useBrowserActing.ts`: the one "acting" selector.
 - `components/chat/ThreadOverviewBrowserRow.tsx`.
 - `packages/shared/src/browser-preview/browser-control.ts` (reducer), `browser-partition.ts`.
-- Desktop: `security/browser-profiles.ts`, `profiles/history-store.ts`.
+- Desktop: `security/browser-profiles.ts`, `profiles/history-store.ts`, `security/certificate-exceptions.ts` (S11-10).
 
 ### Changed
 
@@ -361,7 +376,7 @@ The pill's provider icon comes from the thread's current provider; no contract f
 - `ActivityRail.tsx`: the Browser entry's glyph swaps to the amber pointer while acting (undrawn, Q10). S12P-01 has already reduced the rail to one Browser entry.
 - `ElectronWebviewBrowserSurfaceAdapter.ts` (workspace partition, append after prepare), `create-window.ts` and `webview-attachment-policy.ts` (attach binding), `registry.ts` (partition on the pending record, exact session at adopt), `navigation/handlers.ts`, `capture/handlers.ts` (per-session policy; snapshots handed to S10-11 staging), `capture/overlay.ts` (click or drag), `automation/kernel.ts`, `BrowserAutomationHost.tsx`, `browserAutomationStore.ts`, broker, `mcp-handler.ts`, `browser-operating-guide.ts`.
 - `transport/ws-events.ts` (`workspace.deleted` calls `profiles.remove`) and `workspaceStore.ts` (`profiles.reconcile` after a successful `workspace.list`).
-- `resolve-target.ts`, `nav-errors.ts`, `preview-page-status.ts`.
+- `resolve-target.ts`, `nav-errors.ts`, `preview-page-status.ts`. For certificates (S11-10): `BrowserUrlPill` (the "Not secure" mark), `browser-profiles.ts` (`workspaceForSession`, and `remove` drops exceptions), `automation/kernel.ts` (the certificate failure message) and the desktop bridge (`preview.certificate.*`).
 - `previewAnnotationStore.ts` (per-page numbering, v2 bundle, `clearPreviewNotes` separate from diff comments, notes read and written through the composer draft), `composer-draft-storage.ts` (`browserNotePages` field), `composer-submission-annotations.ts` (Browser half of the dispatch guard), `ComposerContentSurface.tsx`, `ComposerQueueList.tsx`, `MessageBubble.tsx`, `ImageAttachmentLightbox.tsx` (open a page snapshot), `agent-rpc.ts`, `turn-admission-dispatch-coordinator.ts`, `browser-preview.ts`.
 - `ThreadOverview.tsx` (mount the row in Activity), `config/default-keybindings.json`.
 - Docs: `CONTEXT.md` (Browser controller, Preview annotation mode, Annotation display number, Preview annotation set, Annotation bundle, Preview annotation snapshot: rewrite, do not append), `docs/internals/runtime/browser-v2-rollout.md:31-37`, two ADRs, each at the next free number at merge ("Browser control stays with the user until Hand back", "One browser profile per project").
@@ -475,16 +490,17 @@ Foundation tickets: F-01 tokens, F-02 fade, F-03 round buttons, F-04 menus, F-05
 
 - **Blocked by:** S11-04 Two-row Browser header with page tabs.
 - **Boards:** 11b Agent in control (`2EUZ-2`), You took control (`2EXG-2`); 11c Agent acting (`2F7C-2`)
-- **Delivers:** While the agent acts, row 2 shows the agent pill (provider icon, Take control) instead of Design and Screenshot. Clicking the page or Take control stops the agent; row 2 shows Design, Screenshot and a "Hand back" pill. The agent cannot act in any tab of that thread until Hand back. The pill disappears when the agent stops acting, so an idle agent never offers Take control.
+- **Delivers:** While the agent acts, row 2 shows the agent pill (provider icon, Take control) instead of Design and Screenshot. Clicking the page or Take control stops the agent; row 2 shows Design, Screenshot and a "Hand back" pill. The agent cannot act in any tab of that thread until Hand back. Sending a message does not hand control back (W1): only the explicit Hand back does. The pill disappears when the agent stops acting, so an idle agent never offers Take control.
 - **Build notes:** Section 4 of Backend architecture: `reduceBrowserControl`, kernel and web executor wiring, `preview:automation.hand-back`, broker refusal and guidance, inspect `controlEpoch`, MCP description, operating guide line. `useBrowserActing`. `BrowserControlPill` with F-06 icon. Add the ADR "Browser control stays with the user until Hand back" (amends ADR-0018's control paragraph by reference).
 - **Deletes:** "Overflow Take control item", "Silent reclaim", "Duplicate CROSS_ORIGIN".
 - **Acceptance criteria:**
   - [ ] Reducer table in Backend architecture section 4 is covered row by row.
   - [ ] After a takeover, `browser_act` with the new epoch returns `HUMAN_INTERRUPTED` with recovery `yield_to_user`; after Hand back, an inspect then act succeeds.
+  - [ ] Sending a message while the user holds control keeps the hold: the turn it starts gets `HUMAN_INTERRUPTED` on its first `browser_act`, and Hand back stays in row 2. Only Hand back admits the agent again.
   - [ ] `browser_inspect` result has a top-level `controlEpoch`.
   - [ ] Plan-mode inspect never shows the agent pill.
   - [ ] The agent pill hides within 3 s of the last effect.
-- **Verify:** `packages/shared` reducer unit test; `automation/__tests__/browser-automation-kernel.test.ts` and `-races.test.ts`; `execution/__tests__/broker.test.ts`; `transport/__tests__/mcp-conformance.test.ts`; `BrowserAutomationHost.test.tsx`. Live: in a fixture-repo thread with Codex or Claude, ask the agent to click through `apps/web/public/browser-automation-fixture.html`, click the page mid-run, confirm "Stopped when you took control" in chat and Hand back in row 2, press Hand back, ask it to continue.
+- **Verify:** `packages/shared` reducer unit test; `automation/__tests__/browser-automation-kernel.test.ts` and `-races.test.ts` (user hold, `agent-turn-ended`, then a new turn's effect is refused); `execution/__tests__/broker.test.ts`; `transport/__tests__/mcp-conformance.test.ts`; `BrowserAutomationHost.test.tsx` (sending a message never calls `hand-back`). Live: in a fixture-repo thread with Codex or Claude, ask the agent to click through `apps/web/public/browser-automation-fixture.html`, click the page mid-run, confirm "Stopped when you took control" in chat and Hand back in row 2. Send "continue" and confirm the agent reports it cannot act and Hand back is still shown. Press Hand back and ask it to continue.
 
 ### S11-07 Agent acting on the page
 
@@ -534,18 +550,32 @@ Foundation tickets: F-01 tokens, F-02 fade, F-03 round buttons, F-04 menus, F-05
   - Connection refused on a project port (drawn): "Can't reach localhost:5173" / "Nothing is listening on this port. web in mcode usually runs here." / **Start web**, Retry. Start web uses the tile's Start call (Backend architecture section 3) and loads the page once S12T-08 reports a reachable port from the new run.
   - Connection refused on another local port (proposed): "Can't reach localhost:3000" / "Nothing is listening on this port." / Retry.
   - DNS, offline, reset, other network errors (proposed): "Can't reach example.com" / "Check the address or your connection." / Retry.
-  - Certificate (proposed): "Can't open this page securely" / "The certificate for example.com isn't trusted, so Mcode stopped loading it." / Go back, Open in browser. No proceed-anyway (Q6).
+  - Certificate (W5; proposed copy, no board), a browser-style warning:
+    - Headline: "This connection isn't private".
+    - Detail: "The certificate for {host} isn't trusted: {reason}. Someone could be posing as this site." `{reason}` by error: authority invalid, "it's self-signed or from an unknown issuer"; date invalid, "it has expired or isn't valid yet"; name invalid, "it was issued for another name"; revoked, "it was revoked"; anything else, "it's invalid".
+    - Buttons: **Back to safety** (primary: back in the tab's history, or the New page when there is none) and Details (secondary).
+    - Details expands in place, as a browser's Advanced does: the error code, subject, issuer, valid from and to, and the fingerprint, in mono with Copy, then the text button "Proceed to {host} (unsafe)". Proceed trusts that host and certificate in this project until Mcode quits (Backend architecture section 8) and reloads the page.
+    - While the active page uses an exception, the URL pill shows a "Not secure" mark before the origin: a 14px alert icon and "Not secure", 13/20 in `--color-error` (proposed). Clicking it opens a one-item F-04 menu, "Stop trusting {host}", which removes the exception and reloads, so the warning returns.
   - Crash (proposed): "This page crashed" / "Reload to open it again." / Reload.
   - Blocked or missing local file: keep today's copy in the new layout.
   - HTTP 404 and 500 (proposed): no Mcode page; the server's own response shows, because dev servers put stack traces there (Q5).
   - Discarded tab (proposed): no page; activating a cold tab reloads behind the normal loading bar (ADR-0002).
   The failed tab shows a globe and `host:port` as its title.
 - **Build notes:** Section 8 of Backend architecture. `BrowserErrorPage` with ink primary and selected-fill secondary buttons.
+  - Certificates: `certificate-exceptions.ts` with the `certificate-error` hook, the three `preview:certificate.*` calls on the desktop bridge, `workspaceForSession` on `BrowserProfiles`, `profiles.remove` dropping the workspace's exceptions, the kernel's certificate failure message, and the "Not secure" mark in `BrowserUrlPill`.
+  - Add one paragraph to `docs/internals/runtime/browser-v2-rollout.md`: exceptions are per profile and in memory, Mcode answers them from `certificate-error` because `setCertificateVerifyProc` results are cached, and only a user click adds one.
 - **Deletes:** "Unused load classifier and copy", "Raw Chromium headline", "`PreviewErrorPanel`", "`http` page error kind".
 - **Acceptance criteria:**
-  - [ ] No `ERR_` string appears in any headline or detail.
+  - [ ] No `ERR_` string appears in any headline or detail. The certificate error code appears only inside Details.
   - [ ] Start web only shows when a thread is open and the failed port matches `run.port.port` on one of its action runs.
-- **Verify:** `navigation/__tests__/nav-errors.test.ts` (table of codes to copy), `BrowserErrorPage.test.tsx`. Live: open `localhost:<port>` for the stopped fixture action, see the drawn copy, press Start web, and the page loads.
+  - [ ] A main-frame certificate failure shows the warning with the host and its plain reason. Proceed reloads and the page loads.
+  - [ ] After Proceed, another tab of the same project opens that host without a warning. The same host in another project still warns, and the same host with a different certificate warns again.
+  - [ ] Main refuses `proceed` for a host and fingerprint that did not fail for that surface.
+  - [ ] After quitting and relaunching Mcode, the warning shows again.
+  - [ ] "Not secure" shows while the active page's host is trusted by an exception and hides on other hosts. Stop trusting removes the exception and the reload shows the warning again.
+  - [ ] An agent `open` of the failing URL returns `NAVIGATION_FAILED` naming the certificate error and adds no exception. After the user proceeds, the agent's `open` loads the page.
+  - [ ] A subresource certificate failure shows no warning page, and a session that is not a project profile never reads the exceptions.
+- **Verify:** `navigation/__tests__/nav-errors.test.ts` (table of codes to copy), `BrowserErrorPage.test.tsx` (including the certificate variant: Details, Proceed then reload, Back to safety with and without history), `BrowserToolbar.test.tsx` (the "Not secure" mark and Stop trusting). Desktop: new `apps/desktop/src/features/preview/security/__tests__/certificate-exceptions.test.ts` (the handler with fake events, sessions and certificates: a trusted pair, an untrusted main frame and subresource, a non-profile session, proceed only for a recorded failure, revoke, `remove`, two workspaces) and `automation/__tests__/browser-automation-kernel.test.ts` (the certificate failure message). Live: open `localhost:<port>` for the stopped fixture action, see the drawn copy, press Start web, and the page loads. Then make a throwaway self-signed certificate in a scratch folder under `.dev/fixture-repo` (for example with the `openssl` that ships with Git), serve from there with `bun -e "Bun.serve({ port: 4443, tls: { cert: Bun.file('cert.pem'), key: Bun.file('key.pem') }, fetch: () => new Response('ok') })"`, open `https://localhost:4443`, see the warning, Proceed, see "Not secure", Stop trusting, and see the warning again. Delete the scratch folder afterwards.
 
 ### S11-11 Thread overview Browser row
 
@@ -621,7 +651,6 @@ Foundation tickets: F-01 tokens, F-02 fade, F-03 round buttons, F-04 menus, F-05
 ### S11-16 Retire the visual proposal editor (only if Q7 confirms)
 
 - **Blocked by:** S11-12 Design mode on the live page.
-- **Needs decision:** Whether the visual proposal (style) editor in the note bubble is retired.
 - **Boards:** 11b Design mode (`2ES7-2`) and 11d (`24CB-2`): the bubble has no style inspector
 - **Delivers:** The note bubble holds text only. Notes always carry note text.
 - **Build notes:** Remove the inspector, `proposedChanges` and `changeSummary` from the v2 payload (v1 reader keeps them for old messages), and the CONTEXT entries "Visual proposal" and "Annotation change summary".
@@ -633,7 +662,7 @@ Foundation tickets: F-01 tokens, F-02 fade, F-03 round buttons, F-04 menus, F-05
 ## Tests
 
 - Pure seams first: `resolve-target.test.ts` (new), `nav-errors.test.ts`, the `reduceBrowserControl` table test in `packages/shared`, `readPreviewAnnotationBundle` in contracts, `designPickerMachine.test.ts`, `history-store.test.ts`.
-- Desktop main: `security/__tests__/electron-session-policy.test.ts`, `webview-attachment-policy.test.ts`, `surfaces/__tests__/registry.test.ts` (two workspace sessions, cross-workspace partition rejected at attach and adopt), `automation/__tests__/browser-automation-kernel.test.ts` and `-races.test.ts`, `capture/__tests__/overlay.test.ts`.
+- Desktop main: `security/__tests__/electron-session-policy.test.ts`, `webview-attachment-policy.test.ts`, `surfaces/__tests__/registry.test.ts` (two workspace sessions, cross-workspace partition rejected at attach and adopt), `automation/__tests__/browser-automation-kernel.test.ts` and `-races.test.ts`, `capture/__tests__/overlay.test.ts`, `security/__tests__/certificate-exceptions.test.ts` (new, S11-10).
 - Server: `browser-automation/execution/__tests__/broker.test.ts`, `transport/__tests__/mcp-conformance.test.ts` (inspect `controlEpoch`, refusal while held), the agent-rpc fence and turn admission attachment names.
 - Web: `PreviewPanel.test.tsx`, `ActivityRail.test.tsx`, `BrowserAutomationHost.test.tsx`, `previewAnnotationStore.test.ts` (current notes and a pending submission through a send), `composer-draft-storage.test.ts` (`browserNotePages`), `BrowserActivityRow.test.tsx`, the `workspace.deleted` and reconcile bridge calls, plus the new component tests named in tickets.
 - Live checks use the Electron live-testing harness (`.agents/skills/electorn-live-testing/SKILL.md`) against `.dev/fixture-repo` only. The one exception is S11-03's isolation check, which creates `.dev/fixture-repo-b`, registers it, and removes both the project and the folder afterwards. Agent scenarios use `apps/web/public/browser-automation-fixture.html` or a server started by a fixture-repo project action with a `bun -e` one-liner, so no package is installed. PRs attach before and after captures with `gh pr create --attach`.
@@ -643,12 +672,12 @@ Foundation tickets: F-01 tokens, F-02 fade, F-03 round buttons, F-04 menus, F-05
 
 Product calls go to the user; contract shapes go to the named section author.
 
-- **Q1 (user).** Does sending a new message to the thread hand control back? Proposed yes: the user is directing the agent again, and otherwise a forgotten Hand back blocks the next turn's browser work.
+- **Q1.** Does sending a new message to the thread hand control back? Decided (user, 2026-10-08): no. Only Hand back returns control. A forgotten Hand back therefore blocks the next turn's browser work; the agent is refused with `HUMAN_INTERRUPTED` and told the user has control, and "Paused · Hand back" stays in row 2 and on the overview row.
 - **Q2 (user).** The board node "Agent paused · Hand back resumes the queued steps" suggests Hand back replays the interrupted steps. Proposed no replay: the user changed the page, observations are stale, and the operating guide forbids automatic replays (`browser-operating-guide.ts:15`). The agent re-inspects after Hand back.
 - **Q3 (user).** Should an agent wait inside its turn for Hand back (a bounded wait on `browser_inspect`)? Proposed no for now; it yields and usually ends its turn. Revisit if paused turns feel abandoned.
 - **Q4 (user).** Per-project cookies is marked "default" in the notes, not confirmed. Migration proposal: clear the old shared jar once, so everyone signs in again per project. The alternative, copying the shared cookies into each project, keeps logins but carries the cross-project leak forward.
 - **Q5 (user).** HTTP 404 and 500: proposed to show the server's response (dev error overlays matter) and drop the `http` error kind. The alternative is Mcode pages "Page not found" and "The site had an error".
-- **Q6 (user).** Certificate errors: proposed no proceed-anyway in Mcode; Open in browser is the escape hatch.
+- **Q6.** Certificate errors. Decided (user, 2026-10-08): the user can proceed, as browsers allow. S11-10 builds the warning page, the per-project exception that lasts until Mcode quits, and the "Not secure" mark. The agent never proceeds on its own.
 - **Q7 (user).** The visual proposal style inspector (about 1,100 lines) is not on any approved board. Proposed retire (S11-16). If kept, the bubble needs a drawn entry point.
 - **Q8 (user).** Screenshot interaction reads as: press Screenshot, then click in the page for the viewport or drag for a region. Today's one-click viewport capture becomes two clicks. Confirm, or make a plain click on the button capture at once and a drag from the button draw a region.
 - **Q9 (user).** Recent pages need a way out: proposed row-hover remove, undrawn. No "Clear history" item is proposed.

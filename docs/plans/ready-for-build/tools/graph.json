@@ -367,6 +367,11 @@
       "S07-07",
       "S04-07"
     ],
+    "S07-08b": [
+      "S07-08",
+      "S03-08",
+      "S10-02"
+    ],
     "S07-09": [
       "S07-03",
       "S01-04",
@@ -397,10 +402,12 @@
     "S08-02": [
       "F-01b",
       "F-02",
-      "F-04a"
+      "F-04a",
+      "S10-03"
     ],
     "S08-03": [
-      "S10-12"
+      "S10-12",
+      "S10-03"
     ],
     "S08-04": [
       "S08-02",
@@ -431,7 +438,8 @@
       "S08-01",
       "F-03",
       "F-10",
-      "S05-10"
+      "S05-10",
+      "S10-03"
     ],
     "S08F-06": [
       "S08F-05",
@@ -694,11 +702,7 @@
     ]
   },
   "needsDecision": {
-    "S08-04": "08e (receipt row, reverted label, confirm copy) was never drawn. Ticket carries default copy; needs design sign-off.",
-    "S08-06": "Whether the agent is told about a revert on the next send.",
-    "S10-13": "Whether the whitespace button hides whitespace changes or shows invisible characters.",
-    "S11-16": "Whether the visual proposal (style) editor in the note bubble is retired.",
-    "S12T-11": "Decision T3 decides whether a follow-up adds the Keeps running toggle. S12T-11 itself is buildable now: startup actions are awaited to exit 0."
+    "S08-04": "08e (receipt row, reverted label, confirm copy) was never drawn. Build to the default copy; the user signs off the design on the PR (user, 2026-10-08)."
   },
   "notes": {
     "S01-03": "Owns the single seen marker and its one write: `thread.acknowledgeSeen({ threadId, throughSequence })`, where `throughSequence` is the settled message sequence the client has actually rendered. Returns `{ previous: { sequence, at }, current: { sequence, at } }` atomically; a repeat is a no-op; a sequence beyond the thread's settled history is rejected. Replaces `thread.markViewed` and every caller (including the unfocused call in the thread store) in this ticket. Waiting sources read ApprovalService (S06-01), never the old permission service. `recordTurnOutcome` is the one write path for turn endings; S08F-01 extends it. Opening a thread clears Finished and Failed, never a live pending approval.",

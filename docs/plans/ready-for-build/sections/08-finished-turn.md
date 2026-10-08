@@ -65,8 +65,9 @@ Exact values, read with `get_jsx` / `get_computed_styles`. Tokens come from F-01
 
 - 2026-10-07 (screen pass, 08 closed by the user): 08a and 08b show the finished turn with a merged meta line and no clock or duration. Review stays on the end-of-turn changes bar and is not amber.
 - 2026-10-07: **Revert this turn** and **"Since you looked"** are approved as new features. 08e (scope picker with Since you looked, Revert this turn… menu, confirm, reverted receipt) was **not drawn** (`screen-pass-todo.md`, 08 entry).
-- 2026-10-07 (10 Review decisions): Revert file is an icon in the file header of Turn views. It opens "the 08 revert confirmation in place, scoped to one file" (`implementation-notes.md`, Review (10)). Last turn merges into Turn. The view picker shows names only, in three groups, and unavailable views are dimmed with a tooltip reason.
+- 2026-10-07 (10 Review decisions): Revert file is an icon in the file header of Turn views. It opens "the 08 revert confirmation in place, scoped to one file" (`implementation-notes.md`, Review (10)). The All turns view gets it too, and there it reverts the file to before the earliest turn in the view's range (user, 2026-10-08, V7). Last turn merges into Turn. The view picker shows names only, in three groups, and unavailable views are dimmed with a tooltip reason.
 - 2026-10-07 (08f notes): the work fold names how the turn ended: "Stopped after 48s", "Interrupted after 30s", "Failed after 1m 02s". A cancelled turn keeps its edits, and "Revert this turn lives in the turn ⋯ menu." The changes bar stays on turns that did not finish.
+- 2026-10-08 (user, E2): Retry and Resume replace the failed or interrupted attempt in the transcript. The attempts of one turn are one turn: its changes bar, its Review Turn view and Revert this turn start at the first attempt's baseline, so a failed attempt's partial edits still show and still revert.
 - 2026-10-07 (05): steps count tool calls only. Narration and the final answer render as prose. Reasoning is a collapsed "Thought" row.
 - 2026-10-07: truncation is the 24px right-edge fade (F-02), never an ellipsis.
 - 2026-10-07: Finished, not yet opened, is an 8px green dot plus a green "Finished" line, cleared on open. The OS notification fires only when Mcode is unfocused (S01).
@@ -108,6 +109,7 @@ Exact values, read with `get_jsx` / `get_computed_styles`. Tokens come from F-01
   - explicit tool names: edit, write, delete, create, rename, move, apply_patch, strreplace, searchreplace
 - **Retention:** rows older than `SNAPSHOT_MAX_AGE_DAYS` (30) are deleted at startup and by `snapshot.cleanup` (`application/bootstrap/server-bootstrap.ts:610-614`; `turns/persistence/turn-snapshot-store.ts:146-158`). Git objects are never pinned. Dirty-tree snapshot trees are unreachable objects, so `git gc` can prune them after `gc.pruneExpire` (default 2 weeks), before the 30 days pass. Inferred from git defaults, not reproduced here.
 - **All turns** is `first.ref_before..last.ref_after` over the union of attributed paths (`snapshot-rpc.ts:103-144`). Verified.
+- **Attempts:** a Retry is a new turn with its own execution, assistant message and snapshot, and only the replaced checkpoint's `phase = "retried"` records it (section 10, How it works today, "Attempts"). So a retried turn's bar and any revert of it start at the retry's own baseline, which already holds the failed attempt's edits. A restart-interrupted attempt has no snapshot at all. Verified.
 - No write path exists for turn files: no revert, restore or discard in contracts or server (`rg -n -i "revert|restore" packages/contracts/src` finds nothing relevant). Verified.
 
 ### Seen state
@@ -132,7 +134,8 @@ Exact values, read with `get_jsx` / `get_computed_styles`. Tokens come from F-01
 | Bar rows | Max 5, glyphs, "+N more" | Tree with common-prefix strip, annotations, count columns, hover actions, many-files rule | web |
 | Bar counts | git numstat fetch, errors swallowed | `file_effects` counts from the snapshot payload. Legacy rows fall back to git stats. Loading shows a skeleton, failure shows "Counts unavailable". | web |
 | Turn ⋯ menu | None | Review changes, Copy file paths, Revert this turn… | web (F-04) |
-| Revert this turn / Revert file | None | One server operation: preview, apply, undo. Each click is a durable request with pinned recovery material written before the first file write, and unfinished operations are recovered at startup. | contracts, server, web |
+| Revert this turn / Revert file | None | One server operation: preview, apply, undo. Each click is a durable request with pinned recovery material written before the first file write, and unfinished operations are recovered at startup. Revert file from All turns covers a range of turns. | contracts, server, web |
+| Bar and revert of a retried turn | Start at the retry's own baseline, so the failed attempt's edits vanish | One turn from the first attempt's baseline, read through S10-03's turn range | server, contracts, web |
 | Revert confirm (inline) | None | Card under the bar; copy driven by the preview | web |
 | Reverted receipt with Undo | None | System message with a `turn-reverted` notice and a `turn_reverts` row | contracts, server, web |
 | "reverted" or "edited later" on bar rows | None | Derived from `reverted_paths` and later snapshots | contracts, server, web |
@@ -145,7 +148,13 @@ Exact values, read with `get_jsx` / `get_computed_styles`. Tokens come from F-01
 
 ### 1. Turn revert operation (shared by Revert this turn and S10 Revert file)
 
-**Semantics (default, matches the drawn Components copy "Reverting removes those edits too"):** every scope path returns to its content in the turn's `ref_before` tree, as a git checkout of that tree writes it. A path the turn added is deleted, and a path it removed is recreated. A rename restores the old path and deletes the new one. Later edits to those paths, whether by later turns or by the user, are overwritten only after the confirm names them. The operation writes the working tree only: **it never touches the index, commits or branches.** The alternative is a three-way inverse that keeps later edits that don't overlap. It is rejected for v1 (Q1).
+**Semantics (default, matches the drawn Components copy "Reverting removes those edits too"):** every scope path returns to its content in the target range's `ref_before` tree, as a git checkout of that tree writes it. A path the range added is deleted, and a path it removed is recreated. A rename restores the old path and deletes the new one. Later edits to those paths, whether by later turns or by the user, are overwritten only after the confirm names them. The operation writes the working tree only: **it never touches the index, commits or branches.** The alternative is a three-way inverse that keeps later edits that don't overlap. It is rejected for v1 (Q1).
+
+**Target range.** Every preview and apply reads one range from S10-03's `turnSnapshotRange(threadId, messageId, fromMessageId?)` (section 10, Backend §3), never a single snapshot row:
+
+- A turn is every attempt of one user turn (E2). `messageId` may name any attempt's assistant message; it resolves to the whole turn. A turn retried after a failure that edited files starts at the first attempt, so Revert this turn restores the first attempt's pre-state, including paths only the failed attempt touched.
+- Without `fromMessageId` the range is `messageId`'s turn. With it (file scope only, Revert file from All turns, V7) the range is every turn from `fromMessageId`'s through `messageId`'s, in message order, each turn whole. A `fromMessageId` that comes after `messageId` is a validation error.
+- The range's `ref_before` is its first row's `ref_before`, its `ref_after` the last row's `ref_after`, and its attributed groups the union over its rows. A turn that was never retried is a one-row range, so its behavior is unchanged.
 
 **Two identities, kept apart.** Every Revert or Undo click carries a client-generated `requestId`. It is the operation's identity: the server persists it with the bound parameters and the outcome, and replays only that request. The `previewToken` is only a precondition. It proves the files are still in the state the user confirmed. A new click gets a new `requestId`, so Revert, Undo, then Revert again is three operations, even though the third preview hashes to the same token as the first.
 
@@ -156,7 +165,11 @@ Exact values, read with `get_jsx` / `get_computed_styles`. Tokens come from F-01
 ```ts
 export const TurnRevertScopeSchema = lazySchema(() => z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("turn") }),
-  z.object({ kind: z.literal("file"), path: z.string().min(1).max(4096) }), // must be attributed to the turn
+  z.object({
+    kind: z.literal("file"),
+    path: z.string().min(1).max(4096),                    // must be attributed to a turn in the range
+    fromMessageId: z.string().min(1).max(256).optional(), // All turns: first turn of a range ending at messageId; omitted = messageId's turn
+  }),
 ]));
 
 /** What apply will do to one path, computed from before/after/current blob ids. */
@@ -182,7 +195,7 @@ export const TurnRevertPreviewSchema = lazySchema(() => z.discriminatedUnion("st
   z.object({
     status: z.literal("ready"),
     // Precondition, not an identity: sha256 over the repo identity (git common dir), the resolved cwd,
-    // the snapshot id, the scope, and each scope path's presence, file type, mode and raw-content sha256.
+    // the range's snapshot ids in order, the scope, and each scope path's presence, file type, mode and raw-content sha256.
     previewToken: z.string().max(128),
     files: z.array(RevertFilePlanSchema()).max(512),
     skipped: z.array(z.object({
@@ -200,6 +213,7 @@ export const TurnRevertRecordSchema = lazySchema(() => z.object({
   id: z.string(),
   threadId: z.string(),
   targetMessageId: z.string(),
+  fromMessageId: z.string().nullable(),   // set for an All turns range revert
   kind: z.enum(["turn", "file", "undo"]),
   path: z.string().nullable(),
   undoesRevertId: z.string().nullable(),
@@ -235,12 +249,12 @@ export const TurnRevertResultSchema = lazySchema(() => z.discriminatedUnion("sta
 | `turn.revert.apply` | `{ threadId, messageId, scope, previewToken, requestId }` (`requestId`: uuid, one per click) | `TurnRevertResult` |
 | `turn.revert.undo` | `{ threadId, revertId, requestId }` | `TurnRevertResult` (`stale` = files changed since the revert, so Undo is refused) |
 | push `turn.reverted` | `{ threadId, revert: TurnRevertRecord, receipt: Message }` | Other clients append the receipt and refresh bar state |
-| `snapshot.listByThread` (changed) | None | Each `TurnSnapshot` gains `reverted_paths: string[]` (paths currently reverted by committed, non-undone records). S08-08 adds `message_sequence`. |
+| `snapshot.listByThread` (changed) | None | Each `TurnSnapshot` gains `reverted_paths: string[]`: paths currently reverted by committed, non-undone records whose range holds this row and that this row attributes. A range revert therefore marks the path on every row of its range that touched it. S08-08 adds `message_sequence`; S10-03 adds `attempt_count`. |
 | `SystemNoticeMetadataSchema` (changed) | `kind` adds `"turn-reverted" \| "turn-revert-undone" \| "turn-revert-interrupted"`, plus `revertId?: string (max 64)` | None |
 
 A `requestId` that is already stored with different bound parameters is a validation error, not a result.
 
-**Server** (`apps/server/src/features/projects/diffs/revert/turn-revert-service.ts`, new; RPC router `diffs/transport/turn-revert-rpc.ts`, same pattern as `snapshot-rpc.ts`). Dependencies: `TurnSnapshotRepo`, `SnapshotService` (new methods below), `SnapshotRefPins` and the store id from S10-12, `RepositoryGitMutationLock`, thread and workspace services, the application database writer, broadcast. Move `resolveSnapshotCwd` out of `snapshot-rpc.ts:164-175` into a shared helper.
+**Server** (`apps/server/src/features/projects/diffs/revert/turn-revert-service.ts`, new; RPC router `diffs/transport/turn-revert-rpc.ts`, same pattern as `snapshot-rpc.ts`). Dependencies: `TurnSnapshotRepo`, S10-03's `turnSnapshotRange`, `SnapshotService` (new methods below), `SnapshotRefPins` and the store id from S10-12, `RepositoryGitMutationLock`, thread and workspace services, the application database writer, broadcast. Move `resolveSnapshotCwd` out of `snapshot-rpc.ts:164-175` into a shared helper.
 
 New `SnapshotService` methods, reusing the existing pathspec batching (`literalPathspecs`, `batchPathspecGroups`):
 
@@ -254,28 +268,28 @@ New `SnapshotService` methods, reusing the existing pathspec batching (`literalP
 
 **Preview algorithm:**
 
-1. Load the snapshot by `messageId`. Missing gives `snapshot_missing`. A non-git workspace gives `not_git`. Resolve `cwd`; if it doesn't exist, return `worktree_missing`.
+1. Resolve the target range (above). A missing snapshot row for `messageId` or `fromMessageId` gives `snapshot_missing`. A non-git workspace gives `not_git`. Resolve `cwd`; if it doesn't exist, return `worktree_missing`.
 2. Scope:
-   - Turn scope: `attributedWorkspacePathGroups(snapshot)`.
-   - File scope: the one group containing `path`. A path not in the attributed set is rejected as a validation error, so the RPC can never write a path the turn did not touch.
-3. Check that `cat-file -e` succeeds for `ref_before` and `ref_after`; otherwise return `snapshot_pruned`.
-4. Read `before = blobIdsAt(ref_before)`, `after = blobIdsAt(ref_after)` and `current = currentBlobIds(ref_after)`. Classify each path:
+   - Turn scope: the range's attributed groups.
+   - File scope: the one group containing `path`. A path that no row of the range attributes is rejected as a validation error, so the RPC can never write a path the range did not touch.
+3. Check that `cat-file -e` succeeds for the range's `ref_before` and `ref_after`; otherwise return `snapshot_pruned`.
+4. Read `before = blobIdsAt(ref_before)`, `after = blobIdsAt(ref_after)` and `current = currentBlobIds(ref_after)`, all from the range's refs. Classify each path:
    - `already_reverted` when current equals before.
    - `clean` when current equals after.
-   - `changed_later` otherwise. `changedBy` is `later_turn` when any later snapshot on a thread with the same resolved `cwd` attributes the path; otherwise it is `outside`.
+   - `changed_later` otherwise. `changedBy` is `later_turn` when a snapshot of a turn after the range, on a thread with the same resolved `cwd`, attributes the path; otherwise it is `outside`. Rows inside the range, such as earlier attempts of a retried turn or the other turns of an All turns range, are never "later".
 
    Gitignored paths (`check-ignore`) and gitlinks go to `skipped`. A path whose before-state is a file but which is now a folder holding files outside the scope goes to `skipped` as `folder_in_the_way`, because recreating it would delete unrelated work.
-5. `unattributedChangeCount` is `git diff --name-only ref_before ref_after` minus the attributed paths. It is 0 when the snapshot has no file effects.
+5. `unattributedChangeCount` is `git diff --name-only ref_before ref_after` over the range, minus the attributed paths. It is 0 when no row of the range has file effects.
 6. Busy check: return `busy` when any thread whose resolved working directory equals `cwd` has an active turn or thread startup, or when a revert is in flight for that `cwd`.
-7. `previewToken` hashes the repo identity, `cwd`, snapshot id, scope and `workingTreeState` of every scope path.
+7. `previewToken` hashes the repo identity, `cwd`, the range's snapshot ids in order, the scope and `workingTreeState` of every scope path.
 
 **Apply.** It runs inside `RepositoryGitMutationLock.run(cwd)`:
 
 1. **Replay.** Look up `turn_reverts.request_id = requestId`. If it exists with the same bound parameters (`threadId`, `messageId`, `scope`, `previewToken`), return its stored outcome and write nothing: `committed` returns `reverted`, `rolled_back` and `recovery_failed` return `failed` with that outcome. A live writer holds the lock, so a replay finds a `prepared` row only when an earlier status write failed; it settles that row with the startup-recovery check below before answering. Outcomes that wrote nothing (`stale`, `busy`, `unavailable`, `nothing_to_revert`, `failed/unchanged`) are not stored, so a replay recomputes them.
 2. **Precondition.** Recompute the preview. If its token differs from the request's `previewToken`, return `stale` with the fresh preview.
-3. **Prepare.** For every path the write will touch (scope paths minus `already_reverted` and `skipped`), `captureRaw` records the `pre` state and `planCheckout(cwd, ref_before, id, paths)` records the `planned` state. `pinRecovery` pins both sets of blobs. Then insert the `turn_reverts` row in state `prepared`: request id, bound parameters, and each path's action, before-blob, `pre` and `planned`. If any step fails, return `failed/unchanged`. No file has been written yet.
+3. **Prepare.** For every path the write will touch (scope paths minus `already_reverted` and `skipped`), `captureRaw` records the `pre` state and `planCheckout(cwd, ref_before, id, paths)`, with the range's `ref_before`, records the `planned` state. `pinRecovery` pins both sets of blobs. Then insert the `turn_reverts` row in state `prepared`: request id, bound parameters, and each path's action, before-blob, `pre` and `planned`. If any step fails, return `failed/unchanged`. No file has been written yet.
 4. **Write.** `restoreRaw(cwd, plannedStates)`.
-5. **Commit.** Read every touched path's `workingTreeState`. Each must equal its `planned` state; a mismatch means another writer got in, and it is handled as a failure after the first write (step 6). Then, in **one** database write (prior art `persistTurnSnapshot`, `features/agents/turns/persistence/turn-finalization-write-operations.ts:11`), set the row to `committed` and insert the receipt system message at `latestSequence + 1`. The receipt has role `system`, content such as "Reverted Turn 3 · 7 files" as the fallback text, and `systemNotice { kind: "turn-reverted", presentation: "timeline", revertId }`. Broadcast `turn.reverted` and `turn.diffChanged` after the write commits. The git watcher emits `files.changed` as usual.
+5. **Commit.** Read every touched path's `workingTreeState`. Each must equal its `planned` state; a mismatch means another writer got in, and it is handled as a failure after the first write (step 6). Then, in **one** database write (prior art `persistTurnSnapshot`, `features/agents/turns/persistence/turn-finalization-write-operations.ts:11`), set the row to `committed` and insert the receipt system message at `latestSequence + 1`. The receipt has role `system`, fallback content text ("Reverted Turn 3 · 7 files" for a turn, "Reverted a.ts · Turn 3" for a file, "Reverted a.ts · Turns 1–5" for a range), and `systemNotice { kind: "turn-reverted", presentation: "timeline", revertId }`. Broadcast `turn.reverted` and `turn.diffChanged` after the write commits. The git watcher emits `files.changed` as usual.
 6. **Failure after the first write** (a write error such as a Windows file lock, `EBUSY`/`EPERM`, a commit-check mismatch, or a failed commit write): settle the row with the recovery rule below, so a path is put back only when it holds exactly its planned state. Set the row to `rolled_back`, or to `recovery_failed` with the listed paths, and return the matching `failed` result. If that status write also fails, the row stays `prepared` and startup recovery settles it.
 
 **Undo** (`turn.revert.undo`) follows the same replay rule by `requestId`. Load the target record `r`: it must be `committed`, have `kind ≠ undo` and not be undone, and its recovery ref must still exist (else `unavailable: recovery_expired`). Under the lock, compare each touched path's `workingTreeState` with `r`'s `planned` state, which `r`'s commit check proved was on disk. Any mismatch returns `stale`. Otherwise prepare an `undo` row whose `pre` is each path's current raw state and whose `planned` is `r`'s `pre`. Its own pin holds both sets of blobs, so its recovery never depends on `r`'s ref. Then `restoreRaw` the planned states and, in one write, commit the undo row, a `turn-revert-undone` receipt and `r.undone_by_revert_id`. Failure handling is the same as apply.
@@ -289,6 +303,13 @@ New `SnapshotService` methods, reusing the existing pathspec batching (`literalP
 
 The row becomes `rolled_back` when every path equals its `pre`. Otherwise it becomes `recovery_failed` with the listed paths, keeps its row and its recovery ref (the sweep never deletes them, §4), and the next start tries again. Each settled row gets one `turn-revert-interrupted` receipt, "Revert of Turn 3 was interrupted. Files were put back." or "Revert of Turn 3 was interrupted. 2 files could not be put back: a.ts, b.ts", so a crash is never silent.
 
+**Across a range** (a retried turn, or a Revert file from All turns):
+
+- **Undo** is unchanged. It never reads snapshots: it compares each touched path with the record's `planned` state and writes back the record's `pre` bytes, so undoing a range revert works exactly like undoing a one-turn revert.
+- **Recovery** is unchanged for the same reason: it reads only the row's raw states and its recovery ref.
+- **Edited later** means a turn after the range's last turn attributes the path. Rows inside the range are what the revert covers, never "later". On the bar, `reverted` outranks `edited later` on every row of the range that touched the path (`reverted_paths`).
+- **Edits inside the range** that no turn attributes, such as a hand edit between two turns or two attempts, are part of the range's diff, which the view shows. Revert undoes them without naming them; only a change after the range's end is `changed_later`.
+
 **Ordering with turns:** every snapshot capture (`turn-runtime-controller.ts:598-608`, and the `captureRef` calls in `turn-file-effects.ts:158`, `turn-execution-file-evidence.ts:81` and `turn-finalizer.ts:556`) runs inside `RepositoryGitMutationLock.run(cwd)`, together with its baseline pin; S10-12 makes that change. A send that arrives during a revert then waits, and its `ref_before` reflects the reverted files. This is the cross-component trap to document. The lock is in-process: it does not stop an editor, external git or a second Mcode runtime on the same repo.
 
 **DB** (Drizzle schema in `runtime/persistence/sqlite/schema.ts`, generate the SQL with `bun run db:generate`):
@@ -300,6 +321,7 @@ CREATE TABLE turn_reverts (
   request_params TEXT NOT NULL,       -- JSON of the bound parameters; a replay must match them
   thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
   target_message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  from_message_id TEXT REFERENCES messages(id) ON DELETE CASCADE, -- first turn of an All turns range; null otherwise
   kind TEXT NOT NULL,                 -- turn | file | undo
   path TEXT,                          -- file scope only
   undoes_revert_id TEXT REFERENCES turn_reverts(id) ON DELETE SET NULL,
@@ -396,7 +418,7 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
   - **Reduced motion:** no height animation.
 - `MessageBubble.tsx`: actions visible at rest. Delete `AssistantMessageMetadata`. Handle system notices `turn-reverted`, `turn-revert-undone` and `turn-revert-interrupted` before the default divider.
 - `SnapshotService` gains `blobIdsAt`, `currentBlobIds`, `workingTreeState`, `captureRaw`, `planCheckout`, `pinRecovery` and `restoreRaw`.
-- `TurnSnapshotStore.listByThread` returns reverted paths (S08-03) and joins the message sequence (S08-08). `server-bootstrap.ts` runs `recoverUnfinished()` before accepting RPCs.
+- `TurnSnapshotStore.listByThread` returns reverted paths (S08-03), joins the message sequence (S08-08) and returns `attempt_count` (S10-03). `server-bootstrap.ts` runs `recoverUnfinished()` before accepting RPCs.
 - `diffStore.ts`: `sinceLookedBaselineByThread`, set from S01-03's acknowledgement response, and the `DiffViewMode` union gains `"since-looked"` (S10 owns the picker entry layout).
 
 ### Retirement ledger
@@ -441,7 +463,7 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
 
 ### S08-02 End-of-turn changes bar and turn ⋯ menu
 
-- **Blocked by:** F-01b Token vocabulary rename; F-02 Fade truncation primitive; F-04a Menu primitive.
+- **Blocked by:** F-01b Token vocabulary rename; F-02 Fade truncation primitive; F-04a Menu primitive; S10-03 Truthful comparison outcomes and turn list.
 - **Boards:** 08a `21J0-2`, 08c `21OI-2`, Components `15OZ-0` (all states except Revert confirmation)
 - **Delivers:**
   - "Changed N files +A −D ⌄" with a folder tree. The longest common directory prefix is stripped (08a shows bare file names).
@@ -451,8 +473,10 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
   - Row hover shows Open in editor (desktop only) and Copy path. A row click opens Review and jumps to the file.
   - The muted Review button pins the Turn view to this turn.
   - ⋯ menu: Review changes and Copy file paths (newline-separated, repo-relative, forward slashes).
+  - A retried or resumed turn's bar covers the whole turn from its first attempt's baseline, so a file that only the failed attempt edited is listed (E2). The replaced attempt shows no bar of its own; section 08f hides it.
 - **Build notes:** web.
   - Counts come from `snapshot.file_effects` (already on `snapshot.listByThread`). Only legacy rows (no effects) call `snapshot.getDiffStats`. Loading shows the skeleton (`1643-0`). A failed or null count shows "Counts unavailable" (`165M-0`).
+  - A row with `attempt_count` > 1 (S10-03) is read like a legacy row: its files, kinds and counts come from `snapshot.getDiffStats({ snapshotId })`, which the server answers over the turn's range, because the row's own `file_effects` covers its attempt only. Copy file paths copies that list.
   - Use the transcript's `threadId` prop, not `activeThreadId`.
   - The latest bar is expanded and older bars collapsed. Keep the manual override map.
   - Hide collapse-all when the tree has no folder rows. 08a draws it with none (Q7).
@@ -463,24 +487,29 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
   - [ ] Review and Review changes open the Review panel on Turn = this turn. A missing snapshot falls back to All turns (today's behavior).
   - [ ] Copy file paths copies every attributed path, not just the visible ones.
   - [ ] The bar never queries a thread other than the one its transcript renders.
+  - [ ] Given a row with `attempt_count: 2` whose `file_effects` lists `b.ts` and `c.ts`, the bar renders the `snapshot.getDiffStats` result (`a.ts`, `b.ts`, `c.ts` with range counts), shows Loading until it arrives, and never shows the `file_effects` counts.
   - [ ] `rg` proofs in the ledger pass.
 - **Verify:** `bun run --cwd apps/web test -- src/features/conversation/turn/__tests__/TurnChangesBar.test.tsx src/features/conversation/turn/__tests__/changes-tree.test.ts`. Prior art: `components/chat/__tests__/TurnChangeSummary.test.tsx`. Live: in a fixture thread, ask for edits to 7 files in 3 folders. Check the grouped tree, the counts, Review opening the Turn view, and the ⋯ menu.
 
 ### S08-03 Turn revert server operation (preview, apply, undo)
 
-- **Blocked by:** S10-12 Pin turn snapshots so git gc cannot prune them.
+- **Blocked by:** S10-12 Pin turn snapshots so git gc cannot prune them; S10-03 Truthful comparison outcomes and turn list.
 - **Reconciled:** Absorbs S08-05. Apply and undo take a client `requestId` (operation identity, replayed only for the same request); `previewToken` is only a precondition over repo identity, snapshot, scope and each path's presence, type, mode and content. Persist a prepared operation and pin its recovery material (`refs/mcode/<storeId>/reverts/<id>`, plus raw bytes and metadata for touched paths where a tree cannot restore exactly) before the first write; recover unfinished operations on startup. Revert UI (S08-04) cannot ship before this.
 - **Boards:** Components `16A3-0`, 10c `2E96-2` (copy inputs only)
 - **Delivers:**
-  - `turn.revert.preview`, `turn.revert.apply` and `turn.revert.undo` with the contracts in Backend §1. Apply and Undo take a client `requestId` and replay only that request. `previewToken` is a precondition over repo identity, snapshot, scope and each path's presence, type, mode and raw content.
+  - `turn.revert.preview`, `turn.revert.apply` and `turn.revert.undo` with the contracts in Backend §1. Apply and Undo take a client `requestId` and replay only that request. `previewToken` is a precondition over repo identity, the range's snapshots, scope and each path's presence, type, mode and raw content.
+  - Every operation reads its target range through S10-03's `turnSnapshotRange`. A retried turn reverts to its first attempt's pre-state (E2). The file scope takes an optional `fromMessageId`, so Revert file from All turns reverts the file to before the earliest turn of the range (V7); `turn_reverts.from_message_id` and `TurnRevertRecord.fromMessageId` record it.
   - Durable recovery (absorbed from S08-05): before the first file write, a `prepared` row records each touched path's raw `pre` state and the exact raw `planned` state the write will leave, and both sets of bytes are pinned at `refs/mcode/<storeId>/reverts/<id>`. Every write goes through `restoreRaw`, so disk matches the record. Rollback and Undo restore byte-exact. `recoverUnfinished()` settles interrupted operations at startup by comparing raw content, type and mode, never filtered blobs. It puts back only paths that hold exactly their planned state, and it lists and leaves alone any path it cannot prove. It writes an interrupted receipt.
   - The `turn_reverts` table, the receipt system message, `turn.reverted` push, `snapshot.listByThread` with `reverted_paths`.
   - The startup sweep covers `reverts/` in this store's namespace only. Revert relies on S10-12 having moved every snapshot capture inside the repo mutation lock.
-- **Build notes:** contracts, server, DB migration. No UI, so Revert cannot reach users before its recovery path exists (S08-04 and S10-10 are blocked by this ticket). Uses S10-12's store id and `snapshot-ref-pins.ts`. A new ADR, at the next free number when it merges, "Turn revert restores pre-turn content", records restore semantics, worktree-only writes, request identity versus precondition, raw `pre` and `planned` states recorded before the first write, recovery by raw comparison only, and the rejected three-way merge. Add one paragraph to `docs/internals/review/turn-diff-review.md` on the lock ordering with baseline capture and on startup recovery. Add a test-only fault hook to `TurnRevertService` that can stop after prepare, after the Nth path write, or inside the commit write, either with an error (exercises rollback) or with a sentinel the service does not catch (simulates process death; the test then builds a fresh service on the same database and repo and calls `recoverUnfinished()`).
+- **Build notes:** contracts, server, DB migration. No UI, so Revert cannot reach users before its recovery path exists (S08-04 and S10-10 are blocked by this ticket). Uses S10-12's store id and `snapshot-ref-pins.ts`, and S10-03's `turnSnapshotRange` for the target range. A new ADR, at the next free number when it merges, "Turn revert restores pre-turn content", records restore semantics, worktree-only writes, request identity versus precondition, raw `pre` and `planned` states recorded before the first write, recovery by raw comparison only, and the rejected three-way merge. Add one paragraph to `docs/internals/review/turn-diff-review.md` on the lock ordering with baseline capture and on startup recovery. Add a test-only fault hook to `TurnRevertService` that can stop after prepare, after the Nth path write, or inside the commit write, either with an error (exercises rollback) or with a sentinel the service does not catch (simulates process death; the test then builds a fresh service on the same database and repo and calls `recoverUnfinished()`).
 - **Deletes:** None.
 - **Acceptance criteria:**
   - [ ] Apply restores modified, added (deleted on revert), removed (recreated) and renamed paths to their `ref_before` content. HEAD and `git diff --cached` are unchanged.
   - [ ] `changed_later` names `later_turn` vs `outside` correctly. `already_reverted` is a no-op. A file-scope path outside the turn's attribution is rejected.
+  - [ ] Retried turn: attempt 1 edits `a.ts` and `b.ts` and fails; its replacement edits `b.ts` and `c.ts`. Revert this turn, given either attempt's message id, restores all three to attempt 1's `ref_before`, and `a.ts` is not `changed_later`. Undo restores the bytes from after the replacement.
+  - [ ] Range: Turns 1 and 3 edit `a.ts`. A file scope with `fromMessageId` = Turn 1 and `messageId` = Turn 3 restores `a.ts` to Turn 1's `ref_before`. A hand edit after Turn 3 makes it `changed_later`/`outside`; a Turn 4 that edits it makes it `changed_later`/`later_turn`. `reverted_paths` lists `a.ts` on the Turn 1 and Turn 3 rows only. Undo restores byte-exact.
+  - [ ] A `fromMessageId` after `messageId`, and a path no turn in the range attributes, are validation errors. Replaying a `requestId` with a different `fromMessageId` is rejected.
   - [ ] Apply, Undo, then Apply again on the same turn, each with a new `requestId`, reverts a second time in a real repo. Replaying any of the three `requestId`s returns that request's own stored outcome and writes nothing.
   - [ ] A lost response: the same `requestId` sent again returns the first outcome. The same `requestId` with different parameters is rejected.
   - [ ] A content change, a mode-only change (executable bit, POSIX only; git ignores it on Windows) or a file-to-symlink change after preview returns `stale` with a fresh preview.
@@ -501,7 +530,7 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
 ### S08-04 Revert this turn: menu item, inline confirm, receipt with Undo
 
 - **Blocked by:** S08-02 End-of-turn changes bar and turn ⋯ menu; S08-03 Turn revert server operation (preview, apply, undo).
-- **Needs decision:** 08e (receipt row, reverted label, confirm copy) was never drawn. Ticket carries default copy; needs design sign-off.
+- **Needs decision:** 08e (receipt row, reverted label, confirm copy) was never drawn. Build to the default copy; the user signs off the design on the PR (user, 2026-10-08).
 - **Boards:** Components Turn menu `160S-0`, Revert confirmation `16A3-0`; 06d receipt `2799-2`
 - **Delivers:**
   - "Revert this turn…" in the ⋯ menu, disabled with a tooltip when the cause is known on the client:
@@ -546,7 +575,6 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
 ### S08-06 Tell the agent about reverts on the next turn
 
 - **Blocked by:** S08-03 Turn revert server operation (preview, apply, undo).
-- **Needs decision:** Whether the agent is told about a revert on the next send.
 - **Boards:** None (no visible UI)
 - **Delivers:** the next prompt sent after a revert carries one hidden Mcode line naming the reverted paths. It is sent once, and undone reverts are skipped.
 - **Build notes:** server only, at turn admission or prompt assembly (site inferred, verify). Mark `agent_notified_at` in the same write as the user message. No adapter changes.
@@ -572,6 +600,7 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
   - The diff shows only the changes from turns after the baseline.
 - **Build notes:**
   - Server and contracts: `snapshot.getCumulativeDiff` and `snapshot.getCumulativeDiffStats` accept `afterSequence`, and `snapshot.listByThread` returns `message_sequence` (Backend §2). Both read through S10-03's typed comparison result.
+  - `afterSequence` selects whole turns (E2): a turn is in when its latest attempt's message sequence is greater than the baseline, and then every row of its S10-03 range is in. So the view never starts a retried turn at its replacement.
   - Web: `DiffViewMode` gains `"since-looked"`. Comparison key `since-looked:<baseline>`. The baseline is `previous.sequence` from the first marker-advancing response of S01-03's `thread.acknowledgeSeen` in this visit, stored before the response clears the badge, held in memory per thread and cleared in `clearThread`. This ticket adds no seen marker, column or `markViewed` change. Ordinals come from `lib/turn-ordinals.ts`. The ADR-0011 default view is unchanged (Q6). Add a CONTEXT.md entry "Since you looked".
 - **Deletes:** None.
 - **Acceptance criteria:**
@@ -582,7 +611,7 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
   - [ ] The view is unavailable after an app restart with no new turns.
 - **Verify:** `bun run --cwd apps/web test -- src/lib/__tests__/review-views.test.ts src/__tests__/diffStore.test.ts` and `bun run --cwd apps/server test -- src/features/projects/diffs/transport/__tests__/snapshot-rpc.test.ts`. Live: queue two follow-ups and switch threads until both finish. Return: the sidebar shows Finished (S01). Review › Since you looked lists both turns' files.
 
-**Cross-section dependency:** S10-10 Revert file is blocked by S08-03 and S08-04. It calls `turn.revert.preview` and `turn.revert.apply` with `scope { kind: "file", path }`, a `previewToken` from that preview and a fresh `requestId` per click, through `useTurnRevert`, and renders `RevertConfirm`. Its copy is "Revert <file> to before Turn N?" and "Only this file changes. The turn's other edits stay." (`2EA2-2`).
+**Cross-section dependency:** S10-10 Revert file is blocked by S08-03 and S08-04. It calls `turn.revert.preview` and `turn.revert.apply` with `scope { kind: "file", path }` from the Turn view and `scope { kind: "file", path, fromMessageId }` from All turns, a `previewToken` from that preview and a fresh `requestId` per click, through `useTurnRevert`, and renders `RevertConfirm`. Its Turn view copy is "Revert <file> to before Turn N?" and "Only this file changes. The turn's other edits stay." (`2EA2-2`); S10-10 carries the proposed All turns variant.
 
 ## Tests
 
@@ -595,7 +624,7 @@ Revert, the seen marker and Since you looked operate on git trees and Mcode's ow
   - `apps/web/src/components/chat/__tests__/TurnChangeSummary.test.tsx`
   - `apps/web/src/features/conversation/narrative/__tests__/TurnFooter.test.tsx`
   - `apps/web/src/features/conversation/messages/__tests__/MessageList.thread-switch.test.tsx`
-- **Revert fixtures:** files that are modified, added, deleted, renamed, binary, gitignored, symlinked, executable, CRLF under `core.autocrlf=true`, mixed line endings, and under a repo-local clean/smudge filter. A file-to-folder and a folder-to-file transition. A later snapshot touching one path. A by-hand edit. A read-only file to force a write failure (Windows: an open handle).
+- **Revert fixtures:** files that are modified, added, deleted, renamed, binary, gitignored, symlinked, executable, CRLF under `core.autocrlf=true`, mixed line endings, and under a repo-local clean/smudge filter. A file-to-folder and a folder-to-file transition. A later snapshot touching one path. A by-hand edit. A read-only file to force a write failure (Windows: an open handle). A retried turn (a failed attempt that edited files, then its replacement) and a three-turn range for the All turns file scope.
 - **Request and recovery cases:** apply, undo, apply with new `requestId`s; a replayed `requestId` after a lost response; a reused `requestId` with other parameters; mode-only and type-only changes after preview; the fault hook stopping after prepare, after the first path write and inside the commit write, both as an error and as simulated process death followed by `recoverUnfinished()` on a fresh service; a path edited between the crash and recovery, including an EOL-only edit and an edit a clean filter hides; a recovery ref deleted before restart.
 - **Must-not-break checks:** the index and HEAD are untouched, no writes happen outside attributed paths, the recovery row (with `pre` and `planned` raw states) and ref exist before any write, rollback and Undo are byte-exact, recovery never writes a path whose raw state equals neither recorded state, and replay never writes twice.
 - **Runtime:** use `.dev/fixture-repo` only (AGENTS.md "Test data").
@@ -635,6 +664,7 @@ Q7: 08a draws collapse-all with no folders; the default hides it. Q8: the meanin
 **Section overlap:**
 
 - S10-01 deletes the dead `TurnTimeline`/`TurnEntry`. S10 builds Revert file on S08-03/S08-04 and owns snapshot and baseline pinning (S10-12).
+- S10-03 owns the attempt link and the turn range (section 10, Backend §3). The bar (S08-02), revert (S08-03) and Since you looked (S08-08) read it; section 08f hides the replaced attempt in the transcript.
 - 08f should not re-implement the fold label table (S08-01 owns it).
 - S06 owns the approval-review text and the receipt anatomy that S08-01 and S08-04 reuse.
 - S01-03 owns the seen marker, `thread.acknowledgeSeen`, the `markViewed` retirement and any change to `status=completed`.

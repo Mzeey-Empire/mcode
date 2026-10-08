@@ -6,6 +6,7 @@
 //   node graph.mjs sync-docs    rewrite each ticket's "Blocked by" line in the section docs
 //   node graph.mjs render       write ../tickets.md
 //   node graph.mjs issues       write issue bodies to ./out/<id>.md (needs ./issue-map.json for numbers, optional)
+//   node graph.mjs titles       print ticket titles as JSON (used by publish.mjs)
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -321,11 +322,45 @@ function epics(tickets, waves) {
     spec.trim(),
     "",
   ];
+  programBody.splice(
+    programBody.indexOf("## Sequencing"),
+    0,
+    "## Later (needs scoping, not part of this program)",
+    "",
+    ...SCOPING_EPICS.map(({ key, title }) => `- ${numbers[`epic:${key}`] ? `#${numbers[`epic:${key}`]} ` : ""}${title}`),
+    "",
+  );
   writeFileSync(join(outDir, "epic-program.md"), programBody.join("\n"));
+
+  for (const { key, body } of SCOPING_EPICS) {
+    const text = [
+      "## Description",
+      "",
+      body,
+      "",
+      `Decided out of the Ready for build program (${program}) on 2026-10-08. Scope it after that program ships; it has no tickets yet. Context: [decisions.md](${REPO_BLOB}/decisions.md).`,
+      "",
+    ];
+    writeFileSync(join(outDir, `epic-${key.replace(/:/g, "-")}.md`), text.join("\n"));
+  }
 }
 
+// Epics the user asked to file for later scoping (decisions D11 and N9). They have no tickets.
+const SCOPING_EPICS = [
+  {
+    key: "scoping:model-picker",
+    title: "Model picker extras (needs scoping)",
+    body: "The polished model picker board on the Paper Components page shows more than F-04c builds: a reasoning, context and Fast flyout, Ctrl+1 to 4 favourites, a folded \"Legacy models\" row, and switching a started thread to another provider. F-04c only moves today's picker onto the picker primitive. This epic scopes the rest (decision D11). Switching provider mid-thread needs a handoff design, because a provider session cannot move between harnesses.",
+  },
+  {
+    key: "scoping:projectless-chat",
+    title: "Start a chat without a project (needs scoping)",
+    body: "The empty workspace board offers \"Start a chat\" without choosing a project. Today every thread belongs to a project, and the server, sidebar, worktree modes and Setup all assume one. Until this is scoped, the empty workspace asks for a project first (decision N9).",
+  },
+];
+
 // Retirement ledger rows: | Remove | Where | Replaced by | Deleted in ticket | Proof it is gone |
-const ID_PATTERN = /\b(?:F-\d{2}[a-z]?|S\d{2}[A-Z]?-\d{2})\b/g;
+const ID_PATTERN = /\b(?:F-\d{2}[a-z]?|S\d{2}[A-Z]?-\d{2}[a-z]?)\b/g;
 // Proofs run without a shell so they behave the same on Windows, macOS and Linux:
 // `rg` passes when it prints nothing; `bun`, `bunx`, `node` and `git` pass on exit 0.
 const PROOF_RUNNERS = ["rg", "bun", "bunx", "node", "git"];
@@ -491,6 +526,9 @@ if (command === "check") {
 } else if (command === "render") {
   render(tickets, waves);
   console.log("tickets.md written");
+} else if (command === "titles") {
+  // Ticket titles for tools/publish.mjs.
+  console.log(JSON.stringify(Object.fromEntries(allIds().map((id) => [id, { file: tickets.get(id).file, title: tickets.get(id).title }]))));
 } else if (command === "issues") {
   issues(tickets);
   epics(tickets, waves);

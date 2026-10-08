@@ -34,8 +34,10 @@ From `source/screen-pass-todo.md` and `source/implementation-notes.md` (all 2026
 - Status label while the answer streams is "Answering" (code says "Thinking..."). 05f adds command failed, compacting, rate limited, stopping.
 - Subagents show the provider icon (sub-agent threads are provider-native, so it matches the parent thread), never generic coloured badges. Chips use the 16px provider icon; no inline child rail. The overview row overlaps at most 3 provider discs (20px, 12px step, panel-colour ring); the text ("1 active · 7 done") carries the total. The duplicate subagent count on the status line is dropped.
 - Queue actions are Send now / Edit / Remove.
+- Send now means steer (user, 2026-10-08, R2). While a turn runs, Send now steers the queued message into that turn, and it is shown only when the thread's provider can steer. There is no "send next" fallback under that name. While the thread is idle, Send now sends the message at once, for every provider (the paused queue in 08f relies on it).
 - Full access and Stop are neutral, no amber or red. Stop = ink circle with a background-colour square.
 - Task bubble docks on top of the composer in the same tray as the queue list, task row first, queued messages below. Collapsed row = task icon, task-list title with fade, completion indicator B (one segment per task: done ink, current muted, pending border), settled/total, chevron that expands the list upward. Task progress shows in both the overview and the tray.
+- Task list title (user, 2026-10-08, R1): "Tasks" when no plan backs the list; the plan's title when the tasks come from implementing a plan; never the thread title.
 - Truncation is a 24px right-edge fade, never an ellipsis. Overview width 280, open by default; it lists only what exists at that moment.
 - Sidebar active-turn fade (~55%, spinner, no text) comes from "S01 thread row state model". The overview card shell comes from "S03 overview card shell".
 - S06: the pending dock replaces the composer surface while the tray stays above it; status line becomes "Waiting for approval". S07: plan lives in the overview; plan row opens the Plan panel.
@@ -77,7 +79,8 @@ From `source/screen-pass-todo.md` and `source/implementation-notes.md` (all 2026
 - Tasks are projected twice from tool names: web `projectTaskToolUse` (`apps/web/src/stores/threadStore.ts:1925-1940`) and server `task-tool-intent-reducer.ts` for persistence (`apps/server/src/features/agents/tasks/task-persistence-service.ts:16-41`). Sources: Claude native tools; Codex `turn/plan/updated` → synthetic `update_plan` (`codex-event-mapper.ts:1983-1991`); Cursor ACP `plan` → `TodoWrite` snapshot (`cursor-acp-event-mapper.ts:160`, `cursor/events/cursor-todo-snapshot.ts:231`). Devin drops ACP `plan` updates (`devin-acp-event-mapper.ts:128-135`). OpenCode treats `todo.*` as noise (`opencode-event-mapper.ts:608`). Copilot maps no task list (verified: nothing in `copilot-event-mapper.ts`). No source carries a task-list title.
 - `TaskBubble` is a hover-open outline pill "3/4 steps" with a progress ring and `FileEffectFacts` (`apps/web/src/components/chat/TaskBubble.tsx:161-250`), mounted above the composer (`ComposerContentSurface.tsx:173-186`). `TaskPanel`/`TaskGroup` have no consumers (`apps/web/src/components/tasks/index.ts:1`). `TaskItem` uses amber, green and `animate-ping` (`components/tasks/TaskItem.tsx:12-40`).
 - `ComposerQueueList`: "QUEUED" header with Continue and Clear all, drag handle, Send now (Zap, Claude only), Edit, Remove (`apps/web/src/components/chat/ComposerQueueList.tsx:118-405`; gate `apps/web/src/lib/model-registry.ts:405-415`).
-- Bug (verified): while a turn runs, Send now only moves the message to the head of the queue (`apps/web/src/features/conversation/composer/queue/useQueuedMessageDispatch.ts:56-63`); the list's docstring says it stops the agent (`ComposerQueueList.tsx:44-49`).
+- Bug (verified): while a turn runs, Send now only moves the message to the head of the queue (`apps/web/src/features/conversation/composer/queue/useQueuedMessageDispatch.ts:56-63`); the list's docstring says it stops the agent (`ComposerQueueList.tsx:44-49`), and so does the Claude-only gate's (`model-registry.ts:396-415`, read at `ComposerQueueList.tsx:109`).
+- Nothing steers into a running turn today (verified: no steer path in `packages/providers` or `apps/server`). A send while a turn runs fails at the thread's mutation reservation (`turn-runtime-controller.ts:486,500-507`; `thread-control-mutation-reservation-service.ts:24-32` returns null while one is held), which is why the client queues follow-ups.
 - Queued messages are deleted when a turn errors (`threadStore.ts:2688`). S08 (08f) should decide whether they survive.
 
 ### Overview, scroll, Stop
@@ -99,9 +102,9 @@ From `source/screen-pass-todo.md` and `source/implementation-notes.md` (all 2026
 | Status labels incl. Answering, Waiting on subagents, Stopping, Compacting, Rate limited | "Thinking...", subagent count, banners | `deriveRunStatus` + spinner icon for holding states | web, providers (signals) |
 | Subagent chips with provider icon | Coloured identity glyph | Bordered pill with `ProviderIcon` | web |
 | Overview Subagents (3 discs) | Label + 4 glyphs | Disc stack (F-06) + "1 active · 7 done" | web |
-| Tray task row with segments | "3/4 steps" pill | Tray row, segments B, upward list | web |
+| Tray task row with segments | "3/4 steps" pill | Tray row, segments B, upward list; titled "Tasks" or the plan's title (R1) | web |
 | Task lists for Devin, OpenCode | None | Adapter snapshots as `TodoWrite` | providers |
-| Queue rows Send now / Edit / Remove | Header, drag, Zap, Claude-only | Three icon buttons in the tray | web |
+| Queue rows Send now / Edit / Remove | Header, drag, Zap, Claude-only; Send now while running only reorders | Three icon buttons in the tray; Send now steers while running, shown only where the provider declares `turn-steer` (R2) | contracts, server, providers (Claude, Codex), web |
 | Overview Changes / Tasks / Usage | RPC chain, "Plans", collapsible colour bars | Live counts while running, task row, neutral bars | web |
 | Jump to latest pill + fade | 28px icon | Labelled pill, neutral | web |
 | Stop neutral | Red | Ink circle, background square | web |
@@ -174,7 +177,7 @@ Precedence (first match wins):
 |---|---|---|---|
 | Stop in flight | Stopping | spinner | S05 |
 | Compacting | Compacting context | spinner | S05 |
-| Rate limited / retrying | Rate limited, retrying in 12s · Retrying in 8s · Retrying (no delay known) | spinner | S05 (S08 08f detail, see questions) |
+| Rate limited / retrying | Rate limited · Retrying (no countdown; S08F-09's quiet line under the work carries the attempt and countdown, decision R7) | spinner | S05 |
 | Pending approval | Waiting for approval | layers | S06 |
 | Plan questions / planning | Waiting for your answers · Planning | layers | S07 |
 | Shell running | Running `<command, one line, bounded>` | layers | S05 |
@@ -194,13 +197,15 @@ No contract change. Adapter fixes: Claude emits `RateLimited { active: true }` o
 
 ### 4. Task lists (no new contract)
 
-Keep the existing tool-name protocol and both reducers. Add one shared constant `TASK_LIST_TOOL_NAMES` in `packages/contracts` used by the server reducer, the web projection, and a timeline filter that drops these calls from rows and step counts. Devin and OpenCode normalize to `TodoWrite` snapshots in the adapter (S05-13). The task-list title is derived client-side (see open questions); no provider supplies one.
+Keep the existing tool-name protocol and both reducers. Add one shared constant `TASK_LIST_TOOL_NAMES` in `packages/contracts` used by the server reducer, the web projection, and a timeline filter that drops these calls from rows and step counts. Devin and OpenCode normalize to `TodoWrite` snapshots in the adapter (S05-13).
+
+Title (R1). No provider supplies one, so the client derives it: the plan's title when the task list belongs to a turn that implements a plan version, else "Tasks". It never uses the thread title. A turn implements a version when that version's `acceptedMessageId` (S07-07, `07-plan-mode.md` Data shapes) equals the turn's user message id; for a retried turn, its first attempt's message (E2). Until S07-07 lands, every list reads "Tasks".
 
 Tray and overview read one selector:
 
 ```ts
 interface TaskProgress {
-  title: string;
+  title: string;              // the implemented plan version's title, else "Tasks" (R1)
   settled: number;            // completed + cancelled
   total: number;
   segments: readonly ("done" | "current" | "pending")[]; // completed|cancelled, in_progress, pending
@@ -210,6 +215,44 @@ interface TaskProgress {
 ### 5. Shell output (not built)
 
 Running shells show the header only for every provider. A future `ToolOutputDelta` would draw on Codex `item/commandExecution/outputDelta` (buffered today, `codex-event-mapper.ts:2006-2010`), ACP `tool_call_update` content (Cursor, Devin; inferred), and OpenCode running tool state (inferred). Claude reports only `tool_progress` heartbeats (`claude-event-mapper.ts:546-556`). No ticket now.
+
+### 6. Send now steers (S05-10)
+
+Steering adds the user's message to the turn that is running, without stopping it (R2). One capability gates it: `turn-steer`, added to `ProviderCapabilityNameSchema` (`packages/agent-model/src/capabilities.ts:5-21`). The web shows Send now on a queued row while a turn runs only when the thread's provider declares it `supported`.
+
+```ts
+// packages/contracts/src/ws/methods.ts
+"agent.steer": {
+  params: z.object({
+    threadId: z.string().min(1).max(256),
+    turnExecutionId: z.string().min(1).max(256),   // the running turn the user saw; a precondition
+    messageId: z.string().uuid(),                  // client id: a replay returns the first result
+    // plus the message fields agent.send takes (content, mentions, attachments), with the same schemas and bounds
+  }).strict(),
+  result: z.object({ messageId: z.string() }).strict(),
+}
+// Failures: turn_not_running (the turn ended or another turn runs), steer_unsupported.
+
+// packages/contracts/src/providers/interfaces.ts, next to sendTurn (:178)
+steerTurn?(input: Pick<TurnRequest, "threadId" | "message" | "attachments"> & { turnExecutionId: string }): Promise<void>;
+```
+
+- Server: `TurnRuntimeController.steer` checks that `turnExecutionId` is the thread's running turn and that the adapter declares `turn-steer`, then calls `steerTurn`. It does not take the mutation reservation the running turn already holds. The steered text persists as a user message inside the running turn, so the transcript shows it at the point it was sent and it survives a reload (inferred: no canonical event carries a mid-turn user message today; the ticket adds one with the canonical writer).
+- A failed steer never loses the message: the client keeps the row queued and shows the error on it. A turn that ended first returns `turn_not_running`, and the row then behaves as an idle Send now.
+- Removed: the Claude-only `PROVIDERS_WITH_SEND_NOW` gate (`model-registry.ts:396-415`) and the head-of-queue move (`useQueuedMessageDispatch.ts:56-63`). Nothing called "Send now" sends next.
+
+Per adapter. Evidence is the code as it is today; where a provider's native protocol is not vendored in this worktree, the source is named.
+
+| Provider | Native steer | How Mcode sends a turn today | `turn-steer` |
+|---|---|---|---|
+| Claude | Yes, inferred: an `SDKUserMessage` with `priority: "now"` pushed into the live query. T3 Code steers this way (cached source `.opensrc/repos/github.com/pingdotgg/t3code/main/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts:7518-7550`, declared at `:200-202`) on SDK `^0.3.276`; Mcode pins `^0.3.212` (`packages/providers/package.json:18`), so confirm the field exists or bump the SDK in the ticket. The steer aborts the current stream or tool, and the query ends that segment with `terminal_reason` `aborted_streaming` or `aborted_tools`, which must not read as an interrupted turn (same file, `:2426-2430`). | One long-lived `query()` fed by a prompt queue (`claude-provider.ts:200-279`); each turn pushes a message (`:1405`, `:1906`) built without `priority` (`:282-292`). Pushing mid-turn without `priority` would queue the message for after the turn (inferred). | supported after S05-10 |
+| Codex | Yes: app-server `turn/steer` with `expectedTurnId` (cached source `.opensrc/repos/github.com/openai/codex/main/codex-rs/app-server-protocol/src/protocol/common.rs:1056-1061`, params at `v2/turn.rs:308-333`). | `turn/start` (`codex-app-server.ts:1191`) and `turn/interrupt` (`:1136`); the adapter already tracks `activeTurnId` (`:963`, `:1088`), which `expectedTurnId` needs. It never calls `turn/steer`. | supported after S05-10 on CLIs that accept `turn/steer`; the ticket measures the minimum version and records it next to `CODEX_MIN_VERSION` (`codex-provider.ts:98`); older CLIs declare it unsupported |
+| Cursor | No: ACP has one `session/prompt` per turn and no way to add input to it. T3 Code declares Cursor and its generic ACP adapter unable to steer (cached `CursorAdapterV2.ts:106`, `AcpAdapterV2.ts:562`). | One ACP prompt per turn (`cursor-turn-executor.ts:161`). | unsupported: Send now hidden while a turn runs |
+| Copilot | Unknown: SDK `^0.2.2` (`packages/providers/package.json:20`) is not vendored here, and no evidence shows it accepting input into a running turn. | `session.send` per turn (`copilot-provider.ts:222`). | unsupported until a captured trace proves it |
+| Devin | No: the same ACP rule as Cursor. | One ACP prompt per turn (`devin-provider.ts:601`). | unsupported |
+| OpenCode | Unknown for the server Mcode drives: newer OpenCode accepts a prompt with `delivery: "steer"` (cached T3 Code `OpenCode2AdapterV2.ts:8-10`), but Mcode's adapter targets `prompt_async`, and no trace shows that endpoint steering. | `prompt_async` (`opencode-http-client.ts:320-325`). | unsupported until a captured trace on Mcode's supported OpenCode version proves it |
+
+Capability declarations to extend: Claude `claude-provider.ts:471-475`, Codex `codex-provider.ts:116-130`, Cursor `cursor-provider.ts:149-156`, Copilot `copilot-provider.ts:37`, Devin `devin-provider.ts:159-168`, OpenCode `opencode-provider.ts:47,257`. Unsupported providers declare `turn-steer` as `unsupported`, so the decision is written down per adapter.
 
 ### Per-provider decision table
 
@@ -221,6 +264,7 @@ Running shells show the header only for every provider. A future `ToolOutputDelt
 | Compacting | No change (`claude-event-mapper.ts:360-370`) | Change: map `contextCompaction` (`codex-event-mapper.ts:67-70` silent) | No change: no signal (`cursor-acp-session-trace.ts:89-94` only summarizes) | No change (`copilot-event-mapper.ts:109-112`) | No change: no signal | No change (`opencode-event-mapper.ts:603-606`, `632-636`) |
 | Rate limited / retry | Change: warning is not a block (`:558-581`); ApiRetry no change (`:381-390`) | No change: ApiRetry without delay (`:2108-2115`), label "Retrying" | No change: no signal | No change: no signal (inferred) | No change: no signal | Change: map retries (`:268`, `588`; fields inferred) |
 | Live shell output | Not built | Not built | Not built | Not built | Not built | Not built |
+| Steer (Send now while running, section 6) | Change: `priority: "now"` push, declare `turn-steer` (S05-10) | Change: `turn/steer`, declare `turn-steer` on CLIs that accept it (S05-10) | No change: cannot steer; declare `unsupported` | No change: unproven; declare `unsupported` | No change: cannot steer; declare `unsupported` | No change: unproven; declare `unsupported` |
 
 ### Streaming performance (zero-lag pillar)
 
@@ -256,7 +300,7 @@ Running shells show the header only for every provider. A future `ToolOutputDelt
 - `ToolSummaryLine`, `ShellToolCallRow`, `ActiveToolRow`, `NarrativeSummaryLine`: use `NarrativeToolRow`; shell never auto-opens; expanded shell card keeps the Components "Shell" anatomy (`129W-0`) with `formatClock`.
 - `ThoughtBlock` → narration prose at `--text-prose`/`--leading-prose`; `MessageBubble` assistant body the same; `.typing-cursor` 2px × 18px `--color-primary`.
 - `SubagentRow` → `SubagentChip`s that read their S12P-08 roster entry. The glyph-to-`ProviderIcon` swap in every caller is F-06's.
-- `ComposerQueueList` → queue rows inside `ComposerTray`. Send now while idle dispatches immediately (as today); its running behaviour waits on an open question.
+- `ComposerQueueList` → queue rows inside `ComposerTray`. Send now while idle dispatches immediately (as today); while a turn runs it steers (section 6) and shows only for a provider that declares `turn-steer`.
 - Composer send position: Stop = 40px `--color-ink` circle with a 14px `--color-background` square (radius 2); with a draft, a ghost square stop beside the amber Send (`L95-0`); stop requested = muted circle with spinner (`L9T-0`).
 - `CONTEXT.md` "Reasoning block" and "Task bubble" entries, and `docs/internals/conversation/narrative-pipeline.md` (lines 1-7 status line, 16-31 shell rows, 207-210 shimmer, invariant 6) are rewritten by the tickets that change them.
 
@@ -275,7 +319,7 @@ Running shells show the header only for every provider. A future `ToolOutputDelt
 | Copilot thinking drop, OpenCode `reasoning-not-surfaced` | `copilot-event-mapper.ts:61`, `opencode-event-mapper.ts:472,598-600,631` | `reasoningDelta` | S05-07 | `rg -n "reasoning-not-surfaced" apps/server/src` returns nothing |
 | Chip lifecycle words "started working" and "updated", unused `SubagentRow` props (`children`, `hooks`, `depth`, `toolCall`), overview "Subagents" label and 4-icon stack with comma copy | `SubagentRow.tsx:10-20,66-67`, `ThreadOverview.tsx:2509-2523,2822-2853` | `SubagentChip` words from S12P-08's `subagentChipWord`, `ProviderDiscStack` with `countSubagents` | S05-08 | `rg -n "started working\|subagentGlyphRows" apps/web/src` returns nothing |
 | `TaskBubble` pill, `ProgressCircle`, `FileEffectFacts`, `TaskPanelHeader`, hover popover, `animate-ping` task mark | `components/chat/TaskBubble.tsx`, `FileEffectFacts.tsx`, `components/tasks/TaskPanelHeader.tsx`, `TaskItem.tsx:30-40` | `ComposerTray` task row | S05-09 | `rg -n "TaskBubble\b\|FileEffectFacts\|TaskPanelHeader\|ProgressCircle\|bg-primary/25 animate-ping" apps/web/src/components` returns nothing (the banners' `motion-safe:animate-ping` goes with their own rows) |
-| Queue header (QUEUED, Continue, Clear all), Zap icon, drag handle and dnd-kit (if the user drops reorder), Claude-only Send now gate (if the user picks interrupt) | `ComposerQueueList.tsx:118-405`, `model-registry.ts:405-415` | Tray queue rows | S05-10 | `rg -n "Clear all queued messages\|PROVIDERS_WITH_SEND_NOW" apps/web/src` returns nothing under the Q2 and Q3 defaults (`Zap` and `GripVertical` stay legitimately in other components) |
+| Queue header (QUEUED, Continue, Clear all), Zap icon, drag handle and dnd-kit reorder (R3), the Claude-only Send now gate and the head-of-queue move that Send now makes while a turn runs (R2) | `ComposerQueueList.tsx:109,118-405`, `model-registry.ts:396-415`, `useQueuedMessageDispatch.ts:56-63` | Tray queue rows; Send now steers (section 6) | S05-10 | `rg -n "Clear all queued messages\|PROVIDERS_WITH_SEND_NOW\|providerSupportsSendNow" apps/web/src` returns nothing (`Zap` and `GripVertical` stay legitimately in other components); `bun run --cwd apps/web test -- src/features/conversation/composer/queue/useQueuedMessageDispatch.test.tsx` passes, including "Send now while a turn runs steers and never reorders the queue" |
 | Overview "Plans" text row, green/red change counts, collapsible coloured usage | `ThreadOverview.tsx:2655-2676,2633-2645,563-575,649-790` | Tasks, Changes, Usage rows | S05-11 | `rg -n "usageCategoryFillClass\|usageCategoryMetricClass\|>Plans<" apps/web/src` returns nothing |
 | `ScrollToBottomButton` and its amber variant | `messages/ScrollToBottomButton.tsx`, `MessageListOverlays.tsx:115-125` | `JumpToLatestPill` | S05-12 | `rg -n "ScrollToBottomButton" apps/web/src` returns nothing |
 | Red Stop styles | `ComposerContentSurface.tsx:411,523-524` | Neutral Stop | S05-12 | `rg -n "bg-destructive text-white\|text-destructive/60" apps/web/src/features/conversation/composer` returns nothing |
@@ -299,13 +343,13 @@ Running shells show the header only for every provider. A future `ToolOutputDelt
 
 - **Blocked by:** S05-01 Delete dead transcript renderers and the orphan task panel; F-01b Token vocabulary rename.
 - **Boards:** 05a `213P-2`, 05b `28OG-2`, 05c `29B3-2`, 05f `2CNV-2` (states 3, 4, 6, 7)
-- **Delivers:** The status line reads "4 steps · Running bun run lint 0:42", "Answering", "Waiting on subagents", "Stopping", "Compacting context", "Rate limited, retrying in 12s", with a spinner icon for the last three. The compacting banner is gone; the retry banner is replaced by S08F-09's provider retrying line.
+- **Delivers:** The status line reads "4 steps · Running bun run lint 0:42", "Answering", "Waiting on subagents", "Stopping", "Compacting context", "Rate limited" or "Retrying", with a spinner icon for the last three. The countdown and attempt live on S08F-09's quiet line under the work (R7), so the status line never repeats them. The compacting banner is gone; the retry banner is replaced by S08F-09's provider retrying line.
 - **Build notes:** web. Add `formatClock` (`lib/time.ts`) and `deriveRunStatus` (precedence table above); compute in `narrativeIndicatorItem` (`virtual-items.ts:538-542`) and extend its equality. Store `retryAt` on receipt in `handleRateLimited`/`handleApiRetry` (`threadStore.ts:2611-2622`). Accept `waitingFor` as an input S06/S07 fill later. Remove the shimmer only if the user agrees (open question). Rewrite `narrative-pipeline.md` lines 1-7 and 207-210.
 - **Deletes:** ledger rows 3-4.
 - **Acceptance criteria:**
   - [ ] Each precedence row has a unit test; "Answering" is true exactly when the provisional answer slot is non-empty.
   - [ ] Timer reads m:ss with no parens; no subagent count.
-  - [ ] Countdown reaches "Rate limited, retrying" (no number) at zero and clears on the next event.
+  - [ ] While the provider waits to retry, the status line reads "Rate limited" or "Retrying" with no number, and clears on the next event.
 - **Verify:** `bun run --cwd apps/web test -- src/features/conversation/narrative/__tests__/NarrativeIndicator.test.tsx src/features/conversation/narrative/__tests__/activity-label.test.ts`; live (Electron harness): run a Claude turn that reads a file and runs `bun run lint`; status line shows "Reading …", "Running bun run lint", then "Answering"; press Stop and see "Stopping" with the spinner.
 
 ### S05-03 In-turn state signals per adapter
@@ -393,25 +437,36 @@ Running shells show the header only for every provider. A future `ToolOutputDelt
 - **Blocked by:** S05-01 Delete dead transcript renderers and the orphan task panel; F-02 Fade truncation primitive; F-03 Button primitives.
 - **Boards:** 05a `213P-2` (`21AF-2`), 05b `28OG-2`, 05e `28ZH-2` (`296A-2`)
 - **Delivers:** The task list docks on the composer as a tray row: icon, faded title, one segment per task, "3/4", and a chevron that expands the list upward inside the tray.
-- **Build notes:** web. `ComposerTray` replaces the task-bubble and queue mounts in `ComposerContentSurface.tsx:173-210` (queue rows join in S05-10). `selectTaskProgress(threadId)` returns `TaskProgress` with shallow equality; title rule per the open question. Expanded list: 40px rows, neutral status marks (proposal). Keep `prepareTaskBubbleForNewTurn` lifecycle (`taskStore.ts:116-144`). Segment lane behaviour past ~20 tasks per the open question. Rewrite `CONTEXT.md` "Task bubble". The tray stays above the S06 approval dock.
+- **Build notes:** web. `ComposerTray` replaces the task-bubble and queue mounts in `ComposerContentSurface.tsx:173-210` (queue rows join in S05-10). `selectTaskProgress(threadId)` returns `TaskProgress` with shallow equality; the title follows R1 (section 4): the implemented plan version's title, else "Tasks", never the thread title. Expanded list: 40px rows, neutral status marks (proposal). Keep `prepareTaskBubbleForNewTurn` lifecycle (`taskStore.ts:116-144`). Segment lane behaviour past ~20 tasks per the open question. Rewrite `CONTEXT.md` "Task bubble". The tray stays above the S06 approval dock.
 - **Deletes:** ledger row 11.
 - **Acceptance criteria:**
   - [ ] Segment colours follow done/current/pending; count is settled/total.
   - [ ] Chevron, Enter and Esc expand and collapse; the list grows upward without moving the composer.
   - [ ] No task list: no tray row.
-- **Verify:** `bun run --cwd apps/web test -- src/components/chat/TaskBubble.test.tsx` (rename to the tray test) `src/stores/taskStore.test.ts`; live: Claude turn that writes a 4-item todo list; tray matches 05a then 05b.
+  - [ ] A task list from an ordinary turn is titled "Tasks", even in a thread with a title; a task list from a turn whose user message is a version's `acceptedMessageId` is titled with that version's title. No case shows the thread title.
+- **Verify:** `bun run --cwd apps/web test -- src/components/chat/TaskBubble.test.tsx src/stores/taskStore.test.ts` (rename the first to the tray test; add the three title cases to the selector test); live: Claude turn that writes a 4-item todo list; tray matches 05a then 05b, titled "Tasks" (the boards show a plan's title, which applies only to an Implement turn).
 
 ### S05-10 Queue rows in the tray: Send now, Edit, Remove
 
 - **Blocked by:** S05-09 Composer tray with the task row; F-03 Button primitives.
 - **Boards:** 05e `28ZH-2` (`296A-2`)
-- **Delivers:** Queued follow-ups sit under the task row with arrow-up Send now, pencil Edit, x Remove.
-- **Build notes:** web. Restyle rows; drop header, Continue, Clear all and Zap. Edit keeps `onLoadIntoComposer`; Remove keeps `removeFromQueue`. Send now while idle dispatches now (existing `sendNow`); while running it follows the user's answer (interrupt then send needs only existing Stop + dispatch for all six providers; head-of-queue keeps today's behaviour under a clearer tooltip). Drag reorder per the open question. Fix the docstring mismatch either way.
+- **Delivers:** Queued follow-ups sit under the task row with arrow-up Send now, pencil Edit, x Remove. While a Claude or Codex turn runs, Send now steers the message into that turn, and it shows in the transcript where it was sent. For Cursor, Copilot, Devin and OpenCode, Send now is hidden while a turn runs. While the thread is idle, Send now sends the message at once, for every provider.
+- **Build notes:** a vertical slice (R2, section 6).
+  - Web: restyle rows; drop header, Continue, Clear all, Zap and drag reorder (R3). Edit keeps `onLoadIntoComposer`; Remove keeps `removeFromQueue`. Send now while idle dispatches now (existing `sendNow`). While running, it calls `agent.steer` with the running `turnExecutionId` and shows only when the thread's provider declares `turn-steer` (from the provider descriptor the client already loads). Delete the Claude-only gate and the head-of-queue move. Rewrite the `ComposerQueueList` docstring to match.
+  - Contracts: the `turn-steer` capability, `agent.steer`, and the optional `steerTurn` on the provider interface.
+  - Server: `TurnRuntimeController.steer` with the running-turn precondition and no new reservation; the steered message persists in the running turn.
+  - Claude: push the message with `priority: "now"`; treat `aborted_streaming` and `aborted_tools` results after a steer as part of the same turn. Confirm the SDK field on the pinned version or bump the SDK, and record the decision in the PR.
+  - Codex: `turn/steer` with `expectedTurnId` from `activeTurnId`; measure the minimum CLI version and declare `turn-steer` only at or above it.
+  - Cursor, Copilot, Devin, OpenCode: declare `turn-steer` `unsupported`.
 - **Deletes:** ledger row 12.
 - **Acceptance criteria:**
   - [ ] Three actions, keyboard reachable, tooltips name them.
-  - [ ] Send now behaves as decided for every provider; no provider gate remains unless the user keeps one.
-- **Verify:** `bun run --cwd apps/web test -- src/components/chat/__tests__/ComposerQueueList.lifecycle.test.tsx src/features/conversation/composer/queue/useQueuedMessageDispatch.test.tsx`; live: queue two follow-ups during a Codex turn, use each action.
+  - [ ] During a running Claude or Codex turn, Send now steers: the provider receives the text inside the same turn, no second turn starts, the queue does not reorder, and the message appears in the transcript at its place and after a reload.
+  - [ ] During a running Cursor, Copilot, Devin or OpenCode turn, the row shows Edit and Remove only.
+  - [ ] A steer that loses a race with the turn's end returns `turn_not_running`; the message stays queued and is never lost or sent twice.
+  - [ ] A Codex CLI below the measured minimum declares `turn-steer` unsupported and hides Send now while running.
+  - [ ] While the thread is idle, Send now sends the message for every provider and resumes auto-drain (S08F-05 relies on this).
+- **Verify:** `bun run --cwd apps/web test -- src/components/chat/__tests__/ComposerQueueList.lifecycle.test.tsx src/features/conversation/composer/queue/useQueuedMessageDispatch.test.tsx`; `bun run --cwd apps/server test -- src/features/agents/transport/__tests__/agent-rpc-route.test.ts` (the `agent.steer` route and its preconditions); `bun run --cwd packages/providers test -- src/__tests__/codex/codex-provider-lifecycle.test.ts src/private/claude/__tests__/claude-provider-stream-mapping.test.ts` (the `turn/steer` request with `expectedTurnId`; the `priority: "now"` push and an aborted segment that does not end the turn). Live: queue a follow-up during a Codex turn in `.dev/fixture-repo` and press Send now; the agent picks it up in the same turn. Repeat on Claude. On a Cursor turn, confirm Send now is absent while running and present once the turn ends.
 
 ### S05-11 Overview Changes, Tasks and Usage rows
 
@@ -457,14 +512,14 @@ Running shells show the header only for every provider. A future `ToolOutputDelt
 
 ## Risks and open questions
 
-1. Task-list title source (user). No provider sends one. Recommendation: the plan title when the turn implements a saved plan (S07), else the thread title, else "Tasks". No new model calls.
-2. Send now while running (user). Interrupt then send (works for all six with existing Stop) or keep "send next"? Recommendation: interrupt then send; provider-native steering later.
+1. Task-list title source. Decided (user, 2026-10-08, R1): "Tasks" when no plan backs the list, the plan's title when the tasks come from implementing a plan, never the thread title (section 4). No new model calls.
+2. Send now while running. Decided (user, 2026-10-08, R2): Send now means steer into the running turn. It is hidden while a turn runs when the provider cannot steer, and there is no "send next" fallback under that name (section 6). Today that means Claude and Codex steer; Cursor, Copilot, Devin and OpenCode do not.
 3. Drag reorder of queued messages (user). Paper shows none. Recommendation: drop it with the header.
 4. Status-label shimmer (user). It repaints every frame for the whole turn. Recommendation: drop it; keep the icon motion.
 5. Thought duration format (user). 05f `2COB-2` reads "4s"; the locked rule says m:ss. Default in tickets: "0:04".
 6. Not drawn (user or design): expanded Thought body, active Thought label, expanded task list rows, multi-call failed group text, segment lane past ~20 tasks, `h:mm:ss` timers. Tickets carry proposals.
-7. Usage near the limit (user). Paper shows neutral at 62%; today turns amber at 70% and red at 90%. Recommendation: stay neutral; the usage-limit stop is 08f's notice.
-8. Retry line (S05 and S08). 05f puts "Rate limited, retrying in 12s" on the status line; 08f describes a quiet spinner line with attempt and status. Recommendation: one row, the status line; S08 adds detail to its label only if the user wants it.
+7. Usage near the limit. Decided (R6, default stands, user 2026-10-08): neutral until 90%, then amber; no red. Paper's neutral 62% fits that rule.
+8. Retry line (S05 and S08). Decided (R7, default stands, user 2026-10-08): the provider retrying shows on its own quiet line under the work, as 08f draws it, with the attempt and countdown. The status line keeps only the short label ("Rate limited" or "Retrying"), so 05f state 7's "retrying in 12s" is not built on the status line.
 9. Components page drift (design owner): tool rows, queue icons, status line subagent count, chip status words differ from the 05 boards.
 10. Claude thinking text availability (fact to check in S05-07): current models may summarize or omit thinking text. The row works either way.
 11. Copilot reasoning and OpenCode todo/retry event shapes are inferred; S05-07 and S05-13 confirm them against the pinned SDK and a captured OpenCode stream.
