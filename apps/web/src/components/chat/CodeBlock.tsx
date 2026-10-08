@@ -82,7 +82,7 @@ function CodeBlockHeader({ language, languageLabel, isStreaming, copied, onCopy 
 
 function CodeBlockPresentation({ containerRef, code, language, languageLabel, isStreaming, html, copied, onCopy }: { containerRef: RefObject<HTMLDivElement | null>; code: string; language: string; languageLabel: string | undefined; isStreaming: boolean; html: string | null; copied: boolean; onCopy: () => Promise<void> }) {
   const isReady = html !== null && html !== "";
-  const codeScrollBody = "overflow-x-auto bg-muted text-foreground text-sm font-mono leading-relaxed";
+  const codeScrollBody = "overflow-x-auto bg-muted text-foreground text-sm font-code leading-relaxed";
   const codePreInner = "m-0 min-w-full w-max bg-transparent p-3";
   return <div ref={containerRef} className="my-2 min-w-0 rounded-lg overflow-hidden border border-border">
     <CodeBlockHeader language={language} languageLabel={languageLabel} isStreaming={isStreaming} copied={copied} onCopy={onCopy} />
@@ -91,7 +91,7 @@ function CodeBlockPresentation({ containerRef, code, language, languageLabel, is
       {html && <div className={`${codeScrollBody} [grid-row:1/2] [grid-column:1/2] transition-opacity duration-150 ease-in
         [&_pre]:m-0 [&_pre]:min-w-full [&_pre]:w-max [&_pre]:bg-transparent [&_pre]:!bg-transparent [&_pre]:p-3
         [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:text-foreground
-        [&_code]:text-sm [&_code]:font-mono`} dangerouslySetInnerHTML={{ __html: html }} />}
+        [&_code]:text-sm [&_code]:font-code`} dangerouslySetInnerHTML={{ __html: html }} />}
     </div>}
   </div>;
 }

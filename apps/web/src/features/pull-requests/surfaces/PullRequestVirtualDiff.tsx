@@ -288,7 +288,7 @@ const DiffCell = memo(function DiffCell({
       data-line-side={cell.side}
       tabIndex={active ? 0 : -1}
       className={cn(
-        "group/cell relative flex min-h-7 min-w-0 items-stretch font-mono text-xs outline-none",
+        "group/cell relative flex min-h-7 min-w-0 items-stretch font-code text-xs outline-none",
         cellTone(cell),
         split && "min-w-0 flex-1",
         active && "ring-1 ring-inset ring-primary/70",

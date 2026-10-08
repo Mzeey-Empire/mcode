@@ -741,6 +741,7 @@ const DIFF_UNSAFE_CSS = `
   --diffs-addition-color-override: var(--diff-add-text);
   --diffs-deletion-color-override: var(--diff-remove-text);
   --diffs-font-family: var(--font-mono);
+  --diffs-font-features: "liga" 0, "calt" 0;
 }
 [data-diffs-header="default"] {
   border-bottom: 1px solid color-mix(in oklch, var(--border), transparent 70%);
