@@ -149,4 +149,11 @@ describe("PlanExecutionState", () => {
     state.handlePlanCapture({ markdown: "```mermaid\ngraph TD\n```\nShip the change.", source: "native" });
     expect(state.consumeAssistantMessage("Summary")?.title).toBe("Ship the change.");
   });
+
+  it("still versions a plan that is only a code block", () => {
+    const state = new PlanExecutionState();
+    state.beginOutputGeneration();
+    state.handlePlanCapture({ markdown: "```mermaid\ngraph TD\n```", source: "native" });
+    expect(state.consumeAssistantMessage("Summary")?.title).toBe("Plan");
+  });
 });

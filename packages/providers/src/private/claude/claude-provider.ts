@@ -1067,12 +1067,17 @@ export class ClaudeProvider
         message: "The plan is too long for the client to capture. Shorten it and call ExitPlanMode again.",
       };
     }
-    if (planMarkdown) {
-      this.planAnswerThreads.delete(threadId);
-      const routing = this.runtime.get(`mcode-${threadId}`)?.executionRouting;
-      if (routing) this.canonicalEventPublisher.capturePlan(routing, { markdown: planMarkdown, source: "native" });
-      this.emit("plan_captured", { threadId, markdown: planMarkdown, source: "native" });
+    if (!planMarkdown) {
+      return {
+        behavior: "deny" as const,
+        message: "No plan was received. Write the full plan inside the ````mcode-plan fence in your reply instead.",
+      };
     }
+    this.planAnswerThreads.delete(threadId);
+    const routing = this.runtime.get(`mcode-${threadId}`)?.executionRouting;
+    if (routing) this.canonicalEventPublisher.capturePlan(routing, { markdown: planMarkdown, source: "native" });
+    else logger.warn("Native plan capture has no live execution", { threadId });
+    this.emit("plan_captured", { threadId, markdown: planMarkdown, source: "native" });
     // The plan record anchors to the turn's assistant message, so ask for the short summary the chat shows.
     return {
       behavior: "deny" as const,

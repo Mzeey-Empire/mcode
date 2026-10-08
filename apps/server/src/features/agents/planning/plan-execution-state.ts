@@ -111,7 +111,7 @@ export class PlanExecutionState {
 function extractMarkdown(content: string): PlanPersistenceReady | null {
   const headings = [...markdownHeadings(content)];
   const titleHeading = headings.find((heading) => heading.level === 1);
-  const title = titleHeading?.title ?? headings[0]?.title ?? firstProseLine(content);
+  const title = titleHeading?.title ?? headings[0]?.title ?? firstProseLine(content) ?? "Plan";
   return title ? { title: title.slice(0, 200), contentMd: content,
     sectionsJson: planNavigation(headings.filter((heading) => heading !== titleHeading)), changeSummary: null } : null;
 }

@@ -58,8 +58,13 @@ afterEach(async () => { await Promise.allSettled(providers.splice(0).map((provid
 async function completed(events: () => ProviderRuntimeEvent[], count: number) { await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(count)); }
 
 describe("Claude public factory core and capabilities", () => {
-  it.each([false, true])("finishes a textless native plan turn without inventing a message, oversized=%s", async (oversized) => {
-    const markdown = oversized ? "x".repeat(256 * 1024 + 1) : "## Native plan\nShip it.";
+  it.each([
+    ["captured", "## Native plan\nShip it.",
+      "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it."],
+    ["oversized", "x".repeat(256 * 1024 + 1),
+      "The plan is too long for the client to capture. Shorten it and call ExitPlanMode again."],
+    ["empty", "  ", "No plan was received. Write the full plan inside the ````mcode-plan fence in your reply instead."],
+  ] as const)("finishes a textless native plan turn without inventing a message: %s", async (kind, markdown, reply) => {
     const decisions: Array<Promise<unknown>> = [];
     installTransport((_turn, options) => {
       assert(options.canUseTool);
@@ -73,10 +78,8 @@ describe("Claude public factory core and capabilities", () => {
     provider.setPlanAnswerMode("thread-1", true);
     await provider.sendTurn(request());
     await completed(events, 1);
-    expect(await Promise.all(decisions)).toEqual([{ behavior: "deny", message: oversized
-      ? "The plan is too long for the client to capture. Shorten it and call ExitPlanMode again."
-      : "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it." }]);
-    expect(capture.mock.calls).toEqual(oversized ? [] : [[{ threadId: "thread-1", markdown, source: "native" }]]);
+    expect(await Promise.all(decisions)).toEqual([{ behavior: "deny", message: reply }]);
+    expect(capture.mock.calls).toEqual(kind === "captured" ? [[{ threadId: "thread-1", markdown, source: "native" }]] : []);
     expect(events().filter((runtime) => runtime.event.type === "message" || runtime.planCapture)).toEqual([]);
     expect(events().filter((runtime) => runtime.event.type === "error")).toEqual([]);
   });
