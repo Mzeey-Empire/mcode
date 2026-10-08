@@ -28,23 +28,21 @@ export function stripPlanFences(content: string, isStreaming = false): string {
   let fence: Fence | null = null;
   const visible: string[] = [];
   for (const raw of content.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
-    const line = raw.replace(/\r?\n$/, "");
-    if (fence) {
-      if (fence.hidden) fence.held.push(raw);
-      else visible.push(raw);
-      if (closesFence(line, fence)) fence = null;
-      continue;
-    }
-    const partial = isStreaming && !raw.endsWith("\n");
-    fence = openingFence(line, partial);
-    if (fence?.hidden) {
-      fence.held.push(raw);
-      continue;
-    }
-    visible.push(raw);
+    fence = fence ? continueFence(fence, raw, visible) : startFence(raw, isStreaming, visible);
   }
   if (fence?.plan && !isStreaming) visible.push(...fence.held);
   return visible.join("");
+}
+
+function startFence(raw: string, isStreaming: boolean, visible: string[]): Fence | null {
+  const fence = openingFence(raw.replace(/\r?\n$/, ""), isStreaming && !raw.endsWith("\n"));
+  (fence?.hidden ? fence.held : visible).push(raw);
+  return fence;
+}
+
+function continueFence(fence: Fence, raw: string, visible: string[]): Fence | null {
+  (fence.hidden ? fence.held : visible).push(raw);
+  return closesFence(raw.replace(/\r?\n$/, ""), fence) ? null : fence;
 }
 
 function openingFence(line: string, partial: boolean): Fence | null {

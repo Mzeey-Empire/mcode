@@ -39,6 +39,10 @@ import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
  * an empty assistant bubble — which is what cursor-agent's strict "Output
  * ONLY the plan-questions block" obedience produces).
  */
+function isTextStillArriving(textIsStreaming: boolean | undefined, agentDisplayState: AgentDisplayState | undefined): boolean {
+  return textIsStreaming ?? (agentDisplayState?.phase === "streaming" || agentDisplayState?.phase === "finalizing");
+}
+
 function isAssistantContentEmpty(content: string, isStreaming: boolean): boolean {
   const stripped = stripPlanFences(content, isStreaming);
   return stripped.trim().length === 0;
@@ -967,8 +971,7 @@ function AssistantMessageContent({
   );
   const goal = parseGoalStatusNotice(textContent);
   if (goal) return <AssistantGoalNotice goal={goal} />;
-  const textStreaming = textIsStreaming ?? (agentDisplayState?.phase === "streaming" || agentDisplayState?.phase === "finalizing");
-  const assistantContentEmpty = isAssistantContentEmpty(message.content, textStreaming);
+  const assistantContentEmpty = isAssistantContentEmpty(message.content, isTextStillArriving(textIsStreaming, agentDisplayState));
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
   if (assistantContentEmpty && !hasAttachments) return isAnsweredPlanMessage ? <AnsweredSummary content={message.content} messageId={message.id} /> : null;
   const resolvedAgentDisplayState = agentDisplayState ?? COMPLETED_AGENT_DISPLAY_STATE;
