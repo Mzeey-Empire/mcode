@@ -2,7 +2,7 @@ import { defineRule, type ESTree } from "@oxlint/plugins";
 
 const ELLIPSIS = "…";
 
-/** Drops variant prefixes (`md:`, `group-hover/ws:`, `*:data-[x=y]:`) and the `!` modifier, keeping brackets intact. */
+/** Drops variant prefixes (`md:`, `group-hover/ws:`, `*:data-[x=y]:`) and the leading or trailing `!` modifier, keeping brackets intact. */
 function baseUtility(token: string): string {
   let depth = 0;
   let start = 0;
@@ -12,7 +12,7 @@ function baseUtility(token: string): string {
     else if (char === "]") depth -= 1;
     else if (char === ":" && depth === 0) start = index + 1;
   }
-  return token.slice(start).replace(/^!/, "");
+  return token.slice(start).replace(/^!|!$/g, "");
 }
 
 function isEllipsisUtility(utility: string): boolean {

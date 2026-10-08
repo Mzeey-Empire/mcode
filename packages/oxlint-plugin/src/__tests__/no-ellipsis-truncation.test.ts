@@ -63,6 +63,13 @@ ruleTester.run("no-ellipsis-truncation", noEllipsisTruncation, {
       errors: [{ messageId: "ellipsisClass", data: { token: "*:data-[slot=select-value]:!truncate" } }],
     },
     {
+      name: "the trailing important modifier",
+      code: 'const className = "md:text-ellipsis! truncate!";',
+      errors: [
+        { messageId: "ellipsisClass", data: { token: "md:text-ellipsis!" } },
+      ],
+    },
+    {
       name: "an arbitrary text-overflow property",
       code: 'const className = "[text-overflow:ellipsis] overflow-hidden";',
       errors: [{ messageId: "ellipsisClass", data: { token: "[text-overflow:ellipsis]" } }],
