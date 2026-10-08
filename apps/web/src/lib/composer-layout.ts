@@ -5,8 +5,8 @@ import {
 } from "@/stores/diffStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 
-/** Inline project-tree width (`Sidebar` uses Tailwind `w-72`). */
-export const SIDEBAR_WIDTH_PX = 288;
+/** Inline project-tree width in px; mirrors `--container-sidebar` (`w-sidebar`) in index.css. */
+export const SIDEBAR_WIDTH_PX = 304;
 
 /** Gap between the project tree and the chat/panel row in App.tsx. */
 export const LAYOUT_COLUMN_GAP_PX = 0;

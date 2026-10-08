@@ -84,7 +84,7 @@ export function Sidebar({
   };
 
   return (
-    <div className={cn("flex h-full flex-col bg-page", settingsOpen ? "w-40 max-w-[42vw] sm:w-56 md:w-72 md:max-w-none" : "w-72 max-w-[55vw] md:max-w-none", className)}>
+    <div className={cn("flex h-full flex-col bg-page", settingsOpen ? "w-40 max-w-[42vw] sm:w-56 md:w-sidebar md:max-w-none" : "w-sidebar max-w-[55vw] md:max-w-none", className)}>
       <SidebarTitle settingsOpen={settingsOpen} onCloseSettings={onCloseSettings} onCollapse={collapseSidebar} />
       <SidebarBody settingsOpen={settingsOpen} settingsSection={settingsSection} onSettingsSection={onSettingsSection} primarySurface={primarySurface} onNewThread={() => { setPrimarySurface("chat"); useWorkspaceStore.getState().beginNewThread(); }} onOpenThreadSearch={() => useCommandPaletteStore.getState().open({ intent: "threadSearch" })} onOpenPullRequests={() => setPrimarySurface("pullRequests")} />
       <SidebarFooter settingsOpen={settingsOpen} onOpenSettings={onOpenSettings} onEditSettings={handleEditJson} />
