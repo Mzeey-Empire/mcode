@@ -638,9 +638,11 @@ async function mapPlanText(provider: string, text: string): Promise<AgentEvent[]
   }
   if (provider === "codex") {
     const mapper = new CodexEventMapper("THREAD_1");
-    return [...text].flatMap((delta) => mapper.mapNotification({ jsonrpc: "2.0",
+    const started = mapper.mapNotification({ jsonrpc: "2.0", method: "item/started", params: { threadId: "SESSION_1",
+      turnId: "TURN_1", item: { type: "agentMessage", id: "ITEM_1", text: "", phase: "final_answer" } } });
+    return [...started.map((runtime) => runtime.event), ...[...text].flatMap((delta) => mapper.mapNotification({ jsonrpc: "2.0",
       method: "item/agentMessage/delta", params: { threadId: "SESSION_1", turnId: "TURN_1", itemId: "ITEM_1", delta },
-    }).map((runtime) => runtime.event));
+    }).map((runtime) => runtime.event))];
   }
   if (provider === "copilot") {
     const turn: CopilotTurnState = { nativeIdleObserved: false, tokensIn: 0, tokensOut: 0,

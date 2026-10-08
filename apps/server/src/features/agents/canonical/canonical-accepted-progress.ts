@@ -103,6 +103,16 @@ export class CanonicalAcceptedProgress {
     await new Promise<void>((resolve, reject) => thread.waiters.add({ resolve, reject }));
   }
 
+  /** Wait until the thread's accepted rows are saved, without fencing admission or late publications. */
+  async waitForAcceptedSaves(threadId: string): Promise<void> {
+    const thread = this.threads.get(threadId);
+    if (!thread) return;
+    const saving = thread.owner.savingState();
+    if (saving.kind === "failed") throw saving.error;
+    if (thread.owner.recoveryCut().retained.length === 0) return;
+    await new Promise<void>((resolve, reject) => thread.waiters.add({ resolve, reject }));
+  }
+
   /** Release the admission fence if the durable command fails or conflicts. */
   cancelDurableCommand(threadId: string): void {
     const thread = this.threads.get(threadId);

@@ -41,6 +41,11 @@ describe("PlanFenceParser", () => {
     expect(parser.feed("Original\r\n````\r\n")).toBe("# Plan\r\nOriginal");
   });
 
+  it("captures a tilde plan fence, matching what the chat hides", () => {
+    const parser = new PlanFenceParser();
+    expect(parser.feed("~~~mcode-plan\n# Plan\n```sh\nls\n```\n~~~\n")).toBe("# Plan\n```sh\nls\n```");
+  });
+
   it.each([3, 4, 5])("accepts a %i-backtick opener at every chunk boundary", (length) => {
     const fence = "`".repeat(length);
     const text = `${fence}mcode-plan\n# Plan\nShip it.\n${fence}`;

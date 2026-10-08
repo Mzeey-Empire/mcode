@@ -29,7 +29,7 @@ type ClaudePlanAnswerModeProvider = {
 /** Owns plan-question turns and durable mcode-plan materialization. */
 @injectable()
 export class PlanTurnService {
-  private acceptedProgress: Pick<CanonicalAcceptedProgress, "recordSavedPlan"> | undefined;
+  private acceptedProgress: Pick<CanonicalAcceptedProgress, "recordSavedPlan" | "waitForAcceptedSaves"> | undefined;
   private readonly assistantByThread = new Map<string, PlanMessage>();
   private readonly executionByThread = new Map<string, PlanExecutionState>();
 
@@ -42,7 +42,7 @@ export class PlanTurnService {
   ) {}
 
   /** Keep canonical plan reads current after the turn's captured plan is saved. */
-  bindAcceptedProgress(progress: Pick<CanonicalAcceptedProgress, "recordSavedPlan">): void {
+  bindAcceptedProgress(progress: Pick<CanonicalAcceptedProgress, "recordSavedPlan" | "waitForAcceptedSaves">): void {
     this.acceptedProgress = progress;
   }
 
@@ -147,7 +147,9 @@ ${userMessage}`;
       return;
     }
     try {
-      // Terminal cleanup awaits this turn effect. A command fence would reject late hook publications.
+      // plans.message_id references the assistant row, which the accepted save queue may not have written yet.
+      // A durable command fence would also wait, but it rejects late hook publications during terminal cleanup.
+      await this.acceptedProgress?.waitForAcceptedSaves(threadId);
       await this.persistPlan(threadId, event.messageId, ready, execution);
     } catch (error) {
       logger.error("Plan capture persistence failed", {

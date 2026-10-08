@@ -97,7 +97,8 @@ export function runPlanCaptureProfile(fixture: ProviderFixtureManifest, events: 
   const parser = new PlanFenceParser();
   const plans: string[] = [];
   for (const event of events) {
-    if (event.type !== "textDelta") continue;
+    // The server feeds plan capture only final-response text; commentary never carries the plan.
+    if (event.type !== "textDelta" || event.isFinalResponse === false) continue;
     const plan = parser.feed(event.delta);
     if (plan !== null) plans.push(plan);
   }

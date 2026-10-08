@@ -50,6 +50,26 @@ describe("PlanTurnService output", () => {
       title: "Plan", contentMd: "# Plan\nBuild it.\nThen test it.", sectionsJson: [],
     });
   });
+  it("inserts the plan only after the thread's accepted saves drain", async () => {
+    const { thread, messages, plans, service } = await fixture();
+    let drain!: () => void;
+    const saves = new Promise<void>((resolve) => { drain = resolve; });
+    const recordSavedPlan = vi.fn();
+    service.bindAcceptedProgress({ recordSavedPlan, waitForAcceptedSaves: () => saves });
+    service.beginOutputGeneration(thread.id);
+    service.handlePlanCaptured({ threadId: thread.id, markdown: "# Plan\nBuild it.", source: "native" });
+    const assistant = await messages.create(thread.id, "assistant", "Summary.", 1);
+    service.observeAssistantMessage({ type: "message", threadId: thread.id,
+      messageId: assistant.id, content: assistant.content, tokens: null });
+    const finishing = service.finishTurn(thread.id);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(plans.listByThread(thread.id)).toEqual([]);
+    drain();
+    await finishing;
+    expect(plans.getLatestForThread(thread.id)).toMatchObject({ messageId: assistant.id, title: "Plan" });
+    expect(recordSavedPlan).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["# " + "x".repeat(513), "title-limit"],
     ["# Plan\n" + "x".repeat(256 * 1024), "content-limit"],

@@ -56,7 +56,7 @@ export class PlanFenceParser {
       const opening = /^ {0,3}(`{3,}|~{3,})([^`]*)$/.exec(line);
       if (opening) this.fence = {
         marker: opening[1][0], length: opening[1].length,
-        plan: opening[1][0] === "`" && opening[2].trim() === "mcode-plan",
+        plan: opening[2].trim() === "mcode-plan",
       };
       return null;
     }
