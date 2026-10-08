@@ -79,8 +79,6 @@ export function MessageListOverlays({
           </div>
         </div>
       )}
-      {isLoadingMore && <PaginationIndicator placement="top" delayMs={300} />}
-      {isLoadingNewer && <PaginationIndicator placement="bottom" delayMs={300} />}
       {onSelectedTextComment && (
         <SelectedTextCommentControls
           key={renderedThreadId ?? "no-rendered-thread"}
@@ -102,6 +100,9 @@ export function MessageListOverlays({
           onOpenComment={onOpenSelectedTextCommentEditor}
         />
       )}
+      {/* Equal-layer indicators follow the markers so loading and sticky content stay above them. */}
+      {isLoadingMore && <PaginationIndicator placement="top" delayMs={300} />}
+      {isLoadingNewer && <PaginationIndicator placement="bottom" delayMs={300} />}
       {stickyPreview && (
         <StickyUserMessage
           key={stickyPreview}

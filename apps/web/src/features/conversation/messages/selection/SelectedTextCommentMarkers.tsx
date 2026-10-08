@@ -173,7 +173,7 @@ export function SelectedTextCommentMarkers({
   const activeCommentId = focusedCommentId ?? hoveredCommentId;
 
   return (
-    <div className="pointer-events-none absolute inset-0 isolate z-(--layer-base)">
+    <div className="pointer-events-none absolute inset-0 isolate z-(--layer-sticky)">
       <div ref={overlayRef} className="pointer-events-none absolute inset-0 z-(--layer-base) overflow-hidden" aria-hidden="true">
         {geometries.map(({ comment, rects }) => {
           const isActive = isSelectedTextCommentHighlightActive(comment.id, activeCommentId);
