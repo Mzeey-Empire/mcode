@@ -4,6 +4,7 @@ import {
   ThreadSchema, ThreadStartupSchema, ThreadStartupStartInputSchema, ThreadStartupPhaseSchema,
   ThreadStartupBlockSchema, ThreadStartupErrorSchema, THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS,
   type ThreadStartup,
+  ThreadStartupStepDetailSchema,
 } from "@mcode/contracts";
 import { databaseWriteHandler, databaseWriteOperation } from "../../runtime/persistence/sqlite/database-write-operation.js";
 import { ThreadStore } from "../thread-control/persistence/thread-store.js";
@@ -28,15 +29,15 @@ function transition<Input>(name: string, input: z.ZodType<Input>) {
 /** Complete state-machine operations admitted by the shared database owner. */
 export const threadStartupStateWriteOperations = {
   start: transition("threadStartup.start", z.tuple([z.tuple([ThreadStartupStartInputSchema(), z.string().max(4096).optional()]), clock])),
-  advance: transition("threadStartup.advance", z.tuple([z.tuple([z.string(), ThreadStartupPhaseSchema]), clock])),
+  advance: transition("threadStartup.advance", z.tuple([z.tuple([z.string(), ThreadStartupPhaseSchema, ThreadStartupStepDetailSchema().optional()]), clock])),
   bindThread: transition("threadStartup.bindThread", z.tuple([z.tuple([z.string(), z.string()]), clock])),
   clearThreadBinding: transition("threadStartup.clearThreadBinding", z.tuple([id, clock])),
   appendOutput: transition("threadStartup.appendOutput", z.tuple([z.tuple([z.string(), z.string().max(THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS)]), clock])),
   complete: transition("threadStartup.complete", z.tuple([id, clock])),
-  block: transition("threadStartup.block", z.tuple([z.tuple([z.string(), ThreadStartupBlockSchema()]), clock])),
+  block: transition("threadStartup.block", z.tuple([z.tuple([z.string(), ThreadStartupBlockSchema(), ThreadStartupStepDetailSchema().optional()]), clock])),
   resume: transition("threadStartup.resume", z.tuple([id, clock])),
-  skip: transition("threadStartup.skip", z.tuple([z.tuple([z.string(), ThreadStartupPhaseSchema]), clock])),
-  fail: transition("threadStartup.fail", z.tuple([z.tuple([z.string(), ThreadStartupErrorSchema()]), clock])),
+  skip: transition("threadStartup.skip", z.tuple([z.tuple([z.string(), ThreadStartupPhaseSchema, ThreadStartupStepDetailSchema().optional()]), clock])),
+  fail: transition("threadStartup.fail", z.tuple([z.tuple([z.string(), ThreadStartupErrorSchema(), ThreadStartupStepDetailSchema().optional()]), clock])),
   cancel: transition("threadStartup.cancel", z.tuple([id, clock])),
   markCancelled: transition("threadStartup.markCancelled", z.tuple([id, clock])),
   createAndBindThread: databaseWriteOperation("threadStartup.createAndBindThread", z.tuple([z.string(), creation, clock]), committed.extend({ thread: ThreadSchema() })),

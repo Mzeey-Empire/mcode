@@ -13,7 +13,7 @@ const secondStartupId = "00000000-0000-4000-8000-000000000002";
 const thirdStartupId = "00000000-0000-4000-8000-000000000003";
 const threadId = "00000000-0000-4000-8000-000000000004";
 
-function createHarness() {
+function createHarness(now?: () => Date) {
   const db = openMemoryDatabase();
   db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES (?, ?, ?, ?)")
     .run("workspace-1", "First", "/first", "{}");
@@ -22,7 +22,7 @@ function createHarness() {
   let time = Date.parse("2026-09-02T10:00:00.000Z");
   const service = new ThreadStartupStateStore(
     new ThreadStartupStore(db),
-    () => new Date(time++),
+    now ?? (() => new Date(time++)),
   );
   return { db, service };
 }
@@ -36,6 +36,131 @@ function input(
 }
 
 describe("ThreadStartupStateStore", () => {
+  it("times every managed step and persists details without resetting a running step", () => {
+    let time = "2026-10-08T10:00:00.000Z";
+    const { db, service } = createHarness(() => new Date(time));
+    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
+    service.advance(firstStartupId, "thread");
+    time = "2026-10-08T10:00:01.000Z";
+    service.advance(firstStartupId, "worktree");
+    time = "2026-10-08T10:00:02.000Z";
+    service.advance(firstStartupId, "worktree", { phase: "worktree", mode: "created", folderName: "checkout", path: "/checkout" });
+    service.advance(firstStartupId, "setup");
+    time = "2026-10-08T10:00:03.000Z";
+    service.advance(firstStartupId, "agent");
+    time = "2026-10-08T10:00:04.000Z";
+    const completed = service.complete(firstStartupId);
+    expect(completed.steps).toEqual([
+      { phase: "thread", state: "completed", startedAt: "2026-10-08T10:00:00.000Z", endedAt: "2026-10-08T10:00:01.000Z" },
+      { phase: "worktree", state: "completed", startedAt: "2026-10-08T10:00:01.000Z", endedAt: "2026-10-08T10:00:02.000Z",
+        detail: { phase: "worktree", mode: "created", folderName: "checkout", path: "/checkout" } },
+      { phase: "setup", state: "completed", startedAt: "2026-10-08T10:00:02.000Z", endedAt: "2026-10-08T10:00:03.000Z" },
+      { phase: "agent", state: "completed", startedAt: "2026-10-08T10:00:03.000Z", endedAt: "2026-10-08T10:00:04.000Z" },
+    ]);
+    expect(new ThreadStartupStore(db).findById(firstStartupId)).toEqual(completed);
+    db.close();
+  });
+
+  it("ends blocked attempts, resets Retry setup, and records a skip", () => {
+    let time = "2026-10-08T10:00:00.000Z";
+    const { db, service } = createHarness(() => new Date(time));
+    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
+    service.advance(firstStartupId, "thread");
+    service.advance(firstStartupId, "worktree");
+    service.advance(firstStartupId, "setup");
+    time = "2026-10-08T10:00:01.000Z";
+    const blocked = service.block(firstStartupId,
+      { code: "SETUP_FAILED", message: "Setup failed", detail: "exit 17", actions: ["retry", "continue"] },
+      { phase: "setup", exitCode: 17 });
+    expect(blocked.steps[2]).toEqual({ phase: "setup", state: "blocked", startedAt: "2026-10-08T10:00:00.000Z",
+      endedAt: "2026-10-08T10:00:01.000Z", detail: { phase: "setup", exitCode: 17 } });
+    expect(blocked.block?.detail).toBe("exit 17");
+    time = "2026-10-08T10:00:02.000Z";
+    expect(service.resume(firstStartupId).steps[2]).toEqual({ phase: "setup", state: "running", startedAt: "2026-10-08T10:00:02.000Z" });
+    time = "2026-10-08T10:00:03.000Z";
+    const skipped = service.skip(firstStartupId, "setup", { phase: "setup", skipReason: "user-skipped" });
+    expect(skipped.steps.slice(2)).toEqual([
+      { phase: "setup", state: "skipped", startedAt: "2026-10-08T10:00:02.000Z", endedAt: "2026-10-08T10:00:03.000Z",
+        detail: { phase: "setup", skipReason: "user-skipped" } },
+      { phase: "agent", state: "running", startedAt: "2026-10-08T10:00:03.000Z" },
+    ]);
+    db.close();
+  });
+
+  it.each(["failed", "cancelled", "interrupted"] as const)("ends a %s step and keeps cancellation intent untimed", (state) => {
+    let time = "2026-10-08T10:00:00.000Z";
+    const { db, service } = createHarness(() => new Date(time));
+    service.start(input());
+    service.advance(firstStartupId, "thread");
+    time = "2026-10-08T10:00:01.000Z";
+    expect(service.cancel(firstStartupId).steps[0]).toEqual({ phase: "thread", state: "running", startedAt: "2026-10-08T10:00:00.000Z" });
+    if (state === "failed") service.fail(firstStartupId, { code: "FAILED", message: "Failed", detail: "cause", retryable: true });
+    if (state === "cancelled") service.markCancelled(firstStartupId);
+    if (state === "interrupted") service.interruptBatch();
+    expect(service.get(firstStartupId)?.steps[0]).toEqual({ phase: "thread", state,
+      startedAt: "2026-10-08T10:00:00.000Z", endedAt: "2026-10-08T10:00:01.000Z" });
+    db.close();
+  });
+
+  it("times interrupted completion without inventing starts for pending steps", () => {
+    let time = "2026-10-08T10:00:00.000Z";
+    const { db, service } = createHarness(() => new Date(time));
+    service.start(input());
+    service.advance(firstStartupId, "thread");
+    time = "2026-10-08T10:00:01.000Z";
+    service.interruptBatch();
+    time = "2026-10-08T10:00:02.000Z";
+    expect(service.complete(firstStartupId).steps).toEqual([
+      { phase: "thread", state: "skipped", startedAt: "2026-10-08T10:00:00.000Z", endedAt: "2026-10-08T10:00:02.000Z" },
+      { phase: "agent", state: "completed", endedAt: "2026-10-08T10:00:02.000Z" },
+    ]);
+    db.close();
+  });
+
+  it("fixes the fetch list at start and preserves it across replay", () => {
+    const { db, service } = createHarness();
+    const request = { ...input(), fetch: { ref: "pull/42/head", pullRequestNumber: 42, branch: "feature/pr" } };
+    const started = service.start(request);
+    expect(started.steps).toEqual([
+      { phase: "thread", state: "pending" },
+      { phase: "fetch", state: "pending", detail: { phase: "fetch", ref: "pull/42/head", pullRequestNumber: 42, branch: "feature/pr" } },
+      { phase: "agent", state: "pending" },
+    ]);
+    expect(service.start(request)).toEqual(started);
+    expect(() => service.start(input())).toThrow(ThreadStartupConflictError);
+    service.start(input(secondStartupId));
+    expect(() => service.start({ ...request, startupId: secondStartupId })).toThrow(ThreadStartupConflictError);
+    db.close();
+  });
+
+  it("persists fetch failure details and times, and rejects a later fetch insertion", () => {
+    let time = "2026-10-08T10:00:00.000Z";
+    const { db, service } = createHarness(() => new Date(time));
+    service.start({ ...input(), fetch: { ref: "origin/main" } });
+    service.advance(firstStartupId, "thread");
+    service.advance(firstStartupId, "fetch");
+    time = "2026-10-08T10:00:01.000Z";
+    const failed = service.fail(firstStartupId, { code: "FETCH_FAILED", message: "Fetch failed", retryable: true, detail: "fatal: offline" },
+      { phase: "fetch", ref: "origin/main" });
+    expect(failed.steps[1]).toEqual({ phase: "fetch", state: "failed", detail: { phase: "fetch", ref: "origin/main" },
+      startedAt: "2026-10-08T10:00:00.000Z", endedAt: "2026-10-08T10:00:01.000Z" });
+    expect(service.get(firstStartupId)?.error?.detail).toBe("fatal: offline");
+    service.start(input(secondStartupId));
+    service.advance(secondStartupId, "thread");
+    expect(() => service.advance(secondStartupId, "fetch")).toThrow();
+    expect(service.get(secondStartupId)?.steps.map((step) => step.phase)).toEqual(["thread", "agent"]);
+    db.close();
+  });
+
+  it("rejects mismatched step detail before it can corrupt the persisted record", () => {
+    const { db, service } = createHarness();
+    service.start(input());
+    const before = service.advance(firstStartupId, "thread");
+    expect(() => service.advance(firstStartupId, "agent", { phase: "setup", exitCode: 1 })).toThrow();
+    expect(service.get(firstStartupId)).toEqual(before);
+    db.close();
+  });
+
   it("increments revisions for each lifecycle change", () => {
     const { db, service } = createHarness();
     const created = service.start(input());
@@ -81,6 +206,19 @@ describe("ThreadStartupStateStore", () => {
     // Rows created before the fingerprint migration remain readable and replayable.
     service.start(input(secondStartupId));
     expect(restarted.start(input(secondStartupId), "new-request").startupId).toBe(secondStartupId);
+    db.close();
+  });
+
+  it("replays a pre-v2 existing worktree or PR record when the same request retries", () => {
+    const { db, service } = createHarness();
+    service.start(input(), "attach-request");
+    service.start(input(secondStartupId), "pr-request");
+
+    expect(service.start(input(firstStartupId, "workspace-1", "attached-worktree"), "attach-request").kind).toBe("direct");
+    expect(service.start({ ...input(secondStartupId), fetch: { ref: "pull/42/head" } }, "pr-request").steps
+      .map((step) => step.phase)).toEqual(["thread", "agent"]);
+    expect(() => service.start(input(firstStartupId, "workspace-1", "attached-worktree"), "other-request"))
+      .toThrow(ThreadStartupConflictError);
     db.close();
   });
 
@@ -146,14 +284,14 @@ describe("ThreadStartupStateStore", () => {
     expect(blocked).toMatchObject({
       state: "blocked",
       phase: "setup",
-      steps: expect.arrayContaining([{ phase: "setup", state: "blocked" }]),
+      steps: expect.arrayContaining([expect.objectContaining({ phase: "setup", state: "blocked" })]),
       block: { actions: ["retry", "continue"] },
     });
     expect(resumed).toMatchObject({ state: "running", phase: "setup", block: undefined });
     expect(skipped).toMatchObject({
       state: "running",
       phase: "agent",
-      steps: expect.arrayContaining([{ phase: "setup", state: "skipped" }, { phase: "agent", state: "running" }]),
+      steps: expect.arrayContaining([expect.objectContaining({ phase: "setup", state: "skipped" }), expect.objectContaining({ phase: "agent", state: "running" })]),
     });
     expect(service.findByThreadId(threadId)?.startupId).toBe(firstStartupId);
     db.close();
@@ -201,7 +339,7 @@ describe("ThreadStartupStateStore", () => {
   });
 
   it("marks nonterminal startup records interrupted after restart", () => {
-    const { db, service } = createHarness();
+    const { db, service } = createHarness(() => new Date("2026-09-02T10:00:00.000Z"));
     service.start(input(firstStartupId));
     service.start(input(secondStartupId, "workspace-1", "managed-worktree"));
     service.advance(secondStartupId, "thread");
@@ -217,9 +355,9 @@ describe("ThreadStartupStateStore", () => {
       secondStartupId,
     ]);
     expect(service.get(firstStartupId)).toMatchObject({ state: "interrupted", phase: "thread" });
-    expect(service.get(firstStartupId)?.steps[0]).toEqual({ phase: "thread", state: "interrupted" });
+    expect(service.get(firstStartupId)?.steps[0]).toEqual({ phase: "thread", state: "interrupted", endedAt: "2026-09-02T10:00:00.000Z" });
     expect(service.get(secondStartupId)).toMatchObject({ state: "interrupted", phase: "thread" });
-    expect(service.get(secondStartupId)?.steps[0]).toEqual({ phase: "thread", state: "interrupted" });
+    expect(service.get(secondStartupId)?.steps[0]).toEqual({ phase: "thread", state: "interrupted", startedAt: "2026-09-02T10:00:00.000Z", endedAt: "2026-09-02T10:00:00.000Z" });
     expect(service.get(thirdStartupId)?.state).toBe("completed");
     db.close();
   });
@@ -265,7 +403,7 @@ describe("ThreadStartupStateStore", () => {
     expect(cancelled).toMatchObject({
       state: "cancelled",
       cancellation: "requested",
-      steps: expect.arrayContaining([{ phase: "setup", state: "cancelled" }]),
+      steps: expect.arrayContaining([expect.objectContaining({ phase: "setup", state: "cancelled" })]),
     });
     db.close();
   });
@@ -287,7 +425,7 @@ describe("ThreadStartupStateStore", () => {
     expect(resumed).toMatchObject({
       state: "running",
       phase: "setup",
-      steps: expect.arrayContaining([{ phase: "setup", state: "running" }]),
+      steps: expect.arrayContaining([expect.objectContaining({ phase: "setup", state: "running" })]),
     });
     db.close();
   });
