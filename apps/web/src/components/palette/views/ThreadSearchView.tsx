@@ -117,7 +117,7 @@ function ThreadSearchResult({
           <TooltipTrigger
             render={
               <span
-                className="max-w-44 text-fade text-right"
+                className="max-w-44 text-fade"
                 aria-label={`Project, ${row.workspaceName}`}
               >
                 {row.workspaceName}

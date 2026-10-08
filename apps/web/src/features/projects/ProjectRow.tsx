@@ -165,7 +165,7 @@ function ProjectRowEnrichment({
       </Tooltip>
       <GitBranch size={10} className="shrink-0 opacity-70" aria-hidden />
       <Tooltip>
-        <TooltipTrigger render={<span className="min-w-0 text-fade text-right">{branch}</span>} />
+        <TooltipTrigger render={<span className="min-w-0 justify-self-end text-fade">{branch}</span>} />
         <TooltipContent>{branch}</TooltipContent>
       </Tooltip>
       <ProjectRowThreadCount count={enrichment.threadCount} />

@@ -459,7 +459,6 @@ function QuoteBlock({
   }
 
   const label = "Reply";
-  const displayText = quotedText.slice(0, 150) + (quotedText.length > 150 ? "..." : "");
 
   return (
     <button
@@ -468,7 +467,7 @@ function QuoteBlock({
       className="mb-1.5 w-full cursor-pointer rounded-md border-l-2 border-primary/40 bg-hover/30 px-2.5 py-1.5 text-left transition-colors hover:bg-hover/50 select-none"
     >
       <p className="text-xs font-semibold text-primary/60 leading-none mb-0.5">{label}</p>
-      <p className="text-xs text-muted/60 text-fade italic">{displayText}</p>
+      <p className="text-xs text-muted/60 text-fade italic">{quotedText}</p>
     </button>
   );
 }
