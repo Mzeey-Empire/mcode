@@ -151,8 +151,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     if (this.terminalFinalizedThreads.has(command.threadId)) return null;
     this.terminalFinalizedThreads.add(command.threadId);
     const executionId = this.runtime.snapshot(command.threadId)?.turnExecutionId;
-    this.settlePlanCapture(command.threadId, command.outcome);
     const pending = [...this.persistenceByThread.get(command.threadId) ?? []];
+    // Plan settlement runs beside finalization, so turn.persisted does not wait for the plan insert.
+    this.settlePlanCapture(command.threadId, command.outcome);
     const finalization = this.fileEffects.finalize(
       command.threadId, command.outcome, executionId ?? undefined, command.source,
       Promise.all(pending),
