@@ -387,7 +387,7 @@ function CliErrorNotice({ error, onDismiss, onOpenSettings }: { error: string; o
       ) : null}
     </div>
   ) : undefined;
-  return <Notice tone="warning" title={headline} detail={detail} action={settingsHint ? { label: "Open Settings", onClick: onOpenSettings } : undefined} onDismiss={onDismiss} dismissLabel="Dismiss error" className="mx-3 mb-2" />;
+  return <Notice tone="warning" title={headline} detail={detail} action={settingsHint ? { label: "Open Settings", onClick: onOpenSettings, emphasis: "neutral" } : undefined} onDismiss={onDismiss} dismissLabel="Dismiss error" className="mx-3 mb-2" />;
 }
 
 type ConversationStage = "hold" | "transition" | "error" | "messages";
