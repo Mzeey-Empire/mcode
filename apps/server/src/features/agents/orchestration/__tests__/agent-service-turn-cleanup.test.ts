@@ -2252,19 +2252,22 @@ describe("AgentService Ended finalization", () => {
     expect(assistant).toMatchObject({ outcome: "completed", outcomeExecutionId: executionId });
     expect(canonicalSink.loadConversationProjection(thread.id, 10).messages)
       .toContainEqual(expect.objectContaining({ id: assistant?.id, outcome: "completed" }));
-    expect(reduceAgentEventBatch(createAgentModelState(), canonicalEvents)).toMatchObject({
-      outcome: "applied",
-      state: {
-        turns: {
-          [turn!.id]: expect.objectContaining({ status: "Completed" }),
+    // Publication reaches the renderer after the checkpoint commits, so wait for it to converge.
+    await vi.waitFor(() => {
+      expect(reduceAgentEventBatch(createAgentModelState(), canonicalEvents)).toMatchObject({
+        outcome: "applied",
+        state: {
+          turns: {
+            [turn!.id]: expect.objectContaining({ status: "Completed" }),
+          },
         },
-      },
-    });
-    expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
-      threadId: thread.id,
-      messageId: assistant?.id,
-      outcome: "completed",
-      executionId,
-    }));
+      });
+      expect(broadcast).toHaveBeenCalledWith("turn.persisted", expect.objectContaining({
+        threadId: thread.id,
+        messageId: assistant?.id,
+        outcome: "completed",
+        executionId,
+      }));
+    }, { timeout: 5_000 });
   });
 });
