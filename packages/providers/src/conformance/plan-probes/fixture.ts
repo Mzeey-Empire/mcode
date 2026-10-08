@@ -62,7 +62,7 @@ const rules: Record<z.infer<typeof providerSchema>, Record<string, Rule[]>> = {
     "sdk/mode.set": [literal("mode", "plan")],
     "sdk/permission": [literal("kind", "read", "write", "shell", "mcp", "url", "custom-tool", "approved", "denied-interactively-by-user"), ...identity("sessionId", "toolCallId"), pathRule("path"), pathRule("fileName"), ...shape("intention")],
     "sdk/question": [...identity("sessionId"), ...shape("question", "choices", "answer"), ...bool("allowFreeform", "wasFreeform")],
-    "sdk/event": [literal("type", ...retainedCopilotEvents), ...shape("data.content", "data.deltaContent", "data.arguments", "data.result"), ...identity("data.toolCallId"), literal("data.newMode", "plan"), literal("data.previousMode", "interactive"), literal("data.toolName", "create", "edit", "view", "ask_user", "report_intent", "update_plan", "write_plan", "sql")],
+    "sdk/event": [literal("type", ...retainedCopilotEvents), ...shape("data.content", "data.deltaContent", "data.arguments", "data.result"), ...identity("data.toolCallId"), literal("data.newMode", "plan"), literal("data.previousMode", "interactive"), literal("data.toolName", "create", "edit", "view", "ask_user", "exit_plan_mode", "report_intent", "update_plan", "write_plan", "sql")],
     "sdk/plan.read": [...identity("sessionId"), ...bool("exists"), ...shape("content"), pathRule("path")],
   },
   devin: acp,
