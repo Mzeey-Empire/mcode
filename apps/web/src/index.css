@@ -1041,7 +1041,7 @@ input[type="range"].settings-range::-moz-range-thumb {
 
 .typing-cursor {
   display: inline-block;
-  width: 1.5px;
+  width: 2px;
   height: 0.875em;
   background: var(--primary);
   margin-left: 1px;

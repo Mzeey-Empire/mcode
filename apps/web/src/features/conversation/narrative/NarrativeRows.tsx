@@ -29,7 +29,7 @@ export function narrativeRowMargin(item: NarrativeItem, index: number): string {
     case "active-tool":
       return "mt-1";
     case "delta":
-      return "mt-2";
+      return "mt-3";
   }
 }
 
