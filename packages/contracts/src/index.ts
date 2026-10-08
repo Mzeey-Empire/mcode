@@ -1,4 +1,5 @@
 // Models
+export * from "./models/next-message-draft.js";
 export {
   ThreadStatusSchema,
   ThreadModeSchema,

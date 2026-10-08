@@ -247,7 +247,9 @@ function appendPreviewAnnotations(
 ): string {
   if (!previewAnnotations || previewAnnotations.annotations.length === 0) return content;
   if (content.includes(PREVIEW_ANNOTATION_FENCE_START)) return content;
-  return `${content.trim()}\n\n${PREVIEW_ANNOTATION_FENCE_START}\n${JSON.stringify(previewAnnotations)}\n${PREVIEW_ANNOTATION_FENCE_END}`.trim();
+  const serialized = JSON.stringify(previewAnnotations)
+    .replaceAll("<", "\\u003c").replaceAll(">", "\\u003e").replaceAll("&", "\\u0026");
+  return `${content.trim()}\n\n${PREVIEW_ANNOTATION_FENCE_START}\n${serialized}\n${PREVIEW_ANNOTATION_FENCE_END}`.trim();
 }
 
 function watchReturnedThreadWorktree(

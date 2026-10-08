@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import type { AttachmentMeta, StoredAttachment } from "./attachment.js";
+import { MessageMentionsSchema } from "./mention.js";
+import { MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS } from "./selected-text-comment.js";
 
 /** Max lengths for {@link McodeBrowserCaptureV1} excerpt fields (matches Zod). */
 export const MCODE_BROWSER_CAPTURE_V1_STRING_MAX = {
@@ -440,10 +442,14 @@ export const DiffAnnotationPayloadSchema = lazySchema(() =>
     side: z.enum(["left", "right"]),
     line: z.number().int().positive(),
     lineContent: z.string().max(4096),
-    note: z.string().trim().min(1).max(PREVIEW_ANNOTATION_STRING_MAX.note),
-  }),
+    note: z.string().max(MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS).refine((note) => note.trim().length > 0),
+    mentions: MessageMentionsSchema().optional(),
+  }).refine((annotation) =>
+    annotation.note.length + JSON.stringify(annotation.mentions ?? []).length <= MAX_SELECTED_TEXT_COMMENT_TEXT_CHARS,
+  { message: "Diff comment note and mentions exceed the message payload budget" }),
 );
 
+/** One diff line comment with its typed note-relative mentions. */
 export type DiffAnnotationPayload = z.infer<
   ReturnType<typeof DiffAnnotationPayloadSchema>
 >;

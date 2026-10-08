@@ -4,8 +4,11 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { getExtension, type WsMethodName, WS_METHODS } from "@mcode/contracts";
 import type { z } from "zod";
+import { container } from "tsyringe";
+import { AttachmentService } from "../storage/attachment-service.js";
+import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 
-type AttachmentRpcMethod = "clipboard.saveFile";
+type AttachmentRpcMethod = "clipboard.saveFile" | "attachments.stageDraft";
 
 type AttachmentRpcParamsByMethod = {
   [Method in AttachmentRpcMethod]: z.input<ReturnType<typeof WS_METHODS>[Method]["params"]>;
@@ -20,6 +23,11 @@ type AttachmentHandlerMap = {
 const attachmentHandlers: AttachmentHandlerMap = {
   // JSON-RPC remains available for clients that cannot upload a binary frame.
   "clipboard.saveFile": saveClipboardFile,
+  "attachments.stageDraft": ({ threadId, attachment }) => {
+    const thread = container.resolve(ThreadRepo).findById(threadId);
+    if (!thread || thread.deleted_at != null) throw new Error("Draft image thread does not exist");
+    return container.resolve(AttachmentService).stageDraft(threadId, attachment);
+  },
 };
 
 /** Checks whether a method belongs to the attachment RPC family. */

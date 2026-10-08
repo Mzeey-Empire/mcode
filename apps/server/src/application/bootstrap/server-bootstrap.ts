@@ -4,6 +4,7 @@
  */
 
 import { setupContainer } from "../composition/container.js";
+import { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { createWsServer } from "../transport/ws-server.js";
 import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sessionCount } from "../transport/push.js";
 import { PortPush } from "../transport/port-push.js";
@@ -614,6 +615,7 @@ async function removeExpiredSnapshots(): Promise<void> {
 }
 
 await removeExpiredSnapshots();
+container.resolve(AttachmentService).removeExpiredDraftImages();
 
 /** Starts workspace and worktree Git watchers, then repairs stale Git flags. */
 async function initializeWorkspaceWatchers(): Promise<ReturnType<typeof workspaceRepo.listAll>> {

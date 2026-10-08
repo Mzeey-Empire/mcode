@@ -79,6 +79,7 @@ import {
   ConversationTailSchema,
 } from "../models/conversation-tail.js";
 import { AttachmentMetaSchema } from "../models/attachment.js";
+import { StagedDraftImageSchema } from "../models/next-message-draft.js";
 import { MAX_ATTACHMENTS } from "../models/file-types.js";
 import { ToolCallRecordSchema } from "../models/tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "../models/thought-segment.js";
@@ -296,6 +297,8 @@ export const SendMessageSchema = lazySchema(() => z.object({
     content: z.string(),
     /** Client identity for the optimistic user row, when the sender has one. */
     messageId: z.string().uuid().optional(),
+    /** Durable images leased and copied into this message during admission. */
+    stagedDraftImageIds: z.array(z.string().uuid()).max(MAX_ATTACHMENTS).optional(),
     /**
      * When set, persisted user row uses this transcript while {@link content}
      * flows to providers (injections and hidden metadata fences).
@@ -1449,6 +1452,10 @@ export const WS_METHODS = lazySchema(() => ({
         ),
     }),
     result: AttachmentMetaSchema(),
+  },
+  "attachments.stageDraft": {
+    params: z.object({ threadId: z.string().min(1), attachment: AttachmentMetaSchema() }),
+    result: StagedDraftImageSchema(),
   },
   "settings.get": {
     params: z.object({}),

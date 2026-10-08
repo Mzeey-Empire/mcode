@@ -100,6 +100,7 @@ import {
 import type { FileService } from "../../features/projects/files/file-service.js";
 import { isFileRpcMethod, routeFileRpc } from "../../features/projects/files/transport/file-rpc.js";
 import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attachments/transport/attachment-rpc.js";
+import { DraftImageMissingError } from "../../features/attachments/storage/attachment-service.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
@@ -444,6 +445,9 @@ function validateRpcParameters(
 
 function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof DraftImageMissingError) {
+    return { id: request.id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
+  }
   if (error instanceof TerminalBackendError || error instanceof TerminalSessionPolicyError || error instanceof TerminalSessionRuntimeError) {
     return terminalRouteError(request.id, error, message);
   }
