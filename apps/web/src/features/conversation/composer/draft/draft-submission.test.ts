@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message, MessageMention, PlanCommentSelection } from "@mcode/contracts";
+import type { MessageMention, PlanCommentSelection } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import {
@@ -196,11 +196,7 @@ describe("settling with an open editor", () => {
 
 describe("draft submission lifecycle", () => {
   const THREAD_ID = "thread-lifecycle";
-  const getMessages = vi.fn();
-
-  function message(id: string, sequence: number): Message {
-    return { id, sequence } as Message;
-  }
+  const confirmMessage = vi.fn();
 
   function pendingComments(): string[] {
     const draft = useComposerDraftStore.getState().drafts[THREAD_ID];
@@ -215,14 +211,14 @@ describe("draft submission lifecycle", () => {
 
   beforeEach(() => {
     useComposerDraftStore.setState({ drafts: {} });
-    getMessages.mockReset();
-    vi.mocked(getTransport).mockReturnValue({ getMessages } as unknown as ReturnType<typeof getTransport>);
+    confirmMessage.mockReset();
+    vi.mocked(getTransport).mockReturnValue({ confirmMessage } as unknown as ReturnType<typeof getTransport>);
   });
 
   it("keeps the submission pending when a failed Send cannot be confirmed, then settles it after reconnect", async () => {
     vi.useFakeTimers();
     const handle = startSend();
-    getMessages.mockRejectedValueOnce(new Error("socket closed"));
+    confirmMessage.mockRejectedValueOnce(new Error("socket closed"));
 
     await handle.failed();
     vi.clearAllTimers();
@@ -231,7 +227,7 @@ describe("draft submission lifecycle", () => {
     expect(pendingComments()).toEqual([]);
     expect(useComposerDraftStore.getState().drafts[THREAD_ID]?.submissions).toHaveLength(1);
 
-    getMessages.mockResolvedValueOnce({ messages: [message(MESSAGE_ID, 7)], hasMore: false });
+    confirmMessage.mockResolvedValueOnce({ admitted: true });
     await reconcileOrphanedDraftSubmissions(THREAD_ID);
 
     expect(useComposerDraftStore.getState().drafts[THREAD_ID]).toBeUndefined();
@@ -241,29 +237,31 @@ describe("draft submission lifecycle", () => {
   async function orphanSend(): Promise<void> {
     vi.useFakeTimers();
     const handle = startSend();
-    getMessages.mockRejectedValueOnce(new Error("offline"));
+    confirmMessage.mockRejectedValueOnce(new Error("offline"));
     await handle.failed();
     // Drop the scheduled confirmation retries; each test drives reconcile itself.
     vi.clearAllTimers();
     vi.useRealTimers();
-    getMessages.mockReset();
+    confirmMessage.mockReset();
   }
 
-  it("pages back through history before deciding a restarted Send was lost", async () => {
-    await orphanSend();
-    getMessages
-      .mockResolvedValueOnce({ messages: [message("newer-a", 200), message("newer-b", 201)], hasMore: true })
-      .mockResolvedValueOnce({ messages: [message(MESSAGE_ID, 120)], hasMore: true });
+  it("waits for the server's answer on a Send it was still admitting, so a late commit is not sent twice", async () => {
+    const handle = startSend();
+    let answer!: (result: { admitted: boolean }) => void;
+    confirmMessage.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
 
-    await reconcileOrphanedDraftSubmissions(THREAD_ID);
+    const failing = handle.failed();
+    expect(useComposerDraftStore.getState().drafts[THREAD_ID]?.submissions).toHaveLength(1);
+    answer({ admitted: true });
+    await failing;
 
-    expect(getMessages).toHaveBeenNthCalledWith(2, THREAD_ID, 100, 200);
+    expect(confirmMessage).toHaveBeenCalledWith(THREAD_ID, MESSAGE_ID);
     expect(useComposerDraftStore.getState().drafts[THREAD_ID]).toBeUndefined();
   });
 
-  it("returns every element when the whole history lacks the message", async () => {
+  it("returns every element when the server confirms the message was never admitted", async () => {
     await orphanSend();
-    getMessages.mockResolvedValueOnce({ messages: [message("other", 3)], hasMore: false });
+    confirmMessage.mockResolvedValueOnce({ admitted: false });
 
     await reconcileOrphanedDraftSubmissions(THREAD_ID);
 
@@ -274,9 +272,9 @@ describe("draft submission lifecycle", () => {
     vi.useFakeTimers();
     try {
       const handle = startSend();
-      getMessages.mockRejectedValueOnce(new Error("timeout"));
+      confirmMessage.mockRejectedValueOnce(new Error("timeout"));
       await handle.failed();
-      getMessages.mockResolvedValueOnce({ messages: [message(MESSAGE_ID, 9)], hasMore: false });
+      confirmMessage.mockResolvedValueOnce({ admitted: true });
 
       await vi.advanceTimersByTimeAsync(5_000);
 
@@ -290,9 +288,9 @@ describe("draft submission lifecycle", () => {
     await orphanSend();
     vi.useFakeTimers();
     try {
-      getMessages.mockRejectedValueOnce(new Error("timeout"));
+      confirmMessage.mockRejectedValueOnce(new Error("timeout"));
       await reconcileOrphanedDraftSubmissions(THREAD_ID);
-      getMessages.mockResolvedValueOnce({ messages: [message(MESSAGE_ID, 9)], hasMore: false });
+      confirmMessage.mockResolvedValueOnce({ admitted: true });
 
       await vi.advanceTimersByTimeAsync(5_000);
 

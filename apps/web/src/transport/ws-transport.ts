@@ -1264,6 +1264,8 @@ export function createWsTransport(
       rpc<GoalLookupResult>("thread.goal.get", { threadId }),
     clearThreadGoal: (threadId) =>
       rpc<GoalLookupResult>("thread.goal.clear", { threadId }),
+    confirmMessage: (threadId, messageId) =>
+      rpc<{ admitted: boolean }>("agent.confirmMessage", { threadId, messageId }),
     readThreadControl: (identity, messageLimit) =>
       rpc<import("@mcode/contracts").ThreadControlReadResult>("thread.control.read", {
         identity,

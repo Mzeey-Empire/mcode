@@ -467,6 +467,11 @@ export interface McodeTransport {
   getThreadGoal(threadId: string): Promise<GoalLookupResult>;
   /** Clear the current active goal for a thread without sending a chat message. */
   clearThreadGoal(threadId: string): Promise<GoalLookupResult>;
+  /**
+   * Reports whether the thread holds the user message a send carried, after
+   * any admission of that message still running on the server settles.
+   */
+  confirmMessage(threadId: string, messageId: string): Promise<{ admitted: boolean }>;
   /** Read one canonical persisted coordination projection. */
   readThreadControl(
     identity: ThreadControlIdentity,

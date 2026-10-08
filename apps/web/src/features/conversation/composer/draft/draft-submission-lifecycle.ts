@@ -11,13 +11,10 @@ import {
 const inFlightMessageIds = new Set<string>();
 
 /**
- * Delays before re-reading the thread after a confirmation read failed. A
+ * Delays before asking the server again after a confirmation call failed. A
  * reconnect also retries, but a connection that stays up never reconnects.
  */
 const CONFIRMATION_RETRY_DELAYS_MS = [5_000, 30_000];
-
-/** Page size for confirming a lost or interrupted Send; a fresh Send is usually on the first page. */
-const CONFIRMATION_PAGE_SIZE = 100;
 
 /** A Send that froze draft elements, settled once by its dispatch outcome. */
 export interface DraftSubmissionHandle {
@@ -26,9 +23,9 @@ export interface DraftSubmissionHandle {
   succeeded(): void;
   /**
    * Settles after the Send threw. The server may still have admitted the
-   * message when only its response was lost, so its message list decides.
-   * When the server cannot be read either, the submission stays pending for
-   * {@link reconcileOrphanedDraftSubmissions} to settle after reconnect.
+   * message when only its response was lost, so the server confirms it.
+   * When the server cannot be reached, the submission stays pending for
+   * {@link reconcileOrphanedDraftSubmissions} to settle later.
    */
   failed(): Promise<void>;
 }
@@ -42,28 +39,20 @@ function settle(threadId: string, messageId: string, outcome: "success" | "failu
 }
 
 /**
- * Reports which of the given message ids the server holds for a thread, or
- * null when the server cannot be read. Pages back through the whole history
- * only while some id is still unfound, because absence must be proven before
- * a Send's elements return.
+ * Asks the server which of these messages it admitted, or null when it cannot
+ * be reached. The server waits for any admission of the id still running, so
+ * an absent message is proof the Send failed, never a race with its commit.
  */
-async function findServerMessages(
+async function confirmServerMessages(
   threadId: string,
   messageIds: readonly string[],
 ): Promise<Set<string> | null> {
-  const wanted = new Set(messageIds);
-  const found = new Set<string>();
-  let before: number | undefined;
   try {
-    for (;;) {
-      const page = await getTransport().getMessages(threadId, CONFIRMATION_PAGE_SIZE, before);
-      for (const message of page.messages) {
-        if (wanted.has(message.id)) found.add(message.id);
-      }
-      const oldest = page.messages[0];
-      if (found.size === wanted.size || !page.hasMore || !oldest) return found;
-      before = oldest.sequence;
-    }
+    const results = await Promise.all(messageIds.map(async (messageId) => {
+      const { admitted } = await getTransport().confirmMessage(threadId, messageId);
+      return admitted ? messageId : null;
+    }));
+    return new Set(results.filter((messageId): messageId is string => messageId !== null));
   } catch {
     return null;
   }
@@ -88,7 +77,7 @@ export function beginDraftSubmission(
     messageId,
     succeeded: () => settle(threadId, messageId, "success"),
     failed: async () => {
-      const found = await findServerMessages(threadId, [messageId]);
+      const found = await confirmServerMessages(threadId, [messageId]);
       if (!found) {
         inFlightMessageIds.delete(messageId);
         retryReconcileLater(threadId, 0);
@@ -108,7 +97,7 @@ export async function reconcileOrphanedDraftSubmissions(threadId: string, attemp
     .map((submission) => submission.messageId)
     .filter((messageId) => !inFlightMessageIds.has(messageId));
   if (orphaned.length === 0) return;
-  const found = await findServerMessages(threadId, orphaned);
+  const found = await confirmServerMessages(threadId, orphaned);
   // Unreachable server: keep the submissions pending rather than guess, and look again later.
   if (!found) {
     retryReconcileLater(threadId, attempt);
