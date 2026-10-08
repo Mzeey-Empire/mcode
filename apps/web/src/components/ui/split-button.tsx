@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react"
 
 import { Button, type ButtonProps } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { sidePlacement } from "@/components/ui/side-placement"
 import { cn } from "@/lib/utils"
 
 type SplitButtonVariant = "default" | "outline" | "secondary" | "ghost"
@@ -36,17 +37,15 @@ interface SplitButtonProps {
   className?: string
   /** Extra props for the action half, such as a test id or a longer accessible name. */
   actionProps?: Omit<ButtonProps, "children" | "onClick" | "variant" | "size" | "disabled" | "loading"> & DataAttributes
-  /** Menu placement against the whole control, e.g. `left` to open beside a column. */
-  menuSide?: "top" | "bottom" | "left" | "right"
-  menuAlign?: "start" | "center" | "end"
-  menuSideOffset?: number
+  /** Open the menu beside the card that holds the control (overview rows) instead of below it. */
+  menuBeside?: "left" | "right"
   /** Extra props for the chevron half. */
   menuTriggerProps?: Omit<ButtonProps, "children" | "variant" | "size" | "disabled" | "aria-label"> & DataAttributes
 }
 
 type SplitButtonMenuProps = Pick<
   SplitButtonProps,
-  "menu" | "menuLabel" | "menuSide" | "menuAlign" | "menuSideOffset" | "menuTriggerProps"
+  "menu" | "menuLabel" | "menuBeside" | "menuTriggerProps"
 > & {
   variant: SplitButtonVariant
   size: SplitButtonSize
@@ -58,9 +57,7 @@ type SplitButtonMenuProps = Pick<
 function SplitButtonMenu({
   menu,
   menuLabel,
-  menuSide = "bottom",
-  menuAlign = "end",
-  menuSideOffset,
+  menuBeside,
   menuTriggerProps,
   variant,
   size,
@@ -89,7 +86,9 @@ function SplitButtonMenu({
           </Button>
         }
       />
-      <DropdownMenuContent anchor={anchor} side={menuSide} align={menuAlign} sideOffset={menuSideOffset}>
+      <DropdownMenuContent
+        {...(menuBeside ? sidePlacement(anchor, menuBeside) : { anchor, side: "bottom", align: "end" })}
+      >
         {menu}
       </DropdownMenuContent>
     </DropdownMenu>
