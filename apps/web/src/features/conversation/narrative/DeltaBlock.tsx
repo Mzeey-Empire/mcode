@@ -309,7 +309,7 @@ function StreamingTable({ header, rows }: { header: string[]; rows: string[][] }
  * collapsing each blank line from a full prose line to an 8px margin.
  */
 function StreamingParagraphs({ text }: { text: string }) {
-  const paragraphs = text.split(/\n\s*\n/).filter((paragraph) => paragraph.length > 0);
+  const paragraphs = text.split(/\n\s*\n/).filter((paragraph) => paragraph.trim().length > 0);
   return (
     <>
       {paragraphs.map((paragraph, index) => (

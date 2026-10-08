@@ -161,7 +161,7 @@ describe("DeltaBlock", () => {
 
   it("streams blank-line paragraphs as the same spaced paragraphs markdown settles to", async () => {
     const { container: streaming } = render(
-      <DeltaBlock text={"First paragraph.\n\nSecond paragraph.\n\n"} isStreaming showCursor={false} />,
+      <DeltaBlock text={"First paragraph.\n\nSecond paragraph.\n\n \n\n "} isStreaming showCursor={false} />,
     );
 
     await waitFor(() =>
