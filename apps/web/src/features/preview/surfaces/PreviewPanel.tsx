@@ -943,7 +943,7 @@ function InspectorValueInput({
         placeholder={affordance === "0-1" ? "0-1" : undefined}
         inputMode={affordance === "0-1" || affordance === "px" ? "decimal" : undefined}
         className={cn(
-          "h-7 rounded-md border-white/[0.08] bg-[#303030]/70 text-xs text-neutral-100 shadow-none placeholder:text-neutral-500 hover:border-white/[0.14] focus-visible:border-sky-300/40 focus-visible:ring-1 focus-visible:ring-sky-300/[0.35]",
+          "h-7 rounded-md border-white/[0.08] bg-[#303030]/70 text-xs text-neutral-100 shadow-none placeholder:text-neutral-500 hover:border-white/[0.14] focus-visible:border-sky-300/40 focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-sky-300/[0.35]",
           affordance === "px" && "pr-8",
           className,
         )}
@@ -1130,7 +1130,7 @@ function ColorInspectorControl({
           const next = parseColorValue(event.target.value);
           if (next) commitColor({ ...next, a: pickerColor.a });
         }}
-        className="h-7 rounded-md border-white/[0.08] bg-[#242424] font-mono text-xs text-neutral-100 shadow-none focus-visible:border-amber-300/50 focus-visible:ring-1 focus-visible:ring-amber-300/30"
+        className="h-7 rounded-md border-white/[0.08] bg-[#242424] font-mono text-xs text-neutral-100 shadow-none focus-visible:border-amber-300/50 focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-amber-300/30"
       />
     ) : colorFormat === "hsl" ? (
       <div className="grid grid-cols-3 gap-1.5">
@@ -1149,7 +1149,7 @@ function ColorInspectorControl({
               value={formatColorNumber(channelValue)}
               inputMode={inputMode}
               onChange={updateHslChannel(channel)}
-              className="h-7 rounded-md border-white/[0.08] bg-[#242424] text-center font-mono text-xs text-neutral-100 shadow-none focus-visible:border-amber-300/50 focus-visible:ring-1 focus-visible:ring-amber-300/30"
+              className="h-7 rounded-md border-white/[0.08] bg-[#242424] text-center font-mono text-xs text-neutral-100 shadow-none focus-visible:border-amber-300/50 focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-amber-300/30"
             />
           </label>
         ))}
@@ -1171,7 +1171,7 @@ function ColorInspectorControl({
               value={formatColorNumber(channelValue)}
               inputMode={inputMode}
               onChange={updateRgbChannel(channel)}
-              className="h-7 rounded-md border-white/[0.08] bg-[#242424] text-center font-mono text-xs text-neutral-100 shadow-none focus-visible:border-amber-300/50 focus-visible:ring-1 focus-visible:ring-amber-300/30"
+              className="h-7 rounded-md border-white/[0.08] bg-[#242424] text-center font-mono text-xs text-neutral-100 shadow-none focus-visible:border-amber-300/50 focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-amber-300/30"
             />
           </label>
         ))}
@@ -1301,7 +1301,7 @@ function ColorInspectorControl({
                 aria-label={`Color picker for ${label}`}
                 value={formatColorValue(pickerColor, colorFormat)}
                 onChange={(event) => onChange(controlKey, event.target.value)}
-                className="h-7 rounded-md border-white/[0.08] bg-[#242424] font-mono text-xs text-neutral-100 shadow-none focus-visible:border-amber-300/50 focus-visible:ring-1 focus-visible:ring-amber-300/30"
+                className="h-7 rounded-md border-white/[0.08] bg-[#242424] font-mono text-xs text-neutral-100 shadow-none focus-visible:border-amber-300/50 focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-amber-300/30"
               />
               <div className="grid grid-cols-3 overflow-hidden rounded-md border border-white/[0.08] bg-[#252525]">
                 {(["rgb", "hsl", "hex"] as const).map((format) => (
@@ -1342,7 +1342,7 @@ function ColorInspectorControl({
             }, 0);
           }}
           onChange={(event) => onChange(controlKey, event.target.value)}
-          className="h-7 rounded-md border-white/[0.08] bg-[#303030]/70 pl-8 font-mono text-xs text-neutral-100 shadow-none placeholder:text-neutral-500 hover:border-white/[0.14] focus-visible:border-sky-300/40 focus-visible:ring-1 focus-visible:ring-sky-300/[0.35]"
+          className="h-7 rounded-md border-white/[0.08] bg-[#303030]/70 pl-8 font-mono text-xs text-neutral-100 shadow-none placeholder:text-neutral-500 hover:border-white/[0.14] focus-visible:border-sky-300/40 focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-sky-300/[0.35]"
         />
       </div>
     </InspectorRow>
@@ -1415,7 +1415,7 @@ function QuadInputStrip({
             value={displayVisualControlValue(entry.key, values[entry.key])}
             onChange={(event) => onChange(entry.key, event.target.value)}
             inputMode="decimal"
-            className="h-7 rounded-none border-0 bg-transparent px-0 text-center font-mono text-xs tabular-nums text-neutral-100 shadow-none placeholder:text-neutral-500 hover:bg-white/[0.03] focus-visible:ring-1 focus-visible:ring-sky-300/35"
+            className="h-7 rounded-none border-0 bg-transparent px-0 text-center font-mono text-xs tabular-nums text-neutral-100 shadow-none placeholder:text-neutral-500 hover:bg-white/[0.03] focus-visible:outline-0 focus-visible:ring-1 focus-visible:ring-sky-300/35"
           />
         </label>
       ))}
@@ -4087,7 +4087,7 @@ export function PreviewPanel({
                 onKeyDown={onBubbleNoteKeyDown}
                 onFocus={() => setBubbleInputFocused(true)}
                 onBlur={() => setBubbleInputFocused(false)}
-                className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm text-neutral-50 shadow-none outline-none placeholder:text-neutral-500 focus-visible:ring-0"
+                className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-sm text-neutral-50 shadow-none outline-none placeholder:text-neutral-500 focus-visible:outline-0 focus-visible:ring-0"
                 maxLength={4000}
                 placeholder="Comment · / for skills · @ to mention"
                 aria-label="Annotation note"

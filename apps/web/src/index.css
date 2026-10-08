@@ -337,15 +337,6 @@
   font-variant-ligatures: none;
 }
 
-/* Paper's focus ring sits 2px outside the control. An outline follows the
-   border radius and takes no layout space, so focus never moves anything. */
-@utility focus-ring {
-  &:focus-visible {
-    outline: var(--size-focus-ring) solid var(--color-focus);
-    outline-offset: var(--size-focus-offset);
-  }
-}
-
 /* Overflowing text fades its last 24px instead of ending in an ellipsis.
    The mask only applies while the element overflows: a scroll timeline is
    inactive when its scroller has nothing to scroll, so the animation that

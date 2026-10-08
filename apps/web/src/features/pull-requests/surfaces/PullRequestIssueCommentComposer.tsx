@@ -30,7 +30,7 @@ const textEncoder = new TextEncoder();
 const composerShellClass =
   "relative rounded-xl bg-hover/50 ring-1 ring-inset ring-border/60 transition-shadow focus-within:ring-2 focus-within:ring-primary/70";
 const composerTextareaClass =
-  "min-h-12 max-h-32 resize-none border-0 bg-transparent px-3 pb-3 pt-3 text-sm shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent";
+  "min-h-12 max-h-32 resize-none border-0 bg-transparent px-3 pb-3 pt-3 text-sm shadow-none focus-visible:border-transparent focus-visible:outline-0 focus-visible:ring-0 dark:bg-transparent";
 
 /** Props for an explicit pull request issue-comment composer. */
 export interface PullRequestIssueCommentComposerProps {

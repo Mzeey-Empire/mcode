@@ -59,7 +59,7 @@ the shared portal layers.
 ```
 
 `SelectTrigger` takes the same three sizes. Inputs, textareas and select triggers share one
-state recipe in `field-surface.ts`; every form control draws focus with the `focus-ring` utility.
+state recipe in `field-surface.ts`; every form control draws focus with `FOCUS_RING_CLASS` from `focus-ring.ts`.
 
 ## Badge Variants
 

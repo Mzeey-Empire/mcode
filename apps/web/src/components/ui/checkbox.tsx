@@ -3,6 +3,7 @@
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox";
 import { Check, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FOCUS_RING_CLASS } from "./focus-ring";
 
 /** A checked state, or `"mixed"` for a parent row whose children are partly checked. */
 type CheckboxChecked = boolean | "mixed";
@@ -22,7 +23,8 @@ function Checkbox({
       checked={mixed ? false : checked}
       indeterminate={mixed}
       className={cn(
-        "peer flex size-5 shrink-0 items-center justify-center rounded-badge border border-control-border bg-selected text-primary-ink transition-colors duration-(--duration-fast) ease-(--ease-standard) hover:not-aria-invalid:border-muted hover:bg-hover focus-ring aria-invalid:border-error data-[checked]:not-aria-invalid:border-primary data-[checked]:bg-primary data-[checked]:hover:not-aria-invalid:border-primary-hover data-[checked]:hover:bg-primary-hover data-[indeterminate]:not-aria-invalid:border-primary data-[indeterminate]:bg-primary data-[indeterminate]:hover:not-aria-invalid:border-primary-hover data-[indeterminate]:hover:bg-primary-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "peer flex size-5 shrink-0 items-center justify-center rounded-badge border border-control-border bg-selected text-primary-ink transition-colors duration-(--duration-fast) ease-(--ease-standard) hover:not-aria-invalid:border-muted hover:bg-hover aria-invalid:border-error data-[checked]:not-aria-invalid:border-primary data-[checked]:bg-primary data-[checked]:hover:not-aria-invalid:border-primary-hover data-[checked]:hover:bg-primary-hover data-[indeterminate]:not-aria-invalid:border-primary data-[indeterminate]:bg-primary data-[indeterminate]:hover:not-aria-invalid:border-primary-hover data-[indeterminate]:hover:bg-primary-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        FOCUS_RING_CLASS,
         className,
       )}
       {...props}
