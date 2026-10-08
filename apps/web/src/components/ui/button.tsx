@@ -1,6 +1,6 @@
 "use client"
 
-import { Children, isValidElement, type MouseEvent, type ReactNode } from "react"
+import { Children, Fragment, isValidElement, type MouseEvent, type ReactNode } from "react"
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 
@@ -27,8 +27,9 @@ const buttonVariants = cva(
           "bg-destructive text-destructive-ink hover:bg-button-destructive-hover active:bg-button-destructive-hover active:inset-ring-2 active:inset-ring-destructive-ink",
         link: "text-link underline underline-offset-4 hover:text-focus active:text-ink",
         // The round icon button's resting fill; switched on, it takes the control-border fill.
+        // Hover sits halfway between the two: no role token differs from `selected` in both themes.
         subtle:
-          "bg-selected text-ink hover:bg-button-secondary-hover aria-expanded:bg-control-border aria-pressed:bg-control-border active:inset-ring-2 active:inset-ring-ink",
+          "bg-selected text-ink hover:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] aria-expanded:bg-control-border aria-pressed:bg-control-border active:inset-ring-2 active:inset-ring-ink",
         // Composer Stop: neutral by rule, never amber or red.
         ink: "bg-ink text-background hover:bg-ink/90 active:inset-ring-2 active:inset-ring-background",
       },
@@ -83,6 +84,13 @@ type ButtonProps = ButtonPrimitive.Props &
     loading?: boolean
   }
 
+/** An icon is a leaf element: an `<svg>` or an icon component with no children. */
+function isLeadingIcon(node: ReactNode): boolean {
+  if (!isValidElement<{ children?: ReactNode }>(node) || node.type === Fragment) return false
+  if (typeof node.type === "string" && node.type !== "svg") return false
+  return node.props.children == null
+}
+
 /**
  * Swaps the leading icon for the spinner so the label and width stay put. Text-first
  * content has no icon slot, so the spinner overlays the content, which keeps its box.
@@ -90,10 +98,11 @@ type ButtonProps = ButtonPrimitive.Props &
 function renderLoadingContent(children: ReactNode, spinnerPx: number): ReactNode {
   const [first, ...rest] = Children.toArray(children)
   const spinner = <Spinner key="loading-spinner" size={spinnerPx} className="text-current" />
-  if (isValidElement(first) && typeof first.type !== "string") return [spinner, ...rest]
+  if (isLeadingIcon(first)) return [spinner, ...rest]
+  // opacity-0, not invisible: the hidden label must stay the button's accessible name.
   return (
     <>
-      <span className="invisible inline-flex items-center gap-[inherit]">{children}</span>
+      <span className="inline-flex items-center gap-[inherit] opacity-0">{children}</span>
       <span className="absolute inset-0 flex items-center justify-center">{spinner}</span>
     </>
   )

@@ -34,6 +34,17 @@ describe("Button loading", () => {
     expect(screen.queryByTestId("leading-icon")).not.toBeInTheDocument();
     expect(screen.getByRole("button")).toHaveTextContent("New thread");
   });
+
+  it("keeps a fragment or text label as the accessible name while loading", () => {
+    render(
+      <Button loading>
+        <>Create pull request</>
+      </Button>,
+    );
+
+    expect(screen.getByRole("button", { name: "Create pull request" })).toBeInTheDocument();
+    expect(screen.getByText("Create pull request")).not.toHaveClass("invisible");
+  });
 });
 
 describe("IconButton", () => {
