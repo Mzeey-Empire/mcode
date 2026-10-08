@@ -1,23 +1,15 @@
-import {
-  ArrowClockwiseIcon,
-  ArrowLeftIcon,
-  FileXIcon,
-  GlobeXIcon,
-  ShieldWarningIcon,
-  WarningDiamondIcon,
-  WifiSlashIcon,
-  type Icon,
-} from "@phosphor-icons/react";
+import { FileX, GlobeX, OctagonAlert, ShieldAlert, WifiOff, type LucideIcon } from "lucide-react";
+import { BackIcon, RetryIcon } from "@/components/ui/icon-map";
 import type { PreviewPageError } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 
 /** Per-kind glyph for the error headline. */
-const ERROR_ICON: Record<PreviewPageError["kind"], Icon> = {
-  http: GlobeXIcon,
-  network: WifiSlashIcon,
-  "file-not-found": FileXIcon,
-  crash: WarningDiamondIcon,
-  blocked: ShieldWarningIcon,
+const ERROR_ICON: Record<PreviewPageError["kind"], LucideIcon> = {
+  http: GlobeX,
+  network: WifiOff,
+  "file-not-found": FileX,
+  crash: OctagonAlert,
+  blocked: ShieldAlert,
 };
 
 /** Props for {@link PreviewErrorPanel}. */
@@ -63,11 +55,11 @@ export function PreviewErrorPanel({
       role="alert"
       className="absolute inset-0 flex flex-col items-center justify-center gap-7 px-6 text-center motion-safe:animate-in motion-safe:fade-in"
     >
-      {/* Duotone is the documented weight for large empty-state glyphs; clay
+      {/* Clay
           tint marks the errored reading at glance speed. 48px steps past the
           32px display size because this glyph is the page hero, matching the
           browser error pages this surface emulates. */}
-      <Icon size={48} weight="duotone" className="text-destructive/70" aria-hidden />
+      <Icon size={48} className="text-destructive/70" aria-hidden />
       <div className="flex max-w-md flex-col items-center gap-3">
         <p
           data-testid="preview-error-headline"
@@ -100,13 +92,13 @@ export function PreviewErrorPanel({
             data-testid="preview-error-retry"
             className="rounded-2xl bg-primary/[0.12] text-primary ring-1 ring-inset ring-primary/20 hover:bg-primary/[0.2] hover:text-primary"
           >
-            <ArrowClockwiseIcon aria-hidden />
+            <RetryIcon aria-hidden />
             Retry
           </Button>
         ) : null}
         {canBack ? (
           <Button size="sm" variant="ghost" onClick={onGoBack} className="rounded-2xl">
-            <ArrowLeftIcon aria-hidden />
+            <BackIcon aria-hidden />
             Go back
           </Button>
         ) : null}

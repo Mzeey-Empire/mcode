@@ -34,6 +34,17 @@
     "mcode/no-global-host-runtime": "error",
     "mcode/no-native-title-tooltip": "error",
     "mcode/require-lazy-nontrivial-schema": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "@phosphor-icons/react",
+            "message": "Product icons are Lucide. Import from @/components/ui/icon-map or lucide-react (DESIGN.md Iconography)."
+          }
+        ]
+      }
+    ],
     "unicorn/no-useless-spread": "warn",
     "unicorn/no-useless-fallback-in-spread": "warn"
   },
