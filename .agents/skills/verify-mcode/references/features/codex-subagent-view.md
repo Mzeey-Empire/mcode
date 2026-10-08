@@ -5,7 +5,7 @@
 - Codex `collabAgentToolCall` and V2 `subAgentActivity` events produce the same canonical child contract.
 - The parent task is the primary sentence-style label in chat, the roster, and child detail. Provider identity remains separate metadata.
 - A chat row opens the exact canonical child in the Subagents panel.
-- Chat and detail use the same stable selection key for the identity color.
+- Chat, the roster, child detail, and the overview disc stack show the Codex provider icon.
 - The canonical roster moves the child from Active to Done with the exact terminal outcome.
 - While the child is Active, its assistant message is shown in child detail as it streams.
 - The child transcript contains the full message from the parent and the child's assistant message after restart.
@@ -17,7 +17,7 @@
 2. Select Codex and `gpt-5.6-terra`.
 3. Ask the parent to delegate one task to one subagent and return a unique final marker.
 4. While it runs, open Subagents and confirm that the child is Active.
-5. Select the subagent from chat. Confirm that the panel opens that child, converts an underscored parent task such as `verify_ui_child` to `Verify ui child`, and uses the same glyph color.
+5. Select the subagent from chat. Confirm that the panel opens that child, converts an underscored parent task such as `verify_ui_child` to `Verify ui child`, and shows the Codex provider icon.
 6. While the child is Active, confirm that its assistant text appears and grows in detail before the child moves to Done. The detail must not stay blank while the main chat streams text.
 7. Confirm that the parent's full delegated message and the child's reply appear in the transcript. V1 (`collabAgentToolCall`) carries the delegated prompt on the wire so the child thread gets a synthesized user message; V2 (`subAgentActivity`) never carries the prompt, so the child transcript starts at the child's first assistant item. The live check only requires the parent message when the delegation record's input carried it.
 8. Wait for completion. Confirm that the child moves to Done and shows Completed.
@@ -33,7 +33,7 @@ bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime check
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime live --provider codex --model gpt-5.6-terra --scenario subagent --confirm-provider-call
 ```
 
-`runtime check` covers the legacy and V2 protocol mappers, a fresh canonical reader after persistence, provider-neutral presentation, navigation, transcript mounting, sentence-style task labels, and the shared palette key. The live scenario uses the worktree-owned disposable fixture workspace. It requires an Active-to-Completed roster transition, the full parent message, the retained task, and the child's assistant marker through `conversation.page`. The detail view uses the same durable source. The verifier deletes the generated parent thread and its owned descendants unless `--keep-thread` is present.
+`runtime check` covers the legacy and V2 protocol mappers, a fresh canonical reader after persistence, provider-neutral presentation, navigation, transcript mounting, and sentence-style task labels. The live scenario uses the worktree-owned disposable fixture workspace. It requires an Active-to-Completed roster transition, the full parent message, the retained task, and the child's assistant marker through `conversation.page`. The detail view uses the same durable source. The verifier deletes the generated parent thread and its owned descendants unless `--keep-thread` is present.
 
 Use the Electron workflow for visual proof. The runtime receipt does not prove that an open child detail displayed a delta before completion; it contains no detail-view observation or screenshot.
 
@@ -45,11 +45,11 @@ Use the Electron workflow for visual proof. The runtime receipt does not prove t
 - Fail if the child thread omits the child's assistant marker.
 - Fail if the child thread omits the full message that the parent sent, when the delegation call carried the prompt (V1). V2 runs skip this check; see Coverage gaps.
 - Fail visual proof if the child detail stays blank until completion after the child starts streaming text.
-- Fail visual proof if chat does not open the exact child or the glyph palette differs between chat and detail.
+- Fail visual proof if chat does not open the exact child or chat and detail show different provider icons.
 
 ## Coverage gaps
 
 - Terra is the live V2 proof model. The legacy event shape is deterministic mapper coverage because current Codex decides which protocol item it emits.
 - V2 `subAgentActivity` does not carry the delegated prompt on the wire (`collaboration_actions.message` stays null), so the child's user message cannot be synthesized and `subagentParentMessageRetained` is skipped when the delegation record shows no prompt. Planned under the goals feature. Codex also emits `thread/goal/updated` and `thread/goal/cleared` for that feature; they are intentionally ignored until goals ship, so they must not surface "unrecognized update" notices.
-- The public runtime receipt proves persisted data and state. Electron is required for click, color, and application-restart evidence.
+- The public runtime receipt proves persisted data and state. Electron is required for click, provider icon, and application-restart evidence.
 - The automated checks do not bind child `textDelta` events to an open detail view. Electron proof must observe growing child text before completion.
