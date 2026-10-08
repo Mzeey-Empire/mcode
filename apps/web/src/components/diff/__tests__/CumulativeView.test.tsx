@@ -73,34 +73,4 @@ describe("CumulativeView summary lens", () => {
 
     expect(screen.queryByTestId("cumulative-summary-toggle")).not.toBeInTheDocument();
   });
-
-  it("shows the scoped diff when a subagent scope replaces an open summary lens", async () => {
-    const comparison = {
-      files: [{ path: "apps/web/src/a.ts", previousPath: null, changeType: "modified" as const, binary: false }],
-      additions: 1,
-      deletions: 0,
-    };
-    const { rerender } = render(
-      <CumulativeView
-        threadId="thread-1"
-        comparison={comparison}
-        cacheVersion="snap-1"
-      />,
-    );
-
-    await userEvent.click(screen.getByTestId("cumulative-summary-toggle"));
-    expect(screen.getByTestId("summary-lens")).toBeInTheDocument();
-
-    rerender(
-      <CumulativeView
-        threadId="thread-1"
-        comparison={comparison}
-        cacheVersion="snap-1"
-        scopeLabel="explorer_state"
-      />,
-    );
-
-    expect(screen.queryByTestId("summary-lens")).not.toBeInTheDocument();
-    expect(screen.getByTestId("review-file-jump-trigger")).toBeInTheDocument();
-  });
 });

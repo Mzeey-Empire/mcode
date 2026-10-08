@@ -1,8 +1,8 @@
 import { create } from "zustand";
-import type { TurnSnapshot, GitCommit, BranchComparison } from "@mcode/contracts";
+import type { TurnSnapshot, BranchComparison } from "@mcode/contracts";
 import { defaultReviewView, type ReviewChangeState } from "@/lib/review-views";
 
-export type { GitCommit, BranchComparison };
+export type { BranchComparison };
 
 /** Active tab in the right panel. */
 export type RightPanelTab = "tasks" | "changes" | "preview" | "terminal" | "action-terminal" | "subagents" | "coordination" | "environment";
@@ -16,14 +16,6 @@ export interface SubagentDetailSelection {
   /** Canonical roster tab, unresolved for selections opened from narration. */
   readonly originTab?: SubagentRosterTab;
   readonly scrollTop: number;
-}
-
-/** Transient file-path filter opened from one subagent detail. */
-export interface SubagentReviewScope {
-  readonly label: string;
-  readonly paths: readonly string[];
-  readonly additions: number;
-  readonly deletions: number;
 }
 
 /**
@@ -117,19 +109,8 @@ export function maxPanelWidthInSplit(
 }
 
 /** Currently selected file for diff viewing. */
-export interface SelectedFile {
-  source: "snapshot" | "turn-diff" | "cumulative" | "commit" | "unstaged" | "staged" | "branch";
-  /**
-   * Identifier resolving the diff for {@link source}: the snapshot ID for
-   * `"snapshot"`, the thread ID for `"cumulative"`, the commit SHA for
-   * `"commit"`, and the workspace ID for the git working-tree views
-   * (`"unstaged"`, `"staged"`, `"branch"`), which read the workspace root.
-   */
-  id: string;
-  filePath: string;
-  /** Thread that owns this selection, used to clear on thread deletion. */
-  threadId: string;
-}
+/** Source used to resolve a file's diff. */
+export type DiffSource = "snapshot" | "turn-diff" | "cumulative" | "commit" | "unstaged" | "staged" | "branch";
 
 /**
  * Right panel container state (visibility, width, open tabs, active tab). Stored
@@ -439,8 +420,6 @@ interface DiffState {
   readonly subagentRosterTabByThread: Record<string, SubagentRosterTab>;
   /** Selected Subagents detail and roster return position for each thread. */
   readonly subagentDetailByThread: Record<string, SubagentDetailSelection>;
-  /** Transient subagent Review filters keyed by owning thread. */
-  readonly subagentReviewScopeByThread: Record<string, SubagentReviewScope>;
   /** Explicit Files visibility choices keyed by Review scope. Missing scopes start closed. */
   readonly reviewFilesVisibleByScope: Record<string, boolean>;
   /** View mode within the Changes tab (the single rendered view). */
@@ -526,10 +505,6 @@ interface DiffState {
    * so the user's scroll position and reading flow aren't disrupted.
    */
   snapshotsPendingByThread: Record<string, boolean>;
-  /** Git commits keyed by thread ID. */
-  commitsByThread: Record<string, GitCommit[]>;
-  /** Whether commits are currently loading, keyed by thread ID. */
-  commitsLoadingByThread: Record<string, boolean>;
   /**
    * Inline diff cache keyed by `"threadId:source:id:version:filePath"`. Survives
    * component unmounts (panel close/reopen, tab switches) so diffs aren't
@@ -542,12 +517,6 @@ interface DiffState {
    * checkout without changing the visible ref names.
    */
   diffRevisionByScope: Record<string, number>;
-  /** Currently selected file for diff viewing. */
-  selectedFile: SelectedFile | null;
-  /** Raw unified diff text for the selected file. */
-  diffContent: string | null;
-  /** Whether diff content is currently loading. */
-  diffLoading: boolean;
   /** Persisted diff summary for the current thread. */
   summaryRecord: {
     id: string;
@@ -627,10 +596,6 @@ interface DiffState {
   selectSubagentDetail: (threadId: string, selection: SubagentDetailSelection) => void;
   /** Return one thread to its Subagents roster. */
   clearSubagentDetail: (threadId: string) => void;
-  /** Scope cumulative Review to workspace files attributed to one subagent. */
-  setSubagentReviewScope: (threadId: string, scope: SubagentReviewScope) => void;
-  /** Restore aggregate Review for one thread. */
-  clearSubagentReviewScope: (threadId: string) => void;
   /** Read the persisted Files visibility choice for a Review scope. */
   getReviewFilesVisible: (scopeId: string) => boolean;
   /** Persist an explicit Files visibility choice for a Review scope. */
@@ -687,11 +652,6 @@ interface DiffState {
   setSnapshotsLoading: (threadId: string, loading: boolean) => void;
   /** Flag a thread's all-changes view as having upstream changes not yet reflected. */
   markSnapshotsPending: (threadId: string, pending: boolean) => void;
-  setCommits: (threadId: string, commits: GitCommit[]) => void;
-  setCommitsLoading: (threadId: string, loading: boolean) => void;
-  selectFile: (file: SelectedFile | null) => void;
-  setDiffContent: (content: string | null) => void;
-  setDiffLoading: (loading: boolean) => void;
   /** Set the loaded summary record. */
   setSummaryRecord: (record: DiffState["summaryRecord"]) => void;
   /** Set summary loading state. */
@@ -716,7 +676,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   rightPanelFallbackByWorkspace: {},
   subagentRosterTabByThread: {},
   subagentDetailByThread: {},
-  subagentReviewScopeByThread: {},
   reviewFilesVisibleByScope: readReviewFilesVisibility(),
   viewMode: "last-turn",
   reviewViewByThread: {},
@@ -736,13 +695,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   snapshotsByThread: {},
   snapshotsLoadingByThread: {},
   snapshotsPendingByThread: {},
-  commitsByThread: {},
-  commitsLoadingByThread: {},
   inlineDiffCache: {},
   diffRevisionByScope: {},
-  selectedFile: null,
-  diffContent: null,
-  diffLoading: false,
   summaryRecord: null,
   summaryLoading: false,
 
@@ -917,30 +871,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete subagentDetailByThread[threadId];
       return { subagentDetailByThread };
     }),
-  setSubagentReviewScope: (threadId, scope) =>
-    set((state) => {
-      const paths = [...new Set(scope.paths.map((path) => path.trim()).filter(Boolean))].slice(0, 256);
-      if (paths.length === 0) {
-        if (!(threadId in state.subagentReviewScopeByThread)) return {};
-        const subagentReviewScopeByThread = { ...state.subagentReviewScopeByThread };
-        delete subagentReviewScopeByThread[threadId];
-        return { subagentReviewScopeByThread };
-      }
-      return {
-        subagentReviewScopeByThread: {
-          ...state.subagentReviewScopeByThread,
-          [threadId]: { ...scope, label: scope.label.trim().slice(0, 96), paths },
-        },
-      };
-    }),
-  clearSubagentReviewScope: (threadId) =>
-    set((state) => {
-      if (!(threadId in state.subagentReviewScopeByThread)) return {};
-      const subagentReviewScopeByThread = { ...state.subagentReviewScopeByThread };
-      delete subagentReviewScopeByThread[threadId];
-      return { subagentReviewScopeByThread };
-    }),
-
   getReviewFilesVisible: (scopeId) => get().reviewFilesVisibleByScope[scopeId] ?? false,
   setReviewFilesVisible: (scopeId, visible) =>
     set((state) => {
@@ -953,7 +883,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
     }),
 
   setViewMode: (mode) =>
-    set({ viewMode: mode, selectedFile: null, diffContent: null, selectedCommitSha: null, reviewFileJumpRequest: null }),
+    set({ viewMode: mode, selectedCommitSha: null, reviewFileJumpRequest: null }),
   getReviewView: (threadId, changeState) => {
     const state = get();
     if (state.reviewViewManuallySelectedByThread[threadId]) {
@@ -963,8 +893,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   },
   setReviewViewForThread: (threadId, mode) =>
     set((s) => {
-      const subagentReviewScopeByThread = { ...s.subagentReviewScopeByThread };
-      delete subagentReviewScopeByThread[threadId];
       return {
         viewMode: mode,
         reviewViewByThread: { ...s.reviewViewByThread, [threadId]: mode },
@@ -972,10 +900,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
           ...s.reviewViewManuallySelectedByThread,
           [threadId]: true,
         },
-        subagentReviewScopeByThread,
-        // Match setViewMode's resets so a fresh pick clears stale selection/operand.
-        selectedFile: null,
-        diffContent: null,
         selectedCommitSha: null,
         // A jump request belongs to the view it was issued for; a fresh pick
         // drops it so a stale path cannot fire in an unrelated view.
@@ -1019,9 +943,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
               ...s.branchManuallySelectedByScope,
               [s.branchComparisonKey]: true,
             },
-            // Changing an operand invalidates the selected file's diff.
-            selectedFile: null,
-            diffContent: null,
           }
         : {},
     ),
@@ -1034,8 +955,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
               ...s.branchManuallySelectedByScope,
               [s.branchComparisonKey]: true,
             },
-            selectedFile: null,
-            diffContent: null,
           }
         : {},
     ),
@@ -1089,13 +1008,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       else delete next[threadId];
       return { snapshotsPendingByThread: next };
     }),
-  setCommits: (threadId, commits) =>
-    set((s) => ({ commitsByThread: { ...s.commitsByThread, [threadId]: commits } })),
-  setCommitsLoading: (threadId, loading) =>
-    set((s) => ({ commitsLoadingByThread: { ...s.commitsLoadingByThread, [threadId]: loading } })),
-  selectFile: (file) => set({ selectedFile: file, diffContent: null, diffLoading: false }),
-  setDiffContent: (content) => set({ diffContent: content, diffLoading: false }),
-  setDiffLoading: (loading) => set({ diffLoading: loading }),
   setSummaryRecord: (record) => set({ summaryRecord: record }),
   setSummaryLoading: (loading) => set({ summaryLoading: loading }),
   cacheInlineDiff: (threadId, source, id, filePath, data, cacheVersion) =>
@@ -1126,10 +1038,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete snapshotsLoading[threadId];
       const snapshotsPending = { ...state.snapshotsPendingByThread };
       delete snapshotsPending[threadId];
-      const commits = { ...state.commitsByThread };
-      delete commits[threadId];
-      const commitsLoading = { ...state.commitsLoadingByThread };
-      delete commitsLoading[threadId];
       const previewUrls = { ...state.previewUrlByThread };
       delete previewUrls[threadId];
       const lineWrapByThread = { ...state.lineWrapByThread };
@@ -1140,8 +1048,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete subagentRosterTabByThread[threadId];
       const subagentDetailByThread = { ...state.subagentDetailByThread };
       delete subagentDetailByThread[threadId];
-      const subagentReviewScopeByThread = { ...state.subagentReviewScopeByThread };
-      delete subagentReviewScopeByThread[threadId];
       const reviewViewByThread = { ...state.reviewViewByThread };
       delete reviewViewByThread[threadId];
       const reviewViewManuallySelectedByThread = { ...state.reviewViewManuallySelectedByThread };
@@ -1164,22 +1070,17 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
       const inlineDiffCache = omitInlineDiffCacheByPrefix(state.inlineDiffCache, `${threadId}:`);
 
-      // Only clear the global selection when it belongs to the deleted thread.
-      const selectionBelongsToThread = state.selectedFile?.threadId === threadId;
       const summaryBelongsToThread = state.summaryRecord?.threadId === threadId;
 
       return {
         snapshotsByThread: snapshots,
         snapshotsLoadingByThread: snapshotsLoading,
         snapshotsPendingByThread: snapshotsPending,
-        commitsByThread: commits,
-        commitsLoadingByThread: commitsLoading,
         previewUrlByThread: previewUrls,
         lineWrapByThread,
         rightPanelByThread,
         subagentRosterTabByThread,
         subagentDetailByThread,
-        subagentReviewScopeByThread,
         reviewViewByThread,
         reviewViewManuallySelectedByThread,
         selectedTurnMessageIdByThread,
@@ -1188,9 +1089,6 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         branchManuallySelectedByScope,
         branchResolvedRevisionByScope,
         inlineDiffCache,
-        ...(selectionBelongsToThread
-          ? { selectedFile: null, diffContent: null, diffLoading: false }
-          : {}),
         ...(summaryBelongsToThread
           ? { summaryRecord: null, summaryLoading: false }
           : {}),
