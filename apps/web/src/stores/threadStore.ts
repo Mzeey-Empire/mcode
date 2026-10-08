@@ -439,7 +439,7 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode) => Promise<boolean>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string) => Promise<boolean>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
@@ -2972,10 +2972,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     selectedTextComments: SelectedTextComment[] | undefined,
     replyToMessageId: string | undefined,
     quotedText: string | undefined,
+    messageId: string = crypto.randomUUID(),
   ): Message => {
     const visibleAttachments = visibleSendAttachments(attachments, previewAnnotations);
     return {
-      id: crypto.randomUUID(), thread_id: threadId, role: "user", content: displayContent ?? content,
+      id: messageId, thread_id: threadId, role: "user", content: displayContent ?? content,
       tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null,
       timestamp: new Date().toISOString(), sequence: messageSequenceFor(threadId),
       attachments: visibleAttachments.length > 0 ? visibleAttachments : null,
@@ -3521,7 +3522,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId) => {
     conversationResidency.invalidateConversation(threadId);
 
     const { isControlCommand, runningBeforeControl } = prepareOutgoingTurn(threadId, content);
@@ -3530,7 +3531,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
     const userMessage = optimisticUserMessage(
       threadId, content, displayContent, attachments, previewAnnotations, mentions,
-      selectedTextComments, replyToMessageId, quotedText,
+      selectedTextComments, replyToMessageId, quotedText, messageId,
     );
     applyOptimisticSend(
       threadId, userMessage, isControlCommand, optimisticTurnResponseKey,

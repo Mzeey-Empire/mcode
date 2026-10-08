@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import type { WebSocket } from "ws";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { routeMessage, type RouterDeps } from "../ws-router.js";
+import { DraftImageMissingError } from "../../../features/attachments/storage/draft-image-missing-error.js";
 import { CodexCatalogService } from "../../../features/providers/catalog/codex-catalog-service.js";
 import { ProviderCatalogService } from "../../../features/providers/catalog/provider-catalog-service.js";
 import { ProviderCatalogSnapshotRepo } from "../../../features/providers/catalog/persistence/provider-catalog-snapshot-repo.js";
@@ -766,6 +767,17 @@ describe("routeMessage agent commands", () => {
           capture,
         },
       },
+      {
+        kind: "diff",
+        id: "00000000-0000-4000-8000-000000000002",
+        displayNumber: 2,
+        filePath: "src/main.ts",
+        side: "right",
+        line: 5,
+        lineContent: "return true;",
+        note: "@main.ts " + "x".repeat(4991),
+        mentions: [{ id: "file-1", label: "main.ts", range: { start: 0, end: 8 }, kind: "file", path: "src/main.ts" }],
+      },
     ],
   };
 
@@ -807,7 +819,17 @@ mcode-preview-annotations:end -->`,
       permissionMode: "full",
       thinking: false,
       previewAnnotations,
-      onTurnStarted: expect.any(Function),
+      onAdmissionComplete: expect.any(Function),
+    });
+    const stagingId = "00000000-0000-4000-8000-000000000003";
+    sendMessage.mockRejectedValueOnce(new DraftImageMissingError(stagingId));
+    const failure = await routeMessage(JSON.stringify({
+      id: "missing-image", method: "agent.send",
+      params: { threadId: "thread-1", content: "", stagedDraftImageIds: [stagingId] },
+    }), deps);
+    expect(failure).toMatchObject({
+      id: "missing-image",
+      error: { code: "draft_image_missing", data: { stagingId } },
     });
   });
 

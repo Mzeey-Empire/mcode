@@ -49,6 +49,7 @@ function submission(
   approvalReviewMode: ApprovalReviewMode = "manual",
 ): PreparedComposerSubmission {
   return {
+    currentDiffComments: [],
     snapshot: {
       revision: 1,
       rawInput: content,

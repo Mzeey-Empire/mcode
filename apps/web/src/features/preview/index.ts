@@ -52,9 +52,7 @@ export {
   usePreviewAnnotationStore,
 } from "./state/previewAnnotationStore";
 export type {
-  DiffAnnotationInput,
   PreviewDraftAnnotation,
-  SavedDiffAnnotation,
   SavedPreviewAnnotation,
 } from "./state/previewAnnotationStore";
 export { usePreviewDesignModeStore } from "./state/previewDesignModeStore";

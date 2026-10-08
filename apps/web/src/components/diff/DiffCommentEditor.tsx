@@ -2,60 +2,70 @@ import { useCallback, useRef, useState, type MutableRefObject } from "react";
 import type { LexicalEditor } from "lexical";
 import { MessageCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { MessageMention } from "@mcode/contracts";
+import type { DraftDiffComment, MessageMention } from "@mcode/contracts";
 import { basename } from "@/lib/path";
-import { canSaveSelectedTextComment } from "@/features/conversation/messages/selection/comment-editor-model";
 import {
   CommentEditorComposer,
   CommentEditorControls,
   useCommentDismissal,
 } from "@/features/conversation/messages/selection/comment-editor-primitives";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import {
-  usePreviewAnnotationStore,
-  type DiffAnnotationInput,
-  type SavedDiffAnnotation,
-} from "@/features/preview/state/previewAnnotationStore";
+  canSaveDiffComment,
+  deleteDraftDiffComment,
+  saveDraftDiffComment,
+  setDraftDiffCommentEditor,
+} from "@/features/conversation/composer/draft/draft-diff-comments";
+import type { DiffCommentTarget } from "@/features/conversation/composer/draft/draft-submission";
 
-/**
- * Unsaved note text kept outside React so it survives pierre's virtualizer
- * unmounting the annotation row while the user types or scrolls.
- */
-interface DiffCommentDraft {
-  readonly note: string;
-  readonly mentions: MessageMention[];
+/** True when the note or its mentions differ from the saved comment, or from empty for a new one. */
+function isEdited(
+  note: string,
+  mentions: readonly MessageMention[],
+  annotation: DraftDiffComment | undefined,
+): boolean {
+  return note !== (annotation?.note ?? "")
+    || JSON.stringify(mentions) !== JSON.stringify(annotation?.mentions ?? []);
 }
 
-const draftCache = new Map<string, DiffCommentDraft>();
-
-function draftKey(target: Omit<DiffAnnotationInput, "note" | "lineContent">, annotationId: string | undefined): string {
-  return `${target.filePath}${target.side}:${target.line}:${annotationId ?? "new"}`;
+/** Restores the open editor's unsaved text, else starts from the saved comment. */
+function readInitialContent(
+  threadId: string,
+  annotation: DraftDiffComment | undefined,
+): { note: string; mentions: MessageMention[] } {
+  const editor = useComposerDraftStore.getState().drafts[threadId]?.diffCommentEditor;
+  if (editor && editor.annotationId === annotation?.id) {
+    return { note: editor.note, mentions: editor.mentions };
+  }
+  return { note: annotation?.note ?? "", mentions: [...(annotation?.mentions ?? [])] };
 }
 
 /** Props for the compact comment editor attached to a diff line. */
 export interface DiffCommentEditorProps {
-  /** Thread whose composer bundle receives the saved comment. */
+  /** Thread whose composer draft receives the saved comment. */
   readonly threadId: string;
   /** Line target and source context sent to the agent. */
-  readonly target: Omit<DiffAnnotationInput, "note">;
-  /** Existing annotation when the user is editing a saved line note. */
-  readonly annotation?: SavedDiffAnnotation;
+  readonly target: DiffCommentTarget;
+  /** Existing comment when the user is editing a saved line note. */
+  readonly annotation?: DraftDiffComment;
   /** Workspace that scopes mention and slash suggestions. */
   readonly workspaceId?: string;
   /** Provider that scopes mention and slash suggestions. */
   readonly providerId?: string;
   /** Receives the compact Lexical editor for owner-managed focus. */
   readonly editorRef?: MutableRefObject<LexicalEditor | null>;
-  /** Closes the editor; drafts persist in the module cache. */
+  /** Called after the editor closes; unsaved text persists in the composer draft. */
   readonly onClose: () => void;
 }
 
 /**
  * Diff line comment editor rendered inline at the annotated line. Uses the
  * same compact ComposerEditor, controls, and dismissal policy as the
- * transcript "Add comment" feature; persistence lands in
- * `previewAnnotationStore.diffByThread`. The diff row frames it: the editor sits
- * in the row's flow rather than floating, because the virtualizer unmounts rows
- * that a floating anchor would point at.
+ * transcript "Add comment" feature. Saved comments and the open editor's
+ * unsaved text and mentions persist in the thread's composer draft, so they
+ * survive pierre's virtualizer unmounting the row and a reload. The diff row
+ * frames it: the editor sits in the row's flow rather than floating, because the
+ * virtualizer unmounts rows that a floating anchor would point at.
  */
 export function DiffCommentEditor({
   threadId,
@@ -70,16 +80,16 @@ export function DiffCommentEditor({
   const ownedEditorRef = useRef<LexicalEditor | null>(null);
   const editorRef = providedEditorRef ?? ownedEditorRef;
   const isPopupOpenRef = useRef(false);
-  const key = draftKey(target, annotation?.id);
-  const [note, setNote] = useState(() => draftCache.get(key)?.note ?? annotation?.note ?? "");
-  const [mentions, setMentions] = useState<MessageMention[]>(() => draftCache.get(key)?.mentions ?? []);
+  const [initialDraft] = useState(() => readInitialContent(threadId, annotation));
+  const [note, setNote] = useState(initialDraft.note);
+  const [mentions, setMentions] = useState<MessageMention[]>(initialDraft.mentions);
   // Composer's savedNote effect rewrites the editor on change, so it must see
   // the initial draft only; live state would echo every keystroke back in.
   const initialNote = useRef(note).current;
   const initialMentions = useRef(mentions).current;
 
-  const isDirty = note !== (annotation?.note ?? "") || mentions.length > 0;
-  const canSave = canSaveSelectedTextComment(note, mentions);
+  const isDirty = isEdited(note, mentions, annotation);
+  const canSave = canSaveDiffComment(note, mentions);
 
   const { isShaking, resetWarnings } = useCommentDismissal({
     rootRef,
@@ -92,26 +102,27 @@ export function DiffCommentEditor({
     setNote(nextNote);
     setMentions(nextMentions);
     resetWarnings();
-    draftCache.set(key, { note: nextNote, mentions: nextMentions });
-  }, [key, resetWarnings]);
+    setDraftDiffCommentEditor(threadId, {
+      target,
+      annotationId: annotation?.id,
+      note: nextNote,
+      mentions: nextMentions,
+    });
+  }, [annotation?.id, resetWarnings, target, threadId]);
 
   const close = useCallback(() => {
-    draftCache.delete(key);
+    setDraftDiffCommentEditor(threadId, undefined);
     onClose();
-  }, [key, onClose]);
+  }, [onClose, threadId]);
 
   const save = useCallback(() => {
     if (!canSave) return;
-    usePreviewAnnotationStore
-      .getState()
-      .saveDiffAnnotation(threadId, { ...target, note }, annotation?.id);
-    close();
-  }, [annotation?.id, canSave, close, note, target, threadId]);
+    saveDraftDiffComment(threadId, target, { note, mentions }, annotation?.id);
+    onClose();
+  }, [annotation?.id, canSave, mentions, note, onClose, target, threadId]);
 
   const remove = useCallback(() => {
-    if (annotation) {
-      usePreviewAnnotationStore.getState().deleteAnnotation(threadId, annotation.id);
-    }
+    if (annotation) deleteDraftDiffComment(threadId, annotation.id);
     close();
   }, [annotation, close, threadId]);
 

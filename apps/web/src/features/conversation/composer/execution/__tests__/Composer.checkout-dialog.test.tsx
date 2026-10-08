@@ -2,12 +2,11 @@ import React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ORCHESTRATION_MODES, type AgentEvent, type SelectedTextComment } from "@mcode/contracts";
+import { ORCHESTRATION_MODES, type AgentEvent, type DraftDiffComment, type SelectedTextComment } from "@mcode/contracts";
 import { Composer } from "../../Composer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   usePreviewAnnotationStore,
-  type SavedDiffAnnotation,
   type SavedPreviewAnnotation,
 } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
@@ -366,17 +365,17 @@ function makePreviewAnnotationBundle() {
   };
 }
 
-function makeSavedDiffAnnotation(): SavedDiffAnnotation {
+function makeDraftDiffComment(): DraftDiffComment {
   return {
     kind: "diff",
     id: "550e8400-e29b-41d4-a716-446655440002",
+    revision: 1,
     displayNumber: 2,
     filePath: "apps/web/src/features/conversation/composer/Composer.tsx",
     side: "right",
     line: 946,
     lineContent: "const diffAnnotationRows = usePreviewAnnotationStore(...);",
     note: "Keep this review target attached to the next prompt.",
-    createdAt: 1_783_036_800_001,
   };
 }
 
@@ -407,7 +406,7 @@ describe("Composer checkout confirmation", () => {
       toast: null,
       editingThreadId: null,
     });
-    usePreviewAnnotationStore.setState({ byThread: {}, diffByThread: {}, drafts: {} });
+    usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
     usePreviewDesignModeStore.setState({ modes: {} });
     useToastStore.setState({ toasts: [] });
     useWorkspaceStore.setState({
@@ -849,10 +848,11 @@ describe("Composer checkout confirmation", () => {
       byThread: {
         [thread.id]: [makeSavedAnnotation()],
       },
-      diffByThread: {
-        [thread.id]: [makeSavedDiffAnnotation()],
-      },
     });
+    useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
+      ...draft,
+      diffComments: [makeDraftDiffComment()],
+    }));
     (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
     render(<Composer threadId={thread.id} workspaceId="ws-1" />);
@@ -883,11 +883,11 @@ describe("Composer checkout confirmation", () => {
       ],
     });
     expect(usePreviewAnnotationStore.getState().byThread[thread.id] ?? []).toEqual([]);
-    expect(usePreviewAnnotationStore.getState().diffByThread[thread.id] ?? []).toEqual([]);
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts[thread.id]).toBeUndefined());
     expect(usePreviewDesignModeStore.getState().modes[thread.id]).toBe(false);
   });
 
-  it("clears annotations and comments as soon as feedback dispatch starts", async () => {
+  it("hides submitted comments while dispatch is pending and keeps them in the draft", async () => {
     const workspace = createMockWorkspace({ id: "ws-1", is_git_repo: true });
     const thread = createMockThread({ id: "thread-1", workspace_id: "ws-1" });
     useWorkspaceStore.setState({
@@ -906,10 +906,11 @@ describe("Composer checkout confirmation", () => {
       byThread: {
         [thread.id]: [makeSavedAnnotation()],
       },
-      diffByThread: {
-        [thread.id]: [makeSavedDiffAnnotation()],
-      },
     });
+    useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
+      ...draft,
+      diffComments: [makeDraftDiffComment()],
+    }));
     (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mockReturnValue(
       new Promise<void>(() => {}),
     );
@@ -924,8 +925,71 @@ describe("Composer checkout confirmation", () => {
     expect(lastComposerText).toBe("");
     expect(screen.queryByTestId("composer-annotation-bundle")).not.toBeInTheDocument();
     expect(usePreviewAnnotationStore.getState().byThread[thread.id] ?? []).toEqual([]);
-    expect(usePreviewAnnotationStore.getState().diffByThread[thread.id] ?? []).toEqual([]);
+    expect(screen.queryByTestId("diff-comment-chip")).not.toBeInTheDocument();
+    const sendCommand = (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
+    act(() => {
+      useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
+        ...draft,
+        diffComments: [{ ...makeDraftDiffComment(), revision: 2, note: "Edited while sending" }],
+      }));
+    });
+    expect(sendCommand?.previewAnnotations?.annotations.at(-1)).toMatchObject({
+      note: "Keep this review target attached to the next prompt.",
+    });
+    expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("1 comment");
+    act(() => {
+      useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
+        ...draft,
+        diffComments: [makeDraftDiffComment()],
+      }));
+    });
+    const pendingDraft = useComposerDraftStore.getState().drafts[thread.id];
+    expect(pendingDraft?.diffComments).toEqual([makeDraftDiffComment()]);
+    expect(pendingDraft?.submissions).toEqual([{
+      messageId: sendCommand?.messageId,
+      elements: [{ field: "diffComments", id: makeDraftDiffComment().id, revision: 1 }],
+      stagingIds: [],
+    }]);
     expect(usePreviewDesignModeStore.getState().modes[thread.id]).toBe(false);
+  });
+
+  it("says a draft was not saved while storage is full and keeps the composer working", async () => {
+    const workspace = createMockWorkspace({ id: "ws-1", is_git_repo: true });
+    const thread = createMockThread({ id: "thread-quota", workspace_id: "ws-1" });
+    useWorkspaceStore.setState({
+      workspaces: [workspace],
+      activeWorkspaceId: workspace.id,
+      threads: [thread],
+      activeThreadId: thread.id,
+      branches: [branch("main", true)],
+      newThreadMode: "direct",
+      newThreadBranch: "main",
+      selectedWorktree: null,
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    render(<Composer threadId={thread.id} workspaceId="ws-1" />);
+
+    act(() => {
+      useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
+        ...draft,
+        diffComments: [makeDraftDiffComment()],
+      }));
+    });
+
+    expect(await screen.findByText("Draft not saved · Storage is full")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Message Mcode"), "Still typing");
+    expect(lastComposerText).toBe("Still typing");
+
+    setItem.mockRestore();
+    act(() => {
+      useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({ ...draft, diffComments: [] }));
+    });
+
+    await waitFor(() => expect(screen.queryByText("Draft not saved · Storage is full")).not.toBeInTheDocument());
   });
 
   it("restores the draft when existing-thread transport fails", async () => {
@@ -974,12 +1038,17 @@ describe("Composer checkout confirmation", () => {
         "ws-1": [makeSavedAnnotation()],
       },
     });
+    useComposerDraftStore.getState().updateNextMessage("ws-1", (draft) => ({
+      ...draft,
+      diffComments: [makeDraftDiffComment()],
+    }));
 
     render(<Composer isNewThread workspaceId="ws-1" />);
 
     expect(screen.getByTestId("composer-annotation-bundle")).toHaveTextContent(
       "1 annotation",
     );
+    expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("1 comment");
     await userEvent.click(screen.getByLabelText("Send message"));
 
     await waitFor(() => expect(mockTransport.createAndSendMessage).toHaveBeenCalled());
@@ -993,9 +1062,11 @@ describe("Composer checkout confirmation", () => {
           id: "550e8400-e29b-41d4-a716-446655440001",
           note: "Make the content flush with the page edge.",
         },
+        { kind: "diff", id: "550e8400-e29b-41d4-a716-446655440002", displayNumber: 2 },
       ],
     });
     expect(usePreviewAnnotationStore.getState().byThread["ws-1"] ?? []).toEqual([]);
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts["ws-1"]).toBeUndefined());
     expect(usePreviewDesignModeStore.getState().modes["ws-1"]).toBe(false);
   });
 

@@ -4,6 +4,7 @@ import * as NodePath from "node:path";
 import {
   AgentEventType,
   previewAnnotationSnapshotAttachments,
+  isDiffAnnotationPayload,
   type AttachmentMeta,
   type ContextWindowMode,
   type DevinMode,
@@ -81,6 +82,8 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   mutationReservationToken?: string;
   /** Resolves the authoritative first-turn handshake before provider I/O continues. */
   onTurnStarted?: (snapshot: TurnRuntimeSnapshot) => void;
+  /** Acknowledges successful admission, including queued rows, before provider dispatch. */
+  onAdmissionComplete?: () => void;
   /** Starts a new provider execution instead of continuing the thread's prior native session. */
   forceFreshSession?: boolean;
   /** Interrupted execution consumed atomically when the replacement turn starts. */
@@ -176,6 +179,7 @@ interface PreparedCommand {
   readonly providerId: ProviderId;
   readonly provider: IAgentProvider;
   readonly mentions: readonly MessageMention[];
+  readonly commentMentions: readonly MessageMention[];
   readonly commandEffect: CommandEffectReceipt | null;
   readonly content: string;
   readonly automaticAttachments: PersistedAttachmentData | null;
@@ -213,10 +217,28 @@ export class TurnAdmissionDispatchCoordinator {
     runtime: TurnRuntimeAdmissionAuthority,
     canReserve?: () => boolean,
   ): Promise<TurnAdmissionResult> {
+    const release = command.stagedDraftImageIds?.length
+      ? this.attachments.leaseDraftImages(command.threadId, command.stagedDraftImageIds)
+      : undefined;
+    try {
+      const admitted = await this.admitLeased(command, runtime, canReserve);
+      command.onAdmissionComplete?.();
+      return admitted;
+    } finally {
+      release?.();
+    }
+  }
+
+  private async admitLeased(
+    command: SendMessageCommand,
+    runtime: TurnRuntimeAdmissionAuthority,
+    canReserve?: () => boolean,
+  ): Promise<TurnAdmissionResult> {
     const prepared = await this.prepare(command);
     if (prepared.kind !== "ready") return prepared;
     if (canReserve && !canReserve()) {
       this.completeCommandEffect(prepared.value.commandEffect);
+      await this.cleanupAutomaticDraftCopies(prepared.value);
       return { kind: "handled" };
     }
     let lease: TurnRuntimeLease | undefined;
@@ -225,6 +247,7 @@ export class TurnAdmissionDispatchCoordinator {
       this.reserveCommandEffect(prepared.value.commandEffect);
       return await this.commit(prepared.value, lease, runtime);
     } catch (error) {
+      await this.cleanupAutomaticDraftCopies(prepared.value);
       if (lease) {
         await runtime.abort(lease);
         runtime.release(lease);
@@ -346,6 +369,27 @@ export class TurnAdmissionDispatchCoordinator {
     | { readonly kind: "queued" }
     | { readonly kind: "ready"; readonly attachments: PersistedAttachmentData }
   > {
+    const release = command.stagedDraftImageIds?.length
+      ? this.attachments.leaseDraftImages(command.threadId, command.stagedDraftImageIds)
+      : undefined;
+    try {
+      return await this.admitLeasedInitialAutomaticTurn(command);
+    } finally {
+      release?.();
+    }
+  }
+
+  private async cleanupAutomaticDraftCopies(prepared: PreparedCommand): Promise<void> {
+    if (prepared.command.stagedDraftImageIds?.length && prepared.automaticAttachments) {
+      await this.attachments.removeStoredAttachments(prepared.command.threadId, prepared.automaticAttachments.stored);
+    }
+  }
+
+  private async admitLeasedInitialAutomaticTurn(command: SendMessageCommand): Promise<
+    | { readonly kind: "not-managed" }
+    | { readonly kind: "queued" }
+    | { readonly kind: "ready"; readonly attachments: PersistedAttachmentData }
+  > {
     const thread = this.requireThread(command.threadId);
     if (thread.mode !== "worktree" || thread.worktree_managed !== true || !this.environment) {
       return { kind: "not-managed" };
@@ -392,30 +436,39 @@ export class TurnAdmissionDispatchCoordinator {
       mentions: command.mentions ?? [],
       providerId,
     });
+    const commentMentions = this.validateCommentMentions(command, workspace.id, providerId);
     const automatic = await this.admitAutomaticSetup(command, thread, mentions, providerId);
     if (automatic.kind !== "continue") return automatic;
-    const provider = this.providers.resolve(providerId);
-    const routed = command.providerOriginated
-      ? { kind: "ready" as const, content: command.content, commandEffect: null }
-      : await this.routeCommand(command, provider);
-    if (routed.kind === "handled") {
-      await this.cleanupHandledAttachments(command.threadId, automatic.handledCommandAttachmentCleanup);
-      return routed;
+    try {
+      const provider = this.providers.resolve(providerId);
+      const routed = command.providerOriginated
+        ? { kind: "ready" as const, content: command.content, commandEffect: null }
+        : await this.routeCommand(command, provider);
+      if (routed.kind === "handled") {
+        await this.cleanupHandledAttachments(command.threadId, automatic.handledCommandAttachmentCleanup);
+        return routed;
+      }
+      return {
+        kind: "ready",
+        value: {
+          command,
+          thread,
+          workspace,
+          providerId,
+          provider,
+          mentions,
+          commentMentions,
+          commandEffect: routed.commandEffect,
+          content: routed.content,
+          automaticAttachments: automatic.attachments,
+        },
+      };
+    } catch (error) {
+      if (command.stagedDraftImageIds?.length && automatic.attachments) {
+        await this.attachments.removeStoredAttachments(command.threadId, automatic.attachments.stored);
+      }
+      throw error;
     }
-    return {
-      kind: "ready",
-      value: {
-        command,
-        thread,
-        workspace,
-        providerId,
-        provider,
-        mentions,
-        commandEffect: routed.commandEffect,
-        content: routed.content,
-        automaticAttachments: automatic.attachments,
-      },
-    };
   }
 
   private async commit(
@@ -433,11 +486,28 @@ export class TurnAdmissionDispatchCoordinator {
     });
     runtime.activate(lease);
     const attachmentData = await this.persistAttachments(prepared);
+    try {
+      return await this.commitWithAttachments(prepared, lease, attachmentData, cwd, review);
+    } catch (error) {
+      if (prepared.command.stagedDraftImageIds?.length && !prepared.command.persistedUserMessage) {
+        await this.attachments.removeStoredAttachments(prepared.command.threadId, attachmentData.stored);
+      }
+      throw error;
+    }
+  }
+
+  private async commitWithAttachments(
+    prepared: PreparedCommand,
+    lease: TurnRuntimeLease,
+    attachmentData: PersistedAttachmentData,
+    cwd: string,
+    review: ApprovalReviewDecision,
+  ): Promise<PreparedTurnDispatch> {
     const sourceTurnId = prepared.command.sourceTurnId ?? NodeCrypto.randomUUID();
     const parentStartInput = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachmentData, review);
+    const wirePayload = this.buildWirePayload(prepared);
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
     await this.publishCommittedEffects(prepared, sourceTurnId);
-    const wirePayload = this.buildWirePayload(prepared);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);
     return {
       kind: "dispatch",
@@ -521,6 +591,20 @@ export class TurnAdmissionDispatchCoordinator {
     return sorted;
   }
 
+  private validateCommentMentions(command: SendMessageCommand, workspaceId: string, providerId: ProviderId): MessageMention[] {
+    const comments = [
+      ...(command.selectedTextComments ?? []),
+      ...(command.previewAnnotations?.annotations.filter(isDiffAnnotationPayload) ?? []),
+    ];
+    return comments.flatMap((comment) => this.validateMentions({
+      workspaceId,
+      threadId: command.threadId,
+      providerId,
+      content: comment.note,
+      mentions: comment.mentions ?? [],
+    }));
+  }
+
   private validateMention(
     input: { workspaceId: string; threadId: string; content: string; providerId: ProviderId },
     mention: MessageMention,
@@ -602,7 +686,14 @@ export class TurnAdmissionDispatchCoordinator {
       ...(command.attachments ?? []),
       ...previewAnnotationSnapshotAttachments(command.previewAnnotations),
     ]);
-    return { stored: persisted.stored, persisted: persisted.persisted };
+    if (!command.stagedDraftImageIds?.length) return persisted;
+    try {
+      const drafts = await this.attachments.persistDraftImages(command.threadId, command.stagedDraftImageIds);
+      return { stored: [...persisted.stored, ...drafts.stored], persisted: [...persisted.persisted, ...drafts.persisted] };
+    } catch (error) {
+      await this.attachments.removeStoredAttachments(command.threadId, persisted.stored);
+      throw error;
+    }
   }
 
   private automaticSubmission(
@@ -897,7 +988,7 @@ export class TurnAdmissionDispatchCoordinator {
   private injectMentionFileContents(prepared: PreparedCommand, text: string): string {
     const paths = new Set<string>();
     const files: Array<{ path: string; content: string }> = [];
-    for (const mention of prepared.mentions) {
+    for (const mention of [...prepared.mentions, ...prepared.commentMentions]) {
       if (mention.kind !== "file" || paths.has(mention.path)) continue;
       if (!this.files) throw new Error("File mention injection is unavailable");
       paths.add(mention.path);
@@ -918,6 +1009,7 @@ export class TurnAdmissionDispatchCoordinator {
     const settings = await this.settings.get();
     const model = prepared.command.model ?? "claude-sonnet-4-6";
     const guardrails = this.guardrails(prepared.command, settings);
+    const mentions = [...prepared.mentions, ...prepared.commentMentions];
     return {
       sessionId: `mcode-${prepared.command.threadId}`,
       turnExecutionId: lease.turnExecutionId,
@@ -926,7 +1018,7 @@ export class TurnAdmissionDispatchCoordinator {
       workspaceId: prepared.workspace.id,
       threadId: prepared.command.threadId,
       message,
-      mentions: prepared.mentions.length > 0 ? prepared.mentions : undefined,
+      mentions: mentions.length > 0 ? mentions : undefined,
       cwd,
       model,
       fallbackModel: this.fallbackModel(settings, model),

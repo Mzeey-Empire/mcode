@@ -20,6 +20,7 @@ import {
 } from "../conversation/read-model/conversation-page.js";
 import type { ThoughtSegmentRepo } from "../conversation/narrative/persistence/thought-segment-repo.js";
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
+import type { MessageRepo } from "../conversation/persistence/message-repo.js";
 import type { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js";
 import type { AgentService } from "../orchestration/agent-service.js";
 import type { SendMessageCommand } from "../turns/turn-admission-dispatch-coordinator.js";
@@ -35,6 +36,7 @@ import type { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-r
 
 type AgentRpcMethod =
   | "agent.send"
+  | "agent.confirmMessage"
   | "agent.recoveryIncident"
   | "agent.retry"
   | "agent.continueWithoutSaving"
@@ -84,7 +86,7 @@ export interface AgentRouterDeps {
   >;
   gitWatcherService?: Pick<GitWatcherService, "watchThreadWorktree">;
   hookExecutionRepo: Pick<HookExecutionRepo, "listByMessage">;
-  messageRepo: ConversationPageDeps["messageRepo"];
+  messageRepo: ConversationPageDeps["messageRepo"] & Pick<MessageRepo, "confirmUserMessage">;
   narrativeStore: Pick<NarrativeStore, "load">;
   planQuestionAnswersRepo: ConversationPageDeps["planQuestionAnswersRepo"];
   planRepo: Pick<PlanRepo, "updateStatus" | "listByThread">;
@@ -111,8 +113,26 @@ type AgentRpcHandlerMap = {
 const PREVIEW_ANNOTATION_FENCE_START = "<!-- mcode-preview-annotations:v1";
 const PREVIEW_ANNOTATION_FENCE_END = "mcode-preview-annotations:end -->";
 
+const pendingMessageAdmissions = new Map<string, Set<Promise<void>>>();
+
+function registerMessageAdmission(params: AgentRpcParams<"agent.send">): (() => void) | undefined {
+  if (!params.messageId) return undefined;
+  const key = JSON.stringify([params.threadId, params.messageId]);
+  const pending = pendingMessageAdmissions.get(key) ?? new Set<Promise<void>>();
+  let resolveAdmission!: () => void;
+  const admission = new Promise<void>((resolve) => { resolveAdmission = resolve; });
+  pending.add(admission);
+  pendingMessageAdmissions.set(key, pending);
+  return () => {
+    pending.delete(admission);
+    if (pending.size === 0) pendingMessageAdmissions.delete(key);
+    resolveAdmission();
+  };
+}
+
 const agentHandlers: AgentRpcHandlerMap = {
   "agent.send": async (deps, params) => {
+    const settleAdmission = registerMessageAdmission(params);
     const started = serverWorkTrace ? NodePerfHooks.performance.now() : 0;
     try {
       await sendAdmittedTurn(deps.agentService, {
@@ -121,8 +141,18 @@ const agentHandlers: AgentRpcHandlerMap = {
         displayContent: params.displayContent ?? params.content,
       });
     } finally {
+      settleAdmission?.();
       if (serverWorkTrace) serverWorkTrace.record("agent-send", params.threadId, undefined, NodePerfHooks.performance.now() - started);
     }
+  },
+  "agent.confirmMessage": async (deps, params) => {
+    const key = JSON.stringify([params.threadId, params.messageId]);
+    let pending = pendingMessageAdmissions.get(key);
+    while (pending) {
+      await Promise.all(pending);
+      pending = pendingMessageAdmissions.get(key);
+    }
+    return { admitted: await deps.messageRepo.confirmUserMessage(params.threadId, params.messageId) };
   },
   "agent.recoveryIncident": (deps) => deps.turnRecoveryService.currentRecoveryIncident(),
   "agent.retry": async (deps, params) => {
@@ -211,9 +241,10 @@ async function sendAdmittedTurn(
   const admission = new Promise<void>((resolve) => { resolveAdmission = resolve; });
   const dispatch = service.sendMessage({
     ...command,
-    onTurnStarted: (snapshot) => {
+    // onTurnStarted reserves the turn before its user message is committed.
+    onAdmissionComplete: () => {
       admitted = true;
-      command.onTurnStarted?.(snapshot);
+      command.onAdmissionComplete?.();
       resolveAdmission();
     },
   });
@@ -247,7 +278,9 @@ function appendPreviewAnnotations(
 ): string {
   if (!previewAnnotations || previewAnnotations.annotations.length === 0) return content;
   if (content.includes(PREVIEW_ANNOTATION_FENCE_START)) return content;
-  return `${content.trim()}\n\n${PREVIEW_ANNOTATION_FENCE_START}\n${JSON.stringify(previewAnnotations)}\n${PREVIEW_ANNOTATION_FENCE_END}`.trim();
+  const serialized = JSON.stringify(previewAnnotations)
+    .replaceAll("<", "\\u003c").replaceAll(">", "\\u003e").replaceAll("&", "\\u0026");
+  return `${content.trim()}\n\n${PREVIEW_ANNOTATION_FENCE_START}\n${serialized}\n${PREVIEW_ANNOTATION_FENCE_END}`.trim();
 }
 
 function watchReturnedThreadWorktree(

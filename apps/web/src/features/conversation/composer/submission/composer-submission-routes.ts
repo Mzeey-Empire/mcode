@@ -26,6 +26,8 @@ export interface DispatchComposerTargetOptions {
   onThreadCreated?(thread: Thread): void;
   onThreadPreparing?(thread: WorkspaceThread): void;
   onThreadCreationFailed?(): void;
+  /** Client id for the existing-thread user message. */
+  messageId?: string;
 }
 
 function savedCommentsForTransport(
@@ -241,6 +243,6 @@ async function dispatchExistingThread(
   const { submission } = options;
   await sendComposerThreadMessage(
     threadId,
-    createPreparedThreadMessagePayload(submission),
+    createPreparedThreadMessagePayload(submission, options.messageId),
   );
 }

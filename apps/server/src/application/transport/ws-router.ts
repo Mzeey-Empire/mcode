@@ -100,6 +100,8 @@ import {
 import type { FileService } from "../../features/projects/files/file-service.js";
 import { isFileRpcMethod, routeFileRpc } from "../../features/projects/files/transport/file-rpc.js";
 import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attachments/transport/attachment-rpc.js";
+import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
+import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
 import { isSnapshotRpcMethod, routeSnapshotRpc } from "../../features/projects/diffs/transport/snapshot-rpc.js";
@@ -299,6 +301,8 @@ export interface RouterDeps {
   ciWatcherService: CiWatcherService;
   /** Thread repository for resolving worktree paths in git operations. */
   threadRepo: ThreadRepo;
+  /** Stages draft images for the next message. */
+  attachmentService: Pick<AttachmentService, "stageDraft">;
   /** Workspace repository for resolving repo paths in git operations. */
   workspaceRepo: WorkspaceRepo;
   /** Enriches workspaces with git and thread count metadata for the project selector. */
@@ -442,6 +446,9 @@ function validateRpcParameters(
 
 function mapRouteError(request: WebSocketRequest, error: unknown): WebSocketResponse {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof DraftImageMissingError) {
+    return { id: request.id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
+  }
   if (error instanceof TerminalBackendError) {
     return terminalRouteError(request.id, error, message);
   }
@@ -587,7 +594,7 @@ const ROUTE_FAMILIES = [
   createRouteFamily(isDiffSummaryRpcMethod, (method, params, deps) =>
     routeDiffSummaryRpc(method, params, deps)),
   createRouteFamily(isFileRpcMethod, (method, params, deps) => routeFileRpc(method, params, deps)),
-  createRouteFamily(isAttachmentRpcMethod, (method, params) => routeAttachmentRpc(method, params)),
+  createRouteFamily(isAttachmentRpcMethod, (method, params, deps) => routeAttachmentRpc(method, params, deps)),
   createRouteFamily(isMemoryRpcMethod, (method, params, deps) => routeMemoryRpc(method, params, deps)),
   createRouteFamily(isApplicationRpcMethod, (method) => routeApplicationRpc(method)),
 ] satisfies readonly RpcRouteFamily[];
