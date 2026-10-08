@@ -49,7 +49,7 @@ export function PlanChrome({
             <Button
               type="button"
               variant="outline"
-              size="xs"
+              size="compact"
               className="shrink-0 gap-1.5 font-mono text-caption uppercase tracking-[0.16em]"
               aria-label={`Revision history: v${plan.version} of ${maxVersion}`}
             >
@@ -74,7 +74,7 @@ export function PlanChrome({
                   key={p.id}
                   type="button"
                   variant="ghost"
-                  size="sm"
+                  size="compact"
                   onClick={() => setActiveVersion(threadId, isLatest ? null : p.version)}
                   aria-current={isActive ? "true" : undefined}
                   className={cn(
@@ -137,7 +137,7 @@ export function PlanChrome({
               <Button
                 type="button"
                 variant="ghost"
-                size="xs"
+                size="compact"
                 onClick={onRevise}
                 className={cn(
                   "font-mono text-caption uppercase tracking-[0.16em]",
@@ -161,7 +161,7 @@ export function PlanChrome({
               <Button
                 type="button"
                 variant="default"
-                size="xs"
+                size="compact"
                 onClick={onImplement}
                 className="font-mono text-caption uppercase tracking-[0.16em]"
               >

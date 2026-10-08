@@ -78,12 +78,12 @@ export function QuotePreview({ quote }: { readonly quote: string }) {
         {quote}
       </p>
       {!isExpanded && overflows && (
-        <Button type="button" variant="link" size="sm" className="pointer-events-auto mt-0.5 h-auto px-0 text-xs" onClick={() => setIsExpanded(true)}>
+        <Button type="button" variant="link" size="compact" className="pointer-events-auto mt-0.5 h-auto px-0 text-xs" onClick={() => setIsExpanded(true)}>
           Show full quote
         </Button>
       )}
       {isExpanded && (
-        <Button type="button" variant="link" size="sm" className="pointer-events-auto mt-0.5 h-auto px-0 text-xs" onClick={() => setIsExpanded(false)}>
+        <Button type="button" variant="link" size="compact" className="pointer-events-auto mt-0.5 h-auto px-0 text-xs" onClick={() => setIsExpanded(false)}>
           Collapse quote
         </Button>
       )}
@@ -114,7 +114,7 @@ function CommentPreviewActions<T extends { readonly id: string; readonly display
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 aria-label={`Edit comment ${comment.displayNumber}`}
                 onClick={() => onEdit(comment)}
                 className="text-muted hover:text-ink"
@@ -133,7 +133,7 @@ function CommentPreviewActions<T extends { readonly id: string; readonly display
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 aria-label={`Delete comment ${comment.displayNumber}`}
                 onClick={() => onDelete(comment)}
                 className="text-muted hover:text-ink"
@@ -175,7 +175,7 @@ function MutableCommentPreviewControls<T extends { readonly id: string; readonly
           ref={openSourceButtonRef}
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           aria-label={`Open source for comment ${comment.displayNumber}`}
           onClick={() => onOpenSource(comment)}
           className="absolute inset-0 z-(--layer-base) h-auto w-full rounded-md p-0 focus-visible:z-(--layer-sticky)"
@@ -255,7 +255,7 @@ export function ComposerCommentPreviewItem<T extends ComposerCommentCardData>({
         if (sourceUnavailable) openSourceButtonRef(element);
       }}
       tabIndex={sourceUnavailable ? 0 : undefined}
-      className="relative min-w-0 border-b border-border/60 py-2 pr-12 first:pt-1 last:border-b-0 last:pb-1 focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-focus/50"
+      className="relative min-w-0 border-b border-border/60 py-2 pr-12 first:pt-1 last:border-b-0 last:pb-1 focus-visible:rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       data-testid={testId}
       onPointerEnter={showActions}
       onPointerLeave={(event) => {
@@ -436,7 +436,7 @@ export function ComposerCommentAttachmentShell({
       data-testid={testId}
     >
       <Popover open={isPreviewOpen} onOpenChange={handleOpenChange}>
-        <div className="inline-flex h-8 max-w-full items-center overflow-hidden rounded-lg border border-border bg-background focus-within:border-focus focus-within:ring-3 focus-within:ring-focus/50" data-testid={chipTestId}>
+        <div className="inline-flex h-8 max-w-full items-center overflow-hidden rounded-lg border border-border bg-background focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus" data-testid={chipTestId}>
           <PopoverTrigger
             openOnHover
             delay={0}
@@ -449,7 +449,7 @@ export function ComposerCommentAttachmentShell({
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
+                size="compact"
                 className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-ink hover:bg-hover focus-visible:z-(--layer-sticky)"
               />
             }
@@ -461,7 +461,7 @@ export function ComposerCommentAttachmentShell({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               aria-label={`Remove ${label}`}
               onClick={onRemove}
               className="rounded-none border-0 bg-transparent text-muted hover:bg-hover hover:text-ink focus-visible:z-(--layer-sticky)"
