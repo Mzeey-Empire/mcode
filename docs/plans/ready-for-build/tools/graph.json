@@ -1,0 +1,730 @@
+{
+  "sections": {
+    "00-foundation.md": {
+      "epic": "Foundation: design system primitives",
+      "prefixes": [
+        "F-"
+      ]
+    },
+    "01-09-shell-sidebar-and-notifications.md": {
+      "epic": "01 and 09: Shell, sidebar and notifications",
+      "prefixes": [
+        "S01-",
+        "S09-"
+      ]
+    },
+    "02-03-add-project-and-new-thread.md": {
+      "epic": "02 and 03: Add project and new thread",
+      "prefixes": [
+        "S02-",
+        "S03-"
+      ]
+    },
+    "04-08f-thread-start-and-turn-endings.md": {
+      "epic": "04 and 08f: Thread start and turn endings",
+      "prefixes": [
+        "S04-",
+        "S08F-"
+      ]
+    },
+    "05-running-turn.md": {
+      "epic": "05: Running turn",
+      "prefixes": [
+        "S05-"
+      ]
+    },
+    "06-approvals.md": {
+      "epic": "06: Approvals",
+      "prefixes": [
+        "S06-"
+      ]
+    },
+    "07-plan-mode.md": {
+      "epic": "07: Plan mode",
+      "prefixes": [
+        "S07-"
+      ]
+    },
+    "08-finished-turn.md": {
+      "epic": "08: Finished turn",
+      "prefixes": [
+        "S08-"
+      ]
+    },
+    "10-review-panel.md": {
+      "epic": "10: Review panel",
+      "prefixes": [
+        "S10-"
+      ]
+    },
+    "11-browser-panel.md": {
+      "epic": "11: Browser panel",
+      "prefixes": [
+        "S11-"
+      ]
+    },
+    "12a-terminal-actions-and-project-settings.md": {
+      "epic": "12a: Terminal, actions and project settings",
+      "prefixes": [
+        "S12T-"
+      ]
+    },
+    "12b-panel-shell-files-and-subagents.md": {
+      "epic": "12b: Panel shell, Files and Subagents",
+      "prefixes": [
+        "F-05",
+        "S12P-"
+      ]
+    }
+  },
+  "dropped": {
+    "S09-01": "Merged into F-07b (same toast lane; app toasts move into it there).",
+    "S08-07": "Merged into S01-03 (one seen marker on threads, used by the sidebar Finished state and by Since you looked).",
+    "S08F-10": "Merged into F-10 (F-10 renames every visible \"Errored\" to \"Failed\").",
+    "S08-05": "Merged into S08-03: revert safety material must be persisted and pinned before the first destructive write.",
+    "S04-08": "Merged into S12T-11: one atomic switch makes the S12 action runner the only startup executor and converts the trail to read it.",
+    "S07-10": "Merged into S07-02: Codex native plan mode and its requestUserInput question protocol activate together.",
+    "S02-04": "Deferred to the design backlog: New project, Git URL and GitHub sources have no boards. Excluded from this program and from F-99."
+  },
+  "blockers": {
+    "F-01a": [],
+    "F-01b": [
+      "F-01a"
+    ],
+    "F-02": [
+      "F-01a"
+    ],
+    "F-03": [
+      "F-01b"
+    ],
+    "F-04a": [
+      "F-01b",
+      "F-03",
+      "F-07a",
+      "F-09"
+    ],
+    "F-04b": [
+      "F-04a",
+      "F-07a",
+      "F-02",
+      "F-12"
+    ],
+    "F-04c": [
+      "F-04b",
+      "F-06"
+    ],
+    "F-05": [
+      "F-02",
+      "F-03",
+      "F-04a",
+      "F-07a",
+      "S01-01"
+    ],
+    "F-06": [
+      "F-01b"
+    ],
+    "F-07a": [
+      "F-01b"
+    ],
+    "F-07b": [
+      "F-01b",
+      "F-02",
+      "F-03",
+      "F-07a",
+      "F-10"
+    ],
+    "F-08": [],
+    "F-09": [
+      "F-01b"
+    ],
+    "F-10": [
+      "F-01b",
+      "F-08"
+    ],
+    "F-11a": [
+      "F-01b",
+      "F-06"
+    ],
+    "F-11b": [
+      "F-01b"
+    ],
+    "F-12": [
+      "F-01b"
+    ],
+    "S01-01": [
+      "F-01b",
+      "F-03"
+    ],
+    "S01-02": [
+      "S01-01",
+      "F-01b",
+      "F-03"
+    ],
+    "S01-03": [
+      "S06-01"
+    ],
+    "S01-04": [
+      "S01-02",
+      "S01-03",
+      "F-02",
+      "F-06",
+      "F-10"
+    ],
+    "S01-05": [
+      "S01-02",
+      "F-03",
+      "F-07a"
+    ],
+    "S02-01": [
+      "F-01b",
+      "F-04b"
+    ],
+    "S02-02": [
+      "S02-01"
+    ],
+    "S02-03": [
+      "S02-01",
+      "S03-03"
+    ],
+    "S03-01": [],
+    "S03-02": [
+      "S03-01",
+      "F-01b",
+      "F-03",
+      "F-07a",
+      "F-04a"
+    ],
+    "S03-03": [
+      "F-01b",
+      "F-02"
+    ],
+    "S03-04": [],
+    "S03-05": [
+      "S03-04",
+      "F-04b",
+      "F-02"
+    ],
+    "S03-06": [
+      "S03-05",
+      "S03-03",
+      "F-04a"
+    ],
+    "S03-07": [
+      "S03-02",
+      "S03-06"
+    ],
+    "S03-08": [
+      "S03-05",
+      "S03-07",
+      "S04-01"
+    ],
+    "S04-01": [],
+    "S04-02": [
+      "S04-01"
+    ],
+    "S04-03": [
+      "S04-01",
+      "F-01b",
+      "F-02"
+    ],
+    "S04-04": [
+      "S04-03",
+      "S08F-05"
+    ],
+    "S04-05": [
+      "S04-02",
+      "S04-03"
+    ],
+    "S04-06": [
+      "S04-01",
+      "S04-03",
+      "S03-08"
+    ],
+    "S04-07": [
+      "S04-01",
+      "S04-04"
+    ],
+    "S04-09": [
+      "S04-03",
+      "S03-03"
+    ],
+    "S05-01": [],
+    "S05-02": [
+      "S05-01",
+      "F-01b"
+    ],
+    "S05-03": [
+      "S05-02"
+    ],
+    "S05-04": [
+      "S05-02",
+      "F-01b"
+    ],
+    "S05-05": [
+      "F-01b"
+    ],
+    "S05-06": [
+      "S05-02",
+      "S05-04"
+    ],
+    "S05-07": [
+      "S05-06"
+    ],
+    "S05-08": [
+      "F-06",
+      "S03-02",
+      "S12P-08"
+    ],
+    "S05-09": [
+      "S05-01",
+      "F-02",
+      "F-03"
+    ],
+    "S05-10": [
+      "S05-09",
+      "F-03"
+    ],
+    "S05-11": [
+      "S05-09",
+      "S03-02"
+    ],
+    "S05-12": [
+      "F-03"
+    ],
+    "S05-13": [
+      "S05-09"
+    ],
+    "S06-00": [],
+    "S06-01": [
+      "S06-00"
+    ],
+    "S06-02": [
+      "S06-01",
+      "S01-03"
+    ],
+    "S06-03": [
+      "S06-01"
+    ],
+    "S06-04": [
+      "S06-01",
+      "S06-03",
+      "S05-02",
+      "S05-09",
+      "F-01b",
+      "F-02",
+      "F-06"
+    ],
+    "S06-05": [
+      "S06-04"
+    ],
+    "S06-06": [
+      "S06-04"
+    ],
+    "S06-07": [
+      "S06-03",
+      "S06-04",
+      "S08F-05"
+    ],
+    "S06-08": [
+      "S06-04",
+      "F-06"
+    ],
+    "S06-09": [
+      "F-04a"
+    ],
+    "S07-00": [],
+    "S07-01": [
+      "S07-00"
+    ],
+    "S07-02": [
+      "S07-01",
+      "S07-09"
+    ],
+    "S07-03": [
+      "S07-01"
+    ],
+    "S07-04": [
+      "S07-03",
+      "S03-02",
+      "F-02",
+      "F-04a",
+      "F-05"
+    ],
+    "S07-05": [
+      "S07-04"
+    ],
+    "S07-06": [
+      "S07-05",
+      "S10-11",
+      "F-07b"
+    ],
+    "S07-07": [
+      "S07-05",
+      "F-03",
+      "F-04a"
+    ],
+    "S07-08": [
+      "S07-07"
+    ],
+    "S07-09": [
+      "S07-03",
+      "S01-04",
+      "S06-04"
+    ],
+    "S07-11": [
+      "S05-09",
+      "F-03"
+    ],
+    "S07-12": [
+      "S07-01",
+      "S07-07",
+      "S07-09"
+    ],
+    "S07-13": [
+      "S07-01",
+      "S07-07",
+      "S07-09"
+    ],
+    "S07-14": [
+      "S07-01",
+      "S07-07",
+      "S07-09"
+    ],
+    "S08-01": [
+      "F-01b"
+    ],
+    "S08-02": [
+      "F-01b",
+      "F-02",
+      "F-04a"
+    ],
+    "S08-03": [
+      "S10-12"
+    ],
+    "S08-04": [
+      "S08-02",
+      "S08-03"
+    ],
+    "S08-06": [
+      "S08-03"
+    ],
+    "S08-08": [
+      "S01-03",
+      "S10-04"
+    ],
+    "S08F-01": [
+      "S01-03"
+    ],
+    "S08F-02": [
+      "S08F-01"
+    ],
+    "S08F-03": [
+      "S08F-01"
+    ],
+    "S08F-04": [
+      "S08F-01"
+    ],
+    "S08F-05": [
+      "S08F-01",
+      "S04-02",
+      "S08-01",
+      "F-03",
+      "F-10",
+      "S05-10"
+    ],
+    "S08F-06": [
+      "S08F-05",
+      "S01-04"
+    ],
+    "S08F-07": [
+      "S08F-05",
+      "S08F-02",
+      "F-04b",
+      "F-04c"
+    ],
+    "S08F-08": [
+      "S08F-05",
+      "S09-04"
+    ],
+    "S08F-09": [
+      "S08F-01",
+      "S08-01",
+      "S05-03"
+    ],
+    "S09-02": [
+      "S01-04",
+      "F-07b"
+    ],
+    "S09-03": [
+      "S09-02"
+    ],
+    "S09-04": [
+      "S01-02",
+      "F-06",
+      "F-07a"
+    ],
+    "S09-05": [
+      "S09-04"
+    ],
+    "S09-06": [
+      "S09-04"
+    ],
+    "S10-01": [],
+    "S10-02": [],
+    "S10-03": [
+      "S10-02"
+    ],
+    "S10-04": [
+      "S10-01",
+      "S10-02",
+      "S10-03",
+      "F-03",
+      "F-04a",
+      "F-05"
+    ],
+    "S10-05": [
+      "S10-04",
+      "S03-04",
+      "F-04b"
+    ],
+    "S10-06": [
+      "S10-02",
+      "S10-04",
+      "F-01b",
+      "F-02"
+    ],
+    "S10-07": [
+      "S10-02",
+      "S10-04"
+    ],
+    "S10-08": [
+      "S10-02"
+    ],
+    "S10-09": [
+      "S10-08",
+      "S10-06",
+      "F-03",
+      "F-07a",
+      "F-12"
+    ],
+    "S10-10": [
+      "S08-03",
+      "S08-04",
+      "S10-06"
+    ],
+    "S10-11": [],
+    "S10-12": [],
+    "S10-13": [
+      "S10-04"
+    ],
+    "S11-01": [],
+    "S11-02": [],
+    "S11-03": [],
+    "S11-04": [
+      "S11-01",
+      "S12P-01",
+      "F-01b",
+      "F-02",
+      "F-03",
+      "F-04a",
+      "F-05"
+    ],
+    "S11-05": [
+      "S11-04"
+    ],
+    "S11-06": [
+      "S11-04"
+    ],
+    "S11-07": [
+      "S11-06"
+    ],
+    "S11-08": [
+      "S11-03"
+    ],
+    "S11-09": [
+      "S11-04",
+      "S11-08",
+      "S12T-08"
+    ],
+    "S11-10": [
+      "S11-04",
+      "S11-09"
+    ],
+    "S11-11": [
+      "S11-06",
+      "S11-07",
+      "S11-10",
+      "S03-02"
+    ],
+    "S11-12": [
+      "S11-04"
+    ],
+    "S11-13": [
+      "S11-12"
+    ],
+    "S11-14": [
+      "S11-13"
+    ],
+    "S11-15": [
+      "S11-13",
+      "S10-11"
+    ],
+    "S11-16": [
+      "S11-12"
+    ],
+    "S12P-01": [
+      "F-05",
+      "S12T-01"
+    ],
+    "S12P-02": [
+      "S06-01"
+    ],
+    "S12P-03": [],
+    "S12P-04": [
+      "S12P-01",
+      "S12P-03",
+      "F-02",
+      "F-04b",
+      "F-05",
+      "F-07a"
+    ],
+    "S12P-05": [
+      "S12P-04"
+    ],
+    "S12P-06": [
+      "S12P-04"
+    ],
+    "S12P-07": [
+      "S12P-04",
+      "S10-11",
+      "S07-06"
+    ],
+    "S12P-08": [],
+    "S12P-09": [
+      "S12P-08"
+    ],
+    "S12P-10": [
+      "S12P-08"
+    ],
+    "S12P-11": [
+      "S12P-10"
+    ],
+    "S12P-12": [
+      "S12P-08",
+      "F-05",
+      "F-06"
+    ],
+    "S12P-13": [
+      "S12P-01",
+      "S12P-09",
+      "S12P-12",
+      "S05-08"
+    ],
+    "S12T-01": [],
+    "S12T-02": [
+      "S12T-01",
+      "S12P-01",
+      "F-01b",
+      "F-02",
+      "F-03",
+      "F-05",
+      "F-07a"
+    ],
+    "S12T-03": [
+      "S12T-02"
+    ],
+    "S12T-04": [],
+    "S12T-05": [
+      "S12T-01"
+    ],
+    "S12T-06": [
+      "S12T-02",
+      "S12T-05"
+    ],
+    "S12T-07": [
+      "S12T-06"
+    ],
+    "S12T-08": [
+      "S12T-06"
+    ],
+    "S12T-09": [
+      "S12T-04",
+      "S12T-06"
+    ],
+    "S12T-10": [
+      "S12T-06",
+      "S12T-08",
+      "S12T-09",
+      "S03-02",
+      "F-04a"
+    ],
+    "S12T-11": [
+      "S12T-04",
+      "S12T-05",
+      "S12T-07",
+      "S12T-08",
+      "S04-04",
+      "S04-07"
+    ],
+    "S12T-12": [
+      "S12T-04"
+    ],
+    "S12T-13": [
+      "S12T-04",
+      "S12T-09",
+      "S12T-11",
+      "F-03",
+      "F-04a",
+      "F-05",
+      "F-12"
+    ],
+    "S12T-14": [
+      "S01-02",
+      "F-01b",
+      "S12P-03"
+    ],
+    "S12T-15": [
+      "S12T-13",
+      "S12T-14",
+      "F-04b"
+    ],
+    "F-99": [
+      "*"
+    ]
+  },
+  "needsDecision": {
+    "S08-04": "08e (receipt row, reverted label, confirm copy) was never drawn. Ticket carries default copy; needs design sign-off.",
+    "S08-06": "Whether the agent is told about a revert on the next send.",
+    "S10-13": "Whether the whitespace button hides whitespace changes or shows invisible characters.",
+    "S11-16": "Whether the visual proposal (style) editor in the note bubble is retired.",
+    "S12T-11": "Decision T3: when a startup action counts as ready (default: exit 0 or a current-run port, plus a per-action Keeps running toggle)."
+  },
+  "notes": {
+    "S01-03": "Owns the single seen marker and its one write: `thread.acknowledgeSeen({ threadId, throughSequence })`, where `throughSequence` is the settled message sequence the client has actually rendered. Returns `{ previous: { sequence, at }, current: { sequence, at } }` atomically; a repeat is a no-op; a sequence beyond the thread's settled history is rejected. Replaces `thread.markViewed` and every caller (including the unfocused call in the thread store) in this ticket. Waiting sources read ApprovalService (S06-01), never the old permission service. `recordTurnOutcome` is the one write path for turn endings; S08F-01 extends it. Opening a thread clears Finished and Failed, never a live pending approval.",
+    "S10-12": "Owns snapshot pinning for every section, namespaced by the owning database: `refs/mcode/<storeId>/snapshots/<id>` (a cloned dev database gets its own storeId). Sweep only refs under this store's namespace. Pin the dirty pre-turn baseline when it is captured, not at finalization. S08-03 adds `reverts/` beside it.",
+    "S10-11": "Owns the one draft store for everything that rides the next message: Review comments, Browser design notes (S11-15), file line comments (S12P-07) and plan-comment chip selection (S07-06). Decision: the persisted composer draft, no new table. It must persist included and excluded plan comment ids, stage screenshot snapshots durably with reference release on discard, thread deletion and successful admission, update the serializer, parser and the write-failure path (surface failure, never silently drop), and clear only the submitted draft revision after admission. Plan comments themselves stay records in `plan_comments`.",
+    "S11-15": "Uses the S10-11 draft store. Delete the `thread_annotation_drafts` table and its two RPCs from this brief.",
+    "S12P-01": "Writes the single ADR for right panel tabs (rail = tools, row-1 tabs inside a tool), superseding ADR-0020. Terminal cap is eight records per scope (pending, running and exited, shells and actions together) from S12T-01's contract constant; + disables at eight. S12T-02 writes no ADR.",
+    "S12T-02": "Builds on the S12P-01 ADR; do not write a second ADR.",
+    "S12T-08": "Owns port detection for every consumer. Parse candidate URLs from the current run's output (ANSI and chunk safe), normalize the host (IPv4, IPv6, localhost) and probe that host. A previous run's port is display history only, never readiness. TCP reachability is not app health; say so in copy. The Browser (S11-09) reads `run.port`; S11-09 deletes the unimplemented `detectLocalPorts` declaration.",
+    "S03-08": "Server flag and toggle only. S04-06 renders the fetch step in the trail.",
+    "S08-08": "Reads the seen marker from S01-03: takes its visit baseline from the `thread.acknowledgeSeen` response before the badge clears. Owns the `afterSequence` parameter on the cumulative diff methods.",
+    "S10-05": "Reuses S03-04's qualified-ref listing with an explicit purpose filter. Review keeps local and origin twins as separate selectable refs; the new-thread picker may group them for display. Remove the competing `git.listRefs` sketch.",
+    "F-07b": "Also absorbs S09-01: existing app toasts move into the lane in this ticket.",
+    "F-10": "Also absorbs S08F-10: rename every visible \"Errored\" to \"Failed\", toasts included; contract status values stay.",
+    "S12T-14": "Reuses the S12P-03 image route; no second route. The sidebar project row's icon slot is a lifecycle toggle today; S01-02 decides where that toggle goes before this ticket swaps the slot to the project icon.",
+    "S08-03": "Absorbs S08-05. Apply and undo take a client `requestId` (operation identity, replayed only for the same request); `previewToken` is only a precondition over repo identity, snapshot, scope and each path's presence, type, mode and content. Persist a prepared operation and pin its recovery material (`refs/mcode/<storeId>/reverts/<id>`, plus raw bytes and metadata for touched paths where a tree cannot restore exactly) before the first write; recover unfinished operations on startup. Revert UI (S08-04) cannot ship before this.",
+    "S12T-11": "Absorbs S04-08. The S12 action runner is the only startup executor; the startup trail is a projection of the frozen action and run ids. Retry reruns from the first failed action and skips actions that succeeded in this attempt. The trail shows a bounded read-only tail of the run's terminal output plus Open terminal. Scripts stay out of the startup record (ids plus a content hash), so the record has no separate command bounds. Converts the runner and every old-setup consumer in one ticket. Readiness: an action is ready on exit 0 or on a port detected from the current run, whichever comes first (decision T3).",
+    "S12P-03": "Owns the single authenticated, scoped image-read route used by Files and by project icons (S12T-14): workspace-root and thread-worktree scopes, per-segment path checks, SVG handling, caller-specific size caps (icon 2 MB, Files 20 MB) and caching.",
+    "S05-08": "Consumes the S12P-08 roster entry's provider and normalized status; no second status model in the chips or overview.",
+    "S08F-05": "Also owns queue retention: an error or ending never silently clears queued user input. The queue pauses visibly with an explicit send action.",
+    "S06-07": "Persists note-delivery intent with the approval outcome, deduplicated by request id, so a lost response or reconnect cannot drop the note.",
+    "S03-04": "Owns one qualified-ref listing (full ref names, explicit purpose filter, one paging and result contract, current-worktree context, sorting) shared with Review's Branch picker (S10-05). Test diverged local and origin branches with the same short name.",
+    "S06-00": "Small first fix, before the v2 contract: Cursor deny never selects an allow option, and a request that fails validation is denied upstream with a visible receipt instead of hanging the agent.",
+    "S07-00": "Bounded protocol investigation for all six providers before plan capture: captured request and response evidence for native plan output, questions, plan-file identity and minimum supported versions. Its findings decide which native paths S07-02 and S07-12 to S07-14 promise.",
+    "F-04c": "Migrates the model picker and the file editor picker to the F-04b picker; owns their retirement (they were assigned to whole sections before).",
+    "S12T-01": "Chooses the one terminal backend to keep (decision T11) and deletes the other backend, its selector and env option, its tests and docs. Defines `TERMINAL_MAX_PER_SCOPE = 8`.",
+    "S07-03": "Narrowed: durable versions, save and snapshot, writer coordination and one working read consumer. Comment operations and re-anchoring move to S07-06, the Implement operation to S07-07, plan-phase classification to S07-09. `planTurn` and `prepareImplement` signatures are set in S07-01.",
+    "S07-07": "Implement is a durable request (immutable version, revision and text, target thread, admission identity, recoverable status). Reserve turn admission before changing plan status; mark Accepted only with successful admission, with conditional compensation. Replays return the same target and message, including the new-thread path (S07-08)."
+  }
+}
