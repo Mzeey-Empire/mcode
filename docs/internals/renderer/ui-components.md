@@ -22,6 +22,7 @@ All UI primitives live in `apps/web/src/components/ui/`. **Always use these inst
 | `Separator` | `separator.tsx` | `<hr>` or `<div className="border-b">` |
 | `Switch` | `switch.tsx` | Custom toggle implementations |
 | `Tooltip` | `tooltip.tsx` | `title` attributes or custom hover text |
+| `ToastLane` | `toast.tsx` | A second toast stack. Raise toasts with `useToastStore.show({ kind, title, meta })`; the lane is mounted once in `App.tsx` |
 | `PathText` | `path-text.tsx` | Raw path strings, rtl tricks, or code that cuts a path |
 
 ## Composer overlay layers
@@ -35,7 +36,8 @@ layers below application overlay primitives:
 | Composer status | 20 | Local queued-send toast |
 | Provider notice | 30 | `ComposerProviderNoticeSurface` |
 | Composer menu | 40 | Slash commands, mentions, and Add to composer |
-| Application overlay primitive | 50 | Dialogs, popovers, tooltips, dropdowns, and toasts |
+| Application overlay primitive | 50 | Dialogs, popovers, tooltips, and dropdowns |
+| Toast lane | 60 | `ToastLane`, on `--layer-toast`. It sits under the conversation header, so it never meets the title bar |
 | Desktop title-bar root | 60 | Desktop title bar and its descendants |
 
 The notice is also hidden while the slash or mention picker is open. Do not use
