@@ -73,7 +73,7 @@ function ThreadStateSpinner({ marker, dim }: { marker: Extract<ThreadStateMarker
 
 function CiStateMarker({ marker, dim }: { marker: Extract<ThreadStateMarkerModel, { kind: "ci" }>; dim: boolean }) {
   const { icon: Icon, color } = getCiVisual(marker.aggregate);
-  if (marker.aggregate === "pending") return <Spinner size={13} aria-label={marker.label} className={cn(color, dim && "opacity-[0.72]")} />;
+  if (marker.aggregate === "pending") return <Spinner size={12} aria-label={marker.label} className={cn(color, dim && "opacity-[0.72]")} />;
   return <Icon size={13} aria-label={marker.label} className={cn("shrink-0", color, dim && "opacity-[0.72]")} />;
 }
 

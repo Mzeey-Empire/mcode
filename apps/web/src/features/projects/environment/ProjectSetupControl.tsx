@@ -142,7 +142,7 @@ export function ProjectSetupMenuItem({ attempt, starting, onStart }: ProjectSetu
   const disabled = attempt?.status === "running" || attempt?.status === "awaiting-approval" || attempt?.cleanupPending === true;
   return (
     <DropdownMenuItem disabled={disabled || starting} onClick={() => { void onStart(); }}>
-      {starting ? <Spinner size={13} aria-hidden /> : null}
+      {starting ? <Spinner size={12} aria-hidden /> : null}
       Run Setup
     </DropdownMenuItem>
   );

@@ -25,7 +25,7 @@ function RemoteMarkdownComponent({ content, className }: RemoteMarkdownProps) {
       <Suspense
         fallback={
           <Spinner
-            size="sm"
+            size={12}
             aria-label="Loading pull request content"
             className="text-muted"
           />

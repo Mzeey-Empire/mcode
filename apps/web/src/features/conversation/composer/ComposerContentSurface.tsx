@@ -559,7 +559,7 @@ function ComposerSendButton({
       aria-label={SEND_BUTTON_COPY[copy]}
     >
       {visualState === "scaffold" || visualState === "stopping" ? (
-        <Spinner size={14} className="text-current" />
+        <Spinner size={16} className="text-current" />
       ) : visualState === "stop" ? (
         <div className="h-4 w-4 rounded-sm bg-current" />
       ) : (

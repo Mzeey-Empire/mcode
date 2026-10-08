@@ -324,7 +324,7 @@ function ThreadDeleteDialog({
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" className="cursor-pointer" disabled={isDeleting} onClick={onClose}>Cancel</Button>
           <Button variant="destructive" className="cursor-pointer" disabled={isDeleting} onClick={onConfirm}>
-            {isDeleting && <Spinner size={14} className="text-current" />}
+            {isDeleting && <Spinner size={16} className="text-current" />}
             {isDeleting ? "Deleting..." : "Delete"}
           </Button>
         </div>
@@ -1260,7 +1260,7 @@ export function ProjectTree() {
                   isRenaming || workspaceRenameValue.trim().length === 0
                 }
               >
-                {isRenaming && <Spinner size={14} className="text-current" />}
+                {isRenaming && <Spinner size={16} className="text-current" />}
                 {isRenaming ? "Renaming..." : "Rename"}
               </Button>
             </div>
@@ -1950,7 +1950,7 @@ function ThreadLifecycleButton({
 }
 
 function ThreadLifecycleIcon({ isPending, isCompleted }: { isPending: boolean; isCompleted: boolean }) {
-  if (isPending) return <Spinner size={11} />;
+  if (isPending) return <Spinner size={12} />;
   if (isCompleted) return <Check size={13} aria-hidden />;
   return <Circle size={13} aria-hidden />;
 }
@@ -2155,7 +2155,7 @@ const WorkspaceCiRollupChip = memo(function WorkspaceCiRollupChip({
             )}
           >
             {rollup.aggregate === "pending" ? (
-              <Spinner size={9} className="text-current" />
+              <Spinner size={12} className="text-current" />
             ) : (
               <Icon size={9} className="shrink-0" />
             )}

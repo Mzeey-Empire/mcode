@@ -545,7 +545,7 @@ function PrDialogSidebar({
           disabled={isDisabled || !form.title.trim()}
           className="w-full gap-1.5"
         >
-          {form.state === "submitting" && <Spinner size={14} className="text-current" />}
+          {form.state === "submitting" && <Spinner size={16} className="text-current" />}
           Create PR
         </Button>
         <Button

@@ -390,7 +390,7 @@ function PostCommentButton({
       disabled={!canPost}
       onClick={() => void onPost()}
     >
-      {submitting ? <Spinner size="xs" aria-hidden /> : <ArrowUp size={14} aria-hidden />}
+      {submitting ? <Spinner size={12} aria-hidden /> : <ArrowUp size={14} aria-hidden />}
     </Button>
   );
 }

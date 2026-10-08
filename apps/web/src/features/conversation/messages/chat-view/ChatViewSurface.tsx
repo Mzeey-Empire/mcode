@@ -495,11 +495,11 @@ function SetupRecoveryActions({ automaticSetup }: { readonly automaticSetup: Ret
   return (
     <>
       <Button type="button" variant="outline" size="sm" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.retrySetup(); }}>
-        {retrying ? <Spinner size={13} aria-hidden /> : null}
+        {retrying ? <Spinner size={12} aria-hidden /> : null}
         Retry setup
       </Button>
       <Button type="button" variant="outline" size="sm" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.continueWithoutSetup(); }}>
-        {continuing ? <Spinner size={13} aria-hidden /> : null}
+        {continuing ? <Spinner size={12} aria-hidden /> : null}
         Continue without setup
       </Button>
     </>

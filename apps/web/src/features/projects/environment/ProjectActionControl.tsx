@@ -439,7 +439,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
                 disabled={command !== null}
                 onClick={restartAction}
               >
-                {command === "restart" ? <Spinner size={14} aria-hidden /> : <RotateCcw size={14} aria-hidden />}
+                {command === "restart" ? <Spinner size={16} aria-hidden /> : <RotateCcw size={14} aria-hidden />}
               </Button>
             }
           />
@@ -458,7 +458,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
                     disabled={command !== null}
                     onClick={stopAction}
                   >
-                    {command === "stop" ? <Spinner size={14} aria-hidden /> : <CircleStop size={14} aria-hidden />}
+                    {command === "stop" ? <Spinner size={16} aria-hidden /> : <CircleStop size={14} aria-hidden />}
                   </Button>
                 }
               />

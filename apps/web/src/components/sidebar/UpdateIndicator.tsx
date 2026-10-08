@@ -24,7 +24,7 @@ export function UpdateIndicator() {
       <div className="space-y-1.5 px-1.5 py-1">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-[11px] text-muted">
-            <Spinner size={11} className="text-primary" />
+            <Spinner size={12} className="text-primary" />
             Downloading update
           </span>
           <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink/45">

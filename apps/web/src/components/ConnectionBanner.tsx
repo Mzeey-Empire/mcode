@@ -9,7 +9,7 @@ export function ConnectionBanner() {
 
   return (
     <div className="flex items-center justify-center gap-2 bg-yellow-600/90 px-4 py-1.5 text-xs font-medium text-white">
-      <Spinner size={14} className="text-current" />
+      <Spinner size={16} className="text-current" />
       {status === "authFailed"
         ? "Re-authenticating after server restart..."
         : "Connection lost. Reconnecting to server..."}

@@ -524,7 +524,7 @@ function ReviewDialogFooter({ review }: { review: ReviewSubmission }) {
       <Button type="button" disabled={submitDisabled} onClick={() => void review.submit()}>
         {review.submitting ? (
           <>
-            <Spinner size="xs" aria-hidden />
+            <Spinner size={12} aria-hidden />
             Submitting review
           </>
         ) : (

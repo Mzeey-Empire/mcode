@@ -159,7 +159,7 @@ function CreateThreadBranchDialogSession({
             disabled={submitting || !finalBranchName}
             className="min-w-[7rem] gap-1.5"
           >
-            {submitting ? <Spinner size={14} className="text-current" /> : null}
+            {submitting ? <Spinner size={16} className="text-current" /> : null}
             {submitLabel}
           </Button>
         </DialogFooter>

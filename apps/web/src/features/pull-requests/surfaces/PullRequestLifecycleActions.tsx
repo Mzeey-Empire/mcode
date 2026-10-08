@@ -203,7 +203,7 @@ function RefreshMenuItem({
 }) {
   return (
     <DropdownMenuItem disabled={refreshing} className="text-xs" onClick={onRefresh}>
-      {refreshing ? <Spinner size={13} aria-hidden /> : <RefreshCw size={13} aria-hidden />}
+      {refreshing ? <Spinner size={12} aria-hidden /> : <RefreshCw size={13} aria-hidden />}
       Refresh
     </DropdownMenuItem>
   );

@@ -753,7 +753,7 @@ function ResourceListState({
         role="status"
         className="flex items-center gap-2 py-3 text-xs text-muted"
       >
-        <Spinner size="xs" aria-hidden />
+        <Spinner size={12} aria-hidden />
         {loadingLabel}
       </p>
     );

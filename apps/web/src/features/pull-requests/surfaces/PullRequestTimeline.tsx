@@ -452,7 +452,7 @@ function TimelineEmptyState({
   if (initialLoading) {
     return (
       <div className="flex items-center justify-center gap-2 px-4 py-12 text-xs text-muted">
-        <Spinner size="xs" aria-hidden />
+        <Spinner size={12} aria-hidden />
         <span role="status">Loading Timeline activity</span>
       </div>
     );
