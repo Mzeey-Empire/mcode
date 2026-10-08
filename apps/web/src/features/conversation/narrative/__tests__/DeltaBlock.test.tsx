@@ -151,11 +151,27 @@ describe("DeltaBlock", () => {
     const { container, rerender } = render(<DeltaBlock text="answer" isStreaming showCursor={false} />);
     const root = container.firstElementChild;
     expect(root?.classList.contains("text-prose")).toBe(true);
+    await waitFor(() => expect(container.querySelector("p.whitespace-pre-wrap")).not.toBeNull());
     expect(container.querySelector("p.whitespace-pre-wrap")?.classList.contains("text-sm")).toBe(false);
 
     rerender(<DeltaBlock text="answer" isStreaming={false} showCursor={false} />);
     await waitFor(() => expect(screen.getByTestId("markdown-content")).toBeTruthy());
     expect(container.firstElementChild?.classList.contains("text-prose")).toBe(true);
+  });
+
+  it("streams blank-line paragraphs as the same spaced paragraphs markdown settles to", async () => {
+    const { container: streaming } = render(
+      <DeltaBlock text={"First paragraph.\n\nSecond paragraph.\n\n"} isStreaming showCursor={false} />,
+    );
+
+    await waitFor(() =>
+      expect([...streaming.querySelectorAll("p")].map((p) => p.textContent)).toEqual([
+        "First paragraph.",
+        "Second paragraph.",
+      ]),
+    );
+    const paragraphs = [...streaming.querySelectorAll("p")];
+    expect(paragraphs.every((p) => p.classList.contains("mb-2"))).toBe(true);
   });
 
   it("parks a 2x18 caret after the last word, centred on its line", () => {

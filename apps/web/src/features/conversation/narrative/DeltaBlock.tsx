@@ -303,9 +303,25 @@ function StreamingTable({ header, rows }: { header: string[]; rows: string[][] }
   );
 }
 
+/**
+ * Streaming prose split on blank lines into the same `mb-2` paragraphs the
+ * settled markdown renders, so the row keeps its height at the swap instead of
+ * collapsing each blank line from a full prose line to an 8px margin.
+ */
+function StreamingParagraphs({ text }: { text: string }) {
+  const paragraphs = text.split(/\n\s*\n/).filter((paragraph) => paragraph.length > 0);
+  return (
+    <>
+      {paragraphs.map((paragraph, index) => (
+        <p key={index} className="mb-2 whitespace-pre-wrap">{paragraph}</p>
+      ))}
+    </>
+  );
+}
+
 function StreamingPart({ part }: { part: StreamingBlockPart }) {
   if (part.kind === "text") {
-    return <p className="whitespace-pre-wrap">{part.text}</p>;
+    return <StreamingParagraphs text={part.text} />;
   }
   if (part.kind === "table") {
     return part.closed
@@ -352,7 +368,7 @@ function StreamingPart({ part }: { part: StreamingBlockPart }) {
 function StreamingBody({ text }: { text: string }) {
   const parts = useMemo(() => splitStreamingBlocks(text), [text]);
   if (!parts.some((part) => part.kind !== "text")) {
-    return <p className="whitespace-pre-wrap">{text}</p>;
+    return <StreamingParagraphs text={text} />;
   }
   return (
     <>
