@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
+import { POPOVER_SURFACE_CLASS } from "./overlay-surface";
 
 interface MenuItem {
   label: string;
@@ -53,7 +54,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     <div
       ref={ref}
       style={{ position: "fixed", left: x, top: y, zIndex: 50 }}
-      className="min-w-[160px] rounded-lg border border-border bg-panel p-1 shadow-xl"
+      className={cn("min-w-[160px] p-1", POPOVER_SURFACE_CLASS)}
     >
       {items.map((item, i) =>
         item.divider ? (

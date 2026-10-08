@@ -72,7 +72,7 @@ export function NewThreadProjectPicker({
         side={placement}
         align={trigger ? "center" : "start"}
         sideOffset={8}
-        className="w-64 overflow-hidden p-0 shadow-lg"
+        className="w-64 overflow-hidden p-0"
       >
         <Command>
           <CommandInput placeholder="Search projects…" aria-label="Search projects" />

@@ -11,6 +11,12 @@ const twMerge = extendTailwindMerge<"text-fade">({
       "font-family": [{ font: ["code"] }],
       "text-fade": ["text-fade", { "text-fade-lines": [validators.isInteger] }],
     },
+    // Paper's radius and elevation roles, so a caller's `rounded-*` or `shadow-*` replaces the
+    // overlay recipe's value instead of both classes surviving and CSS order picking one.
+    theme: {
+      radius: ["badge", "menu", "control", "composer", "dialog"],
+      shadow: ["popover", "floating", "dialog"],
+    },
   },
 })
 

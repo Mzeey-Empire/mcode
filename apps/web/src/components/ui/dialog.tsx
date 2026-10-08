@@ -2,6 +2,7 @@ import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/lib/utils"
+import { DIALOG_FADE_CLASS, DIALOG_SURFACE_CLASS } from "./overlay-surface"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
@@ -29,7 +30,8 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "app-viewport-fixed fixed isolate z-50 bg-ink/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "app-viewport-fixed fixed isolate z-50 bg-ink/10 supports-backdrop-filter:backdrop-blur-xs",
+        DIALOG_FADE_CLASS,
         className
       )}
       {...props}
@@ -51,7 +53,9 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-5 rounded-xl bg-background p-5 text-sm ring-1 ring-ink/10 duration-100 outline-none sm:max-w-md data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 [&_[data-slot=dialog-header]]:pr-9",
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-5 p-5 text-sm outline-none sm:max-w-md [&_[data-slot=dialog-header]]:pr-9",
+          DIALOG_SURFACE_CLASS,
+          DIALOG_FADE_CLASS,
           className
         )}
         {...props}
@@ -99,7 +103,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-5 -mb-5 flex flex-col-reverse gap-3 rounded-b-xl border-t bg-hover/50 p-4 sm:flex-row sm:justify-end",
+        "-mx-5 -mb-5 flex flex-col-reverse gap-3 rounded-b-dialog border-t bg-hover/50 p-4 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
