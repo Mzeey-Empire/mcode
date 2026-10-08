@@ -14,7 +14,7 @@ import { SetupEntryBlock } from "./entries/setup";
 import { SourcesEntryBlock } from "./entries/sources";
 import { SubagentsEntryBlock } from "./entries/subagents";
 import { UsageEntryBlock } from "./entries/usage";
-import { OverviewProjectActions, OverviewProjectSettings } from "./header-actions";
+import { OverviewProjectActions, OverviewProjectActionsState, OverviewProjectSettings } from "./header-actions";
 import type { OverviewSubject } from "./overview-subject";
 
 /** Card sections for the later grouped overview layout. */
@@ -38,6 +38,8 @@ export interface OverviewHeaderAction {
   readonly order: number;
   readonly subjects: readonly OverviewSubject["kind"][];
   readonly Action: ComponentType<{ subject: OverviewSubject }>;
+  /** Owns state that must survive the button unmounting when the overview closes. */
+  readonly State?: ComponentType<{ subject: OverviewSubject; children: ReactNode }>;
 }
 
 /** Body entries in the existing visual order; section grouping belongs to S03-02. */
@@ -61,7 +63,7 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
 
 /** Header actions in their existing visual order. */
 export const OVERVIEW_HEADER_ACTIONS: readonly OverviewHeaderAction[] = [
-  { id: "project-actions", order: 0, subjects: ["thread"], Action: OverviewProjectActions },
+  { id: "project-actions", order: 0, subjects: ["thread"], Action: OverviewProjectActions, State: OverviewProjectActionsState },
   { id: "settings", order: 10, subjects: ["thread"], Action: OverviewProjectSettings },
 ];
 

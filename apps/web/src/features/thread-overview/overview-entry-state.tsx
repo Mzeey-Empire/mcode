@@ -1,6 +1,5 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, type ComponentType, type ReactNode } from "react";
 import type { Thread } from "@/transport";
-import type { OverviewEntry } from "./overview-registry";
 import type { OverviewSubject } from "./overview-subject";
 
 /** Keeps an entry's hook mounted independently of its popover row. */
@@ -27,9 +26,15 @@ export function createOverviewEntryState<State>(useValue: (thread: Thread) => St
   return { Provider, useEntryState };
 }
 
+/** A registered entry or header action that may own state outliving the popover. */
+export interface OverviewStateOwner {
+  readonly id: string;
+  readonly State?: ComponentType<{ subject: OverviewSubject; children: ReactNode }>;
+}
+
 /** Mounts registered state providers outside the content that closes and unmounts. */
 export function OverviewEntryStateProviders({ entries, subject, children }: {
-  entries: readonly OverviewEntry[];
+  entries: readonly OverviewStateOwner[];
   subject: OverviewSubject;
   children: ReactNode;
 }) {

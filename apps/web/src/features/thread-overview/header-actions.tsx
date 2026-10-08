@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ProjectActionMenu, ProjectSetupMenuItem, useProjectActions } from "@/features/projects/environment";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
+import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { rightPanelActionTerminalId, useDiffStore } from "@/stores/diffStore";
@@ -25,9 +26,17 @@ function canRunManualProjectSetup(thread: Thread): boolean {
   );
 }
 
+function useThreadProjectActions(thread: Thread) {
+  return useProjectActions(thread.workspace_id, thread.id);
+}
+
+/** Keeps loaded project actions and Setup across popover close, as the parent-owned hook did. */
+export const { Provider: OverviewProjectActionsState, useEntryState: useProjectActionsState } =
+  createOverviewEntryState(useThreadProjectActions);
+
 function ProjectActions({ thread }: { thread: Thread }) {
   const { projectSetup, openProjectSettings } = useOverviewContext();
-  const projectActions = useProjectActions(thread.workspace_id, thread.id);
+  const projectActions = useProjectActionsState();
   const startProjectAction = useCallback(async (actionId: string) => {
     const run = await projectActions.start(actionId);
     useDiffStore.getState().ensureRightPanelActionTerminalTab(

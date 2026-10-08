@@ -160,7 +160,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
   const headerActions = getOverviewHeaderActions(subject);
   const triggerButton = <ThreadOverviewTrigger ciDot={state.ciDot} open={open} />;
   return (<OverviewContext.Provider value={state}>
-    <OverviewEntryStateProviders entries={entries} subject={subject}>
+    <OverviewEntryStateProviders entries={[...entries, ...headerActions]} subject={subject}>
     <Popover open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger render={<PopoverTrigger render={triggerButton} />} />

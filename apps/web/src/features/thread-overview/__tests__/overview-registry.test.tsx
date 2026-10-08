@@ -127,6 +127,18 @@ describe("overview registry", () => {
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(2);
   });
 
+  it("loads project actions once and keeps them across a popover close and reopen", async () => {
+    render(<ThreadOverview thread={thread} threadPaneWidth={600} />);
+    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    await screen.findByTestId("thread-overview-masthead-controls");
+    await waitFor(() => expect(mockTransport.readWorkspaceEnvironment).toHaveBeenCalledTimes(1));
+    await closeOverview();
+    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    await screen.findByTestId("thread-overview-masthead-controls");
+    expect(mockTransport.readWorkspaceEnvironment).toHaveBeenCalledTimes(1);
+    expect(mockTransport.listWorkspaceActionRuns).toHaveBeenCalledTimes(1);
+  });
+
   it("retries a failed repository load on reopen", async () => {
     mockLoadedEntries();
     vi.mocked(mockTransport.getRemoteUrl).mockRejectedValueOnce(new Error("Remote unavailable"));
