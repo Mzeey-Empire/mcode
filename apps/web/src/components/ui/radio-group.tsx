@@ -24,7 +24,7 @@ function RadioGroupItem<Value>({ className, ...props }: RadioPrimitive.Root.Prop
     <RadioPrimitive.Root
       data-slot="radio-group-item"
       className={cn(
-        "flex size-5 shrink-0 items-center justify-center rounded-full border border-control-border bg-selected transition-colors duration-(--duration-fast) ease-(--ease-standard) hover:not-aria-invalid:border-muted hover:bg-hover aria-invalid:border-error data-[checked]:not-aria-invalid:border-primary data-[checked]:bg-primary data-[checked]:hover:not-aria-invalid:border-primary-hover data-[checked]:hover:bg-primary-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "flex size-5 shrink-0 items-center justify-center rounded-full border border-control-border bg-field transition-colors duration-(--duration-fast) ease-(--ease-standard) hover:not-aria-invalid:border-muted hover:bg-hover aria-invalid:border-error data-[checked]:not-aria-invalid:border-primary data-[checked]:bg-primary data-[checked]:hover:not-aria-invalid:border-primary-hover data-[checked]:hover:bg-primary-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         FOCUS_RING_CLASS,
         className,
       )}

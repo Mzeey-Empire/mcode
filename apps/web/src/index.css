@@ -117,6 +117,8 @@
      selected sidebar row would vanish (decisions.md D4). Only selection moves:
      the secondary button keeps neutral-100 so its neutral-200 hover still shows. */
   --selected: var(--neutral-200);
+  /* Form controls keep Paper's light selected fill; D4 darkens selection only. */
+  --field: var(--neutral-100);
   --destructive: var(--clay-600);
   --destructive-ink: var(--neutral-50);
   --button-secondary-hover: var(--neutral-200);
@@ -183,6 +185,7 @@
   --hover: var(--neutral-700);
   --muted: var(--neutral-300);
   --selected: var(--neutral-600);
+  --field: var(--neutral-600);
   --destructive: var(--clay-500);
   --destructive-ink: var(--neutral-900);
   --button-secondary-hover: var(--neutral-500);
@@ -273,6 +276,7 @@
   --color-hover: var(--hover);
   --color-muted: var(--muted);
   --color-selected: var(--selected);
+  --color-field: var(--field);
   --color-destructive: var(--destructive);
   --color-destructive-ink: var(--destructive-ink);
   --color-button-secondary-hover: var(--button-secondary-hover);
