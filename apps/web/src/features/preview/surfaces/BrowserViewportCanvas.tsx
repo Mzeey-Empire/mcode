@@ -370,7 +370,7 @@ function BrowserViewportStage({
       <div className="flex min-h-full min-w-full items-center justify-center" style={stageStyle(responsive, size)}>
         <div
           data-testid="responsive-viewport-canvas"
-          className={cn("relative flex-none", responsive && "overflow-visible rounded-md border border-border bg-background shadow-sm")}
+          className={cn("relative flex-none", responsive && "overflow-visible rounded-md border border-border bg-background")}
           style={viewportCanvasStyle(responsive, size)}
         >
           <div

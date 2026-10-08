@@ -521,8 +521,8 @@ export function isComposerSendButtonDisabled({
 const SEND_BUTTON_CLASS_NAMES: Record<ComposerSendButtonVisualState, string> = {
   scaffold: "bg-primary text-primary-ink",
   queue: "bg-primary/60 text-primary-ink hover:bg-primary/75",
-  stop: "bg-destructive text-white hover:bg-destructive/90",
-  stopping: "bg-destructive/60 text-white",
+  stop: "bg-destructive text-destructive-ink hover:bg-destructive/90",
+  stopping: "bg-destructive/60 text-destructive-ink",
   send: "bg-primary text-primary-ink hover:bg-primary/90",
   empty: "bg-hover text-muted opacity-40",
 };
@@ -661,7 +661,7 @@ function ComposerInputSurface({
         "relative z-10 bg-transparent ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-primary/70",
         model.isNewThread
           ? "-mt-px rounded-xl shadow-none"
-          : "rounded-xl shadow-lg shadow-black/20",
+          : "rounded-xl",
         model.isDragOver && "ring-2 ring-primary",
       )}
       onDragEnter={actions.onDragEnter}

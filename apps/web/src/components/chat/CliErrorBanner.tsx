@@ -65,14 +65,14 @@ export function CliErrorBanner({ error, onDismiss, onOpenSettings }: CliErrorBan
     <div
       role="alert"
       className={cn(
-        "mx-3 mb-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.06]",
+        "mx-3 mb-2 rounded-lg border border-warning/30 bg-warning/[0.06]",
         "px-4 py-3",
       )}
     >
       <div className="flex items-start gap-3">
         <TriangleAlert
           size={15}
-          className="mt-0.5 shrink-0 text-amber-500/80"
+          className="mt-0.5 shrink-0 text-warning/80"
           aria-hidden
         />
 
@@ -95,8 +95,8 @@ export function CliErrorBanner({ error, onDismiss, onOpenSettings }: CliErrorBan
                       aria-label="Copy command"
                       className={cn(
                         "flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border/40",
-                        "text-muted/60 transition-colors hover:border-amber-500/40",
-                        "hover:bg-amber-500/10 hover:text-amber-500/80",
+                        "text-muted/60 transition-colors hover:border-warning/40",
+                        "hover:bg-warning/10 hover:text-warning/80",
                       )}
                     >
                       {copied ? <Check size={12} /> : <Copy size={12} />}
@@ -115,7 +115,7 @@ export function CliErrorBanner({ error, onDismiss, onOpenSettings }: CliErrorBan
               <button
                 type="button"
                 onClick={onOpenSettings}
-                className="inline-flex items-center gap-1 text-amber-500/80 underline-offset-2 hover:underline"
+                className="inline-flex items-center gap-1 text-link underline-offset-2 hover:underline"
               >
                 <Settings size={10} />
                 Open Settings

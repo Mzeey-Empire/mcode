@@ -25,15 +25,15 @@ export function BashRenderer({ toolCall, isActive }: ToolRendererProps) {
       isActive={isActive}
     >
       <div className="space-y-1.5">
-        <pre className="rounded bg-zinc-900 px-2.5 py-1.5 text-xs leading-relaxed text-zinc-300 font-mono overflow-x-auto">
-          <span className="select-none text-zinc-500">$ </span>{command}
+        <pre className="rounded bg-page px-2.5 py-1.5 text-xs leading-relaxed text-muted font-mono overflow-x-auto">
+          <span className="select-none text-muted">$ </span>{command}
         </pre>
 
         {outputLines.length > 0 && (
           <div>
             <pre
               className={`max-h-64 overflow-auto rounded bg-hover/30 p-2 text-xs leading-relaxed text-muted font-mono ${
-                toolCall.isError ? "border-l-2 border-red-500/70" : ""
+                toolCall.isError ? "border-l-2 border-error/70" : ""
               }`}
             >
               {visible.join("\n")}

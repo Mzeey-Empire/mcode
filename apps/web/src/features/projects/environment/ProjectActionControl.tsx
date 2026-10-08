@@ -610,21 +610,21 @@ function ansiColor(sequence: string): string | undefined {
 const ANSI_COLORS: Readonly<Record<number, string | null>> = {
   0: null,
   30: "text-ink",
-  31: "text-red-500",
-  32: "text-emerald-500",
-  33: "text-amber-500",
-  34: "text-blue-500",
-  35: "text-fuchsia-500",
-  36: "text-cyan-500",
+  31: "text-error",
+  32: "text-success",
+  33: "text-primary",
+  34: "text-link",
+  35: "text-ink",
+  36: "text-ink",
   37: "text-ink",
   39: null,
   90: "text-ink",
-  91: "text-red-500",
-  92: "text-emerald-500",
-  93: "text-amber-500",
-  94: "text-blue-500",
-  95: "text-fuchsia-500",
-  96: "text-cyan-500",
+  91: "text-error",
+  92: "text-success",
+  93: "text-primary",
+  94: "text-link",
+  95: "text-ink",
+  96: "text-ink",
   97: "text-ink",
 };
 
@@ -663,7 +663,7 @@ function ActionStatusIcon({
 }
 
 const ACTION_STATUS_NODES: Readonly<Partial<Record<NonNullable<WorkspaceEnvironmentActionRun["status"]>, ReactNode>>> = {
-  running: <span role="status" aria-label="Running" className="ml-2 flex shrink-0 text-amber-600 dark:text-amber-400"><Spinner size={12} aria-hidden className="motion-reduce:animate-none" /></span>,
+  running: <span role="status" aria-label="Running" className="ml-2 flex shrink-0 text-muted"><Spinner size={12} aria-hidden className="motion-reduce:animate-none" /></span>,
   "awaiting-approval": <Badge role="status" aria-label="Approval required" variant="secondary" size="sm" className="ml-2 shrink-0">Approval</Badge>,
   completed: <span role="status" aria-label="Completed" className="ml-2 flex shrink-0"><CircleCheck className="size-3.5 text-[var(--diff-add-strong)]" aria-hidden /></span>,
   failed: <span role="status" aria-label="Failed" className="ml-2 flex shrink-0"><CircleX className="size-3.5 text-[var(--diff-remove)]" aria-hidden /></span>,

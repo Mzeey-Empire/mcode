@@ -33,8 +33,8 @@ export function InterruptedSessionsBanner({
   };
 
   return (
-    <div data-testid="recovery-incident-banner" role="alert" className="flex items-start gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-2.5 text-sm">
-      <WarningIcon className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+    <div data-testid="recovery-incident-banner" role="alert" className="flex items-start gap-3 rounded-md border border-warning/30 bg-warning/10 px-4 py-2.5 text-sm">
+      <WarningIcon className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <div className="min-w-0 flex-1">
         <p>{count} {count === 1 ? "turn was" : "turns were"} interrupted during the last server restart.</p>
         <ul className="mt-1 space-y-0.5 text-muted">

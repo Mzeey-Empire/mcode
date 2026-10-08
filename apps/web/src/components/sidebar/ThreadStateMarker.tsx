@@ -68,7 +68,7 @@ export function getThreadStateMarker({
 }
 
 function ThreadStateSpinner({ marker, dim }: { marker: Extract<ThreadStateMarkerModel, { kind: "setup" | "running" }>; dim: boolean }) {
-  return <Spinner aria-label={marker.label} className={cn(marker.kind === "setup" ? "text-white" : "text-primary", dim && "opacity-[0.72]")} />;
+  return <Spinner aria-label={marker.label} className={cn(marker.kind === "setup" ? "text-ink" : "text-primary", dim && "opacity-[0.72]")} />;
 }
 
 function CiStateMarker({ marker, dim }: { marker: Extract<ThreadStateMarkerModel, { kind: "ci" }>; dim: boolean }) {
@@ -79,11 +79,11 @@ function CiStateMarker({ marker, dim }: { marker: Extract<ThreadStateMarkerModel
 
 function ThreadStatusDot({ marker, dim }: { marker: Exclude<ThreadStateMarkerModel, { kind: "time" | "setup" | "running" | "ci" }>; dim: boolean }) {
   const markerClasses = {
-    action: "ring-2 ring-inset ring-amber-500 bg-transparent status-pulse",
-    "setup-response": "ring-2 ring-inset ring-amber-500 bg-transparent status-pulse",
-    completed: "bg-[var(--diff-add-strong)]/80",
-    errored: "bg-[var(--diff-remove-strong)]/85",
-    interrupted: "bg-amber-500/85 status-pulse",
+    action: "ring-2 ring-inset ring-primary bg-transparent status-pulse",
+    "setup-response": "ring-2 ring-inset ring-primary bg-transparent status-pulse",
+    completed: "bg-success/80",
+    errored: "bg-error/85",
+    interrupted: "bg-primary status-pulse",
   };
   return <span aria-label={marker.label} className={cn("shrink-0 rounded-full", marker.kind === "action" || marker.kind === "setup-response" ? "h-2 w-2" : "h-1.5 w-1.5", markerClasses[marker.kind], dim && "opacity-[0.72]")} />;
 }

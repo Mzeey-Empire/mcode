@@ -16,7 +16,7 @@ export const HandoffCard = memo(function HandoffCard({ content }: HandoffCardPro
   if (!metadata) return null;
 
   return (
-    <div className="my-3 overflow-hidden rounded-lg border border-border/50 bg-hover/20 shadow-sm">
+    <div className="my-3 overflow-hidden rounded-lg border border-border/50 bg-hover/20">
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
@@ -88,7 +88,7 @@ export const HandoffCard = memo(function HandoffCard({ content }: HandoffCardPro
                 <ul className="space-y-0.5 pl-4">
                   {metadata.openTasks.map((t, i) => (
                     <li key={i} className="flex items-start gap-1.5 text-ink/80">
-                      <span className={`mt-px shrink-0 ${t.status === "completed" ? "text-green-500" : "text-muted/50"}`}>
+                      <span className={`mt-px shrink-0 ${t.status === "completed" ? "text-success" : "text-muted/50"}`}>
                         {t.status === "completed" ? "✓" : "○"}
                       </span>
                       <span className={t.status === "completed" ? "line-through opacity-60" : ""}>{t.content}</span>

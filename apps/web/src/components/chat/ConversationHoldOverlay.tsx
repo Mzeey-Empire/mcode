@@ -15,7 +15,7 @@ export function ConversationHoldOverlay({ targetTitle }: ConversationHoldOverlay
       aria-live="polite"
       className="absolute inset-0 z-10 flex items-center justify-center bg-background/45 backdrop-blur-[1px]"
     >
-      <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-xs text-muted shadow-sm">
+      <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-xs text-muted shadow-floating">
         <Spinner size={14} />
         <span>Switching to {targetTitle}</span>
       </div>

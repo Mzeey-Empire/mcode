@@ -97,7 +97,7 @@ function resetPendingGoal(
 function ComposerQueueToast({ toast }: { toast: string | null }) {
   if (!toast) return null;
   return (
-    <div className="pointer-events-none absolute -top-8 right-4 z-20 flex items-center gap-1.5 rounded-full bg-panel/90 px-3 py-1 text-xs text-muted shadow-sm ring-1 ring-border/50 backdrop-blur-sm animate-in fade-in-0 slide-in-from-bottom-1 duration-150">
+    <div className="pointer-events-none absolute -top-8 right-4 z-20 flex items-center gap-1.5 rounded-full bg-panel/90 px-3 py-1 text-xs text-muted shadow-floating ring-1 ring-border/50 backdrop-blur-sm animate-in fade-in-0 slide-in-from-bottom-1 duration-150">
       <Check size={10} className="text-primary" />
       {toast}
     </div>

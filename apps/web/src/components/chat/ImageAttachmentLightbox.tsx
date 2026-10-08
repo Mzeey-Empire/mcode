@@ -123,7 +123,7 @@ function LightboxNavigation({ onPrevious, onNext }: { onPrevious: (event: MouseE
   const navBtnClass = cn(
     "pointer-events-auto flex size-11 shrink-0 items-center justify-center rounded-full",
     "border border-white/14 bg-black/45 text-white backdrop-blur-md",
-    "shadow-lg shadow-black/40 transition-[background-color,border-color,opacity]",
+    "shadow-floating transition-[background-color,border-color,opacity]",
     "hover:bg-black/60 hover:border-white/22",
     "focus-visible:border-white/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35",
     "motion-reduce:transition-none",
@@ -159,8 +159,7 @@ function LightboxImage({ failed, src, title, onError }: { failed: boolean; src: 
         "pointer-events-none max-h-[min(82dvh,calc(100vh-11rem))] max-w-[min(94vw,calc(100vw-2rem))]",
         "h-auto w-auto object-contain select-none",
         "rounded-[3px]",
-        "shadow-[0_28px_90px_-20px_rgba(0,0,0,0.85)]",
-        "motion-reduce:shadow-xl motion-reduce:shadow-black/60",
+        "shadow-floating",
       )}
       style={{ imageOrientation: "from-image" }}
       onError={onError}
@@ -330,7 +329,7 @@ export const ImageAttachmentLightbox = memo(function ImageAttachmentLightbox({
   const closeBtnClass = cn(
     "absolute right-4 top-4 z-[70] flex size-11 items-center justify-center rounded-full",
     "border border-white/14 bg-black/45 text-white backdrop-blur-md",
-    "shadow-lg shadow-black/40 transition-[background-color,border-color,opacity]",
+    "shadow-floating transition-[background-color,border-color,opacity]",
     "hover:bg-black/60 hover:border-white/22",
     "focus-visible:border-white/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35",
     "motion-reduce:transition-none",

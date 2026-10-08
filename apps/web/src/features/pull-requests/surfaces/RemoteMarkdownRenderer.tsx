@@ -55,7 +55,7 @@ const GITHUB_ALERTS: Record<
   tip: {
     label: "Tip",
     icon: Lightbulb,
-    className: "border-emerald-500/25 bg-emerald-500/[0.035] text-emerald-400",
+    className: "border-info/25 bg-info/[0.035] text-info",
   },
   important: {
     label: "Important",
@@ -65,7 +65,7 @@ const GITHUB_ALERTS: Record<
   warning: {
     label: "Warning",
     icon: CircleAlert,
-    className: "border-amber-500/25 bg-amber-500/[0.035] text-amber-400",
+    className: "border-warning/25 bg-warning/[0.035] text-warning",
   },
   caution: {
     label: "Caution",

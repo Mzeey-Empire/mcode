@@ -230,7 +230,7 @@ export function TaskBubble({
           onKeyDown={(event) => {
             if (event.key === "Escape") closePreview();
           }}
-          className="flex max-h-(--available-height) w-[min(40rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border-border/70 p-0 shadow-lg shadow-black/20"
+          className="flex max-h-(--available-height) w-[min(40rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border-border/70 p-0 shadow-popover"
         >
           <TaskPanelHeader tasks={tasks} />
           <ScrollArea
