@@ -261,7 +261,7 @@ function BrowserViewportDragHandle({
       aria-valuetext={isCorner ? `${state.confirmed.width} by ${state.confirmed.height} pixels` : undefined}
       data-position={position}
       className={cn(
-        "pointer-events-auto absolute z-30 flex touch-none select-none items-center justify-center text-muted opacity-75 outline-none transition-colors hover:bg-selected/70 hover:text-ink hover:opacity-100 focus-visible:bg-selected/70 focus-visible:text-ink focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus",
+        "pointer-events-auto absolute z-(--layer-floating-panel) flex touch-none select-none items-center justify-center text-muted opacity-75 outline-none transition-colors hover:bg-selected/70 hover:text-ink hover:opacity-100 focus-visible:bg-selected/70 focus-visible:text-ink focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus",
         details.className,
       )}
       {...handlers}

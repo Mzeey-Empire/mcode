@@ -94,7 +94,7 @@ export function ThreadStateMarker({
 }) {
   if (marker.kind === "time") {
     return (
-      <span className={cn("shrink-0 font-mono text-[10px] tabular-nums text-muted/45", dim && "opacity-[0.72]")}>
+      <span className={cn("shrink-0 font-mono text-caption tabular-nums text-muted/45", dim && "opacity-[0.72]")}>
         {marker.label}
       </span>
     );

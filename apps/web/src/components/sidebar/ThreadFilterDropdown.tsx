@@ -35,7 +35,7 @@ function FilterCheckbox({
       onClick={onChange}
     >
       <span
-        className={`flex h-3 w-3 shrink-0 items-center justify-center rounded-sm border text-[8px] ${
+        className={`flex h-3 w-3 shrink-0 items-center justify-center rounded-sm border text-caption ${
           checked
             ? "border-primary/40 bg-primary/20 text-primary"
             : "border-border"

@@ -131,12 +131,12 @@ function LightboxNavigation({ onPrevious, onNext }: { onPrevious: (event: MouseE
   );
   return (
     <>
-      <div className="pointer-events-none absolute inset-y-8 left-2 z-20 flex items-center sm:left-5">
+      <div className="pointer-events-none absolute inset-y-8 left-2 z-(--layer-dropdown) flex items-center sm:left-5">
         <button type="button" className={navBtnClass} aria-label="Previous image" onClick={onPrevious}>
           <ChevronLeft className="size-6" aria-hidden />
         </button>
       </div>
-      <div className="pointer-events-none absolute inset-y-8 right-2 z-20 flex items-center sm:right-5">
+      <div className="pointer-events-none absolute inset-y-8 right-2 z-(--layer-dropdown) flex items-center sm:right-5">
         <button type="button" className={navBtnClass} aria-label="Next image" onClick={onNext}>
           <ChevronRight className="size-6" aria-hidden />
         </button>
@@ -200,7 +200,7 @@ function LightboxCaption({ carousel, items, activeIndex, rawTitle, displayTitle,
   children: ReactNode;
 }) {
   return (
-    <div className="pointer-events-auto relative z-20 mx-auto flex w-full max-w-[min(94vw,42rem)] min-w-0 flex-col items-center gap-2.5 px-4 pb-6 pt-1" id={captionId}>
+    <div className="pointer-events-auto relative z-(--layer-dropdown) mx-auto flex w-full max-w-[min(94vw,42rem)] min-w-0 flex-col items-center gap-2.5 px-4 pb-6 pt-1" id={captionId}>
       {children}
       <div className="flex w-full min-w-0 flex-col items-center gap-1 border-t border-white/[0.08] pt-3 text-center">
         <Tooltip>
@@ -288,7 +288,7 @@ function LightboxCanvas({
   captionId: string;
 }) {
   return (
-    <div className="relative z-10 flex min-h-0 flex-1 flex-col pointer-events-none">
+    <div className="relative z-(--layer-sticky) flex min-h-0 flex-1 flex-col pointer-events-none">
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-2 pt-2 sm:px-10">
         {slide.carousel ? <LightboxNavigation onPrevious={onPrevious} onNext={onNext} /> : null}
         <span className="flex min-h-0 max-h-full w-full min-w-0 flex-1 items-center justify-center"><LightboxImage failed={failed} src={slide.src} title={slide.displayTitle} onError={onImageError} /></span>
@@ -307,7 +307,7 @@ function LightboxBody({ open, items, activeIndex, failed, onOpenChange, onPrevio
   return (
     <>
       <LightboxAccessibleStatus slide={slide} itemCount={items.length} liveId={liveId} />
-      <button type="button" className={cn("absolute inset-0 z-0 cursor-pointer border-0 bg-transparent outline-none", "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/25")} aria-label="Dismiss preview" aria-describedby={`${captionId} ${liveId}`} onClick={() => onOpenChange(false)} />
+      <button type="button" className={cn("absolute inset-0 z-(--layer-base) cursor-pointer border-0 bg-transparent outline-none", "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/25")} aria-label="Dismiss preview" aria-describedby={`${captionId} ${liveId}`} onClick={() => onOpenChange(false)} />
       <LightboxCanvas slide={slide} items={items} failed={failed} onPrevious={onPrevious} onNext={onNext} onSelectIndex={onSelectIndex} onImageError={onImageError} captionId={captionId} />
     </>
   );
@@ -328,7 +328,7 @@ export const ImageAttachmentLightbox = memo(function ImageAttachmentLightbox({
   const liveId = useId();
   const { failed, setFailed, activeIndex, setActiveIndex, handleOpenChange, goPrev, goNext } = useLightboxControls(open, onOpenChange, items, initialIndex);
   const closeBtnClass = cn(
-    "absolute right-4 top-4 z-[70] flex size-11 items-center justify-center rounded-full",
+    "absolute right-4 top-4 z-(--layer-tooltip) flex size-11 items-center justify-center rounded-full",
     "border border-white/14 bg-black/45 text-white backdrop-blur-md",
     "shadow-lg shadow-black/40 transition-[background-color,border-color,opacity]",
     "hover:bg-black/60 hover:border-white/22",
@@ -351,7 +351,7 @@ export const ImageAttachmentLightbox = memo(function ImageAttachmentLightbox({
         <DialogPrimitive.Popup
           data-slot="image-attachment-lightbox-popup"
           className={cn(
-            "app-viewport-fixed fixed z-50 flex flex-col bg-transparent p-0 shadow-none ring-0 outline-none",
+            "app-viewport-fixed fixed z-(--layer-modal) flex flex-col bg-transparent p-0 shadow-none ring-0 outline-none",
             "data-open:animate-in data-open:fade-in-0",
             "data-closed:animate-out data-closed:fade-out-0",
           )}

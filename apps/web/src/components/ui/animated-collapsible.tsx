@@ -15,8 +15,7 @@ interface AnimatedCollapsibleProps {
 
 /**
  * Smooth height animation using CSS grid-template-rows.
- * Transitions between 0fr (collapsed) and 1fr (expanded) using an
- * ease-out cubic-bezier for a snappy, natural feel.
+ * Transitions between 0fr (collapsed) and 1fr (expanded) using the shared motion tokens.
  */
 export function AnimatedCollapsible({
   open,
@@ -27,7 +26,7 @@ export function AnimatedCollapsible({
   return (
     <div
       className={cn(
-        "grid transition-[grid-template-rows] duration-250 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none",
+        "grid transition-[grid-template-rows] duration-(--duration-standard) ease-(--ease-standard) motion-reduce:transition-none",
         open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         className,
       )}

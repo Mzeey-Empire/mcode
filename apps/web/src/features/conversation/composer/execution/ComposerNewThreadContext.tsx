@@ -36,7 +36,7 @@ export function ComposerNewThreadContext({
   return (
     <div
       data-testid="new-thread-context-strip"
-      className="relative z-0 mx-[14px] flex h-[40px] min-w-0 items-center gap-1 overflow-x-auto rounded-t-xl bg-hover/45 px-[16px] ring-1 ring-inset ring-border/60"
+      className="relative z-(--layer-base) mx-[14px] flex h-[40px] min-w-0 items-center gap-1 overflow-x-auto rounded-t-xl bg-hover/45 px-[16px] ring-1 ring-inset ring-border/60"
     >
       {activeWorkspace ? (
         <>

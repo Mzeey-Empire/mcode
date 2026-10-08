@@ -150,7 +150,7 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
       <div key={projectName ?? "projectless"} data-testid="new-thread-welcome" className="animate-fade-up-in flex w-full max-w-[80rem] flex-col items-center gap-7 text-center">
         <McodeLogo variant="newThread" markOnly />
-        <h1 aria-label={projectName ? `What should we build in ${projectName}?` : undefined} className="text-balance text-2xl font-medium tracking-[-0.025em] text-ink sm:text-[28px]">
+        <h1 aria-label={projectName ? `What should we build in ${projectName}?` : undefined} className="text-balance text-2xl font-medium tracking-[-0.025em] text-ink sm:text-2xl">
           {projectName ? (
             <>
               What should we build in{" "}
@@ -158,7 +158,7 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
                 placement="bottom"
                 triggerTooltip="Change project"
                 trigger={
-                  <Button type="button" variant="link" size="sm" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus/60 sm:!text-[28px]">
+                  <Button type="button" variant="link" size="sm" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus/60 sm:!text-2xl">
                     {projectName}<span className="text-ink">?</span>
                   </Button>
                 }
@@ -183,7 +183,7 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
 function NewThreadSurface({ state, onPromptSelect }: { state: ChatViewState; onPromptSelect: (text: string) => void }) {
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background">
-      {state.sidebarCollapsed && <div className="absolute left-2 top-2 z-10"><SidebarRevealButton /></div>}
+      {state.sidebarCollapsed && <div className="absolute left-2 top-2 z-(--layer-sticky)"><SidebarRevealButton /></div>}
       <NewThreadWelcome projectName={state.activeWorkspaceName || undefined} onPromptSelect={onPromptSelect} />
       <Composer isNewThread workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />
     </div>

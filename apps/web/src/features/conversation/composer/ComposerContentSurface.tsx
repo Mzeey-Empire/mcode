@@ -380,7 +380,7 @@ function ComposerAttachmentSurface({
         <RetryBanner threadId={model.threadId} />
       )}
       {model.isDragOver && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-primary/10 backdrop-blur-sm">
+        <div className="absolute inset-0 z-(--layer-sticky) flex items-center justify-center rounded-xl bg-primary/10 backdrop-blur-sm">
           <span className="text-sm font-medium text-primary">Drop files here</span>
         </div>
       )}
@@ -663,7 +663,7 @@ function ComposerInputSurface({
       ref={model.composerContainerRef}
       data-testid="composer-surface"
       className={cn(
-        "relative z-10 bg-transparent ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-primary/70",
+        "relative z-(--layer-sticky) bg-transparent ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-primary/70",
         model.isNewThread
           ? "-mt-px rounded-xl shadow-none"
           : "rounded-xl shadow-lg shadow-black/20",

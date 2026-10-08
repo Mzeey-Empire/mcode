@@ -79,8 +79,6 @@ export function MessageListOverlays({
           </div>
         </div>
       )}
-      {isLoadingMore && <PaginationIndicator placement="top" delayMs={300} />}
-      {isLoadingNewer && <PaginationIndicator placement="bottom" delayMs={300} />}
       {onSelectedTextComment && (
         <SelectedTextCommentControls
           key={renderedThreadId ?? "no-rendered-thread"}
@@ -102,6 +100,9 @@ export function MessageListOverlays({
           onOpenComment={onOpenSelectedTextCommentEditor}
         />
       )}
+      {/* Equal-layer indicators follow the markers so loading and sticky content stay above them. */}
+      {isLoadingMore && <PaginationIndicator placement="top" delayMs={300} />}
+      {isLoadingNewer && <PaginationIndicator placement="bottom" delayMs={300} />}
       {stickyPreview && (
         <StickyUserMessage
           key={stickyPreview}
@@ -140,7 +141,7 @@ function PaginationIndicator({ placement, delayMs = 0 }: { readonly placement: "
   const positionClass = placement === "top" ? "top-2" : "bottom-2";
   if (!visible) return null;
   return (
-    <div className={`absolute ${positionClass} left-1/2 z-10 -translate-x-1/2`}>
+    <div className={`absolute ${positionClass} left-1/2 z-(--layer-sticky) -translate-x-1/2`}>
       <div className="rounded-md border border-border/40 bg-background/80 px-2 py-1 backdrop-blur-sm">
         <Spinner size={16} className="text-muted/70" />
       </div>

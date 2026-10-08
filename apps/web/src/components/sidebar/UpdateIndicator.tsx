@@ -23,11 +23,11 @@ export function UpdateIndicator() {
     return (
       <div className="space-y-1.5 px-1.5 py-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-[11px] text-muted">
+          <span className="flex items-center gap-1.5 text-caption text-muted">
             <Spinner size={12} className="text-primary" />
             Downloading update
           </span>
-          <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink/45">
+          <span className="shrink-0 font-mono text-caption tabular-nums text-ink/45">
             {status.percent}%
           </span>
         </div>
@@ -62,10 +62,10 @@ export function UpdateIndicator() {
 
     return (
       <div className="flex items-center justify-between gap-2 px-1.5 py-1">
-        <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted">
+        <span className="flex min-w-0 items-center gap-1.5 text-caption text-muted">
           <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
           <span className="text-fade">Update available</span>
-          <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink/40">
+          <span className="shrink-0 font-mono text-caption tabular-nums text-ink/40">
             v{status.version}
           </span>
         </span>
@@ -73,14 +73,14 @@ export function UpdateIndicator() {
           <button
             onClick={() => void handleDownload()}
             disabled={busy}
-            className="rounded px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+            className="rounded px-1.5 py-0.5 text-caption font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
           >
             {busy ? "Downloading…" : "Download"}
           </button>
           <button
             onClick={dismiss}
             aria-label="Dismiss update notice"
-            className="rounded px-1 py-0.5 text-[11px] text-muted/60 transition-colors hover:text-ink"
+            className="rounded px-1 py-0.5 text-caption text-muted/60 transition-colors hover:text-ink"
           >
             ×
           </button>
@@ -107,7 +107,7 @@ export function UpdateIndicator() {
         disabled={busy}
         className="flex w-full items-center justify-between gap-2 rounded-md border border-primary/25 bg-primary/10 px-2 py-1.5 text-left transition-colors hover:bg-primary/15 disabled:opacity-60"
       >
-        <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-primary">
+        <span className="flex min-w-0 items-center gap-1.5 text-caption font-medium text-primary">
           {busy ? (
             <Spinner size={12} className="text-current" />
           ) : (
@@ -115,7 +115,7 @@ export function UpdateIndicator() {
           )}
           <span className="text-fade">{busy ? "Restarting…" : "Restart to update"}</span>
         </span>
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-primary/70">
+        <span className="shrink-0 font-mono text-caption tabular-nums text-primary/70">
           v{status.version}
         </span>
       </button>

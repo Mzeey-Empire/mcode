@@ -223,7 +223,7 @@ function DiffCellDraftAction({
       tabIndex={-1}
       aria-label={`Draft comment on ${lineLabel.toLowerCase()}`}
       className={cn(
-        "pointer-events-none absolute left-0.5 top-0.5 z-10 size-6 rounded-md bg-ink text-background opacity-0 shadow-none transition-opacity duration-100 hover:bg-ink hover:text-background dark:hover:bg-ink group-hover/cell:pointer-events-auto group-hover/cell:opacity-100 group-focus-within/cell:pointer-events-auto group-focus-within/cell:opacity-100 motion-reduce:transition-none",
+        "pointer-events-none absolute left-0.5 top-0.5 z-(--layer-sticky) size-6 rounded-md bg-ink text-background opacity-0 shadow-none transition-opacity duration-100 hover:bg-ink hover:text-background dark:hover:bg-ink group-hover/cell:pointer-events-auto group-hover/cell:opacity-100 group-focus-within/cell:pointer-events-auto group-focus-within/cell:opacity-100 motion-reduce:transition-none",
         active && "pointer-events-auto opacity-100",
       )}
       onClick={(event) => {

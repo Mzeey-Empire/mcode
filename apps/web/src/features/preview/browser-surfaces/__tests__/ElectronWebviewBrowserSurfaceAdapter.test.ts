@@ -121,7 +121,8 @@ describe("ElectronWebviewBrowserSurfaceAdapter", () => {
       canGoBack: vi.fn(() => true),
       canGoForward: vi.fn(() => false),
     });
-    adapter.present({ left: 10, top: 20, width: 640, height: 480, scale: 1.25, zIndex: 42, coveredLeft: 112 });
+    const zIndex = 42;
+    adapter.present({ left: 10, top: 20, width: 640, height: 480, scale: 1.25, zIndex, coveredLeft: 112 });
     expect(adapter.element.style.left).toBe("10px");
     expect(adapter.element.style.width).toBe("640px");
     expect(adapter.element.style.zIndex).toBe("42");
@@ -185,7 +186,8 @@ describe("ElectronWebviewBrowserSurfaceAdapter", () => {
       root,
       bridge: bridge(),
     });
-    adapter.present({ left: 10, top: 20, width: 640, height: 480, zIndex: 31 });
+    const zIndex = 31;
+    adapter.present({ left: 10, top: 20, width: 640, height: 480, zIndex });
 
     adapter.setControlled(true);
 

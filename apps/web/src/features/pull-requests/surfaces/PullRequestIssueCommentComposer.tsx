@@ -271,7 +271,7 @@ function PullRequestTimelineCommentComposer({
     <section
       aria-label="Add a comment"
       aria-busy={composer.submitting || undefined}
-      className="relative z-10 shrink-0 px-3 pb-3 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-gradient-to-t before:from-page before:to-transparent"
+      className="relative z-(--layer-sticky) shrink-0 px-3 pb-3 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-gradient-to-t before:from-page before:to-transparent"
     >
       <div className="mx-auto w-full max-w-5xl">
         <div className={composerShellClass}>

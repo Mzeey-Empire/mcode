@@ -50,7 +50,7 @@ export function PlanChrome({
               type="button"
               variant="outline"
               size="xs"
-              className="shrink-0 gap-1.5 font-mono text-[10px] uppercase tracking-[0.16em]"
+              className="shrink-0 gap-1.5 font-mono text-caption uppercase tracking-[0.16em]"
               aria-label={`Revision history: v${plan.version} of ${maxVersion}`}
             >
               v{plan.version}
@@ -62,7 +62,7 @@ export function PlanChrome({
           }
         />
         <PopoverContent align="start" className="w-72 p-0">
-          <div className="px-3 pt-3 pb-2 font-mono text-[9px] uppercase tracking-[0.18em] text-muted/45">
+          <div className="px-3 pt-3 pb-2 font-mono text-caption uppercase tracking-[0.18em] text-muted/45">
             Revision history
           </div>
           <div className="flex flex-col gap-0.5 px-1.5 pb-1.5">
@@ -85,27 +85,27 @@ export function PlanChrome({
                   <span className="flex items-center gap-2.5">
                     <span
                       className={cn(
-                        "font-mono text-[11px] tabular-nums",
+                        "font-mono text-caption tabular-nums",
                         isActive ? "text-primary" : "text-ink",
                       )}
                     >
                       v{p.version}
                     </span>
-                    <span className="font-mono text-[10px] tabular-nums text-muted/70">
+                    <span className="font-mono text-caption tabular-nums text-muted/70">
                       {formatRelative(p.createdAt)}
                     </span>
                     {isLatest ? (
-                      <span className="ml-auto rounded-full bg-primary/12 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.16em] text-primary">
+                      <span className="ml-auto rounded-full bg-primary/12 px-1.5 py-0.5 font-mono text-caption uppercase tracking-[0.16em] text-primary">
                         latest
                       </span>
                     ) : (
-                      <span className="ml-auto font-mono text-[8px] uppercase tracking-[0.16em] text-muted/45">
+                      <span className="ml-auto font-mono text-caption uppercase tracking-[0.16em] text-muted/45">
                         {p.status}
                       </span>
                     )}
                   </span>
                   {p.changeSummary && (
-                    <span className="text-[11px] leading-relaxed text-muted/80">{p.changeSummary}</span>
+                    <span className="text-caption leading-relaxed text-muted/80">{p.changeSummary}</span>
                   )}
                 </Button>
               );
@@ -118,7 +118,7 @@ export function PlanChrome({
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="min-w-0 text-fade text-[11px] leading-snug text-muted">
+              <span className="min-w-0 text-fade text-caption text-muted">
                 {plan.changeSummary}
               </span>
             }
@@ -140,7 +140,7 @@ export function PlanChrome({
                 size="xs"
                 onClick={onRevise}
                 className={cn(
-                  "font-mono text-[10px] uppercase tracking-[0.16em]",
+                  "font-mono text-caption uppercase tracking-[0.16em]",
                   hasFeedback && "text-ink",
                 )}
               >
@@ -163,7 +163,7 @@ export function PlanChrome({
                 variant="default"
                 size="xs"
                 onClick={onImplement}
-                className="font-mono text-[10px] uppercase tracking-[0.16em]"
+                className="font-mono text-caption uppercase tracking-[0.16em]"
               >
                 Implement
               </Button>

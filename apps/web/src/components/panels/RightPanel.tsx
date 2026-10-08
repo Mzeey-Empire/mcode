@@ -811,7 +811,7 @@ function TerminalPanelContent({ active }: { readonly active: boolean }) {
   return (
     <div
       className={cn(
-        "absolute inset-0 z-0 flex min-h-0 flex-row overflow-hidden",
+        "absolute inset-0 z-(--layer-base) flex min-h-0 flex-row overflow-hidden",
         !active && "pointer-events-none opacity-0",
       )}
       inert={!active ? true : undefined}

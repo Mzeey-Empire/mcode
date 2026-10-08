@@ -22,7 +22,7 @@ export function Kbd({
       className={cn(
         variant === "keycap"
           ? "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-sm border border-current/22 bg-current/6 px-1 font-mono text-caption text-current"
-          : "inline-flex items-center px-1 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.16em] rounded-sm",
+          : "inline-flex items-center px-1 py-0.5 font-mono text-caption uppercase tracking-[0.16em] rounded-sm",
         variant === "inline" &&
           // currentColor-derived border so the chip stays legible inside colored buttons.
           // The `border-current/30` syntax uses Tailwind 4's color-mix with currentColor.

@@ -101,7 +101,7 @@ export default function DiffPreviewMarkdown({
         "[&_[data-diff-added]:not(:has([data-diff-added]))]:pl-3",
         // Basic typographic defaults for unstyled tags.
         "[&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4",
-        "[&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:mt-4",
+        "[&_h2]:text-label [&_h2]:font-semibold [&_h2]:mt-4",
         "[&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-3",
         "[&_p]:leading-relaxed",
         "[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5",

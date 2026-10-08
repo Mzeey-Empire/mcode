@@ -89,12 +89,13 @@ describe("BrowserSurfaceHostRoot", () => {
     browserSurfaceHost.create(IDENTITY, {
       address: "https://example.test/controlled",
     });
+    const zIndex = 31;
     browserSurfaceHost.present(IDENTITY, {
       left: 10,
       top: 20,
       width: 640,
       height: 480,
-      zIndex: 31,
+      zIndex,
     });
 
     const frame = screen.getByTestId("web-runtime-preview-iframe");

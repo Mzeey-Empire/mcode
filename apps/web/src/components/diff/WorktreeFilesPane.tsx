@@ -114,7 +114,7 @@ export function WorktreeFilesPane({
     >
       {loading ? (
         <div className="flex flex-1 items-center justify-center" role="status">
-          <span className="font-mono text-[1.05rem] uppercase tracking-[0.18em] text-muted/50">
+          <span className="font-mono text-caption uppercase tracking-[0.18em] text-muted/50">
             Loading files
           </span>
         </div>
@@ -127,7 +127,7 @@ export function WorktreeFilesPane({
           <span aria-hidden className="font-mono text-2xl text-muted/15">
             ⊘
           </span>
-          <p className="font-mono text-[1.05rem] uppercase tracking-[0.18em] text-muted/40">
+          <p className="font-mono text-caption uppercase tracking-[0.18em] text-muted/40">
             {files.length === 0 ? "No changed files" : "No matching files"}
           </p>
         </div>

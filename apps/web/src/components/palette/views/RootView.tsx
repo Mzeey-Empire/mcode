@@ -159,7 +159,7 @@ export function RootView() {
   };
 
   const footer = (
-    <div className="flex items-center justify-between gap-3 border-t border-border/50 px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted/70">
+    <div className="flex items-center justify-between gap-3 border-t border-border/50 px-3 py-1.5 font-mono text-caption uppercase tracking-[0.14em] text-muted/70">
       <div className="flex items-center gap-3">
         <span>
           <Kbd>&gt;</Kbd> <span className="ml-1">Actions only</span>

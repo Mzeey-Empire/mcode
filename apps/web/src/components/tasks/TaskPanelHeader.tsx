@@ -92,7 +92,7 @@ export function TaskPanelHeader({ tasks }: TaskPanelHeaderProps) {
 
         {/* Fraction counter — typographic ratio with a soft slash */}
         <span
-          className={`shrink-0 font-mono tabular-nums text-[10.5px] leading-none transition-colors duration-300 ${
+          className={`shrink-0 font-mono tabular-nums text-caption transition-colors duration-300 ${
             hasActive
               ? "text-primary/85"
               : allDone

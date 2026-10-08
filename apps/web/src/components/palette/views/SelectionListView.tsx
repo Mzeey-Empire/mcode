@@ -20,7 +20,7 @@ export function SelectionListView({ view }: Props) {
             key={item.id}
             value={item.id}
             onSelect={() => view.onPick(item.id)}
-            className="px-3 py-2 text-[13px]"
+            className="px-3 py-2 text-body-small"
           >
             {item.title}
           </CommandItem>

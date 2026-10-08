@@ -22,7 +22,7 @@ function taskRowClass(status: TaskItemType["status"]): string {
       : status === "in_progress"
         ? "text-ink/95"
         : "text-ink/60";
-  return `flex items-start gap-2.5 px-3 py-[7px] text-[11.5px] leading-[1.5] transition-colors duration-150 ${background} ${text}`;
+  return `flex items-start gap-2.5 px-3 py-[7px] text-caption transition-colors duration-150 ${background} ${text}`;
 }
 
 function TaskStatusMark({ status }: { status: TaskItemType["status"] }) {
