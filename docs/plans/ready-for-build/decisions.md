@@ -66,6 +66,7 @@ These tickets carry the "needs decision" flag in `tickets.md`.
 | E6 | Keep refilling the composer when Stop lands before the provider starts? | Yes. |
 | E7 | 04f shows "· 412 packages" after `bun install`. Intended progress text? | No; show the step name and time only. |
 | E8 | Copy button for the worktree path: overview row only, trail step shows a tooltip? | Yes. |
+| E9 | "Implement in a new thread" continues the plan in the same checkout. Should that new thread skip automatic Setup (the locked rule says an Existing worktree start runs Setup)? | Yes, like branched threads today; only the server can request this skip (reason `plan-implement`). |
 
 ## Running turn (05)
 
@@ -90,6 +91,7 @@ These tickets carry the "needs decision" flag in `tickets.md`.
 | P5 | Codex can send several files in one edit request. | List the files in the dock; each opens in the diff dialog. |
 | P6 | Cursor on Windows is locked to Full access by an outdated comment. Test and unlock Manual? | Yes, in S06-06. |
 | P7 | A way to clear session approvals? | Not now. |
+| P8 | After a crash, Mcode may not know whether a deny note already reached the provider. Send it again automatically, or ask? | Ask. The note shows as "Delivery unknown" with Send again and Remove; Mcode never re-sends it on its own. |
 
 ## Plan mode (07)
 
@@ -103,6 +105,7 @@ These tickets carry the "needs decision" flag in `tickets.md`.
 | L6 | Undo for Resolve? | Undo toast. |
 | L7 | Plan rail icon: document (10a, 12a) or list (12f, code)? | Document. |
 | L8 | Add CodeMirror 6 for the live-preview editor? | Yes. |
+| L9 | Can a superseded plan version be implemented? | No. Draft and ready versions can, including the ready version a user edit forked from. |
 
 ## Finished turn (08)
 
@@ -145,7 +148,7 @@ These tickets carry the "needs decision" flag in `tickets.md`.
 |---|---|---|
 | T1 | Action terminals run the script, then an interactive shell (the command is not typed into the shell). Two consequences: the command is not in shell history, and a `cd` or `export` in the script does not carry into the shell afterwards. OK? | Yes. |
 | T2 | Terminal cap of 8 records per scope (running and exited, shells and actions together)? | Yes. |
-| T3 | When is a startup action "ready" so the first turn can start? Mcode cannot tell `bun install` (finishes) from `bun test --watch` (never finishes) by looking at it. | Ready on exit 0, or on a port detected from the current run, whichever comes first. A long-running action with no port would hold the first turn, so add an explicit per-action "Keeps running" toggle that marks it ready once started. Needs the user's yes before S12T-11. |
+| T3 | Startup actions are awaited until they exit 0 (S12T-11 builds this). A dev server never exits, so it cannot be a startup action under that rule. Add a per-action "Keeps running" toggle that starts the action and does not wait for it? | Yes, as a follow-up ticket after S12T-11, defined when you answer. A listening port never counts as ready, because another process can answer on it. |
 | T4 | "watch" in overview rows: sample text? | Yes, sample text. |
 | T5 | In repo setup commands need approving once after the upgrade. | Accept. |
 | T6 | Per-action "Forget approval" replaces "Clear shared command approvals". | Yes. |

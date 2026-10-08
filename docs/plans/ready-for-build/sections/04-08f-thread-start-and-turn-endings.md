@@ -203,7 +203,7 @@ From `source/screen-pass-todo.md` and `source/implementation-notes.md`. Do not r
 | Setup failed and needs approval inline | In-chat card and an approval dialog | Trail states with Retry setup, Skip setup, Show output, and amber Run setup | web, server (block detail) |
 | Fetch failed, worktree failed, thread didn't start | Generic `CollapsibleError` or card text | Trail states with the raw error line and phase actions | server (error detail), web |
 | Cancelled startup | "Start over" and "Keep thread" in the card | Trail "Cancelled" with Edit message and Keep thread | web |
-| Existing worktree runs setup | Kind direct, setup unavailable | Kind `attached-worktree` with a setup phase. Skips while a sibling thread is live | contracts, server |
+| Existing worktree runs setup | Kind direct, setup unavailable | Kind `attached-worktree` with a setup phase. Skips while a sibling thread is live, and for a branch or Implement in a new thread in the same checkout | contracts, server |
 | Setup runs startup actions | Single setup script | S12T-11 makes the S12 action runner the only executor; the trail projects its frozen action and run ids (section E) | contracts, server, web (S12T-11) |
 | Esc or Stop cancels startup | Card Cancel only. Agent-phase cancel only records intent | Composer Stop and Esc call cancel. Agent phase stops the dispatched turn | server, web |
 | No queueing during startup | Composer can queue (inferred). Gate queue accepts many | Composer starting state: editor inert, Send hidden, Stop live | web |
@@ -253,7 +253,7 @@ export const ThreadStartupStepDetailSchema = lazySchema(() => z.discriminatedUni
     /** Exit code of the command that failed the setup step. */
     exitCode: z.number().int().optional(),
     skipReason: z.enum(["not-configured", "thread-running-here", "user-skipped"]).optional(),
-    // S12T-11 adds `actions` (section E). Script text never enters the record.
+    // S07-08 adds "plan-implement" (section D). S12T-11 adds `actions` (section E). Script text never enters the record.
   }).strict(),
 ]));
 
@@ -342,12 +342,18 @@ providerStartedAt: CanonicalTimestampSchema.nullable(),
 
 ### D. Existing worktree runs setup (S04-07)
 
+The one Setup rule for a new thread, shared with S07-08: a thread whose checkout is a worktree, managed or attached, runs Setup before its first turn, unless the start continues another thread in the same checkout or another thread is live in that worktree. Attachment alone never bypasses Setup.
+
 - The coordinator chooses the kind as: `existingWorktreePath ? "attached-worktree" : mode === "worktree" ? "managed-worktree" : "direct"`. This replaces `thread-creation-coordinator.ts:431-433`. The worktree step uses `mode: "opened"` with no duration.
 - Setup eligibility becomes "the thread runs in a worktree": `mode === "worktree" && worktree_path != null`, managed or attached. Change it in `requireAutomaticSetupThread` (`workspace-environment-service.ts:1147-1164`) and `admitInitialAutomaticTurn` (`turn-admission-dispatch-coordinator.ts:348`). Leave cleanup ownership keyed by `worktree_managed` as it is.
+- Continuation skip. The coordinator decides it before the gate, so the first turn never queues behind Setup. It skips the startup's setup step and returns a `dispatch` result without calling `admitInitialAutomaticTurn`, which is what the branched path does today (`provisionBranchedInitialTurn` and `finishBranchedStartup`, `thread-creation-coordinator.ts:581-614,664-671`). Two starts qualify:
+  - A branched thread, as today. `finishBranchedStartup` skips only the managed kind today; from S04-01 it skips the setup step for both worktree kinds.
+  - A new thread opened by "Implement vN in a new thread" (S07-08), with `skipReason: "plan-implement"`. It continues its source thread in the source's own checkout, the same way Implement in this thread runs no Setup. Only `PlanService` can request it, through a server-only option on the `createAndSend` port that the coordinator verifies against the source thread's `worktree_path`; 07 Implement step 5 has the details. The live-sibling check below does not cover this case: Implement refuses while the source has an unfinished execution, so the source is never live when the new thread starts.
 - Live-sibling check: before setup starts, the environment service asks for another non-deleted thread with the same normalized `worktree_path` whose runtime phase is running or finalizing, or whose startup is nonterminal.
   - If one exists, skip setup with `skipReason: "thread-running-here"` and release the gate as not required.
   - Serialize the check and the setup launch per worktree path, so two simultaneous starts cannot both run setup (inferred risk, see Risks).
-- This ticket changes which threads get a setup step, not what runs in it. S04-07 lands on the single-script executor; S12T-11 later swaps the executor and keeps this eligibility and the sibling skip unchanged.
+- The locked decision "Existing worktree runs setup on every thread start" governs threads the user starts in the composer's Existing worktree mode. The continuation skip extends the existing branch behavior to Implement in a new thread; open question 13 asks the user to confirm it.
+- This ticket changes which threads get a setup step, not what runs in it. S04-07 lands on the single-script executor; S12T-11 later swaps the executor and keeps this eligibility and both skips unchanged.
 - Docs: rewrite `docs/internals/projects/environment.md:40-82`. It currently says automatic setup is for a "managed New worktree" and manual setup runs in an "unmanaged existing worktree".
 
 ### E. The setup step projects startup actions (S12T-11)
@@ -370,7 +376,7 @@ export const ThreadStartupActionSchema = lazySchema(() => z.object({
 ```
 
 - Bounds. Action ids use the document's id schema, and the count uses `WORKSPACE_ENVIRONMENT_STARTUP_ACTIONS_MAX`, the same constant the document validation enforces (12a Backend E). The record holds no script text, so every configuration the document accepts fits the record, whatever its script sizes.
-- `outcome` holds what only the runner knows: whether an action is ready (exit 0 or a port from its current run), still running, failed, or skipped by Retry. Run status, times, terminal id and command text come from the run record. The step-level `exitCode` (section A) is the failed action's exit code.
+- `outcome` holds what only the runner knows: whether an action is ready (its current run exited 0), still running, failed, or skipped by Retry. Run status, times, terminal id and command text come from the run record. The step-level `exitCode` (section A) is the failed action's exit code.
 - Only the runner writes `actions`, in the same step that changes the attempt. The attempt keeps no second copy of the list.
 
 Trail projection after S12T-11:
@@ -380,9 +386,9 @@ Trail projection after S12T-11:
 3. Tail: `ThreadStartup.transcript`, unchanged in shape and bounded by the locked 32-entry, 16KB caps. The runner writes each startup run's command-phase output into it as plain text (12a Backend F). The trail renders it read-only and never as a second terminal.
 4. Open terminal focuses the Terminal tab on the `terminalSessionId` of the running entry, else the failed one. It is hidden when that terminal was closed (`terminalSessionId: null`). It replaces `openAutomaticSetupTerminal`.
 5. Edit script opens Project settings (S12T-13 deep-links it to Actions).
-6. Setup failed shows "exit N · m:ss" from the step's `exitCode` and duration, with the block `detail` line. Retry setup calls `retryAutomaticSetup`. It reruns from the first failed action and skips actions that succeeded earlier in this startup, unless their script hash changed or a port-ready action has since exited. Skip setup calls `continueAutomaticSetup`; actions still running keep running.
+6. Setup failed shows "exit N · m:ss" from the step's `exitCode` and duration, with the block `detail` line. Retry setup calls `retryAutomaticSetup`. It reruns from the first failed action and skips actions that exited 0 earlier in this startup, unless their script hash changed. Skip setup calls `continueAutomaticSetup`; actions still running keep running.
 7. Setup needs approval names the pending entry's command. Run setup approves that run's `snapshot.approval` fingerprint and starts it, the same calls as the terminal's approval card (S12T-07); the runner then continues. Each shared action asks once, in order.
-8. Readiness default (decision T3): an action is ready on exit 0 or on a port from its current run, whichever comes first. A long-running action that prints no reachable URL, such as `bun test --watch`, keeps the step at Running setup until it exits or the user picks Skip setup. T3 is open with the user; the trail needs no change if the proposed "Keeps running" toggle is approved.
+8. Readiness (12a Backend F): an action is ready only when its current run exits 0. A detected port is a display fact for the Browser and the terminal, never Setup readiness. An action that never exits, such as `bun run dev` or `bun test --watch`, keeps the step at Running setup until it exits or the user picks Skip setup. Whether a per-action "Keeps running" toggle follows is decision T3; S12T-11 builds none of it.
 9. Which threads get a setup step stays section D's decision; the runner takes a `threadId` and does not decide.
 
 S12T-11 also removes the trail's pre-switch reads of the gate snapshot and its `openAutomaticSetupTerminal` call.
@@ -742,7 +748,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - Contracts: section A.
   - Server:
     - `thread-startup-state-store.ts`: stamps times in `advance`, `complete`, `skip`, `fail`, `block`, `resume`, `cancel`, `markCancelled` and `interruptBatch`.
-    - Coordinator: the kind choice at `:431-433`, PR fetch moved from `:283-286` into the `fetch` phase, worktree detail in `managedLifecycle` (`:410-421`) and `createStandaloneThread` (`:298-315`), and `failStartup` (`:474-484`) gaining `detail` from the thrown error.
+    - Coordinator: the kind choice at `:431-433`, PR fetch moved from `:283-286` into the `fetch` phase, worktree detail in `managedLifecycle` (`:410-421`) and `createStandaloneThread` (`:298-315`), and `failStartup` (`:474-484`) gaining `detail` from the thrown error. `finishBranchedStartup` (`:664-671`) skips the setup step for both worktree kinds, so a branch into an existing worktree keeps skipping setup.
     - Environment service: writes setup `exitCode` and `skipReason`, and passes block `detail` from `blockStartupSetup` (`:1491-1495`) as the transcript's last non-empty line. No script text goes into the record.
   - Contracts: the record's `steps` bound becomes 5.
 - **Deletes:** none.
@@ -750,6 +756,7 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
   - [ ] A managed worktree start records `thread, worktree, setup, agent` with increasing `startedAt` and with `endedAt` on finished steps.
   - [ ] A PR start records a `fetch` step with `pullRequestNumber` and `branch`.
   - [ ] An existing worktree start has kind `attached-worktree` and worktree detail `mode: "opened"`.
+  - [ ] A branched start into an existing worktree records its setup step as skipped and dispatches its first turn.
   - [ ] A failed git fetch writes `error.detail` with the git stderr line, for example "fatal: Could not resolve host: github.com".
   - [ ] Retry setup resets the setup step's `startedAt` and clears `endedAt`.
   - [ ] Old records without the new fields still parse and replay.
@@ -881,16 +888,18 @@ Startup tickets are S04-NN and turn-ending tickets are S08F-NN. External depende
 
 - **Blocked by:** S04-01 Startup record v2: step times, step details, fetch phase, attached-worktree kind; S04-04 Trail decisions and failures replace the in-chat setup card.
 - **Boards:** `04d · Thread starting · Existing worktree · Dark` (`2AMW-2`), `04f` state 11 (`2BW7-2`)
-- **Delivers:** Starting a thread in an existing worktree shows "Opened worktree mcode-9c1d" and runs setup. If another thread in that worktree is running, or is itself starting, setup shows "Skipped setup · thread running here" and the thread starts right away.
-- **Build notes:** Section D. The eligibility change touches `workspace-environment-service.ts:1147-1164` and `turn-admission-dispatch-coordinator.ts:348`. Add the occupancy check with per-path serialization. Rewrite the setup gate text in `docs/internals/projects/environment.md`. This runs on the single-script executor; S12T-11 swaps the executor later and must keep this eligibility and skip rule.
+- **Delivers:** Starting a thread in an existing worktree shows "Opened worktree mcode-9c1d" and runs setup. If another thread in that worktree is running, or is itself starting, setup shows "Skipped setup · thread running here" and the thread starts right away. A thread that continues another thread in the same checkout (a branch today, Implement in a new thread once S07-08 lands) skips setup without waiting.
+- **Build notes:** Section D, which holds the one Setup rule S07-08 also follows. The eligibility change touches `workspace-environment-service.ts:1147-1164` and `turn-admission-dispatch-coordinator.ts:348`. Add the occupancy check with per-path serialization. Keep the coordinator's continuation skip ahead of the gate for branched starts; S07-08 adds the Implement case and its `plan-implement` reason. Rewrite the setup gate text in `docs/internals/projects/environment.md`, including both skips. This runs on the single-script executor; S12T-11 swaps the executor later and must keep this eligibility and both skips.
 - **Deletes:** none (the behavior change and the docs rewrite).
 - **Acceptance criteria:**
   - [ ] An attached-worktree thread queues its first prompt behind setup, exactly as a managed worktree does.
   - [ ] A running sibling turn produces `skipReason: "thread-running-here"` with no setup process launched.
   - [ ] Two starts in the same worktree run setup at most once.
+  - [ ] A branched start into an existing worktree never calls `admitInitialAutomaticTurn` and its first turn is dispatched, not queued.
+  - [ ] Stop during an attached worktree's setup cancels the startup, and the worktree is never removed.
   - [ ] Cleanup of attached worktrees is unchanged: the worktree is never removed.
 - **Verify:**
-  - Unit: `workspace-environment-automatic-setup.test.ts` covering an attached thread and a busy sibling.
+  - Unit: `workspace-environment-automatic-setup.test.ts` covering an attached thread and a busy sibling; `thread-creation-startup.test.ts` covering the branched skip into an attached worktree.
   - Live: in the fixture repo, start thread A in New worktree and let it run a long turn. Start thread B in Existing worktree on A's worktree and confirm Skipped setup. After A finishes, start thread C there and confirm setup runs.
 
 ### S04-08 Setup step runs startup actions (the switch) (merged)
@@ -1150,7 +1159,8 @@ Product calls for the user:
 9. **Section 12 copy.** Decided (T10): the Run on startup hint reads "When a thread starts in a worktree"; S12T-13 uses it.
 10. **Devin `tool_rejected`.** It still maps to interrupted. It is likely a user denial, which reads better as stopped. Needs a Devin trace to decide (Devin owner).
 11. **Mcode stop copy** (designer). "Stopped by Mcode" with "Mcode couldn't answer an approval request", and "Stopped by another thread", are not drawn. They reuse the quiet "You stopped" style with no action. S06's receipt names the request that failed.
-12. **Startup readiness, T3** (user, before S12T-11). Default: ready on exit 0 or a port from the current run. A no-port watcher marked Run on startup holds the first turn until Skip setup; the proposed "Keeps running" toggle would fix that explicitly (12a Risks).
+12. **Startup readiness, T3** (user). S12T-11 awaits each startup action until it exits 0, so a dev server or watcher marked Run on startup holds the first turn until Skip setup. Whether a "Keeps running" toggle follows as its own ticket is decision T3 (12a Risks).
+13. **Setup for Implement in a new thread.** The new thread continues its source in the same checkout, so it skips Setup like a branched thread (section D), even though no other thread is live there. The alternative runs Setup and holds the durable Implement request, the source thread's reservation and its plan edits through Setup approval, retry and skip, for as long as Setup takes. Recommended: skip. Decides: user (confirm).
 
 Facts to check while building:
 

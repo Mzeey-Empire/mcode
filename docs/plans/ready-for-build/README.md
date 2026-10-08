@@ -31,7 +31,7 @@ To change a dependency, edit `tools/graph.json`, then run `node tools/graph.mjs 
 Ledger commands, run from this folder:
 
 - `node tools/graph.mjs ledger` fails when a ledger row lacks exactly one active owning ticket or a runnable proof command.
-- `node tools/graph.mjs ledger-run <ticket>` runs that ticket's `rg` proofs against the repo and fails on any hit. Before a ticket starts, it lists what the ticket must delete. After the ticket, it must pass.
+- `node tools/graph.mjs ledger-run <ticket>` runs every proof that ticket owns, without a shell: an `rg` proof passes when it prints nothing, a `bun`, `node` or `git` proof passes on exit 0. It prints pass, fail, error and skip counts and exits non-zero on anything but a full pass. Before a ticket starts, it lists what the ticket must delete. After the ticket, it must pass. `--rg-only` skips the test proofs and says so.
 
 ## Paper
 
@@ -65,7 +65,7 @@ Every ticket names its boards by name and node id, for example `05a Â· Running Â
 3. Branch from `main`. One ticket, one PR, Conventional Commits.
 4. Build the vertical slice: contract, server, adapter decisions, web, desktop where it applies, tests.
 5. Delete what the ticket owns in the ledgers and run `node docs/plans/ready-for-build/tools/graph.mjs ledger-run <ticket>`.
-6. Verify with the smallest proof: `bun run --cwd <workspace> test -- <files>` and targeted lint and typecheck for the changed scope (AGENTS.md "Verifying"; CI owns the full suite). For UI, run the live check named in the ticket on the Electron app with the live-testing harness (`.agents/skills/electorn-live-testing/SKILL.md`).
+6. Verify with the smallest proof: `bun run --cwd <workspace> test -- <files>` plus `bun run lint` (oxlint, fast, and the only place lint rules are configured) and `bun run --cwd <workspace> typecheck` for each workspace the ticket touches (AGENTS.md "Verifying"; CI owns the full suite). For UI, run the live check named in the ticket on the Electron app with the live-testing harness (`.agents/skills/electorn-live-testing/SKILL.md`).
 7. Open the PR with `.github/pull_request_template.md`. UI changes need before and after screenshots or video from the harness, attached to the PR.
 
 Live checks stay inside AGENTS.md's boundaries. Product and runtime tests touch only `.dev/fixture-repo` (and, where a ticket says so, a second fixture workspace it creates under `.dev` and removes afterwards). Never sign a provider out, install or update a CLI globally, or write global config; use an isolated provider home and a scratch install prefix. Evidence from a captured provider trace is labelled as such; a provider that is unavailable on the machine is reported as pending, not passed.

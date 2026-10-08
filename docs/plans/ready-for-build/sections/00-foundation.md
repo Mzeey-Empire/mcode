@@ -274,7 +274,7 @@ Foundation-shaped retirements that a section ticket owns live in that section's 
 | `line-clamp-*` ellipsis | `ui/select.tsx:52`, `Toast.tsx:59`, `ImageAttachmentLightbox.tsx:208`, `CoordinationPanel.tsx:236`, `StickyUserMessage.tsx:146`, `SelectedTextCommentsComposerAttachment.tsx:75` | `.text-fade-lines-*` | F-02 | `rg -n "\bline-clamp-" apps/web/src -g '*.{ts,tsx}' -g '!*.test.*' -g '!**/__tests__/**'` |
 | Ad-hoc horizontal fade masks | `ComposerAddMenu.tsx:46` (1.5rem), `SlashCommandPopup.tsx:238-239` (2.5rem), `ThreadOverview.tsx:1597` (1.25rem, left edge), `ProjectTree.tsx:2601` (1.5rem on hover) | `.text-fade`, `PathText` | F-02 | `rg -n "(maskImage\|mask-image)[^,]*to[ _]right" apps/web/src -g '!*.css' -g '!**/components/ui/**' -g '!*.test.*' -g '!**/__tests__/**'`. Vertical scroll fades (`MessageList.tsx:486`) and the overview ring mask are not text truncation and stay. |
 | rtl ellipsis path trick, code-side path cutting | `features/projects/PathLabel.tsx:17,42`, `chat/WorktreePicker.tsx:127` (`truncatePath`) | `PathText` | F-02 | `rg -n "truncatePath\|direction:\s*\"?rtl" apps/web/src -g '!*.test.*' -g '!**/__tests__/**'` |
-| Button size aliases `xs`, `sm`, `icon-xs`, `icon-sm`, `icon`, `md`, `lg`, `icon-md`, `icon-lg` | `button.tsx:25-35`; 363 call sites | `compact`, `default`, `comfortable` and their icon-only boxes | F-03 | `rg -n "^\s+\"?(xs\|sm\|md\|lg\|icon\|icon-(xs\|sm\|md\|lg))\"?:" apps/web/src/components/ui -g 'button.tsx'`, then `bun run typecheck` proves no call site still passes a removed size |
+| Button size aliases `xs`, `sm`, `icon-xs`, `icon-sm`, `icon`, `md`, `lg`, `icon-md`, `icon-lg` | `button.tsx:25-35`; 363 call sites | `compact`, `default`, `comfortable` and their icon-only boxes | F-03 | `rg -n "^\s+\"?(xs\|sm\|md\|lg\|icon\|icon-(xs\|sm\|md\|lg))\"?:" apps/web/src/components/ui -g 'button.tsx'`, then `bun run --cwd apps/web typecheck` proves no call site still passes a removed size |
 | Destructive tint on Button | `button.tsx:20-21` | filled destructive | F-03 | `rg -n "bg-destructive/10" apps/web/src/components/ui -g 'button.tsx'` |
 | Translate press and 3px focus glow outside the form controls | `translate-y-px`: `button.tsx:9`, `ThreadOverview.tsx:230`, `SidebarRevealButton.tsx:77`; `ring-3`: `button.tsx:9`, `TerminalSection.tsx:37`, `ProjectEnvironmentPanel.tsx:97`, `SelectedTextCommentsComposerAttachment.tsx:257,486` | 2px inset press ring, 2px focus ring with 2px offset | F-03 | `rg -n "translate-y-px\|\bring-3\b" apps/web/src -g '!**/components/ui/{input,textarea,checkbox,select,switch}.tsx' -g '!*.test.*' -g '!**/__tests__/**'` |
 | PR-specific split button | `chat/PrSplitButton.tsx` | `SplitButton` | F-03 | `rg -n "PrSplitButton" apps/web/src -g '!*.test.*' -g '!**/__tests__/**'` |
@@ -368,7 +368,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-01b` passes.
   - [ ] Typecheck, lint and web tests pass.
   - [ ] Screenshot diff of the four F-01a surfaces shows no change (rename only).
-- **Verify:** `bun run --cwd apps/web test`, `bun run typecheck`, `bun run lint`; live screenshots compared with F-01a's.
+- **Verify:** `bun run --cwd apps/web test`, `bun run --cwd apps/web typecheck`, `bun run lint`; live screenshots compared with F-01a's.
 
 ### F-02 Fade truncation primitive
 
@@ -395,7 +395,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
   - [ ] All six variants render Paper's six states in both themes.
   - [ ] Round button: selected fill at rest, control-border fill with `aria-pressed="true"`, accessible name and tooltip required (type-level: `aria-label` is a required prop for icon-only).
   - [ ] Loading keeps width and blocks repeat clicks.
-  - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-03` passes and `bun run typecheck` passes.
+  - [ ] `node docs/plans/ready-for-build/tools/graph.mjs ledger-run F-03` passes and `bun run --cwd apps/web typecheck` passes.
 - **Verify:** `components/ui/__tests__/button.test.tsx`: loading blocks a second click; split button keyboard order (action, then chevron opens the menu). Live: Review panel header, sidebar header ghost buttons, a dialog's primary and destructive pair, both themes.
 
 ### F-04a Menu primitive
@@ -619,7 +619,7 @@ Section authors referenced F-01 to F-07. F-01, F-04 and F-07 are now split; a re
 - **Build notes:**
   1. Run `node docs/plans/ready-for-build/tools/graph.mjs ledger` (every row in every section has one active owner and a runnable proof), then `node docs/plans/ready-for-build/tools/graph.mjs ledger-run` with no ticket argument, which runs every `rg` proof in every section.
   2. Investigate each FAIL before touching code. A leftover the owning ticket should have removed is a bug against that ticket: fix it here when the fix is the deletion the ledger row already names, otherwise reopen the owner. A hit on a name the design keeps on purpose means the proof is too broad: narrow the proof in its section doc and leave the code alone.
-  3. Run the non-`rg` proofs the ledgers name, because `ledger-run` executes only `rg`: `bun run lint`, `bun run typecheck`, and each named `bun run --cwd <workspace> test -- <file>` command.
+  3. `ledger-run` executes every declared proof, `rg` searches and named `bun` commands alike, and prints pass, fail, error and skip counts. Treat any failure, error or skip as unfinished work.
   4. Configure knip, a root devDependency with no config today (`package.json:27,53`): a `knip.json` with workspaces (`apps/*`, `packages/*`), entry points (web `src/main.tsx`, desktop main and preload, server entry) and ignores for generated files. Run `bun run lint:deadcode`. A finding that matches a ledger row is handled as in step 2. Anything else predates this program or sits outside it: do not delete it here. Record it in knip's ignore list with a one-line reason and list it in one follow-up issue.
   5. Add `bun run lint:deadcode` to the `lint` job in `.github/workflows/ci.yml` (beside `bun run lint`, `ci.yml:101`), so new dead code fails CI from now on.
 - **Deletes:** Nothing of its own. Leftovers found in steps 1 to 3 are deleted under the ledger row that already names them.

@@ -267,9 +267,10 @@ Each ticket adds its own migration with the next free number (README rule); 0069
 - **Agent versions** stay on the canonical path (`accepted-feature-observations.ts:365-390`).
   - Change: supersede both `draft` and `ready` predecessors, never `accepted`.
   - Set `author`, `providerId`, `captureSource`, and the server-only native file ref from the capture event.
+  - A user fork does not supersede its base. While a user draft exists, the `ready` version it forked from stays `ready`, so the user can still implement the agent's text (Implement, below).
 - **User writes** (draft saves, comments, Implement) go through `PlanService` as allowlisted operations on `ApplicationDatabaseWriter`, the application's only writable connection (`application-database-writer.ts:43-44`; existing plan operations at `plan-write-operations.ts:6-11`). Each operation checks its preconditions inside its own transaction, so draft saves, agent captures and turn admission on one thread apply in one order.
   - `plan_busy` when the thread has an unfinished execution (a `canonical_agent_ingest_checkpoints` row with no `terminal_outcome`, `schema.ts:788-807`) or a `preparing` Implement request. Agent captures happen only inside executions, so a user write and a capture never interleave.
-  - Drafts carry a revision precondition (Draft autosave, below). Implement's admission re-checks the version's revision inside the turn start.
+  - Drafts and Implement both carry a revision precondition (Draft autosave and Implement, below). Implement checks it before taking its text snapshot and again inside the turn start.
   - Because user writes never run during a turn, they need no canonical status writes. Those would fail `validatePlanRouting` for user versions, which have no assistant message (`accepted-feature-write.ts:105-108`).
 - **Canonical cache.** Accepted progress publishes agent plans before its save queue writes SQLite (`canonical-accepted-progress.ts:210-212`). It numbers the next version from its in-memory list (`accepted-feature-observations.ts:380`), and `listPlans` refreshes that list only when no head exists (`canonical-accepted-progress.ts:245-255`).
   - After every `PlanService` write, including an Implement admission, call a new `CanonicalAcceptedProgress.reloadPlans(threadId)`. It merges the `plans` table into the in-memory list. New rows are added. Content and revision of user rows come from the table. Status takes the later of the two values in the order draft or ready, then superseded, then accepted.
@@ -284,14 +285,20 @@ Each ticket adds its own migration with the next free number (README rule); 0069
 - **Revision.** The server owns it. A `ready` version is created at 0 and never changes. A `draft` is created at 1, and the server adds one on every save.
 - **`plan.saveVersion({ threadId, versionId, baseVersionId, baseRevision, contentMd })`.** `versionId` is the draft's id. The client mints it once, at the first change of an edit session, and reuses it for every save and every retry in that session. This keys the first-edit fork.
   - **No row has `versionId` (a fork).** `baseVersionId` must be the thread's latest version, `ready`, with `revision = baseRevision`. The server creates the draft with version = latest + 1, revision 1, and `baseVersionId` set.
-  - **The row exists.** It must be this thread's `draft`. When `revision = baseRevision`, the server writes the text and returns revision + 1. When `revision = baseRevision + 1` and the stored text equals `contentMd`, the request replays a lost response, so the server returns the row unchanged. Anything else is `plan_conflict`.
+  - **The row exists.** It must be this thread's `draft`. Any window may save to it by its id; the draft has no owning session. When `revision = baseRevision`, the server writes the text and returns revision + 1. When `revision = baseRevision + 1` and the stored text equals `contentMd`, the request replays a lost response, so the server returns the row unchanged. Anything else is `plan_conflict`.
   - **Failures.** `plan_conflict` returns the latest version and writes nothing. It covers a newer latest version, another window's draft, and any revision mismatch, so the client keeps its text in every case. `plan_read_only` when the base is accepted. `plan_busy` per the serialization rule.
 - **Client (S07-05).**
   - One save in flight per thread. Newer keystrokes coalesce into the next save. A lost response resends the identical payload.
-  - On `plan_conflict`, the editor keeps the local text, stops autosaving, and shows a conflict notice with "Keep my text" and "Use saved version" (proposed copy, no board; open question 14). "Keep my text" saves the local text against the current latest version under the same rules. "Use saved version" discards it.
+  - On `plan_conflict`, the editor keeps the local text, stops autosaving, and shows a conflict notice with "Keep my text" and "Use saved version" (proposed copy, no board; open question 14). Neither choice is ever made automatically.
+  - **Keep my text** turns the retained local text into an ordinary save against the returned latest version L:
+    - L is a `draft` (another window's fork, or this draft at a newer revision): the session adopts L's id as its `versionId` and L's revision as `baseRevision`, then saves the local text. It lands as L's revision + 1 and replaces the other window's text, which is what the user confirmed.
+    - L is `ready` (an agent capture replaced the base): the session mints a new `versionId` and forks L at revision 0.
+    - L is `accepted`: there is nothing to save into, because the base is read-only. Keep my text is not offered; the editor keeps the local text visible, read-only, until Use saved version.
+  - **Use saved version** loads L and discards the local text. When L is a draft, the session adopts its id and revision; otherwise the next change mints a new `versionId`.
+  - After either choice the session follows the normal rules: every later save needs revision equality, so a third window's save produces a new conflict and a new choice.
   - The client never reloads over unacknowledged text.
 
-Two windows that fork the same ready version with different `versionId`s create one draft; the second window gets `plan_conflict` and keeps its text. Two saves sent with the same `baseRevision` land at most once.
+Two windows that fork the same ready version with different `versionId`s create one draft; the second window gets `plan_conflict`, keeps its text, and its Keep my text saves into that one draft. Two saves sent with the same `baseRevision` land at most once.
 
 ### Wire contract
 
@@ -303,7 +310,7 @@ Two windows that fork the same ready version with different `versionId`s create 
 | `plan.comment.update` (S07-06) | `{ commentId, body }` | `PlanComment` | `plan_read_only` |
 | `plan.comment.setStatus` (S07-06) | `{ commentId, status: "open" \| "resolved" }` | `PlanComment` | Resolve, plus its reverse |
 | `plan.comment.delete` (S07-06) | `{ commentId }` | `void` | Idempotent |
-| `plan.implement` (S07-07, S07-08) | `{ requestId (uuid), threadId, versionId, pending?: { versionId, baseVersionId, baseRevision, contentMd }, target: "thread" \| "new-thread" }` | `PlanImplementReceipt` | `thread_busy`; `plan_read_only`; `plan_conflict`; `implement_request_conflict` (same id, other params); `implement_interrupted` (a restart before admission); `implement_failed` (admission refused, with the cause). A replay of the same `requestId` returns the stored receipt or failure. |
+| `plan.implement` (S07-07, S07-08) | `{ requestId (uuid), threadId, versionId, expectedRevision, pending?: { versionId, baseVersionId, baseRevision, contentMd }, target: "thread" \| "new-thread" }`. `expectedRevision` is required: the revision of the text on screen. With `pending`, `pending.versionId` equals `versionId`. | `PlanImplementReceipt` | `thread_busy`; `plan_read_only` (accepted); `plan_conflict` (the version's revision differs from `expectedRevision`, or it is superseded; returns the latest version); `implement_request_conflict` (same id, other params); `implement_interrupted` (a restart before admission); `implement_failed` (admission refused or the new thread's startup cancelled, with the cause). A replay of the same `requestId` returns the stored receipt or failure. |
 | `agent.send` (changed) | S07-06 adds `planCommentIds?: uuid[]` (max 128). S07-09 removes `planAction`. | unchanged | `plan_comment_invalid` when an id is not open, already sent, or not on the latest non-accepted version, checked inside the admission transaction |
 
 | Push | Payload | Replaces |
@@ -347,15 +354,22 @@ The sidebar shows "Answers required" for `questions` and "Plan ready" for `ready
 
 Implement is a durable request. Its row exists before any side effect, and the version becomes Accepted only inside the transaction that admits the turn. Accepted is therefore never visible without an admitted turn, and an admitted Implement turn always has its Accepted version.
 
+**What can be implemented.** Implement sends the version on screen at the revision on screen, or nothing.
+
+- A `draft` or `ready` version is implementable. That includes the `ready` version a user draft forked from; implementing it supersedes the draft.
+- `accepted` is read-only (`plan_read_only`).
+- `superseded` is history. The picker shows it read-only with no Implement split, the shortcut and palette never target it, and the server refuses it with `plan_conflict` and the latest version.
+- Every request carries `expectedRevision`, the revision of the text the user saw: 0 for a ready version, the acknowledged revision for a draft, or, with `pending`, the revision the pending save produces (1 for a fork, `pending.baseRevision + 1` otherwise). The server compares it with the version's revision before it takes the text snapshot, and admission compares it again. Another window's save between display and click therefore fails the request instead of sending text the user never saw.
+
 ```ts
 // Server-only row in plan_implement_requests.
 interface PlanImplementRequest {
   requestId: string;              // client uuid, primary key
   sourceThreadId: string;
-  fingerprint: string;            // sha256 of the validated params
+  fingerprint: string;            // sha256 of the validated params: threadId, versionId, expectedRevision, pending, target
   versionId: string;              // immutable snapshot, no FK
   version: number;
-  revision: number;               // the precondition admission re-checks
+  revision: number;               // expectedRevision, verified before the snapshot; admission re-checks it
   title: string;
   wireText: string;               // exact provider text, bounded by PLAN_MAX_CONTENT_CHARS plus the header
   target: "thread" | "new-thread";
@@ -363,7 +377,7 @@ interface PlanImplementRequest {
   startupId: string | null;       // new-thread only; equals requestId
   messageId: string;              // admission identity: the user message the turn will project
   status: "preparing" | "admitted" | "failed";
-  failureCode: string | null;     // thread_busy, plan_conflict, interrupted, admission_failed, ...
+  failureCode: string | null;     // thread_busy, plan_conflict, interrupted, admission_failed, startup_cancelled, ...
   nativePlanFile: NativePlanFileOutcome | null;
   turnId: string | null;
   executionId: string | null;
@@ -377,15 +391,19 @@ interface PlanImplementRequest {
    - Thread target: reserve as `activeTurn` and hand the token to admission as `mutationReservationToken`. Thread-control approval dispatch already passes a reservation into admission this way (`turn-admission-dispatch-coordinator.ts:80-81`).
    - New-thread target: reserve the source in a new `planImplement` state and release it when the request settles.
    - No reservation available returns `thread_busy`. While Implement holds it, an ordinary Send fails with the existing pending-mutation error. If a Send holds it first, Implement fails `thread_busy`.
-3. **Prepare, in one writer transaction.** Refuse with `thread_busy` if the thread has an unfinished execution. Apply `pending` under the `plan.saveVersion` rules. Check that the version belongs to the thread and is not accepted. Insert the row as `preparing` with the immutable snapshot, the wire text, a fresh `messageId`, and `targetThreadId` set to the source for a thread target. From here on, plan writes on this thread return `plan_busy`.
-4. **Files.** Write the Mcode plan file (atomic temp file and rename). Then call the source adapter's `prepareImplement` with the newest agent version's native file ref, or null (Native plan files, below). Record the outcome on the row. Neither step changes plan status, so neither needs compensation. The Mcode file always mirrors the latest version, and a provider file is only rewritten while it still holds bytes Mcode already stores.
+3. **Prepare, in one writer transaction.** Refuse with `thread_busy` if the thread has an unfinished execution. Apply `pending` under the `plan.saveVersion` rules. Check that the version belongs to the thread and is `draft` or `ready` (accepted returns `plan_read_only`; superseded returns `plan_conflict`). Check that its revision equals `expectedRevision`, else return `plan_conflict` with the latest version. Only then take the snapshot: insert the row as `preparing` with the snapshot text, the wire text, a fresh `messageId`, and `targetThreadId` set to the source for a thread target. A refusal in this step writes nothing, including the pending save. From here on, plan writes on this thread return `plan_busy`.
+4. **Files.** Write the snapshot text to the Mcode plan file (atomic temp file and rename), so the path named in the wire text holds exactly what is sent. Then call the source adapter's `prepareImplement` with the newest agent version's native file ref, or null (Native plan files, below). Record the outcome on the row. Neither step changes plan status. A provider file is only rewritten while it still holds bytes Mcode already stores. After admission the Mcode file again equals its projection, because the accepted version is then the latest non-superseded one; a failed request re-projects it (step 7).
 5. **Admit.**
    - Send through `AGENT_TURN_COMMAND_PORT` with `messageId`, `content` set to the wire text, `displayContent` set to `Implement plan v{N}`, `interactionMode: "build"`, the reservation token (thread target), and `planImplement: { requestId }`. `AgentTurnCommand` gains these fields (`agent-turn-command-port.ts:56-73`); `agent.send` already accepts a client `messageId` (`methods.ts:298`).
-   - New-thread target (S07-08): admission is one `createAndSend` call (`turn-runtime-controller.ts:1976-1992`), added to the port for this caller, with `startupId = requestId`. A concurrent replay joins the same startup, and the startup record binds the thread durably (`thread-creation-coordinator.ts:124-141`). `mode` follows the source; worktree sources pass `existingWorktreePath`, which attaches to the source checkout instead of creating a managed worktree, so the automatic Setup gate does not apply (`turn-admission-dispatch-coordinator.ts:346-349`).
+   - New-thread target (S07-08): admission is one `createAndSend` call (`turn-runtime-controller.ts:1976-1992`), added to the port for this caller, with `startupId = requestId`. A concurrent replay joins the same startup, and the startup record binds the thread durably (`thread-creation-coordinator.ts:124-141`). `mode` follows the source; worktree sources pass `existingWorktreePath`, which attaches to the source checkout instead of creating a managed worktree.
+   - Setup for the new thread follows the one rule in `04-08f` section D. Attachment alone does not bypass Setup, because S04-07 makes attached worktrees eligible, and today's `createAndSend` returns a queued thread without admitting the turn when the gate holds it (`turn-runtime-controller.ts:1984-1990`). The new thread continues its source in the same checkout, so it skips Setup the way a branch does. The port's `createAndSend` takes a server-only option, `setupSkip: { reason: "plan-implement", sourceThreadId }`.
+     - The option is a separate argument, not a field of `CreateAndSendCommand`, which `agent.createAndSend` builds by spreading wire params (`agent-rpc.ts:140-145`). No client can request it.
+     - The coordinator honors it only for an `attached-worktree` start whose `existingWorktreePath` matches the non-deleted source thread's `worktree_path`, compared as `sameWorktreePath` does (`turn-admission-dispatch-coordinator.ts:372-377`). Anything else refuses the start, so the request fails and nothing is queued. The option is part of the startup fingerprint.
+     - With a valid option, the coordinator skips the startup's setup step with `skipReason: "plan-implement"` and returns a `dispatch` result without calling `admitInitialAutomaticTurn`, as the branched path does (`thread-creation-coordinator.ts:581-614,664-671`). The port call therefore returns admitted or failed, never queued, and no Implement request ever waits on a Setup approval, retry, skip or queued admission.
    - The admission coordinator copies `planImplement` into the data-only parent start input next to `answeredPlanQuestionMessageId` (`canonical-parent-turn-write.ts:91-95`) and its schema (`canonical-runtime-write-operations.ts:39`). Zod strips unknown keys, so a field missing from that schema would drop the effect silently on the worker-owned path; the S07-07 tests must admit through that path.
 6. **Accept inside the turn start.** The writer's start handler already projects the user message and the plan answer in the canonical start transaction (`canonical-parent-turn-write.ts:251-264`; lifecycle at `canonical-parent-turn-lifecycle.ts:78-96`; transaction at `canonical-agent-event-store.ts:115-117`). It now also runs `acceptPlanImplement`:
    - the row is `preparing` and its `messageId` equals the message being projected; a new-thread row binds `targetThreadId` here if it is still null, otherwise it must equal the admitting thread;
-   - the source version is still `draft` or `ready` at the recorded `revision`;
+   - the source version is still `draft` or `ready` at the recorded `revision`, the same comparison step 3 made before the snapshot;
    - the version becomes `accepted` with `accepted_at`, and every other `draft` or `ready` version in the source thread becomes `superseded`;
    - the source thread's `interaction_mode` becomes build, which moves today's client switch (`threadStore.ts:3995-4004`) to the server, and `plan_phase` becomes null (whichever of S07-07 and S07-09 merges second adds this line and its test);
    - for a new thread, the accepted copy is inserted into the target thread (same `version` number, `captureSource: "copy"`, `baseVersionId` set to the source version);
@@ -394,8 +412,8 @@ interface PlanImplementRequest {
    Any failed check throws, so the user message, the turn start and Accepted roll back together.
 7. **Settle.** After the port call returns or throws, read the row. The row, not the promise, decides the result.
    - `admitted`: call `reloadPlans` for the source and the target, push `plan.versionUpserted` for every touched row, and return the receipt. A provider failure after admission is an ordinary failed turn with Retry (S08F). The version stays Accepted because the message that implements it is in the transcript.
-   - Still `preparing`: mark it `failed` with a conditional update (`WHERE status = 'preparing'`), so a late failure can never overwrite an admitted row. Release the reservation only if admission did not take it; release is token-checked (`thread-control-mutation-reservation-service.ts:91-96`), and a failed admission already releases its own lease (`turn-runtime-controller.ts:518-526`). Never release after success, because the running turn holds the same token. For a new thread, remove the target only if it has no messages and its startup is this request's. Plan rows need no restore, because nothing changed them.
-8. **Restart recovery.** At startup, after turn recovery, every `preparing` row becomes `failed` with `interrupted` and gets the step 7 compensation. A client that replays the id after reconnecting receives `implement_interrupted`. The version is still implementable, and the next press is a new request.
+   - Still `preparing`: mark it `failed` with a conditional update (`WHERE status = 'preparing'`), so a late failure can never overwrite an admitted row. A cancelled new-thread startup records `startup_cancelled`. Release the reservation only if admission did not take it; release is token-checked (`thread-control-mutation-reservation-service.ts:91-96`), and a failed admission already releases its own lease (`turn-runtime-controller.ts:518-526`). Never release after success, because the running turn holds the same token. For a new thread, remove the target only if it has no messages and its startup is this request's. Re-project the Mcode plan file from the table, because step 4 may have written a version that is not the latest. Plan rows need no restore, because nothing changed them.
+8. **Restart recovery.** At startup, after turn recovery and startup recovery (so a new thread's startup is already terminal), every `preparing` row becomes `failed` with `interrupted` and gets the step 7 compensation. A client that replays the id after reconnecting receives `implement_interrupted`. The version is still implementable, and the next press is a new request.
 
 Wire text (proposed; the bubble shows only the first line):
 
@@ -412,9 +430,23 @@ Open comments are not sent with Implement, because Implement sends exactly the p
 ### Comments and re-anchoring (S07-06)
 
 - **Create.** The client sends the source offsets of the selection, the quote, 32 characters of prefix and suffix, and the nearest preceding heading. CodeMirror positions are source offsets, so no mapping layer is needed.
-- **Records versus draft state.** Plan comments are records in `plan_comments`. Which of them ride the next message is draft state in the persisted composer draft that S10-11 owns, the one store for everything that rides the next message.
-  - The draft holds the ids the user excluded with × and, at submit, the ids that ride. An open, unsent comment on the latest non-accepted version rides unless it is excluded.
-  - An unsaved comment editor (anchor plus note) is also draft state there, so it survives a restart (PRODUCT.md principle 12).
+- **Records versus draft state.** Plan comments are records in `plan_comments`. Draft state lives in the persisted composer draft that S10-11 owns, the one store for everything that rides the next message.
+  - Which comments ride is S10-11's `planCommentSelection` field with its reconcile rule (`10-review-panel.md` section 7). An open, unsent comment on the latest non-accepted version rides unless it is excluded. S07-06 renders the chip from that field.
+  - An unsaved comment editor is a second field that S07-06 adds and owns, so the editor survives a restart (PRODUCT.md principle 12). It follows the precedent of `selectedTextCommentEditor` (`composerDraftStore.ts:48`, parsed at `composer-draft-storage.ts:112-123`, counted at `composerDraftStore.ts:104`):
+
+    ```ts
+    // ComposerDraft, added by S07-06
+    planCommentEditor?: {
+      planVersionId: string;            // the version the editor is open on
+      commentId: string | null;         // null for a new comment, the comment's id when editing one
+      anchor: PlanCommentAnchor;        // the selection, as plan.comment.create sends it
+      body: string;                     // unsaved note, at most 4000 characters, may be empty while typing
+    };
+    ```
+
+    - S07-06 adds `PlanCommentEditorDraftSchema` beside `PlanCommentAnchorSchema`, writes the field in `serializeComposerDraft`, and rebuilds it in `parseStoredComposerDraft` through that schema. Stored JSON is untrusted, so an invalid field is dropped and counted in the parser's log line. `draftHasNoSendableContent` counts it, so a draft that holds only an open editor persists.
+    - The editor never rides a send. Saving it calls `plan.comment.create` or `plan.comment.update`; success, Cancel, Esc and trash clear the field. A save that fails, for example `plan_read_only` because the version was accepted in another window, keeps the field and the note.
+    - On load, the panel reopens the editor on `planVersionId`; versions are deleted only with their thread, which drops the draft too. If an edited comment was deleted meanwhile, the editor reopens as a new comment (`commentId: null`) on the same anchor. The note is never dropped silently.
   - After admission, S10-11 clears only the submitted draft revision. Exclusions apply to one send, and edits made while Send was in flight stay.
 - **Chip.** "N plan comment(s) ×" counts the comments that ride. × excludes all of them from this send; the comments stay open in the panel.
 - **Revise.** `agent.send.planCommentIds` (the ids that ride, frozen at submit) makes the server append an escaped envelope `<!-- mcode-plan-comments-v1 -->` (generalize `appendSelectedTextComments`, `selected-text-comment-append.ts:18-34`). The admission coordinator passes the ids into the data-only parent start input. The writer stamps `sent_message_id` inside the transaction that projects the user message, after checking that each comment is still open, unsent, and on the thread's latest non-accepted version. A failed check aborts admission with `plan_comment_invalid`; nothing is stamped and the draft stays.
@@ -431,7 +463,7 @@ Open comments are not sent with Implement, because Implement sends exactly the p
 
 - **Path:** `<mcodeDir>/threads/<threadId>/plan.md`. Add `resolveThreadPlanFile` next to `resolveThreadHandoffsDir` (`packages/shared/src/paths/handoffs.ts:35-40`). It is outside the worktree, so there is no git noise.
 - **Content:** exactly the latest non-superseded version. It is a projection of the `plans` table, written by the version writer.
-- **Writes:** on every version upsert and before every plan or Implement turn.
+- **Writes:** on every version upsert and before every plan or Implement turn. Implement writes the exact text it sends, and a failed Implement re-projects the file from the table (Implement steps 4 and 7).
 - **Passing the path:** one line in the revise, follow-up (S07-09), and Implement (S07-07) wire text. For Claude and Copilot, also issue a turn-scoped Read pre-grant (`ScopedPreGrantService.issue`, `scoped-pre-grant.ts:50-54`; prior art `handoff-coordinator.ts:322-325`). Other adapters read outside the workspace under their own rules (inferred). The inline text never depends on the file.
 - **Cleanup:** remove the directory when the thread is deleted (inferred: reuse the handoff cleanup path).
 
@@ -493,12 +525,12 @@ Gemini appears in `ProviderIdSchema` (`settings.ts:63`) but is not one of the si
 
 - **`PlanPanelHeader`** (`apps/web/src/components/panels/plan/`): version picker, Implement split (F-03), expand, toggle. Row 1 of F-05.
 - **`PlanVersionPicker`**: names-only menu (F-04), newest first. Each item is `vN` plus a muted word: "Edited by you" (user draft), "Accepted", the provider name (agent ready), or "Older version" (superseded). Only "Edited by you" and "Accepted" are drawn; the rest are proposed.
-- **`PlanImplementSplit`**: label "Implement v{N}". Amber only when no open, unsent comments. Hidden for accepted versions.
-- **`PlanEditor`**: CodeMirror 6 with `@codemirror/lang-markdown` and live-preview decorations that hide markdown syntax except on the focused line (the Obsidian pattern). Styled to the board's document values. It renders read-only for accepted and older versions and while a turn runs. Proposed new dependency (open question 10).
+- **`PlanImplementSplit`**: label "Implement v{N}" for the version on screen. Amber only when no open, unsent comments. Shown only for `draft` and `ready` versions; hidden for accepted and superseded ones.
+- **`PlanEditor`**: CodeMirror 6 with `@codemirror/lang-markdown` and live-preview decorations that hide markdown syntax except on the focused line (the Obsidian pattern). Styled to the board's document values. It is editable only on the thread's latest version while that version is `draft` or `ready`. Every other version renders read-only, as does any version while a turn runs or an Implement is preparing. Proposed new dependency (open question 10).
 - **`PlanCommentLayer`**: highlight marks, comment rows, and the new and editing editor states (Enter saves, Esc cancels).
 - **`PlanCommentsComposerChip`**: "N plan comment(s) ×" in the composer attachment row, reading its selection from the S10-11 composer draft.
 - **`QuestionDock`**: the 07b dock in the composer slot. It shares the pending-dock surface with S06.
-- **`usePlanCommands(threadId)`**: registers the palette commands `plan.implement` and `plan.implementInNewThread`, titled "Implement v{N}" and "Implement v{N} in a new thread", while an implementable version exists (`command-registry.ts:19`). Adds a `planImplementable` keybinding context.
+- **`usePlanCommands(threadId)`**: registers the palette commands `plan.implement` and `plan.implementInNewThread`, titled "Implement v{N}" and "Implement v{N} in a new thread" (`command-registry.ts:19`). The target is the version on screen while the Plan panel is open, and the newest `draft` or `ready` version while it is closed. The commands and the `planImplementable` keybinding context exist only while that target is implementable, so the shortcut does nothing while the panel shows an accepted or superseded version. The request carries the target's revision from `planStore`.
 - **Web `lib/plan-fences.ts`** (S07-01): the one list of fences the renderer hides (`plan-questions`, `mcode-plan`, and the legacy `plan-output`) and the one strip function the bubble's emptiness check uses. The legacy entry is a bounded read transform: it hides a fence whose info string is exactly `plan-output`, never parses its JSON, and has no writer anywhere.
 - **Server:** `PlanService`, `PlanFenceParser`, `reanchorPlanComment`, `PlanFileWriter`, `legacy-plan-record.ts`, and the writer-side `acceptPlanImplement` effect.
 - **Providers:** `plan/native-plan-file.ts` (validation, hashing, atomic rewrite).
@@ -663,9 +695,11 @@ Historic messages keep their `plan-output` fences. The ledger retires every writ
   - [ ] A database with legacy rows and legacy canonical plan items in the event log loads, and `plan.snapshot` lists them as `ready`.
   - [ ] A save while the thread has an unfinished execution returns `plan_busy`.
   - [ ] After a user save, the next agent capture numbers past it, and `plan.snapshot` lists both. A fork made right after a planning turn ends bases on the agent's new version.
-  - [ ] A save with `baseRevision` equal to the stored revision returns revision + 1. A lower or higher `baseRevision` returns `plan_conflict` with the latest version and changes nothing.
+  - [ ] A save with `baseRevision` equal to the stored revision returns revision + 1. A higher `baseRevision` returns `plan_conflict` with the latest version and changes nothing. So does a lower one, except the lost-response replay: `baseRevision` one below the stored revision with identical text returns the stored row unchanged.
   - [ ] Repeating a fork with the same `versionId` after a lost response returns the same draft and creates no second version.
   - [ ] Two windows that fork one ready version with different `versionId`s create one draft; the second gets `plan_conflict`. Of two saves sent with the same `baseRevision`, exactly one lands.
+  - [ ] A save that names another window's draft id at its current revision lands as revision + 1 (the Keep my text request).
+  - [ ] A user fork leaves its ready base `ready`; an agent capture supersedes both.
   - [ ] After `reloadPlans` with a head present, a status already later in memory is never moved back.
   - [ ] The plan file holds the latest version after every upsert.
 - **Verify:** `bun run --cwd apps/server test -- src/runtime/persistence/sqlite/__tests__/database-migration-success.test.ts src/features/agents/canonical/__tests__/canonical-plan-live-projection.test.ts src/features/agents/transport/__tests__/agent-rpc-route.test.ts`, plus a new `src/features/agents/planning/__tests__/plan-service.test.ts` on real SQLite (prior art `planning/persistence/__tests__/plan-question-answers-repo.test.ts`).
@@ -692,11 +726,11 @@ Historic messages keep their `plan-output` fences. The ledger retires every writ
 
 - **Blocked by:** S07-04 Plan in the thread overview and the Plan panel read view.
 - **Boards:** 07e `26TN-2` (step 4 focused)
-- **Delivers:** Clicking into the plan and typing works. The focused line shows raw markdown. The first change creates vN+1 "Edited by you". Later edits autosave into it. An edit made in another window never silently replaces this window's text; the user chooses. The editor is read-only while a turn runs, for accepted versions, and for older versions.
+- **Delivers:** Clicking into the plan and typing works. The focused line shows raw markdown. The first change creates vN+1 "Edited by you". Later edits autosave into it. An edit made in another window never silently replaces this window's text; the user chooses. The editor is editable only on the latest draft or ready version, and read-only while a turn runs or an Implement is preparing.
 - **Build notes:**
   - Client half of Draft autosave. Mint `versionId` once at the first change; debounced `plan.saveVersion` (500 ms, proposed) with one save in flight per thread; coalesce newer text; resend the identical payload after a lost response.
   - Flush on blur, panel close, thread switch, and before Implement (Implement carries the pending text in its request instead of saving it separately).
-  - `plan_conflict` keeps the local text and shows the conflict notice ("Keep my text", "Use saved version"; open question 14). Never reload over unacknowledged text.
+  - `plan_conflict` keeps the local text and shows the conflict notice ("Keep my text", "Use saved version"; open question 14). Keep my text adopts the returned draft's id and revision, or forks a returned ready version with a new id, then saves the retained text; it is not offered when the latest version is accepted (Draft autosave). Never reload over unacknowledged text.
   - Decorations for headings, ordered lists (20 wide mono number column), inline code, and file-path list items (name ink, folder muted, fade). Tables and diagrams show raw source (proposed).
 - **Deletes:** none (its predecessors go in S07-04).
 - **Acceptance criteria:**
@@ -705,8 +739,9 @@ Historic messages keep their `plan-output` fences. The ledger retires every writ
   - [ ] Reloading the app shows the edit.
   - [ ] Editing an accepted version is impossible.
   - [ ] A lost response to the first save, followed by a retry, yields one version.
-  - [ ] When two windows edit the same draft, the second window's save shows the conflict notice with its text intact, and "Keep my text" saves it as the next revision.
-- **Verify:** Unit-test the pure decoration ranges and the save scheduler, including serialization, coalescing, same-payload retry and conflict hold (`apps/web/src/components/panels/plan/__tests__/`). Live: type in step 4 and check the picker flips to "v2 Edited by you" and `plan.snapshot` returns the text; then edit the same draft in a second window and see the notice.
+  - [ ] Two-window conflict and resolution, end to end on one server. Windows A and B fork ready v2 with different text. A's first save creates v3 (draft, revision 1). B gets the conflict notice with its text intact; Keep my text saves B's text into v3 at revision 2, and no v4 exists. A's next save, still based on revision 1, gets the notice in turn; Use saved version shows B's text, and A's next edit saves v3 at revision 3. B's following save, based on revision 2, gets the notice again rather than overwriting A.
+  - [ ] When the latest version is accepted, the notice offers only Use saved version and keeps the local text visible until then.
+- **Verify:** Unit-test the pure decoration ranges and the save scheduler, including serialization, coalescing, same-payload retry, conflict hold, and both Keep my text branches (adopt a draft, fork a ready version) (`apps/web/src/components/panels/plan/__tests__/`). Replay the two-window request sequence above against real SQLite in `apps/server/src/features/agents/planning/__tests__/plan-service.test.ts`. Live, with two web clients on one server (`.dev/fixture-repo`): type in step 4 and check the picker flips to "v2 Edited by you" and `plan.snapshot` returns the text; then run the two-window sequence by hand and confirm the picker shows one "Edited by you" version holding the text of the last confirmed choice.
 
 ### S07-06 Plan comments and the composer chip
 
@@ -720,7 +755,9 @@ Historic messages keep their `plan-output` fences. The ledger retires every writ
 - **Build notes:**
   - Server: the `plan_comments` migration; `plan.comment.*`; `reanchorPlanComment`; carry-forward on user forks and agent captures; `plan.snapshot.comments` and `plan.commentsChanged`.
   - Send: `agent.send.planCommentIds`, the envelope append, and `sent_message_id` stamping inside the admission transaction (add `planCommentIds` to `DataOnlyParentTurnStartInput` and `CanonicalRuntimeParentStartSchema`, as for Implement).
-  - Draft state: the chip's selection (excluded ids, and the riding ids frozen at submit) and any unsaved comment editor live in the S10-11 persisted composer draft. This ticket adds no second draft store. The comments themselves stay records in `plan_comments`.
+  - Draft state lives in the S10-11 persisted composer draft; this ticket adds no second draft store, and the comments themselves stay records in `plan_comments`.
+    - The chip reads S10-11's `planCommentSelection` and calls its reconcile helper. The riding ids are frozen at submit.
+    - This ticket owns the `planCommentEditor` field (Comments and re-anchoring): `PlanCommentEditorDraftSchema` in contracts, the `serializeComposerDraft` write, the validating `parseStoredComposerDraft` read, the `draftHasNoSendableContent` count, and the round-trip test. These follow the S10-11 store rules for a new field.
   - Web: `PlanCommentLayer`, `PlanCommentsComposerChip`.
 - **Deletes:** none (`PlanAnnotation` goes in S07-04, same wave).
 - **Acceptance criteria:**
@@ -730,7 +767,10 @@ Historic messages keep their `plan-output` fences. The ledger retires every writ
   - [ ] A comment resolved in another window before Send makes the send fail with `plan_comment_invalid`; nothing is stamped and the draft stays.
   - [ ] Editing the highlighted words drops the comment to its section.
   - [ ] Enter saves and Esc cancels in both editor states; Resolve's Undo reopens the comment.
-- **Verify:** `bun run --cwd apps/server test -- src/features/agents/turns/__tests__/selected-text-comment-append.test.ts src/features/agents/canonical/__tests__/canonical-parent-turn-write.test.ts` (generalized append; stamp inside the start), plus a pure `reanchor-plan-comment.test.ts`. Live: comment on step 3, see the chip, send "go", and confirm the next version arrives and the chip clears.
+  - [ ] An unsaved comment editor, new or editing, survives an app restart with its anchor and note. A draft that holds only that editor persists.
+  - [ ] `planCommentEditor` round-trips through serialize, `JSON.stringify` and parse. A stored editor with a bad anchor or an over-long note is dropped and counted, and the rest of the draft loads.
+  - [ ] Saving the editor clears the field; a save refused with `plan_read_only` keeps it and the note. An editor whose comment was deleted in another window reopens as a new comment on the same anchor.
+- **Verify:** `bun run --cwd apps/server test -- src/features/agents/turns/__tests__/selected-text-comment-append.test.ts src/features/agents/canonical/__tests__/canonical-parent-turn-write.test.ts` (generalized append; stamp inside the start), plus a pure `reanchor-plan-comment.test.ts`. `bun run --cwd apps/web test -- src/lib/composer-draft-storage.test.ts` with the `planCommentEditor` round-trip and invalid-field cases. Live: comment on step 3, see the chip, send "go", and confirm the next version arrives and the chip clears. Then open a comment editor, type a note, restart the app, and confirm the editor reopens with the note.
 
 ### S07-07 Implement in this thread: split button, shortcut, palette, Accepted
 
@@ -738,17 +778,19 @@ Historic messages keep their `plan-output` fences. The ledger retires every writ
 - **Reconciled:** Implement is a durable request (immutable version, revision and text, target thread, admission identity, recoverable status). Reserve turn admission before changing plan status; mark Accepted only with successful admission, with conditional compensation. Replays return the same target and message, including the new-thread path (S07-08).
 - **Boards:** 07e `26TN-2`, 07f `260S-2`, 07g states 1 `2CVR-2` and 3 `2CWX-2`
 - **Delivers:**
-  - "Implement vN" (amber unless comments are open) and its menu.
+  - "Implement vN" (amber unless comments are open) and its menu, for the draft or ready version on screen. Accepted and superseded versions show no split.
   - Ctrl+Shift+Enter (Cmd+Shift+Enter on macOS) anywhere in the thread, including inside the composer and the editor, with no stray newline.
   - ⌘K/Ctrl+K entries.
   - The chat shows "Implement plan vN". The Plan chip turns off. The version reads Accepted and is read-only, and it never reads Accepted without that turn.
+  - Implement sends the text the user saw. If another window changed the version after it was shown, nothing is sent and the panel shows the newer text ("This version changed in another window. Nothing was sent."; proposed copy).
   - A failed or interrupted Implement leaves the version implementable and says so ("Implement was interrupted. Nothing was sent."; proposed copy).
   - The overview row shows task progress.
 - **Build notes:**
-  - Server: the `plan_implement_requests` migration and `PlanService.implement` (target `thread`) per the Implement sequence (request row, reservation, prepare transaction, files, admission through the port, `acceptPlanImplement` in the turn start, settle, restart recovery).
+  - Server: the `plan_implement_requests` migration and `PlanService.implement` (target `thread`) per the Implement sequence (request row, reservation, prepare transaction with the `expectedRevision` check before the snapshot, files, admission through the port, `acceptPlanImplement` in the turn start with the same check, settle, restart recovery).
+  - `expectedRevision` is required by the `plan.implement` schema and is part of the fingerprint.
   - Coordinate with the canonical admission boundary only through the data-only start input (`canonical-parent-turn-write.ts:91-95,251-264`); do not add a second commit beside the turn start.
   - `AgentTurnCommand` fields and the reservation hand-off.
-  - Web: pending edits ride the request; `usePlanCommands`, the keybinding context, and critical-priority Lexical and CodeMirror handlers. The client replays an unanswered request once with the same `requestId` after reconnecting.
+  - Web: pending edits ride the request. Every request carries the `expectedRevision` of the text on screen (What can be implemented). Implement waits for an in-flight autosave to settle before it reads that revision. On `plan_conflict` the panel loads the returned version, through the editor's conflict notice when unsaved text was riding, and sends nothing until the user presses Implement again. `usePlanCommands`, the keybinding context, and critical-priority Lexical and CodeMirror handlers. The client replays an unanswered request once with the same `requestId` after reconnecting.
   - The task tray title uses the plan title (07f; inferred, coordinate with S05).
 - **Deletes:** the `planAction: "implement"` ledger row.
 - **Acceptance criteria:**
@@ -758,31 +800,48 @@ Historic messages keep their `plan-output` fences. The ledger retires every writ
   - [ ] Crash simulation (drop the in-flight call at a stage, start a new service set on the same database, run recovery) turns a `preparing` row into `interrupted`; the version stays implementable, and a replay returns `implement_interrupted`.
   - [ ] A race with an ordinary Send, in both orders, starts exactly one turn; the loser gets `thread_busy` or the existing pending-mutation error.
   - [ ] A save from another window during Implement gets `plan_busy`. An admission whose recorded revision no longer matches fails with `plan_conflict` and accepts nothing.
+  - [ ] Second-window save between display and click. Window A shows draft v3 at revision 4 with no unsaved text; window B saves revision 5; A's Implement v3 with `expectedRevision` 4 returns `plan_conflict` with revision 5, writes no request row, sends no message and accepts nothing. A then shows B's text, and a second press implements revision 5 with exactly that text.
+  - [ ] With pending text, an `expectedRevision` that does not match the revision the pending save produces returns `plan_conflict`, and the pending save is rolled back.
+  - [ ] A replay of a `requestId` with a different `expectedRevision` returns `implement_request_conflict`.
   - [ ] A late failure never overwrites an admitted request.
   - [ ] Admission through the worker-owned parent start path writes Accepted (the schema carries `planImplement`).
-  - [ ] The provider receives the exact plan text plus the supersede line and the file path.
-  - [ ] Implementing an older version supersedes the newer one.
-- **Verify:** `bun run --cwd apps/server test -- src/features/agents/planning/__tests__/plan-service.test.ts src/features/agents/canonical/__tests__/canonical-parent-turn-write.test.ts src/features/agents/orchestration/__tests__/agent-service-plan-implement.test.ts` (new; prior art `agent-service-plan-marker.test.ts`, which already checks a plan effect inside the parent start). Live: press Ctrl+Shift+Enter with the composer focused; one "Implement plan v2" bubble appears and the panel reads "v2 Accepted".
+  - [ ] The provider receives the exact plan text plus the supersede line and the file path, and the Mcode plan file holds that text when the turn starts.
+  - [ ] Implementing the ready version a draft forked from (shown under its provider name) accepts it, supersedes the draft, and leaves the plan file holding the accepted text. A failed attempt leaves the file holding the draft again.
+  - [ ] A superseded version shows no Implement split, the shortcut does nothing while it is on screen, and a direct `plan.implement` for it returns `plan_conflict` with the latest version.
+- **Verify:** `bun run --cwd apps/server test -- src/features/agents/planning/__tests__/plan-service.test.ts src/features/agents/canonical/__tests__/canonical-parent-turn-write.test.ts src/features/agents/orchestration/__tests__/agent-service-plan-implement.test.ts` (new; prior art `agent-service-plan-marker.test.ts`, which already checks a plan effect inside the parent start). `bun run --cwd apps/web test -- src/components/panels/plan/PlanPanel.test.tsx` covers the split per status and the `expectedRevision` each request carries. Live: press Ctrl+Shift+Enter with the composer focused; one "Implement plan v2" bubble appears and the panel reads "v2 Accepted". Then, with a second web client on the same server, save an edit after the first client rendered the draft and press Implement in the first: nothing is sent and the newer text appears.
 
 ### S07-08 Implement in a new thread
 
-- **Blocked by:** S07-07 Implement in this thread: split button, shortcut, palette, Accepted.
+- **Blocked by:** S07-07 Implement in this thread: split button, shortcut, palette, Accepted; S04-07 Existing worktree runs setup, skipped while a thread is live there.
 - **Boards:** 07g state 1 `2CVR-2` (menu)
-- **Delivers:** "Implement vN in a new thread" opens a new thread in the same checkout. The new thread shows "Implement plan vN" and its own overview plan row (a copy, Accepted). The source version reads Accepted. A retry never opens a second thread.
+- **Delivers:** "Implement vN in a new thread" opens a new thread in the same checkout and starts it at once. For a worktree source, the new thread's trail reads "Opened worktree", then "Skipped setup · implementing a plan" (proposed copy, no board). The new thread shows "Implement plan vN" and its own overview plan row (a copy, Accepted). The source version reads Accepted. A retry or a reconnect never opens a second thread.
 - **Build notes:**
   - `plan.implement` with target `new-thread` through `createAndSend` with `startupId = requestId` (existing worktree path or direct).
+  - Setup follows the one rule in `04-08f` section D, which S04-07 builds: the new thread continues its source in the same checkout, so it skips Setup the way a branch does. S04-07's live-sibling skip does not settle this case, because Implement refuses while the source has an unfinished execution, so the source is never live when the new thread starts.
+    - Add the server-only `setupSkip: { reason: "plan-implement", sourceThreadId }` argument to the port's `createAndSend` and thread it to the coordinator, outside `CreateAndSendCommand` (Implement step 5).
+    - The coordinator verifies the source thread's `worktree_path`, refuses any mismatch, skips the setup step with `skipReason: "plan-implement"`, and returns a `dispatch` result without calling `admitInitialAutomaticTurn`.
+    - Add `"plan-implement"` to the setup `skipReason` enum (`04-08f` section A) and its trail copy to `startup-step-copy.ts`.
+    - Setup never runs for this start, so no request waits on a Setup approval, retry, skip or queued admission, and the port call returns admitted or failed.
   - The source holds a `planImplement` reservation until the request settles.
   - `acceptPlanImplement` binds `targetThreadId`, accepts the source version and inserts the copy (`captureSource: "copy"`) in the new thread's start transaction.
   - Compensation removes the new thread only when it has no messages and its startup is this request's.
+  - Cancellation follows S04-05. A cancel before admission fails the request with `startup_cancelled`, and step 7 compensates. A cancel after admission and before the first provider frame ends the turn "Stopped before {Provider} started"; the version stays Accepted because its message is in the transcript (open question 16).
+  - Reconnect: the client replays the request once with the same `requestId` and opens the returned `targetThreadId`.
 - **Deletes:** none.
 - **Acceptance criteria:**
   - [ ] The worktree source creates a thread in the same worktree; the direct source creates a direct thread.
+  - [ ] With a setup script configured and no other thread live in the worktree, the new thread's setup step is skipped with `plan-implement`, the Setup gate's `admitAutomaticTurn` is never called for it, and the request is `admitted` when the port call returns.
+  - [ ] A client `agent.createAndSend` that adds a `setupSkip` field to its params still runs Setup for an attached worktree.
+  - [ ] A `setupSkip` whose source worktree differs from the target refuses the start: the request fails, and no thread or queued prompt remains.
   - [ ] If the source thread is busy, the request is refused and no thread is created.
   - [ ] A replay of the same `requestId`, during or after the request, returns the same target thread and message and creates no second thread.
+  - [ ] A client that disconnects after sending and replays on reconnect, once while the new thread is starting and once after, gets the same target and message; the sidebar shows one new thread.
+  - [ ] A startup cancel during the new thread's worktree phase (fault-injected pause, then `thread.startup.cancel`) fails the request with `startup_cancelled`, releases the source reservation, removes the empty thread, and leaves the version implementable.
+  - [ ] A cancel after admission and before the first provider frame leaves the source version Accepted and the new thread holding its "Implement plan vN" message.
   - [ ] An admission failure in the new thread leaves the source version implementable and removes the empty thread. A thread that gained a message is never removed.
-  - [ ] After a crash simulation between thread creation and admission, recovery marks the request `interrupted`, the empty thread is gone, and the source plan and checkout are unchanged.
+  - [ ] After a crash simulation between thread creation and admission, recovery runs after startup recovery, marks the request `interrupted`, removes the empty thread, and leaves the source plan and checkout unchanged.
   - [ ] Fault injection after the copy insert rolls back both the copy and the source's Accepted.
-- **Verify:** `bun run --cwd apps/server test -- src/features/agents/turns/__tests__/thread-creation-startup.test.ts src/features/agents/planning/__tests__/plan-service.test.ts`. Live: run it from the menu and check the sidebar gains one thread on the same branch.
+- **Verify:** `bun run --cwd apps/server test -- src/features/agents/turns/__tests__/thread-creation-startup.test.ts src/features/agents/planning/__tests__/plan-service.test.ts src/features/agents/transport/__tests__/agent-rpc-route.test.ts` (the client `setupSkip` case). Live: in `.dev/fixture-repo` with a setup script configured, run it from the menu on a worktree thread. The new thread shows Skipped setup and starts at once, and the sidebar gains one thread on the same branch. Reload the window while it starts and confirm no second thread appears.
 
 ### S07-09 Plan-mode conversation: question dock, Planning, revise follow-ups, sidebar states
 
@@ -880,8 +939,10 @@ Merged into S07-02, so native Codex plan mode and its question protocol activate
   - Provider conformance fixtures (`packages/providers/src/conformance/fixtures/*.json`): rename `planExitCount` (`fixture-safety.ts:392-433`) to `planCaptureCount`; add S07-00's captured plan fixtures.
 - **Races and crashes.**
   - Implement against an ordinary Send, in both orders.
-  - Two windows saving one draft; two windows forking one ready version; reordered saves; a lost first-save response.
+  - Two windows saving one draft; two windows forking one ready version, then the loser's Keep my text and the winner's next save; reordered saves; a lost first-save response.
+  - A second-window save between displaying a version and pressing Implement.
   - Implement with stages faulted before the row, after file preparation, after thread creation, and inside admission; then restart recovery on the same database.
+  - Implement in a new thread cancelled before and after admission, and replayed across a reconnect.
   - A Codex question across a window reload and across an app-server exit.
 - **Historic data.** A stored message with a `plan-output` fence renders without JSON. Legacy `plans` rows and legacy canonical plan items load as `ready` versions.
 - **Prior art.**
@@ -918,3 +979,5 @@ Merged into S07-02, so native Codex plan mode and its question protocol activate
 14. **Draft conflict notice.** No board shows the notice that offers "Keep my text" and "Use saved version". Decides: user, then a board.
 15. **Unproven native files stay.** Where S07-00 cannot tie a provider's plan file to its session (inferred to be likely for Devin and OpenCode), Mcode leaves the file in place. An in-worktree OpenCode file then shows in git status until the user removes it. This is the honest cost of never deleting by pattern. Decides: engineering, revisited if S07-00 finds an identity source.
 16. **Accepted is atomic with admission, not "before the turn".** An Implement whose provider fails after admission stays Accepted with a failed turn and Retry, because its message is in the transcript. Decides: engineering (confirm with the user if a rollback to implementable is preferred).
+17. **Superseded versions are not implementable.** The picker shows them read-only with no Implement split. A user who prefers an older agent version asks the agent to restore it, or copies its text into the draft. The ready version a draft forked from stays implementable. Decides: engineering (confirm with the user).
+18. **Implement in a new thread skips Setup.** The new thread continues its source in the same checkout, like a branch, so Setup does not run even when no other thread is live there (`04-08f` section D, open question 13 there). Decides: user (confirm).

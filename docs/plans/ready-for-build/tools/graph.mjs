@@ -326,7 +326,48 @@ function epics(tickets, waves) {
 
 // Retirement ledger rows: | Remove | Where | Replaced by | Deleted in ticket | Proof it is gone |
 const ID_PATTERN = /\b(?:F-\d{2}[a-z]?|S\d{2}[A-Z]?-\d{2})\b/g;
-const PROOF_COMMAND = /`((?:rg|git|test|bun|node|!)\s[^`]*)`/;
+// Proofs run without a shell so they behave the same on Windows, macOS and Linux:
+// `rg` passes when it prints nothing; `bun`, `node` and `git` pass on exit 0.
+const PROOF_RUNNERS = ["rg", "bun", "node", "git"];
+const PROOF_COMMAND = /`((?:rg|bun|node|git)\s[^`]*)`/;
+
+function proofCommands(proofCell) {
+  return [...proofCell.matchAll(/`([^`]*)`/g)]
+    .map((m) => m[1].replace(/\\\|/g, "|"))
+    .filter((cmd) => PROOF_RUNNERS.includes(cmd.split(/\s/)[0]));
+}
+
+// Minimal POSIX-style word splitting: double quotes (with \" and \\ escapes) and single quotes.
+// Returns null when the command uses shell operators, which proofs must not need.
+function splitWords(cmd) {
+  const words = [];
+  let word = "";
+  let inWord = false;
+  for (let i = 0; i < cmd.length; i += 1) {
+    const ch = cmd[i];
+    if (ch === '"') {
+      inWord = true;
+      for (i += 1; i < cmd.length && cmd[i] !== '"'; i += 1) {
+        if (cmd[i] === "\\" && (cmd[i + 1] === '"' || cmd[i + 1] === "\\")) i += 1;
+        word += cmd[i];
+      }
+    } else if (ch === "'") {
+      inWord = true;
+      for (i += 1; i < cmd.length && cmd[i] !== "'"; i += 1) word += cmd[i];
+    } else if (/\s/.test(ch)) {
+      if (inWord) words.push(word);
+      word = "";
+      inWord = false;
+    } else if ("|&;<>".includes(ch)) {
+      return null;
+    } else {
+      word += ch;
+      inWord = true;
+    }
+  }
+  if (inWord) words.push(word);
+  return words;
+}
 
 function ledgerRows() {
   const rows = [];
@@ -356,27 +397,67 @@ function ledgerCheck() {
       else if (!(owner in graph.blockers)) problems.push(`${where} owner ${owner} is not a ticket`);
     }
     if (!PROOF_COMMAND.test(row.proof)) problems.push(`${where} proof is not a runnable command: ${row.proof.slice(0, 80)}`);
+    for (const cmd of proofCommands(row.proof)) {
+      if (!splitWords(cmd)) problems.push(`${where} proof uses a shell operator (pipe, &&, ;, redirect); split it into separate commands: ${cmd.slice(0, 80)}`);
+    }
   }
   return problems;
 }
 
-async function ledgerRun(ticket) {
+async function ledgerRun(ticket, { rgOnly }) {
   const { spawnSync } = await import("node:child_process");
+  if (ticket && !(ticket in graph.blockers)) {
+    console.error(`unknown or merged ticket ${ticket}`);
+    return { failed: 1 };
+  }
   const repoRoot = join(root, "..", "..", "..");
-  let failed = 0;
+  const counts = { pass: 0, fail: 0, error: 0, skip: 0 };
+  const indent = (text) => text.trim().split("\n").slice(0, 6).map((l) => `     ${l}`).join("\n");
   for (const row of ledgerRows()) {
     const owners = row.owner.match(ID_PATTERN) ?? [];
     if (ticket && !owners.includes(ticket)) continue;
-    const match = PROOF_COMMAND.exec(row.proof);
-    if (!match || !match[1].startsWith("rg ")) continue;
-    const cmd = match[1].replace(/\\\|/g, "|");
-    const result = spawnSync("bash", ["-c", cmd], { cwd: repoRoot, encoding: "utf8" });
-    const clean = result.status === 1 && !result.stdout.trim();
-    if (!clean) failed += 1;
-    console.log(`${clean ? "PASS" : "FAIL"} ${owners.join(",")} ${row.file}:${row.line} ${cmd}`);
-    if (!clean) console.log(result.stdout.split("\n").slice(0, 5).map((l) => `     ${l}`).join("\n"));
+    for (const cmd of proofCommands(row.proof)) {
+      const where = `${owners.join(",")} ${row.file}:${row.line}`;
+      const words = splitWords(cmd);
+      if (!words) {
+        counts.error += 1;
+        console.log(`ERROR ${where} uses a shell operator: ${cmd}`);
+        continue;
+      }
+      const [exe, ...args] = words;
+      if (rgOnly && exe !== "rg") {
+        counts.skip += 1;
+        console.log(`SKIP  ${where} ${cmd}`);
+        continue;
+      }
+      let result = spawnSync(exe, args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+      // Windows package managers often ship .cmd shims, which spawn cannot run without a shell.
+      if (result.error?.code === "ENOENT" && process.platform === "win32" && exe !== "rg") {
+        result = spawnSync(`${exe}.cmd`, args, { cwd: repoRoot, encoding: "utf8", shell: true, maxBuffer: 16 * 1024 * 1024 });
+      }
+      if (result.error) {
+        counts.error += 1;
+        console.log(`ERROR ${where} ${cmd}\n     ${result.error.message}`);
+        continue;
+      }
+      const isSearch = exe === "rg";
+      const clean = isSearch ? result.status === 1 && !result.stdout.trim() : result.status === 0;
+      const broken = isSearch && result.status !== 0 && result.status !== 1;
+      if (clean) {
+        counts.pass += 1;
+        console.log(`PASS  ${where} ${cmd}`);
+      } else if (broken) {
+        counts.error += 1;
+        console.log(`ERROR ${where} ${cmd} (exit ${result.status})\n${indent(result.stderr)}`);
+      } else {
+        counts.fail += 1;
+        console.log(`FAIL  ${where} ${cmd} (exit ${result.status})\n${indent(isSearch ? result.stdout : `${result.stdout}\n${result.stderr}`)}`);
+      }
+    }
   }
-  return failed;
+  console.log(`\n${counts.pass} passed, ${counts.fail} failed, ${counts.error} errors, ${counts.skip} skipped`);
+  if (counts.pass + counts.fail + counts.error + counts.skip === 0) console.log("no proofs found for this selection");
+  return { failed: counts.fail + counts.error + (counts.pass + counts.fail + counts.error + counts.skip === 0 ? 1 : 0) };
 }
 
 const command = process.argv[2] ?? "check";
@@ -386,7 +467,10 @@ if (command === "ledger") {
   process.exit(problems.length ? 1 : 0);
 }
 if (command === "ledger-run") {
-  const failed = await ledgerRun(process.argv[3]);
+  // node graph.mjs ledger-run [ticket] [--rg-only]
+  const args = process.argv.slice(3);
+  const ticket = args.find((a) => !a.startsWith("--"));
+  const { failed } = await ledgerRun(ticket, { rgOnly: args.includes("--rg-only") });
   process.exit(failed ? 1 : 0);
 }
 const { tickets, waves, problems } = check();
