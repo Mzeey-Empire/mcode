@@ -1095,6 +1095,7 @@ describe("MessageList thread switch", () => {
   });
 
 
+  // About 1.5s warm; on a cold CI runner the first render of 180 tool rows also pays for loading the tool renderers.
   it("virtualizes expanded tool children and restores them after scrolling and thread switches", async () => {
     vi.useFakeTimers();
     messagesValue = [{ id: "answer", sequence: 1, role: "assistant", content: "Finished commands" }];
@@ -1144,7 +1145,7 @@ describe("MessageList thread switch", () => {
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(container.querySelectorAll("li")).toHaveLength(0);
     expect(viewport.scrollTop).toBe(0);
-  });
+  }, 20_000);
 
   function transcriptRows(threadId = "thread-A") {
     return Array.from({ length: 12 }, (_, sequence) => ({
