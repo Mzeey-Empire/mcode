@@ -39,14 +39,21 @@ The notice is also hidden while the slash or mention picker is open. Do not use
 an inline Tailwind z-index utility to override this order: the CSS classes own
 the shared portal layers.
 
-## Button Variants
+## Buttons
+
+`components/ui/button.tsx` holds `Button` and `IconButton`; `components/ui/split-button.tsx` holds `SplitButton`. Values come from Paper's button boards (DESIGN.md, Buttons).
+
+- **Sizes.** `compact` (32), `default` (40) and `comfortable` (48), plus `icon-*` boxes of the same heights and `icon-inline` (28) and `icon-inline-sm` (24) for row actions. The call-site default is `compact` because most buttons sit in dense chrome; pass `default` in dialogs, forms and docks.
+- **States.** Press draws a 2px inset ring in the variant's foreground and never moves the control. Focus is a 2px outline 2px outside the control, so the gap stays transparent on any surface. Do not reintroduce `translate-y-px` or a `ring-3` glow on buttons or button-like rows.
+- **Loading.** `loading` keeps the button focusable and blocks activation in the click handler instead of disabling it, so focus is not lost and the disabled opacity does not apply. The spinner replaces a leading icon; text-only content stays in place, invisible, under a centred spinner, so the width never changes.
+- **IconButton.** `aria-label` is required at the type level and doubles as the tooltip. `shape="round"` is the 32px top-level and panel-header control: selected fill at rest, `control-border` fill when `pressed` (or a menu it opens is expanded). `floating` makes it 40px with the floating shadow.
+- **SplitButton.** The action and the chevron are two tab stops in that order; the chevron opens a `DropdownMenu` of alternates. Use the amber `default` variant only when the action is the state's primary.
+- **Composer Send and Stop.** Send is a round `default` button; Stop is the round `ink` variant, neutral by rule.
 
 ```tsx
-// Variants: default, outline, secondary, ghost, destructive, link
-// Text sizes: xs/sm/default = small (h-8, text-sm), md = medium (h-12, text-base), lg = large (h-14, text-lg)
-// Icon-only sizes: icon-xs/icon-sm/icon = small (size-8), icon-md = medium (size-12), icon-lg = large (size-14)
-<Button variant="ghost" size="sm">Click me</Button>
-<Button variant="outline" size="icon-xs"><Icon /></Button>
+<Button variant="ghost">Cancel</Button>
+<Button size="default" variant="destructive" loading={deleting}>Delete thread</Button>
+<IconButton shape="round" aria-label="Wrap lines" pressed={wrap} onClick={toggleWrap}><WrapText /></IconButton>
 ```
 
 ## Input Sizes
