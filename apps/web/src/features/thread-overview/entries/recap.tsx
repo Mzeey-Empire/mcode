@@ -61,7 +61,7 @@ function ThreadOverviewRecapControls({
           render={
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               type="button"
               data-testid="thread-overview-recap-refresh"
               aria-label={refreshLabel}
@@ -95,7 +95,7 @@ function ThreadOverviewRecapCoverage({
         render={
           <Button
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             type="button"
             data-testid="thread-overview-recap-coverage"
             aria-label={`Covered through ${coverageLabel.coveredThrough}. Latest activity ${coverageLabel.latestActivityAt}`}

@@ -79,7 +79,7 @@ export function PanelEmptyState({
                 key={type.id}
                 type="button"
                 variant="outline"
-                size="sm"
+                size="compact"
                 data-testid={`panel-card-${type.id}`}
                 disabled={type.comingSoon}
                 aria-label={type.comingSoon ? `${type.label} (coming soon)` : `Open ${type.label}`}

@@ -14,7 +14,7 @@ function CommitOrPushEntry() {
     >
       <Button
         variant="ghost"
-        size="sm"
+        size="compact"
         type="button"
         disabled
         data-testid="workspace-menu-commit"

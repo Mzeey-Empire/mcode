@@ -34,7 +34,7 @@ export function TurnSaveRecovery({ statuses }: { statuses: readonly TurnSavingSt
   if (threadIds.length === 0) return null;
   return <div data-testid="turn-save-recovery">
     {threadIds.map((threadId) => <div key={threadId}>
-      <Button type="button" variant="ghost" size="sm" className="w-full justify-start text-xs" disabled={retrying.has(threadId)} aria-busy={retrying.has(threadId)}
+      <Button type="button" variant="ghost" size="compact" className="w-full justify-start text-xs" disabled={retrying.has(threadId)} aria-busy={retrying.has(threadId)}
         onClick={() => { void retrySave(threadId); }}>
         {retrying.has(threadId) ? "Retrying save…" : "Retry save"}
       </Button>

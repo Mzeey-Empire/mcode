@@ -367,7 +367,7 @@ export function PullRequestLifecycleActions({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               className="text-muted"
               aria-label="Pull request actions"
             >

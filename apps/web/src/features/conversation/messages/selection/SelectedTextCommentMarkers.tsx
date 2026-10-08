@@ -212,7 +212,7 @@ export function SelectedTextCommentMarkers({
               key={marker.commentId}
               type="button"
               variant="ghost"
-              size="icon-sm"
+              size="icon-compact"
               data-testid="selected-text-comment-marker"
               data-selected-text-comment-marker-id={marker.commentId}
               aria-label={`Open comment ${marker.displayNumber}`}

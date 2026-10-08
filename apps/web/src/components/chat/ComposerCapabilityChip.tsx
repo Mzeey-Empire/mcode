@@ -37,7 +37,7 @@ export function ComposerCapabilityChip({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               onClick={onRemove}
               aria-label={removeLabel}
               className="rounded-lg text-muted hover:bg-selected hover:text-ink"

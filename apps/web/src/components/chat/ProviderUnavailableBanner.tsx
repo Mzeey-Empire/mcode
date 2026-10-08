@@ -50,9 +50,9 @@ export function ProviderUnavailableBanner({
       className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-border/60 bg-hover/40 px-3 py-2 text-sm"
     >
       <span className="flex-1">{copy}</span>
-      <Button size="sm" variant="outline" onClick={onOpenSettings}>Open Settings</Button>
+      <Button size="compact" variant="outline" onClick={onOpenSettings}>Open Settings</Button>
       {reason === "disabled" && onBranch && (
-        <Button size="sm" variant="ghost" onClick={onBranch}>Branch to another provider</Button>
+        <Button size="compact" variant="ghost" onClick={onBranch}>Branch to another provider</Button>
       )}
     </div>
   );

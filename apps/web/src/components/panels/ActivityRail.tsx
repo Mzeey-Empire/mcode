@@ -288,7 +288,7 @@ function RailTab({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           data-rail-tab={railDomId(id)}
           data-active={active ? "true" : undefined}
           aria-pressed={active}
@@ -335,7 +335,7 @@ function RailTab({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           aria-label={`Close ${label}`}
           data-rail-close
           onClick={() => onClose(id)}
@@ -408,7 +408,7 @@ function BrowserPageRailTab({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           data-rail-browser-page={page.id}
           data-active={active ? "true" : undefined}
           aria-pressed={active}
@@ -447,7 +447,7 @@ function BrowserPageRailTab({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           aria-label={`Close page ${label}`}
           data-rail-close
           onClick={(e) => {
@@ -577,7 +577,7 @@ function RailAddControl({
         <span className="block">
           <Button
             variant="ghost"
-            size="sm"
+            size="compact"
             className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted hover:text-ink"
             aria-label={`New ${only.label}`}
             disabled={terminalCapReached && only.id === "terminal"}
@@ -606,7 +606,7 @@ function RailAddControl({
           render={
             <Button
               variant="ghost"
-              size="sm"
+              size="compact"
               className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted hover:text-ink"
               aria-label="New tab"
             >
@@ -706,7 +706,7 @@ function RailHeader({
       <RailTooltip content="Close panel" disabled={expanded}>
         <Button
           variant="ghost"
-          size="sm"
+          size="compact"
           onClick={onTogglePanel}
           className="relative h-8 w-full justify-start overflow-hidden px-2 text-muted/70 transition-colors hover:bg-transparent hover:text-ink"
           aria-label="Close panel"
@@ -728,7 +728,7 @@ function RailHeader({
       <RailTooltip content={maximized ? "Restore panel" : "Maximize panel"}>
         <Button
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           onClick={onToggleMaximized}
           className={cn(
             RAIL_TRAILING_CONTROL_CLASS,

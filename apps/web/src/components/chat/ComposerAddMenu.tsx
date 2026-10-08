@@ -139,7 +139,7 @@ export function ComposerAddMenu({
       ref={triggerRef}
       type="button"
       variant="ghost"
-      size="icon"
+      size="icon-compact"
       aria-label="Add to composer"
       aria-expanded={open}
       aria-haspopup="menu"
@@ -180,7 +180,7 @@ export function ComposerAddMenu({
               type="button"
               role="menuitem"
               variant="ghost"
-              size="sm"
+              size="compact"
               onClick={handleAttachFiles}
               className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-left hover:bg-selected/70"
             >
@@ -208,7 +208,7 @@ export function ComposerAddMenu({
                       type="button"
                       role="menuitemcheckbox"
                       variant="ghost"
-                      size="sm"
+                      size="compact"
                       onClick={() => handleAttachCapability(capability.id)}
                       disabled={attached}
                       aria-checked={attached}

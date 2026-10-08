@@ -58,7 +58,7 @@ export function PreviewAnnotationHeader({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-sm"
+                size="icon-compact"
                 aria-label="Exit Design"
                 className="text-muted hover:bg-hover/60 hover:text-ink"
                 onClick={onExit}
@@ -76,7 +76,7 @@ export function PreviewAnnotationHeader({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon-compact"
                   aria-label="Discard page annotations"
                   className="text-muted hover:bg-hover/60 hover:text-ink"
                   onClick={() => setDiscardDialogOpen(true)}
@@ -106,7 +106,7 @@ export function PreviewAnnotationHeader({
         <Button
           type="button"
           variant="default"
-          size="sm"
+          size="compact"
           disabled={!hasAnnotations}
           className="h-7 rounded-lg px-2.5"
           data-testid="preview-annotation-send-state"

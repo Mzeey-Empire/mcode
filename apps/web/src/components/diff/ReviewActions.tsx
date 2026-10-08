@@ -44,7 +44,7 @@ export function ReviewActions({ thread }: ReviewActionsProps) {
           render={
             <Button
               variant="ghost"
-              size="xs"
+              size="compact"
               onClick={handleCommitOrPush}
               data-testid="review-commit-or-push"
               className={ACTION_CLASS}
@@ -62,7 +62,7 @@ export function ReviewActions({ thread }: ReviewActionsProps) {
       {pr ? (
         <Button
           variant="ghost"
-          size="xs"
+          size="compact"
           onClick={(event) => handleOpenPr(pr.url, event)}
           data-testid="review-open-pr"
           className={ACTION_CLASS}
@@ -78,7 +78,7 @@ export function ReviewActions({ thread }: ReviewActionsProps) {
                 <span className="inline-flex">
                   <Button
                     variant="ghost"
-                    size="xs"
+                    size="compact"
                     onClick={() => setCreatePrOpen(true)}
                     disabled
                     data-testid="review-create-pr"
@@ -91,7 +91,7 @@ export function ReviewActions({ thread }: ReviewActionsProps) {
               ) : (
                 <Button
                   variant="ghost"
-                  size="xs"
+                  size="compact"
                   onClick={() => setCreatePrOpen(true)}
                   disabled={!hasCommitsAhead}
                   data-testid="review-create-pr"

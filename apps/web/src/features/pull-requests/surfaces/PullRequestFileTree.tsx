@@ -423,7 +423,7 @@ export function PullRequestFileTree(props: PullRequestFileTreeProps) {
               type="button"
               role="treeitem"
               variant="ghost"
-              size="sm"
+              size="compact"
               tabIndex={focusedId === row.node.id ? 0 : -1}
               aria-label={row.node.path}
               aria-level={row.depth}
@@ -459,7 +459,7 @@ export function PullRequestFileTree(props: PullRequestFileTreeProps) {
         type="button"
         role="treeitem"
         variant="ghost"
-        size="sm"
+        size="compact"
         tabIndex={focusedId === row.node.id ? 0 : -1}
         aria-level={row.depth}
         aria-posinset={row.positionInSet}

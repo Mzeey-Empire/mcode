@@ -535,7 +535,7 @@ function BrowseError({ error, onRetry }: { error: string | null; onRetry: () => 
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-2 text-xs" role="alert">
       <span className="text-muted">Check the path or retry the folder listing.</span>
-      <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+      <Button type="button" size="compact" variant="outline" onClick={onRetry}>
         Retry
       </Button>
     </div>
@@ -548,7 +548,7 @@ function BrowseAddError({ addError, onRetry }: { addError: string | null; onRetr
   return (
     <div data-testid="browse-add-error" className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-2 text-xs" role="alert">
       <span className="text-destructive">{addError}</span>
-      <Button type="button" size="sm" variant="ghost" onClick={onRetry}>
+      <Button type="button" size="compact" variant="ghost" onClick={onRetry}>
         Retry
       </Button>
     </div>

@@ -55,7 +55,7 @@ function ToolbarLeading({
   return (
     <div className="flex min-w-0 items-center gap-2">
       {isNarrow && reserveSidebarReveal && <span aria-hidden data-testid="pull-request-sidebar-reveal-spacer" className="w-8 shrink-0" />}
-      {isNarrow ? (onBack ? <Button ref={backButtonRef} type="button" variant="ghost" size="icon-xs" aria-label="Back to pull requests" onClick={onBack}><ArrowLeft size={14} aria-hidden /></Button> : null) : (
+      {isNarrow ? (onBack ? <Button ref={backButtonRef} type="button" variant="ghost" size="icon-compact" aria-label="Back to pull requests" onClick={onBack}><ArrowLeft size={14} aria-hidden /></Button> : null) : (
         <>
           <GitPullRequest size={14} aria-hidden className="shrink-0 text-muted" />
           <span className="min-w-0 text-fade font-mono text-xs text-ink/75">{model ? `${model.identity.owner}/${model.identity.repository}` : "Pull request"}</span>
@@ -88,8 +88,8 @@ function ToolbarActions({
     <div className="flex min-w-0 items-center justify-end gap-1">
       {viewAction}
       {detail && capabilities !== undefined && onRefresh ? <PullRequestLifecycleActions detail={detail} capabilities={capabilities} mutationTransport={mutationTransport} readTransport={readTransport} onRefresh={onRefresh} onRefreshClick={onRefreshClick} refreshing={refreshing} onFork={onFork} onForkInBackground={onForkInBackground} forkAllowed={forkAllowed} forkUnavailableReason={forkUnavailableReason} /> : null}
-      {browserUrl ? <Tooltip><TooltipTrigger render={<a href={browserUrl} target="_blank" rel="noopener noreferrer" aria-label="Open in browser" className={cn(buttonVariants({ variant: "ghost", size: "icon-xs" }), "text-muted")}><ExternalLink size={13} aria-hidden /></a>} /><TooltipContent>Open in browser</TooltipContent></Tooltip> : null}
-      {!isNarrow && onClose ? <Button type="button" variant="ghost" size="icon-xs" aria-label="Close pull request detail" className="text-muted" onClick={onClose}><X size={14} aria-hidden /></Button> : null}
+      {browserUrl ? <Tooltip><TooltipTrigger render={<a href={browserUrl} target="_blank" rel="noopener noreferrer" aria-label="Open in browser" className={cn(buttonVariants({ variant: "ghost", size: "icon-compact" }), "text-muted")}><ExternalLink size={13} aria-hidden /></a>} /><TooltipContent>Open in browser</TooltipContent></Tooltip> : null}
+      {!isNarrow && onClose ? <Button type="button" variant="ghost" size="icon-compact" aria-label="Close pull request detail" className="text-muted" onClick={onClose}><X size={14} aria-hidden /></Button> : null}
     </div>
   );
 }

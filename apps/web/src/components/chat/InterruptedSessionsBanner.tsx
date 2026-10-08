@@ -45,13 +45,13 @@ export function InterruptedSessionsBanner({
           ))}
         </ul>
       </div>
-      <Button variant="outline" size="sm" disabled={retrying} onClick={() => void retryAll()}>
+      <Button variant="outline" size="compact" disabled={retrying} onClick={() => void retryAll()}>
         <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${retrying ? "animate-spin" : ""}`} />
         {retrying ? "Retrying..." : "Retry all"}
       </Button>
       <Button
         variant="ghost"
-        size="icon"
+        size="icon-compact"
         onClick={onDismiss}
         aria-label="Dismiss"
         className="h-7 w-7 text-muted hover:text-ink"

@@ -31,7 +31,7 @@ export function SubagentChangeSummary({ effects, onViewAllDiffs }: SubagentChang
         <Button
           type="button"
           variant="ghost"
-          size="xs"
+          size="compact"
           className="shrink-0 gap-1 text-muted/70"
           onClick={() => onViewAllDiffs(paths, additions, deletions)}
         >
