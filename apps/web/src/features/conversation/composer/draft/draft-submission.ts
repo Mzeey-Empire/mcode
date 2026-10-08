@@ -167,7 +167,7 @@ function settleSuccessfulPlanSelection(
 }
 
 /** An unsaved edit of a comment that was just sent keeps its text as a new comment. */
-function keepEditorOfSentComment<E extends { readonly annotationId?: string }>(
+export function keepEditorOfSentComment<E extends { readonly annotationId?: string }>(
   editor: E | undefined,
   remaining: readonly DraftDiffComment[],
 ): E | undefined {

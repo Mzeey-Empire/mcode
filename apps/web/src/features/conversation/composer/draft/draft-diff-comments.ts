@@ -14,6 +14,7 @@ import {
   type DiffCommentEditorDraft,
 } from "@/stores/composerDraftStore";
 import {
+  keepEditorOfSentComment,
   removeDiffComment,
   saveDiffComment,
   visibleDiffComments,
@@ -137,18 +138,18 @@ export function editDraftDiffComment(threadId: string, comment: DraftDiffComment
 }
 
 /**
- * Removes comments a queued message took with it, unless they were edited
- * since; a later revision is a new comment the queue does not own.
+ * Removes comments a queued or sent message took with it, unless they were
+ * edited since; a later revision is a new comment the message does not own.
  */
-export function removeQueuedDiffComments(threadId: string, taken: readonly DraftDiffComment[]): void {
+export function removeTakenDiffComments(threadId: string, taken: readonly DraftDiffComment[]): void {
   if (taken.length === 0) return;
   const takenRevisions = new Set(taken.map((comment) => `${comment.id}:${comment.revision}`));
-  updateThread(threadId, (draft) => ({
-    ...draft,
-    diffComments: (draft.diffComments ?? []).filter(
+  updateThread(threadId, (draft) => {
+    const diffComments = (draft.diffComments ?? []).filter(
       (comment) => !takenRevisions.has(`${comment.id}:${comment.revision}`),
-    ),
-  }));
+    );
+    return { ...draft, diffComments, diffCommentEditor: keepEditorOfSentComment(draft.diffCommentEditor, diffComments) };
+  });
 }
 
 /** Puts comments from a queued message back into the draft as new revisions. */

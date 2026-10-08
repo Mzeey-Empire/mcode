@@ -927,6 +927,22 @@ describe("Composer checkout confirmation", () => {
     expect(usePreviewAnnotationStore.getState().byThread[thread.id] ?? []).toEqual([]);
     expect(screen.queryByTestId("diff-comment-chip")).not.toBeInTheDocument();
     const sendCommand = (mockTransport.sendMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
+    act(() => {
+      useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
+        ...draft,
+        diffComments: [{ ...makeDraftDiffComment(), revision: 2, note: "Edited while sending" }],
+      }));
+    });
+    expect(sendCommand?.previewAnnotations?.annotations.at(-1)).toMatchObject({
+      note: "Keep this review target attached to the next prompt.",
+    });
+    expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("1 comment");
+    act(() => {
+      useComposerDraftStore.getState().updateNextMessage(thread.id, (draft) => ({
+        ...draft,
+        diffComments: [makeDraftDiffComment()],
+      }));
+    });
     const pendingDraft = useComposerDraftStore.getState().drafts[thread.id];
     expect(pendingDraft?.diffComments).toEqual([makeDraftDiffComment()]);
     expect(pendingDraft?.submissions).toEqual([{
@@ -1022,12 +1038,17 @@ describe("Composer checkout confirmation", () => {
         "ws-1": [makeSavedAnnotation()],
       },
     });
+    useComposerDraftStore.getState().updateNextMessage("ws-1", (draft) => ({
+      ...draft,
+      diffComments: [makeDraftDiffComment()],
+    }));
 
     render(<Composer isNewThread workspaceId="ws-1" />);
 
     expect(screen.getByTestId("composer-annotation-bundle")).toHaveTextContent(
       "1 annotation",
     );
+    expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("1 comment");
     await userEvent.click(screen.getByLabelText("Send message"));
 
     await waitFor(() => expect(mockTransport.createAndSendMessage).toHaveBeenCalled());
@@ -1041,9 +1062,11 @@ describe("Composer checkout confirmation", () => {
           id: "550e8400-e29b-41d4-a716-446655440001",
           note: "Make the content flush with the page edge.",
         },
+        { kind: "diff", id: "550e8400-e29b-41d4-a716-446655440002", displayNumber: 2 },
       ],
     });
     expect(usePreviewAnnotationStore.getState().byThread["ws-1"] ?? []).toEqual([]);
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts["ws-1"]).toBeUndefined());
     expect(usePreviewDesignModeStore.getState().modes["ws-1"]).toBe(false);
   });
 

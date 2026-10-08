@@ -9,6 +9,7 @@ import type { ComposerFormController } from "../draft/useComposerFormController"
 import type { ComposerExecutionTargetController } from "../execution/useComposerExecutionTarget";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
 import type { HandoffQueuedSend } from "../queue/useHandoffQueuedSend";
+import { removeTakenDiffComments } from "../draft/draft-diff-comments";
 import { beginDraftSubmission } from "../draft/draft-submission-lifecycle";
 import { completeSuccessfulComposerSubmission } from "./complete-composer-submission";
 import { createComposerAnnotationDispatchGuard } from "./composer-submission-annotations";
@@ -138,7 +139,12 @@ export function useComposerSubmissionController({
       annotations.clearBeforeDispatch();
       queue.consumeEditForDispatch();
       const messageId = crypto.randomUUID();
-      const draftSubmission = beginDraftSubmission(threadId, submission.currentDiffComments, messageId);
+      // Only an existing-thread Send can be confirmed by its messageId later;
+      // new-thread and branch Sends settle on their dispatch result alone.
+      const sendsToThisThread = target.kind === "existing-thread";
+      const draftSubmission = sendsToThisThread
+        ? beginDraftSubmission(threadId, submission.currentDiffComments, messageId)
+        : null;
       let placeholderAccepted = false;
       const dispatch = dispatchComposerTarget({
         messageId,
@@ -172,6 +178,9 @@ export function useComposerSubmissionController({
       }
       annotations.stopWatching();
       draftSubmission?.succeeded();
+      if (!sendsToThisThread && annotationScopeId) {
+        removeTakenDiffComments(annotationScopeId, submission.currentDiffComments);
+      }
       completeSuccessfulComposerSubmission({
         form,
         submission,

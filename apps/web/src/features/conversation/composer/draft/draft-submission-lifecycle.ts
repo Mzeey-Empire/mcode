@@ -10,6 +10,12 @@ import {
 /** Sends this window started that have not settled; only these skip reconcile. */
 const inFlightMessageIds = new Set<string>();
 
+/**
+ * Delays before re-reading the thread after a confirmation read failed. A
+ * reconnect also retries, but a connection that stays up never reconnects.
+ */
+const CONFIRMATION_RETRY_DELAYS_MS = [5_000, 30_000];
+
 /** Page size for confirming a lost or interrupted Send; a fresh Send is usually on the first page. */
 const CONFIRMATION_PAGE_SIZE = 100;
 
@@ -85,6 +91,9 @@ export function beginDraftSubmission(
       const found = await findServerMessages(threadId, [messageId]);
       if (!found) {
         inFlightMessageIds.delete(messageId);
+        for (const delay of CONFIRMATION_RETRY_DELAYS_MS) {
+          setTimeout(() => void reconcileOrphanedDraftSubmissions(threadId), delay);
+        }
         return;
       }
       settle(threadId, messageId, found.has(messageId) ? "success" : "failure");

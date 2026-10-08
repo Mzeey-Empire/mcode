@@ -118,6 +118,22 @@ function nextMessageFields(draft: ComposerDraft | undefined): NextMessageFields 
   };
 }
 
+/**
+ * The stored draft's next-message fields win, because the composer's snapshot
+ * of them can be stale. A draft moved from a placeholder thread fills the
+ * fields the destination does not have yet.
+ */
+function mergeNextMessageFields(stored: ComposerDraft | undefined, incoming: ComposerDraft): NextMessageFields {
+  const kept = nextMessageFields(stored);
+  const moved = nextMessageFields(incoming);
+  return {
+    diffComments: kept.diffComments ?? moved.diffComments,
+    diffCommentEditor: kept.diffCommentEditor ?? moved.diffCommentEditor,
+    planCommentSelection: kept.planCommentSelection ?? moved.planCommentSelection,
+    submissions: kept.submissions ?? moved.submissions,
+  };
+}
+
 /** Composer fields of a draft created by a next-message write before the composer saved one. */
 const NO_COMPOSER_STATE: Omit<ComposerDraft, keyof NextMessageFields> = {
   input: "",
@@ -243,7 +259,7 @@ export const useComposerDraftStore = create<ComposerDraftState>()(
 
       saveDraft: (threadId, composerDraft) => {
         const existing = get().drafts[threadId];
-        const draft = { ...composerDraft, ...nextMessageFields(existing) };
+        const draft = { ...composerDraft, ...mergeNextMessageFields(existing, composerDraft) };
         if (draftHasNoSendableContent(draft)) {
           // Don't store empty drafts; clean up if one existed
           if (!existing) return;

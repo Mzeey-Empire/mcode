@@ -79,7 +79,7 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
   const annotationRows = usePreviewAnnotationStore((state) =>
     annotationScopeId ? state.byThread[annotationScopeId] : undefined,
   );
-  const diffComments = useNumberedDiffComments(input.threadId);
+  const diffComments = useNumberedDiffComments(annotationScopeId);
   const previewAnnotationCount = annotationRows?.length ?? 0;
   const connected = useConnectionStore((state) => state.status === "connected");
   // Reruns on reconnect, so a submission a dropped connection left pending settles.

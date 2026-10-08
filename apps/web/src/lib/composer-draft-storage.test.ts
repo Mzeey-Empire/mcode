@@ -204,6 +204,34 @@ describe("composer-draft-storage", () => {
 });
 
 describe("persisted next-message drafts", () => {
+  it("moves next-message fields with a draft transferred to a new thread", () => {
+    useComposerDraftStore.setState({ drafts: {} });
+    useComposerDraftStore.getState().updateNextMessage("placeholder", (draft) => ({
+      ...draft,
+      diffComments: [diffComment],
+    }));
+    const moved = useComposerDraftStore.getState().getDraft("placeholder")!;
+
+    useComposerDraftStore.getState().saveDraft("real-thread", { ...moved, input: "first message" });
+
+    expect(useComposerDraftStore.getState().drafts["real-thread"]?.diffComments).toEqual([diffComment]);
+  });
+
+  it("keeps stored next-message fields over a composer snapshot without them", () => {
+    useComposerDraftStore.setState({ drafts: {} });
+    useComposerDraftStore.getState().updateNextMessage("thread-a", (draft) => ({
+      ...draft,
+      diffComments: [diffComment],
+    }));
+
+    useComposerDraftStore.getState().saveDraft("thread-a", { ...baseDraft, input: "typed" });
+
+    expect(useComposerDraftStore.getState().drafts["thread-a"]).toMatchObject({
+      input: "typed",
+      diffComments: [diffComment],
+    });
+  });
+
   it("restores a draft holding only a plan-comment selection after a reload", async () => {
     localStorage.clear();
     useComposerDraftStore.setState({ drafts: {} });

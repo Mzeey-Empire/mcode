@@ -4,7 +4,7 @@ import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { useQueueStore } from "@/stores/queueStore";
-import { removeQueuedDiffComments } from "../draft/draft-diff-comments";
+import { removeTakenDiffComments } from "../draft/draft-diff-comments";
 import type { ComposerAgentSelection, ComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
 import type { HandoffQueuedSend } from "../queue/useHandoffQueuedSend";
@@ -130,6 +130,6 @@ function clearQueuedAnnotations(
 ): void {
   if (!annotationScopeId || !annotations) return;
   usePreviewAnnotationStore.getState().clearThread(annotationScopeId);
-  removeQueuedDiffComments(annotationScopeId, diffComments);
+  removeTakenDiffComments(annotationScopeId, diffComments);
   usePreviewDesignModeStore.getState().setActive(annotationScopeId, false);
 }

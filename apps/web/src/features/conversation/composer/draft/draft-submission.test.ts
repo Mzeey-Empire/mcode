@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, MessageMention, PlanCommentSelection } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
-import { saveDraftDiffComment, setDraftDiffCommentEditor } from "./draft-diff-comments";
+import {
+  editDraftDiffComment,
+  removeTakenDiffComments,
+  saveDraftDiffComment,
+  setDraftDiffCommentEditor,
+} from "./draft-diff-comments";
 import { beginDraftSubmission, reconcileOrphanedDraftSubmissions } from "./draft-submission-lifecycle";
 import {
   freezeDraftSubmission,
@@ -256,6 +261,38 @@ describe("draft submission lifecycle", () => {
     await reconcileOrphanedDraftSubmissions(THREAD_ID);
 
     expect(pendingComments()).toEqual(["review note"]);
+  });
+
+  it("retries confirmation while the connection stays up", async () => {
+    vi.useFakeTimers();
+    try {
+      const handle = startSend();
+      getMessages.mockRejectedValueOnce(new Error("timeout"));
+      await handle.failed();
+      getMessages.mockResolvedValueOnce({ messages: [message(MESSAGE_ID, 9)], hasMore: false });
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(useComposerDraftStore.getState().drafts[THREAD_ID]).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps an unsaved edit as a new comment when a queued message takes the comment", () => {
+    saveDraftDiffComment(THREAD_ID, target, { note: "queued", mentions: [] });
+    const taken = useComposerDraftStore.getState().drafts[THREAD_ID]!.diffComments!;
+    editDraftDiffComment(THREAD_ID, taken[0]!);
+    setDraftDiffCommentEditor(THREAD_ID, {
+      ...useComposerDraftStore.getState().drafts[THREAD_ID]!.diffCommentEditor!,
+      note: "unsaved edit",
+    });
+
+    removeTakenDiffComments(THREAD_ID, taken);
+
+    const draft = useComposerDraftStore.getState().drafts[THREAD_ID];
+    expect(draft?.diffComments).toEqual([]);
+    expect(draft?.diffCommentEditor).toMatchObject({ annotationId: undefined, note: "unsaved edit" });
   });
 
   it("keeps an open editor while settling", () => {
