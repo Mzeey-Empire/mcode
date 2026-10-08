@@ -113,12 +113,13 @@
   --primary: var(--amber-700);
   --primary-hover: var(--amber-800);
   --primary-foreground: var(--neutral-50);
-  /* Paper's light selected is neutral-100, the same as page and hover, so a
-     selected sidebar row would vanish (decisions.md D4). */
-  --secondary: var(--neutral-200);
+  --secondary: var(--neutral-100);
   --secondary-foreground: var(--neutral-800);
   --muted: var(--neutral-100);
   --muted-foreground: var(--neutral-400);
+  /* Paper's light selected is neutral-100, the same as page and hover, so a
+     selected sidebar row would vanish (decisions.md D4). Only selection moves:
+     the secondary button keeps neutral-100 so its neutral-200 hover still shows. */
   --accent: var(--neutral-200);
   --accent-foreground: var(--neutral-800);
   --destructive: var(--clay-600);

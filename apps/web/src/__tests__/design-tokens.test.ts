@@ -43,10 +43,14 @@ const ROLE_VARIABLES: Readonly<Record<string, readonly string[]>> = {
   "diff-remove-bg": ["--diff-remove-bg"],
 };
 
-/** Departures from the Paper export that the user's decisions record, keyed by Paper token. */
-const DECIDED_DEVIATIONS: Readonly<Record<string, string>> = {
-  // decisions.md D4: Paper's light selected equals page and hover, so selection vanished.
-  "--color-light-selected": "var(--color-neutral-200)",
+/**
+ * Light-theme variables that depart from their Paper role by a recorded decision,
+ * mapped to the Paper token they resolve to instead.
+ */
+const LIGHT_DEVIATIONS: Readonly<Record<string, { readonly role: string; readonly token: string }>> = {
+  // decisions.md D4: Paper's light selected equals page and hover, so a selected row
+  // vanished. Only selection moves; the secondary button (--secondary) keeps Paper's pair.
+  "--accent": { role: "selected", token: "--color-neutral-200" },
 };
 
 const TYPE_ROLES = ["body", "prose", "body-small", "caption", "label", "button", "code"] as const;
@@ -100,8 +104,7 @@ function toPx(length: string): number {
 }
 
 const paperTokens = new Map(Object.entries(paperExport.tokens));
-const decidedPaper = new Map([...paperTokens, ...Object.entries(DECIDED_DEVIATIONS)]);
-const paper = (name: string) => resolveVars(`var(${name})`, decidedPaper);
+const paper = (name: string) => resolveVars(`var(${name})`, paperTokens);
 
 const rootScope = blockDeclarations(":root");
 const themes = {
@@ -130,20 +133,23 @@ describe("design tokens match the Paper export", () => {
   it.each(Object.entries(ROLE_VARIABLES))("resolves %s to Paper's value in both themes", (role, variables) => {
     for (const variable of variables) {
       expect(code(themes.dark, variable), `dark ${variable}`).toBe(paper(`--color-${role}`));
-      expect(code(themes.light, variable), `light ${variable}`).toBe(paper(`--color-light-${role}`));
+      expect(code(themes.light, variable), `light ${variable}`).toBe(
+        paper(LIGHT_DEVIATIONS[variable]?.token ?? `--color-light-${role}`),
+      );
     }
   });
 
   it("keeps each decided deviation different from Paper", () => {
-    for (const [name, value] of Object.entries(DECIDED_DEVIATIONS)) {
-      expect(paperTokens.get(name), `${name} now matches the decision; drop the deviation`).not.toBe(value);
+    for (const [variable, { role, token }] of Object.entries(LIGHT_DEVIATIONS)) {
+      expect(paper(`--color-light-${role}`), `Paper now matches ${variable}; drop the deviation`).not.toBe(paper(token));
     }
   });
 
-  it("pairs the primary label and focus ring as the style guide requires", () => {
+  it("keeps the primary label, focus ring and light secondary hover distinct as the style guide requires", () => {
     expect(code(themes.dark, "--primary")).toBe("oklch(72% 0.170 75)");
     expect(code(themes.dark, "--primary-foreground")).toBe("oklch(16% 0.005 260)");
     expect(code(themes.light, "--ring")).toBe("oklch(52% 0.170 264)");
+    expect(code(themes.light, "--secondary")).not.toBe(code(themes.light, "--button-secondary-hover"));
   });
 
   it.each(TYPE_ROLES)("gives the %s type role Paper's size, line height and weight", (role) => {
