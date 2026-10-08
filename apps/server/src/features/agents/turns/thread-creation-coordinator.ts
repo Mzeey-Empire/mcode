@@ -310,7 +310,7 @@ export class ThreadCreationCoordinator {
     const thread = await this.configure(attached, creation);
     if (startupId) {
       await this.startups()?.bindThread(startupId, thread.id);
-      await this.startups()?.advance(startupId, "worktree", worktreeDetail(params.existingWorktreePath, "opened"));
+      await this.startups()?.advance(startupId, "worktree", worktreeDetail(thread.worktree_path ?? params.existingWorktreePath, "opened"));
     }
     await this.cancelIfRequested(startupId);
     return thread;
@@ -333,7 +333,7 @@ export class ThreadCreationCoordinator {
       if (startupId) {
         await this.startups()?.fail(startupId, {
           code: "FETCH_FAILED", message: "Git fetch failed", retryable: true,
-          detail: startupErrorDetail(cause, true),
+          detail: startupErrorDetail(cause),
         });
       }
       throw cause;
@@ -454,9 +454,9 @@ export class ThreadCreationCoordinator {
     const startup = await startupService.start({
       startupId: command.startupId,
       workspaceId: params.workspaceId,
-      kind: params.mode === "worktree"
-        ? params.existingWorktreePath ? "attached-worktree" : "managed-worktree"
-        : "direct",
+      kind: params.existingWorktreePath
+        ? "attached-worktree"
+        : params.mode === "worktree" ? "managed-worktree" : "direct",
       fetch: params.pullRequestNumber !== undefined && !params.existingWorktreePath && !params.parentThreadId ? {
         ref: `pull/${params.pullRequestNumber}/head`,
         pullRequestNumber: params.pullRequestNumber,
@@ -511,7 +511,7 @@ export class ThreadCreationCoordinator {
       : startup.phase === "worktree"
         ? { code: "WORKTREE_PREPARATION_FAILED", message: "Worktree preparation failed", retryable: true }
         : { code: "SETUP_ADMISSION_FAILED", message: "Project Setup admission failed", retryable: true };
-    await this.startups()?.fail(startupId, { ...error, detail: startupErrorDetail(cause, false) });
+    await this.startups()?.fail(startupId, { ...error, detail: startupErrorDetail(cause) });
   }
 
   /** Apply first-turn provider settings to an already-provisioned thread. */
@@ -716,9 +716,9 @@ function worktreeDetail(path: string | null | undefined, mode: "created" | "open
   return path ? { phase: "worktree", mode, folderName: NodePath.basename(path), path } : undefined;
 }
 
-function startupErrorDetail(error: unknown, fetch: boolean): string | undefined {
+function startupErrorDetail(error: unknown): string | undefined {
   // execFile's message starts with the command; stderr contains Git's actual cause.
-  const stderr = fetch && error instanceof Error && "stderr" in error && typeof error.stderr === "string"
+  const stderr = error instanceof Error && "stderr" in error && typeof error.stderr === "string"
     ? error.stderr : undefined;
   const message = stderr?.trim() ? stderr : error instanceof Error ? error.message : String(error);
   return message.split(/\r?\n/).find((line) => line.trim())?.trim().slice(0, 2_000);

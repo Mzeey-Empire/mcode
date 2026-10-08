@@ -51,9 +51,13 @@ export class ThreadStartupStateStore {
     const existing = this.startupRepo.findById(input.startupId);
     if (existing) {
       const persistedFingerprint = this.startupRepo.requestFingerprint(input.startupId);
-      if (existing.workspaceId === input.workspaceId && existing.kind === input.kind
-        && existing.steps.some((step) => step.phase === "fetch") === (input.fetch !== undefined)
-        && (!persistedFingerprint || !requestFingerprint || persistedFingerprint === requestFingerprint)) return existing;
+      // A matching fingerprint is the same request even when an older server
+      // derived a different kind or step list for it, as before record v2.
+      const sameRequest = persistedFingerprint && requestFingerprint
+        ? persistedFingerprint === requestFingerprint
+        : existing.kind === input.kind
+          && existing.steps.some((step) => step.phase === "fetch") === (input.fetch !== undefined);
+      if (existing.workspaceId === input.workspaceId && sameRequest) return existing;
       throw new ThreadStartupConflictError(input.startupId);
     }
 

@@ -193,6 +193,7 @@ function NewThreadSurface({ state, onPromptSelect }: { state: ChatViewState; onP
 function startupContext(context: ClientPreparingContext | undefined, startupKind?: StartupDisplayContext): StartupDisplayContext {
   if (startupKind === "pull-request-review") return "pull-request-review";
   if (startupKind === "managed-worktree") return "managed-worktree";
+  if (startupKind === "attached-worktree") return "attached-worktree";
   if (context === "new-existing-worktree" || context === "branch-existing-worktree") return "attached-worktree";
   if (context === "new-worktree" || context === "branch-worktree") return "managed-worktree";
   return "direct";

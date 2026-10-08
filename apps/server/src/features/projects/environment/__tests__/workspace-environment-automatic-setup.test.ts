@@ -295,7 +295,10 @@ describe("automatic Project Setup", () => {
     ));
   });
 
-  it("forwards automatic Setup output before completion and blocks a failed attempt", async () => {
+  it.each([
+    ["this attempt's last output line", "installing\n  command failed  \n\n", "command failed"],
+    ["no line from an earlier attempt", "\n", undefined],
+  ])("forwards automatic Setup output and blocks a failed attempt with %s", async (_case, attemptOutput, detail) => {
     const startup = {
       appendOutput: vi.fn(),
       block: vi.fn(),
@@ -303,7 +306,11 @@ describe("automatic Project Setup", () => {
         startupId: "00000000-0000-4000-8000-000000000001",
         state: "running",
         phase: "setup",
-        transcript: [{ phase: "setup", content: "installing\n  command failed  \n\n" }],
+        steps: [{ phase: "setup", state: "running", startedAt: "2026-10-08T10:00:01.000Z" }],
+        transcript: [
+          { phase: "setup", content: "npm ERR! from the previous attempt\n", createdAt: "2026-10-08T10:00:00.000Z" },
+          { phase: "setup", content: attemptOutput, createdAt: "2026-10-08T10:00:02.000Z" },
+        ],
       })),
       resume: vi.fn(),
       skip: vi.fn(),
@@ -324,7 +331,7 @@ describe("automatic Project Setup", () => {
     completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
     await eventually(() => expect(startup.block).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
-      expect.objectContaining({ code: "SETUP_FAILED", detail: "command failed", actions: ["retry", "continue"] }),
+      expect.objectContaining({ code: "SETUP_FAILED", detail, actions: ["retry", "continue"] }),
       { phase: "setup", exitCode: 1 },
     ));
   });
@@ -338,6 +345,7 @@ describe("automatic Project Setup", () => {
         startupId: "00000000-0000-4000-8000-000000000001",
         state: startupState,
         phase: "setup",
+        steps: [],
         transcript: [],
       })),
       resume: vi.fn(() => { startupState = "running"; }),

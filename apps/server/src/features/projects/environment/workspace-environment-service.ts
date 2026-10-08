@@ -1491,7 +1491,10 @@ export class WorkspaceEnvironmentService {
   private async blockStartupSetup(threadId: string, code: string, message: string, exitCode?: number): Promise<void> {
     const startup = this.options.threadStartups?.findByThreadId(threadId);
     if (!startup || startup.phase !== "setup" || startup.state !== "running") return;
-    const detail = startup.transcript.filter((entry) => entry.phase === "setup")
+    // Retry setup keeps the transcript, so earlier attempts' output must not explain this block.
+    const attemptStartedAt = startup.steps.find((step) => step.phase === "setup")?.startedAt ?? "";
+    const detail = startup.transcript
+      .filter((entry) => entry.phase === "setup" && entry.createdAt >= attemptStartedAt)
       .map((entry) => entry.content).join("").split(/\r?\n/)
       .reverse().find((line) => line.trim())?.trim().slice(0, 2_000);
     await this.options.threadStartups?.block(startup.startupId,

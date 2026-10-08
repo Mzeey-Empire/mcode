@@ -142,6 +142,17 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
       retryable: true, detail: "fatal: Could not resolve host: github.com" });
   });
 
+  it("retains Git stderr when worktree creation fails", async () => {
+    const { workspace, startups, threadService, coordinator } = await harness();
+    vi.mocked(threadService.create).mockRejectedValue(Object.assign(
+      new Error("Command failed: git -C /project worktree add /project-wt"),
+      { stderr: "fatal: 'feature/x' is already checked out at '/other'\n" },
+    ));
+    await expect(coordinator.createInitialTurn({ workspaceId: workspace.id, content: "Build", mode: "worktree",
+      startupId: managedStartupId })).rejects.toThrow("Command failed");
+    expect(startups.get(managedStartupId)?.error?.detail).toBe("fatal: 'feature/x' is already checked out at '/other'");
+  });
+
   it("records a thread creation failure after a successful direct PR fetch", async () => {
     const { db, workspace, threads, startups, gitRepository, coordinator } = await harness();
     db.exec(`CREATE TRIGGER reject_thread_creation BEFORE INSERT ON threads

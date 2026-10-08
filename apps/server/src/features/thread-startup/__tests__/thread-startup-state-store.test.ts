@@ -209,6 +209,19 @@ describe("ThreadStartupStateStore", () => {
     db.close();
   });
 
+  it("replays a pre-v2 existing worktree or PR record when the same request retries", () => {
+    const { db, service } = createHarness();
+    service.start(input(), "attach-request");
+    service.start(input(secondStartupId), "pr-request");
+
+    expect(service.start(input(firstStartupId, "workspace-1", "attached-worktree"), "attach-request").kind).toBe("direct");
+    expect(service.start({ ...input(secondStartupId), fetch: { ref: "pull/42/head" } }, "pr-request").steps
+      .map((step) => step.phase)).toEqual(["thread", "agent"]);
+    expect(() => service.start(input(firstStartupId, "workspace-1", "attached-worktree"), "other-request"))
+      .toThrow(ThreadStartupConflictError);
+    db.close();
+  });
+
   it("keeps terminal records stable", () => {
     const { db, service } = createHarness();
     service.start(input());

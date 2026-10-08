@@ -38,6 +38,29 @@ function fallbackStartup(context: StartupDisplayContext): StartupDisplay {
   };
 }
 
+/**
+ * Show a startup record v2 in the shape this card rendered before v2, so the new
+ * fetch step and the attached checkout's worktree and setup steps add no rows.
+ * The S04-03 steps trail replaces this card and reads every step directly.
+ */
+function legacyStartup(startup: StartupDisplay): StartupDisplay {
+  const folded = new Set<ThreadStartup["phase"]>(
+    startup.kind === "attached-worktree" ? ["fetch", "worktree", "setup"] : ["fetch"],
+  );
+  const threadParts = startup.steps.filter((step) => step.phase === "thread" || folded.has(step.phase));
+  return {
+    ...startup,
+    phase: folded.has(startup.phase) ? "thread" : startup.phase,
+    steps: startup.steps
+      .filter((step) => !folded.has(step.phase))
+      .map((step) => step.phase === "thread" ? { phase: "thread", state: firstUnfinishedState(threadParts) } : step),
+  };
+}
+
+function firstUnfinishedState(steps: ThreadStartup["steps"]): ThreadStartupStepState {
+  return steps.find((step) => step.state !== "completed" && step.state !== "skipped")?.state ?? "completed";
+}
+
 function stepLabel(phase: ThreadStartup["phase"], context: StartupDisplayContext): string {
   if (context === "pull-request-review") {
     if (phase === "thread") return "Load pull request";
@@ -379,7 +402,7 @@ function StartupHeader({
 
 /** Renders the small activity indicator and authoritative startup progress card. */
 export function StartupProgressCard({ startup, context, startupId, actions }: StartupProgressCardProps) {
-  const display = startup ?? fallbackStartup(context);
+  const display = startup ? legacyStartup(startup) : fallbackStartup(context);
   const cancellation = useStartupCancellation(startupId, display);
   const cancelError = ["completed", "failed", "cancelled", "interrupted"].includes(display.state)
     ? null
