@@ -25,7 +25,7 @@ function mergeFirstPageCommits(current: GitCommit[], firstPage: GitCommit[]): Gi
   ];
 }
 
-/** Format an ISO date to a compact relative string (mirrors CommitEntry's scale). */
+/** Format an ISO date to a compact relative string. */
 function relativeTime(isoDate: string): string {
   const then = new Date(isoDate).getTime();
   if (!isFinite(then)) return "";

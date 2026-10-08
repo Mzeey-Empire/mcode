@@ -14,7 +14,6 @@ interface CumulativeViewProps {
   cacheVersion?: string | number;
   refreshing?: boolean;
   onRefresh?: () => void;
-  scopeLabel?: string;
 }
 
 function CumulativeEmptyState() {
@@ -24,8 +23,8 @@ function CumulativeEmptyState() {
   </div>;
 }
 
-function CumulativeHeader({ scopeLabel, summaryLens, summaryEnabled, onToggleSummary }: { scopeLabel: string | undefined; summaryLens: boolean; summaryEnabled: boolean; onToggleSummary: () => void }) {
-  if (!summaryEnabled || scopeLabel) return null;
+function CumulativeHeader({ summaryLens, summaryEnabled, onToggleSummary }: { summaryLens: boolean; summaryEnabled: boolean; onToggleSummary: () => void }) {
+  if (!summaryEnabled) return null;
   return <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/15">
     <Button type="button" variant={summaryLens ? "secondary" : "ghost"} size="xs" aria-pressed={summaryLens} onClick={onToggleSummary} data-testid="cumulative-summary-toggle" className="ml-auto gap-1.5 px-2 font-mono text-[10.5px] uppercase tracking-[0.12em]"><FileText size={11} />{summaryLens ? "Diff" : "Summarize"}</Button>
   </div>;
@@ -46,13 +45,8 @@ function CumulativeBody({ showSummary, files, threadId, cacheVersion, refreshing
   return <FileList files={files} source="cumulative" id={threadId} threadId={threadId} cacheVersion={cacheVersion} refreshable refreshing={refreshing} onRefresh={onRefresh} jumpViewKey="cumulative" />;
 }
 
-function getCumulativeLensState(pending: boolean, scopeLabel: string | undefined, summaryLens: boolean, summaryEnabled: boolean): { showPendingNotice: boolean; showSummary: boolean } {
-  const isThreadScope = !scopeLabel;
-  return { showPendingNotice: pending && isThreadScope, showSummary: summaryLens && summaryEnabled && isThreadScope };
-}
-
 /** Deduplicated file list across all snapshots for the "All" cumulative view. */
-export function CumulativeView({ threadId, comparison = null, cacheVersion = "", refreshing = false, onRefresh = () => {}, scopeLabel }: CumulativeViewProps) {
+export function CumulativeView({ threadId, comparison = null, cacheVersion = "", refreshing = false, onRefresh = () => {} }: CumulativeViewProps) {
   const pending = useDiffStore((s) => s.snapshotsPendingByThread[threadId] ?? false);
   const diffSummaryEnabled = useSettingsStore((s) => s.settings.diffSummary.enabled);
   const [summaryLens, setSummaryLens] = useState(false);
@@ -61,13 +55,11 @@ export function CumulativeView({ threadId, comparison = null, cacheVersion = "",
 
   if (files.length === 0) return <CumulativeEmptyState />;
 
-  const { showPendingNotice, showSummary } = getCumulativeLensState(pending, scopeLabel, summaryLens, diffSummaryEnabled);
-
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <CumulativeHeader scopeLabel={scopeLabel} summaryLens={summaryLens} summaryEnabled={diffSummaryEnabled} onToggleSummary={() => setSummaryLens((value) => !value)} />
-      {showPendingNotice && <CumulativePendingNotice refreshing={refreshing} onRefresh={onRefresh} />}
-      <CumulativeBody showSummary={showSummary} files={files} threadId={threadId} cacheVersion={cacheVersion} refreshing={refreshing} onRefresh={onRefresh} />
+      <CumulativeHeader summaryLens={summaryLens} summaryEnabled={diffSummaryEnabled} onToggleSummary={() => setSummaryLens((value) => !value)} />
+      {pending && <CumulativePendingNotice refreshing={refreshing} onRefresh={onRefresh} />}
+      <CumulativeBody showSummary={summaryLens && diffSummaryEnabled} files={files} threadId={threadId} cacheVersion={cacheVersion} refreshing={refreshing} onRefresh={onRefresh} />
     </div>
   );
 }
