@@ -253,7 +253,7 @@ function TerminalSearchControls({
           aria-invalid={invalidRegex || searchError !== null}
           maxLength={TERMINAL_SEARCH_QUERY_MAX_LENGTH}
           className="min-w-0 flex-1 text-fade whitespace-nowrap"
-          size="sm"
+          size="compact"
         />
         <Button
           type="button"

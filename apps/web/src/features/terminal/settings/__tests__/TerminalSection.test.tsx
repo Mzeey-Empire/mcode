@@ -77,13 +77,8 @@ describe("TerminalSection", () => {
       screen.getByLabelText("Terminal font family"),
     ];
     for (const field of fields) {
-      expect(field).toHaveClass(
-        "bg-transparent",
-        "shadow-none",
-        "focus-visible:ring-3",
-        "focus-visible:ring-focus/50",
-        "dark:bg-selected/30",
-      );
+      expect(field).toHaveClass("bg-selected", "border-control-border", "focus-ring");
+      expect(field).not.toHaveClass("focus-visible:ring-3");
     }
   });
 

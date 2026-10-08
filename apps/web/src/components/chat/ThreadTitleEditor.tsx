@@ -77,7 +77,7 @@ export function ThreadTitleEditor({
       defaultValue={title}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
-      size="sm"
+      size="compact"
     />
   );
 }

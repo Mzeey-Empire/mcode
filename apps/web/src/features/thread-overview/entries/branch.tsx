@@ -157,7 +157,7 @@ function ThreadOverviewBranchMenu({
           className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted"
         />
         <Input
-          size="xs"
+          size="compact"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search branches"

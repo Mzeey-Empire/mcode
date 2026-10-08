@@ -1970,7 +1970,7 @@ function ThreadRowContent({
       {isEditing ? (
         <Input
           type="text"
-          size="xs"
+          size="compact"
           value={inlineEdit?.title ?? ""}
           onChange={(event) => onInlineEditChange(event.target.value)}
           onKeyDown={(event) => handleInlineEditKeyDown(event, onInlineEditCommit, onInlineEditCancel)}

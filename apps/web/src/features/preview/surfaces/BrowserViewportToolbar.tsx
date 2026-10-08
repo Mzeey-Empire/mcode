@@ -95,10 +95,10 @@ function ViewportDimensionInputs({ width, height, onWidthChange, onHeightChange,
   return (
     <div className="flex min-w-0 shrink-0 items-center gap-1 @max-[520px]:gap-0.5">
       <label className="sr-only" htmlFor="browser-viewport-width">Viewport width</label>
-      <Input id="browser-viewport-width" inputMode="numeric" size="xs" value={width} onChange={(event) => onWidthChange(event.target.value)} onKeyDown={submitOnEnter} aria-label="Viewport width" className="h-7 w-14 px-1.5 font-mono text-xs @max-[520px]:w-10 @max-[520px]:px-1" />
+      <Input id="browser-viewport-width" inputMode="numeric" size="compact" value={width} onChange={(event) => onWidthChange(event.target.value)} onKeyDown={submitOnEnter} aria-label="Viewport width" className="h-7 w-14 px-1.5 font-mono text-xs @max-[520px]:w-10 @max-[520px]:px-1" />
       <span className="text-muted" aria-hidden>×</span>
       <label className="sr-only" htmlFor="browser-viewport-height">Viewport height</label>
-      <Input id="browser-viewport-height" inputMode="numeric" size="xs" value={height} onChange={(event) => onHeightChange(event.target.value)} onKeyDown={submitOnEnter} aria-label="Viewport height" className="h-7 w-14 px-1.5 font-mono text-xs @max-[520px]:w-10 @max-[520px]:px-1" />
+      <Input id="browser-viewport-height" inputMode="numeric" size="compact" value={height} onChange={(event) => onHeightChange(event.target.value)} onKeyDown={submitOnEnter} aria-label="Viewport height" className="h-7 w-14 px-1.5 font-mono text-xs @max-[520px]:w-10 @max-[520px]:px-1" />
     </div>
   );
 }

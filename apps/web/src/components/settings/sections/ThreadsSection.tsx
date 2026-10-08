@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { FieldError } from "@/components/ui/field-error";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -90,13 +91,9 @@ function RetentionDaysControl({
         </label>
       </div>
       {error ? (
-        <p
-          id="completed-thread-retention-error"
-          role="alert"
-          className="basis-full text-xs text-destructive"
-        >
+        <FieldError id="completed-thread-retention-error" role="alert" className="basis-full">
           {error}
-        </p>
+        </FieldError>
       ) : null}
     </div>
   );

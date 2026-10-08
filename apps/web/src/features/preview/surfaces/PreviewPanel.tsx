@@ -936,7 +936,7 @@ function InspectorValueInput({
   return (
     <span className="relative flex min-w-0 items-center">
       <Input
-        size="xs"
+        size="compact"
         aria-label={label}
         value={displayVisualControlValue(controlKey, value)}
         onChange={(event) => onChange(controlKey, event.target.value)}
@@ -1123,7 +1123,7 @@ function ColorInspectorControl({
   const formatFields =
     colorFormat === "hex" ? (
       <Input
-        size="xs"
+        size="compact"
         aria-label={`${label} HEX value`}
         value={colorToHex(pickerColor)}
         onChange={(event) => {
@@ -1144,7 +1144,7 @@ function ColorInspectorControl({
               {fieldLabel}
             </span>
             <Input
-              size="xs"
+              size="compact"
               aria-label={`${label} ${fieldLabel}`}
               value={formatColorNumber(channelValue)}
               inputMode={inputMode}
@@ -1166,7 +1166,7 @@ function ColorInspectorControl({
               {fieldLabel}
             </span>
             <Input
-              size="xs"
+              size="compact"
               aria-label={`${label} ${fieldLabel}`}
               value={formatColorNumber(channelValue)}
               inputMode={inputMode}
@@ -1297,7 +1297,7 @@ function ColorInspectorControl({
                 <div className="min-w-0 flex-1">{formatFields}</div>
               </div>
               <Input
-                size="xs"
+                size="compact"
                 aria-label={`Color picker for ${label}`}
                 value={formatColorValue(pickerColor, colorFormat)}
                 onChange={(event) => onChange(controlKey, event.target.value)}
@@ -1331,7 +1331,7 @@ function ColorInspectorControl({
           </PopoverContent>
         </Popover>
         <Input
-          size="xs"
+          size="compact"
           aria-label={label}
           value={displayValue}
           onFocus={(event) => {
@@ -1410,7 +1410,7 @@ function QuadInputStrip({
         >
           <span className="sr-only">{entry.ariaLabel}</span>
           <Input
-            size="xs"
+            size="compact"
             aria-label={entry.ariaLabel}
             value={displayVisualControlValue(entry.key, values[entry.key])}
             onChange={(event) => onChange(entry.key, event.target.value)}
