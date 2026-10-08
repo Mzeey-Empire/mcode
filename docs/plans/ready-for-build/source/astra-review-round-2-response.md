@@ -1,0 +1,18 @@
+# Response to Astra review, round 2
+
+Claude's resolution of each finding in `astra-review-round-2.md`. Graph and decision edits: `tools/apply-astra-round-2.cjs`. Doc fixes: groups K1 to K4, briefed by `source/fix-round-1-brief.md` (same rules) plus the assignments below.
+
+| Finding | Verdict | Resolution | Owner |
+|---|---|---|---|
+| N1 revert recovery by filtered equality | Accept | Persist the exact intended raw post-state per path before writing; recovery compares raw content, type and mode; unproved state keeps the recovery material and reports `recovery_failed` without overwriting. EOL-only and clean-filter-equivalent crash cases. | K1 (S08-03) |
+| N2 commit recovery heuristic | Accept | Return `unknown` whenever ownership is unproved; never push a heuristically attributed commit. External same-subject commit, lost response, hook rewrite and restart-before-push tests. | K1 (S10-08) |
+| N3 Implement text the user did not see | Accept | Every Implement carries the expected revision; checked before the text snapshot and again at admission. Decide and align whether a superseded version is implementable. Second-window save test. | K2 (S07-07) |
+| N4 new-thread Implement and Setup | Accept | One rule shared by S07-08 and S04-07, with cancellation and reconnect tests. Graph: S07-08 now blocked by S04-07. | K2 |
+| N5 approval refinement bypass | Accept | Validate the fully composed request (or move the refinement onto the body); invalid choices take the fail-closed path; service-boundary tests. | K3 (S06-01) |
+| N6 deny-note duplication | Accept | New `delivery_unknown` state shown with Send again and Remove; never auto-queued. Exactly-once wording only where an idempotency guarantee exists. Decision P8 records the policy. | K3 (S06-07) |
+| N7 TCP reachability releases Setup | Accept | Setup readiness is exit 0 only; a port is a display fact. Synthetic command echo excluded from detector input. Tile states aligned between 12a and 11. Occupied port, echoed URL, IPv6 and print-then-fail tests. | K4 (S12T-08, S12T-11, S11-09) |
+| N8 ledger runner | Accept, fixed | `ledger-run` now runs every declared proof natively (no Bash), passes `rg` on no output and other runners on exit 0, rejects shell operators and unknown tickets, reports stderr, exit codes and pass, fail, error and skip counts, and fails on an empty selection. `ledger` rejects piped proofs. The 12b status-word search excludes test fixtures; foundation typecheck proofs are scoped to `apps/web`; README names the exact gates. | Claude (tool), K3 (two piped proofs in 06) |
+| N9 draft send ownership | Accept | Freeze submitted page and item revisions with their image references; later edits go to a separate current revision; lease submitted images until admission settles; release only unreferenced images. The unsaved plan-comment editor field and its parser and serializer belong to S07-06. | K1 (S10-11), K4 (S11-15), K2 (S07-06) |
+| N10 losing autosave fork | Accept | "Keep my text" adopts the returned draft id and revision, then submits the retained text; revision equality holds for later updates; the lower-revision acceptance criterion exempts the defined idempotent replay. Full two-window test. | K2 (S07-03, S07-05) |
+| N11 T3 hold vs default | Accept | S12T-11 is buildable now: startup actions awaited to exit 0. The Keeps running toggle is excluded until the user answers T3, then becomes its own ticket. Decision row, graph note and flag rewritten to say the same. | K4, graph |
+| F2 note | Accept | Publication sets `RFB_REF` to the full pushed commit SHA and spot-checks links and anchors before creating issues. | Claude |
