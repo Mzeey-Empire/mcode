@@ -29,6 +29,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe("ToastLane", () => {
@@ -124,5 +125,32 @@ describe("ToastLane", () => {
     show({ kind: "finished", title: "Refine navigation", meta: "Finished · 14:32" });
 
     expect(within(lane()).getByText("Finished")).toHaveClass("text-success");
+  });
+
+  it("dismisses on a sideways trackpad swipe past a third of the card", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(340);
+    renderLane();
+    show({ kind: "failed", title: "Bump Electron" });
+    const card = within(lane()).getByRole("alert");
+
+    for (let step = 0; step < 4; step++) fireEvent.wheel(card, { deltaX: -40, deltaY: 2 });
+    // The quiet gap ends the gesture, then the card flies out.
+    act(() => void vi.advanceTimersByTime(200));
+    act(() => void vi.advanceTimersByTime(200));
+
+    expect(store().toasts).toEqual([]);
+  });
+
+  it("springs back from a short trackpad swipe and ignores vertical scroll", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(340);
+    renderLane();
+    show({ kind: "failed", title: "Bump Electron" });
+    const card = within(lane()).getByRole("alert");
+
+    fireEvent.wheel(card, { deltaX: -60, deltaY: 0 });
+    fireEvent.wheel(card, { deltaX: 0, deltaY: 400 });
+    act(() => void vi.advanceTimersByTime(300));
+
+    expect(store().toasts).toHaveLength(1);
   });
 });

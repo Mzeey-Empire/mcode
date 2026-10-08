@@ -8,12 +8,14 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
+  type WheelEvent,
   type RefObject,
 } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusMark, type StatusMarkState } from "@/components/ui/status-mark";
 import { overviewResponsivePaddingPx } from "@/lib/composer-layout";
+import { SwipeVelocity } from "@/lib/swipe-velocity";
 import { layoutToastStack, mergeToastPresence, type ToastPresence } from "@/lib/toast-presence";
 import { cn } from "@/lib/utils";
 import { useToastStore, type Toast, type ToastKind } from "@/stores/toastStore";
@@ -25,6 +27,8 @@ const REDUCED_EXIT_MS = 120;
 const SWIPE_EXIT_MS = 160;
 const SWIPE_DISMISS_FRACTION = 0.35;
 const FLICK_PX_PER_MS = 0.5;
+/** A pause in trackpad scroll this long ends the swipe. */
+const WHEEL_GESTURE_END_MS = 120;
 /** Pointer travel below this is a click, not a swipe. */
 const DRAG_SLOP_PX = 4;
 
@@ -195,7 +199,7 @@ function ToastCard({ entry, offset, onHeight, onExited }: ToastCardProps) {
   return (
     <div
       ref={ref}
-      className="absolute inset-x-0 top-0 transition-transform duration-200 ease-standard"
+      className="absolute inset-x-0 top-0 transition-transform duration-200 ease-standard motion-reduce:transition-none"
       style={{ transform: `translateY(${offset}px)` }}
     >
       <div className={exiting ? "animate-toast-exit" : "animate-toast-enter"} inert={exiting}>
@@ -281,7 +285,6 @@ interface SwipeState {
 
 interface DragStart {
   readonly x: number;
-  readonly time: number;
   readonly pointerId: number;
 }
 
@@ -298,18 +301,17 @@ function swipeStyle({ phase, dx, width }: SwipeState): CSSProperties | undefined
   };
 }
 
-function isSwipeDismissal(dx: number, width: number, elapsedMs: number) {
-  return Math.abs(dx) > width * SWIPE_DISMISS_FRACTION || Math.abs(dx) / Math.max(1, elapsedMs) > FLICK_PX_PER_MS;
-}
-
 /**
- * Horizontal swipe: the card follows the pointer and fades with distance.
- * Past 35% of its width, or on a flick, it flies out; otherwise it springs back.
- * Under reduced motion the card stays still and a dismissing swipe plays the normal fade.
+ * Horizontal swipe by pointer drag or sideways trackpad scroll: the card follows
+ * and fades with distance. Past 35% of its width, or on a flick, it flies out;
+ * otherwise it springs back. Under reduced motion the card stays still and a
+ * dismissing swipe plays the normal fade.
  */
 function useSwipeToDismiss(onDismiss: () => void) {
   const start = useRef<DragStart | null>(null);
   const dragged = useRef(false);
+  const velocity = useRef(new SwipeVelocity());
+  const wheel = useRef<{ dx: number; timer: ReturnType<typeof setTimeout> | null }>({ dx: 0, timer: null });
   const [swipe, setSwipe] = useState<SwipeState>({ phase: "idle", dx: 0, width: 1 });
 
   useEffect(() => {
@@ -318,31 +320,14 @@ function useSwipeToDismiss(onDismiss: () => void) {
     return () => clearTimeout(timer);
   }, [swipe.phase, onDismiss]);
 
-  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || isCloseButton(event.target)) return;
-    start.current = { x: event.clientX, time: event.timeStamp, pointerId: event.pointerId };
-    dragged.current = false;
+  useEffect(() => () => clearTimeout(wheel.current.timer ?? undefined), []);
+
+  const follow = (dx: number, width: number) => {
+    if (!prefersReducedMotion()) setSwipe({ phase: "dragging", dx, width });
   };
 
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const origin = start.current;
-    if (!origin || event.pointerId !== origin.pointerId) return;
-    const dx = event.clientX - origin.x;
-    if (!dragged.current && Math.abs(dx) < DRAG_SLOP_PX) return;
-    if (!dragged.current) {
-      dragged.current = true;
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
-    if (!prefersReducedMotion()) setSwipe({ phase: "dragging", dx, width: event.currentTarget.offsetWidth });
-  };
-
-  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    const origin = start.current;
-    start.current = null;
-    if (!origin || !dragged.current) return;
-    const dx = event.clientX - origin.x;
-    const width = event.currentTarget.offsetWidth;
-    if (!isSwipeDismissal(dx, width, event.timeStamp - origin.time)) {
+  const release = (dx: number, width: number, pxPerMs: number) => {
+    if (Math.abs(dx) <= width * SWIPE_DISMISS_FRACTION && pxPerMs <= FLICK_PX_PER_MS) {
       setSwipe({ phase: "settling", dx: 0, width });
     } else if (prefersReducedMotion()) {
       onDismiss();
@@ -351,9 +336,54 @@ function useSwipeToDismiss(onDismiss: () => void) {
     }
   };
 
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || isCloseButton(event.target)) return;
+    start.current = { x: event.clientX, pointerId: event.pointerId };
+    velocity.current.reset({ x: event.clientX, time: event.timeStamp });
+    dragged.current = false;
+  };
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const origin = start.current;
+    if (!origin || event.pointerId !== origin.pointerId) return;
+    velocity.current.track({ x: event.clientX, time: event.timeStamp });
+    const dx = event.clientX - origin.x;
+    if (!dragged.current && Math.abs(dx) < DRAG_SLOP_PX) return;
+    if (!dragged.current) {
+      dragged.current = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    follow(dx, event.currentTarget.offsetWidth);
+  };
+
+  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    const origin = start.current;
+    start.current = null;
+    if (!origin || !dragged.current) return;
+    const sample = { x: event.clientX, time: event.timeStamp };
+    release(event.clientX - origin.x, event.currentTarget.offsetWidth, velocity.current.pxPerMs(sample));
+  };
+
   const onPointerCancel = () => {
     start.current = null;
     setSwipe((current) => (current.phase === "idle" ? current : { ...current, phase: "settling", dx: 0 }));
+  };
+
+  // A trackpad swipe arrives as horizontal wheel deltas with no end event; a short quiet gap ends it.
+  // Momentum scrolling keeps deltas flowing after a fast flick, so distance alone decides.
+  const onWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (swipe.phase === "flung" || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+    const width = event.currentTarget.offsetWidth;
+    const gesture = wheel.current;
+    gesture.dx -= event.deltaX;
+    follow(gesture.dx, width);
+    clearTimeout(gesture.timer ?? undefined);
+    gesture.timer = setTimeout(() => {
+      const dx = gesture.dx;
+      gesture.dx = 0;
+      gesture.timer = null;
+      release(dx, width, 0);
+    }, WHEEL_GESTURE_END_MS);
   };
 
   // A drag ends with a click on whatever is under the pointer; it must not open the toast.
@@ -366,6 +396,6 @@ function useSwipeToDismiss(onDismiss: () => void) {
 
   return {
     style: swipeStyle(swipe),
-    handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onClickCapture },
+    handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onWheel, onClickCapture },
   };
 }
