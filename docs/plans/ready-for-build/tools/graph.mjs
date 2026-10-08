@@ -547,6 +547,18 @@ async function runWords(words, cwd) {
   return result;
 }
 
+// A section doc without the table rows of its Retirement ledger blocks (same block rule as ledgerRows).
+function withoutLedgers(text) {
+  const kept = [];
+  let inLedger = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^### Retirement ledger/.test(line)) { inLedger = true; continue; }
+    if (inLedger && /^#/.test(line)) inLedger = false;
+    if (!inLedger || !line.startsWith("|")) kept.push(line);
+  }
+  return kept.join("\n");
+}
+
 // Repo-relative paths of the test files a `bun run --cwd <ws> test -- <files>` command names.
 function namedTestFiles(words) {
   if (words[0] !== "bun" || words[1] !== "run" || words[2] !== "--cwd") return [];
@@ -590,8 +602,16 @@ async function gate(id, tickets) {
     console.error("no changes against origin/main; nothing to gate");
     return 1;
   }
-  // F-99's job includes narrowing over-broad proofs in the section ledgers; every other ticket treats the plan as read-only.
-  const planEdits = changed.filter((f) => f.startsWith("docs/plans/ready-for-build/") && !(id === "F-99" && /^docs\/plans\/ready-for-build\/sections\/[^/]+\.md$/.test(f)));
+  // F-99's job includes narrowing over-broad proofs in the section ledgers, so it may change ledger tables
+  // and nothing else in a section doc. Every other ticket treats the plan as read-only.
+  const ledgerOnlyEdit = async (f) => {
+    if (id !== "F-99" || !/^docs\/plans\/ready-for-build\/sections\/[^/]+\.md$/.test(f) || !existsSync(join(repoRoot, f))) return false;
+    const before = await runWords(["git", "show", `${base.stdout.trim()}:${f}`], repoRoot);
+    if (before.status !== 0) return false;
+    return withoutLedgers(before.stdout) === withoutLedgers(readFileSync(join(repoRoot, f), "utf8"));
+  };
+  const planEdits = [];
+  for (const f of changed) if (f.startsWith("docs/plans/ready-for-build/") && !(await ledgerOnlyEdit(f))) planEdits.push(f);
   results.push({ label: "plan folder unchanged", ok: planEdits.length === 0 });
   console.log(`${planEdits.length ? "FAIL" : "PASS"}  plan folder unchanged${planEdits.length ? `: ${planEdits.join(", ")}` : ""}`);
 
