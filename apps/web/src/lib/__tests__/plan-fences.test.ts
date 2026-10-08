@@ -27,7 +27,7 @@ describe("plan fences", () => {
 
   it.each(["plan-questions", "mcode-plan", "plan-output"])("hides the exact %s info string without reading its content", (info) => {
     expect(stripPlanFences("````" + info + "\nNot JSON\n````")).toBe("");
-    expect(stripPlanFences("````" + info + "\nUnclosed")).toBe("");
+    expect(stripPlanFences("````" + info + "\nUnclosed", true)).toBe("");
     const ordinary = "````" + info + "-example\nVisible code\n````";
     expect(stripPlanFences(ordinary)).toBe(ordinary);
     expect(renderToStaticMarkup(createElement(MarkdownContent, { content: ordinary }))).toContain("Visible code");
@@ -39,6 +39,18 @@ describe("plan fences", () => {
     parser.feed(content);
     expect(parser.finish()).toBe("# Plan");
     expect(stripPlanFences(content)).toBe("");
+  });
+
+  it("keeps an unclosed plan visible once the message is finished, because the server never captured it", () => {
+    const content = "Summary.\n\n````mcode-plan\n# Truncated plan\n```\nStep";
+    expect(stripPlanFences(content, true)).toBe("Summary.\n\n");
+    expect(stripPlanFences(content)).toBe(content);
+    expect(stripPlanFences("Summary.\n\n```plan-output\n{\"title\":\"x\"}")).toBe("Summary.\n\n");
+  });
+
+  it("shows a nested mcode-plan block, which the server never captures", () => {
+    const content = "Summary\n\n> ```mcode-plan\n> nested-plan\n> ```";
+    expect(renderToStaticMarkup(createElement(MarkdownContent, { content }))).toContain("nested-plan");
   });
 
   it.each(["plan-output", "plan-questions json"])("hides nested historic %s blocks", (info) => {

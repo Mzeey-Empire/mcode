@@ -77,12 +77,17 @@ function makeMessage(content: string): Message {
 describe("hidden plan messages", () => {
   it.each([
     '```plan-output\n{"title":"Historic plan"}\n```',
-    "````mcode-plan\n# Still streaming",
     "````mcode-plan\n# Plan\n```ts\ncode();\n```\n````",
   ])("leaves no empty assistant bubble for a protocol-only message", (content) => {
     const message = { ...makeMessage(content), role: "assistant" as const };
     const { container } = render(<MessageBubble message={message} />);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("hides an unfinished plan fence while it streams and shows it once the message is finished uncaptured", () => {
+    const message = { ...makeMessage("````mcode-plan\n# Truncated plan"), role: "assistant" as const };
+    expect(render(<MessageBubble message={message} textIsStreaming />).container.innerHTML).toBe("");
+    expect(render(<MessageBubble message={message} />).container.textContent).toContain("Truncated plan");
   });
 });
 
