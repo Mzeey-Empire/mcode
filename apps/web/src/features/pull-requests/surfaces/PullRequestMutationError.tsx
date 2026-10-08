@@ -101,11 +101,11 @@ export function PullRequestMutationError({
         {errorMessage(error)}
       </p>
       {retry ? (
-        <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={retry}>
+        <Button type="button" variant="ghost" size="compact" disabled={busy} onClick={retry}>
           Retry confirmed effect
         </Button>
       ) : refresh ? (
-        <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={refresh}>
+        <Button type="button" variant="ghost" size="compact" disabled={busy} onClick={refresh}>
           {error.conflictReason === "outcome_unknown" ? "Check remote state" : "Refresh"}
         </Button>
       ) : null}

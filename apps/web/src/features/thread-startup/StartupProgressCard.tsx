@@ -364,7 +364,7 @@ function StartupControls({
     <div className="flex flex-wrap gap-2">
       {actions}
       {canCancelStartup(startupId, startup) && !cancellationUnavailable ? (
-        <Button type="button" variant="destructive" size="sm" onClick={() => { void onCancel(); }}>
+        <Button type="button" variant="destructive" size="compact" onClick={() => { void onCancel(); }}>
           Cancel
         </Button>
       ) : null}

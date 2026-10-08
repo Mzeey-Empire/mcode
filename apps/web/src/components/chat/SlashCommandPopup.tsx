@@ -178,7 +178,7 @@ function CommandRow({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="compact"
       id={`slash-cmd-${index}`}
       role="option"
       aria-selected={selected}
@@ -359,7 +359,7 @@ function ErrorRow({
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="compact"
         // Same pattern as the footer Refresh button: preventDefault on
         // mousedown to retain editor focus, action on click for keyboard a11y.
         onMouseDown={(e) => e.preventDefault()}

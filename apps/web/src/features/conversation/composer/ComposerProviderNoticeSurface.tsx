@@ -225,7 +225,7 @@ function ComposerNoticeTrigger({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             className="h-7 gap-1 px-1.5 text-xs text-muted hover:bg-transparent"
             onMouseDown={(event) => event.preventDefault()}
             onClick={onOpen}
@@ -270,7 +270,7 @@ function ComposerNoticeOverlay({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="compact"
           className="h-10 min-w-0 flex-1 justify-start gap-2 rounded-none px-3 text-left text-xs hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
           aria-expanded={detailsOpen}
           aria-controls="composer-provider-notice-details"
@@ -291,7 +291,7 @@ function ComposerNoticeOverlay({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             className="h-7 px-1.5 text-xs text-muted hover:bg-transparent dark:hover:bg-transparent"
             onMouseDown={(event) => event.preventDefault()}
             onClick={onShowAnother}
@@ -305,7 +305,7 @@ function ComposerNoticeOverlay({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-sm"
+                size="icon-compact"
                 className="mr-1 rounded-md text-muted hover:bg-transparent hover:text-ink dark:hover:bg-transparent"
                 aria-label="Dismiss notice"
                 onMouseDown={(event) => event.preventDefault()}

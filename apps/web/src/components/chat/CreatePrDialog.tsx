@@ -631,7 +631,7 @@ function PrDraftGenerationButton({
   return (
     <Button
       variant="ghost"
-      size="sm"
+      size="compact"
       onClick={onRegenerate}
       disabled={disabled}
       className="h-6 gap-1.5 px-2 text-xs text-muted hover:text-ink"

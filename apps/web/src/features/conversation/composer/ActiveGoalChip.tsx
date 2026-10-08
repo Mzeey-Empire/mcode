@@ -92,7 +92,7 @@ function ActiveGoalChipTrigger({
             <Button
               type="button"
               variant="ghost"
-              size="xs"
+              size="compact"
               className="h-6 gap-0 rounded-md px-0 hover:bg-selected"
               aria-label={`Show active goal: ${goal.objective}`}
             >
@@ -110,7 +110,7 @@ function ActiveGoalChipTrigger({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon-xs"
+                    size="icon-compact"
                     className="size-6 rounded-md text-muted hover:bg-selected hover:text-ink"
                     aria-label="Clear active goal"
                     disabled
@@ -123,7 +123,7 @@ function ActiveGoalChipTrigger({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon-xs"
+                  size="icon-compact"
                   className="size-6 rounded-md text-muted hover:bg-selected hover:text-ink"
                   aria-label="Clear active goal"
                   onClick={onClear}
@@ -200,7 +200,7 @@ function ActiveGoalDetails({
         <Button
           type="button"
           variant="outline"
-          size="sm"
+          size="compact"
           className="w-full"
           disabled={isClearingGoal}
           onClick={onClear}

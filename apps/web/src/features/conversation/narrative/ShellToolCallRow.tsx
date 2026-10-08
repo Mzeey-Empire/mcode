@@ -118,7 +118,7 @@ function ShellToolCallHeader({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="compact"
       onClick={onToggle}
       className={`${NARRATIVE_TOOL_ROW} h-auto w-full justify-start rounded-md px-0 py-1 text-left font-normal transition-colors duration-150 hover:bg-hover/30 aria-expanded:bg-transparent active:translate-y-0 motion-reduce:transition-none dark:hover:bg-hover/30 dark:aria-expanded:bg-transparent`}
       aria-expanded={open}

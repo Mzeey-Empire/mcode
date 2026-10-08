@@ -214,7 +214,7 @@ export function DesktopTitleBar({
       <div className="flex items-center gap-1 [app-region:no-drag]">
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="icon-compact"
           aria-label="Toggle sidebar"
           onClick={() => executeCommand("sidebar.toggle")}
         >
@@ -222,7 +222,7 @@ export function DesktopTitleBar({
         </Button>
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="icon-compact"
           aria-label="Back"
           disabled={!canGoBack}
           onClick={onBack}
@@ -231,7 +231,7 @@ export function DesktopTitleBar({
         </Button>
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="icon-compact"
           aria-label="Forward"
           disabled={!canGoForward}
           onClick={onForward}

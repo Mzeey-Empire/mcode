@@ -16,7 +16,7 @@ function CreateBranchEntry() {
     <ThreadOverviewTooltipButton content="Create a branch in this worktree">
       <Button
         variant="ghost"
-        size="sm"
+        size="compact"
         type="button"
         data-testid="thread-overview-create-branch"
         className={cn(

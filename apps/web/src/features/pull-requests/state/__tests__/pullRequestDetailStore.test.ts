@@ -535,16 +535,19 @@ describe("pullRequestDetailStore", () => {
     for (let index = 0; index < 32; index += 1) {
       await usePullRequestDetailStore.getState().loadChecks({ append: true, transport });
     }
-    const mergeStartedAt = performance.now();
+    // Size accounting stringifies each record it measures. Counting calls checks that an append measures only the
+    // incoming page, not the ~990 records already held, without a wall-clock budget that a loaded runner breaks.
+    const stringify = vi.spyOn(JSON, "stringify");
     await usePullRequestDetailStore.getState().loadChecks({ append: true, transport });
-    const mergeDurationMs = performance.now() - mergeStartedAt;
+    const measuredValues = stringify.mock.calls.length;
+    stringify.mockRestore();
     await usePullRequestDetailStore.getState().loadChecks({ append: true, transport });
 
     const entry = usePullRequestDetailStore.getState().entries[getPullRequestDetailKey(identity(1))]!;
     expect(entry.checks).toHaveLength(1_000);
     expect(entry.checksNextCursor).toBeNull();
     expect(entry.lanes.checks.boundedData).toEqual({ reason: "record_limit" });
-    expect(mergeDurationMs).toBeLessThan(2);
+    expect(measuredValues).toBeLessThan(100);
   });
 
   it("retains one thousand Timeline events alongside core detail metadata", async () => {

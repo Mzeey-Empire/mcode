@@ -178,7 +178,7 @@ export function TerminalTabContent({ threadId }: TerminalTabContentProps) {
         <div className="absolute inset-0 z-(--layer-sticky) flex flex-col items-center justify-center gap-3 bg-background text-muted">
           <Terminal className="h-10 w-10 opacity-40" />
           <p className="text-sm">No terminals</p>
-          <Button variant="outline" size="sm" onClick={createTerminal}>
+          <Button variant="outline" size="compact" onClick={createTerminal}>
             New terminal
           </Button>
         </div>

@@ -179,7 +179,7 @@ export function HandoffFallbackBanner({ threadId }: Props) {
         </span>
         <div className="flex items-center gap-2 shrink-0">
           <Button
-            size="sm"
+            size="compact"
             variant="ghost"
             onClick={() => setDocOpen(true)}
             className="gap-1 text-xs h-7"
@@ -192,7 +192,7 @@ export function HandoffFallbackBanner({ threadId }: Props) {
               render={
                 <span className="inline-flex">
                   <Button
-                    size="sm"
+                    size="compact"
                     variant="outline"
                     disabled
                     className="gap-1 h-7"
@@ -206,7 +206,7 @@ export function HandoffFallbackBanner({ threadId }: Props) {
             <TooltipContent>Coming soon</TooltipContent>
           </Tooltip>
           <Button
-            size="icon"
+            size="icon-compact"
             variant="ghost"
             onClick={() => setHandoffStatus(threadId, "ready")}
             aria-label="Dismiss"

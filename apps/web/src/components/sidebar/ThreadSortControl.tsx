@@ -44,7 +44,7 @@ export function ThreadSortControl({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             className={
               isNonDefault
                 ? "h-8 gap-1.5 px-2 text-primary"
@@ -72,7 +72,7 @@ export function ThreadSortControl({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             key={opt.field}
             className={`h-8 w-full justify-between px-2 text-sm font-normal ${
               sortField === opt.field ? "text-primary" : "text-muted"
@@ -92,7 +92,7 @@ export function ThreadSortControl({
         <Button
           type="button"
           variant="ghost"
-          size="xs"
+          size="compact"
           className="h-8 w-full justify-start gap-1.5 px-2 text-sm font-normal text-muted"
           onClick={toggleSortDirection}
         >

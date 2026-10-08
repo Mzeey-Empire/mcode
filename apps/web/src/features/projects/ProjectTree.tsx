@@ -1075,7 +1075,7 @@ export function ProjectTree() {
             render={
               <Button
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 onClick={handleOpenFolder}
                 aria-label="Add project"
                 className="text-muted hover:text-ink"
@@ -1135,7 +1135,7 @@ export function ProjectTree() {
             </p>
             <Button
               variant="ghost"
-              size="xs"
+              size="compact"
               onClick={handleOpenFolder}
               className="group h-auto gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-caption font-normal text-muted/80 hover:border-border hover:bg-selected/50 hover:text-ink"
             >
@@ -1928,7 +1928,7 @@ function ThreadLifecycleButton({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           aria-label={actionLabel}
           disabled={lifecycle.lifecycleUnavailable}
           onPointerDown={(event) => event.stopPropagation()}
@@ -2070,7 +2070,7 @@ function ThreadCleanupRetry({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           aria-label={`Retry cleanup for ${thread.title}`}
           disabled={lifecycle.isCleanupRetryPending}
           onPointerDown={(event) => event.stopPropagation()}
@@ -2541,7 +2541,7 @@ function ProjectLifecycleToggle({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-compact"
           aria-label={lifecycle.label}
           aria-pressed={lifecycleView === "completed"}
           data-view={lifecycleView}
@@ -2568,7 +2568,7 @@ function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: (
   return (
     <Tooltip>
       <TooltipTrigger render={
-        <Button type="button" variant="ghost" size="xs" aria-label={`Open project ${workspace.name}`} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 dark:hover:bg-transparent">
+        <Button type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 dark:hover:bg-transparent">
           <span className="flex-1 text-fade font-medium tracking-tight">{workspace.name}</span>
         </Button>
       } />
@@ -2603,7 +2603,7 @@ function ProjectRowActions({
 }: { workspace: Workspace; isExpanded: boolean; onToggle: () => void; onOpenInExplorer: (event: React.MouseEvent) => void; onRename: (event: React.MouseEvent) => void; onDelete: (event: React.MouseEvent) => void; onCreateThread: (event: React.MouseEvent) => void }) {
   return (
     <div data-testid={`project-row-actions-${workspace.id}`} className="pointer-events-none absolute inset-y-0 right-1.5 z-(--layer-dropdown) flex items-center justify-end gap-1 bg-transparent px-0.5 opacity-0 transition-opacity duration-150 group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100 motion-reduce:transition-none">
-      <Button type="button" variant="ghost" size="icon-xs" aria-label={`Toggle threads for ${workspace.name}`} aria-expanded={isExpanded} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggle(); }} className="size-6 shrink-0 text-muted opacity-0 transition-opacity hover:bg-transparent hover:text-muted dark:hover:bg-transparent group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100">
+      <Button type="button" variant="ghost" size="icon-compact" aria-label={`Toggle threads for ${workspace.name}`} aria-expanded={isExpanded} onKeyDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onToggle(); }} className="size-6 shrink-0 text-muted opacity-0 transition-opacity hover:bg-transparent hover:text-muted dark:hover:bg-transparent group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100">
         <ChevronRight size={14} className={cn("transition-transform duration-150 motion-reduce:transition-none", isExpanded && "rotate-90")} />
       </Button>
       <DropdownMenu>
@@ -2617,7 +2617,7 @@ function ProjectRowActions({
       </DropdownMenu>
       <Tooltip>
         <TooltipTrigger
-          render={<Button variant="ghost" size="icon-xs" aria-label={`New thread in ${workspace.name}`} onKeyDown={(event) => event.stopPropagation()} onClick={onCreateThread} className="opacity-0 text-muted hover:bg-background/60 hover:text-ink group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100"><SquarePen className="size-[1.4rem]" /></Button>}
+          render={<Button variant="ghost" size="icon-compact" aria-label={`New thread in ${workspace.name}`} onKeyDown={(event) => event.stopPropagation()} onClick={onCreateThread} className="opacity-0 text-muted hover:bg-background/60 hover:text-ink group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100"><SquarePen className="size-[1.4rem]" /></Button>}
         />
         <TooltipContent>{`New thread in ${workspace.name}`}</TooltipContent>
       </Tooltip>
@@ -2632,7 +2632,7 @@ function ProjectThreadListToggle({
   onToggleThreadList,
 }: { workspaceId: string; isExpanded: boolean; hiddenCount: number; onToggleThreadList: (workspaceId: string) => void }) {
   const label = isExpanded ? "Show less" : `Show more (${hiddenCount})`;
-  return <Button variant="ghost" size="xs" onClick={() => onToggleThreadList(workspaceId)} className="mt-0.5 h-auto w-full justify-start rounded-md px-2 py-1 text-caption font-normal text-muted/55 hover:bg-selected/40 hover:text-ink">{label}</Button>;
+  return <Button variant="ghost" size="compact" onClick={() => onToggleThreadList(workspaceId)} className="mt-0.5 h-auto w-full justify-start rounded-md px-2 py-1 text-caption font-normal text-muted/55 hover:bg-selected/40 hover:text-ink">{label}</Button>;
 }
 
 /**
@@ -2861,7 +2861,7 @@ function DraftRow({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 aria-label="Delete draft"
                 onPointerDown={(event) => event.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}

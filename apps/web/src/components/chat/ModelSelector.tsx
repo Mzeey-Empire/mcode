@@ -511,7 +511,7 @@ function FavoriteToggle({
     <Button
       type="button"
       variant="ghost"
-      size="icon-xs"
+      size="icon-compact"
       className="h-7 w-7 shrink-0 text-muted hover:text-ink"
       aria-label={getFavoriteActionLabel(label, starred)}
       onClick={(event) => {
@@ -1224,7 +1224,7 @@ export function ModelSelector({
         render={
           <Button
             variant="ghost"
-            size="xs"
+            size="compact"
             data-testid="model-selector-trigger"
             className="max-w-full shrink whitespace-normal text-muted transition-colors hover:bg-hover/40 hover:text-ink"
           >

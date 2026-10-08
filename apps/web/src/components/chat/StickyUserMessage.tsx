@@ -182,7 +182,7 @@ export function StickyUserMessage({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon-sm"
+                  size="icon-compact"
                   onClick={onJumpToMessage}
                   className="mt-0.5 mr-0.5 size-11 shrink-0 text-muted hover:bg-ink/5 hover:text-ink"
                   aria-label="Jump to your message"

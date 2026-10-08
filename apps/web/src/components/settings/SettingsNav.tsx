@@ -21,7 +21,7 @@ export function SettingsNav({ section, onSection }: SettingsNavProps) {
               key={item.id}
               type="button"
               variant="ghost"
-              size="sm"
+              size="compact"
               onClick={() => onSection(item.id)}
               className={cn(
                 "w-full justify-start rounded-md px-3 text-left font-medium",

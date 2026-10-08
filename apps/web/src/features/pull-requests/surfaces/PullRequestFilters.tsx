@@ -118,7 +118,7 @@ export function PullRequestFilters({
               <Button
                 type="button"
                 variant="outline"
-                size="icon-sm"
+                size="icon-compact"
                 aria-label={filterLabel}
                 className="relative bg-page"
               >
@@ -213,7 +213,7 @@ export function PullRequestFilters({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="compact"
             onClick={onClearAll}
             className="h-6 gap-1 px-1.5 text-xs"
           >

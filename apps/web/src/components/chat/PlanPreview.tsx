@@ -42,7 +42,7 @@ export function PlanPreview({ workspaceId, threadId, preview }: PlanPreviewProps
       <Button
         type="button"
         variant="outline"
-        size="xs"
+        size="compact"
         onClick={viewPlan}
         className="shrink-0"
       >
@@ -54,7 +54,7 @@ export function PlanPreview({ workspaceId, threadId, preview }: PlanPreviewProps
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-compact"
               aria-label="Dismiss plan preview"
               onClick={() => usePlanStore.getState().dismissLivePreview(threadId, preview.version)}
               className="shrink-0 text-muted"

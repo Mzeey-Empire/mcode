@@ -165,7 +165,7 @@ function ProjectActionMenuDropdown({
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-compact"
             aria-label="Project Actions"
             className="text-muted hover:bg-hover/40 hover:text-ink"
           >
@@ -434,7 +434,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-compact"
                 aria-label={`Restart ${run.actionName}`}
                 disabled={command !== null}
                 onClick={restartAction}
@@ -453,7 +453,7 @@ export function ProjectActionTerminalView({ threadId, actionId }: ProjectActionT
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon-xs"
+                    size="icon-compact"
                     aria-label={`Stop ${run.actionName}`}
                     disabled={command !== null}
                     onClick={stopAction}

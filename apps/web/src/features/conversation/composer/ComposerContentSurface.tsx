@@ -406,10 +406,10 @@ function ComposerInlineStopButton({
       <TooltipTrigger
         render={
           <Button
-            variant="ghost"
-            size="icon-xs"
+            variant="ink"
+            shape="round"
+            size="icon-compact"
             onClick={actions.onStop}
-            className="text-destructive/60 hover:bg-destructive/10 hover:text-destructive"
             aria-label="Stop agent"
           >
             <div className="h-2.5 w-2.5 rounded-sm bg-current" />
@@ -518,13 +518,14 @@ export function isComposerSendButtonDisabled({
     || isThreadScaffold || isStopPending || (!isAgentRunning && !hasContent);
 }
 
-const SEND_BUTTON_CLASS_NAMES: Record<ComposerSendButtonVisualState, string> = {
-  scaffold: "bg-primary text-primary-ink",
-  queue: "bg-primary/60 text-primary-ink hover:bg-primary/75",
-  stop: "bg-destructive text-destructive-ink hover:bg-destructive/90",
-  stopping: "bg-destructive/60 text-destructive-ink",
-  send: "bg-primary text-primary-ink hover:bg-primary/90",
-  empty: "bg-hover text-muted opacity-40",
+// Send is the round primary; Stop is neutral by rule: an ink circle with a background-colour square.
+const SEND_BUTTON_VARIANT: Record<ComposerSendButtonVisualState, "default" | "ink"> = {
+  scaffold: "default",
+  queue: "default",
+  stop: "ink",
+  stopping: "ink",
+  send: "default",
+  empty: "default",
 };
 
 const SEND_BUTTON_COPY: Record<ComposerSendButtonCopy, string> = {
@@ -552,10 +553,11 @@ function ComposerSendButton({
   const sendButton = (
     <Button
       type="button"
-      size="icon-sm"
+      variant={SEND_BUTTON_VARIANT[visualState]}
+      shape="round"
+      size="icon-compact"
       onClick={onClick}
       disabled={disabled}
-      className={cn("rounded-full transition-colors", SEND_BUTTON_CLASS_NAMES[visualState])}
       aria-label={SEND_BUTTON_COPY[copy]}
     >
       {visualState === "scaffold" || visualState === "stopping" ? (

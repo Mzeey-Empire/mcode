@@ -204,7 +204,7 @@ function PaletteInput({
                 <Button
                   type="button"
                   variant="default"
-                  size="sm"
+                  size="compact"
                   data-testid="palette-add-folder"
                   disabled={!canAdd}
                   onMouseDown={(e) => {

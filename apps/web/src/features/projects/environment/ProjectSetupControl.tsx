@@ -177,7 +177,7 @@ export function ProjectSetupAttemptCard({ attempt, onApprove }: ProjectSetupAtte
             id={headingId}
             type="button"
             variant="ghost"
-            size="sm"
+            size="compact"
             aria-label={`Setup ${statusLabel}. ${open ? "Hide" : "Show"} details`}
             aria-controls={contentId}
             className="h-8 w-full justify-between rounded-none px-2.5 text-xs motion-reduce:transition-none"
@@ -230,7 +230,7 @@ function ProjectSetupAttemptDetails({
       {attempt.exitCode !== null ? <p className="mt-2 font-mono text-xs tabular-nums text-muted">Exit code: {attempt.exitCode}</p> : null}
       {attempt.outputTruncated ? <p className="mt-2 text-xs text-muted">Output was truncated.</p> : null}
       {attempt.cleanupPending ? <p className="mt-2 text-xs text-muted">Setup cleanup is still pending.</p> : null}
-      {attempt.status === "awaiting-approval" && !approvalOpen ? <Button type="button" size="sm" className="mt-2" onClick={onOpenApproval}>Review shared command</Button> : null}
+      {attempt.status === "awaiting-approval" && !approvalOpen ? <Button type="button" size="compact" className="mt-2" onClick={onOpenApproval}>Review shared command</Button> : null}
     </div>
   );
 }

@@ -157,7 +157,7 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
                 placement="bottom"
                 triggerTooltip="Change project"
                 trigger={
-                  <Button type="button" variant="link" size="sm" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus/60 sm:!text-2xl">
+                  <Button type="button" variant="link" size="compact" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus/60 sm:!text-2xl">
                     {projectName}<span className="text-ink">?</span>
                   </Button>
                 }
@@ -219,7 +219,7 @@ function CancelledStartupActions({ thread, startup }: { thread: WorkspaceThread;
       <Button
         type="button"
         variant="outline"
-        size="sm"
+        size="compact"
         onClick={() => { void startOver().catch(() => undefined); }}
       >
         Start over
@@ -227,7 +227,7 @@ function CancelledStartupActions({ thread, startup }: { thread: WorkspaceThread;
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="compact"
         onClick={() => useThreadStartupStore.getState().dismissStartup(startup.startupId)}
       >
         Keep thread
@@ -495,11 +495,11 @@ function SetupRecoveryActions({ automaticSetup }: { readonly automaticSetup: Ret
   const continuing = automaticSetup.busy === "continue";
   return (
     <>
-      <Button type="button" variant="outline" size="sm" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.retrySetup(); }}>
+      <Button type="button" variant="outline" size="compact" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.retrySetup(); }}>
         {retrying ? <Spinner size={13} aria-hidden /> : null}
         Retry setup
       </Button>
-      <Button type="button" variant="outline" size="sm" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.continueWithoutSetup(); }}>
+      <Button type="button" variant="outline" size="compact" disabled={automaticSetup.busy !== null} onClick={() => { void automaticSetup.continueWithoutSetup(); }}>
         {continuing ? <Spinner size={13} aria-hidden /> : null}
         Continue without setup
       </Button>
@@ -566,7 +566,7 @@ function RemoveIncompleteThreadAction({ thread, pendingStartup }: {
   };
   return (
     <>
-      <Button type="button" variant="outline" size="sm" disabled={removing} onClick={() => { void remove(); }}>
+      <Button type="button" variant="outline" size="compact" disabled={removing} onClick={() => { void remove(); }}>
         Remove incomplete thread
       </Button>
       {error && <span role="alert">{error}</span>}

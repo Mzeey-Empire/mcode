@@ -157,7 +157,7 @@ function PullRequestInboxToolbar({
           aria-controls={RELATIONSHIP_PANEL_ID}
           tabIndex={relationship === tab ? 0 : -1}
           variant="ghost"
-          size="sm"
+          size="compact"
           onClick={() => onRelationshipChange(tab)}
           onKeyDown={(event) => onRelationshipTabKeyDown(event, index)}
           className={cn(
@@ -183,7 +183,7 @@ function PullRequestInboxToolbar({
       <Button
         type="button"
         variant="ghost"
-        size="icon-xs"
+        size="icon-compact"
         aria-label="Refresh pull requests"
         onClick={onRefresh}
         className="ml-1 text-muted"
@@ -207,7 +207,7 @@ function PullRequestStateFilter({
     <Button
       type="button"
       variant="ghost"
-      size="xs"
+      size="compact"
       aria-pressed={selected}
       className={cn(
         "h-8 px-2 text-xs font-normal capitalize",
@@ -300,7 +300,7 @@ function PullRequestInboxNotices({
         <div className="mx-auto w-full max-w-[720px] px-5">
           <div className="mb-2 flex items-center gap-2 bg-destructive/10 px-2.5 py-2 text-xs text-muted">
             <span className="min-w-0 flex-1 text-fade">Stale data. {error.message}</span>
-            <Button type="button" variant="ghost" size="xs" onClick={onRefresh} className="h-6">Retry</Button>
+            <Button type="button" variant="ghost" size="compact" onClick={onRefresh} className="h-6">Retry</Button>
           </div>
         </div>
       ) : null}
@@ -329,7 +329,7 @@ function PullRequestInboxBody({
     return <div className="flex flex-1 items-center justify-center text-muted"><Spinner size="sm" aria-label="Loading pull requests" /></div>;
   }
   if (errorEmpty) {
-    return <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"><ErrorIcon size={22} aria-hidden className="text-destructive/70" /><p className="text-sm text-ink">{error?.message ?? "Pull request read failed"}</p><Button type="button" variant="outline" size="sm" onClick={onRefresh}>Retry</Button></div>;
+    return <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center"><ErrorIcon size={22} aria-hidden className="text-destructive/70" /><p className="text-sm text-ink">{error?.message ?? "Pull request read failed"}</p><Button type="button" variant="outline" size="compact" onClick={onRefresh}>Retry</Button></div>;
   }
   if (!hasRows) {
     return <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted"><span aria-hidden className="font-mono text-3xl opacity-35">∅</span><p className="font-mono text-xs uppercase tracking-widest">{emptyLabel}</p></div>;
@@ -340,7 +340,7 @@ function PullRequestInboxBody({
 function PullRequestInboxLoadMore({ status, onLoadMore }: { status: PullRequestInboxStatus; onLoadMore: () => void }) {
   return (
     <div className="mx-auto w-full max-w-[720px] shrink-0 px-5 py-2">
-      <Button type="button" variant="ghost" size="sm" onClick={onLoadMore} disabled={status === "refreshing"} className="w-full text-xs text-muted">
+      <Button type="button" variant="ghost" size="compact" onClick={onLoadMore} disabled={status === "refreshing"} className="w-full text-xs text-muted">
         Load more
       </Button>
     </div>

@@ -66,7 +66,7 @@ function ToastItem({ toast }: { toast: ToastData }) {
       {/* Dismiss */}
       <Button
         variant="ghost"
-        size="icon-xs"
+        size="icon-compact"
         onClick={handleDismiss}
         className="shrink-0 mt-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
         aria-label="Dismiss"
