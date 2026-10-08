@@ -327,9 +327,9 @@ function epics(tickets, waves) {
 // Retirement ledger rows: | Remove | Where | Replaced by | Deleted in ticket | Proof it is gone |
 const ID_PATTERN = /\b(?:F-\d{2}[a-z]?|S\d{2}[A-Z]?-\d{2})\b/g;
 // Proofs run without a shell so they behave the same on Windows, macOS and Linux:
-// `rg` passes when it prints nothing; `bun`, `node` and `git` pass on exit 0.
-const PROOF_RUNNERS = ["rg", "bun", "node", "git"];
-const PROOF_COMMAND = /`((?:rg|bun|node|git)\s[^`]*)`/;
+// `rg` passes when it prints nothing; `bun`, `bunx`, `node` and `git` pass on exit 0.
+const PROOF_RUNNERS = ["rg", "bun", "bunx", "node", "git"];
+const PROOF_COMMAND = /`((?:rg|bunx|bun|node|git)\s[^`]*)`/;
 
 function proofCommands(proofCell) {
   return [...proofCell.matchAll(/`([^`]*)`/g)]
@@ -408,7 +408,7 @@ async function ledgerRun(ticket, { rgOnly }) {
   const { spawnSync } = await import("node:child_process");
   if (ticket && !(ticket in graph.blockers)) {
     console.error(`unknown or merged ticket ${ticket}`);
-    return { failed: 1 };
+    return { code: 1 };
   }
   const repoRoot = join(root, "..", "..", "..");
   const counts = { pass: 0, fail: 0, error: 0, skip: 0 };
@@ -456,8 +456,12 @@ async function ledgerRun(ticket, { rgOnly }) {
     }
   }
   console.log(`\n${counts.pass} passed, ${counts.fail} failed, ${counts.error} errors, ${counts.skip} skipped`);
-  if (counts.pass + counts.fail + counts.error + counts.skip === 0) console.log("no proofs found for this selection");
-  return { failed: counts.fail + counts.error + (counts.pass + counts.fail + counts.error + counts.skip === 0 ? 1 : 0) };
+  const total = counts.pass + counts.fail + counts.error + counts.skip;
+  if (total === 0) console.log("no proofs found for this selection");
+  if (counts.skip && !counts.fail && !counts.error) console.log("incomplete: skipped proofs did not run, so this is not a retirement gate");
+  // Exit 0 only when every selected proof ran and passed; 2 marks an incomplete run.
+  const code = counts.fail || counts.error || total === 0 ? 1 : counts.skip ? 2 : 0;
+  return { code };
 }
 
 const command = process.argv[2] ?? "check";
@@ -470,8 +474,8 @@ if (command === "ledger-run") {
   // node graph.mjs ledger-run [ticket] [--rg-only]
   const args = process.argv.slice(3);
   const ticket = args.find((a) => !a.startsWith("--"));
-  const { failed } = await ledgerRun(ticket, { rgOnly: args.includes("--rg-only") });
-  process.exit(failed ? 1 : 0);
+  const { code } = await ledgerRun(ticket, { rgOnly: args.includes("--rg-only") });
+  process.exit(code);
 }
 const { tickets, waves, problems } = check();
 if (problems.length) {
