@@ -110,7 +110,7 @@ describe("HookRow", () => {
     const row = screen.getByRole("button", { name: /SessionStart:startup/ });
 
     expect(row).toHaveClass("min-w-0", "overflow-hidden");
-    expect(screen.getByText(/SessionStart:startup/)).toHaveClass("min-w-0", "truncate");
+    expect(screen.getByText(/SessionStart:startup/)).toHaveClass("min-w-0", "text-fade");
     expect(wrapper.scrollWidth).toBeLessThanOrEqual(wrapper.clientWidth);
   });
 });

@@ -135,11 +135,11 @@ function FileRow({
         />
       )}
       <FileTypeIcon filePath={row.file.path} size={14} className="shrink-0" />
-      <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink/90">
+      <span className="min-w-0 flex-1 text-fade font-mono text-xs text-ink/90">
         {row.file.path}
       </span>
       {row.file.previousPath && (
-        <span className="hidden max-w-56 truncate font-mono text-xs text-muted lg:inline">
+        <span className="hidden max-w-56 text-fade font-mono text-xs text-muted lg:inline">
           from {row.file.previousPath}
         </span>
       )}

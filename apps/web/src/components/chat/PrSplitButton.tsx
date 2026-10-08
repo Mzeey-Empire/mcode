@@ -80,7 +80,7 @@ export function PrSplitButton({
                 <GitPullRequest className="size-3.5 shrink-0 text-muted" />
                 <span
                   className={cn(
-                    "truncate text-xs font-medium",
+                    "text-fade text-xs font-medium",
                     machineLabel && "font-mono tabular-nums",
                   )}
                 >

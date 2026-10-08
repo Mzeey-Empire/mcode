@@ -99,7 +99,7 @@ function ToolCallWrapperInner({
         </div>
 
         {badge && (
-          <span className="truncate pl-[21px] text-sm text-muted/50 font-mono">
+          <span className="text-fade pl-[21px] text-sm text-muted/50 font-mono">
             {badge}
           </span>
         )}

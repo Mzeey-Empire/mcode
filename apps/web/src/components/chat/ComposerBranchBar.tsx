@@ -23,7 +23,7 @@ export function ComposerBranchBar({ branchFromMessageId, branchFromMessageConten
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium text-muted/60 leading-none mb-0.5">Forking from</p>
         {branchFromMessageContent && (
-          <p className="text-xs text-muted/50 truncate italic">
+          <p className="text-xs text-muted/50 text-fade italic">
             {branchFromMessageContent.slice(0, 120)}{branchFromMessageContent.length > 120 ? "…" : ""}
           </p>
         )}

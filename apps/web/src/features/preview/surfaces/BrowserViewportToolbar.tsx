@@ -59,7 +59,7 @@ function ViewportPresetMenu({ open, selected, onOpenChange, onResponsive, onPres
       <DropdownMenuTrigger
         render={
           <Button type="button" size="xs" variant="outline" className="w-32 shrink-0 justify-between gap-1 px-2 @max-[520px]:w-24 @max-[520px]:px-1" aria-label="Viewport preset">
-            <span className="truncate">{selected?.label ?? "Responsive"}</span>
+            <span className="text-fade">{selected?.label ?? "Responsive"}</span>
             <ChevronDown size={13} aria-hidden />
           </Button>
         }
@@ -71,7 +71,7 @@ function ViewportPresetMenu({ open, selected, onOpenChange, onResponsive, onPres
         </DropdownMenuItem>
         {VIEWPORT_PRESETS.map((preset) => (
           <DropdownMenuItem key={preset.id} className="w-full justify-between gap-3 text-xs" onClick={() => onPreset(preset)}>
-            <span className="min-w-0 truncate">{preset.label}</span>
+            <span className="min-w-0 text-fade">{preset.label}</span>
             <span className="shrink-0 font-mono text-muted">{`${preset.width} × ${preset.height}`}</span>
           </DropdownMenuItem>
         ))}

@@ -105,7 +105,7 @@ function ThreadSearchResult({
     >
       <span
         className={cn(
-          "min-w-0 flex-1 truncate text-sm font-medium text-ink",
+          "min-w-0 flex-1 text-fade text-sm font-medium text-ink",
           isUserCompleted &&
             "text-muted line-through decoration-muted decoration-1",
         )}
@@ -117,7 +117,7 @@ function ThreadSearchResult({
           <TooltipTrigger
             render={
               <span
-                className="max-w-44 truncate text-right"
+                className="max-w-44 text-fade text-right"
                 aria-label={`Project, ${row.workspaceName}`}
               >
                 {row.workspaceName}
@@ -130,7 +130,7 @@ function ThreadSearchResult({
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="max-w-40 truncate font-mono" aria-label={`Branch, ${thread.branch}`}>
+              <span className="max-w-40 text-fade font-mono" aria-label={`Branch, ${thread.branch}`}>
                 {thread.branch}
               </span>
             }

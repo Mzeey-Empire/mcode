@@ -126,7 +126,7 @@ const REF_SECTIONS: ReadonlyArray<{ type: GitBranch["type"]; heading: string }> 
 ];
 
 /**
- * Truncate a long ref name in the middle rather than at the tail. Branch names
+ * Shorten a long ref name in the middle rather than at the tail. Branch names
  * put the distinctive part last (`…/docstrings/2bbc811`), so tail-ellipsis makes
  * long siblings identical; keeping both ends tells them apart at a glance.
  */
@@ -159,7 +159,7 @@ function RefName({
         render={
           <span
             className={cn(
-              "min-w-0 flex-1 truncate whitespace-nowrap font-mono text-[11px]",
+              "min-w-0 flex-1 text-fade whitespace-nowrap font-mono text-[11px]",
               active ? "text-ink" : "text-ink/80",
             )}
           />
@@ -207,7 +207,7 @@ function RefCombobox({
               "text-ink shadow-none hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.06]",
             )}
           >
-            <span className={cn("min-w-0 truncate", !value && "text-muted")}>
+            <span className={cn("min-w-0 text-fade", !value && "text-muted")}>
               {value ?? "select ref"}
             </span>
             <ChevronDown size={11} className="shrink-0 text-muted/65" />
@@ -282,7 +282,7 @@ function CurrentRefChip({ value }: { value: string | null }) {
           />
         }
       >
-        <span className={cn("max-w-[142px] truncate", !value && "text-muted")}>
+        <span className={cn("max-w-[142px] text-fade", !value && "text-muted")}>
           {value ?? "current"}
         </span>
       </TooltipTrigger>

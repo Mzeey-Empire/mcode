@@ -1,5 +1,4 @@
 /** Public Projects feature surface for workbench composition. */
-export { PathLabel } from "./PathLabel";
 export { ProjectRow } from "./ProjectRow";
 export { ProjectTree } from "./ProjectTree";
 export { ProjectsView } from "./ProjectsView";

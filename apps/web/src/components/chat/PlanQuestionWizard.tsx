@@ -59,8 +59,8 @@ function AnsweredPlanQuestions({
         return (
           <button key={question.id} type="button" onClick={() => onSelect(index)} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-selected/50">
             <span className="font-mono text-xs tabular-nums tracking-[0.12em] text-muted/45">{formatStep(index + 1, questions.length)}</span>
-            <span className="flex-1 truncate text-xs text-muted/60">{question.question}</span>
-            <span className="flex-shrink-0 max-w-[140px] truncate text-xs font-medium text-muted">{answerLabel}</span>
+            <span className="flex-1 text-fade text-xs text-muted/60">{question.question}</span>
+            <span className="flex-shrink-0 max-w-[140px] text-fade text-xs font-medium text-muted">{answerLabel}</span>
             <span className="text-xs text-[oklch(0.48_0.14_145)]" aria-hidden="true">✓</span>
           </button>
         );

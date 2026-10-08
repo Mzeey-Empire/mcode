@@ -420,9 +420,9 @@ function ReviewRemoteEffect({ detail, draftCount }: { detail: PullRequestDetail;
       </p>
       <p className="mt-2 flex min-w-0 items-center gap-2 font-mono text-xs text-muted">
         <GitBranch size={13} aria-hidden />
-        <span className="truncate">{detail.base.name}</span>
+        <span className="text-fade">{detail.base.name}</span>
         <span aria-hidden className="opacity-45">←</span>
-        <span className="truncate text-ink/85">{detail.head.name}</span>
+        <span className="text-fade text-ink/85">{detail.head.name}</span>
         {detail.head.oid ? (
           <span className="ml-auto shrink-0 tabular-nums">{detail.head.oid.slice(0, 8)}</span>
         ) : null}

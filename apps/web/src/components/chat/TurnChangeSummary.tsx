@@ -385,7 +385,7 @@ function ChangedFileRow({ filePath, stat, onJump }: ChangedFileRowProps) {
           >
             <span className="flex min-w-0 items-center gap-2 overflow-hidden">
               <FileTypeIcon filePath={filePath} size={14} className="shrink-0" />
-              <span className="font-medium text-ink/80 truncate">{name}</span>
+              <span className="font-medium text-ink/80 text-fade">{name}</span>
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
               {stat && (

@@ -257,7 +257,7 @@ function PreparingThreadHeader({ thread, state, startupPending }: { thread: Work
     <div className="flex h-11 items-center justify-between border-b border-border pr-4 pl-2">
       <div className="flex min-w-0 items-center gap-2">
         {state.sidebarCollapsed && <SidebarRevealButton />}
-        <span data-testid="chat-header-title" className="truncate text-sm font-medium">
+        <span data-testid="chat-header-title" className="text-fade text-sm font-medium">
           {thread.title}
           {(thread.clientPreparing || startupPending) && <span className="ml-2 inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary/60 align-middle" aria-hidden />}
         </span>

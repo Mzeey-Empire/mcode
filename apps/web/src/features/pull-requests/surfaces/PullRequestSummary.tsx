@@ -375,7 +375,7 @@ const CheckRow = memo(function CheckRow({
         aria-hidden
         className={cn("shrink-0", visual.className)}
       />
-      <span className="min-w-0 flex-1 truncate text-ink/90">
+      <span className="min-w-0 flex-1 text-fade text-ink/90">
         {check.name}
       </span>
       {check.isRequired === true && (
@@ -436,7 +436,7 @@ function ConversationAuthor({
           className="shrink-0 text-muted"
         />
       )}
-      <span className="truncate">{label}</span>
+      <span className="text-fade">{label}</span>
     </span>
   );
 }
@@ -598,7 +598,7 @@ function ReviewThreadRow({
       className="min-w-0 overflow-hidden rounded-lg bg-panel/45 px-4 py-4"
     >
       <header className="flex min-h-8 min-w-0 flex-wrap items-center gap-2 pb-3 text-xs">
-        <span className="truncate font-mono text-ink/85">
+        <span className="text-fade font-mono text-ink/85">
           {location}
         </span>
         <Badge variant="ghost" size="sm" className="text-muted">

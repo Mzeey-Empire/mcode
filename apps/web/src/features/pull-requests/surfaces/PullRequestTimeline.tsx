@@ -152,7 +152,7 @@ function CommitEventBody({ item }: { item: TimelineEventOfKind<"commit"> }) {
       <code className="shrink-0 font-mono text-primary/90">
         {item.oid.slice(0, 8)}
       </code>
-      <span className="truncate text-ink/80">{item.messageHeadline}</span>
+      <span className="text-fade text-ink/80">{item.messageHeadline}</span>
     </div>
   );
 }
@@ -180,7 +180,7 @@ function ReviewThreadEventBody({
   return (
     <div className="mt-2 bg-page/45 px-3 py-2.5">
       <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
-        <span className="truncate font-mono text-ink/85">{location}</span>
+        <span className="text-fade font-mono text-ink/85">{location}</span>
         <Badge variant="ghost" size="sm" className="text-muted">
           {item.isResolved ? "Resolved" : "Unresolved"}
         </Badge>

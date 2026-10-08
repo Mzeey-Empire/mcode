@@ -58,7 +58,7 @@ function ToolbarLeading({
       {isNarrow ? (onBack ? <Button ref={backButtonRef} type="button" variant="ghost" size="icon-xs" aria-label="Back to pull requests" onClick={onBack}><ArrowLeft size={14} aria-hidden /></Button> : null) : (
         <>
           <GitPullRequest size={14} aria-hidden className="shrink-0 text-muted" />
-          <span className="min-w-0 truncate font-mono text-xs text-ink/75">{model ? `${model.identity.owner}/${model.identity.repository}` : "Pull request"}</span>
+          <span className="min-w-0 text-fade font-mono text-xs text-ink/75">{model ? `${model.identity.owner}/${model.identity.repository}` : "Pull request"}</span>
           {model ? <span className="shrink-0 font-mono text-xs tabular-nums text-muted">#{model.identity.number}</span> : null}
         </>
       )}

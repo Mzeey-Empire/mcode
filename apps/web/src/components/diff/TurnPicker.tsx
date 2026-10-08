@@ -112,7 +112,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
               "text-ink shadow-none hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.06]",
             )}
           >
-            <span className={cn("min-w-0 truncate", !effectiveOrdinal && "text-muted")}>
+            <span className={cn("min-w-0 text-fade", !effectiveOrdinal && "text-muted")}>
               {effectiveOrdinal ? `Turn ${effectiveOrdinal}` : "Pick a turn"}
             </span>
             <ChevronDown size={11} className="shrink-0 text-muted/65" />
@@ -144,7 +144,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
                     aria-current={active ? "true" : undefined}
                     className="gap-2 px-2 py-1.5"
                   >
-                    <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[11px]">
+                    <span className="min-w-0 flex-1 text-fade whitespace-nowrap text-[11px]">
                       Turn {ordinal}
                       <span className="text-muted/60"> · {statLabel(turn)}</span>
                     </span>

@@ -107,7 +107,7 @@ export function PullRequestFileRow({
             >
               <FileTypeIcon filePath={file.path} size={14} />
             </span>
-            <span className="min-w-0 flex-1 truncate text-left font-mono text-xs">
+            <span className="min-w-0 flex-1 text-fade text-left font-mono text-xs">
               {basename(file.path)}
             </span>
             {patchLabel && (

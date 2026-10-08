@@ -44,7 +44,7 @@ export function ComposerNewThreadContext({
             <Folder size={14} className="shrink-0 text-muted" aria-hidden />
             <Tooltip>
               <TooltipTrigger
-                render={<span className="max-w-40 truncate">{activeWorkspace.name}</span>}
+                render={<span className="max-w-40 text-fade">{activeWorkspace.name}</span>}
               />
               <TooltipContent>{activeWorkspace.path}</TooltipContent>
             </Tooltip>

@@ -77,7 +77,7 @@ export function PreviewErrorPanel({
         ) : null}
       </div>
       {diagnosticLine ? (
-        <p className="max-w-md truncate font-mono text-[11px] text-muted/70">
+        <p className="max-w-md text-fade font-mono text-[11px] text-muted/70">
           {diagnosticLine}
         </p>
       ) : null}

@@ -273,7 +273,7 @@ function PullRequestCodeToolbar({
     >
       <div className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs text-muted">
         <GitBranch size={14} aria-hidden className="shrink-0" />
-        <span className="min-w-0 truncate text-ink/80">
+        <span className="min-w-0 text-fade text-ink/80">
           {detail.head.name}
         </span>
         <ChevronRight
@@ -281,7 +281,7 @@ function PullRequestCodeToolbar({
           aria-hidden
           className="shrink-0 text-muted/55"
         />
-        <span className="min-w-0 truncate">{detail.base.name}</span>
+        <span className="min-w-0 text-fade">{detail.base.name}</span>
       </div>
 
       <div
@@ -364,7 +364,7 @@ function PullRequestFilesErrorNotice({
       className="flex min-h-8 items-center gap-2 bg-destructive/8 px-3 text-xs text-muted"
     >
       <ErrorIcon size={13} aria-hidden className="text-destructive/75" />
-      <span className="min-w-0 flex-1 truncate">{error.message}</span>
+      <span className="min-w-0 flex-1 text-fade">{error.message}</span>
       <Button
         type="button"
         variant="ghost"
@@ -542,7 +542,7 @@ function PullRequestFilesMoreControl({
       className="flex min-h-8 shrink-0 items-center gap-2 bg-background px-3 text-xs text-muted"
       style={marginRight === undefined ? undefined : { marginRight }}
     >
-      <span className="min-w-0 flex-1 truncate">{message}</span>
+      <span className="min-w-0 flex-1 text-fade">{message}</span>
       <Button
         type="button"
         variant="ghost"

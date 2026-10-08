@@ -242,7 +242,7 @@ function SubagentParticipant({
           className="size-4"
           size={12}
         />
-        <span className="min-w-0 truncate text-xs font-medium text-ink/85">
+        <span className="min-w-0 text-fade text-xs font-medium text-ink/85">
           {view.title}
         </span>
       </Button>

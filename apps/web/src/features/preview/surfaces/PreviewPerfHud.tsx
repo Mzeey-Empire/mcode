@@ -42,7 +42,7 @@ export function PreviewPerfHud() {
         {(Object.entries(counters) as Array<[keyof BrowserPerfCounters, number]>).map(
           ([k, v]) => (
             <div key={k} className="contents">
-              <dt className="truncate text-muted">{k}</dt>
+              <dt className="text-fade text-muted">{k}</dt>
               <dd className="tabular-nums">{v}</dd>
             </div>
           ),

@@ -282,7 +282,7 @@ function ComposerNoticeOverlay({
             className={notice.tone === "attention" ? "size-3.5 text-amber-500" : "size-3.5 text-muted"}
             aria-hidden="true"
           />
-          <span className="min-w-0 flex-1 truncate">{notice.title}</span>
+          <span className="min-w-0 flex-1 text-fade">{notice.title}</span>
           <ChevronDown
             className={`size-3.5 text-muted transition-transform ${detailsOpen ? "rotate-180" : ""}`}
             aria-hidden="true"

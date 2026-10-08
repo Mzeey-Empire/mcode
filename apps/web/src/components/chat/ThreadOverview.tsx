@@ -663,7 +663,7 @@ function ThreadOverviewUsageBars({
       >
         <span className="flex min-w-0 items-center gap-2">
           <Gauge aria-hidden className="size-3.5 shrink-0 text-muted" />
-          <span className="truncate text-xs font-medium">Usage</span>
+          <span className="text-fade text-xs font-medium">Usage</span>
         </span>
         <span className="shrink-0 font-mono text-xs tabular-nums text-muted">
           {summary}
@@ -690,11 +690,11 @@ function ThreadOverviewUsageBars({
         >
           <span className="flex min-w-0 items-center gap-2">
             <Gauge aria-hidden className="size-3.5 shrink-0 text-muted" />
-            <span className="truncate text-xs font-medium">Usage</span>
+            <span className="text-fade text-xs font-medium">Usage</span>
           </span>
           <span className="flex min-w-0 shrink items-center gap-2">
             {!open ? (
-              <span className="min-w-0 truncate font-mono text-xs tabular-nums text-muted">
+              <span className="min-w-0 text-fade font-mono text-xs tabular-nums text-muted">
                 {summary}
               </span>
             ) : null}
@@ -731,7 +731,7 @@ function ThreadOverviewUsageBars({
               return (
                 <div key={category.label} className="space-y-1">
                   <div className="flex items-baseline justify-between gap-3">
-                    <span className="min-w-0 truncate text-xs text-ink/80">{displayLabel}</span>
+                    <span className="min-w-0 text-fade text-xs text-ink/80">{displayLabel}</span>
                     <span
                       data-testid="thread-overview-usage-value"
                       className={cn(
@@ -774,7 +774,7 @@ function ThreadOverviewUsageBars({
             ) : null}
             {sessionCostSummary ? (
               <div className="flex items-baseline justify-between gap-3 pt-1">
-                <span className="min-w-0 truncate text-xs text-ink/80">Session cost</span>
+                <span className="min-w-0 text-fade text-xs text-ink/80">Session cost</span>
                 <span className="shrink-0 font-mono text-xs tabular-nums text-muted">
                   {sessionCostSummary}
                 </span>
@@ -1039,7 +1039,7 @@ function ThreadOverviewRepositoryRow({
                 imageTestId="thread-overview-repository-favicon"
                 fallback={<GitBranch size={14} className="shrink-0 text-muted" />}
               />
-              <span className="truncate text-xs font-medium">{label}</span>
+              <span className="text-fade text-xs font-medium">{label}</span>
               <ExternalLink size={12} aria-hidden className="shrink-0 text-muted" />
             </Button>
           </ThreadOverviewTooltipButton>
@@ -1239,7 +1239,7 @@ function ThreadOverviewLocalMenu({ worktreePath, branch }: ThreadOverviewLocalMe
             <span className="block text-xs font-medium text-ink">Worktree path</span>
             <span
               data-testid="thread-overview-local-path"
-              className="block max-w-56 truncate font-mono text-xs text-muted"
+              className="block max-w-56 text-fade font-mono text-xs text-muted"
             >
               {worktreePath ?? "Unavailable"}
             </span>
@@ -1264,7 +1264,7 @@ function ThreadOverviewLocalMenu({ worktreePath, branch }: ThreadOverviewLocalMe
             <span className="block text-xs font-medium text-ink">Branch</span>
             <span
               data-testid="thread-overview-local-branch"
-              className="block max-w-56 truncate font-mono text-xs text-muted"
+              className="block max-w-56 text-fade font-mono text-xs text-muted"
             >
               {branch}
             </span>
@@ -1491,9 +1491,9 @@ function ThreadOverviewBranchRow({
       <span className="flex min-w-0 items-center gap-2">
         <GitBranch size={13} className="shrink-0 text-muted" />
         <span className="min-w-0">
-          <span className="block truncate text-xs font-medium">{branch.name}</span>
+          <span className="block text-fade text-xs font-medium">{branch.name}</span>
           {isCurrent && currentBranchUncommittedLabel ? (
-            <span className="block truncate text-xs font-normal text-muted">
+            <span className="block text-fade text-xs font-normal text-muted">
               {currentBranchUncommittedLabel}
             </span>
           ) : null}
@@ -1590,11 +1590,11 @@ function ThreadOverviewBrowserSection({ rows, onOpen }: ThreadOverviewBrowserSec
                           fallback={<Globe size={14} className="text-muted" />}
                         />
                       )}
-                      <span className="min-w-0 truncate text-xs font-medium">{title}</span>
+                      <span className="min-w-0 text-fade text-xs font-medium">{title}</span>
                     </span>
                     <span
                       data-testid={`thread-overview-browser-address-${tab.id}`}
-                      className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-right font-mono text-xs tabular-nums text-muted [mask-image:linear-gradient(to_right,transparent_0,black_1.25rem)]"
+                      className="ml-auto text-fade font-mono text-xs tabular-nums text-muted"
                     >
                       {address}
                     </span>
@@ -1873,7 +1873,7 @@ function ThreadOverviewPrActiveRow({
           >
             <span className="flex min-w-0 items-center gap-2">
               <ThreadOverviewCiStatusCircle checks={checks} />
-              <span className="truncate font-mono text-xs tabular-nums">
+              <span className="text-fade font-mono text-xs tabular-nums">
                 {getCiOverviewSummaryLabel(checks)}
               </span>
             </span>
@@ -1895,7 +1895,7 @@ function ThreadOverviewPrActiveRow({
           className="inline-flex h-7 w-full items-center gap-2 px-2 font-mono text-xs text-muted"
         >
           <span aria-hidden className="size-3.5 shrink-0" />
-          <span className="truncate">{status.label}</span>
+          <span className="text-fade">{status.label}</span>
         </span>
       ) : null
     );
@@ -2621,7 +2621,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
                   size={14}
                   className="shrink-0 text-muted transition-colors duration-150 group-hover:text-ink/80"
                 />
-                <span className="truncate text-xs font-medium">Changes</span>
+                <span className="text-fade text-xs font-medium">Changes</span>
               </span>
               <ThreadOverviewWhen when={isChangeSummaryLoading}>
                 <span
@@ -2667,9 +2667,9 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
                     size={14}
                     className="shrink-0 text-muted transition-colors duration-150 group-hover:text-ink/80"
                   />
-                  <span className="truncate text-xs font-medium">Plans</span>
+                  <span className="text-fade text-xs font-medium">Plans</span>
                 </span>
-                <span className="min-w-0 max-w-[11rem] truncate text-xs text-muted">
+                <span className="min-w-0 max-w-[11rem] text-fade text-xs text-muted">
                   {latestPlan?.title}
                 </span>
               </Button>
@@ -2697,7 +2697,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
                         data-testid="thread-overview-local-mode-icon"
                         className="shrink-0 text-muted transition-colors duration-150 group-hover:text-ink/80"
                       />
-                      <span className="truncate text-xs font-medium">{modeLabel}</span>
+                      <span className="text-fade text-xs font-medium">{modeLabel}</span>
                     </span>
                     <ChevronDown
                       size={13}
@@ -2758,7 +2758,7 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
                           size={14}
                           className="shrink-0 text-muted transition-colors duration-150 group-hover:text-ink/80"
                         />
-                        <span className="truncate text-xs font-medium">{checkoutLabel}</span>
+                        <span className="text-fade text-xs font-medium">{checkoutLabel}</span>
                       </span>
                       <ChevronDown
                         size={13}

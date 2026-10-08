@@ -186,7 +186,7 @@ export function PullRequestFilters({
                     closeOnClick
                     onCheckedChange={() => onRepositoryChange(repository)}
                   >
-                    <span className="truncate">{repository}</span>
+                    <span className="text-fade">{repository}</span>
                   </DropdownMenuCheckboxItem>
                 ))}
               </DropdownMenuSubContent>
@@ -207,7 +207,7 @@ export function PullRequestFilters({
 
       {activeCount > 0 && (
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted">
-          <p aria-live="polite" className="min-w-0 flex-1 truncate">
+          <p aria-live="polite" className="min-w-0 flex-1 text-fade">
             {descriptions.join(" · ")}
           </p>
           <Button

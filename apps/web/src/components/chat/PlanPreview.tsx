@@ -33,7 +33,7 @@ export function PlanPreview({ workspaceId, threadId, preview }: PlanPreviewProps
       <ListChecks size={16} className="shrink-0 text-muted" aria-hidden />
       <Tooltip>
         <TooltipTrigger
-          render={<span className="min-w-0 flex-1 truncate text-sm text-ink" />}
+          render={<span className="min-w-0 flex-1 text-fade text-sm text-ink" />}
         >
           {preview.title}
         </TooltipTrigger>

@@ -94,7 +94,7 @@ function DraftEditor({
             Outdated
           </Badge>
         ) : null}
-        <span className="ml-auto min-w-0 truncate font-mono text-xs text-muted">
+        <span className="ml-auto min-w-0 text-fade font-mono text-xs text-muted">
           {targetLabel}
         </span>
       </div>
@@ -182,7 +182,7 @@ function PullRequestInlineThreadComponent({
                   Outdated
                 </Badge>
               )}
-              <span className="ml-auto min-w-0 truncate font-mono text-xs text-muted">
+              <span className="ml-auto min-w-0 text-fade font-mono text-xs text-muted">
                 {threadTargetLabel(thread)}
               </span>
             </div>

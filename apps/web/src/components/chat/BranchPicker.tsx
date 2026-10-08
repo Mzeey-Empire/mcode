@@ -96,7 +96,7 @@ function BranchItem({ branch, selectedBranch, onSelect }: BranchItemProps) {
           : "text-ink hover:bg-selected/50 hover:text-ink",
       )}
     >
-      <span className="truncate">{branch.name}</span>
+      <span className="text-fade">{branch.name}</span>
       {badge ? <Badge variant="secondary" size="sm" className="ml-2 shrink-0">{badge}</Badge> : null}
     </button>
   );
@@ -123,7 +123,7 @@ function PullRequestItem({ pullRequest, selectedBranch, fetchingBranch, onSelect
           : "text-ink hover:bg-selected/50 hover:text-ink",
       )}
     >
-      <div className="flex flex-col items-start gap-0.5 truncate">
+      <div className="flex flex-col items-start gap-0.5 text-fade">
         <span className="flex items-center gap-1">
           <GitPullRequest size={10} />
           #{pullRequest.number} {pullRequest.title}

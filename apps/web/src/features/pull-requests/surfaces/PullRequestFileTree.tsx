@@ -57,7 +57,7 @@ function OverflowPathLabel({ label, path }: OverflowPathLabelProps) {
     <Tooltip disabled={!overflowing}>
       <TooltipTrigger
         render={
-          <span ref={labelRef} className="min-w-0 truncate">
+          <span ref={labelRef} className="min-w-0 text-fade">
             {label}
           </span>
         }
