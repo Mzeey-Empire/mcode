@@ -22,7 +22,7 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId, sideba
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <NewThreadCanvasHeader projectName={projectName} sidebarCollapsed={sidebarCollapsed} />
-      <div data-testid="new-thread-start-column" className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto">
+      <div data-testid="new-thread-start-column" className="flex min-h-0 flex-1 flex-col justify-center-safe overflow-y-auto">
         <div className="px-4 pb-4 sm:px-8">
           <div key={projectName ?? "projectless"} className={cn(COMPOSER_RAIL_CLASS, "animate-fade-up-in flex justify-center")}>
             <ProjectSlotHeading projectName={projectName} />
