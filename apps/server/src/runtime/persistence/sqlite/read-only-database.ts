@@ -7,9 +7,10 @@ const walJournalSchema = z.object({ journal_mode: z.literal("wal") });
 export function openReadOnlyDatabase(dbPath: string): Database {
   const db = new Database(dbPath, { strict: true, readonly: true });
   try {
+    // Set before the first statement so reading the schema waits out another connection's final close.
+    db.run("PRAGMA busy_timeout = 5000");
     const journal = walJournalSchema.parse(db.query("PRAGMA journal_mode").get());
     if (journal.journal_mode !== "wal") throw new Error("Read-only database requires WAL");
-    db.run("PRAGMA busy_timeout = 5000");
     db.run("PRAGMA foreign_keys = ON");
     db.run("PRAGMA synchronous = FULL");
     db.run("PRAGMA mmap_size = 0");
