@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   release-please:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     outputs:
@@ -54,7 +54,7 @@ jobs:
   cleanup-superseded-nightlies:
     needs: [release-please, build-stable-release]
     if: needs.release-please.outputs.releases_created == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write

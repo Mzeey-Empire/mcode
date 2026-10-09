@@ -64,7 +64,7 @@ jobs:
       matrix:
         include:
           - target-id: linux-x64
-            runner: blacksmith-2vcpu-ubuntu-2404
+            runner: ubuntu-24.04
             platform: linux
             arch: x64
             build-args: --config.deb.compression=gz
@@ -88,22 +88,22 @@ jobs:
       matrix:
         include:
           - target-id: windows-x64
-            runner: blacksmith-2vcpu-windows-2025
+            runner: windows-2025
             platform: windows
             arch: x64
             build-args: --config.compression=store
           - target-id: linux-x64
-            runner: blacksmith-2vcpu-ubuntu-2404
+            runner: ubuntu-24.04
             platform: linux
             arch: x64
             build-args: --config.deb.compression=gz
           - target-id: macos-arm64
-            runner: blacksmith-6vcpu-macos-26
+            runner: macos-26
             platform: macos
             arch: arm64
             build-args: --mac --arm64
           - target-id: macos-x64
-            runner: blacksmith-6vcpu-macos-26
+            runner: macos-26
             platform: macos
             arch: x64
             build-args: --mac --x64
@@ -121,7 +121,7 @@ jobs:
   verify-release-evidence:
     needs: package-full
     if: needs.package-full.result == 'success'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
