@@ -69,6 +69,17 @@ describe("WorkspaceService.create", () => {
     expect(repo.listAll()).toEqual([result.workspace]);
   });
 
+  it("reuses a legacy registration stored under a non-canonical alias", async () => {
+    const alias = NodePath.join(directory, "alias");
+    await NodeFSPromises.symlink(project, alias, "junction");
+    const legacy = await repo.create("Legacy", alias, false);
+
+    const result = await service.create(undefined, alias);
+
+    expect(result).toMatchObject({ ok: true, reused: true, workspace: { id: legacy.id, path: alias } });
+    expect(repo.listAll()).toHaveLength(1);
+  });
+
   it("reuses the same folder, including a trailing separator, without a second row", async () => {
     const first = await service.create("Chosen name", project);
     if (!first.ok) throw new Error("Expected successful registration");

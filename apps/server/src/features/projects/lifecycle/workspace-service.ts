@@ -45,8 +45,9 @@ export class WorkspaceService {
   async create(name: string | undefined, requestedPath: string): Promise<WorkspaceCreateResult> {
     const validated = await validateWorkspacePath(requestedPath);
     if (!validated.ok) return validated;
-    const { path } = validated;
-    const existing = this.workspaceRepo.findByPath(path);
+    const { path, submittedPath } = validated;
+    // Rows registered before paths were canonicalized hold the path as the client sent it.
+    const existing = this.workspaceRepo.findByPath(path) ?? this.workspaceRepo.findByPath(submittedPath);
     if (existing) {
       const current = await this.writer.execute(projectLifecycleWriteOperations.reuseWorkspace, [existing.id]);
       if (!current) throw new Error("Workspace was deleted while it was being reopened");
@@ -159,7 +160,7 @@ function registrationFailure(code: WorkspaceCreateErrorCode, message: string): E
 }
 
 async function validateWorkspacePath(requestedPath: string): Promise<
-  { ok: true; path: string } | Extract<WorkspaceCreateResult, { ok: false }>
+  { ok: true; path: string; submittedPath: string } | Extract<WorkspaceCreateResult, { ok: false }>
 > {
   const expandedPath = requestedPath.replace(/^~(?=$|[\\/])/, NodeOS.homedir());
   if (!NodePath.isAbsolute(expandedPath)) {
@@ -176,7 +177,7 @@ async function validateWorkspacePath(requestedPath: string): Promise<
       return registrationFailure("too_broad", "Choose a project folder, not your home folder or a filesystem root.");
     }
     await NodeFSPromises.access(path, NodeFS.constants.R_OK);
-    return { ok: true, path };
+    return { ok: true, path, submittedPath: expandedPath };
   } catch (error) {
     return registrationFilesystemError(error);
   }
