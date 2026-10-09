@@ -1,4 +1,4 @@
-import type { DiffStats, ReviewComparison } from "@mcode/contracts";
+import type { DiffStats, ReviewComparison, WorkspaceCreateResult } from "@mcode/contracts";
 import type {
   McodeTransport,
   Workspace,
@@ -1023,7 +1023,7 @@ export function createWsTransport(
     }),
     // Workspace
     listWorkspaces: () => rpc<Workspace[]>("workspace.list", {}),
-    createWorkspace: (name, path) => rpc<Workspace>("workspace.create", { name, path }),
+    createWorkspace: (name, path) => rpc<WorkspaceCreateResult>("workspace.create", { name, path }),
     renameWorkspace: (id, name) => rpc<Workspace>("workspace.rename", { id, name }),
     readWorkspaceEnvironment: (workspaceId, threadId) =>
       rpc<WorkspaceEnvironmentReadResult>("workspace.environment.read", { workspaceId, threadId }),

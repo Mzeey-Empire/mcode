@@ -19,7 +19,7 @@ import {
   createMockWorkspace,
   createMockThread,
 } from "../../../../__tests__/mocks/transport";
-import type { CreateAndSendResult, SelectedTextComment, ThreadStartup, TurnRuntimeSnapshot } from "@mcode/contracts";
+import type { CreateAndSendResult, SelectedTextComment, ThreadStartup, TurnRuntimeSnapshot, WorkspaceCreateResult } from "@mcode/contracts";
 import { act, renderHook } from "@testing-library/react";
 import { useQueuedMessageDispatch } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";
 import { useThreadStartupStore } from "@/features/thread-startup";
@@ -200,16 +200,14 @@ describe("Workspace Behavior", () => {
 
   it("when the user creates a workspace, it appears in the list", async () => {
     const ws = createMockWorkspace({ name: "my-project" });
-    (
-      mockTransport.createWorkspace as ReturnType<typeof vi.fn>
-    ).mockResolvedValue(ws);
+    vi.mocked(mockTransport.createWorkspace).mockResolvedValue({ ok: true, workspace: ws, reused: false });
 
     const result = await useWorkspaceStore
       .getState()
       .createWorkspace("my-project", "/tmp/my-project");
 
-    expect(result.name).toBe("my-project");
-    expect(useWorkspaceStore.getState().workspaces).toContainEqual(ws);
+    expect(result).toEqual({ ok: true, workspace: ws, reused: false });
+    expect(useWorkspaceStore.getState().workspaces).toEqual([ws]);
   });
 
   it("when the user re-adds an existing project, it is deduped and moved to the front", async () => {
@@ -218,18 +216,27 @@ describe("Workspace Behavior", () => {
     useWorkspaceStore.setState({ workspaces: [other, existing] });
 
     // Server is idempotent on path: re-adding returns the live workspace.
-    (
-      mockTransport.createWorkspace as ReturnType<typeof vi.fn>
-    ).mockResolvedValue(existing);
+    vi.mocked(mockTransport.createWorkspace).mockResolvedValue({ ok: true, workspace: existing, reused: true });
 
-    await useWorkspaceStore
+    const result = await useWorkspaceStore
       .getState()
       .createWorkspace("existing", "/tmp/existing");
 
+    expect(result).toEqual({ ok: true, workspace: existing, reused: true });
     const { workspaces } = useWorkspaceStore.getState();
-    expect(workspaces).toHaveLength(2);
-    expect(workspaces.filter((w) => w.id === "ws-existing")).toHaveLength(1);
-    expect(workspaces[0].id).toBe("ws-existing");
+    expect(workspaces).toEqual([existing, other]);
+  });
+
+  it("returns a rejected registration without changing the sidebar", async () => {
+    const existing = createMockWorkspace({ id: "existing" });
+    useWorkspaceStore.setState({ workspaces: [existing], activeWorkspaceId: existing.id });
+    const rejected = { ok: false, error: { code: "path_not_found", message: "This folder doesn't exist." } } satisfies WorkspaceCreateResult;
+    vi.mocked(mockTransport.createWorkspace).mockResolvedValue(rejected);
+
+    expect(await useWorkspaceStore.getState().createWorkspace(undefined, "/missing")).toEqual(rejected);
+    expect(useWorkspaceStore.getState().workspaces).toEqual([existing]);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("existing");
+    expect(useWorkspaceStore.getState().error).toBe("This folder doesn't exist.");
   });
 
   it("when the user deletes the active workspace, threads and selection clear", async () => {

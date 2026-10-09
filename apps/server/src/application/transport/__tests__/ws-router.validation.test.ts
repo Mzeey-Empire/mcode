@@ -1309,8 +1309,9 @@ describe("routeMessage workspace.create", () => {
       return environmentRead.promise;
     });
     const watchWorkspace = vi.fn();
+    const create = vi.fn().mockResolvedValue({ ok: true, workspace, reused: false });
     const deps = {
-      workspaceService: { create: vi.fn().mockResolvedValue(workspace) },
+      workspaceService: { create },
       workspaceEnvironmentService: { read },
       gitWatcherService: { watchWorkspace },
     } as unknown as RouterDeps;
@@ -1328,10 +1329,21 @@ describe("routeMessage workspace.create", () => {
 
     await expect(responsePromise).resolves.toEqual({
       id: "workspace-create",
-      result: workspace,
+      result: { ok: true, workspace, reused: false },
     });
     expect(read).toHaveBeenCalledWith(workspace.id);
     expect(watchWorkspace).toHaveBeenCalledWith(workspace.id, workspace.path);
+
+    const failure = { ok: false, error: { code: "path_not_found", message: "This folder doesn't exist." } };
+    create.mockResolvedValue(failure);
+    await expect(routeMessage(JSON.stringify({
+      id: "workspace-rejected",
+      method: "workspace.create",
+      params: { path: " C:/missing " },
+    }), deps)).resolves.toEqual({ id: "workspace-rejected", result: failure });
+    expect(create).toHaveBeenLastCalledWith(undefined, "C:/missing");
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(watchWorkspace).toHaveBeenCalledTimes(1);
   });
 });
 

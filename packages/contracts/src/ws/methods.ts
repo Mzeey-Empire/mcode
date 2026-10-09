@@ -597,6 +597,30 @@ const workspaceEnvironmentActionMethods = (): Record<
 
 type WsMethodDefinition = { params: z.ZodTypeAny; result: z.ZodTypeAny };
 
+/** Reasons a folder cannot be registered as a workspace. */
+export const WorkspaceCreateErrorCodeSchema = lazySchema(() => z.enum([
+  "path_not_absolute",
+  "path_not_found",
+  "not_a_directory",
+  "too_broad",
+  "permission_denied",
+]));
+
+/** Stable registration failure codes for client-side copy. */
+export type WorkspaceCreateErrorCode = z.infer<ReturnType<typeof WorkspaceCreateErrorCodeSchema>>;
+
+/** Registration either opens a workspace or explains why the folder is invalid. */
+export const WorkspaceCreateResultSchema = lazySchema(() => z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), workspace: WorkspaceSchema(), reused: z.boolean() }),
+  z.object({
+    ok: z.literal(false),
+    error: z.object({ code: WorkspaceCreateErrorCodeSchema(), message: z.string().min(1).max(512) }),
+  }),
+]));
+
+/** Result of registering or reopening a workspace folder. */
+export type WorkspaceCreateResult = z.infer<ReturnType<typeof WorkspaceCreateResultSchema>>;
+
 /** All WebSocket methods with runtime-validating parameter and result schemas. */
 export const WS_METHODS = lazySchema(() => ({
   /** Registers this WebSocket as a visible-browser automation host. */
@@ -661,8 +685,11 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.array(WorkspaceSchema()),
   },
   "workspace.create": {
-    params: z.object({ name: z.string(), path: z.string() }),
-    result: WorkspaceSchema(),
+    params: z.object({
+      path: z.string().trim().min(1).max(4096),
+      name: z.string().trim().min(1).max(120).optional(),
+    }),
+    result: WorkspaceCreateResultSchema(),
   },
   /** Rename a workspace without changing its filesystem path. */
   "workspace.rename": {

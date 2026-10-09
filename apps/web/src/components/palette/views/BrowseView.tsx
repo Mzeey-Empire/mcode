@@ -240,7 +240,7 @@ function useBrowseAddAction({
   result: BrowseResult | null;
   loading: boolean;
   error: string | null;
-  createWorkspace: (name: string, path: string) => Promise<{ id: string }>;
+  createWorkspace: ReturnType<typeof useWorkspaceStore.getState>["createWorkspace"];
   beginNewThread: (workspaceId?: string | null) => void;
   close: () => void;
 }) {
@@ -268,8 +268,12 @@ function useBrowseAddAction({
     setAddErrorState(null);
     setIsAdding(true);
     try {
-      const workspace = await createWorkspace(name, target);
-      beginNewThread(workspace.id);
+      const created = await createWorkspace(name, target);
+      if (!created.ok) {
+        setAddErrorState({ query, message: created.error.message });
+        return;
+      }
+      beginNewThread(created.workspace.id);
       close();
     } catch {
       setAddErrorState({ query, message: "Could not add this folder. Try again." });

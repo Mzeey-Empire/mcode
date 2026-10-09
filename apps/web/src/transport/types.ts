@@ -3,6 +3,7 @@ import type {
   DiffStats,
   ReviewComparison,
   Workspace,
+  WorkspaceCreateResult,
   WorkspaceEnrichment,
   WorkspaceEnvironmentDocument,
   WorkspaceEnvironmentReadResult,
@@ -305,7 +306,7 @@ export interface McodeTransport {
   ): Promise<void>;
 
   // Workspace commands
-  createWorkspace(name: string, path: string): Promise<Workspace>;
+  createWorkspace(name: string | undefined, path: string): Promise<WorkspaceCreateResult>;
   listWorkspaces(): Promise<Workspace[]>;
   /** Rename a workspace without changing its filesystem path. */
   renameWorkspace(id: string, name: string): Promise<Workspace>;

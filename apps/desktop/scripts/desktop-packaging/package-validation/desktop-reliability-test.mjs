@@ -116,7 +116,9 @@ async function startReliabilityRun(run, child) {
 async function createReliabilityThread(lock, runRoot) {
   let mutationCount = 0;
   await rpc(lock, "settings.update", { appearance: { theme: "dark" } }, () => { mutationCount += 1; });
-  const workspace = (await rpc(lock, "workspace.create", { name: "Reliability harness", path: runRoot })).result;
+  const created = (await rpc(lock, "workspace.create", { name: "Reliability harness", path: runRoot })).result;
+  if (!created.ok) throw new Error(`Workspace registration failed (${created.error.code}): ${created.error.message}`);
+  const { workspace } = created;
   const thread = (await rpc(lock, "thread.create", {
     workspaceId: workspace.id,
     title: "Restart recovery",

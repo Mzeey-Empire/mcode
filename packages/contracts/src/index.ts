@@ -1225,6 +1225,8 @@ export type {
 
 export {
   WS_METHODS,
+  WorkspaceCreateErrorCodeSchema,
+  WorkspaceCreateResultSchema,
   CreateThreadSchema,
   SendMessageSchema,
   CreateAndSendSchema,
@@ -1238,6 +1240,8 @@ export {
 } from "./ws/methods.js";
 export type {
   WsMethodName,
+  WorkspaceCreateErrorCode,
+  WorkspaceCreateResult,
   SendMessageInput,
   CreateAndSendInput,
   CreateAndSendResult,

@@ -104,7 +104,7 @@ export const mockTransport: McodeTransport = {
   respondToBrowserAutomationRequest: vi.fn().mockResolvedValue(undefined),
   heartbeatBrowserAutomationHost: vi.fn().mockResolvedValue(undefined),
   cancelBrowserAutomationRequest: vi.fn().mockResolvedValue(undefined),
-  createWorkspace: vi.fn(),
+  createWorkspace: vi.fn<McodeTransport["createWorkspace"]>(),
   listWorkspaces: vi.fn().mockResolvedValue([]),
   renameWorkspace: vi.fn().mockResolvedValue(createMockWorkspace()),
   readWorkspaceEnvironment: vi.fn().mockResolvedValue({

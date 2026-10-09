@@ -1,4 +1,4 @@
-import { WS_METHODS, type Thread, type Workspace, type WsMethodName } from "@mcode/contracts";
+import { WS_METHODS, type Thread, type Workspace, type WorkspaceCreateResult, type WsMethodName } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import * as NodePerfHooks from "node:perf_hooks";
 import type { z } from "zod";
@@ -133,9 +133,11 @@ export async function routeWorkspaceThreadRpc<Method extends WorkspaceThreadRpcM
 
 async function createWorkspace(
   deps: WorkspaceThreadRouterDeps,
-  params: { name: string; path: string },
-): Promise<Workspace> {
-  const workspace = await deps.workspaceService.create(params.name, params.path);
+  params: WorkspaceThreadRpcParamsByMethod["workspace.create"],
+): Promise<WorkspaceCreateResult> {
+  const result = await deps.workspaceService.create(params.name, params.path);
+  if (!result.ok) return result;
+  const { workspace } = result;
   await deps.workspaceEnvironmentService.read(workspace.id);
   try {
     deps.gitWatcherService.watchWorkspace(workspace.id, workspace.path);
@@ -145,7 +147,7 @@ async function createWorkspace(
       error: error instanceof Error ? error.message : String(error),
     });
   }
-  return workspace;
+  return result;
 }
 
 async function deleteWorkspace(

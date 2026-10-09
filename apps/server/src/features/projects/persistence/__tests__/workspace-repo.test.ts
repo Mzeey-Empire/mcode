@@ -1,5 +1,8 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
 import { createThreadPersistenceTestRuntime } from "../../../thread-control/testing/thread-persistence-test-runtime.js";
 import { WorkspaceRepo } from "../workspace-repo.js";
@@ -83,8 +86,11 @@ describe("WorkspaceRepo", () => {
 describe("WorkspaceService", () => {
   let repo: WorkspaceRepo;
   let service: WorkspaceService;
+  let directory: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    directory = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "workspace-repo-"));
+    directory = await NodeFSPromises.realpath(directory);
     persistenceRuntime = createThreadPersistenceTestRuntime();
     repo = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     const threadRepo = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
@@ -103,20 +109,27 @@ describe("WorkspaceService", () => {
     );
   });
 
-  it("create() returns existing workspace when path already exists", async () => {
-    const ws1 = await service.create("project-a", "/tmp/existing");
-    await service.create("other", "/tmp/other");
-
-    const ws2 = await service.create("project-a-renamed", "/tmp/existing");
-
-    expect(ws2.id).toBe(ws1.id);
-    expect(ws2.name).toBe("project-a");
-    expect(repo.listAll()[0]!.id).toBe(ws1.id);
+  afterEach(async () => {
+    await NodeFSPromises.rm(directory, { recursive: true, force: true });
   });
 
-  it("create() creates a new workspace when path does not exist", async () => {
-    const ws = await service.create("new-project", "/tmp/new");
-    expect(ws.name).toBe("new-project");
-    expect(ws.path).toBe("/tmp/new");
+  it("create() returns existing workspace when path already exists", async () => {
+    const other = NodePath.join(directory, "other");
+    await NodeFSPromises.mkdir(other);
+    const ws1 = await service.create("project-a", directory);
+    await service.create("other", other);
+
+    const ws2 = await service.create("project-a-renamed", directory);
+
+    if (!ws1.ok || !ws2.ok) throw new Error("Expected successful registration");
+    expect(ws2.workspace.id).toBe(ws1.workspace.id);
+    expect(ws2.workspace.name).toBe("project-a");
+    expect(ws2.reused).toBe(true);
+    expect(repo.listAll()[0]!.id).toBe(ws1.workspace.id);
+  });
+
+  it("create() creates a new workspace for an unregistered folder", async () => {
+    const result = await service.create("new-project", directory);
+    expect(result).toMatchObject({ ok: true, reused: false, workspace: { name: "new-project", path: directory } });
   });
 });
