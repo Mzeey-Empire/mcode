@@ -151,7 +151,7 @@ export function Picker<T>(props: PickerProps<T>) {
     }
     if (isRowActionShortcut(event)) {
       const row = rows[activeIndex]?.row;
-      if (!row?.action || row.disabled) return;
+      if (!row?.action) return;
       event.preventDefault();
       row.action.run();
       return;
@@ -257,10 +257,18 @@ function PickerFooter({ loaded, total, footer }: { readonly loaded: number; read
   );
 }
 
+/**
+ * Whether the arrow keys can land on a row. A disabled row with an action stays reachable so the keyboard can
+ * still run it, for example to unstar a model whose access ended; Enter still refuses to pick it.
+ */
+function isReachable(row: PickerRow): boolean {
+  return !row.disabled || row.action !== undefined;
+}
+
 /** The highlighted row survives appended pages; otherwise it falls back to the selection, then the first enabled row. */
 function resolveActiveKey<T>(rows: readonly ListRow<T>[], activeKey: string | null, selectedKey?: string): string | null {
   const isEnabled = (key: string | null | undefined) => rows.some(({ row }) => row.key === key && !row.disabled);
-  if (isEnabled(activeKey)) return activeKey;
+  if (rows.some(({ row }) => row.key === activeKey && isReachable(row))) return activeKey;
   if (isEnabled(selectedKey)) return selectedKey ?? null;
   return rows.find(({ row }) => !row.disabled)?.row.key ?? null;
 }
@@ -270,16 +278,17 @@ function resolveActiveKey<T>(rows: readonly ListRow<T>[], activeKey: string | nu
  * from the search caret, as cmdk did and DESIGN.md's picker contract asks.
  */
 function highlightTarget<T>(rows: readonly ListRow<T>[], activeIndex: number, key: string): number | null {
-  if (key === "Home") return nextEnabledRow(rows, -1, 1);
-  if (key === "End") return nextEnabledRow(rows, rows.length, -1);
+  if (key === "Home") return nextReachableRow(rows, -1, 1);
+  if (key === "End") return nextReachableRow(rows, rows.length, -1);
   const step = ARROW_STEPS[key];
-  return step === undefined ? null : nextEnabledRow(rows, activeIndex, step);
+  return step === undefined ? null : nextReachableRow(rows, activeIndex, step);
 }
 
-/** Next enabled row from `from` in direction `step`, stopping at the ends, or -1 when there is none. */
-function nextEnabledRow<T>(rows: readonly ListRow<T>[], from: number, step: 1 | -1): number {
+/** Next reachable row from `from` in direction `step`, stopping at the ends, or -1 when there is none. */
+function nextReachableRow<T>(rows: readonly ListRow<T>[], from: number, step: 1 | -1): number {
   for (let index = from + step; index >= 0 && index < rows.length; index += step) {
-    if (!rows[index]?.row.disabled) return index;
+    const row = rows[index]?.row;
+    if (row && isReachable(row)) return index;
   }
   return -1;
 }
@@ -419,8 +428,7 @@ function PickerOption(props: PickerOptionProps) {
 
 /** What an option reads after its name: why it is disabled, and how to run its action from the keyboard. */
 function optionDescriptions(id: string, row: PickerRow, reason: string | undefined) {
-  // The shortcut only reaches the highlighted row, and a disabled row is never highlighted.
-  const actionHint = row.action && !row.disabled ? `${row.action.label} (${ROW_ACTION_SHORTCUT.label})` : undefined;
+  const actionHint = row.action ? `${row.action.label} (${ROW_ACTION_SHORTCUT.label})` : undefined;
   const describedBy = [reason && `${id}-reason`, actionHint && `${id}-action`].filter(Boolean).join(" ");
   return {
     describedBy: describedBy || undefined,

@@ -316,7 +316,7 @@ describe("Picker", () => {
     expect(search).toHaveFocus();
   });
 
-  it("runs the active row's action on Ctrl+D without picking it, and keeps the shortcut off disabled rows", async () => {
+  it("runs the active row's action on Ctrl+D without picking it", async () => {
     const onSelect = vi.fn();
     const onAction = vi.fn();
     render(
@@ -325,7 +325,6 @@ describe("Picker", () => {
         renderItem={(branch) => ({
           key: branch.name,
           name: branch.name,
-          disabled: branch.name === "branch-001",
           action: { label: `Star ${branch.name}`, icon: <span>*</span>, run: () => onAction(branch.name) },
         })}
       />,
@@ -334,8 +333,33 @@ describe("Picker", () => {
     await userEvent.keyboard("{Control>}d{/Control}");
     expect(onAction).toHaveBeenCalledWith("branch-000");
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("lets the arrow keys reach a disabled row with an action so Ctrl+D runs it, while Enter still refuses it", async () => {
+    const onSelect = vi.fn();
+    const onAction = vi.fn();
+    render(
+      <PagedPicker
+        onSelect={onSelect}
+        renderItem={(branch) => ({
+          key: branch.name,
+          name: branch.name,
+          disabled: branch.name === "branch-001" || branch.name === "branch-002",
+          action: branch.name === "branch-002" ? undefined : { label: `Unstar ${branch.name}`, icon: <span>*</span>, run: () => onAction(branch.name) },
+        })}
+      />,
+    );
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{ArrowDown}");
     const disabled = screen.getByRole("option", { name: /branch-001/ });
-    expect(disabled).not.toHaveAttribute("aria-keyshortcuts");
+    expect(disabled).toHaveAttribute("data-active");
+    expect(disabled).toHaveAttribute("aria-keyshortcuts", "Control+D");
+    await userEvent.keyboard("{Enter}");
+    expect(onSelect).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(onAction).toHaveBeenCalledWith("branch-001");
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: /branch-003/ })).toHaveAttribute("data-active");
     await userEvent.click(disabled.querySelector("[data-slot=picker-row-action]") as HTMLElement);
     expect(onAction).toHaveBeenLastCalledWith("branch-001");
     expect(onSelect).not.toHaveBeenCalled();

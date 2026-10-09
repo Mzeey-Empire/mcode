@@ -235,7 +235,7 @@ describe("ModelSelector", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("dims a favourite whose access ended but still lets it be unstarred", async () => {
+  it("dims a favourite whose access ended but still lets the keyboard unstar it", async () => {
     const claude = MODEL_PROVIDERS.find((provider) => provider.id === "claude");
     claude?.models.push({ id: "claude-retired-1", label: "Claude Retired 1", providerId: "claude", availableUntil: "2020-01-31" });
     onTestFinished(() => {
@@ -254,8 +254,12 @@ describe("ModelSelector", () => {
     expect(row).toHaveAttribute("aria-disabled", "true");
     await userEvent.click(row);
     expect(onSelect).not.toHaveBeenCalled();
-    await userEvent.click(row.querySelector("[data-slot=picker-row-action]") as HTMLElement);
+    await userEvent.click(screen.getByRole("combobox"));
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(onSelect).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Control>}d{/Control}");
     expect(useModelFavoritesStore.getState().entries).toEqual([]);
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("shows the loading row while a catalog loads and keeps the cached models after a timeout", async () => {
