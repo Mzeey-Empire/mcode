@@ -12,7 +12,7 @@ import {
   type PaletteGroup,
 } from "../CommandPalette.logic";
 import { CommandPaletteResults } from "../CommandPaletteResults";
-import { Kbd } from "@/components/ui/kbd";
+import { PALETTE_LIST_HINTS, PaletteFooterHints, type PaletteHint } from "../PaletteFooterHints";
 
 // Commands that should not appear in the palette listing.
 // `palette.open` and `commandPalette.toggle` are both bound to opening the palette
@@ -23,6 +23,12 @@ const HIDDEN_COMMANDS = new Set([
   "palette.open",
   "commandPalette.toggle",
 ]);
+
+const ROOT_HINTS: readonly PaletteHint[] = [
+  { keys: [">"], label: "Actions" },
+  { keys: ["~/"], label: "Browse" },
+  ...PALETTE_LIST_HINTS,
+];
 
 const QUICK_ACTION_IDS = new Set([
   "thread.new",
@@ -158,29 +164,10 @@ export function RootView() {
     }
   };
 
-  const footer = (
-    <div className="flex items-center justify-between gap-3 border-t border-border/50 px-3 py-1.5 font-mono text-caption uppercase tracking-[0.14em] text-muted/70">
-      <div className="flex items-center gap-3">
-        <span>
-          <Kbd>&gt;</Kbd> <span className="ml-1">Actions only</span>
-        </span>
-        <span>
-          <Kbd>~/</Kbd> <span className="ml-1">Browse</span>
-        </span>
-      </div>
-      <div className="flex items-center gap-3">
-        <span>
-          <Kbd>↑↓</Kbd> Move
-        </span>
-        <span>
-          <Kbd>↵</Kbd> Select
-        </span>
-        <span>
-          <Kbd>Esc</Kbd> Close
-        </span>
-      </div>
-    </div>
+  return (
+    <>
+      <CommandPaletteResults groups={groups} onSelect={handleSelect} />
+      <PaletteFooterHints hints={ROOT_HINTS} />
+    </>
   );
-
-  return <CommandPaletteResults groups={groups} onSelect={handleSelect} footer={footer} />;
 }

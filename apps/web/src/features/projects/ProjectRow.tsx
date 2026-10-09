@@ -77,9 +77,9 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
       }}
       className={cn(
         "group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-sm px-3 py-2 text-body-small transition-colors outline-none focus-visible:ring-1 focus-visible:ring-focus max-[520px]:flex-col max-[520px]:items-stretch max-[520px]:gap-1.5",
-        // group-aria-selected/cmd responds to parent CommandItem keyboard focus in the palette.
-        // has no effect in landing page context (no parent with group/cmd).
-        "hover:bg-selected/60 data-[active=true]:bg-selected group-aria-selected/cmd:bg-selected",
+        // The wrapping CommandItem paints the palette highlight; cmdk selects on hover, so a
+        // hover fill here would cover it.
+        "data-[active=true]:bg-selected",
       )}
       onClick={() => onSelect(workspace.id)}
     >

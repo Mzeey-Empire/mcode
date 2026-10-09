@@ -3,16 +3,24 @@ import { create } from "zustand";
 /**
  * A palette view pushed onto the viewStack.
  *
- * `addProject` is intentionally absent — the unified palette handles folder
- * browsing in-place via prefix detection on the input query (see `getPaletteMode`).
- * To open the palette in browse mode, call `open({ intent: "addProject" })` which
- * seeds the input with `~/` and stays on the root view.
+ * Folder browsing has no view of its own. Any view flips into browse mode when
+ * the query starts with a path prefix (see `isBrowseQuery`). `sources` lists the
+ * places a project can come from, and its Local folder row sets the query to `~/`.
  */
 export type View =
   | { kind: "root" }
+  | { kind: "sources" }
   | { kind: "projects" }
   | { kind: "threadSearch" }
   | { kind: "selectionList"; title: string; items: { id: string; title: string }[]; onPick: (id: string) => void };
+
+type OpenIntent = "projects" | "threadSearch" | "addProject";
+
+const INTENT_VIEW_KIND = {
+  projects: "projects",
+  threadSearch: "threadSearch",
+  addProject: "sources",
+} as const satisfies Record<OpenIntent, View["kind"]>;
 
 interface State {
   /** Whether the palette overlay is visible. */
@@ -32,13 +40,9 @@ interface State {
    * Open the palette, optionally at a specific intent.
    * - `projects`: open at the projects view.
    * - `threadSearch`: open the cross-project thread finder.
-   * - `addProject`: open at the root view with the input pre-seeded to `~/`.
-   *   The unified shell flips into browse mode on render because `~/` matches
-   *   the browse-mode prefix detection.
+   * - `addProject`: open at the sources view with an empty query.
    */
-  open: (opts?: {
-    intent?: "projects" | "threadSearch" | "addProject";
-  }) => void;
+  open: (opts?: { intent?: OpenIntent }) => void;
   /** Push a new view onto the navigation stack and clear the query. */
   push: (view: View) => void;
   /** Pop the active view. Closes the palette if the stack would become empty. */
@@ -66,16 +70,8 @@ export const useCommandPaletteStore = create<State>((set, get) => ({
   pendingBack: null,
   open: (opts) => {
     const intent = opts?.intent;
-    const view: View =
-      intent === "threadSearch"
-        ? { kind: "threadSearch" }
-        : intent === "projects"
-        ? { kind: "projects" }
-        : { kind: "root" };
-    // The addProject intent stays on the root view but seeds the query with `~/`
-    // so the unified shell renders in browse mode immediately.
-    const query = intent === "addProject" ? "~/" : "";
-    set({ isOpen: true, viewStack: [view], query, pendingConfirm: null, pendingBack: null });
+    const view: View = intent ? { kind: INTENT_VIEW_KIND[intent] } : { kind: "root" };
+    set({ isOpen: true, viewStack: [view], query: "", pendingConfirm: null, pendingBack: null });
   },
   push: (view) => set({
     viewStack: [...get().viewStack, view],
