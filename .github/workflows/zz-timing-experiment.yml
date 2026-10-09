@@ -1,0 +1,42 @@
+name: Timing Experiment
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  timing:
+    name: timing (${{ matrix.concurrency }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        concurrency: ["10", "1", "isolated"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Configure node-gyp headers
+        run: |
+          node_dir="$(dirname "$(dirname "$(command -v node)")")"
+          echo "npm_config_nodedir=$node_dir" >> "$GITHUB_ENV"
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: nproc; lscpu | grep -E "Model name|^CPU\(s\)"; free -g
+      - name: Log perf p95
+        run: |
+          perl -0pi -e 's/(    expect\(filterP95\))/    console.log("P95", JSON.stringify({ filterP95, groupingP95, selectionUpdateP95 }));\n$1/' apps/web/src/features/pull-requests/state/__tests__/pull-request-performance.test.ts
+      - name: Isolated perf test x3
+        if: matrix.concurrency == 'isolated'
+        run: |
+          bunx turbo run transit --filter=mcode-frontend
+          for i in 1 2 3; do bun run --cwd apps/web test -- src/features/pull-requests/state/__tests__/pull-request-performance.test.ts --silent=false --reporter=verbose 2>&1 | grep -aE "P95|Tests " || true; done
+          for i in 1 2 3; do bun run --cwd apps/desktop test -- scripts/__tests__/build-server-dev-bundle.test.mjs --reporter=verbose 2>&1 | grep -aE "copies the CLI binary|Tests " || true; done
+      - name: Full suite
+        if: matrix.concurrency != 'isolated'
+        continue-on-error: true
+        run: |
+          start=$(date +%s)
+          bunx turbo run test --force --continue --concurrency=${{ matrix.concurrency }} -- --silent=false 2>&1 | tee /tmp/test.log | grep -aE "P95|×|FAIL |Tests |Tasks:|Failed:" || true
+          echo "elapsed=$(( $(date +%s) - start ))s"
+          grep -aE "publishes a terminal turn with more than 256|admits a new context after evicting|copies the CLI binary and package.json|keeps 1,000-row filtering" /tmp/test.log | sed 's/\x1b\[[0-9;]*m//g' | head -10
