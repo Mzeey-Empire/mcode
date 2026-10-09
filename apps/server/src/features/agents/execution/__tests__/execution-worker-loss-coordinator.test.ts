@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -16,6 +17,12 @@ import type { ExecutionLostAssignment, ExecutionMailboxCommand } from "../execut
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution-worker-handler.js";
 import { ExecutionThreadWorkerPort } from "../execution-worker-port.js";
 import { ExecutionWorkerLossCoordinator } from "../execution-worker-loss-coordinator.js";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
+import { RepositoryGitMutationLock } from "../../../projects/git/repository-git-mutation-lock.js";
+import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
+import { ensureSnapshotStoreId } from "../../../projects/diffs/snapshots/snapshot-store-identity.js";
+import { formatPinRef, SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
 
 const NOW = "2026-09-24T10:00:00.000Z";
 const execution = {
@@ -237,6 +244,39 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
       kind: "checkpoint", phase: "running", nativeCursor: null,
     }, byteLength: 100 })).toEqual({ kind: "stale-execution" });
     expect(coordinator.scheduler.claim({ ...execution, executionId: "new-execution" }, 2).kind).toBe("claimed");
+  });
+
+  it("writes and pins the snapshot of an attempt whose worker was lost", async () => {
+    const repo = NodePath.join(directory, "repo");
+    NodeFS.mkdirSync(repo);
+    const git = (...args: string[]) => NodeChildProcess.execFileSync("git", ["-C", repo, ...args], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    git("init", "-b", "main");
+    NodeFS.writeFileSync(NodePath.join(repo, "a.ts"), "export const a = 1;\n");
+    db.prepare("UPDATE workspaces SET path = ? WHERE id = ?").run(repo, "lost-worker-workspace");
+    const executor = new RealGitExecutor();
+    const lock = new RepositoryGitMutationLock(hostRuntime);
+    const snapshots = new SnapshotService(executor, lock);
+    const storeId = await ensureSnapshotStoreId(owner, NodePath.join(directory, "app.sqlite"), hostRuntime.platform);
+    const pins = new SnapshotRefPins(executor, storeId, db, owner, lock, snapshots, hostRuntime);
+
+    await start(coordinator);
+    const { tree: baseline } = await pins.captureBaseline(repo, execution.threadId, execution.executionId);
+    await new ParentAssistantTextCheckpointService(db, owner).appendChunk([{ ...execution, sequence: 1, text: "Partial answer" }]);
+    NodeFS.writeFileSync(NodePath.join(repo, "a.ts"), "export const a = 2;\n");
+    workers[0]?.crash();
+    expect(await coordinator.waitForRecovery(0)).toEqual({ kind: "recovered", workerIndex: 0 });
+    await pins.settleExecution(execution.threadId, execution.executionId);
+
+    const assistant = new MessageRepo(db, owner).listIncludingInternal(execution.threadId)
+      .find((message) => message.role === "assistant");
+    const row = db.query<{ id: string; ref_before: string; files_changed: string }, [string]>(
+      "SELECT id, ref_before, files_changed FROM turn_snapshots WHERE message_id = ?",
+    ).get(assistant?.id ?? "");
+    expect(row).toMatchObject({ ref_before: baseline, files_changed: JSON.stringify(["a.ts"]) });
+    const refs = git("for-each-ref", "--format=%(refname)", "refs/mcode/").split("\n");
+    expect(refs).toEqual([formatPinRef(storeId, { kind: "snapshot", snapshotId: row?.id ?? "" })]);
   });
 
   it("keeps the slot fenced after a failed writer receipt until explicit retry", async () => {

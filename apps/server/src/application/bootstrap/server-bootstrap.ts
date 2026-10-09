@@ -73,6 +73,7 @@ import {
 import { AgentEventPublicationRegistry } from "../../features/agents/orchestration/agent-event-publication-registry.js";
 import { WorkerOwnedTurnRuntime } from "../../features/agents/execution/worker-owned-turn-runtime.js";
 import { SnapshotRefPins } from "../../features/projects/diffs/snapshots/snapshot-ref-pins.js";
+import { AgentRuntimeCommandPort } from "../../features/agents/orchestration/agent-turn-command-port.js";
 import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
 import { TURN_FINALIZER, TurnFinalizer } from "../../features/agents/turns/turn-finalizer.js";
 import {
@@ -354,6 +355,15 @@ const providerRegistry = container.resolve(ProviderRegistry);
 const providerEventIngress = container.resolve(ProviderEventIngress);
 const workerOwnedTurnRuntime = container.resolve(WorkerOwnedTurnRuntime);
 const snapshotRefPins = container.resolve(SnapshotRefPins);
+const agentRuntimeCommands = container.resolve(AgentRuntimeCommandPort);
+
+/** Sweep this store's snapshot pins, leaving threads the runtime still holds to their finalizer. */
+function sweepSnapshotPins(): Promise<void> {
+  return snapshotRefPins.sweep({
+    isThreadLive: (threadId) => agentRuntimeCommands.runtimeSnapshots()
+      .some((snapshot) => snapshot.threadId === threadId && snapshot.phase !== "idle"),
+  });
+}
 const cursorProvider = container.resolve<CursorProviderBoundary>("CursorProvider");
 const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
@@ -734,6 +744,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   canonicalSink,
   canonicalProgress: workerOwnedTurnRuntime.progress,
   turnSnapshotRepo,
+  sweepSnapshotPins,
   turnDiffs: container.resolve(TurnDiffService),
   snapshotService,
   settingsService,
@@ -910,6 +921,8 @@ async function bootstrapServer(): Promise<void> {
     });
     await recoverTurnsAtStartup();
     recordStartupCheckpoint("turn recovery completed");
+    // Interrupted attempts get their snapshot rows here; git work must not delay startup.
+    snapshotRefPins.runInBackground(sweepSnapshotPins);
     await threadControlService.recoverApprovals();
     recordStartupCheckpoint("approval recovery completed");
     await externalThreadControlMcpRuntime.reconcileOnStartup();
