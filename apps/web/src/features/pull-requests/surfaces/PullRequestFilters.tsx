@@ -142,14 +142,12 @@ export function PullRequestFilters({
             className="w-52"
           >
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <CircleCheck aria-hidden />
-                Status
-              </DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger label="Status" icon={<CircleCheck />} />
               <DropdownMenuSubContent className="w-44">
                 {stateOptions.map((option) => (
                   <DropdownMenuCheckboxItem
                     key={option.value}
+                    label={option.label}
                     checked={stateFilter === option.value}
                     closeOnClick
                     onCheckedChange={() =>
@@ -159,35 +157,28 @@ export function PullRequestFilters({
                           : [option.value],
                       )
                     }
-                  >
-                    {option.label}
-                  </DropdownMenuCheckboxItem>
+                  />
                 ))}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <FolderGit2 aria-hidden />
-                Repository
-              </DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger label="Repository" icon={<FolderGit2 />} />
               <DropdownMenuSubContent className="w-72">
                 <DropdownMenuCheckboxItem
+                  label="All repositories"
                   checked={repositoryFilter === null}
                   closeOnClick
                   onCheckedChange={() => onRepositoryChange(null)}
-                >
-                  All repositories
-                </DropdownMenuCheckboxItem>
+                />
                 {repositories.map((repository) => (
                   <DropdownMenuCheckboxItem
                     key={repository}
+                    label={repository}
                     checked={repositoryFilter === repository}
                     closeOnClick
                     onCheckedChange={() => onRepositoryChange(repository)}
-                  >
-                    <span className="text-fade">{repository}</span>
-                  </DropdownMenuCheckboxItem>
+                  />
                 ))}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
@@ -195,10 +186,7 @@ export function PullRequestFilters({
             {activeCount > 0 && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={onClearAll}>
-                  <X aria-hidden />
-                  Clear filters
-                </DropdownMenuItem>
+                <DropdownMenuItem label="Clear filters" icon={<X />} onClick={onClearAll} />
               </>
             )}
           </DropdownMenuContent>

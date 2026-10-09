@@ -139,13 +139,21 @@ export function useProjectSetupAttempt(threadId: string): {
 
 /** Renders the manual Setup command within the Project Actions menu. */
 export function ProjectSetupMenuItem({ attempt, starting, onStart }: ProjectSetupMenuItemProps) {
-  const disabled = attempt?.status === "running" || attempt?.status === "awaiting-approval" || attempt?.cleanupPending === true;
   return (
-    <DropdownMenuItem disabled={disabled || starting} onClick={() => { void onStart(); }}>
-      {starting ? <Spinner size={12} aria-hidden /> : null}
-      Run Setup
-    </DropdownMenuItem>
+    <DropdownMenuItem
+      label="Run Setup"
+      icon={starting ? <Spinner size={16} aria-hidden /> : undefined}
+      disabledReason={setupUnavailableReason(attempt, starting)}
+      onClick={() => { void onStart(); }}
+    />
   );
+}
+
+function setupUnavailableReason(attempt: WorkspaceEnvironmentSetupAttempt | null, starting: boolean): string | null {
+  if (starting || attempt?.status === "running") return "Setup is already running";
+  if (attempt?.status === "awaiting-approval") return "Setup is waiting for approval";
+  if (attempt?.cleanupPending === true) return "The last Setup is still cleaning up";
+  return null;
 }
 
 /** Renders the compact expandable terminal-style card for a manual Setup attempt. */

@@ -57,85 +57,45 @@ function MenuItems({
   if (name === "file") {
     return (
       <>
-        <DropdownMenuItem onClick={() => executeCommand("workspace.new")}>
-          New project
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => executeCommand("thread.new")}>
-          New thread
-        </DropdownMenuItem>
+        <DropdownMenuItem label="New project" onClick={() => executeCommand("workspace.new")} />
+        <DropdownMenuItem label="New thread" onClick={() => executeCommand("thread.new")} />
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => nativeAction("closeWindow")}>
-          Close window
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => nativeAction("quit")}>
-          Quit
-        </DropdownMenuItem>
+        <DropdownMenuItem label="Close window" onClick={() => nativeAction("closeWindow")} />
+        <DropdownMenuItem label="Quit" onClick={() => nativeAction("quit")} />
       </>
     );
   }
   if (name === "edit") {
     return (
       <>
-        <DropdownMenuItem onClick={() => nativeAction("undo")}>
-          Undo
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => nativeAction("redo")}>
-          Redo
-        </DropdownMenuItem>
+        <DropdownMenuItem label="Undo" onClick={() => nativeAction("undo")} />
+        <DropdownMenuItem label="Redo" onClick={() => nativeAction("redo")} />
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => nativeAction("cut")}>
-          Cut
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => nativeAction("copy")}>
-          Copy
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => nativeAction("paste")}>
-          Paste
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => nativeAction("selectAll")}>
-          Select all
-        </DropdownMenuItem>
+        <DropdownMenuItem label="Cut" onClick={() => nativeAction("cut")} />
+        <DropdownMenuItem label="Copy" onClick={() => nativeAction("copy")} />
+        <DropdownMenuItem label="Paste" onClick={() => nativeAction("paste")} />
+        <DropdownMenuItem label="Select all" onClick={() => nativeAction("selectAll")} />
       </>
     );
   }
   if (name === "view") {
     return (
       <>
-        <DropdownMenuItem disabled={!canGoBack} onClick={onBack}>
-          Back
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled={!canGoForward} onClick={onForward}>
-          Forward
-        </DropdownMenuItem>
+        <DropdownMenuItem label="Back" disabledReason={canGoBack ? null : "Nothing to go back to"} onClick={onBack} />
+        <DropdownMenuItem label="Forward" disabledReason={canGoForward ? null : "Nothing to go forward to"} onClick={onForward} />
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => executeCommand("sidebar.toggle")}>
-          Toggle sidebar
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => executeCommand("rightPanel.toggle")}>
-          Toggle right panel
-        </DropdownMenuItem>
+        <DropdownMenuItem label="Toggle sidebar" onClick={() => executeCommand("sidebar.toggle")} />
+        <DropdownMenuItem label="Toggle right panel" onClick={() => executeCommand("rightPanel.toggle")} />
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => nativeAction("zoomIn")}>
-          Zoom in
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => nativeAction("zoomOut")}>
-          Zoom out
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => nativeAction("zoomReset")}>
-          Actual size
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => nativeAction("toggleFullScreen")}>
-          Toggle full screen
-        </DropdownMenuItem>
+        <DropdownMenuItem label="Zoom in" onClick={() => nativeAction("zoomIn")} />
+        <DropdownMenuItem label="Zoom out" onClick={() => nativeAction("zoomOut")} />
+        <DropdownMenuItem label="Actual size" onClick={() => nativeAction("zoomReset")} />
+        <DropdownMenuItem label="Toggle full screen" onClick={() => nativeAction("toggleFullScreen")} />
         {window.desktopBridge?.window.isDevelopment ? (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => nativeAction("reload")}>
-              Reload
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => nativeAction("toggleDevTools")}>
-              Developer tools
-            </DropdownMenuItem>
+            <DropdownMenuItem label="Reload" onClick={() => nativeAction("reload")} />
+            <DropdownMenuItem label="Developer tools" onClick={() => nativeAction("toggleDevTools")} />
           </>
         ) : null}
       </>
@@ -143,12 +103,8 @@ function MenuItems({
   }
   return (
     <>
-      <DropdownMenuItem onClick={() => openSettings("keyboard")}>
-        Keyboard shortcuts
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={() => openSettings("about")}>
-        About Mcode
-      </DropdownMenuItem>
+      <DropdownMenuItem label="Keyboard shortcuts" onClick={() => openSettings("keyboard")} />
+      <DropdownMenuItem label="About Mcode" onClick={() => openSettings("about")} />
     </>
   );
 }
@@ -276,7 +232,7 @@ export function DesktopTitleBar({
               <DropdownMenuContent sideOffset={2} className="min-w-48">
                 {MENU_LABELS.map(({ name, label }) => (
                   <DropdownMenuSub key={name}>
-                    <DropdownMenuSubTrigger>{label}</DropdownMenuSubTrigger>
+                    <DropdownMenuSubTrigger label={label} />
                     <DropdownMenuSubContent className="min-w-48">
                       <MenuItems
                         name={name}

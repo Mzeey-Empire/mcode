@@ -887,10 +887,10 @@ describe("visible Browser conformance observer", () => {
     expect(screen.getByRole("button", { name: "Rotate viewport to portrait" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Viewport scale and presentation" }));
-    await user.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Actual size" }));
+    await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: "Actual size" }));
     expect(coordinator.snapshot().presentation).toBe("actual");
     await user.click(screen.getByRole("button", { name: "Viewport scale and presentation" }));
-    await user.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Fit to panel" }));
+    await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: "Fit to panel" }));
     expect(coordinator.snapshot().presentation).toBe("fit");
 
     const normalized = normalizeBrowserConformanceRun({

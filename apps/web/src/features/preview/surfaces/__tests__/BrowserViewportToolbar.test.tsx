@@ -89,7 +89,7 @@ describe("BrowserViewportToolbar", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Viewport preset" }));
-    const responsiveItem = within(await screen.findByRole("menu")).getByRole("menuitem", {
+    const responsiveItem = within(await screen.findByRole("menu")).getByRole("menuitemradio", {
       name: "Responsive",
     });
     expect(responsiveItem).toHaveClass("w-full");
@@ -174,10 +174,10 @@ describe("BrowserViewportToolbar", () => {
     ));
 
     await user.click(screen.getByRole("button", { name: "Viewport scale and presentation" }));
-    await user.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Actual size" }));
+    await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: "Actual size" }));
     expect(coordinator.snapshot().presentation).toBe("actual");
     await user.click(screen.getByRole("button", { name: "Viewport scale and presentation" }));
-    await user.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Fit to panel" }));
+    await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: "Fit to panel" }));
     expect(coordinator.snapshot().presentation).toBe("fit");
     await user.click(screen.getByRole("button", { name: "Close viewport toolbar" }));
     expect(onClose).toHaveBeenCalledOnce();
@@ -200,9 +200,9 @@ describe("BrowserViewportToolbar", () => {
     await user.click(screen.getByRole("button", { name: "Viewport scale and presentation" }));
     const zoomMenu = await screen.findByRole("menu");
     for (const zoom of ["50%", "75%", "100%", "125%", "150%", "200%"]) {
-      expect(within(zoomMenu).getByRole("menuitem", { name: zoom })).toBeInTheDocument();
+      expect(within(zoomMenu).getByRole("menuitemradio", { name: zoom })).toBeInTheDocument();
     }
-    await user.click(within(zoomMenu).getByRole("menuitem", { name: "150%" }));
+    await user.click(within(zoomMenu).getByRole("menuitemradio", { name: "150%" }));
     expect(coordinator.snapshot().presentation).toBe("150%");
   });
 

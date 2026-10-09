@@ -174,13 +174,10 @@ function ProjectActionMenuDropdown({
         }
       />
       <DropdownMenuContent align="end" sideOffset={4} className="min-w-52">
-        <DropdownMenuItem onClick={onEdit}>
-          <Pencil size={14} aria-hidden />
-          Edit project actions
-        </DropdownMenuItem>
+        <DropdownMenuItem label="Edit project actions" icon={<Pencil />} onClick={onEdit} />
         {hasActionGroup || hasSetup ? <DropdownMenuSeparator /> : null}
-        {loadError ? <p role="status" className="px-2 py-1.5 text-xs text-destructive">{loadError}</p> : null}
-        {startError ? <p role="status" className="px-2 py-1.5 text-xs text-destructive">{startError}</p> : null}
+        {loadError ? <p role="status" className="px-3 py-2 text-caption text-error">{loadError}</p> : null}
+        {startError ? <p role="status" className="px-3 py-2 text-caption text-error">{startError}</p> : null}
         {rows.map((row) => (
           <ProjectActionMenuItem
             key={row.actionId}
@@ -218,16 +215,15 @@ function ProjectActionMenuItem({
   return (
     <DropdownMenuItem
       data-testid={`project-action-${row.actionId}`}
+      label={row.actionName}
+      trailing={<ActionStatus status={run?.status ?? null} finishedAt={run?.finishedAt ?? null} />}
       closeOnClick={false}
       onPointerDown={(event) => recordProjectActionPointerDown(event, row, focusAction, pointerActivation, keyboardActivation)}
       onPointerUp={(event) => recordProjectActionPointerUp(event, row, focusAction, pointerActivation, keyboardActivation)}
       onPointerCancel={(event) => cancelProjectActionPointer(event, pointerActivation)}
       onKeyDown={(event) => recordProjectActionKeyboard(event, row, focusAction, pointerActivation, keyboardActivation)}
       onClick={() => activateProjectAction(row, run, focusAction, onStart, onFocus, pointerActivation, keyboardActivation)}
-    >
-      <span className="min-w-0 flex-1 text-fade">{row.actionName}</span>
-      <ActionStatus status={run?.status ?? null} finishedAt={run?.finishedAt ?? null} />
-    </DropdownMenuItem>
+    />
   );
 }
 

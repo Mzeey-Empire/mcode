@@ -100,28 +100,16 @@ export function FileEditorPicker({
             {entries.map((entry) => (
               <DropdownMenuItem
                 key={entry.id}
+                label={entry.label}
+                icon={entry.icon}
+                trailing={line !== undefined ? <span className="font-mono text-caption text-muted">:{line}</span> : undefined}
                 onClick={() => handleOpenEditor(entry.id)}
-                className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs"
-              >
-                {entry.icon}
-                <span>{entry.label}</span>
-                {line !== undefined && (
-                  <span className="ml-auto font-mono text-caption text-muted">
-                    :{line}
-                  </span>
-                )}
-              </DropdownMenuItem>
+              />
             ))}
             <DropdownMenuSeparator />
           </>
         )}
-        <DropdownMenuItem
-          onClick={handleReveal}
-          className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs"
-        >
-          <FolderOpen size={14} />
-          <span>Reveal in file manager</span>
-        </DropdownMenuItem>
+        <DropdownMenuItem label="Reveal in file manager" icon={<FolderOpen />} onClick={handleReveal} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

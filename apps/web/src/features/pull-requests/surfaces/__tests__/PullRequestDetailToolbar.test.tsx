@@ -121,11 +121,11 @@ describe("PullRequestDetailToolbar", () => {
     });
     actions.focus();
     await user.keyboard("{Enter}");
-    expect(
-      (await screen.findByRole("menuitem", { name: "Refresh" })).querySelector(
-        "span",
-      ),
-    ).toHaveStyle({ "--spinner-size": "12px" });
+    const refresh = await screen.findByRole("menuitem", { name: "Refresh" });
+    expect(refresh.querySelector('[style*="--spinner-size"]')).toHaveStyle({
+      "--spinner-size": "16px",
+    });
+    expect(refresh).toHaveAccessibleDescription("A refresh is already running");
   });
 
   it.each([

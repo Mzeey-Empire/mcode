@@ -287,10 +287,7 @@ function ThreadOverviewPrActiveRow({
           className: "flex-1 justify-start px-2",
         }}
         menu={
-          <DropdownMenuItem data-testid="workspace-menu-new-pr" onClick={onCreatePr}>
-            <Plus aria-hidden />
-            Create new PR
-          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="workspace-menu-new-pr" label="Create new PR" icon={<Plus />} onClick={onCreatePr} />
         }
       >
         <GitPullRequest aria-hidden className="size-3.5 text-muted" />

@@ -73,12 +73,12 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
   ),
   DropdownMenuContent: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuItem: ({
-    children,
+    label,
     onClick,
   }: {
-    children?: React.ReactNode;
+    label: string;
     onClick?: React.MouseEventHandler<HTMLButtonElement>;
-  }) => <button onClick={onClick}>{children}</button>,
+  }) => <button onClick={onClick}>{label}</button>,
 }));
 
 vi.mock("../openInAppIcons", () => ({

@@ -30,7 +30,7 @@ describe("overlay pointer event boundaries", () => {
       <DropdownMenu open>
         <DropdownMenuTrigger render={<button type="button">Open</button>} />
         <DropdownMenuContent data-testid="dropdown-content">
-          <DropdownMenuItem>Item</DropdownMenuItem>
+          <DropdownMenuItem label="Item" />
         </DropdownMenuContent>
       </DropdownMenu>,
     );
@@ -47,7 +47,7 @@ describe("overlay pointer event boundaries", () => {
         <DropdownMenu open>
           <DropdownMenuTrigger render={<button type="button">Open</button>} />
           <DropdownMenuContent data-testid="dropdown-content">
-            <DropdownMenuItem>Item</DropdownMenuItem>
+            <DropdownMenuItem label="Item" />
           </DropdownMenuContent>
         </DropdownMenu>
       </>,
@@ -63,11 +63,9 @@ describe("overlay pointer event boundaries", () => {
         <DropdownMenuTrigger render={<button type="button">Open</button>} />
         <DropdownMenuContent>
           <DropdownMenuSub open>
-            <DropdownMenuSubTrigger data-testid="submenu-trigger">
-              Status
-            </DropdownMenuSubTrigger>
+            <DropdownMenuSubTrigger data-testid="submenu-trigger" label="Status" />
             <DropdownMenuSubContent data-testid="submenu-content">
-              <DropdownMenuItem>Open</DropdownMenuItem>
+              <DropdownMenuItem label="Open" />
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         </DropdownMenuContent>
@@ -78,7 +76,7 @@ describe("overlay pointer event boundaries", () => {
     const content = await screen.findByTestId("submenu-content");
 
     expect(trigger).toHaveClass("w-full");
-    expect(trigger.querySelector("svg")).toHaveClass("ml-auto");
+    expect(trigger.lastElementChild?.querySelector("svg")).toHaveClass("lucide-chevron-right");
     expect(content).toHaveClass("max-h-(--available-height)");
     expect(content.parentElement).toHaveAttribute("data-side", "inline-end");
     expect(content.parentElement).toHaveAttribute("data-align", "start");

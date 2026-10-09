@@ -240,12 +240,11 @@ describe("PullRequestLifecycleActions", () => {
     await user.click(
       screen.getByRole("button", { name: "Pull request actions" }),
     );
-    expect(
-      await screen.findByRole("menuitem", { name: "Merge" }),
-    ).toHaveAttribute("aria-disabled", "true");
-    expect(
-      screen.getByText("Mark this pull request ready before merging it."),
-    ).toBeVisible();
+    const merge = await screen.findByRole("menuitem", { name: "Merge" });
+    expect(merge).toHaveAttribute("aria-disabled", "true");
+    expect(merge).toHaveAccessibleDescription(
+      "Mark this pull request ready before merging it.",
+    );
     expect(
       screen.queryByRole("dialog", { name: "Merge pull request" }),
     ).toBeNull();
@@ -266,14 +265,11 @@ describe("PullRequestLifecycleActions", () => {
     await user.click(
       screen.getByRole("button", { name: "Pull request actions" }),
     );
-    expect(
-      await screen.findByRole("menuitem", { name: "Merge" }),
-    ).toHaveAttribute("aria-disabled", "true");
-    expect(
-      screen.getByText(
-        "Resolve merge conflicts before choosing a merge method.",
-      ),
-    ).toBeVisible();
+    const merge = await screen.findByRole("menuitem", { name: "Merge" });
+    expect(merge).toHaveAttribute("aria-disabled", "true");
+    expect(merge).toHaveAccessibleDescription(
+      "Resolve merge conflicts before choosing a merge method.",
+    );
   });
 
   it("offers readiness through the keyboard-operable actions menu", async () => {

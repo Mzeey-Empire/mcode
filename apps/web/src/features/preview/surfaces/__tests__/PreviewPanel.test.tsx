@@ -535,7 +535,7 @@ describe("PreviewPanel: unavailable state", () => {
     const toolbar = await screen.findByTestId("browser-viewport-toolbar");
     expect(toolbar).toBeInTheDocument();
     await user.click(within(toolbar).getByRole("button", { name: "Viewport preset" }));
-    await user.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Responsive" }));
+    await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: "Responsive" }));
     await waitFor(() => {
       expect(
         useBrowserAutomationStore.getState().viewportStateByTarget.get(
@@ -573,7 +573,7 @@ describe("PreviewPanel: unavailable state", () => {
     ));
     let toolbar = await screen.findByTestId("browser-viewport-toolbar");
     await user.click(within(toolbar).getByRole("button", { name: "Viewport scale and presentation" }));
-    await user.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "150%" }));
+    await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: "150%" }));
     await waitFor(() => {
       expect(
         useBrowserAutomationStore.getState().viewportStateByTarget.get(

@@ -6,7 +6,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -126,17 +125,18 @@ function PendingPermissionRequest({
               <ChevronDown size={11} className="opacity-80" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" sideOffset={4} className="min-w-[180px]">
-              <DropdownMenuItem onClick={() => onAllowMode("allow")} className="gap-2">
-                <Zap size={12} className="text-primary shrink-0" />
-                <div className="flex flex-col"><span className="text-xs font-medium">Allow once</span><span className="text-xs text-muted">Prompt again next time</span></div>
-                {allowMode === "allow" && <Check size={11} className="ml-auto text-primary" />}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => onAllowMode("allow-session")} className="gap-2">
-                <Clock size={12} className="text-info shrink-0" />
-                <div className="flex flex-col"><span className="text-xs font-medium">Allow in session</span><span className="text-xs text-muted">Skip prompts this session</span></div>
-                {allowMode === "allow-session" && <Check size={11} className="ml-auto text-primary" />}
-              </DropdownMenuItem>
+              <DropdownMenuItem
+                label="Allow once"
+                icon={<Zap />}
+                checked={allowMode === "allow"}
+                onClick={() => onAllowMode("allow")}
+              />
+              <DropdownMenuItem
+                label="Allow in session"
+                icon={<Clock />}
+                checked={allowMode === "allow-session"}
+                onClick={() => onAllowMode("allow-session")}
+              />
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

@@ -16,7 +16,6 @@ import {
   X,
 } from "lucide-react";
 import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -25,7 +24,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { Kbd } from "@/components/ui/kbd";
 import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import {
@@ -182,6 +180,14 @@ function railDomId(id: RightPanelTab): string {
 }
 
 /** The mcode keycap for a tab type, or null when it has no binding. */
+const TERMINAL_CAP_REASON = "8 terminals are open. Close one to open another.";
+
+function newTabUnavailableReason(type: PanelTabType, terminalCapReached: boolean): string | null {
+  if (type.comingSoon) return "Coming soon";
+  if (terminalCapReached && type.id === "terminal") return TERMINAL_CAP_REASON;
+  return null;
+}
+
 function tabKeycap(type: PanelTabType): string | null {
   if (!type.commandId) return null;
   const binding = getKeybindingForCommand(type.commandId);
@@ -573,7 +579,7 @@ function RailAddControl({
   if (creatable.length === 1) {
     const only = creatable[0];
     return (
-      <RailTooltip content={terminalCapReached && only.id === "terminal" ? "8 terminals are open. Close one to open another." : `New ${only.label}`} disabled={expanded && !terminalCapReached}>
+      <RailTooltip content={terminalCapReached && only.id === "terminal" ? TERMINAL_CAP_REASON : `New ${only.label}`} disabled={expanded && !terminalCapReached}>
         <span className="block">
           <Button
             variant="ghost"
@@ -626,31 +632,16 @@ function RailAddControl({
       </RailTooltip>
       <DropdownMenuContent align="start" sideOffset={6} className="min-w-[184px]">
         {shown.map((type) => {
-          const keycap = tabKeycap(type);
+          const unavailableReason = newTabUnavailableReason(type, terminalCapReached ?? false);
           return (
-            <RailTooltip key={type.id} content="8 terminals are open. Close one to open another." disabled={!terminalCapReached || type.id !== "terminal"}>
-              <span>
-                <DropdownMenuItem
-                  disabled={type.comingSoon || (terminalCapReached && type.id === "terminal")}
-                  onClick={type.comingSoon || (terminalCapReached && type.id === "terminal")
-                    ? undefined
-                    : () => onCreate(type.id as RightPanelTab)}
-                  className="flex items-center justify-between gap-3 px-2.5 py-1.5 text-xs"
-                >
-                  <span className="flex items-center gap-2">
-                    <type.icon size={14} className="text-muted" />
-                    {type.label}
-                  </span>
-                  {type.comingSoon ? (
-                    <Badge variant="secondary" size="compact" className="uppercase tracking-wide">
-                      Soon
-                    </Badge>
-                  ) : (
-                    keycap && <Kbd>{keycap}</Kbd>
-                  )}
-                </DropdownMenuItem>
-              </span>
-            </RailTooltip>
+            <DropdownMenuItem
+              key={type.id}
+              label={type.label}
+              icon={<type.icon />}
+              shortcut={tabKeycap(type) ?? undefined}
+              disabledReason={unavailableReason}
+              onClick={unavailableReason ? undefined : () => onCreate(type.id as RightPanelTab)}
+            />
           );
         })}
       </DropdownMenuContent>
