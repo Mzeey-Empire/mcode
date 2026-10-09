@@ -111,6 +111,20 @@ describe("Picker", () => {
     expect(onLoadMore).toHaveBeenCalledTimes(2);
   });
 
+  it("asks for the next page again after the query leaves and comes back", () => {
+    const onLoadMore = vi.fn();
+    render(<PagedPicker onLoadMore={onLoadMore} />);
+    scrollListTo(0);
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+
+    // The owner drops the pending page when the query changes, then serves the first page again on return.
+    const search = screen.getByRole("combobox");
+    fireEvent.change(search, { target: { value: "branch-00" } });
+    fireEvent.change(search, { target: { value: "" } });
+    scrollListTo(0);
+    expect(onLoadMore).toHaveBeenCalledTimes(2);
+  });
+
   it("stops asking once every row is loaded", () => {
     const onLoadMore = vi.fn();
     render(<PagedPicker onLoadMore={onLoadMore} pages={12} />);

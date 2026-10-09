@@ -230,18 +230,22 @@ function optionId(listId: string, index: number): string {
  */
 function useLoadMoreOnce<T>({ onLoadMore, items, total, status }: PickerProps<T>, listKey: string): () => void {
   const requestedFor = useRef<string | null>(null);
+  // Each visit to a list gets its own number: the owner may have dropped a pending page when the query or tab
+  // moved away, so coming back must be able to ask again. Counted during render so it lands before any effect.
+  const [visit, setVisit] = useState({ listKey, count: 0 });
+  if (visit.listKey !== listKey) setVisit({ listKey, count: visit.count + 1 });
   // A failed page must be askable again after Retry, even though the item count has not moved.
   const failed = typeof status === "object";
   useEffect(() => {
     if (failed) requestedFor.current = null;
   }, [failed]);
   return useCallback(() => {
-    const page = `${listKey}\u0000${items.length}`;
+    const page = `${visit.count}\u0000${items.length}`;
     const exhausted = total !== null && items.length >= total;
     if (!onLoadMore || status !== "ready" || exhausted || requestedFor.current === page) return;
     requestedFor.current = page;
     onLoadMore();
-  }, [onLoadMore, status, total, items.length, listKey]);
+  }, [onLoadMore, status, total, items.length, visit.count]);
 }
 
 interface PickerListProps<T> {
