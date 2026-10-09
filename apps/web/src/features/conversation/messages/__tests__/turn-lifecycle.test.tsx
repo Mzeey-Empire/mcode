@@ -7,7 +7,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { shouldQueueActiveThreadSubmit } from "../../composer/submission/composer-submit-policy";
 import { useMessageListData } from "../useMessageListData";
 import { useMessageListItems } from "../useMessageListItems";
-import { buildStableItems } from "../virtual-items";
+import { buildStableItems, type PersistedNarrativeRecordsByMessage } from "../virtual-items";
 
 const THREAD = "lifecycle-thread";
 const EXECUTION = "current-execution";
@@ -30,21 +30,34 @@ function canonicalTurn(status: AgentTurn["status"], trigger: AgentTurn["trigger"
   };
 }
 
+const NO_FOLDS = new Set<string>();
+
+/** Gives every saved answer one tool so each settled turn earns a work fold. */
+function oneToolPerAnswer(messages: readonly Message[]): PersistedNarrativeRecordsByMessage {
+  return Object.fromEntries(messages.map((message) => [message.id, {
+    hooks: [], thoughts: [],
+    tools: [{
+      id: `${message.id}-tool`, message_id: message.id, parent_tool_call_id: null, tool_name: "Read",
+      input_summary: "", output_summary: "", status: "completed", started_at: NOW, completed_at: NOW, sort_order: 0,
+    }],
+  }]));
+}
+
 function useLifecycle() {
   const data = useMessageListData(THREAD);
-  const { items } = useMessageListItems({ ...data, expandedGroups: new Set() });
+  const { items } = useMessageListItems({ ...data, expandedFolds: NO_FOLDS, expandedGroups: NO_FOLDS });
   const running = useThreadStore((state) => state.runningThreadIds.has(THREAD));
   const rows = buildStableItems(data.messages, undefined, undefined, {
     threadId: THREAD, messageId: data.currentTurnMessageId, executionId: data.turnExecutionId ?? undefined,
-  }, undefined, data.turnSummariesByMessageId, data.agentDisplayState);
-  return { data, items, running, footers: rows.filter((row) => row.type === "persisted-turn-footer") };
+  }, oneToolPerAnswer(data.messages), data.turnSummariesByMessageId, data.agentDisplayState);
+  return { data, items, running, folds: rows.filter((row) => row.type === "work-fold") };
 }
 
 function timelineOrder(items: ReturnType<typeof useMessageListItems>["items"]) {
   return items.map((item) => {
     if (item.type === "message") return `message:${item.message.id}`;
     if (item.type === "narrative-row") return `narrative:${item.item.type}`;
-    if (item.type === "persisted-turn-footer") return `footer:${item.messageId}`;
+    if (item.type === "work-fold" || item.type === "turn-meta-line") return `${item.type}:${item.messageId}`;
     return item.type;
   });
 }
@@ -62,7 +75,7 @@ describe("one lifecycle for the current turn", () => {
     expect(result.current.running).toBe(true);
     expect(result.current.data.isAgentRunning).toBe(true);
     expect(shouldQueueActiveThreadSubmit(THREAD, false, null, false, "follow-up")).toBe(true);
-    expect(result.current.footers.map((row) => [row.messageId, row.summary?.outcome]))
+    expect(result.current.folds.map((row) => [row.messageId, row.outcome]))
       .toEqual([["previous-answer", "interrupted"]]);
   });
 
@@ -75,7 +88,7 @@ describe("one lifecycle for the current turn", () => {
     const { result } = renderHook(useLifecycle);
     expect(result.current.data.agentDisplayState).toEqual({ phase: "streaming" });
     expect(result.current.running).toBe(true);
-    expect(result.current.footers).toEqual([]);
+    expect(result.current.folds).toEqual([]);
   });
 
   it("replaces a saved interrupted outcome with the current terminal decision", () => {
@@ -89,7 +102,7 @@ describe("one lifecycle for the current turn", () => {
     act(() => useThreadStore.getState().applyThreadRuntimeSnapshot({ threadId: THREAD, turnExecutionId: EXECUTION, phase: "cancelled" }));
     expect(result.current.running).toBe(false);
     expect(result.current.data.agentDisplayState).toEqual({ phase: "cancelled" });
-    expect(result.current.footers.map((row) => row.summary?.outcome)).toEqual(["cancelled"]);
+    expect(result.current.folds.map((row) => row.outcome)).toEqual(["cancelled"]);
     expect(shouldQueueActiveThreadSubmit(THREAD, true, null, false, "follow-up")).toBe(false);
   });
 
@@ -134,7 +147,7 @@ describe("one lifecycle for the current turn", () => {
     const { result } = renderHook(useLifecycle);
     expect(result.current.data.currentTurnMessageId).toBe("");
     expect(result.current.data.agentDisplayState).toEqual({ phase: "streaming" });
-    expect(result.current.footers.map((row) => [row.messageId, row.summary?.outcome]))
+    expect(result.current.folds.map((row) => [row.messageId, row.outcome]))
       .toEqual([["previous-answer", "interrupted"]]);
   });
 
@@ -219,11 +232,33 @@ describe("one lifecycle for the current turn", () => {
     expect(result.current.data.agentDisplayState).toEqual({ phase: "completed" });
     expect(result.current.data.messages.map((message) => message.content)).toEqual(["Saved answer"]);
     expect(timelineOrder(result.current.items)).toEqual([
-      "narrative:tool-group",
+      "work-fold:child-answer",
       "message:child-answer",
       "narrative-indicator",
-      "footer:child-answer",
+      "turn-meta-line:child-answer",
     ]);
     expect(shouldQueueActiveThreadSubmit(THREAD, true, null, false, "follow-up")).toBe(false);
+  });
+});
+
+describe("work fold presence", () => {
+  const settled = { ...answer("settled-answer", "settled-execution"), outcome: "completed" as const };
+
+  function foldKeys(records: PersistedNarrativeRecordsByMessage) {
+    return buildStableItems([settled], undefined, undefined, undefined, records)
+      .filter((row) => row.type === "work-fold").map((row) => row.key);
+  }
+
+  function thought(text: string, isFinalResponse: number) {
+    return { id: `thought-${isFinalResponse}`, message_id: settled.id, text, started_at: NOW, ended_at: NOW, sort_order: 0, is_final_response: isFinalResponse };
+  }
+
+  it("omits the fold when the only thought is the answer itself", () => {
+    expect(foldKeys({ [settled.id]: { tools: [], hooks: [], thoughts: [thought("Saved answer", 1)] } })).toEqual([]);
+  });
+
+  it("keeps the fold when a thought precedes the answer", () => {
+    expect(foldKeys({ [settled.id]: { tools: [], hooks: [], thoughts: [thought("Checking the README first.", 0)] } }))
+      .toEqual(["work-fold:settled-answer"]);
   });
 });

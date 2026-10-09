@@ -88,8 +88,8 @@ export interface NarrativeCounts {
   subagents: number;
 }
 
-/** Completed-turn counts and duration rendered by the shared timeline footer. */
-export interface TurnFooterSummary {
+/** Settled-turn counts, wall time, and outcome shown by the work fold and meta line. */
+export interface TurnSummary {
   /** Structured activity counts for the completed turn. */
   counts: NarrativeCounts;
   /** Elapsed structured-activity time, or null when no complete boundary exists. */
