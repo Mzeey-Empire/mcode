@@ -199,9 +199,20 @@ describe("GitRepositoryService.listRefsAt", () => {
   it("returns git_failed and the first stderr line for a corrupt ref", async () => {
     const ref = NodePath.join(root, ".git", "refs", "heads", "broken");
     NodeFS.writeFileSync(ref, `${"f".repeat(40)}\n`);
+    const executor = new RealGitExecutor();
+    let stderr = "";
+    // Some Git releases abort with a glibc message instead of printing "fatal: missing object".
+    const recording = new GitRepositoryService({ findById: () => undefined }, {
+      exec: (args, opts) => executor.exec(args, opts).catch((error: unknown) => {
+        if (args.includes("for-each-ref") && error instanceof Error && "stderr" in error) stderr = String(error.stderr);
+        throw error;
+      }),
+    });
     try {
-      expect(await service.listRefsAt(root, { purpose: "new-thread" })).toMatchObject({
-        ok: false, error: { code: "git_failed", detail: "fatal: missing object ffffffffffffffffffffffffffffffffffffffff for refs/heads/broken" },
+      const result = await recording.listRefsAt(root, { purpose: "new-thread" });
+      expect(stderr).not.toBe("");
+      expect(result).toEqual({
+        ok: false, error: { code: "git_failed", message: "Could not list Git targets.", detail: stderr.split(/\r?\n/)[0] },
       });
     } finally { NodeFS.unlinkSync(ref); }
   });
