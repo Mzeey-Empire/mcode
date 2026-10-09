@@ -791,7 +791,7 @@ describe("visible Browser conformance observer", () => {
 
       expect(screen.queryByTestId("thread-overview-browser")).not.toBeInTheDocument();
       expect(await screen.findByRole("button", { name: "Thread overview" })).toHaveAttribute(
-        "aria-expanded",
+        "aria-pressed",
         "false",
       );
       await userEvent.click(screen.getByRole("button", { name: "Thread overview" }));

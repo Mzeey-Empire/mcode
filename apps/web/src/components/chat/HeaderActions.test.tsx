@@ -439,9 +439,9 @@ describe("HeaderActions - consolidated header", () => {
     mockUseHasCommitsAhead.mockReturnValue(true);
   });
 
-  it("renders the consolidated workspace menu trigger", () => {
+  it("renders the Overview toggle", () => {
     renderHeaderActions();
-    expect(screen.getByTestId("header-workspace-menu")).toBeInTheDocument();
+    expect(screen.getByTestId("header-overview-toggle")).toBeInTheDocument();
   });
 
   it("uses the Settings2 Overview trigger without losing CI status", () => {
@@ -463,21 +463,19 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.getByTestId("thread-overview-ci-green")).toBeInTheDocument();
   });
 
-  it("places one Project Actions control before Project settings in the Overview masthead", () => {
+  it("places one Project Actions control before Project settings in the Overview header", () => {
     renderHeaderActions();
 
-    const masthead = screen.getByTestId("thread-overview-masthead");
-    const controls = within(masthead).getByTestId("thread-overview-masthead-controls");
-    const projectActions = within(masthead).getAllByRole("button", { name: "Project Actions" });
-    const projectSettings = within(masthead).getByRole("button", {
+    const header = screen.getByTestId("thread-overview-card-header");
+    const projectActions = within(header).getAllByRole("button", { name: "Project Actions" });
+    const projectSettings = within(header).getByRole("button", {
       name: "Open Project settings",
     });
 
     expect(projectActions).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Open Project settings" })).toHaveLength(1);
-    expect(controls).toHaveClass("ml-auto");
     expect(Boolean(projectActions[0].compareDocumentPosition(projectSettings) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(controls.lastElementChild).toBe(projectSettings);
+    expect(header.lastElementChild).toBe(projectSettings);
   });
 
   it("opens the Project environment panel through the adaptive route", () => {
@@ -630,8 +628,7 @@ describe("HeaderActions - consolidated header", () => {
     const recap = screen.getByTestId("thread-overview-recap");
     expect(usageTrigger).toHaveAttribute("aria-label", "Usage, 5-hour 12%, weekly 47%");
     expect(usageTrigger).toHaveAttribute("aria-expanded", "true");
-    expect(Boolean(usageTrigger.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(Boolean(usageTrigger.compareDocumentPosition(prSeparator) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(usageTrigger.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
     expect(Boolean(prSeparator.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(usageTrigger.compareDocumentPosition(recap) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(usageTrigger).toHaveTextContent("Usage");
@@ -811,7 +808,7 @@ describe("HeaderActions - consolidated header", () => {
 
   it("keeps the consolidated menu and panel toggle on a direct-mode thread", () => {
     renderHeaderActions(makeThread({ mode: "direct" }));
-    expect(screen.getByTestId("header-workspace-menu")).toBeInTheDocument();
+    expect(screen.getByTestId("header-overview-toggle")).toBeInTheDocument();
     expect(screen.getByTestId("header-panel-toggle")).toBeInTheDocument();
   });
 });

@@ -15,7 +15,7 @@ import {
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusMark, type StatusMarkState } from "@/components/ui/status-mark";
-import { overviewResponsivePaddingPx } from "@/lib/composer-layout";
+import { OVERVIEW_CANVAS_RESERVE, OVERVIEW_DOCK_MIN_CANVAS } from "@/lib/composer-layout";
 import { SwipeVelocity } from "@/lib/swipe-velocity";
 import {
   FRONT_PLACEMENT,
@@ -61,7 +61,7 @@ interface LaneColumn {
 function measureColumn(element: HTMLElement | null, reserveOverview: boolean): LaneColumn {
   if (!element) return { left: 0, top: 0, width: window.innerWidth };
   const rect = element.getBoundingClientRect();
-  const reserve = reserveOverview ? overviewResponsivePaddingPx(rect.width) : 0;
+  const reserve = reserveOverview && rect.width >= OVERVIEW_DOCK_MIN_CANVAS ? OVERVIEW_CANVAS_RESERVE : 0;
   return { left: rect.left, top: rect.top, width: rect.width - reserve };
 }
 
@@ -117,7 +117,7 @@ export interface ToastLaneProps {
   anchor: HTMLElement | null;
   /** Where the lane centres when `anchor` is null. */
   fallbackRef: RefObject<HTMLElement | null>;
-  /** Whether the conversation column gives up its right edge to the Overview. */
+  /** Whether the Overview card docks in a canvas wide enough for it, taking the column's right edge. */
   reserveOverview: boolean;
 }
 

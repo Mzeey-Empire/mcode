@@ -1,0 +1,15 @@
+/*
+ * Entries decide for themselves whether they have anything to show, so the card cannot know which
+ * sections are empty before they render. An entry that renders null leaves its wrapper childless,
+ * and these rules hide that section and keep dividers only between sections that have content.
+ */
+.overview-section:not(:has([data-overview-entry] > *)) {
+  display: none;
+}
+
+.overview-section:has([data-overview-entry] > *) ~ .overview-section:has([data-overview-entry] > *) {
+  border-top-width: 1px;
+  border-top-style: solid;
+  border-top-color: var(--color-border);
+  padding-top: 20px;
+}

@@ -25,12 +25,18 @@ function rectFor(element: Element): DOMRect {
   return new DOMRect();
 }
 
-function CardWithSideMenu({ cardLeft }: { cardLeft: number }) {
+type CardKind = "popover" | "floating-card";
+
+function CardWithSideMenu({ cardLeft, kind }: { cardLeft: number; kind: CardKind }) {
   const rowRef = useRef<HTMLButtonElement>(null);
   const menuProps = { ...sidePlacement(rowRef), "data-testid": "menu" };
   return createElement(
     "div",
-    { "data-testid": "card", "data-slot": "popover-content", "data-left": cardLeft },
+    {
+      "data-testid": "card",
+      "data-left": cardLeft,
+      ...(kind === "popover" ? { "data-slot": "popover-content" } : { "data-floating-card": "" }),
+    },
     createElement(
       Popover,
       { open: true },
@@ -46,8 +52,8 @@ function CardWithSideMenu({ cardLeft }: { cardLeft: number }) {
   );
 }
 
-async function placedMenu(cardLeft: number) {
-  render(createElement(CardWithSideMenu, { cardLeft }));
+async function placedMenu(cardLeft: number, kind: CardKind = "popover") {
+  render(createElement(CardWithSideMenu, { cardLeft, kind }));
   const positioner = (await screen.findByTestId("menu")).parentElement as HTMLElement;
   await waitFor(() => expect(positioner.style.transform || positioner.style.left).not.toBe(""));
   return positioner;
@@ -80,6 +86,12 @@ describe("side placement", () => {
 
   it("opens to the left of a card at the right edge, top at the row minus 4px", async () => {
     const positioner = await placedMenu(1144);
+    await waitFor(() => expect(positioner).toHaveAttribute("data-side", "left"));
+    expect(placedBox(positioner)).toEqual({ left: 1144 - 8 - POPUP.width, top: ROW.top - 4 });
+  });
+
+  it("clears a docked card that is not a popover", async () => {
+    const positioner = await placedMenu(1144, "floating-card");
     await waitFor(() => expect(positioner).toHaveAttribute("data-side", "left"));
     expect(placedBox(positioner)).toEqual({ left: 1144 - 8 - POPUP.width, top: ROW.top - 4 });
   });

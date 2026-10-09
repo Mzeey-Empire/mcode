@@ -23,7 +23,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useOverviewStore } from "@/stores/overviewStore";
+import { threadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { COMPOSER_MIN_WIDTH, useDiffStore } from "@/stores/diffStore";
 import {
   usePreviewDesignModeStore,
@@ -346,7 +346,12 @@ function AppLayout(props: AppLayoutProps) {
   // State, not a ref: the toast lane must re-measure when the main surface mounts or unmounts.
   const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
-  const overviewReserved = useOverviewStore((s) => s.reserveThreadId !== null && s.reserveThreadId === activeThreadId);
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const overviewClosed = useOverviewStore((s) => activeThreadId !== null && s.closedSubjects.has(threadOverviewKey(activeThreadId)));
+  const rightPanelVisible = useDiffStore((s) =>
+    activeThreadId && activeWorkspaceId ? s.getRightPanelVisible(activeWorkspaceId, activeThreadId) : false);
+  // The toast lane applies the canvas-width half of the dock rule once it measures the canvas.
+  const overviewReserved = activeThreadId !== null && !overviewClosed && !rightPanelVisible;
   const chatVisible = !props.settingsOpen && !props.showPullRequests && !props.showNewThreadCanvas;
   return (
     <TerminalPoolSlotProvider>

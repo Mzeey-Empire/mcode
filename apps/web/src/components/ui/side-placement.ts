@@ -18,7 +18,8 @@ export interface SidePlacementProps {
 }
 
 const SIDE_GAP_PX = 8;
-const FLOATING_CARD_SELECTOR = "[data-slot='popover-content']";
+// Popovers, plus cards that float over content without being popovers, such as the docked Overview.
+const FLOATING_CARD_SELECTOR = "[data-slot='popover-content'], [data-floating-card]";
 const ROW_TOP_INSET_PX = 4;
 
 /**
