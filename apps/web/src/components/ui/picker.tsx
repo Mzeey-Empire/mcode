@@ -86,7 +86,7 @@ interface ListRow<T> {
  * scroll fades, and a count footer. It renders the panel body only, so callers choose the surface
  * (popover, dialog or inline); put the search field first so the host's initial focus lands on it.
  * Focus stays in the search field; the arrow keys move a highlight through the listbox via
- * `aria-activedescendant`, and Enter picks the highlighted row.
+ * `aria-activedescendant`, Home and End reach its ends, and Enter picks the highlighted row.
  */
 export function Picker<T>(props: PickerProps<T>) {
   const { query, onQueryChange, searchPlaceholder = "Search", items, renderItem, selectedKey, status } = props;
@@ -101,7 +101,8 @@ export function Picker<T>(props: PickerProps<T>) {
     setHighlightListKey(listKey);
     setActiveKey(null);
   }
-  const activeIndex = rows.findIndex(({ row }) => row.key === resolveActiveKey(rows, activeKey, selectedKey));
+  const activeRowKey = resolveActiveKey(rows, activeKey, selectedKey);
+  const activeIndex = rows.findIndex(({ row }) => row.key === activeRowKey);
   const loadMore = useLoadMoreOnce(props, listKey);
 
   const select = (entry: ListRow<T> | undefined) => {
@@ -116,10 +117,10 @@ export function Picker<T>(props: PickerProps<T>) {
       select(rows[activeIndex]);
       return;
     }
-    const step = ARROW_STEPS[event.key];
-    if (step === undefined) return;
+    const target = highlightTarget(rows, activeIndex, event.key);
+    if (target === null) return;
     event.preventDefault();
-    moveHighlight(nextEnabledRow(rows, activeIndex, step));
+    moveHighlight(target);
   };
 
   const moveHighlight = (next: number) => {
@@ -210,6 +211,17 @@ function resolveActiveKey<T>(rows: readonly ListRow<T>[], activeKey: string | nu
   if (isEnabled(activeKey)) return activeKey;
   if (isEnabled(selectedKey)) return selectedKey ?? null;
   return rows.find(({ row }) => !row.disabled)?.row.key ?? null;
+}
+
+/**
+ * Row the highlight moves to for `key`, or `null` when the key is not a list key. Home and End take the keys
+ * from the search caret, as cmdk did and DESIGN.md's picker contract asks.
+ */
+function highlightTarget<T>(rows: readonly ListRow<T>[], activeIndex: number, key: string): number | null {
+  if (key === "Home") return nextEnabledRow(rows, -1, 1);
+  if (key === "End") return nextEnabledRow(rows, rows.length, -1);
+  const step = ARROW_STEPS[key];
+  return step === undefined ? null : nextEnabledRow(rows, activeIndex, step);
 }
 
 /** Next enabled row from `from` in direction `step`, stopping at the ends, or -1 when there is none. */

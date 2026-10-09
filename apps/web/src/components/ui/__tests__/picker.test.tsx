@@ -192,6 +192,18 @@ describe("Picker", () => {
     expect(onSelect).toHaveBeenLastCalledWith(SOURCE[0]);
   });
 
+  it("jumps the highlight to the first and last enabled rows with Home and End", () => {
+    const onSelect = vi.fn();
+    render(<PagedPicker onSelect={onSelect} selectedKey="branch-020" />);
+    const search = screen.getByRole("combobox");
+    fireEvent.keyDown(search, { key: "End" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onSelect).toHaveBeenLastCalledWith(SOURCE[49]);
+    fireEvent.keyDown(search, { key: "Home" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onSelect).toHaveBeenLastCalledWith(SOURCE[0]);
+  });
+
   it("starts the highlight on the selected row and marks it selected", () => {
     render(<PagedPicker selectedKey="branch-007" />);
     const option = screen.getByRole("option", { name: "branch-007" });
