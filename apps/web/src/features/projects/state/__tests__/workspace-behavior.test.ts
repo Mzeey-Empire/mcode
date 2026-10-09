@@ -236,7 +236,7 @@ describe("Workspace Behavior", () => {
     expect(await useWorkspaceStore.getState().createWorkspace(undefined, "/missing")).toEqual(rejected);
     expect(useWorkspaceStore.getState().workspaces).toEqual([existing]);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("existing");
-    expect(useWorkspaceStore.getState().error).toBe("This folder doesn't exist.");
+    expect(useWorkspaceStore.getState().error).toBeNull();
   });
 
   it("when the user deletes the active workspace, threads and selection clear", async () => {

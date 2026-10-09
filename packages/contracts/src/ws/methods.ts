@@ -621,6 +621,20 @@ export const WorkspaceCreateResultSchema = lazySchema(() => z.discriminatedUnion
 /** Result of registering or reopening a workspace folder. */
 export type WorkspaceCreateResult = z.infer<ReturnType<typeof WorkspaceCreateResultSchema>>;
 
+/** One folder listing for the add-project folder picker. */
+export const FilesystemBrowseResultSchema = lazySchema(() => z.object({
+  path: z.string(),
+  parent: z.string().nullable(),
+  entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
+  /** The requested path resolved to an existing directory without falling back to an ancestor. */
+  isExactDirectory: z.boolean(),
+  /** The listed folder is home or a filesystem root, which `workspace.create` refuses. */
+  isTooBroad: z.boolean(),
+}));
+
+/** Result of browsing a folder in the add-project folder picker. */
+export type FilesystemBrowseResult = z.infer<ReturnType<typeof FilesystemBrowseResultSchema>>;
+
 /** All WebSocket methods with runtime-validating parameter and result schemas. */
 export const WS_METHODS = lazySchema(() => ({
   /** Registers this WebSocket as a visible-browser automation host. */
@@ -746,12 +760,7 @@ export const WS_METHODS = lazySchema(() => ({
   /** Browse the host filesystem starting at the given path, for the folder picker. */
   "filesystem.browse": {
     params: z.object({ path: z.string() }),
-    result: z.object({
-      path: z.string(),
-      parent: z.string().nullable(),
-      entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
-      isExactDirectory: z.boolean(),
-    }),
+    result: FilesystemBrowseResultSchema(),
   },
   "thread.list": {
     params: z.object({ workspaceId: z.string() }),

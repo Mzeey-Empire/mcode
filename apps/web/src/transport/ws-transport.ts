@@ -1,4 +1,4 @@
-import type { DiffStats, ReviewComparison, WorkspaceCreateResult } from "@mcode/contracts";
+import type { DiffStats, FilesystemBrowseResult, ReviewComparison, WorkspaceCreateResult } from "@mcode/contracts";
 import type {
   McodeTransport,
   Workspace,
@@ -1105,15 +1105,7 @@ export function createWsTransport(
     enrichWorkspaces: (ids) =>
       rpc<{ items: WorkspaceEnrichment[] }>("workspace.enrich", { ids }),
     filesystemBrowse: (path) =>
-      rpc<{
-        path: string;
-        parent: string | null;
-        entries: { name: string; isDir: boolean }[];
-        isExactDirectory: boolean;
-      }>(
-        "filesystem.browse",
-        { path },
-      ),
+      rpc<FilesystemBrowseResult>("filesystem.browse", { path }),
 
     // Thread
     createThread: (workspaceId, title, mode, branch) =>

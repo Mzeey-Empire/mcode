@@ -1141,10 +1141,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     set({ error: null });
     try {
       const result = await getTransport().createWorkspace(name, path);
-      if (!result.ok) {
-        set({ error: result.error.message });
-        return result;
-      }
+      // A rejected folder is an expected outcome the caller shows inline, not a store error.
+      if (!result.ok) return result;
       const { workspace } = result;
       // The server is idempotent on path: re-adding an existing folder returns
       // the live workspace (bumped to the top server-side). Dedupe by id before

@@ -22,6 +22,14 @@ describe("FilesystemBrowser", () => {
     expect(result.entries.find((e) => e.name === "a_dir")?.isDir).toBe(true);
     expect(result.parent).toBe(NodePath.dirname(tmp));
     expect(result.isExactDirectory).toBe(true);
+    expect(result.isTooBroad).toBe(false);
+  });
+
+  it("marks home and filesystem roots as too broad to add", async () => {
+    expect((await browser.browse("~")).isTooBroad).toBe(true);
+    expect((await browser.browse(NodeOS.homedir())).isTooBroad).toBe(true);
+    expect((await browser.browse(NodePath.parse(NodeOS.tmpdir()).root)).isTooBroad).toBe(true);
+    expect((await browser.browse("/")).isTooBroad).toBe(true);
   });
 
   it("browse expands ~ to home dir", async () => {

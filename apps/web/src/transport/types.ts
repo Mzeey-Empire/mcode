@@ -1,6 +1,7 @@
 // Import shared types for local use in the McodeTransport interface.
 import type {
   DiffStats,
+  FilesystemBrowseResult,
   ReviewComparison,
   Workspace,
   WorkspaceCreateResult,
@@ -371,13 +372,7 @@ export interface McodeTransport {
   /** Batch-fetch git branch, cleanliness, and thread count for the given workspace ids. */
   enrichWorkspaces(ids: string[]): Promise<{ items: WorkspaceEnrichment[] }>;
   /** Browse the host filesystem at the given path. Returns entries and parent path. */
-  filesystemBrowse(path: string): Promise<{
-    path: string;
-    parent: string | null;
-    entries: { name: string; isDir: boolean }[];
-    /** True only when the requested path resolved to an existing directory. */
-    isExactDirectory: boolean;
-  }>;
+  filesystemBrowse(path: string): Promise<FilesystemBrowseResult>;
 
   // Thread commands
   createThread(

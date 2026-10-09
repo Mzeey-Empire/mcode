@@ -17,6 +17,7 @@ import { logger } from "@mcode/shared";
 import type { GitExecutor } from "../git/execution/index.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { projectLifecycleWriteOperations } from "./project-lifecycle-write-operations.js";
+import { isTooBroadFolder } from "./workspace-path.js";
 import { TerminalBackend, TERMINAL_BACKEND_TOKEN } from "../../terminal/backends/terminal-backend.js";
 
 /** Handles workspace creation, rename, listing, and two-phase deletion. */
@@ -158,8 +159,7 @@ function registrationFailure(code: WorkspaceCreateErrorCode, message: string): E
 async function validateWorkspacePath(requestedPath: string): Promise<
   { ok: true; path: string } | Extract<WorkspaceCreateResult, { ok: false }>
 > {
-  const home = NodeOS.homedir();
-  const expandedPath = requestedPath.replace(/^~(?=$|[\\/])/, home);
+  const expandedPath = requestedPath.replace(/^~(?=$|[\\/])/, NodeOS.homedir());
   if (!NodePath.isAbsolute(expandedPath)) {
     return registrationFailure("path_not_absolute", "Choose an absolute folder path.");
   }
@@ -170,8 +170,7 @@ async function validateWorkspacePath(requestedPath: string): Promise<
       return registrationFailure("not_a_directory", "That's a file, not a folder.");
     }
     const path = await NodeFSPromises.realpath(expandedPath);
-    const canonicalHome = await NodeFSPromises.realpath(home);
-    if (path === canonicalHome || NodePath.dirname(path) === path) {
+    if (await isTooBroadFolder(path)) {
       return registrationFailure("too_broad", "Choose a project folder, not your home folder or a filesystem root.");
     }
     await NodeFSPromises.access(path, NodeFS.constants.R_OK);
