@@ -43,12 +43,14 @@ vi.mock("@/transport", () => ({
   getTransport: () => ({ filesystemBrowse: mocks.filesystemBrowse }),
 }));
 
-vi.mock("@/lib/platform", () => ({ isMac: false }));
+vi.mock("@/lib/platform", () => ({ isMac: false, isWindows: true }));
 
 vi.mock("@/components/ui/command", () => ({
   CommandList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   CommandEmpty: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CommandGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CommandGroup: ({ heading, children }: { heading: string; children: React.ReactNode }) => (
+    <section aria-label={heading}>{children}</section>
+  ),
   CommandItem: ({
     children,
     onSelect,
@@ -73,11 +75,13 @@ describe("BrowseView", () => {
         { name: "README.md", isDir: false },
       ],
       isExactDirectory: true,
+      isTooBroad: false,
     });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    delete window.desktopBridge;
   });
 
   it("filters folders with the leaf query and descends into the selected folder", async () => {
@@ -113,6 +117,7 @@ describe("BrowseView", () => {
       parent: null,
       entries: [{ name: "C:", isDir: true }],
       isExactDirectory: true,
+      isTooBroad: true,
     });
 
     render(<BrowseView />);
@@ -122,5 +127,97 @@ describe("BrowseView", () => {
     expect(mocks.palette.setQuery).toHaveBeenCalledWith("C:\\");
     expect(mocks.getPendingConfirm()).toBeNull();
     expect(mocks.getPendingBack()).toBeNull();
+  });
+
+  it("keeps Add unavailable in a folder too broad to add", async () => {
+    mocks.filesystemBrowse.mockResolvedValue({
+      path: "/home/mcode",
+      parent: "/home",
+      entries: [{ name: "src", isDir: true }],
+      isExactDirectory: true,
+      isTooBroad: true,
+    });
+
+    render(<BrowseView />);
+
+    expect(await screen.findByRole("region", { name: "Folders" })).toBeInTheDocument();
+    expect(mocks.getPendingConfirm()).toBeNull();
+  });
+
+  it("names an addable folder and opens the project it registers", async () => {
+    mocks.palette.query = "~/src/mcode/";
+    const workspace = { id: "ws-mcode" };
+    mocks.workspace.createWorkspace.mockResolvedValue({ ok: true, workspace, reused: true });
+    mocks.filesystemBrowse.mockResolvedValue({
+      path: "/home/mcode/src/mcode",
+      parent: "/home/mcode/src",
+      entries: [{ name: "apps", isDir: true }],
+      isExactDirectory: true,
+      isTooBroad: false,
+    });
+
+    render(<BrowseView />);
+
+    expect(await screen.findByRole("region", { name: "Folders in mcode" })).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    mocks.getPendingConfirm()?.();
+
+    await waitFor(() => expect(mocks.palette.close).toHaveBeenCalledOnce());
+    expect(mocks.workspace.createWorkspace).toHaveBeenCalledWith(undefined, "/home/mcode/src/mcode");
+    expect(mocks.workspace.beginNewThread).toHaveBeenCalledWith("ws-mcode");
+  });
+
+  it("shows only the empty state in a folder without subfolders", async () => {
+    mocks.palette.query = "~/src/mcode/";
+    mocks.filesystemBrowse.mockResolvedValue({
+      path: "/home/mcode/src/mcode",
+      parent: "/home/mcode/src",
+      entries: [],
+      isExactDirectory: true,
+      isTooBroad: false,
+    });
+
+    render(<BrowseView />);
+
+    expect(await screen.findByText("No subfolders here.")).toBeInTheDocument();
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
+  });
+
+  it("says why a folder could not be added and keeps the palette open", async () => {
+    mocks.palette.query = "~/gone/";
+    mocks.workspace.createWorkspace.mockResolvedValue({
+      ok: false,
+      error: { code: "path_not_found", message: "server copy" },
+    });
+
+    render(<BrowseView />);
+
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    mocks.getPendingConfirm()?.();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This folder doesn't exist.");
+    expect(mocks.palette.close).not.toHaveBeenCalled();
+    expect(mocks.workspace.beginNewThread).not.toHaveBeenCalled();
+  });
+
+  it("hides Open in File Explorer on the web", async () => {
+    render(<BrowseView />);
+
+    await screen.findByRole("button", { name: /projects/i });
+    expect(screen.queryByRole("button", { name: /open in/i })).not.toBeInTheDocument();
+  });
+
+  it("adds the folder chosen in the native dialog on desktop", async () => {
+    const showOpenDialog = vi.fn().mockResolvedValue("/home/mcode/src/app");
+    window.desktopBridge = { showOpenDialog } as unknown as typeof window.desktopBridge;
+    mocks.workspace.createWorkspace.mockResolvedValue({ ok: true, workspace: { id: "ws-app" }, reused: false });
+
+    render(<BrowseView />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open in File Explorer" }));
+
+    await waitFor(() => expect(mocks.workspace.beginNewThread).toHaveBeenCalledWith("ws-app"));
+    expect(mocks.workspace.createWorkspace).toHaveBeenCalledWith(undefined, "/home/mcode/src/app");
+    expect(mocks.palette.close).toHaveBeenCalledOnce();
   });
 });
