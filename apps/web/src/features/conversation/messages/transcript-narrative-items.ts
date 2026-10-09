@@ -1,4 +1,4 @@
-import type { ToolCall } from "@/transport/types";
+import type { Message, ToolCall } from "@/transport/types";
 import { buildNarrativeItems } from "../narrative/build-narrative";
 import { buildPersistedNarrativeItems, recordToToolCall } from "../narrative/build-persisted-narrative";
 import type { NarrativeItem } from "../narrative/types";
@@ -34,12 +34,20 @@ export interface TranscriptToolItem {
   readonly count: number;
 }
 
+/** The approval-review sentence that opens an expanded work fold. */
+export interface TranscriptFoldNoteItem {
+  readonly type: "fold-note";
+  readonly key: string;
+  readonly messageId: string;
+  readonly text: string;
+}
+
 /** Inserts open group children into the existing viewport, without another scroll owner. */
 export function expandTranscriptToolGroups(
-  items: readonly (ChatVirtualItem | TranscriptNarrativeItem)[],
+  items: readonly (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem)[],
   expandedGroups: ReadonlySet<string>,
-): (ChatVirtualItem | TranscriptNarrativeItem | TranscriptToolItem)[] {
-  return items.flatMap((row): (ChatVirtualItem | TranscriptNarrativeItem | TranscriptToolItem)[] => {
+): (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem | TranscriptToolItem)[] {
+  return items.flatMap((row): (ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem | TranscriptToolItem)[] => {
     if (row.type !== "narrative-row" || row.item.type !== "tool-group" || !expandedGroups.has(row.key)) return [row];
     const calls = row.item.group.calls;
     return [row, ...calls.map((toolCall, index): TranscriptToolItem => ({
@@ -114,36 +122,94 @@ function narrativeRows(
   });
 }
 
-/** Expands complete turns into rows without changing message or narrative order. */
+type ExpandedTranscriptItem = ChatVirtualItem | TranscriptNarrativeItem | TranscriptFoldNoteItem;
+type WorkFoldVirtualItem = Extract<ChatVirtualItem, { type: "work-fold" }>;
+type NarrativeFlowVirtualItem = Extract<ChatVirtualItem, { type: "narrative-flow" }>;
+
+/**
+ * Expands open work folds into their narrative rows without changing message order.
+ * A settled current turn still carries its live narrative-flow item after the fold,
+ * so an open fold shows those live rows and a closed fold drops them.
+ */
 export function expandTranscriptNarrative(
   items: readonly ChatVirtualItem[],
   recordsByMessage: PersistedNarrativeRecordsByMessage,
+  expandedFolds: ReadonlySet<string>,
   currentTurn?: CurrentTurnResponseIdentity,
   transitions: ReadonlyMap<string, ToolCallTransition> = new Map(),
-): (ChatVirtualItem | TranscriptNarrativeItem)[] {
-  const messages = new Map(items.flatMap((item) => item.type === "message" ? [[item.message.id, item.message] as const] : []));
-  const livePrefix = currentTurn?.executionId ?? currentTurn?.responseKey ?? currentTurn?.threadId ?? "__active_thread__";
-  return items.flatMap((item): (ChatVirtualItem | TranscriptNarrativeItem)[] => {
-    if (item.type === "narrative-flow") {
-      return liveNarrativeRows(item, livePrefix, transitions);
-    }
-    if (item.type !== "persisted-narrative") return [item];
-    const records = recordsByMessage[item.messageId];
-    if (!records) return [];
-    const visibleRecords = visiblePersistedRecords(records);
-    const message = messages.get(item.messageId);
-    const prefix = message?.outcomeExecutionId ?? item.messageId;
-    return narrativeRows(
-      prefix,
-      buildPersistedNarrativeItems({ ...visibleRecords, messageContent: item.messageContent }),
-      visibleRecords.tools.map(recordToToolCall),
-      item.messageId,
-    );
-  });
+): ExpandedTranscriptItem[] {
+  const context: ExpansionContext = {
+    recordsByMessage,
+    expandedFolds,
+    transitions,
+    livePrefix: livePrefixFor(currentTurn),
+    messages: new Map(items.flatMap((item) => item.type === "message" ? [[item.message.id, item.message] as const] : [])),
+  };
+  const expanded: ExpandedTranscriptItem[] = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index]!;
+    const next = items[index + 1];
+    const live = item.type === "work-fold" && next?.type === "narrative-flow" ? next : undefined;
+    if (live) index += 1;
+    expanded.push(...expandItem(item, live, context));
+  }
+  return expanded;
+}
+
+interface ExpansionContext {
+  recordsByMessage: PersistedNarrativeRecordsByMessage;
+  expandedFolds: ReadonlySet<string>;
+  transitions: ReadonlyMap<string, ToolCallTransition>;
+  livePrefix: string;
+  messages: ReadonlyMap<string, Message>;
+}
+
+function livePrefixFor(currentTurn: CurrentTurnResponseIdentity | undefined): string {
+  return currentTurn?.executionId ?? currentTurn?.responseKey ?? currentTurn?.threadId ?? "__active_thread__";
+}
+
+function expandItem(
+  item: ChatVirtualItem,
+  live: NarrativeFlowVirtualItem | undefined,
+  context: ExpansionContext,
+): ExpandedTranscriptItem[] {
+  if (item.type === "narrative-flow") return liveNarrativeRows(item, context.livePrefix, context.transitions);
+  if (item.type !== "work-fold") return [item];
+  return context.expandedFolds.has(item.key) ? [item, ...foldChildren(item, live, context)] : [item];
+}
+
+function foldChildren(
+  fold: WorkFoldVirtualItem,
+  live: NarrativeFlowVirtualItem | undefined,
+  context: ExpansionContext,
+): ExpandedTranscriptItem[] {
+  const note: TranscriptFoldNoteItem[] = fold.approvalNote
+    ? [{ type: "fold-note", key: `${fold.key}:approval`, messageId: fold.messageId, text: fold.approvalNote }]
+    : [];
+  const rows = live
+    ? liveNarrativeRows(live, context.livePrefix, context.transitions)
+    : persistedFoldRows(fold, context.recordsByMessage, context.messages.get(fold.messageId)?.outcomeExecutionId);
+  return [...note, ...rows];
+}
+
+function persistedFoldRows(
+  fold: WorkFoldVirtualItem,
+  recordsByMessage: PersistedNarrativeRecordsByMessage,
+  outcomeExecutionId: string | null | undefined,
+): TranscriptNarrativeItem[] {
+  const records = recordsByMessage[fold.messageId];
+  if (!records) return [];
+  const visibleRecords = visiblePersistedRecords(records);
+  return narrativeRows(
+    outcomeExecutionId ?? fold.messageId,
+    buildPersistedNarrativeItems({ ...visibleRecords, messageContent: fold.messageContent }),
+    visibleRecords.tools.map(recordToToolCall),
+    fold.messageId,
+  );
 }
 
 function liveNarrativeRows(
-  item: Extract<ChatVirtualItem, { type: "narrative-flow" }>,
+  item: NarrativeFlowVirtualItem,
   prefix: string,
   transitions: ReadonlyMap<string, ToolCallTransition>,
 ): TranscriptNarrativeItem[] {

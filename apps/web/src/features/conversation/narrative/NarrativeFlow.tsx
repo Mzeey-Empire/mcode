@@ -105,13 +105,9 @@ export function NarrativeFlow({
           the items array for compatibility with `counts` and tests but are
           intentionally not rendered here. */}
 
-      {/* The turn footer is owned exclusively by the `persisted-turn-footer`
-          virtual-item slot, which is positioned AFTER the `MessageBubble` so
-          the summary closes the turn rather than separating its actions from
-          its answer. Rendering a TurnFooter inside this container would place
-          it ABOVE the message body — which is exactly the bug we are
-          fixing — because this container itself sits before the bubble in
-          the virtual-list order. */}
+      {/* Turn totals belong to the `turn-meta-line` virtual row after the
+          MessageBubble. This container sits before the bubble in list order,
+          so totals rendered here would split the answer from its actions. */}
     </div>
     </NarrativePerformanceBoundary>
   );

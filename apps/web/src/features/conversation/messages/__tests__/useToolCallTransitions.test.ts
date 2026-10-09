@@ -26,7 +26,7 @@ describe("live tool presentation transitions", () => {
     const rows = () => expandTranscriptNarrative([{
       type: "narrative-flow", key: "live", toolCalls: result.current.calls,
       hooks: [], thoughtSegments: [], streamingText: "", isAgentRunning: true, startTime: 1,
-    }], {}, undefined, result.current.transitions);
+    }], {}, new Set(), undefined, result.current.transitions);
     const closing = rows()[0];
     expect(closing).toMatchObject({ transition: "exiting", item: { type: "active-tool", toolCall: { isComplete: true } } });
     act(() => vi.advanceTimersByTime(249));

@@ -178,7 +178,7 @@ describe("buildStableItems", () => {
     expect(items.map((i) => i.type)).toEqual(["message", "message"]);
   });
 
-  it("emits persisted chrome only for visible loaded rows", () => {
+  it("folds a settled turn's work above its answer and closes it with a meta line", () => {
     const messages: Message[] = [
       makeMessage({ id: "u1", role: "user", content: "hi" }),
       makeMessage({ id: "a1", role: "assistant", content: "hello" }),
@@ -190,12 +190,19 @@ describe("buildStableItems", () => {
         hooks: [makeHookRecord({ message_id: "a1", phase: "stop", sort_order: 2 })],
       },
     });
-    expect(items.filter((i) => i.type === "persisted-narrative")).toHaveLength(1);
-    expect(items.map((i) => i.type)).toEqual(["message", "persisted-narrative", "message", "persisted-turn-footer"]);
-    expect(items.filter((i) => i.type === "persisted-turn-footer")).toHaveLength(1);
+    expect(items.map((i) => i.type)).toEqual(["message", "work-fold", "message", "turn-meta-line"]);
+    expect(items[1]).toEqual({
+      key: "work-fold:a1",
+      type: "work-fold",
+      messageId: "a1",
+      messageContent: "hello",
+      outcome: undefined,
+      durationMs: 1_000,
+    });
+    expect(items[3]).toEqual({ key: "turn-meta-line:a1", type: "turn-meta-line", messageId: "a1", steps: 1, subagents: 0 });
   });
 
-  it("renders stop-only persisted hooks as persisted narrative chrome", () => {
+  it("does not fold a turn whose only records are hooks", () => {
     const messages: Message[] = [
       makeMessage({ id: "u1", role: "user", content: "hi" }),
       makeMessage({ id: "a1", role: "assistant", content: "hello" }),
@@ -208,35 +215,25 @@ describe("buildStableItems", () => {
       },
     });
 
-    expect(items.map((i) => i.type)).toEqual([
-      "message",
-      "persisted-narrative",
-      "message",
-      "persisted-turn-footer",
-    ]);
+    expect(items.map((i) => i.type)).toEqual(["message", "message"]);
   });
 
-  it("emits a completed-turn footer from canonical summary data", () => {
+  it("builds the fold and meta line from the canonical summary", () => {
     const messages: Message[] = [
       makeMessage({ id: "u1", role: "user", content: "hi" }),
-      makeMessage({ id: "a1", role: "assistant", content: "hello" }),
+      { ...makeMessage({ id: "a1", role: "assistant", content: "hello" }), outcome: "cancelled" } as Message,
     ];
     const items = buildStableItems(messages, undefined, undefined, undefined, undefined, {
       a1: {
-        counts: { steps: 1, thoughts: 0, subagents: 0 },
-        durationMs: 1_250,
+        counts: { steps: 7, thoughts: 2, subagents: 1 },
+        durationMs: 18_000,
+        approvalReview: { mode: "manual", reason: "manual-requested" },
       },
     });
 
-    expect(items.at(-1)).toEqual({
-      key: "persisted-turn-footer-a1",
-      type: "persisted-turn-footer",
-      messageId: "a1",
-      summary: {
-        counts: { steps: 1, thoughts: 0, subagents: 0 },
-        durationMs: 1_250,
-      },
-    });
+    expect(items.map((i) => i.type)).toEqual(["message", "work-fold", "message", "turn-meta-line"]);
+    expect(items[1]).toMatchObject({ outcome: "cancelled", durationMs: 18_000, approvalNote: "Manual approval selected." });
+    expect(items[3]).toMatchObject({ steps: 7, subagents: 1 });
   });
 
   it("projects a completed current agent response without file-change metadata", () => {
@@ -902,9 +899,7 @@ describe("buildVirtualItems (combined)", () => {
     // live assistant response is suppressed because a tool is still running —
     // `computeLiveStreamingText` returns "" while any top-level tool is in
     // flight, since the model isn't streaming user-facing text during tool
-    // execution. persisted-turn-footer is NOT suppressed because it sits
-    // AFTER the bubble; it owns the post-response summary that closes the
-    // turn.
+    // execution.
     expect(types).toEqual([
       "message",
       "narrative-flow",

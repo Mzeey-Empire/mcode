@@ -150,7 +150,7 @@ describe("projectCanonicalMessageList", () => {
     expect(projection?.messages.map((entry) => entry.id)).toEqual(["child-prompt"]);
   });
 
-  it("keeps completed child tools before the final answer and its footer", () => {
+  it("folds completed child tools above the final answer and closes it with a meta line", () => {
     const state = createAgentModelState();
     state.turns[TURN_ID] = turn("Completed", "2026-08-18T12:00:05.000Z", {
       permissionMode: "supervised",
@@ -265,15 +265,16 @@ describe("projectCanonicalMessageList", () => {
     expect(timeline.map((row) => {
       if (row.type === "message") return `message:${row.message.id}`;
       if (row.type === "narrative-flow") return `tools:${row.toolCalls.map((call) => call.id).join(",")}`;
-      if (row.type === "persisted-turn-footer") return `footer:${row.messageId}`;
+      if (row.type === "work-fold" || row.type === "turn-meta-line") return `${row.type}:${row.messageId}`;
       return row.type;
     })).toEqual([
       "message:child-prompt",
       "message:child-open",
+      "work-fold:child-answer",
       "tools:native-read",
       "message:child-answer",
       "narrative-indicator",
-      "footer:child-answer",
+      "turn-meta-line:child-answer",
       "message:protocol-notice",
     ]);
   });
@@ -381,7 +382,7 @@ describe("projectCanonicalMessageList", () => {
           responseKeysByMessageId: projection.assistantResponseKeys,
         },
       });
-      const rows = expandTranscriptNarrative(timeline, {});
+      const rows = expandTranscriptNarrative(timeline, {}, new Set());
       expect(rows.map((row) => {
         if (row.type === "message") return `message:${row.message.content}`;
         if (row.type === "narrative-row") return row.item.type;

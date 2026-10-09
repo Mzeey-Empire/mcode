@@ -59,11 +59,13 @@ If you are about to touch any of these files, **read this first**:
 
 The pinned prompt uses the chat content width and leaves space for an open Thread overview.
 
-Live and saved activity render inline in chronological order. Long turns keep
-all narrative text in the chat, with no summary view or activity pagination.
-Tool groups retain their existing detail expanders.
+A running turn renders its activity inline in chronological order. Once the
+turn settles, its narrative rows move under a work fold above the answer, and a
+meta line with the step counts closes the turn. The fold's children stay
+separate virtual rows, so opening a fold never measures one tall row. Tool
+groups retain their existing detail expanders.
 
-The current turn's runtime lifecycle controls its response state, footer, Stop
+The current turn's runtime lifecycle controls its response state, work fold, Stop
 control, and follow-up queue decision. Saved message outcomes and canonical
 history cannot override an active local execution. Provider-owned child threads
 use their canonical lifecycle when no local execution owns the thread.
@@ -299,7 +301,7 @@ misclassified preamble or duplicate assistant bodies:
 
 **Don't break this:** dropping the boundary handler or counting thought
 segments in `NarrativeIndicator.stepCount` will diverge live counts from
-`PersistedTurnFooter` (Trap 6).
+the settled turn's meta line (Trap 6).
 
 ---
 
@@ -378,7 +380,7 @@ finished."
 
 **Root cause.** The previous design rendered a `ToolCallSummary` block under
 each persisted assistant message that lazy-fetched tool call records from
-SQLite. We deleted that component when we introduced `TurnFooter`. But the
+SQLite. We later deleted that component. But the
 client store was still clearing volatile state on `turn.persisted` — the
 narrative timeline relies on `toolCallsByThread`, `thoughtSegmentsByThread`,
 and `hooksByThread` being non-empty. With them cleared, the
@@ -397,14 +399,8 @@ and `hooksByThread` being non-empty. With them cleared, the
 | `turn.persisted`            | Keep everything — DB write is informational only           |
 | Next `sendMessage` call     | Clear toolCalls / thoughts / hooks (belt-and-suspenders)   |
 
-`agentStartTimes[threadId]` follows the same lifecycle as the audit trail —
-**do not clear it on `turnComplete`** or `TurnFooter` will lose its
-`startTime` reference and the `completedDurationMs` `useMemo` returns null,
-making the footer show "—" for duration.
-
 **Don't break this:** any future "cleanup on turn end" code that touches
-`toolCallsByThread`, `thoughtSegmentsByThread`, `hooksByThread`, or
-`agentStartTimes` must clear at `turnStarted` / `sendMessage` time, not at
+`toolCallsByThread`, `thoughtSegmentsByThread`, or `hooksByThread` must clear at `turnStarted` / `sendMessage` time, not at
 `turnComplete` / `turn.persisted` time.
 
 ---
@@ -453,41 +449,22 @@ Do not reach for `appendChild` ever again.
 
 ---
 
-## Trap 5: `useMemo` cannot contain `Date.now()` for "freeze on completion"
+## Trap 5: A settling turn must not fold away the rows being read
 
-**Symptom.** `TurnFooter` duration displays "—" even though the turn
-completed and the timestamps look right.
+**Symptom.** A turn finishes while the user is scrolled into its tool rows.
+The rows vanish under a closed work fold and the viewport jumps to the next
+turn.
 
-**Root cause.** An early version of `NarrativeFlow.tsx` computed
-`completedDurationMs` inside a `useMemo` using `Date.now()`. Two problems:
-(1) `useMemo` is supposed to be pure, and using a non-deterministic source
-makes the cache key meaningless; (2) on re-renders triggered by `toolCalls`
-or `thoughtSegments` array reference changes (which happen even after the
-turn ends, e.g. on reconnect replay), `Date.now()` re-samples and the
-duration drifts.
+**Root cause.** Settling a turn replaces its inline narrative rows with a
+closed fold. The reading anchor was one of those rows, so the virtualizer has
+nothing left to hold in place.
 
-**The rule.** To freeze a wall-clock value at a state transition, use
-`useState` + `useEffect`:
-
-```tsx
-const [completedAt, setCompletedAt] = useState<number | null>(null);
-
-useEffect(() => {
-  if (isAgentRunning) {
-    setCompletedAt(null);  // reset on turn restart
-  } else if (completedAt == null) {
-    setCompletedAt(Date.now());  // snapshot on first not-running render
-  }
-}, [isAgentRunning, completedAt]);
-
-const completedDurationMs = useMemo<number | null>(() => {
-  if (isAgentRunning || startTime == null || completedAt == null) return null;
-  return Math.max(0, completedAt - startTime);
-}, [isAgentRunning, startTime, completedAt]);
-```
-
-The snapshot lives in state (so it survives re-renders), gets set exactly
-once when `isAgentRunning` flips false, and resets when a new turn starts.
+**The rule.** When a turn settles, `ThreadTranscript` compares the previous and
+next rows. If the reading anchor was a narrative or tool row of the settling
+turn, it opens that turn's fold in the same render, so the rows stay mounted
+under the anchor. Fold duration also comes from the canonical turn summary,
+not from a clock sampled in the client, so the label never re-samples on
+replay.
 
 ---
 
@@ -501,7 +478,7 @@ calls. `NarrativeCounts.subagents` separately counts top-level Agent calls.
 So a turn with 3 Reads and 1 Agent reads as "4 steps · 1 sub-agent" — the
 sub-agent is one of the four steps, not a fifth.
 
-The labeling in `TurnFooter` reads correctly as "N steps, of which K were
+The meta line reads correctly as "N steps, of which K were
 sub-agents." Don't try to "fix" this by subtracting Agent calls from
 `steps`. See the doc comment on
 [`NarrativeCounts.steps`](../../../apps/web/src/features/conversation/narrative/types.ts)
@@ -527,8 +504,9 @@ before reporting the change done:
 - **Long thought:** clamps to 2 lines with `show more` toggle.
 - **Streaming response:** typing cursor sits inline at the end of the last
   word — not on its own line below the last paragraph.
-- **Turn completion:** timeline stays visible, `TurnFooter` appears with
-  steps/thoughts/sub-agents counts and a stable duration.
+- **Turn completion:** the activity folds under "Worked for <duration>" above
+  the answer, fork and copy show at rest, and the meta line shows the
+  step and sub-agent counts.
 - **Next turn:** sending a new message clears the previous trail and starts
   a fresh timeline.
 - **Browser console:** no `NotFoundError`, no React warnings.
