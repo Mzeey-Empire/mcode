@@ -64,7 +64,7 @@ describe("TurnFileTracker", () => {
     await NodeFSPromises.writeFile(NodePath.join(root, "a.txt"), after);
     await tracker.observeToolResult("t", "edit", input);
     const patch = await tracker.reconstructionPatch("t");
-    expect(parseTurnDiff(patch!)?.files).toEqual([{ path: "a.txt", previousPath: null, binary: false, changeType: "modified" }]);
+    expect(parseTurnDiff(patch!)?.files).toEqual([{ path: "a.txt", previousPath: null, binary: false, changeType: "modified", additions: 2, deletions: 2, untracked: false }]);
     expect(patch).toContain("\\ No newline at end of file");
     tracker.clearTurn("t");
     expect(await tracker.reconstructionPatch("t")).toBeUndefined();

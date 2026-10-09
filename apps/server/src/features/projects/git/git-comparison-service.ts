@@ -233,14 +233,13 @@ export class GitComparisonService {
     const entries = stdout.split("\0").filter(Boolean);
     assertReviewComparisonFileCount(entries.length);
     const paths = entries.filter((path) => !path.endsWith("/"));
-    const directories = entries.filter((path) => path.endsWith("/"));
     const index = await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--git-path", "index"]);
     const source = NodePath.resolve(cwd, index.stdout.trim());
     const temporary = NodePath.join(NodePath.dirname(source), `mcode-review-index-${NodeCrypto.randomUUID()}`);
     const env = { GIT_INDEX_FILE: temporary, GIT_OPTIONAL_LOCKS: "0" };
     try {
       await this.copyReviewIndex(cwd, source, temporary, env);
-      if (paths.length) await this.addReviewUntracked(cwd, env, directories, filePath);
+      if (paths.length) await this.addReviewUntracked(cwd, env, paths, filePath);
       return await run(env, new Set(paths));
     } catch (error) {
       if (error instanceof ReviewComparisonError || isReviewComparisonLimitError(error)) throw error;
@@ -255,19 +254,22 @@ export class GitComparisonService {
     }
   }
 
-  private async addReviewUntracked(cwd: string, env: NodeJS.ProcessEnv, directories: string[], filePath?: string): Promise<void> {
-    let pathspecs = filePath ? [`:(literal)${filePath}`] : ["."];
-    if (!filePath) {
-      // A broad add would replace unmerged stages, hiding the conflict in Review.
-      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "ls-files", "--unmerged", "-z"], { env, timeout: 10_000 });
-      const conflicts = stdout.split("\0").filter(Boolean).map((entry) => entry.slice(entry.indexOf("\t") + 1));
-      pathspecs = [...pathspecs, ...new Set([...directories, ...conflicts].map((path) => `:(exclude,literal)${path}`))];
+  private async addReviewUntracked(cwd: string, env: NodeJS.ProcessEnv, paths: string[], filePath?: string): Promise<void> {
+    // Whole-tree adds can replace unmerged stages even with exclusion pathspecs.
+    const add = (batch: string[]) => this.gitExecutor.exec(
+      ["-C", cwd, "add", "-N", "--", ...batch.map((path) => `:(literal)${path}`)], { env, timeout: 10_000 },
+    );
+    for (const batch of batchReviewPaths(filePath ? [filePath] : paths)) {
+      try {
+        await add(batch);
+      } catch (error) {
+        // Files can disappear between listing and adding them to the review index.
+        const present = await Promise.all(batch.map(async (path) => await isMissingReviewFile(cwd, path) ? null : path));
+        const remaining = present.filter((path) => path !== null);
+        if (remaining.length === batch.length) throw error;
+        if (remaining.length) await add(remaining);
+      }
     }
-    // Deleted tracked paths must remain in the index for rename detection.
-    await this.gitExecutor.exec(["-C", cwd, "add", "-N", "--ignore-removal", "--", ...pathspecs], { env, timeout: 10_000 })
-      .catch(async (error: unknown) => {
-        if (!filePath || !await isMissingReviewFile(cwd, filePath)) throw error;
-      });
   }
 
   private async copyReviewIndex(cwd: string, source: string, temporary: string, env: NodeJS.ProcessEnv): Promise<void> {
@@ -621,6 +623,25 @@ function hasErrorCode(error: unknown, code: string): boolean {
 function gitErrorDetail(error: unknown): string {
   if (error instanceof Error && "stderr" in error && typeof error.stderr === "string") return error.stderr;
   return String(error);
+}
+
+function batchReviewPaths(paths: readonly string[]): string[][] {
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let chars = 0;
+  for (const path of paths) {
+    // Leave room for quoting and separators within the Windows command-line limit.
+    const length = `:(literal)${path}`.length + 3;
+    if (batch.length && (batch.length >= 128 || chars + length > 20_000)) {
+      batches.push(batch);
+      batch = [];
+      chars = 0;
+    }
+    batch.push(path);
+    chars += length;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
 }
 
 async function isMissingReviewFile(cwd: string, filePath: string): Promise<boolean> {

@@ -125,15 +125,36 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     expect(temporaryIndexes()).toEqual([]);
   });
 
-  it("adds a large untracked set in one command without staging tracked edits", async () => {
+  it("retries surviving untracked paths when another path disappears before add", async () => {
+    write("gone.txt", "gone\n");
+    write("[kept].txt", "kept\n");
+    let adds = 0;
+    service = new GitComparisonService(repo, {
+      exec: async (args, options) => {
+        if (args.includes("add") && ++adds === 1) NodeFS.unlinkSync(NodePath.join(cwd, "gone.txt"));
+        return executor.exec(args, options);
+      },
+    });
+    expect(await read("unstaged")).toEqual({
+      files: [{ path: "[kept].txt", previousPath: null, changeType: "added", binary: false, additions: 1, deletions: 0, untracked: true }],
+      additions: 1, deletions: 0,
+    });
+    expect(adds).toBe(2);
+  });
+
+  it.each([
+    { limit: "path count", prefix: "new-", batchSizes: [128, 2] },
+    { limit: "command length", prefix: "x".repeat(160), batchSizes: [111, 19] },
+  ])("batches untracked paths by $limit without staging tracked edits", async ({ prefix, batchSizes }) => {
     write("tracked.txt", "base\n");
     commit();
     write("tracked.txt", "base\nedit\n");
-    for (let index = 0; index < 130; index++) write(`new-${index}.txt`, "new\n");
-    let adds = 0;
+    const paths = Array.from({ length: 130 }, (_, index) => `${prefix}${String(index).padStart(3, "0")}.txt`);
+    for (const path of paths) write(path, "new\n");
+    const adds: string[][] = [];
     service = new GitComparisonService(repo, {
       exec: (args, options) => {
-        if (args.includes("add")) adds++;
+        if (args.includes("add")) adds.push(args.slice(args.indexOf("--") + 1));
         return executor.exec(args, options);
       },
     });
@@ -142,7 +163,8 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     expect(comparison.additions).toBe(131);
     expect(comparison.deletions).toBe(0);
     expect(comparison.files.find((file) => file.path === "tracked.txt")).toMatchObject({ additions: 1, deletions: 0, untracked: false });
-    expect(adds).toBe(1);
+    expect(adds.map((batch) => batch.length)).toEqual(batchSizes);
+    expect(adds.flat().sort()).toEqual(paths.map((path) => `:(literal)${path}`).sort());
     expect(git("diff", "--cached")).toBe("");
   });
 
