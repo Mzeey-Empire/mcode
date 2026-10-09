@@ -125,16 +125,7 @@ export function Picker<T>(props: PickerProps<T>) {
   const listId = useId();
   const rows = useMemo<ListRow<T>[]>(() => items.map((item) => ({ item, row: renderItem(item) })), [items, renderItem]);
   const listKey = `${props.activeTab ?? ""}\u0000${query}`;
-  // The highlight belongs to one list; a new tab or query starts over from the selection. Reset during render
-  // rather than keying by listKey, so returning to an earlier query doesn't revive its old highlight.
-  const [highlight, setHighlight] = useState<Highlight | null>(null);
-  const [highlightListKey, setHighlightListKey] = useState(listKey);
-  if (highlightListKey !== listKey) {
-    setHighlightListKey(listKey);
-    setHighlight(null);
-  }
-  const activeRowKey = resolveActiveKey(rows, highlight, selectedKey);
-  const activeIndex = rows.findIndex(({ row }) => row.key === activeRowKey);
+  const { activeIndex, setHighlight } = useActiveRow(rows, listKey, selectedKey);
   const loadMore = useLoadMoreOnce(props, listKey);
 
   const select = (entry: ListRow<T> | undefined) => {
@@ -150,7 +141,9 @@ export function Picker<T>(props: PickerProps<T>) {
       return;
     }
     if (isRowActionShortcut(event)) {
-      runActiveRowAction(event);
+      if (!rows[activeIndex]?.row.action) return;
+      event.preventDefault();
+      runRowAction(activeIndex);
       return;
     }
     const target = highlightTarget(rows, activeIndex, event.key);
@@ -159,12 +152,11 @@ export function Picker<T>(props: PickerProps<T>) {
     moveHighlight(target);
   };
 
-  const runActiveRowAction = (event: KeyboardEvent<HTMLInputElement>) => {
-    const action = rows[activeIndex]?.row.action;
+  const runRowAction = (index: number) => {
+    const action = rows[index]?.row.action;
     if (!action) return;
-    event.preventDefault();
-    // Pin the derived highlight first, so a row the action removes hands the highlight to the row in its place.
-    highlightRow(activeIndex);
+    // Pin the row first, so a row the action removes hands the highlight to the row in its place.
+    highlightRow(index);
     action.run();
   };
 
@@ -211,6 +203,7 @@ export function Picker<T>(props: PickerProps<T>) {
           loading={status === "loading"}
           onHighlight={highlightRow}
           onPick={select}
+          onRunAction={runRowAction}
           onNearEnd={loadMore}
         />
       ) : null}
@@ -276,6 +269,25 @@ function isReachable(row: PickerRow): boolean {
 }
 
 /** The highlighted row, with its index at the time so a removed row can hand the highlight to the row in its place. */
+/** Tracks the highlighted row of one list and resolves which row is active when it is unreachable or gone. */
+function useActiveRow<T>(rows: readonly ListRow<T>[], listKey: string, selectedKey: string | undefined) {
+  // The highlight belongs to one list; a new tab or query starts over from the selection. Reset during render
+  // rather than keying by listKey, so returning to an earlier query doesn't revive its old highlight.
+  const [highlight, setHighlight] = useState<Highlight | null>(null);
+  const [highlightListKey, setHighlightListKey] = useState(listKey);
+  if (highlightListKey !== listKey) {
+    setHighlightListKey(listKey);
+    setHighlight(null);
+  }
+  const activeRowKey = resolveActiveKey(rows, highlight, selectedKey);
+  const activeIndex = rows.findIndex(({ row }) => row.key === activeRowKey);
+  // Adopt a handed-over highlight, so later appends or reorders track the replacement and not the removed row.
+  if (highlight && activeRowKey !== highlight.key) {
+    setHighlight(activeRowKey === null ? null : { key: activeRowKey, index: activeIndex });
+  }
+  return { activeRowKey, activeIndex, setHighlight };
+}
+
 interface Highlight {
   readonly key: string;
   readonly index: number;
@@ -362,11 +374,12 @@ interface PickerListProps<T> {
   readonly loading: boolean;
   readonly onHighlight: (index: number) => void;
   readonly onPick: (entry: ListRow<T>) => void;
+  readonly onRunAction: (index: number) => void;
   readonly onNearEnd: () => void;
 }
 
 function PickerList<T>(props: PickerListProps<T>) {
-  const { listId, listKey, rows, activeIndex, selectedKey, onHighlight, onPick, onNearEnd } = props;
+  const { listId, listKey, rows, activeIndex, selectedKey, onHighlight, onPick, onRunAction, onNearEnd } = props;
   const listRef = useRef<HTMLUListElement>(null);
   const [atTop, setAtTop] = useState(true);
   const [atEnd, setAtEnd] = useState(true);
@@ -416,6 +429,7 @@ function PickerList<T>(props: PickerListProps<T>) {
               selected={entry.row.key === selectedKey}
               onHighlight={() => onHighlight(index)}
               onPick={() => onPick(entry)}
+              onRunAction={() => onRunAction(index)}
             />
           </Fragment>
         ))}
@@ -443,6 +457,7 @@ interface PickerOptionProps {
   readonly selected: boolean;
   readonly onHighlight: () => void;
   readonly onPick: () => void;
+  readonly onRunAction: () => void;
 }
 
 /** Wraps a disabled row in the reason tooltip, matching the Menu's disabled rows. */
@@ -473,7 +488,7 @@ function optionDescriptions(id: string, row: PickerRow, reason: string | undefin
   };
 }
 
-function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
+function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, onRunAction, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
   const descriptions = optionDescriptions(id, row, reason);
   return (
     <li
@@ -496,13 +511,13 @@ function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, reas
       )}
     >
       {/* A disabled row keeps its action for the pointer, so a starred row whose model went away can be unstarred. */}
-      <PickerOptionContent row={row} selected={selected} />
+      <PickerOptionContent row={row} selected={selected} onRunAction={onRunAction} />
       {descriptions.spans}
     </li>
   );
 }
 
-function PickerOptionContent({ row, selected }: { readonly row: PickerRow; readonly selected: boolean }) {
+function PickerOptionContent({ row, selected, onRunAction }: { readonly row: PickerRow; readonly selected: boolean; readonly onRunAction: () => void }) {
   return (
     <>
       {row.icon != null ? (
@@ -517,7 +532,7 @@ function PickerOptionContent({ row, selected }: { readonly row: PickerRow; reado
         ) : null}
       </span>
       {row.tag ? <span className="shrink-0 text-caption text-muted">{row.tag}</span> : null}
-      {row.action ? <PickerRowActionButton action={row.action} /> : null}
+      {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
       <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
         {selected ? <CheckIcon className="size-[1.4rem] text-ink" strokeWidth={1.5} /> : null}
       </span>
@@ -525,7 +540,7 @@ function PickerOptionContent({ row, selected }: { readonly row: PickerRow; reado
   );
 }
 
-function PickerRowActionButton({ action }: { readonly action: PickerRowAction }) {
+function PickerRowActionButton({ action, onRun }: { readonly action: PickerRowAction; readonly onRun: () => void }) {
   return (
     <button
       type="button"
@@ -535,7 +550,7 @@ function PickerRowActionButton({ action }: { readonly action: PickerRowAction })
       onClick={(event) => {
         // Running the action must never also pick the row underneath it.
         event.stopPropagation();
-        action.run();
+        onRun();
       }}
       onMouseDown={(event) => event.preventDefault()}
       className={cn(

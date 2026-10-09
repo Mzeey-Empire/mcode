@@ -74,6 +74,8 @@ function PagedPicker(props: Partial<PickerProps<Branch>> & { readonly pages?: nu
 function RemovablePicker({ selectedKey }: { readonly selectedKey?: string }) {
   const [names, setNames] = useState(["a", "b", "c", "d"]);
   return (
+    <>
+    <button type="button" onClick={() => setNames((current) => [...current, "e"])}>Add row</button>
     <Picker<string>
       query=""
       onQueryChange={() => {}}
@@ -88,6 +90,7 @@ function RemovablePicker({ selectedKey }: { readonly selectedKey?: string }) {
       })}
       onSelect={() => {}}
     />
+    </>
   );
 }
 
@@ -401,6 +404,22 @@ describe("Picker", () => {
     screen.getByRole("combobox").focus();
     await userEvent.keyboard("{Control>}d{/Control}");
     expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
+  });
+
+  it("hands the opening highlight to the row in its slot when its star is clicked without hovering", async () => {
+    render(<RemovablePicker selectedKey="c" />);
+    const c = screen.getByRole("option", { name: /^c/ });
+    await userEvent.click(c.querySelector("[data-slot=picker-row-action]") as HTMLElement);
+    expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
+  });
+
+  it("keeps a handed-over highlight on its new row when more rows arrive", async () => {
+    render(<RemovablePicker selectedKey="d" />);
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(screen.getByRole("option", { name: /^c/ })).toHaveAttribute("data-active");
+    await userEvent.click(screen.getByRole("button", { name: "Add row" }));
+    expect(screen.getByRole("option", { name: /^c/ })).toHaveAttribute("data-active");
   });
 
   it("hands a hovered row's highlight to the row in its slot when its action removes it", async () => {
