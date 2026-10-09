@@ -1,7 +1,7 @@
 import type { AgentTurnStatus, PermissionDecision, TurnOutcome, TurnRuntimePhase } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport/types";
 import type { NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/types";
-import { computeLiveStreamingText } from "../narrative/build-narrative";
+import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/build-narrative";
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
@@ -260,8 +260,18 @@ function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, 
     && previous.currentTurnHasNarrative === current.currentTurnHasNarrative;
 }
 
+/** Thoughts go through the fold's own row builder, because a thought that repeats the answer renders no row. */
 function hasLiveNarrative(input: TranscriptProjectionInput): boolean {
-  return input.toolCalls.length > 0 || (input.thoughtSegments?.length ?? 0) > 0;
+  if (input.toolCalls.length > 0) return true;
+  if ((input.thoughtSegments?.length ?? 0) === 0) return false;
+  return buildNarrativeItems({
+    toolCalls: [],
+    hooks: [],
+    thoughtSegments: input.thoughtSegments ?? [],
+    streamingText: "",
+    isAgentRunning: false,
+    committedAssistantBody: input.committedAssistantBody,
+  }).items.some((item) => item.type !== "hook" && item.type !== "delta");
 }
 
 /** Represents an item rendered in the virtualized chat list: messages, tool indicators, or streaming text. */
