@@ -109,18 +109,19 @@ describe("transcript narrative rows", () => {
   });
 
   it.each([
-    ["before records load", undefined],
+    ["before records load", undefined, undefined],
     ["after records load", { answer: { tools: [], hooks: [], thoughts: [{
       id: "thought", message_id: "answer", text: "Done", started_at: new Date(1000).toISOString(),
       ended_at: new Date(1100).toISOString(), sort_order: 0, is_final_response: 1,
-    }] } }],
-  ])("omits the fold when a settling turn's only thought is the answer, %s", (_, persistedNarrativeByMessage) => {
+    }] } }, undefined],
+    ["with a summary that counts the thought", undefined, { answer: { counts: { steps: 0, thoughts: 1, subagents: 0 }, durationMs: 100 } }],
+  ])("omits the fold when a settling turn's only thought is the answer, %s", (_, persistedNarrativeByMessage, turnSummariesByMessageId) => {
     const projected = createTranscriptItemProjector()({
       messages: [message("answer", "Done", "execution")],
       currentTurn: { threadId: "thread", executionId: "execution", messageId: "answer" },
       agentDisplayState: { phase: "completed" }, agentStartTime: 1000, streamingText: undefined, toolCalls: [],
       thoughtSegments: [{ text: "Done", startedAt: 1000, endedAt: 1100 }],
-      committedAssistantBody: "Done", persistedNarrativeByMessage,
+      committedAssistantBody: "Done", persistedNarrativeByMessage, turnSummariesByMessageId,
     });
     expect(projected.filter((item) => item.type === "work-fold")).toEqual([]);
   });

@@ -207,7 +207,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       responseTextIsStreaming: input.responseTextIsStreaming,
       persistedNarrativeByMessage: input.persistedNarrativeByMessage,
       turnSummariesByMessageId: input.turnSummariesByMessageId,
-      currentTurnHasNarrative: hasLiveNarrative(input),
+      currentTurnHasNarrative: settledLiveNarrativeHasRows(input),
     };
     const stableItems = sameStableTranscriptInput(previousStableInput, stableInput)
       ? previousStableItems
@@ -245,7 +245,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
 type StableTranscriptInput = Pick<TranscriptProjectionInput,
   "messages" | "persistedFilesChanged" | "latestTurnWithChanges" | "currentTurn" | "agentDisplayState"
   | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId"> & {
-  currentTurnHasNarrative: boolean;
+  currentTurnHasNarrative: boolean | undefined;
 };
 
 function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, current: StableTranscriptInput): boolean {
@@ -260,10 +260,17 @@ function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, 
     && previous.currentTurnHasNarrative === current.currentTurnHasNarrative;
 }
 
-/** Thoughts go through the fold's own row builder, because a thought that repeats the answer renders no row. */
 function hasLiveNarrative(input: TranscriptProjectionInput): boolean {
+  return input.toolCalls.length > 0 || (input.thoughtSegments?.length ?? 0) > 0;
+}
+
+/**
+ * Undefined when the turn still runs (it has no fold yet) or holds no live narrative, so records and the summary decide.
+ * Thoughts go through the fold's own row builder, because a thought that repeats the answer renders no row.
+ */
+function settledLiveNarrativeHasRows(input: TranscriptProjectionInput): boolean | undefined {
+  if (isAgentDisplayActive(input.agentDisplayState) || !hasLiveNarrative(input)) return undefined;
   if (input.toolCalls.length > 0) return true;
-  if ((input.thoughtSegments?.length ?? 0) === 0) return false;
   return buildNarrativeItems({
     toolCalls: [],
     hooks: [],
@@ -440,11 +447,11 @@ function terminalDisplayOutcome(state: AgentDisplayState): TurnOutcome | undefin
 }
 
 /**
- * Records decide when they are loaded, because the fold renders from them: a thought
- * that repeats the answer and hooks (shown in the actions row) produce no fold rows.
+ * Live rows, then loaded records, decide before summary counts, because the fold renders from them:
+ * a thought that repeats the answer and hooks (shown in the actions row) produce no fold rows.
  */
 function hasFoldableNarrative(message: Message, input: StableItemInput, summary: TurnSummary): boolean {
-  if (isCurrentResponse(message, input) && input.currentTurnHasNarrative === true) return true;
+  if (isCurrentResponse(message, input) && input.currentTurnHasNarrative !== undefined) return input.currentTurnHasNarrative;
   const records = input.persistedNarrativeByMessage?.[message.id];
   if (records) return hasFoldRows(records, message.content);
   return summary.counts.steps > 0 || summary.counts.thoughts > 0;
