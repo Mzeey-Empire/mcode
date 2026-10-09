@@ -9,7 +9,8 @@ import {
 import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 
 const committedPublications = z.object({ events: z.array(CanonicalAgentEventEnvelopeSchema) });
-function runtimeOperation<Input, Output>(name: string, input: z.ZodType<Input>, result: z.ZodType<Output>) {
+function runtimeOperation<Input, Output>(name: string, input: z.ZodType<Input, z.ZodTypeDef, unknown>,
+  result: z.ZodType<Output, z.ZodTypeDef, unknown>) {
   return databaseWriteOperation(name, input, committedPublications.extend({ result }));
 }
 

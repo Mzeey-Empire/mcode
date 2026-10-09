@@ -2608,6 +2608,7 @@ export class CanonicalAgentStore {
             approvalReviewReason: input.approvalReviewReason ?? "manual-requested",
             providerIdentities: sourceIdentities,
             startedAt: null,
+            providerStartedAt: null,
             endedAt: null,
             createdAt: startedAt,
             updatedAt: startedAt,

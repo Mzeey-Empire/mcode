@@ -39,7 +39,7 @@ function turn(
     approvalReviewMode: "manual",
     approvalReviewReason: "manual-requested",
     providerIdentities: [],
-    startedAt: STARTED_AT,
+    startedAt: STARTED_AT, providerStartedAt: null,
     endedAt,
     createdAt: STARTED_AT,
     updatedAt: endedAt ?? STARTED_AT,

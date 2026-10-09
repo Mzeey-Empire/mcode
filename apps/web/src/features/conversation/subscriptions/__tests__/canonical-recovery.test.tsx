@@ -37,7 +37,7 @@ function fixture() {
   const admission = event(2, 2, { type: "turn.created", turn: { id: TURN, threadId: THREAD,
     executionId: EXECUTION, status: "Pending", trigger: { kind: "user" }, permissionMode: "full",
     approvalReviewMode: "manual", approvalReviewReason: "manual-requested", providerIdentities: [],
-    startedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW } });
+    startedAt: null, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW } });
   const started = event(3, 3, { type: "turn.started", startedAt: NOW });
   const prefix = event(4, 4, { type: "item.recorded", item: { id: "closed-prefix", threadId: THREAD,
     turnId: TURN, kind: "reasoning", providerIdentities: [], createdAt: NOW, updatedAt: NOW,

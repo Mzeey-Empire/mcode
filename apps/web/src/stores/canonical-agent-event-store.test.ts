@@ -106,7 +106,7 @@ describe("canonical agent event residency guards", () => {
     state.turns.parent = {
       id: "parent", threadId, status: "Running", trigger: { kind: "user" },
       permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested",
-      providerIdentities: [], startedAt: NOW, endedAt: null, createdAt: NOW, updatedAt: NOW,
+      providerIdentities: [], startedAt: NOW, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW,
     };
     state.items.tool = {
       id: "tool", threadId, turnId: "parent", kind: "tool-call", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
@@ -138,7 +138,7 @@ describe("canonical agent event residency guards", () => {
     const state = createAgentModelState();
     state.turns.parent = { id: "parent", threadId, executionId, status: "Running", trigger: { kind: "user" },
       permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", providerIdentities: [],
-      startedAt: NOW, endedAt: null, createdAt: NOW, updatedAt: NOW };
+      startedAt: NOW, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW };
     const tail = [
       { eventId: "retained-answer", routing: { threadId, turnId: "parent", executionId, itemId: "answer" }, sourceProviderId: "codex", sourceIdentities: [],
         acceptedSequence: 1, progressPosition: { epoch: "runtime-1", sequence: 1 }, serverTimestamps: { acceptedAt: NOW },
@@ -228,7 +228,7 @@ describe("canonical agent event residency guards", () => {
           approvalReviewMode: "manual",
           approvalReviewReason: "manual-requested",
           providerIdentities: [],
-          startedAt: null,
+          startedAt: null, providerStartedAt: null,
           endedAt: null,
           createdAt: NOW,
           updatedAt: NOW,

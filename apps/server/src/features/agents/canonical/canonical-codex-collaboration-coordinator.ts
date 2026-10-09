@@ -1458,6 +1458,7 @@ function newChildTurn(
     approvalReviewReason: "manual-requested",
     providerIdentities: [...providerIdentities],
     startedAt: null,
+    providerStartedAt: null,
     endedAt: null,
     createdAt: now,
     updatedAt: now,

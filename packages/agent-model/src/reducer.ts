@@ -93,6 +93,8 @@ const AGENT_EVENT_REDUCERS: Record<AgentEventType, AgentEventReducer> = {
     reduceTurnCreated(state, event as AgentEventFor<"turn.created">, acceptedInputState),
   "turn.started": (state, event, acceptedInputState) =>
     reduceTurnStarted(state, event as AgentEventFor<"turn.started">, acceptedInputState),
+  "turn.provider-started": (state, event, acceptedInputState) =>
+    reduceTurnProviderStarted(state, event as AgentEventFor<"turn.provider-started">, acceptedInputState),
   "turn.completed": (state, event, acceptedInputState) =>
     reduceTurnCompleted(state, event as AgentEventFor<"turn.completed">, acceptedInputState),
   "turn.cancelled": (state, event, acceptedInputState) =>
@@ -282,6 +284,33 @@ function reduceTurnStarted(
     startedAt: event.payload.startedAt,
     endedAt: null,
   });
+}
+
+function reduceTurnProviderStarted(
+  state: AgentModelState,
+  event: AgentEventFor<"turn.provider-started">,
+  acceptedInputState: AcceptedInputState,
+): AgentReducerResult {
+  const turnId = event.routing.turnId;
+  const currentTurn = turnId ? state.turns[turnId] : undefined;
+  if (!currentTurn || currentTurn.threadId !== event.routing.threadId) {
+    return { state, outcome: "routing-conflict" };
+  }
+  // The first frame is a one-time fact: a later claim never moves it.
+  if (currentTurn.providerStartedAt !== null) {
+    return { state: { ...state, ...acceptedInputState }, outcome: "duplicate" };
+  }
+  if (TERMINAL_TURN_STATUSES.has(currentTurn.status)) {
+    return { state: { ...state, ...acceptedInputState }, outcome: "terminal-outcome-confirmed" };
+  }
+  return {
+    state: {
+      ...state,
+      turns: { ...state.turns, [currentTurn.id]: { ...currentTurn, providerStartedAt: event.payload.at, updatedAt: event.payload.at } },
+      ...acceptedInputState,
+    },
+    outcome: "applied",
+  };
 }
 
 function reduceTurnCompleted(
