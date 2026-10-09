@@ -1,7 +1,7 @@
 /**
  * Owns annotation dismissal, visual-control callbacks and picker effects. The parent invokes it after live-chrome publication to preserve effect order.
  */
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useEffectEvent } from "react";
 import type { PreviewAnnotationVisualProposal } from "@mcode/contracts";
 import { usePreviewDesignModeStore } from "../state/previewDesignModeStore";
 import { usePreviewAnnotationStore } from "../state/previewAnnotationStore";
@@ -248,12 +248,18 @@ export function useDesignPicker({
     }
   };
 
+  // `capture` is a new object on every render, and starting a pick flips its
+  // busy flag. Depending on it re-armed the pick on that render, and each new
+  // request makes the desktop host abort the pending pick and reinject the
+  // guest overlay, so the hover highlight never appeared.
+  const requestElementPick = useEffectEvent(() => capture.onAddElementAnnotation());
+
   useEffect(() => {
     if (!designModeActive || hasOpenBubble) return;
     let cancelled = false;
     const pickNext = async (): Promise<void> => {
       if (!usePreviewDesignModeStore.getState().isActive(threadId)) return;
-      const result = await capture.onAddElementAnnotation();
+      const result = await requestElementPick();
       if (cancelled) return;
       if (!result.ok) {
         // Cancel / error / Esc-in-guest: exit the mode entirely so the
@@ -270,7 +276,6 @@ export function useDesignPicker({
     designModeActive,
     hasOpenBubble,
     threadId,
-    capture,
     clearTransientAnnotationState,
     designModeSetActive,
   ]);
