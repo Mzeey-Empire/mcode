@@ -1,5 +1,5 @@
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
-import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
+import { GitFork } from "lucide-react";
 import type { RecoveryIncident, SelectedTextComment } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,10 +14,8 @@ import { ConversationHoldOverlay } from "@/components/chat/ConversationHoldOverl
 import { HandoffDocDialog, useHandoffFallback } from "@/components/chat/handoff-fallback";
 import { HeaderActions } from "@/components/chat/HeaderActions";
 import { InterruptedSessionsBanner } from "@/components/chat/InterruptedSessionsBanner";
-import { NewThreadProjectPicker } from "@/components/chat/NewThreadProjectPicker";
 import { PlanQuestionWizard } from "@/components/chat/PlanQuestionWizard";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
-import { McodeLogo } from "@/components/brand/McodeLogo";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
@@ -38,29 +36,7 @@ import { TurnSavingNotice } from "../../saving/TurnSavingNotice";
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
 import { tryGetConversationResidency } from "../../residency/conversation-residency";
 import type { ChatViewState } from "./useChatViewState";
-
-const NEW_THREAD_STARTERS = [
-  {
-    label: "Explore and understand code",
-    prompt: "Explore this codebase and explain how it works.",
-    icon: ScanSearch,
-  },
-  {
-    label: "Build a new feature, app, or tool",
-    prompt: "Build a new feature, app, or tool in this project.",
-    icon: Hammer,
-  },
-  {
-    label: "Review code and suggest changes",
-    prompt: "Review this codebase and suggest concrete improvements.",
-    icon: SearchCode,
-  },
-  {
-    label: "Fix issues and failures",
-    prompt: "Find and fix issues or failures in this project.",
-    icon: Bug,
-  },
-] as const;
+import { NewThreadStartColumn } from "./NewThreadStartColumn";
 
 /** Actions that the visual chat surface routes to stores, transport, and composer state. */
 export interface ChatViewInteractions {
@@ -88,8 +64,6 @@ export interface ChatViewInteractions {
   onSelectedTextCommentSourceUnavailable: (request: SelectedTextCommentSourceNavigationRequest) => void;
   /** Moves a restored source editor to its card when source loading fails. */
   onSelectedTextCommentEditorSourceUnavailable: (editor: SelectedTextCommentEditorDraft) => void;
-  /** Prefills the new-thread composer with a starter prompt. */
-  onPromptSelect: (text: string) => void;
   /** Stops the active agent after saving has stalled. */
   onStopSafely: () => Promise<void>;
   /** Continues a stalled turn without saving its recovery state. */
@@ -144,52 +118,6 @@ export interface ChatViewSurfaceProps {
   onOpenSubagents?: (target: SubagentRosterTarget) => void;
   /** Error dismissed within the active thread. */
   dismissedError: string | null;
-}
-
-/** Renders the welcome canvas for a workspace without an active thread. */
-function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: string; onPromptSelect: (text: string) => void }) {
-  return (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
-      <div key={projectName ?? "projectless"} data-testid="new-thread-welcome" className="animate-fade-up-in flex w-full max-w-[80rem] flex-col items-center gap-7 text-center">
-        <McodeLogo variant="newThread" markOnly />
-        <h1 aria-label={projectName ? `What should we build in ${projectName}?` : undefined} className="text-balance text-2xl font-medium tracking-[-0.025em] text-ink sm:text-2xl">
-          {projectName ? (
-            <>
-              What should we build in{" "}
-              <NewThreadProjectPicker
-                placement="bottom"
-                triggerTooltip="Change project"
-                trigger={
-                  <Button type="button" variant="link" size="compact" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus/60 sm:!text-2xl">
-                    {projectName}<span className="text-ink">?</span>
-                  </Button>
-                }
-              />
-            </>
-          ) : "What should we work on?"}
-        </h1>
-        <div data-testid="new-thread-starters" className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(18rem,100%),1fr))] gap-3">
-          {NEW_THREAD_STARTERS.map(({ label, prompt, icon: Icon }) => (
-            <Button key={label} type="button" variant="outline" onClick={() => onPromptSelect(prompt)} className="group h-auto min-h-24 flex-col items-start justify-between rounded-xl border-border/70 bg-transparent px-4 py-4 text-left shadow-none hover:border-primary/35 hover:bg-selected/45">
-              <Icon className="size-4 text-primary transition-transform duration-200 group-hover:-translate-y-0.5 motion-reduce:transform-none" aria-hidden />
-              <span className="w-full max-w-[18ch] text-wrap text-sm font-medium leading-5 text-ink/90">{label}</span>
-            </Button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Renders the welcome canvas and new-thread composer. */
-function NewThreadSurface({ state, onPromptSelect }: { state: ChatViewState; onPromptSelect: (text: string) => void }) {
-  return (
-    <div className="relative flex h-full min-h-0 flex-col bg-background">
-      <CanvasHeader />
-      <NewThreadWelcome projectName={state.activeWorkspaceName || undefined} onPromptSelect={onPromptSelect} />
-      <Composer isNewThread workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />
-    </div>
-  );
 }
 
 /** Renders a selected row while the server creates the backing thread. */
@@ -776,7 +704,7 @@ export function ChatViewSurface(props: ChatViewSurfaceProps) {
   });
   const startupDismissed = useThreadStartupStore((s) =>
     startupLookup.startup ? s.dismissedStartupIds.has(startupLookup.startup.startupId) : false);
-  if (!state.activeThreadId) return <NewThreadSurface state={state} onPromptSelect={props.interactions.onPromptSelect} />;
+  if (!state.activeThreadId) return <NewThreadStartColumn projectName={state.activeWorkspaceName || undefined} workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />;
   if (!state.activeThread) return <MissingThreadSurface />;
   if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <ThreadPreparingShell thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} />;
   return <ActiveThreadSurface {...props} />;

@@ -148,9 +148,10 @@ describe("App", () => {
     await waitFor(() => {
       const main = screen.getByRole("main");
       expect(
-        within(main).getByRole("img", { name: "Mcode" }),
+        within(main).getByRole("heading", { name: "What should we build in a project?" }),
       ).toBeInTheDocument();
     });
+    expect(within(screen.getByRole("main")).queryByRole("img", { name: "Mcode" })).toBeNull();
   });
 
   it("gives the floating sidebar an opaque page surface", () => {
@@ -322,7 +323,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(
-        within(screen.getByRole("main")).getByText("What should we work on?"),
+        within(screen.getByRole("main")).getByRole("heading", { name: "What should we build in a project?" }),
       ).toBeInTheDocument();
     });
     expect(

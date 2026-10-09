@@ -2020,18 +2020,14 @@ export async function waitForAutomaticReviewFooter(page, deadline = Date.now() +
 export async function openNewThreadForWorkspace(page, workspaceName) {
   const newThread = page.getByTestId("sidebar-new-thread");
   await newThread.click();
-  await page.getByTestId("new-thread-welcome").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByTestId("new-thread-start-column").waitFor({ state: "visible", timeout: 15_000 });
   await selectWorkspaceForNewThread(page, workspaceName);
   await waitForNewThreadWelcome(page, workspaceName);
 }
 
-/** Selects the workspace from either empty-thread project picker state. */
+/** Selects the workspace through the new-thread heading's project slot. */
 export async function selectWorkspaceForNewThread(page, workspaceName) {
-  const activeProjectPicker = page.getByTestId("new-thread-active-project-picker");
-  const projectPicker = await activeProjectPicker.isVisible().catch(() => false)
-    ? activeProjectPicker
-    : page.getByTestId("new-thread-project-picker");
-  await projectPicker.click();
+  await page.getByTestId("new-thread-project-slot").click();
   await page.getByRole("option", { name: workspaceName, exact: true }).click();
 }
 

@@ -523,7 +523,6 @@ NodeTest.test("opens a projectless new thread through the sidebar and selects it
   const clicks = [];
   const page = {
     getByTestId: (testId) => ({
-      isVisible: async () => testId === "new-thread-active-project-picker" ? false : true,
       click: async () => { clicks.push(testId); },
       waitFor: async () => { clicks.push(`${testId}:visible`); },
     }),
@@ -533,7 +532,7 @@ NodeTest.test("opens a projectless new thread through the sidebar and selects it
     }),
   };
   await openNewThreadForWorkspace(page, "Provider completeness");
-  NodeAssertStrict.deepEqual(clicks, ["sidebar-new-thread", "new-thread-welcome:visible", "new-thread-project-picker", "option:Provider completeness", "heading:What should we build in Provider completeness?:visible"]);
+  NodeAssertStrict.deepEqual(clicks, ["sidebar-new-thread", "new-thread-start-column:visible", "new-thread-project-slot", "option:Provider completeness", "heading:What should we build in Provider completeness?:visible"]);
 });
 
 NodeTest.test("aggregates focused gates and every failed provider surface", () => {

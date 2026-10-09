@@ -3,7 +3,6 @@ import { MAX_THREAD_SUBSCRIPTIONS } from "@mcode/contracts";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { OVERVIEW_CANVAS_RESERVE } from "@/lib/composer-layout";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useActiveWorkspaceThread, useParentThreadExists } from "@/features/projects/state/workspace-selectors";
@@ -100,7 +99,6 @@ export function useChatViewState() {
   const historyLoading = useActiveThreadRecord((record) => record.loading);
   const sessionError = useActiveThreadRecord((record) => record.error);
   const sessionErrorSource = useActiveThreadRecord((record) => record.errorSource);
-  const setPendingPrefill = useComposerDraftStore((state) => state.setPendingPrefill);
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   const activeThread = useActiveWorkspaceThread((thread) => thread);
   const parentThreadExists = useParentThreadExists(activeThread?.parent_thread_id);
@@ -158,7 +156,6 @@ export function useChatViewState() {
     lostProgress,
     sessionError,
     sessionErrorSource,
-    setPendingPrefill,
     setActiveThread,
     setForkMode,
     targetPaintable: effectiveTargetPaintable,
