@@ -34,7 +34,7 @@ describe("PlanExecutionState", () => {
     state.feedText(fenced.slice(19));
     expect(state.consumeAssistantMessage("Summary")).toEqual({
       title: "Login plan", contentMd: markdown,
-      sectionsJson: '[{"id":"s1","title":"Implementation","level":2}]', changeSummary: null,
+      captureSource: "fence",
     });
     state.markPlanPersisted();
     expect(state.needsAssistantMaterialization()).toBe(false);
@@ -60,7 +60,7 @@ describe("PlanExecutionState", () => {
     if (order === "fence-first") state.handlePlanCapture(capture);
     expect(state.consumeAssistantMessage(fenced)).toEqual({
       title: "Native plan", contentMd: capture.markdown,
-      sectionsJson: '[{"id":"s1","title":"Deploy","level":2}]', changeSummary: null,
+      captureSource: "native",
     });
     state.markPlanPersisted();
     state.handlePlanCapture(capture);
@@ -81,7 +81,7 @@ describe("PlanExecutionState", () => {
     state.handlePlanCapture({ markdown: body, source: "native" });
     expect(state.consumeAssistantMessage("Summary")).toEqual({
       title: "Actual title", contentMd: body,
-      sectionsJson: '[{"id":"s1","title":"Context","level":2},{"id":"s2","title":"Steps","level":2}]', changeSummary: null,
+      captureSource: "native",
     });
   });
 
@@ -91,7 +91,7 @@ describe("PlanExecutionState", () => {
     expect(state.consumeAssistantMessage("````mcode-plan\n# Unclosed")).toBeNull();
     state.handlePlanCapture({ markdown: "# Small plan\nDo it.", source: "native" });
     expect(state.consumeAssistantMessage("Summary")).toEqual({
-      title: "Small plan", contentMd: "# Small plan\nDo it.", sectionsJson: "[]", changeSummary: null,
+      title: "Small plan", contentMd: "# Small plan\nDo it.", captureSource: "native",
     });
   });
 
@@ -106,7 +106,7 @@ describe("PlanExecutionState", () => {
     expect(state.consumeAssistantMessage(fenced)).toMatchObject({ title, contentMd: body });
   });
 
-  it.each(["   ", "x".repeat(256 * 1024 + 1)])("retains the fence when native capture is unusable", (body) => {
+  it.each(["   ", "x".repeat(64 * 1024 + 1)])("retains the fence when native capture is unusable", (body) => {
     const state = new PlanExecutionState();
     state.beginOutputGeneration();
     state.handlePlanCapture({ markdown: body, source: "native" });
@@ -121,16 +121,14 @@ describe("PlanExecutionState", () => {
     expect(state.finishTurn()).toBeNull();
   });
 
-  it("bounds navigation sections while retaining the complete markdown", () => {
+  it("retains every section in the complete markdown", () => {
     const state = new PlanExecutionState();
     state.beginOutputGeneration();
     const body = "# Plan\n" + Array.from({ length: 150 }, (_, index) => `## Step ${index}\n`).join("");
     state.handlePlanCapture({ markdown: body, source: "native" });
     const output = state.consumeAssistantMessage("Summary");
     expect(output?.contentMd).toBe(body);
-    expect(JSON.parse(output?.sectionsJson ?? "null")).toEqual(Array.from({ length: 128 }, (_, index) => ({
-      id: `s${index + 1}`, title: `Step ${index}`, level: 2,
-    })));
+    expect(output).toEqual({ title: "Plan", contentMd: body, captureSource: "native" });
   });
 
   it("forks partial fences without consuming accepted state", () => {

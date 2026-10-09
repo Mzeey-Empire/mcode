@@ -128,6 +128,35 @@ describe("successful database migration recovery", () => {
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
 
+  it("backfills legacy plans as ready agent versions and enforces per-thread version uniqueness", () => {
+    const current = NodePath.join(process.cwd(), "drizzle");
+    const previous = NodePath.join(directory, "drizzle-through-0070");
+    copyMigrationsThrough(current, previous, "0070_lyrical_stellaris");
+    const db = new Database(databasePath, { strict: true });
+    const id = "00000000-0000-4000-8000-000000000071";
+    const createdAt = "2026-10-01T00:00:00.000Z";
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(previous) });
+      db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("plan-ws", "Plans", "/fixture");
+      db.prepare("INSERT INTO threads (id, workspace_id, title, branch) VALUES (?, ?, ?, ?)").run("plan-thread", "plan-ws", "Plan", "main");
+      db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES (?, ?, ?, ?, ?)").run("plan-message", "plan-thread", "assistant", "Summary", 1);
+      db.prepare("INSERT INTO plans (id, thread_id, message_id, version, title, content_md, sections_json, change_summary, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(id, "plan-thread", "plan-message", 1, "Plan", "# Plan", "[]", "old", "draft", createdAt);
+      migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
+      expect(db.prepare("SELECT * FROM plans WHERE id = ?").get(id)).toEqual({
+        id, thread_id: "plan-thread", message_id: "plan-message", version: 1, title: "Plan", content_md: "# Plan",
+        author: "agent", provider_id: null, capture_source: "fence", base_version_id: null,
+        revision: 0, native_plan_file_json: null, status: "ready", created_at: createdAt, updated_at: createdAt, accepted_at: null,
+      });
+      expect(() => db.prepare("INSERT INTO plans (id, thread_id, version, title, content_md, author, capture_source) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run("duplicate", "plan-thread", 1, "Duplicate", "", "user", "edit")).toThrow();
+      db.prepare("INSERT INTO plans (id, thread_id, message_id, version, title, content_md, author, capture_source) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)")
+        .run("draft", "plan-thread", 2, "Edited", "# Edited", "user", "edit");
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally { db.close(true); }
+  });
+
   it("keeps five generations and preserves public text identifiers", () => {
     const originalDatabase = new Database(databasePath, { strict: true });
     originalDatabase.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");

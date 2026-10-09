@@ -93,7 +93,7 @@ import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
 import { RecoveryIncidentSchema } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
-import { PlanStatusSchema, PlanRecordSchema, PlanActionSchema } from "../models/plan.js";
+import { PlanSaveVersionSchema, PlanVersionSchema, PlanActionSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
 import { ReviewComparisonSchema, ReviewStateSchema } from "../models/review-comparison.js";
 import {
@@ -1115,19 +1115,15 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ threadId: z.string() }),
     result: z.void(),
   },
-  /** Update the status of a persisted plan (e.g. accept or supersede). */
-  "plan.updateStatus": {
-    params: z.object({
-      planId: z.string(),
-      status: PlanStatusSchema(),
-    }),
-    result: z.void(),
+  "plan.saveVersion": {
+    params: PlanSaveVersionSchema(),
+    result: PlanVersionSchema(),
   },
-  "plan.list": {
+  "plan.snapshot": {
     params: z.object({
       threadId: z.string(),
     }),
-    result: z.array(PlanRecordSchema()),
+    result: z.object({ versions: z.array(PlanVersionSchema()) }),
   },
   "permission.respond": {
     params: z.object({

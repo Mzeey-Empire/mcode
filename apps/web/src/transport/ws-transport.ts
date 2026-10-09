@@ -1422,7 +1422,7 @@ export function createWsTransport(
       ),
 
     getThreadPlans: (threadId: string) =>
-      rpc<import("@mcode/contracts").PlanRecord[]>("plan.list", { threadId }),
+      rpc<{ versions: import("@mcode/contracts").PlanVersion[] }>("plan.snapshot", { threadId }).then((snapshot) => snapshot.versions),
 
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>

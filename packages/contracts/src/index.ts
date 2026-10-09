@@ -880,17 +880,21 @@ export type {
 // Plan output
 export {
   NativePlanFileOutcomeSchema,
-  PlanSectionNavSchema,
-  PlanStatusSchema,
+  NativePlanFileRefSchema,
+  PLAN_MAX_CONTENT_CHARS,
+  PlanVersionStatusSchema,
+  PlanSaveVersionSchema,
+  PlanSaveErrorSchema,
   PlanActionSchema,
-  PlanRecordSchema,
+  PlanVersionSchema,
 } from "./models/plan.js";
 export type {
   NativePlanFileOutcome,
-  PlanSectionNav,
-  PlanStatus,
+  PlanVersionStatus,
+  PlanSaveVersion,
+  PlanSaveError,
   PlanAction,
-  PlanRecord,
+  PlanVersion,
 } from "./models/plan.js";
 
 // Permissions

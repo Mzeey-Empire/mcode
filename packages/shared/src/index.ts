@@ -11,6 +11,7 @@ export {
 export {
   newHandoffUlid,
   resolveThreadHandoffsDir,
+  resolveThreadPlanFile,
   resolveHandoffDir,
   resolveThreadAttachmentsDir,
 } from "./paths/handoffs.js";

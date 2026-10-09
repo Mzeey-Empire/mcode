@@ -18,6 +18,7 @@ Internal guides are grouped in topic subfolders. Use this index to find a guide.
 - [Chat fork handoff](internals/conversation/chat-fork-handoff.md)
 - [Composer drafts](internals/conversation/composer-drafts.md): draft ownership, attachment transfer, and dispatch restoration
 - [Composer overlays](internals/conversation/composer-overlays.md)
+- [Plan records](internals/conversation/plan-records.md): writer ownership and durable versions
 
 ### Providers
 
@@ -93,6 +94,7 @@ Point-in-time decisions. New ADRs take the next free number below. Numbers
 - [0020: Repeatable terminal tabs in right-panel order](adr/0020-repeatable-terminal-tabs-in-right-panel-order.md)
 - [0021: Thread control authority and lifecycle](adr/0021-thread-control-authority-and-lifecycle.md)
 - [0022: Server-owned streaming durability and provider-native recovery](adr/0022-server-owned-streaming-durability-and-provider-native-recovery.md)
+- [0023: Durable plan versions](adr/0023-durable-plan-versions.md)
 
 ## Agent runbooks
 

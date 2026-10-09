@@ -4,7 +4,7 @@ import { ThreadStatusSchema } from "../models/enums.js";
 import { ThreadSchema } from "../models/thread.js";
 import { ProviderIdSchema, SettingsSchema } from "../models/settings.js";
 import { PlanQuestionSchema } from "../models/plan-questions.js";
-import { PlanRecordSchema } from "../models/plan.js";
+import { PlanVersionSchema } from "../models/plan.js";
 import { ChecksStatusSchema } from "../github.js";
 import { PermissionRequestSchema, PermissionDecisionSchema } from "../models/permission.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
@@ -198,10 +198,10 @@ export const WS_CHANNELS = {
     threadId: z.string(),
     assistantMessageId: z.string(),
   }),
-  /** Emitted when the agent generates a structured plan output. */
-  "plan.generated": z.object({
+  /** A captured, saved or transitioned plan version. */
+  "plan.versionUpserted": z.object({
     threadId: z.string(),
-    plan: PlanRecordSchema(),
+    version: PlanVersionSchema(),
   }),
   /** A tool permission request awaiting user decision. */
   "permission.request": PermissionRequestSchema(),

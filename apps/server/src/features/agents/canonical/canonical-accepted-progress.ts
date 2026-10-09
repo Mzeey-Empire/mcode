@@ -10,7 +10,7 @@ import {
   type CanonicalSubagentRosterRequest, type CanonicalSubagentStopRequest, type CollaborationObservationChange,
   AgentEventSchema,
   MessageSchema, HookExecutionRecordSchema,
-  PlanRecordSchema, type PlanRecord, type PlanStatus,
+  type PlanVersion,
 } from "@mcode/contracts";
 import { broadcast, subscribedThreadIds } from "../../../application/transport/push.js";
 import { BoundedProgressRetention } from "../execution/progress-retention-budget.js";
@@ -39,6 +39,9 @@ import { prepareAcceptedFeatureObservations, prepareAcceptedThreadSystemFeatures
 import type { AcceptedFeatureWriteMetadata } from "./accepted-feature-write.js";
 import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js";
 import type { StoredTask } from "../orchestration/persistence/task-repo.js";
+
+import { mergePlanVersions } from "../planning/merge-plan-versions.js";
+import type { PlanFileWriter } from "../planning/plan-file-writer.js";
 
 type AcceptedExecutionWriteIntent = ({ readonly kind: "execution"; readonly operation: ExecutionSemanticOperation }
   | { readonly kind: "plan-answer"; readonly assistant: Message }
@@ -82,7 +85,8 @@ export class CanonicalAcceptedProgress {
   private closing = false;
   private readonly deletingThreads = new Set<string>();
 
-  constructor(private readonly canonical: CanonicalAgentBoundary, private readonly writer: CanonicalAgentWriterClient) {
+  constructor(private readonly canonical: CanonicalAgentBoundary, private readonly writer: CanonicalAgentWriterClient,
+    private readonly planFiles?: PlanFileWriter) {
     this.saves = new AcceptedSaveScheduler({ writer: { append: (batch) => this.save(batch) },
       maxAttempts: 6, retryDelayMs: 1_000, retryable: isTransientSaveFailure,
       onSaved: async (batch, receipt) => this.saved(batch, receipt),
@@ -222,7 +226,7 @@ export class CanonicalAcceptedProgress {
     try {
       this.publishSaving(operation.execution.threadId);
       this.publishPlanQuestions(operation);
-      if (features.planGenerated) broadcast("plan.generated", features.planGenerated);
+      for (const version of features.planRecords ?? []) broadcast("plan.versionUpserted", { threadId: version.threadId, version });
     } catch (error) {
       logger.warn("Accepted progress feature publication failed", { threadId: operation.execution.threadId,
         executionId: operation.execution.executionId, errorType: error instanceof Error ? error.name : "unknown" });
@@ -243,17 +247,18 @@ export class CanonicalAcceptedProgress {
     }
   }
 
-  /** Plan cards and controls read their assigned identities before saving finishes. */
-  listPlans(threadId: string): PlanRecord[] | undefined {
+  /** Merge saved versions even while a head exists, without rolling status backward. */
+  reloadPlans(threadId: string): PlanVersion[] {
+    const saved = this.canonical.loadAcceptedFeatureSeed(threadId).plans;
     const thread = this.threads.get(threadId);
-    if (!thread) return undefined;
-    if (!thread.head) {
-      // Legacy status writes have no canonical event to update this owner after the repository commits.
-      const saved = new Map(this.canonical.loadAcceptedFeatureSeed(threadId).plans.map((plan) => [plan.id, plan]));
-      thread.features.plans = thread.features.plans.map((plan) =>
-        this.planExecution(thread, threadId, plan.id) ? plan : saved.get(plan.id) ?? plan);
-    }
+    if (!thread) return saved;
+    thread.features.plans = mergePlanVersions(thread.features.plans, saved);
     return structuredClone(thread.features.plans);
+  }
+
+  /** Plan readers retain live captures until their database projection catches up. */
+  listPlans(threadId: string): PlanVersion[] {
+    return this.reloadPlans(threadId);
   }
 
   /** Task hydration reads the accepted board while its compatibility row is still queued. */
@@ -263,49 +268,6 @@ export class CanonicalAcceptedProgress {
     const item = thread.state.items[`taskBoard:${threadId}`];
     return item?.payload.projection === "taskBoard" && Array.isArray(item.payload.tasks)
       ? item.payload.tasks.map((task) => storedTaskFromAccepted(task)) : structuredClone(thread.features.tasks);
-  }
-
-  /** Plan status changes are ordered behind their accepted message and plan identity. */
-  updatePlanStatus(planId: string, status: PlanStatus): boolean {
-    this.assertOpen();
-    for (const [threadId, thread] of this.threads) {
-      const index = thread.features.plans.findIndex((plan) => plan.id === planId);
-      const existing = thread.features.plans[index];
-      if (!existing) continue;
-      this.assertAdmission(thread);
-      const ownership = this.planExecution(thread, threadId, planId);
-      if (!ownership) return false;
-      const plan = PlanRecordSchema().parse({ ...existing, status });
-      const { execution, phase, nativeCursor } = ownership;
-      const operationId = `plan-status:${NodeCrypto.randomUUID()}`;
-      const itemId = operationId;
-      const now = new Date().toISOString();
-      this.acceptAuxiliary(thread, operationId, execution, [{ eventId: `${operationId}:record`,
-        routing: { ...execution, itemId }, sourceProviderId: thread.state.threads[threadId]?.providerId ?? "server", sourceIdentities: [],
-        payload: { type: "item.recorded", item: { id: itemId, threadId, turnId: execution.turnId, kind: "system",
-          providerIdentities: [], payload: { projection: "plan", plan }, createdAt: now, updatedAt: now } },
-      }], phase, nativeCursor, { planRecords: [plan] });
-      thread.features.plans[index] = plan;
-      return true;
-    }
-    return false;
-  }
-
-  private planExecution(thread: ProgressThread, threadId: string, planId: string) {
-    if (thread.head) return auxiliaryExecution(thread, threadId);
-    const turn = this.savedPlanTurn(threadId, planId);
-    if (!turn?.executionId || turn.threadId !== threadId) return undefined;
-    const checkpoint = this.canonical.loadCheckpoint(turn.executionId);
-    return { execution: { threadId, turnId: turn.id, executionId: turn.executionId },
-      phase: checkpoint?.phase ?? "finalized", nativeCursor: checkpoint?.nativeCursor ?? null };
-  }
-
-  private savedPlanTurn(threadId: string, planId: string) {
-    const item = this.canonical.loadItem(`plan:${planId}`);
-    if (item?.threadId !== threadId || item.payload.projection !== "plan") return undefined;
-    const plan = PlanRecordSchema().safeParse(item.payload.plan);
-    if (!plan.success || plan.data.id !== planId) return undefined;
-    return this.canonical.loadTurn(item.turnId);
   }
 
   private advanceMessageSequence(thread: ProgressThread, events: readonly import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[]): void {
@@ -851,7 +813,14 @@ export class CanonicalAcceptedProgress {
       for (const waiter of thread.waiters) waiter.resolve();
       thread.waiters.clear();
     }
+    await this.projectSavedPlans(batch);
     await this.retireSavedReceipts(batch, completed, thread);
+  }
+
+  private async projectSavedPlans(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): Promise<void> {
+    if (!batch.write.features?.planRecords?.length) return;
+    this.reloadPlans(batch.execution.threadId);
+    await this.planFiles?.write(batch.execution.threadId);
   }
 
   private async retireSavedReceipts(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>,
@@ -1007,7 +976,7 @@ function compatibilityFields(write: AcceptedExecutionWriteIntent, final: boolean
 }
 
 function featureWriteMetadata(features: AcceptedFeatureObservations): AcceptedFeatureWriteMetadata {
-  return { threadPatch: features.threadPatch, planRecords: features.planRecords,
+  return { threadPatch: features.threadPatch, planRecords: features.planRecords, nativePlanFile: features.nativePlanFile,
     expiredNoticeMessageIds: features.expiredNoticeMessageIds,
     ...(Object.hasOwn(features, "noticeSessionId") ? { noticeSession: { sessionId: features.noticeSessionId ?? null } } : {}) };
 }

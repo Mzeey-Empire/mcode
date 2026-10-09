@@ -4,9 +4,16 @@ import {
   resolveThreadHandoffsDir,
   resolveHandoffDir,
   resolveThreadAttachmentsDir,
+  resolveThreadPlanFile,
 } from "../handoffs.js";
 
 describe("handoffs paths", () => {
+  it("keeps plan files in the thread directory and rejects path traversal", () => {
+    expect(resolveThreadPlanFile("/data", "t_1").replace(/\\/g, "/")).toBe("/data/threads/t_1/plan.md");
+    for (const id of ["", ".", "..", "../other", "..\\other", "/absolute", "C:relative", "bad\0id"]) {
+      expect(() => resolveThreadPlanFile("/data", id)).toThrow();
+    }
+  });
   it("newHandoffUlid produces a 26-char Crockford Base32 string", () => {
     const ulid = newHandoffUlid();
     expect(ulid).toHaveLength(26);

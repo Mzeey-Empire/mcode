@@ -1,5 +1,5 @@
 import { ListChecks, X } from "lucide-react";
-import type { PlanRecord } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
@@ -13,7 +13,7 @@ interface PlanPreviewProps {
   /** Active thread id that owns the previewed plan. */
   threadId: string;
   /** Session-local preview metadata for one live-generated plan version. */
-  preview: Pick<PlanRecord, "id" | "version" | "title">;
+  preview: Pick<PlanVersion, "id" | "version" | "title">;
 }
 
 /** Composer-adjacent preview for a live-generated plan version. */

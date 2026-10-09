@@ -129,7 +129,7 @@ describe("CodexLiveEventEffects", () => {
     const result = prepare("message", { content: "Provider prose", tokens: null });
     expect(result.effects.planOutput).toEqual({ title: "Login plan",
       contentMd: plan,
-      sectionsJson: '[{"id":"s1","title":"Implementation","level":2}]', changeSummary: null });
+      captureSource: "fence" });
     expect(result.effects.message?.content).toBe("Provider prose");
     expect(result.publication.event).toMatchObject({ messageId: result.effects.message?.messageId });
   });

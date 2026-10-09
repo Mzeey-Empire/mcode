@@ -3,7 +3,7 @@ import {
   getThreadRecord,
   patchThreadRecord,
 } from "@/stores/thread-record";
-import type { PlanRecord } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type {
   ThreadHydratorTransport,
@@ -39,7 +39,7 @@ export interface AuxiliaryHydratorDeps {
   getWorkspaceThread: (threadId: string) => HydratorWorkspaceThread | undefined;
   getTasksForThread: (threadId: string) => readonly TaskItem[];
   setTasksForThread: (threadId: string, tasks: readonly TaskItem[]) => void;
-  addPlanForThread: (threadId: string, plan: PlanRecord) => void;
+  addPlanForThread: (threadId: string, plan: PlanVersion) => void;
   shallowEqualBy: <T>(a: readonly T[], b: readonly T[], keys: (keyof T)[]) => boolean;
   coerceTaskStatus: (status: string) => TaskItem["status"];
 }

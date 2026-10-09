@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import * as NodeUtil from "node:util";
-import { AgentThreadIdSchema, CanonicalTimestampSchema, MessageSchema, PlanRecordSchema, lazySchema,
-  type PlanRecord } from "@mcode/contracts";
+import { AgentThreadIdSchema, CanonicalTimestampSchema, MessageSchema, NativePlanFileRefSchema, PlanVersionSchema, lazySchema,
+  type PlanVersion } from "@mcode/contracts";
 import { z } from "zod";
 import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
 import { MessageStore as MessageRepo } from "../conversation/persistence/message-store.js";
@@ -10,8 +10,8 @@ import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
 const MAX_METADATA_BYTES = 2 * 1024 * 1024;
 const boundedIdentitySchema = z.string().min(1).max(256).refine((id) => id.trim() === id,
   "Accepted feature identities must retain exact routing");
-const planSchema = lazySchema(() => PlanRecordSchema().extend({
-  id: boundedIdentitySchema, threadId: boundedIdentitySchema, messageId: boundedIdentitySchema,
+const planSchema = lazySchema(() => PlanVersionSchema().extend({
+  threadId: boundedIdentitySchema, messageId: boundedIdentitySchema.nullable(),
   version: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   createdAt: CanonicalTimestampSchema,
 }).strict());
@@ -28,6 +28,7 @@ export const AcceptedFeatureWriteMetadataSchema = lazySchema(() => z.object({
   noticeSession: z.object({ sessionId: z.string().max(64).nullable() }).strict().optional(),
   expiredNoticeMessageIds: z.array(boundedIdentitySchema).max(8_192).readonly().optional(),
   planRecords: z.array(planSchema()).max(256).readonly().optional(),
+  nativePlanFile: z.object({ planId: z.string().uuid(), ref: NativePlanFileRefSchema() }).optional(),
 }).strict().superRefine(validateMetadataBounds));
 
 /** Assigned data retained at acceptance; the worker never allocates feature identities or versions. */
@@ -53,10 +54,20 @@ export function persistAcceptedFeatureWrite(db: Database, threadId: string, meta
     }
     for (const id of parsed.expiredNoticeMessageIds ?? []) expireNotice(db, messages, threadId, id);
     for (const plan of parsed.planRecords ?? []) persistPlan(db, plans, messages, threadId, plan);
+    persistNativePlanFile(db, threadId, parsed);
   })();
 }
 
-function validateMetadataBounds(metadata: { readonly planRecords?: readonly PlanRecord[]; readonly expiredNoticeMessageIds?: readonly string[] },
+function persistNativePlanFile(db: Database, threadId: string, metadata: AcceptedFeatureWriteMetadata): void {
+  const native = metadata.nativePlanFile;
+  if (!native) return;
+  const captured = metadata.planRecords?.find((plan) => plan.id === native.planId);
+  if (captured?.author !== "agent" || captured.captureSource !== "native") throw new Error("Native plan file requires its captured agent version");
+  db.prepare("UPDATE plans SET native_plan_file_json = ? WHERE id = ? AND thread_id = ?")
+    .run(JSON.stringify(native.ref), captured.id, threadId);
+}
+
+function validateMetadataBounds(metadata: { readonly planRecords?: readonly PlanVersion[]; readonly expiredNoticeMessageIds?: readonly string[] },
   context: z.RefinementCtx): void {
   if (Buffer.byteLength(JSON.stringify(metadata)) > MAX_METADATA_BYTES) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "Accepted feature metadata exceeds its byte limit" });
@@ -92,22 +103,29 @@ function expireNotice(db: Database, messages: MessageRepo, threadId: string, id:
   db.prepare("DELETE FROM messages WHERE id = ? AND thread_id = ? AND role = 'system' AND system_notice IS NOT NULL").run(id, threadId);
 }
 
-function persistPlan(db: Database, plans: PlanRepo, messages: MessageRepo, threadId: string, plan: PlanRecord): void {
+function persistPlan(db: Database, plans: PlanRepo, messages: MessageRepo, threadId: string, plan: PlanVersion): void {
   validatePlanRouting(db, plans, messages, threadId, plan);
-  db.prepare(`INSERT INTO plans (id, thread_id, message_id, version, title, content_md, sections_json, change_summary, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET status = excluded.status`).run(
-    plan.id, plan.threadId, plan.messageId, plan.version, plan.title, plan.contentMd,
-    plan.sectionsJson === null ? null : JSON.stringify(plan.sectionsJson), plan.changeSummary, plan.status, plan.createdAt,
-  );
+  const existing = plans.getById(plan.id);
+  if (!existing) { plans.insert(plan); return; }
+  if (existing.status === "accepted" || existing.status === "superseded") return;
+  db.prepare("UPDATE plans SET status = ?, updated_at = ? WHERE id = ?").run(plan.status, plan.updatedAt, plan.id);
 }
 
-function validatePlanRouting(db: Database, plans: PlanRepo, messages: MessageRepo, threadId: string, plan: PlanRecord): void {
+function validatePlanRouting(db: Database, plans: PlanRepo, messages: MessageRepo, threadId: string, plan: PlanVersion): void {
   if (plan.threadId !== threadId) throw new Error("Accepted plan belongs to another thread");
-  const assistant = messages.findByIdInThreadIncludingInternal(threadId, plan.messageId);
-  if (assistant?.role !== "assistant") throw new Error("Accepted plan requires its materialized assistant message");
   const existing = plans.getById(plan.id);
   if (existing && !samePlanContent(existing, plan)) throw new Error("Accepted plan identity has conflicting content");
+  if (plan.author === "user") {
+    if (!existing || plan.status !== "superseded") throw new Error("Canonical capture can only supersede an existing user draft");
+    return;
+  }
+  validateAgentPlanRouting(db, plans, messages, threadId, plan);
+}
+
+function validateAgentPlanRouting(db: Database, plans: PlanRepo, messages: MessageRepo, threadId: string, plan: PlanVersion): void {
+  if (!plan.messageId) throw new Error("Agent plan requires its assistant message");
+  const assistant = messages.findByIdInThreadIncludingInternal(threadId, plan.messageId);
+  if (assistant?.role !== "assistant") throw new Error("Accepted plan requires its materialized assistant message");
   const existingMessagePlan = plans.getByMessageId(plan.messageId);
   if (existingMessagePlan && existingMessagePlan.id !== plan.id) throw new Error("Accepted assistant already has another plan");
   if (db.prepare("SELECT 1 FROM plans WHERE thread_id = ? AND version = ? AND id <> ?").get(threadId, plan.version, plan.id)) {
@@ -115,8 +133,8 @@ function validatePlanRouting(db: Database, plans: PlanRepo, messages: MessageRep
   }
 }
 
-function samePlanContent(a: PlanRecord, b: PlanRecord): boolean {
-  const { status: _aStatus, ...aContent } = a;
-  const { status: _bStatus, ...bContent } = b;
+function samePlanContent(a: PlanVersion, b: PlanVersion): boolean {
+  const { status: _aStatus, updatedAt: _aUpdated, ...aContent } = a;
+  const { status: _bStatus, updatedAt: _bUpdated, ...bContent } = b;
   return NodeUtil.isDeepStrictEqual(aContent, bContent);
 }

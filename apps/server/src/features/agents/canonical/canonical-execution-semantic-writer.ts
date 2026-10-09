@@ -7,8 +7,6 @@ import {
   CanonicalAgentEventEnvelopeSchema,
   ParentNarrativeRecoveryItemSchema,
   PlanQuestionBatchSchema,
-  PlanRecordSchema,
-  PlanSectionNavSchema,
   ProviderIdSchema,
   ProviderIdentitySchema,
   TurnOutcomeSchema,
@@ -19,6 +17,8 @@ import {
   type TurnOutcome,
 } from "@mcode/contracts";
 import { z } from "zod";
+import { PlanPersistenceReadySchema } from "../planning/plan-capture-schema.js";
+import { readCanonicalPlan } from "../planning/legacy-plan-record.js";
 
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { ThreadStore as ThreadRepo } from "../../thread-control/persistence/thread-store.js";
@@ -100,13 +100,6 @@ const taskIntentsSchema = z.array(z.discriminatedUnion("kind", [
     group: z.string().max(128), patch: storedTaskSchema.pick({ status: true, content: true, activeForm: true }).partial() }).strict(),
   z.object({ kind: z.literal("remove-task"), id: z.string().min(1).max(256), group: z.string().max(128) }).strict(),
 ])).max(16);
-const planOutputSchema = z.object({
-  title: z.string().trim().min(1).max(512),
-  contentMd: z.string().min(1).max(256 * 1024),
-  sectionsJson: z.string().max(64 * 1024),
-  changeSummary: z.string().max(4096).nullable(),
-}).strict();
-const planSectionsSchema = z.array(PlanSectionNavSchema()).max(128);
 const storedPublicationSequencesSchema = z.array(z.union([
   z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   z.object({ executionId: z.string(), sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
@@ -172,7 +165,7 @@ const storedReceiptSchema = z.object({
     publicationId: z.string(), threadId: z.string(),
     questions: PlanQuestionBatchSchema().shape.questions,
   }).optional(),
-  planOutput: PlanRecordSchema().optional(),
+  planOutput: z.unknown().transform(readCanonicalPlan).optional(),
 });
 const storedOperationSchema = z.object({
   kind: z.string(),
@@ -736,8 +729,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     output: NonNullable<Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>["planOutput"]>,
   ) {
     if (this.plans.getByMessageId(messageId)) throw new SemanticConflict();
-    return this.plans.create(threadId, messageId, output.title, output.contentMd,
-      output.sectionsJson, output.changeSummary);
+    return this.plans.create(threadId, messageId, output, ProviderIdSchema.parse(this.threads.findById(threadId)?.provider));
   }
 
   private requireUnfinishedCheckpoint(execution: ExecutionIdentity): void {
@@ -1549,12 +1541,7 @@ function validLivePlanProjection(
       || !PlanQuestionBatchSchema().safeParse({ threadId, questions: mutation.planQuestions }).success) return false;
   }
   if (mutation.planOutput === undefined) return true;
-  if (event.type !== "message" || !mutation.message || !planOutputSchema.safeParse(mutation.planOutput).success) return false;
-  try {
-    return planSectionsSchema.safeParse(JSON.parse(mutation.planOutput.sectionsJson)).success;
-  } catch {
-    return false;
-  }
+  return event.type === "message" && Boolean(mutation.message) && PlanPersistenceReadySchema().safeParse(mutation.planOutput).success;
 }
 
 function validLiveTaskIntents(

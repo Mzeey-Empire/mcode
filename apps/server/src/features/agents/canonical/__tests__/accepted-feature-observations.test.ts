@@ -1,7 +1,7 @@
 import {
-  AgentEventSchema, CanonicalAgentSemanticEnvelopeSchema, MessageSchema, PlanRecordSchema,
+  AgentEventSchema, CanonicalAgentSemanticEnvelopeSchema, MessageSchema, PlanVersionSchema,
   createAgentModelState, reduceAgentEventBatch,
-  type AgentEvent, type AgentItem, type AgentThread, type AgentTurn, type Message, type PlanRecord,
+  type AgentEvent, type AgentItem, type AgentThread, type AgentTurn, type Message, type PlanVersion,
 } from "@mcode/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { ExecutionSemanticOperation, ParentLiveEffects } from "../../execution/execution-worker-handler.js";
@@ -21,7 +21,7 @@ const turn: AgentTurn = { id: execution.turnId, threadId: execution.threadId, ex
   createdAt: STARTED_AT, updatedAt: STARTED_AT };
 const base = { thread, turn, acceptedAt: ACCEPTED_AT, messageSequence: 3, compaction: { active: false }, currentNoticeSessionId: "session-1" };
 const planReady = { title: "Login plan", contentMd: "# Login plan\n## Build\nUse passkeys.",
-  sectionsJson: '[{"id":"build","title":"Build","level":2}]', changeSummary: null };
+  captureSource: "fence" as const };
 const assistant = { messageId: "assistant-message", precedingMessageId: "user-message", content: planReady.contentMd,
   model: "fixture-model", attachments: [] };
 
@@ -62,10 +62,11 @@ function board(tasks: StoredTask[]): AgentItem {
   return item(`taskBoard:${thread.id}`, { projection: "taskBoard", tasks });
 }
 
-function planRecord(overrides: Partial<PlanRecord> = {}): PlanRecord {
-  return { id: "old-plan", threadId: thread.id, messageId: "old-assistant", title: "Earlier plan",
-    contentMd: "# Earlier plan", sectionsJson: null, changeSummary: null, status: "draft", version: 1,
-    createdAt: STARTED_AT, ...overrides };
+function planRecord(overrides: Partial<PlanVersion> = {}): PlanVersion {
+  return { id: "00000000-0000-4000-8000-000000000010", threadId: thread.id, messageId: "old-assistant", title: "Earlier plan",
+    contentMd: "# Earlier plan", status: "ready", version: 1, author: "agent", providerId: "codex",
+    captureSource: "fence", baseVersionId: null, revision: 0, acceptedAt: null, acceptedMessageId: null,
+    createdAt: STARTED_AT, updatedAt: STARTED_AT, ...overrides };
 }
 
 function notice(message = "Provider warning", noticeKey = "warning"): Extract<AgentEvent, { type: "system" }> {
@@ -182,15 +183,13 @@ describe("prepareAcceptedFeatureObservations", () => {
     expect(() => prepare(op, { [invalid.id]: invalid })).toThrow();
   });
 
-  it("assigns exact accepted plan ID/version/time, sanitizes section metadata, and prepares the existing notification payload", () => {
-    const op = operation({ message: assistant, planOutput: { ...planReady,
-      sectionsJson: '[{"id":"build","title":"Build","level":2,"providerSecret":"private"}]' } });
+  it("assigns exact accepted plan ID/version/time and records agent authorship", () => {
+    const op = operation({ message: assistant, planOutput: planReady });
     const prepared = prepare(op);
     expect(prepared).toEqual(prepare(op));
     expect(prepared.planOutput).toMatchObject({ threadId: thread.id, messageId: assistant.messageId,
-      version: 1, createdAt: ACCEPTED_AT, status: "draft", sectionsJson: [{ id: "build", title: "Build", level: 2 }] });
-    expect(PlanRecordSchema().parse(prepared.planOutput)).toEqual(prepared.planOutput);
-    expect(prepared.planGenerated).toEqual({ threadId: thread.id, plan: prepared.planOutput });
+      version: 1, createdAt: ACCEPTED_AT, status: "ready", author: "agent", providerId: "codex", captureSource: "fence", revision: 0 });
+    expect(PlanVersionSchema().parse(prepared.planOutput)).toEqual(prepared.planOutput);
     expect(prepared.planRecords).toEqual([prepared.planOutput]);
     expect(recorded(prepared)[0].payload).toEqual({ projection: "plan", plan: prepared.planOutput });
     expect(apply(prepared).items[recorded(prepared)[0].id]).toEqual(recorded(prepared)[0]);
@@ -201,11 +200,11 @@ describe("prepareAcceptedFeatureObservations", () => {
   it("folds plan status observations and supersedes prior drafts without changing their original item ownership", () => {
     const first = planRecord();
     const original = item(`plan:${first.id}`, { projection: "plan", plan: first });
-    const previous = planRecord({ id: "previous-plan", version: 2, status: "accepted", messageId: "other-assistant" });
+    const previous = planRecord({ id: "00000000-0000-4000-8000-000000000011", version: 2, status: "accepted", messageId: "other-assistant" });
     const items = { [original.id]: original, previous: item("previous", { projection: "plan", plan: previous }) };
     const prepared = prepare(operation({ message: assistant, planOutput: planReady }), items);
     expect(prepared.planOutput?.version).toBe(3);
-    expect(prepared.planRecords).toEqual([{ ...first, status: "superseded" }, prepared.planOutput]);
+    expect(prepared.planRecords).toEqual([{ ...first, status: "superseded", updatedAt: ACCEPTED_AT }, prepared.planOutput]);
     expect(recorded(prepared)[0].id).not.toBe(original.id);
     expect(recorded(prepared)[0].turnId).toBe(turn.id);
     const state = apply(prepared, items);
@@ -220,14 +219,14 @@ describe("prepareAcceptedFeatureObservations", () => {
     const saved = apply(prepare(op)).items;
     expect(() => prepare(operation({ message: assistant, planOutput: { ...planReady, title: "Changed" } }), saved)).toThrow("conflicting content");
     expect(() => prepare(operation({ planOutput: planReady }))).toThrow("assigned assistant message");
-    expect(() => prepare(operation({ message: assistant, planOutput: { ...planReady, sectionsJson: "{" } }))).toThrow();
+    expect(() => prepare(operation({ message: assistant, planOutput: { ...planReady, contentMd: "x".repeat(65_537) } }))).toThrow();
     const foreign = item("foreign-plan", { projection: "plan", plan: planRecord({ threadId: "foreign" }) });
     expect(() => prepare(op, { [foreign.id]: foreign })).toThrow("conflicting ownership");
   });
 
   it("merges legacy plan versions with accepted status observations and supersedes only the current drafts", () => {
-    const legacy = planRecord({ id: "legacy-plan", version: 4, messageId: "legacy-assistant" });
-    const accepted = planRecord({ id: "accepted-plan", version: 5, messageId: "accepted-assistant" });
+    const legacy = planRecord({ id: "00000000-0000-4000-8000-000000000012", version: 4, messageId: "legacy-assistant" });
+    const accepted = planRecord({ id: "00000000-0000-4000-8000-000000000013", version: 5, messageId: "accepted-assistant" });
     const items = { update: item("legacy-update", { projection: "plan", plan: { ...legacy, status: "superseded" } }),
       accepted: item("accepted-plan", { projection: "plan", plan: accepted }) };
     const prepared = prepareAcceptedFeatureObservations({ ...base, operation: operation({ message: assistant, planOutput: planReady }),
@@ -237,8 +236,8 @@ describe("prepareAcceptedFeatureObservations", () => {
     const legacyOnly = prepareAcceptedFeatureObservations({ ...base, operation: operation({ message: assistant, planOutput: planReady }),
       persistedPlans: [legacy], items: {} });
     expect(legacyOnly.planOutput?.version).toBe(5);
-    expect(legacyOnly.planRecords?.[0]).toEqual({ ...legacy, status: "superseded" });
-    expect(legacy.status).toBe("draft");
+    expect(legacyOnly.planRecords?.[0]).toEqual({ ...legacy, status: "superseded", updatedAt: ACCEPTED_AT });
+    expect(legacy.status).toBe("ready");
   });
 
   it("projects exact system intents and deterministic notices for generic providers, rejecting mismatched evidence", () => {
@@ -323,7 +322,7 @@ describe("prepareAcceptedFeatureObservations", () => {
     expect(prepare({ ...operation(), mutation: { kind: "checkpoint", phase: "running", nativeCursor: null } }, items))
       .toEqual({ events: [], publications: [] });
     const persistedTasks = new Proxy<StoredTask[]>([], { get: () => { throw new Error("Ordinary event read legacy tasks"); } });
-    const persistedPlans = new Proxy<PlanRecord[]>([], { get: () => { throw new Error("Ordinary event read legacy plans"); } });
+    const persistedPlans = new Proxy<PlanVersion[]>([], { get: () => { throw new Error("Ordinary event read legacy plans"); } });
     expect(prepareAcceptedFeatureObservations({ ...base, items, persistedTasks, persistedPlans, operation: operation({}, source) }).events).toEqual([]);
   });
 

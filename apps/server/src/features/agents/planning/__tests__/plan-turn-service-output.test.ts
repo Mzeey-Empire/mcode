@@ -63,7 +63,7 @@ describe("PlanTurnService output", () => {
       messageId: assistant.id,
       title: "Login plan",
       contentMd: output,
-      sectionsJson: [{ id: "s1", title: "Implement", level: 2 }],
+      status: "ready", author: "agent", providerId: "codex", captureSource: "fence", revision: 0,
     });
     expect(service.needsAssistantMaterialization(event)).toBe(false);
     service.clearTurn(thread.id);

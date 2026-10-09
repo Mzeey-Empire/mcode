@@ -39,6 +39,14 @@ export function resolveThreadHandoffsDir(
   return NodePath.join(mcodeDir, "threads", threadId, "handoffs");
 }
 
+/** Returns the authoritative Mcode plan projection outside the repository checkout. */
+export function resolveThreadPlanFile(mcodeDir: string, threadId: string): string {
+  if (!threadId || threadId === "." || threadId === ".." || /[\\/:\0]/.test(threadId)) {
+    throw new Error("Invalid thread directory identity");
+  }
+  return NodePath.join(mcodeDir, "threads", threadId, "plan.md");
+}
+
 /**
  * Returns `<mcodeDir>/threads/<threadId>/handoffs/<ulid>`.
  */

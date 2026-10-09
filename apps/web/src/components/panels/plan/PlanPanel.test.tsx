@@ -1,7 +1,7 @@
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanRecord } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts";
 import { usePlanStore } from "@/stores/planStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
@@ -12,22 +12,16 @@ vi.mock("@/transport", async () => ({
   getTransport: () => mockTransport,
 }));
 
-const makePlan = (version: number, contentMd: string): PlanRecord => ({
+const makePlan = (version: number, contentMd: string): PlanVersion => ({
   id: `plan-${version}`,
   threadId: "thread-plan",
   messageId: `00000000-0000-4000-8000-00000000000${version}`,
   version,
   title: `Version ${version} Plan`,
   contentMd,
-  sectionsJson: [
-    {
-      id: `section-${version}`,
-      title: `Version ${version} Step`,
-      level: 2,
-    },
-  ],
-  changeSummary: version === 1 ? null : `Updated to version ${version}`,
-  status: version === 1 ? "superseded" : "draft",
+  author: "agent", providerId: "codex", captureSource: "fence", baseVersionId: null,
+  revision: 0, acceptedAt: null, acceptedMessageId: null, updatedAt: `2026-05-23T00:00:0${version}.000Z`,
+  status: version === 1 ? "superseded" : "ready",
   createdAt: `2026-05-23T00:00:0${version}.000Z`,
 });
 

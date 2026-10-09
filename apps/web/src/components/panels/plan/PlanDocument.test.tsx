@@ -1,18 +1,18 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanRecord } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts";
 import { PlanDocument, type PlanComment } from "./PlanDocument";
 
-const makePlan = (contentMd: string): PlanRecord => ({
+const makePlan = (contentMd: string): PlanVersion => ({
   id: "plan-1",
   threadId: "thread-plan",
   messageId: "00000000-0000-4000-8000-000000000001",
   version: 1,
   title: "Plan",
   contentMd,
-  sectionsJson: [{ id: "section-1", title: "Issues Found", level: 2 }],
-  changeSummary: null,
-  status: "draft",
+  author: "agent", providerId: "codex", captureSource: "fence", baseVersionId: null,
+  revision: 0, acceptedAt: null, acceptedMessageId: null, updatedAt: "2026-05-23T00:00:01.000Z",
+  status: "ready",
   createdAt: "2026-05-23T00:00:01.000Z",
 });
 

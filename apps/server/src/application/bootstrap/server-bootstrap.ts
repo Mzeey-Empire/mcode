@@ -105,6 +105,8 @@ import { PlanQuestionAnswersRepo } from "../../features/agents/planning/persiste
 import { PlanQuestionService } from "../../features/agents/planning/plan-question-service.js";
 import { PostTerminalHookCompletionEffect } from "../../features/agents/turns/post-terminal-hook-completion-effect.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
+import { PlanService } from "../../features/agents/planning/plan-service.js";
+import { PlanFileWriter } from "../../features/agents/planning/plan-file-writer.js";
 import { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
 import { SettingsService } from "../../features/settings/settings-service.js";
 import { warmCodexProviderVersion } from "@mcode/providers";
@@ -135,6 +137,13 @@ import { resolveWebAutomationFlag } from "../../runtime/startup/startup-policy.j
 import { listenWithPortRetry } from "../../runtime/http/http-listener.js";
 import { createReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
 import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
+
+function createPlanService(writer: ApplicationDatabaseWriter, runtime: WorkerOwnedTurnRuntime,
+  plans: PlanRepo, turns: PlanTurnService): PlanService {
+  const files = runtime.planFiles ?? new PlanFileWriter((threadId) => plans.listByThread(threadId));
+  turns.bindPlanProjection(runtime.progress, files);
+  return new PlanService(writer, runtime.progress, files);
+}
 
 /** Start the server runtime and install its shutdown handlers. */
 export async function startServer(): Promise<void> {
@@ -456,6 +465,7 @@ const handoffStorage = container.resolve(HandoffStorage);
 const handoffCheckoutService = container.resolve(HandoffCheckoutService);
 const db = container.resolve<Database>("Database");
 const databaseWriter = container.resolve(ApplicationDatabaseWriter);
+const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, planRepo, planTurnService);
 const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter, undefined, {
   streamAssistant: (threadId) => agentReliability.streamAssistantText(threadId),
 });
@@ -752,7 +762,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   memoryPressureService,
   taskRepo,
   planQuestionAnswersRepo,
-  planRepo,
+  planService,
   providerRegistry,
   providerAvailability,
   modelCacheService,

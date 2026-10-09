@@ -3,13 +3,13 @@ import { usePlanStore } from "@/stores/planStore";
 import { PlanChrome } from "./PlanChrome";
 import { PlanDocument, type PlanComment } from "./PlanDocument";
 import { PlanSkeleton } from "./PlanSkeleton";
-import type { PlanRecord } from "@mcode/contracts";
+import type { PlanVersion } from "@mcode/contracts";
 import { useThreadStore } from "@/stores/threadStore";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /** Stable empty array to avoid new-reference-per-render in Zustand selectors. */
-const EMPTY_PLANS: readonly PlanRecord[] = [];
+const EMPTY_PLANS: readonly PlanVersion[] = [];
 
 interface PlanPanelProps {
   threadId: string;
@@ -39,7 +39,7 @@ function planCommentsReducer(
   return next;
 }
 
-function PlanVersionBanner({ plan, latestVersion, threadId, onShowLatest }: { plan: PlanRecord; latestVersion: number; threadId: string; onShowLatest: (threadId: string, version: null) => void }) {
+function PlanVersionBanner({ plan, latestVersion, threadId, onShowLatest }: { plan: PlanVersion; latestVersion: number; threadId: string; onShowLatest: (threadId: string, version: null) => void }) {
   return <div className="flex min-w-0 flex-shrink-0 items-center gap-2 border-b border-border bg-primary/5 px-3 py-1.5 font-mono text-caption tracking-[0.14em] text-muted">
     <span className="min-w-0 text-fade">Viewing v{plan.version} of {latestVersion} · read-only</span>
     <span className="min-w-0 flex-1" aria-hidden />

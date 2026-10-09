@@ -2,9 +2,14 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
 import {
   AgentEventIdSchema, AgentEventSchema, AgentItemSchema, CanonicalTimestampSchema,
-  MessageSchema, PlanRecordSchema, PlanSectionNavSchema,
-  type AgentEvent, type AgentItem, type AgentThread, type AgentTurn, type Message, type PlanRecord,
+  MessageSchema, PlanVersionSchema,
+  type AgentEvent, type AgentItem, type AgentThread, type AgentTurn, type Message, type PlanVersion,
 } from "@mcode/contracts";
+import { PlanPersistenceReadySchema } from "../planning/plan-capture-schema.js";
+import type { PlanPersistenceReady } from "../planning/plan-execution-state.js";
+import { readCanonicalPlan } from "../planning/legacy-plan-record.js";
+import { mergePlanVersions } from "../planning/merge-plan-versions.js";
+import type { NativePlanFileRef } from "@mcode/contracts";
 import { v5 as uuidv5 } from "uuid";
 import { z } from "zod";
 import type {
@@ -31,12 +36,7 @@ const taskIntentsSchema = z.array(z.discriminatedUnion("kind", [
     patch: storedTaskSchema.pick({ status: true, content: true, activeForm: true }).partial() }).strict(),
   z.object({ kind: z.literal("remove-task"), id: z.string().min(1).max(256), group: z.string().max(128) }).strict(),
 ])).max(16);
-const planOutputSchema = z.object({
-  title: z.string().trim().min(1).max(512), contentMd: z.string().min(1).max(256 * 1024),
-  sectionsJson: z.string().max(64 * 1024), changeSummary: z.string().max(4096).nullable(),
-}).strict();
 const taskBoardSchema = z.array(storedTaskSchema);
-const planSectionsSchema = z.array(PlanSectionNavSchema()).max(128);
 const expiredNoticeIdsSchema = z.array(z.string().min(1).max(256)).max(8_192);
 
 /** Feature projections and notifications assigned before their ordered storage write. */
@@ -47,9 +47,9 @@ export interface AcceptedFeatureObservations {
   readonly compacting?: boolean;
   readonly noticeSessionId?: string;
   readonly expiredNoticeMessageIds?: readonly string[];
-  readonly planOutput?: PlanRecord;
-  readonly planRecords?: readonly PlanRecord[];
-  readonly planGenerated?: { readonly threadId: string; readonly plan: PlanRecord };
+  readonly planOutput?: PlanVersion;
+  readonly planRecords?: readonly PlanVersion[];
+  readonly nativePlanFile?: { readonly planId: string; readonly ref: NativePlanFileRef };
 }
 
 /** Exact child records resolved by the collaboration adapter before live acceptance. */
@@ -61,7 +61,7 @@ export interface AcceptedChildPublicationOwner {
 /**
  * Prepares changed task, plan, and system observations from accepted state.
  * IDs, versions, timestamps, and message order are retained for storage to use unchanged.
- * Separate plan notifications use the existing plan.generated channel, outside AgentEvent.
+ * Plan version notifications remain outside AgentEvent.
  */
 export function prepareAcceptedFeatureObservations(input: {
   readonly operation: ExecutionSemanticOperation;
@@ -72,7 +72,7 @@ export function prepareAcceptedFeatureObservations(input: {
   readonly messageSequence: number;
   readonly compaction: { readonly active: boolean };
   readonly currentNoticeSessionId?: string;
-  readonly persistedPlans?: readonly PlanRecord[];
+  readonly persistedPlans?: readonly PlanVersion[];
   readonly persistedTasks?: readonly StoredTask[];
   readonly childPublicationOwners?: readonly AcceptedChildPublicationOwner[];
 }): AcceptedFeatureObservations {
@@ -115,7 +115,7 @@ type PreparationInput = Parameters<typeof prepareAcceptedFeatureObservations>[0]
 type SystemFeatureInput = Omit<PreparationInput, "operation"> & {
   readonly operation: Pick<ExecutionSemanticOperation, "operationId" | "execution">;
 };
-type PlanPreparation = Pick<AcceptedFeatureObservations, "events" | "planOutput" | "planRecords" | "planGenerated">;
+type PlanPreparation = Pick<AcceptedFeatureObservations, "events" | "planOutput" | "planRecords" | "nativePlanFile">;
 
 /** Assign session notice identity, deduplication and expiry on the retained conversation stream. */
 export function prepareAcceptedThreadSystemFeatures(input: SystemFeatureInput & {
@@ -365,48 +365,46 @@ function findTaskIndex(tasks: readonly StoredTask[], id: string, group: string):
 function preparePlan(input: PreparationInput, effects: ParentLiveEffects | undefined): PlanPreparation {
   if (!effects?.planOutput) return { events: [] };
   if (!effects.message?.messageId) throw new Error("Accepted plan requires its assigned assistant message");
-  const source = planOutputSchema.parse(effects.planOutput);
-  const sectionsJson = planSectionsSchema.parse(JSON.parse(source.sectionsJson));
+  const source = PlanPersistenceReadySchema().parse(effects.planOutput);
+  return prepareCapturedPlan(input, source, effects.message.messageId);
+}
+
+function prepareCapturedPlan(input: PreparationInput, source: PlanPersistenceReady, messageId: string): PlanPreparation {
   const prior = priorPlans(input);
-  const messageId = effects.message.messageId;
   const existing = prior.find((plan) => plan.messageId === messageId);
   if (existing) {
-    if (!NodeUtil.isDeepStrictEqual({ title: existing.title, contentMd: existing.contentMd,
-      sectionsJson: existing.sectionsJson, changeSummary: existing.changeSummary }, { ...source, sectionsJson })) {
+    if (existing.title !== source.title || existing.contentMd !== source.contentMd || existing.captureSource !== source.captureSource) {
       throw new Error("Accepted plan has conflicting content for its assistant message");
     }
     return { events: [] };
   }
   const version = prior.reduce((maximum, plan) => Math.max(maximum, plan.version), 0) + 1;
   if (!Number.isSafeInteger(version) || version < 1) throw new Error("Accepted plan version is invalid");
-  const plan = PlanRecordSchema().parse({ ...source, sectionsJson, id: uuidv5(`mcode:accepted-plan:${input.operation.operationId}`, uuidv5.URL),
-    threadId: input.thread.id, messageId, version, status: "draft", createdAt: input.acceptedAt });
+  const plan = PlanVersionSchema().parse({ ...source, id: uuidv5(`mcode:accepted-plan:${input.operation.operationId}`, uuidv5.URL),
+    threadId: input.thread.id, messageId, version, status: "ready", author: "agent", providerId: input.thread.providerId,
+    baseVersionId: null, revision: 0, createdAt: input.acceptedAt, updatedAt: input.acceptedAt,
+    acceptedAt: null, acceptedMessageId: null });
   if (prior.some((record) => record.id === plan.id)) throw new Error("Accepted operation has a conflicting plan identity");
-  const superseded = prior.filter((record) => record.status === "draft").map((record): PlanRecord => ({ ...record, status: "superseded" }));
+  const superseded = prior.filter((record) => record.status === "draft" || record.status === "ready")
+    .map((record): PlanVersion => ({ ...record, status: "superseded", updatedAt: input.acceptedAt }));
   const events = superseded.map((record) => itemEvent(input, featureItem(input,
     `plan-update:${uuidv5(`${input.operation.operationId}:${record.id}`, uuidv5.URL)}`, "system", { projection: "plan", plan: record })));
   events.push(itemEvent(input, featureItem(input, `plan:${plan.id}`, "system", { projection: "plan", plan })));
-  return { events, planOutput: plan, planRecords: [...superseded, plan], planGenerated: { threadId: input.thread.id, plan } };
+  return { events, planOutput: plan, planRecords: [...superseded, plan],
+    ...(source.nativePlanFile ? { nativePlanFile: { planId: plan.id, ref: source.nativePlanFile } } : {}) };
 }
 
-function priorPlans(input: PreparationInput): PlanRecord[] {
-  const latest = new Map<string, { plan: PlanRecord; updatedAt: number }>();
-  for (const value of input.persistedPlans ?? []) {
-    const plan = validatedPriorPlan(input, value);
-    latest.set(plan.id, { plan, updatedAt: Number.NEGATIVE_INFINITY });
-  }
-  for (const item of Object.values(input.items)) {
+function priorPlans(input: PreparationInput): PlanVersion[] {
+  const historic: PlanVersion[] = [];
+  for (const item of Object.values(input.items).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))) {
     if (item.threadId !== input.thread.id || item.payload.projection !== "plan") continue;
-    const plan = validatedPriorPlan(input, item.payload.plan);
-    const updatedAt = Date.parse(item.updatedAt);
-    const current = latest.get(plan.id);
-    if (!current || updatedAt >= current.updatedAt) latest.set(plan.id, { plan, updatedAt });
+    historic.push(validatedPriorPlan(input, item.payload.plan));
   }
-  return [...latest.values()].map(({ plan }) => plan);
+  return mergePlanVersions(historic, (input.persistedPlans ?? []).map((plan) => validatedPriorPlan(input, plan)));
 }
 
-function validatedPriorPlan(input: PreparationInput, value: unknown): PlanRecord {
-  const plan = PlanRecordSchema().parse(value);
+function validatedPriorPlan(input: PreparationInput, value: unknown): PlanVersion {
+  const plan = readCanonicalPlan(value);
   if (plan.threadId !== input.thread.id || !Number.isSafeInteger(plan.version) || plan.version < 1) {
     throw new Error("Accepted plan projection has conflicting ownership or version");
   }

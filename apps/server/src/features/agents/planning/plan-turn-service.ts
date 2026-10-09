@@ -18,6 +18,9 @@ import {
 import { PlanExecutionState, type PlanPersistenceReady } from "./plan-execution-state.js";
 import { PlanQuestionService, type PlanAnswerInput } from "./plan-question-service.js";
 import { PlanRepo } from "./persistence/plan-repo.js";
+import { ProviderIdSchema } from "@mcode/contracts";
+import type { PlanFileWriter } from "./plan-file-writer.js";
+import type { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 
 type PlanMessage = Extract<AgentEvent, { type: "message" }>;
 
@@ -29,6 +32,7 @@ type ClaudePlanAnswerModeProvider = {
 @injectable()
 export class PlanTurnService {
   private readonly executionByThread = new Map<string, PlanExecutionState>();
+  private projection: { progress: Pick<CanonicalAcceptedProgress, "reloadPlans"> | undefined; files: PlanFileWriter } | undefined;
 
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
@@ -37,6 +41,11 @@ export class PlanTurnService {
     @inject(PlanRepo) private readonly planRepo: PlanRepo,
     @inject(AGENT_TURN_COMMAND_PORT) private readonly commands: AgentTurnCommandPort,
   ) {}
+
+  /** Connect the legacy capture path to the same post-commit projections as canonical capture. */
+  bindPlanProjection(progress: Pick<CanonicalAcceptedProgress, "reloadPlans"> | undefined, files: PlanFileWriter): void {
+    this.projection = { progress, files };
+  }
 
   /** Start parsing one plan-question generation turn. */
   beginQuestionGeneration(threadId: string): void {
@@ -169,9 +178,11 @@ ${userMessage}`;
   ): Promise<void> {
     if (execution.hasPersistedPlan()) return;
     try {
-      const plan = await this.planRepo.create(threadId, messageId, ready.title, ready.contentMd, ready.sectionsJson, ready.changeSummary);
+      await this.planRepo.create(threadId, messageId, ready, ProviderIdSchema.parse(this.threadRepo.findById(threadId)?.provider));
       execution.markPlanPersisted();
-      broadcast("plan.generated", { threadId, plan });
+      this.projection?.progress?.reloadPlans(threadId);
+      await this.projection?.files.write(threadId);
+      for (const version of this.planRepo.listByThread(threadId)) broadcast("plan.versionUpserted", { threadId, version });
     } catch (error) {
       logger.error("Failed to persist plan output", {
         threadId,

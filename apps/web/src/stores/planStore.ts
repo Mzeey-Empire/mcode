@@ -1,10 +1,18 @@
 import { create } from "zustand";
-import type { PlanRecord } from "@mcode/contracts";
+import type { PlanVersion, PlanVersionStatus } from "@mcode/contracts";
+
+const statusOrder: Record<PlanVersionStatus, number> = { draft: 0, ready: 0, superseded: 1, accepted: 2 };
+
+function mergeVersion(current: PlanVersion, incoming: PlanVersion): PlanVersion {
+  const content = current.revision > incoming.revision ? current : incoming;
+  const status = statusOrder[current.status] > statusOrder[incoming.status] ? current : incoming;
+  return { ...content, status: status.status, acceptedAt: status.acceptedAt, acceptedMessageId: status.acceptedMessageId };
+}
 
 /** Zustand state shape for per-thread plan data. */
 interface PlanState {
   /** All plan versions keyed by thread ID, ordered by version ASC. */
-  plansByThread: Record<string, readonly PlanRecord[]>;
+  plansByThread: Record<string, readonly PlanVersion[]>;
 
   /** Which version is currently viewed per thread (null = latest). */
   activeVersionByThread: Record<string, number | null>;
@@ -13,16 +21,16 @@ interface PlanState {
   generatingThreads: Set<string>;
 
   /** Session-local live plan preview keyed by thread ID. Hydration never writes this. */
-  livePreviewByThread: Record<string, Pick<PlanRecord, "id" | "version" | "title">>;
+  livePreviewByThread: Record<string, Pick<PlanVersion, "id" | "version" | "title">>;
 
   /** Session-local dismissed preview versions keyed by thread ID. */
   dismissedPreviewVersionsByThread: Record<string, readonly number[]>;
 
   /** Add or replace a plan in the thread's version list. */
-  addPlan: (threadId: string, plan: PlanRecord) => void;
+  addPlan: (threadId: string, plan: PlanVersion) => void;
 
   /** Show a session-local preview for a live-generated plan version. */
-  showLivePreview: (threadId: string, plan: PlanRecord) => void;
+  showLivePreview: (threadId: string, plan: PlanVersion) => void;
 
   /** Dismiss the current session-local preview for a specific plan version. */
   dismissLivePreview: (threadId: string, version: number) => void;
@@ -35,9 +43,6 @@ interface PlanState {
 
   /** Mark a thread as generating a plan (shows skeleton). */
   setGenerating: (threadId: string, generating: boolean) => void;
-
-  /** Update a plan's status optimistically. */
-  updatePlanStatus: (planId: string, status: PlanRecord["status"]) => void;
 
   /** Clear plan state for a thread. */
   clearPlans: (threadId: string) => void;
@@ -57,7 +62,7 @@ export const usePlanStore = create<PlanState>((set) => ({
       const idx = existing.findIndex((p) => p.version === plan.version);
       const updated =
         idx >= 0
-          ? existing.map((p, i) => (i === idx ? plan : p))
+          ? existing.map((p, i) => (i === idx ? mergeVersion(p, plan) : p))
           : [...existing, plan].sort((a, b) => a.version - b.version);
       return {
         plansByThread: { ...state.plansByThread, [threadId]: updated },
@@ -117,17 +122,6 @@ export const usePlanStore = create<PlanState>((set) => ({
       if (generating) next.add(threadId);
       else next.delete(threadId);
       return { generatingThreads: next };
-    }),
-
-  updatePlanStatus: (planId, status) =>
-    set((state) => {
-      const updated: Record<string, readonly PlanRecord[]> = {};
-      for (const [tid, plans] of Object.entries(state.plansByThread)) {
-        updated[tid] = plans.map((p) =>
-          p.id === planId ? { ...p, status } : p,
-        );
-      }
-      return { plansByThread: updated };
     }),
 
   clearPlans: (threadId) =>

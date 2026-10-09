@@ -13,12 +13,9 @@ export class PlanRepo {
     this.reader = new PlanStore(db);
   }
 
-  create(threadId: Parameters<PlanStore["create"]>[0], messageId: Parameters<PlanStore["create"]>[1], title: Parameters<PlanStore["create"]>[2], contentMd: Parameters<PlanStore["create"]>[3], sectionsJson: Parameters<PlanStore["create"]>[4], changeSummary: Parameters<PlanStore["create"]>[5]): Promise<ReturnType<PlanStore["create"]>> {
-    return this.writer.execute(planWriteOperations.create, [threadId, messageId, title, contentMd, sectionsJson, changeSummary]);
-  }
-
-  updateStatus(planId: Parameters<PlanStore["updateStatus"]>[0], status: Parameters<PlanStore["updateStatus"]>[1]): Promise<ReturnType<PlanStore["updateStatus"]>> {
-    return this.writer.execute(planWriteOperations.updateStatus, [planId, status]);
+  /** Persist a capture through the application writer. */
+  create(...input: Parameters<PlanStore["create"]>): Promise<ReturnType<PlanStore["create"]>> {
+    return this.writer.execute(planWriteOperations.create, input);
   }
 
   listByThread(threadId: Parameters<PlanStore["listByThread"]>[0]): ReturnType<PlanStore["listByThread"]> {
