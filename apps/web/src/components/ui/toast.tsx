@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -16,7 +17,13 @@ import { Button } from "@/components/ui/button";
 import { StatusMark, type StatusMarkState } from "@/components/ui/status-mark";
 import { overviewResponsivePaddingPx } from "@/lib/composer-layout";
 import { SwipeVelocity } from "@/lib/swipe-velocity";
-import { layoutToastStack, mergeToastPresence, type ToastPresence } from "@/lib/toast-presence";
+import {
+  FRONT_PLACEMENT,
+  layoutToastStack,
+  mergeToastPresence,
+  type ToastPlacement,
+  type ToastPresence,
+} from "@/lib/toast-presence";
 import { cn } from "@/lib/utils";
 import { useToastStore, type Toast, type ToastKind } from "@/stores/toastStore";
 
@@ -31,6 +38,10 @@ const FLICK_PX_PER_MS = 0.5;
 const WHEEL_GESTURE_END_MS = 120;
 /** Pointer travel below this is a click, not a swipe. */
 const DRAG_SLOP_PX = 4;
+/** Hover this long before a collapsed stack fans out, so a pointer passing or swiping across leaves it folded. */
+const EXPAND_DELAY_MS = 200;
+/** Leaving the lane this long folds the stack, so a pointer that slips off an edge and back doesn't make it jump. */
+const COLLAPSE_DELAY_MS = 200;
 
 const KIND_STYLE: Record<ToastKind, { mark: StatusMarkState; label: string; tone: string; role: "status" | "alert" }> = {
   finished: { mark: "success", label: "Finished", tone: "text-success", role: "status" },
@@ -83,15 +94,15 @@ function useLaneColumn(
 }
 
 /** Keeps toasts that left the store on screen until their exit animation ends. */
-function useToastPresence(heights: ReadonlyMap<string, number>) {
+function useToastPresence(heights: ReadonlyMap<string, number>, expanded: boolean) {
   const toasts = useToastStore((state) => state.toasts);
   const [presence, setPresence] = useState(() => ({
     source: toasts,
-    entries: toasts.map((toast): ToastPresence => ({ toast, exiting: false, offset: 0 })),
+    entries: toasts.map((toast): ToastPresence => ({ toast, exiting: false, placement: FRONT_PLACEMENT })),
   }));
   let entries = presence.entries;
   if (presence.source !== toasts) {
-    entries = mergeToastPresence(presence.entries, toasts, layoutToastStack(presence.entries, heights));
+    entries = mergeToastPresence(presence.entries, toasts, layoutToastStack(presence.entries, heights, expanded));
     setPresence({ source: toasts, entries });
   }
   const remove = useCallback((id: string) => {
@@ -111,14 +122,53 @@ export interface ToastLaneProps {
 }
 
 /**
+ * Whether the stack is fanned out. Hover expands it after a dwell and folds it
+ * after a grace period. Focus inside the lane expands it at once, so keyboard
+ * users reach every toast.
+ */
+function useStackExpansion() {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const settleHover = (next: boolean, delay: number) => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setHovered(next), delay);
+  };
+  const handlers = {
+    onPointerEnter: () => settleHover(true, EXPAND_DELAY_MS),
+    onPointerLeave: () => settleHover(false, COLLAPSE_DELAY_MS),
+    onFocus: () => setFocused(true),
+    onBlur: (event: FocusEvent<HTMLElement>) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+    },
+  };
+  return { expanded: hovered || focused, handlers };
+}
+
+/** How far the live toasts reach below the lane top, so the lane's hover box matches the stack. */
+function stackExtent(entries: readonly ToastPresence[], placements: ReadonlyMap<string, ToastPlacement>, heights: ReadonlyMap<string, number>) {
+  let extent = 0;
+  for (const entry of entries) {
+    const placement = placements.get(entry.toast.id);
+    if (placement) extent = Math.max(extent, placement.offset + (heights.get(entry.toast.id) ?? 0));
+  }
+  return extent;
+}
+
+/**
  * The app's one toast lane: up to three toasts, newest on top, centred on the
- * conversation column under its header. Toasts never take focus.
+ * conversation column under its header. Several toasts fold into a pile with
+ * the older ones peeking out, and fan out while the lane is hovered or focused.
+ * Toasts never take focus.
  */
 export function ToastLane({ anchor, fallbackRef, reserveOverview }: ToastLaneProps) {
   const column = useLaneColumn(anchor, fallbackRef, reserveOverview);
   const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
-  const { entries, remove } = useToastPresence(heights);
-  const offsets = layoutToastStack(entries, heights);
+  const { expanded, handlers } = useStackExpansion();
+  const { entries, remove } = useToastPresence(heights, expanded);
+  const placements = layoutToastStack(entries, heights, expanded);
 
   const reportHeight = useCallback((id: string, height: number) => {
     setHeights((current) => (current.get(id) === height ? current : new Map(current).set(id, height)));
@@ -134,16 +184,24 @@ export function ToastLane({ anchor, fallbackRef, reserveOverview }: ToastLanePro
 
   if (!column) return null;
   return (
+    // The lane box spans the stack, gaps included, so moving between fanned-out toasts never leaves it.
     <section
       aria-label="Notifications"
-      className="pointer-events-none fixed z-(--layer-toast) w-85 -translate-x-1/2"
-      style={{ top: column.top + LANE_TOP_PX, left: column.left + column.width / 2 }}
+      data-expanded={expanded}
+      className="fixed z-(--layer-toast) w-85 -translate-x-1/2"
+      style={{
+        top: column.top + LANE_TOP_PX,
+        left: column.left + column.width / 2,
+        height: stackExtent(entries, placements, heights),
+      }}
+      {...handlers}
     >
-      {entries.map((entry) => (
+      {entries.map((entry, index) => (
         <ToastCard
           key={entry.toast.id}
           entry={entry}
-          offset={entry.exiting ? entry.offset : offsets.get(entry.toast.id) ?? 0}
+          placement={entry.exiting ? entry.placement : placements.get(entry.toast.id) ?? FRONT_PLACEMENT}
+          layer={entries.length - index}
           onHeight={reportHeight}
           onExited={removeExited}
         />
@@ -154,7 +212,9 @@ export function ToastLane({ anchor, fallbackRef, reserveOverview }: ToastLanePro
 
 interface ToastCardProps {
   entry: ToastPresence;
-  offset: number;
+  placement: ToastPlacement;
+  /** Paint order. Newer toasts sit in front. */
+  layer: number;
   onHeight: (id: string, height: number) => void;
   onExited: (id: string) => void;
 }
@@ -181,7 +241,7 @@ function useExitTimer(id: string, exiting: boolean, onExited: ToastCardProps["on
   }, [id, exiting, onExited]);
 }
 
-function ToastCard({ entry, offset, onHeight, onExited }: ToastCardProps) {
+function ToastCard({ entry, placement, layer, onHeight, onExited }: ToastCardProps) {
   const { toast, exiting } = entry;
   const { dismiss, pause, resume } = useToastStore.getState();
   const ref = useReportedHeight(toast.id, onHeight);
@@ -189,6 +249,7 @@ function ToastCard({ entry, offset, onHeight, onExited }: ToastCardProps) {
   const swipe = useSwipeToDismiss(dismissThis);
   useExitTimer(toast.id, exiting, onExited);
   const kind = KIND_STYLE[toast.kind];
+  const behind = placement.scale < 1;
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape") return;
@@ -199,14 +260,18 @@ function ToastCard({ entry, offset, onHeight, onExited }: ToastCardProps) {
   return (
     <div
       ref={ref}
-      className="absolute inset-x-0 top-0 transition-transform duration-200 ease-standard motion-reduce:transition-none"
-      style={{ transform: `translateY(${offset}px)` }}
+      className="absolute inset-x-0 top-0 origin-bottom transition-transform duration-200 ease-standard motion-reduce:transition-none"
+      style={{ transform: `translateY(${placement.offset}px) scale(${placement.scale})`, zIndex: layer }}
     >
       <div className={exiting ? "animate-toast-exit" : "animate-toast-enter"} inert={exiting}>
         <div
           role={kind.role}
           data-toast-kind={toast.kind}
-          className="group pointer-events-auto relative flex touch-pan-y items-start gap-3 rounded-dialog bg-selected py-3 pr-2.5 pl-4 shadow-floating transition-colors hover:bg-border"
+          className={cn(
+            "group pointer-events-auto relative flex touch-pan-y items-start gap-3 rounded-dialog bg-selected py-3 pr-2.5 pl-4 shadow-floating transition-colors hover:bg-border *:transition-opacity *:duration-200 motion-reduce:*:transition-none",
+            // A toast tucked behind the front one shows only its edge, never text bleeding past the front card.
+            behind && "*:opacity-0",
+          )}
           style={swipe.style}
           onPointerEnter={() => pause(toast.id)}
           onPointerLeave={() => resume(toast.id)}

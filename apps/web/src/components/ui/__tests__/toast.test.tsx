@@ -238,6 +238,65 @@ describe("ToastLane", () => {
     expect(store().toasts).toEqual([]);
   });
 
+  describe("stacking", () => {
+    /** The transform that places the toast titled `title` in the lane. */
+    const placementOf = (title: string) =>
+      within(lane()).getByText(title).closest<HTMLElement>("[style*=translateY]")?.style.transform;
+    const placements = () => ["three", "two", "one"].map(placementOf);
+    const advance = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
+    const collapsed = ["translateY(0px) scale(1)", "translateY(8px) scale(0.95)", "translateY(16px) scale(0.9)"];
+    const expanded = ["translateY(0px) scale(1)", "translateY(70px) scale(1)", "translateY(140px) scale(1)"];
+
+    function showThree() {
+      vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(60);
+      renderLane();
+      for (const title of ["one", "two", "three"]) show({ kind: "failed", title });
+    }
+
+    it("folds older toasts behind the newest with their edges peeking out", () => {
+      showThree();
+
+      expect(placements()).toEqual(collapsed);
+    });
+
+    it("stays folded when the pointer only passes across the lane", () => {
+      showThree();
+
+      fireEvent.pointerEnter(lane());
+      advance(150);
+      expect(placements()).toEqual(collapsed);
+      fireEvent.pointerLeave(lane());
+      // Past the moment the dwell would have ended had leaving not cancelled it.
+      advance(100);
+
+      expect(placements()).toEqual(collapsed);
+    });
+
+    it("fans out after the pointer rests on the lane and folds after it leaves", () => {
+      showThree();
+
+      fireEvent.pointerEnter(lane());
+      advance(200);
+      expect(placements()).toEqual(expanded);
+
+      fireEvent.pointerLeave(lane());
+      advance(150);
+      expect(placements()).toEqual(expanded);
+      advance(50);
+      expect(placements()).toEqual(collapsed);
+    });
+
+    it("fans out at once while focus is inside the lane", () => {
+      showThree();
+
+      act(() => within(lane()).getAllByRole("button", { name: "Dismiss" })[2]?.focus());
+      expect(placements()).toEqual(expanded);
+
+      act(() => screen.getByRole("textbox", { name: "Composer" }).focus());
+      expect(placements()).toEqual(collapsed);
+    });
+  });
+
   it("keeps a toast when a pointer drag turns back toward rest", () => {
     vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(340);
     HTMLElement.prototype.setPointerCapture = vi.fn();
