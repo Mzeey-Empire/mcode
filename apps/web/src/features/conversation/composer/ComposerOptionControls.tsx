@@ -1,12 +1,17 @@
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useDiffStore } from "@/stores/diffStore";
 import { usePlanStore } from "@/stores/planStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { hideRightPanelAdaptive, showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { cn } from "@/lib/utils";
-import { Check, Eye, KeyRound, ListChecks, ShieldCheck } from "lucide-react";
-import { useState, type ComponentType } from "react";
+import { Eye, KeyRound, ListChecks, ShieldCheck } from "lucide-react";
+import type { ComponentType } from "react";
 
 export type ComposerAccessMode = "supervised" | "automatic" | "full";
 
@@ -14,7 +19,6 @@ export type ComposerAccessMode = "supervised" | "automatic" | "full";
 export interface AccessModeOption {
   id: string;
   label: string;
-  description: string;
   icon: ComponentType<{ size?: number; className?: string }>;
 }
 
@@ -29,16 +33,19 @@ export interface ComposerOptionControlsProps {
 }
 
 const ACCESS_MODES: ReadonlyArray<AccessModeOption & { id: ComposerAccessMode }> = [
-  { id: "supervised", label: "Manual", description: "Ask you to approve actions", icon: Eye },
-  { id: "automatic", label: "Auto", description: "Review actions automatically", icon: ShieldCheck },
-  { id: "full", label: "Full access", description: "Run without approval prompts", icon: KeyRound },
+  { id: "supervised", label: "Manual", icon: Eye },
+  { id: "automatic", label: "Auto", icon: ShieldCheck },
+  { id: "full", label: "Full access", icon: KeyRound },
 ];
 
 function isAccessModeDisabled(accessMode: ComposerAccessMode, permissionLocked: boolean): boolean {
   return permissionLocked && accessMode !== "full";
 }
 
-/** Compact access-mode popover; renders generic or provider-native options. */
+/** Why a locked provider dims every mode except Full access. */
+const PERMISSION_LOCKED_REASON = "This provider only runs with Full access";
+
+/** Compact access-mode menu; renders generic or provider-native options. */
 export function AccessModeSelector({
   accessMode,
   permissionLocked,
@@ -49,14 +56,13 @@ export function AccessModeSelector({
   accessMode: string;
   modes?: readonly AccessModeOption[];
 }) {
-  const [open, setOpen] = useState(false);
   const options = modes ?? ACCESS_MODES;
   const selected = options.find((mode) => mode.id === accessMode) ?? options[0];
   const Icon = selected.icon;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
+    <DropdownMenu>
+      <DropdownMenuTrigger
         render={
           <Button
             variant="ghost"
@@ -69,39 +75,23 @@ export function AccessModeSelector({
           </Button>
         }
       />
-      <PopoverContent align="start" sideOffset={8} className="w-60 p-2">
-        <div className="px-1.5 pt-1 pb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-muted/70">
-          Access mode
-        </div>
-        <div className="space-y-0.5">
-          {options.filter((mode) => modes != null || approvalReviewSupported || mode.id !== "automatic").map((mode) => {
-            const ModeIcon = mode.icon;
-            const disabled = modes == null && isAccessModeDisabled(mode.id as ComposerAccessMode, permissionLocked);
-            return (
-              <Button
-                key={mode.id}
-                variant="ghost"
-                size="compact"
-                disabled={disabled}
-                aria-pressed={accessMode === mode.id}
-                onClick={() => {
-                  onAccessModeChange(mode.id as ComposerAccessMode);
-                  setOpen(false);
-                }}
-                className="h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-xs font-normal whitespace-normal"
-              >
-                <ModeIcon size={13} className="text-muted" />
-                <span className="min-w-0 flex-1 text-left">
-                  <span className="block text-ink">{mode.label}</span>
-                  <span className="block text-muted">{mode.description}</span>
-                </span>
-                {accessMode === mode.id && <Check size={13} className="text-primary" />}
-              </Button>
-            );
-          })}
-        </div>
-      </PopoverContent>
-    </Popover>
+      <DropdownMenuContent align="start" sideOffset={8} className="w-60">
+        {options.filter((mode) => modes != null || approvalReviewSupported || mode.id !== "automatic").map((mode) => {
+          const ModeIcon = mode.icon;
+          const disabled = modes == null && isAccessModeDisabled(mode.id as ComposerAccessMode, permissionLocked);
+          return (
+            <DropdownMenuItem
+              key={mode.id}
+              label={mode.label}
+              icon={<ModeIcon />}
+              checked={accessMode === mode.id}
+              disabledReason={disabled ? PERMISSION_LOCKED_REASON : null}
+              onClick={() => onAccessModeChange(mode.id as ComposerAccessMode)}
+            />
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

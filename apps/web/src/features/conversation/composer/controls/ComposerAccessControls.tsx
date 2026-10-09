@@ -47,10 +47,10 @@ function persistDevinMode(
  * `permissionMode: "full"`; every other mode stays `supervised`.
  */
 const DEVIN_ACCESS_MODES: ReadonlyArray<AccessModeOption & { id: DevinMode }> = [
-  { id: "normal", label: "Normal", description: "Devin asks before each action that needs approval.", icon: Eye },
-  { id: "accept-edits", label: "Accept Edits", description: "Auto-accepts file edits; still prompts for other actions.", icon: Pencil },
-  { id: "smart", label: "Smart", description: "Devin decides which actions are safe to run automatically.", icon: ShieldCheck },
-  { id: "bypass", label: "Bypass", description: "Runs without permission prompts.", icon: KeyRound },
+  { id: "normal", label: "Normal", icon: Eye },
+  { id: "accept-edits", label: "Accept Edits", icon: Pencil },
+  { id: "smart", label: "Smart", icon: ShieldCheck },
+  { id: "bypass", label: "Bypass", icon: KeyRound },
 ];
 
 function DevinAccessControls({
