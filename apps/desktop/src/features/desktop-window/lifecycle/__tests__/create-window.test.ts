@@ -132,15 +132,16 @@ describe("Desktop Window creation", () => {
   it("tells the renderer when full screen changes and after each load", () => {
     createWindow({ platform: "darwin", isDesktopDev: () => false, hooks: createHooks() });
 
-    createWindowTest.window.isFullScreen.mockReturnValue(true);
-    createWindowTest.emit("enter-full-screen");
+    // Windows fires each event while isFullScreen() still reports the old state.
     createWindowTest.window.isFullScreen.mockReturnValue(false);
-    createWindowTest.emit("leave-full-screen");
+    createWindowTest.emit("enter-full-screen");
+    createWindowTest.window.isFullScreen.mockReturnValue(true);
     createWindowTest.emit("did-finish-load");
+    createWindowTest.emit("leave-full-screen");
 
     expect(createWindowTest.webContents.send.mock.calls).toEqual([
       ["window:full-screen", true],
-      ["window:full-screen", false],
+      ["window:full-screen", true],
       ["window:full-screen", false],
     ]);
   });

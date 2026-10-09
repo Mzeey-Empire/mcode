@@ -168,11 +168,13 @@ export function createWindow(
 
 // The renderer drops the macOS traffic-light reserve in full screen. Resend on
 // every load so a reload while full screen does not start from a stale default.
+// The events carry their own state because Windows fires them before
+// isFullScreen() flips.
 function forwardFullScreenState(window: BrowserWindow): void {
-  const send = () => {
-    if (!window.isDestroyed()) window.webContents.send("window:full-screen", window.isFullScreen());
+  const send = (fullScreen: boolean) => {
+    if (!window.isDestroyed()) window.webContents.send("window:full-screen", fullScreen);
   };
-  window.on("enter-full-screen", send);
-  window.on("leave-full-screen", send);
-  window.webContents.on("did-finish-load", send);
+  window.on("enter-full-screen", () => send(true));
+  window.on("leave-full-screen", () => send(false));
+  window.webContents.on("did-finish-load", () => send(window.isFullScreen()));
 }
