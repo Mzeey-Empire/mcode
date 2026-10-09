@@ -100,7 +100,7 @@ describe("DiffPanel worktree files", () => {
     return [{ filePath: path, additions: 1, deletions: 0 }];
   }
   function comparison(id: string, path: string): ReviewComparison {
-    return { files: [{ path, previousPath: null, changeType: "modified", binary: false }], additions: 1, deletions: 0,
+    return { files: [{ path, previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }], additions: 1, deletions: 0,
       turnDiff: { id, phase: "settled", source: "native", fidelity: "agent", revision: 1 } };
   }
   beforeEach(() => {
@@ -209,15 +209,15 @@ describe("DiffPanel worktree files", () => {
   });
 
   it("publishes one matching diff and Files result after a controlled refresh", async () => {
-    const first = deferred<{ files: { path: string; previousPath: null; changeType: "modified"; binary: false }[]; additions: number; deletions: number }>();
-    const second = deferred<{ files: { path: string; previousPath: null; changeType: "modified"; binary: false }[]; additions: number; deletions: number }>();
+    const first = deferred<{ files: { path: string; previousPath: null; changeType: "modified"; binary: false, additions: null, deletions: null, untracked: false }[]; additions: number; deletions: number }>();
+    const second = deferred<{ files: { path: string; previousPath: null; changeType: "modified"; binary: false, additions: null, deletions: null, untracked: false }[]; additions: number; deletions: number }>();
     transport.getReviewComparison.mockReset().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
     useWorkspaceStore.setState({ activeThreadId: null, activeWorkspaceId: "workspace-1" });
     useDiffStore.setState({ viewMode: "unstaged" });
     const user = userEvent.setup();
 
     render(<DiffPanel />);
-    first.resolve({ files: [{ path: "old.ts", previousPath: null, changeType: "modified", binary: false }], additions: 1, deletions: 0 });
+    first.resolve({ files: [{ path: "old.ts", previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }], additions: 1, deletions: 0 });
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("old.ts"));
     act(() => { useDiffStore.getState().setReviewFilesVisible("workspace-1", true); });
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("old.ts");
@@ -228,7 +228,7 @@ describe("DiffPanel worktree files", () => {
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("old.ts");
     expect(screen.getByText("Refreshing comparison")).toBeInTheDocument();
 
-    second.resolve({ files: [{ path: "new.ts", previousPath: null, changeType: "modified", binary: false }], additions: 2, deletions: 1 });
+    second.resolve({ files: [{ path: "new.ts", previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }], additions: 2, deletions: 1 });
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("new.ts"));
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("new.ts");
     expect(transport.listWorkspaceFiles).not.toHaveBeenCalled();

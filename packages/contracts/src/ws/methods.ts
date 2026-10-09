@@ -95,7 +95,7 @@ import { RecoveryIncidentSchema } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
 import { PlanStatusSchema, PlanRecordSchema, PlanActionSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
-import { ReviewComparisonSchema } from "../models/review-comparison.js";
+import { ReviewComparisonSchema, ReviewStateSchema } from "../models/review-comparison.js";
 import {
   SettingsSchema,
   PartialSettingsSchema,
@@ -938,19 +938,13 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: z.array(z.string()),
   },
-  "git.workingTreeFiles": {
-    params: z.object({
-      workspaceId: z.string(),
-      staged: z.boolean(),
-      threadId: z.string().optional(),
-    }),
-    result: z.array(z.string()),
-  },
   "git.workingTreeDiff": {
     params: z.object({
       workspaceId: z.string(),
       staged: z.boolean(),
+      untracked: z.boolean().optional(),
       filePath: z.string().optional(),
+      previousPath: z.string().optional(),
       maxLines: z.number().int().positive().optional(),
       threadId: z.string().optional(),
     }),
@@ -965,17 +959,6 @@ export const WS_METHODS = lazySchema(() => ({
       threadId: z.string().optional(),
     }),
     result: z.string(),
-  },
-  "git.branchFiles": {
-    params: z.object({
-      workspaceId: z.string(),
-      /** Base ref of the comparison; omit to use the detected default branch. */
-      base: GitRefNameSchema.optional(),
-      /** Target ref of the comparison; omit to use HEAD. */
-      target: GitRefNameSchema.optional(),
-      threadId: z.string().optional(),
-    }),
-    result: z.array(z.string()),
   },
   "git.branchDiff": {
     params: z.object({
@@ -997,31 +980,19 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: BranchComparisonSchema(),
   },
-  /**
-   * Return total additions and deletions for a Review-panel git view.
-   * Ref semantics match the corresponding file-list methods so the stat
-   * total always agrees with the file list shown in the panel.
-   */
-  "git.reviewDiffStats": {
+  /** Probe repository state for Review availability and dirty defaults. */
+  "git.reviewState": {
     params: z.object({
       workspaceId: z.string(),
-      view: z.enum(["unstaged", "staged", "branch", "commit"]),
-      /** Branch view: base ref (already resolved client-side; omit to auto-detect). */
-      base: z.string().optional(),
-      /** Branch view: target ref (omit to use HEAD). */
-      target: z.string().optional(),
-      /** Commit view: commit SHA. */
-      sha: z.string().optional(),
-      /** Worktree thread — resolves the right cwd when the review is for a thread's worktree. */
       threadId: z.string().optional(),
     }),
-    result: z.object({ additions: z.number(), deletions: z.number() }),
+    result: ReviewStateSchema(),
   },
   /** Resolve file metadata and totals for one Review comparison in one RPC. */
   "git.reviewComparison": {
     params: z.object({
       workspaceId: z.string(),
-      view: z.enum(["unstaged", "staged", "branch", "commit"]),
+      view: z.enum(["unstaged", "staged", "branch", "commit", "uncommitted"]),
       base: GitRefNameSchema.optional(),
       target: GitRefNameSchema.optional(),
       sha: z.string().optional(),

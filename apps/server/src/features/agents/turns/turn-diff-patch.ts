@@ -26,7 +26,7 @@ export function parseTurnDiff(patch: string): ParsedTurnDiff | null {
     const start = cursor.index;
     const parsed = readFile(cursor);
     if (!parsed || result.filePatches.has(parsed.file.path)) return null;
-    result.files.push(parsed.file);
+    result.files.push({ ...parsed.file, additions: parsed.additions, deletions: parsed.deletions });
     result.additions += parsed.additions;
     result.deletions += parsed.deletions;
     result.filePatches.set(parsed.file.path, lines.slice(start, cursor.index).join("\n") + "\n");
@@ -71,6 +71,7 @@ function parseFileNames(oldName: string, newName: string): ReviewFileChange | nu
   const path = newPath ?? oldPath;
   if (path === null) return null;
   return { path, previousPath: oldPath !== path ? oldPath : null, binary: false,
+    additions: null, deletions: null, untracked: false,
     changeType: changeType(oldPath, newPath) };
 }
 

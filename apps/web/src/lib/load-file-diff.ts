@@ -40,6 +40,8 @@ export async function loadFileDiff(
   id: string,
   filePath: string,
   threadId?: string,
+  untracked = false,
+  previousPath?: string,
 ): Promise<string> {
   switch (source) {
     case "turn-diff":
@@ -49,9 +51,9 @@ export async function loadFileDiff(
     case "cumulative":
       return transport.getCumulativeDiff(id, filePath);
     case "unstaged":
-      return transport.getWorkingTreeDiff(id, false, filePath, undefined, threadId);
+      return transport.getWorkingTreeDiff(id, false, filePath, undefined, threadId, untracked, previousPath);
     case "staged":
-      return transport.getWorkingTreeDiff(id, true, filePath, undefined, threadId);
+      return transport.getWorkingTreeDiff(id, true, filePath, undefined, threadId, false, previousPath);
     case "branch":
       // For branch, `id` is the comparison range `base...target` (git refnames
       // can't contain ".."), so the cache key and per-file fetch vary by pair.

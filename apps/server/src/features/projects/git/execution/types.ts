@@ -8,7 +8,7 @@ export interface GitExecOptions {
   cwd?: string;
   /** Timeout in milliseconds. Defaults to RealGitExecutor.DEFAULT_TIMEOUT (10 s). */
   timeout?: number;
-  /** Environment variables to merge into the subprocess environment. */
+  /** Environment variables to overlay on the server's process.env for the subprocess. */
   env?: NodeJS.ProcessEnv;
   /** Receive stdout chunks while Git runs. Enables the observed execution path. */
   onStdout?: (chunk: string) => void;

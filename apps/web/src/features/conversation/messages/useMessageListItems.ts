@@ -34,6 +34,8 @@ type MessageListItemsInput = Pick<
   | "toolCalls"
   | "turnSummariesByMessageId"
 > & {
+  /** Groups and work folds open right now. Fold children mount without an entrance animation. */
+  readonly expandedFolds: ReadonlySet<string>;
   readonly expandedGroups: ReadonlySet<string>;
   readonly leadingContent?: ReactNode;
   readonly afterFirstUserContent?: ReactNode;
@@ -177,8 +179,8 @@ export function useMessageListItems(input: MessageListItemsInput) {
   );
   const toolTransitions = useToolCallTransitions(toolCalls);
   const narrativeItems = useMemo(
-    () => expandTranscriptNarrative(virtualItems, persistedNarrativeByMessage, currentTurn, toolTransitions),
-    [virtualItems, persistedNarrativeByMessage, currentTurn, toolTransitions],
+    () => expandTranscriptNarrative(virtualItems, persistedNarrativeByMessage, input.expandedFolds, currentTurn, toolTransitions),
+    [virtualItems, persistedNarrativeByMessage, input.expandedFolds, currentTurn, toolTransitions],
   );
   const expandedItems = useMemo(
     () => expandTranscriptToolGroups(narrativeItems, input.expandedGroups),

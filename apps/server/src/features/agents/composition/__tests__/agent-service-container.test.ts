@@ -28,6 +28,7 @@ import { TURN_FEATURE_EFFECTS, TurnFeatureEffects } from "../../turns/turn-featu
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import { PlanTurnService } from "../../planning/plan-turn-service.js";
 import { PlanRepo } from "../../planning/persistence/plan-repo.js";
 import { ProviderTurnEventApplication } from "../../turns/provider-turn-event-application.js";
@@ -55,6 +56,7 @@ describe("AgentService container composition", () => {
   });
 
   afterEach(async () => {
+    await container.resolve(SnapshotRefPins).drain();
     if (pushClient) removeClient(pushClient);
     pushClient = undefined;
     await workerRuntime?.close();
@@ -75,6 +77,10 @@ describe("AgentService container composition", () => {
     expect(container.resolve(ExecutionFileEvidenceCoordinator))
       .toBe(container.resolve(ExecutionFileEvidenceCoordinator));
     expect(container.resolve(AgentService)).toBeInstanceOf(AgentService);
+  });
+
+  it("gives the turn runtime the store's snapshot ref pins", () => {
+    expect(container.resolve("TurnRuntimeSnapshotRefPins")).toBe(container.resolve(SnapshotRefPins));
   });
 
   it("starts one writer and a fixed execution pool from the opened database", async () => {

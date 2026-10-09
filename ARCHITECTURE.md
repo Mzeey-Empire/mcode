@@ -240,6 +240,6 @@ Bun workspaces build and test the shared packages and applications. Vitest confi
 
 The [runtime runbook](docs/agents/runtime.md) defines worktree-local startup, authentication, fixture data, and runtime artifacts. The [agent workflow](docs/internals/runtime/agent-workflow.md) defines focused implementation checks. The [verification skill](.agents/skills/verify-mcode/SKILL.md) covers proof through the running application.
 
-[Pull request CI](.github/workflows/ci.yml) runs repository checks and build validation. Release Please manages stable version and release changes. It does not publish a desktop release for every merge to the main branch.
+[Pull request CI](.github/workflows/ci.yml) runs repository checks and build validation. Its [runner and test decisions](docs/internals/ci/pull-request-ci.md) are recorded separately. Release Please manages stable version and release changes. It does not publish a desktop release for every merge to the main branch.
 
 Stable, nightly, and packaging dry runs share the [desktop target packaging workflow](.github/workflows/desktop-package-target.yml). That workflow validates staged packages, native dependencies, server and PTY startup, and target evidence. Stable publication adds production signing requirements. The [stable release workflow](.github/workflows/build-release.yml) and [nightly workflow](.github/workflows/nightly-desktop.yml) own their respective publication policies.

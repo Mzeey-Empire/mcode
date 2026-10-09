@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactNode } from "react";
 import type {
   WorkspaceEnvironmentActionRun,
   WorkspaceEnvironmentAutomaticSetupSnapshot,
@@ -25,6 +25,8 @@ const {
   mockCreateBranch,
   mockGetAutomaticSetup,
   mockGetRightPanelVisible,
+  mockGetReviewComparison,
+  mockGetReviewState,
   mockGetWorkspaceSetupAttempt,
   mockListWorkspaceActionRuns,
   mockOpenSubagentsPanel,
@@ -38,6 +40,8 @@ const {
   mockCreateBranch: vi.fn(),
   mockGetAutomaticSetup: vi.fn(),
   mockGetRightPanelVisible: vi.fn(),
+  mockGetReviewComparison: vi.fn(),
+  mockGetReviewState: vi.fn(),
   mockGetWorkspaceSetupAttempt: vi.fn(),
   mockListWorkspaceActionRuns: vi.fn(),
   mockOpenSubagentsPanel: vi.fn(),
@@ -63,7 +67,12 @@ vi.mock("@/transport", async (importOriginal) => {
     getTransport: () => ({
       createBranch: mockCreateBranch,
       listSnapshots: vi.fn().mockResolvedValue([]),
-      getWorkingTreeFiles: vi.fn().mockResolvedValue([]),
+      getReviewComparison: mockGetReviewComparison,
+      getReviewState: mockGetReviewState,
+      listBranches: vi.fn().mockResolvedValue([
+        { name: "main", shortSha: "abc123", type: "local", isCurrent: true },
+        { name: "feature/other", shortSha: "def456", type: "local", isCurrent: false },
+      ]),
       getBranchComparison: vi.fn().mockResolvedValue(null),
       getRemoteUrl: vi.fn().mockResolvedValue({ label: "repo", webUrl: null }),
       getAutomaticSetup: mockGetAutomaticSetup,
@@ -136,12 +145,6 @@ vi.mock("@/stores/threadStore", () => ({
 vi.mock("@/features/subagents", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/subagents")>()),
   openSubagentsRoster: mockOpenSubagentsPanel,
-}));
-
-vi.mock("@/components/ui/popover", () => ({
-  Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  PopoverTrigger: ({ render }: { render: ReactElement }) => render,
-  PopoverContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -257,6 +260,8 @@ describe("ThreadOverview branchless Create PR", () => {
     mockCreateBranch.mockReset().mockResolvedValue({ branch: "feat/issue-801" });
     mockGetAutomaticSetup.mockReset();
     mockGetRightPanelVisible.mockReset().mockReturnValue(false);
+    mockGetReviewComparison.mockReset().mockResolvedValue({ files: [], additions: 0, deletions: 0 });
+    mockGetReviewState.mockReset().mockResolvedValue({ isGitRepo: false });
     mockGetWorkspaceSetupAttempt.mockReset().mockResolvedValue(null);
     mockListWorkspaceActionRuns.mockReset().mockResolvedValue([]);
     mockReadWorkspaceEnvironment.mockReset().mockResolvedValue({
@@ -293,6 +298,47 @@ describe("ThreadOverview branchless Create PR", () => {
     await user.click(screen.getByTestId("header-overview-toggle"));
     expect(screen.getByTestId("header-overview-toggle")).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
+  });
+
+  it("loads untracked changes from the branchless checkout comparison", async () => {
+    mockGetReviewComparison.mockResolvedValue({
+      files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 4, deletions: 0, untracked: true }],
+      additions: 4, deletions: 0,
+    });
+    render(<ThreadOverview thread={makeThread()} threadPaneWidth={1400} />);
+    expect(await screen.findByTestId("thread-overview-change-summary")).toHaveAttribute("aria-label", "4 additions, 0 deletions");
+    expect(mockGetReviewComparison).toHaveBeenCalledWith({
+      workspaceId: "ws-1", threadId: "thread-1", view: "uncommitted",
+    });
+    expect(mockGetReviewState).not.toHaveBeenCalled();
+  });
+
+  it("keeps branch choices when the uncommitted comparison fails", async () => {
+    mockGetReviewComparison.mockRejectedValue(new Error("Comparison unavailable"));
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={makeThread({ checkout_state: "named" })} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("workspace-menu-branch"));
+    expect(await screen.findByRole("button", { name: "feature/other" })).toBeInTheDocument();
+    expect(screen.getByTestId("thread-overview-current-branch")).toHaveTextContent("main");
+    expect(screen.queryByText("Branches unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Uncommitted:/)).not.toBeInTheDocument();
+  });
+
+  it("uses the state probe's detached comparison when the worktree is clean", async () => {
+    mockGetReviewState.mockResolvedValue({
+      isGitRepo: true, head: "abc123", branch: null,
+      uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
+      commitsAhead: { count: 1, base: "main" }, branchDefault: { base: "main", compare: "HEAD" },
+    });
+    mockGetReviewComparison
+      .mockResolvedValueOnce({ files: [], additions: 0, deletions: 0 })
+      .mockResolvedValue({ files: [{ path: "existing.md", previousPath: null, changeType: "modified", binary: false, additions: 3, deletions: 1, untracked: false }], additions: 3, deletions: 1 });
+    render(<ThreadOverview thread={makeThread()} threadPaneWidth={1400} />);
+    expect(await screen.findByTestId("thread-overview-change-summary")).toHaveAttribute("aria-label", "3 additions, 1 deletions");
+    expect(mockGetReviewState).toHaveBeenCalledWith("ws-1", "thread-1");
+    expect(mockGetReviewComparison).toHaveBeenLastCalledWith({
+      workspaceId: "ws-1", threadId: "thread-1", view: "branch", base: "main", target: "HEAD",
+    });
   });
 
   it("docks only from the minimum canvas width", () => {
@@ -831,11 +877,14 @@ describe("ThreadOverview branchless Create PR", () => {
   });
 
   it("creates a named branch from the branchless worktree row", async () => {
+    const user = userEvent.setup();
     const thread = makeThread({ branch: "release", base_branch: "release" });
     mockWorkspaceState.threads = [thread];
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
-    expect(screen.getByText("HEAD")).toBeInTheDocument();
+    await user.click(screen.getByTestId("thread-overview-local"));
+    expect(await screen.findByText("HEAD")).toBeInTheDocument();
+    await user.click(screen.getByTestId("thread-overview-local"));
     expect(screen.queryByTestId("workspace-menu-branch")).not.toBeInTheDocument();
     expect(screen.queryByTestId("workspace-menu-create-pr")).not.toBeInTheDocument();
     expect(screen.getByTestId("workspace-menu-commit")).toBeDisabled();

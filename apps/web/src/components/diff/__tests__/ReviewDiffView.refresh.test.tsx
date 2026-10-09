@@ -28,7 +28,7 @@ const patch = (text: string) =>
   `diff --git a/file.txt b/file.txt\nindex 1111111..2222222 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-before\n+${text}\n`;
 
 const props = {
-  files: [{ path: "file.txt", previousPath: null, changeType: "modified" as const, binary: false }],
+  files: [{ path: "file.txt", previousPath: null, changeType: "modified" as const, binary: false, additions: null, deletions: null, untracked: false }],
   source: "unstaged" as const,
   id: "workspace-fixture",
   threadId: "thread-fixture",
@@ -52,6 +52,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ReviewDiffView refresh", () => {
+  it("fetches both paths when an untracked file is a rename", async () => {
+    transport.getWorkingTreeDiff.mockResolvedValue("diff --git a/old.txt b/file.txt\nsimilarity index 100%\nrename from old.txt\nrename to file.txt\n");
+    render(<ReviewDiffView {...props} files={[{
+      path: "file.txt", previousPath: "old.txt", changeType: "renamed", binary: false,
+      additions: 0, deletions: 0, untracked: true,
+    }]} />);
+    await waitFor(() => expect(transport.getWorkingTreeDiff).toHaveBeenCalledWith(
+      "workspace-fixture", false, "file.txt", undefined, "thread-fixture", true, "old.txt",
+    ));
+    await waitFor(() => expect(screen.getByTestId("items").textContent).toContain("old.txt"));
+  });
+
   it("refetches an expanded file when cacheVersion changes", async () => {
     const view = render(<ReviewDiffView {...props} />);
     await waitFor(() =>

@@ -16,6 +16,7 @@ import { narrativeRowMargin } from "../narrative/NarrativeRows";
 import { findSelectedTextCommentContent, reconstructCanonicalMessageRange } from "./selected-text-projection";
 import { isMessageListPerformanceBuild, measureMessageListPerformance } from "@/performance/message-list-performance";
 import { TranscriptItemRenderer } from "./timeline/TranscriptItemRenderer";
+import { WorkFoldNote } from "../turn/WorkFold";
 import { MessageListOverlays } from "./MessageListOverlays";
 import type { SelectedTextCommentEditorScope } from "./selection/SelectedTextCommentControls";
 import { findViewportMessageAnchor } from "./message-list-scroll";
@@ -299,6 +300,42 @@ function transcriptGroupKey(item: MessageListItem): string {
   return item.type === "tool-row" ? item.groupKey : item.key;
 }
 
+const ROW_PADDING_BY_TYPE: Partial<Record<MessageListItem["type"], string>> = {
+  "work-fold": "pt-2 pb-1",
+  "fold-note": "pb-3",
+  "turn-meta-line": "pt-1 pb-2",
+};
+
+function transcriptRowPadding(item: MessageListItem): string | undefined {
+  if (item.type === "narrative-row") return narrativeRowMargin(item.index);
+  if (item.type === "tool-row") return undefined;
+  return ROW_PADDING_BY_TYPE[item.type] ?? "py-2";
+}
+
+/**
+ * When a turn settles, its live narrative rows move under a closed work fold.
+ * A reader anchored on one of those rows would lose their place, so the fold opens instead.
+ */
+function revealFoldHidingReadingAnchor(
+  previous: readonly MessageListItem[],
+  next: readonly MessageListItem[],
+  position: TranscriptPosition,
+  expanded: ReadonlySet<string>,
+  open: (key: string) => void,
+): void {
+  if (position.kind !== "reading" || previous === next) return;
+  const anchor = previous.find((item) => item.key === position.key);
+  if (anchor?.type !== "narrative-row" && anchor?.type !== "tool-row") return;
+  if (next.some((item) => item.key === position.key)) return;
+  const previousKeys = new Set(previous.map((item) => item.key));
+  const fold = next.find((item) => item.type === "work-fold" && !previousKeys.has(item.key) && !expanded.has(item.key));
+  if (fold) open(fold.key);
+}
+
+function withoutKeys(keys: ReadonlySet<string>, removed: ReadonlySet<string>): ReadonlySet<string> {
+  return removed.size === 0 ? keys : new Set([...keys].filter((key) => !removed.has(key)));
+}
+
 function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data: MessageListData }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLElement | null>(null);
@@ -313,14 +350,17 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const [highlightedKey, setHighlightedKey] = useState<string>();
   const { expanded: expandedGroups, present: presentGroups, entering: enteringGroups, toggle: toggleExpandedGroup } = useTranscriptGroupExpansion(() =>
     data.renderedThreadId ? recallScrollPosition(data.renderedThreadId)?.expandedGroups ?? new Set() : new Set());
+  // A fold the settle reveal opened collapses on the next visit unless the user touches it.
+  const autoOpenedFolds = useRef(new Set<string>());
   const toggleGroup = useCallback((key: string) => {
+    autoOpenedFolds.current.delete(key);
     const view = controllerRef.current;
     const top = view?.rowTop(key);
     if (top !== undefined) view?.moveTo({ kind: "reading", key, offset: -top });
     toggleExpandedGroup(key);
   }, [toggleExpandedGroup]);
   const { items } =
-    useMessageListItems({ ...data, expandedGroups: presentGroups, leadingContent: props.leadingContent, afterFirstUserContent: props.afterFirstUserContent });
+    useMessageListItems({ ...data, expandedFolds: expandedGroups, expandedGroups: presentGroups, leadingContent: props.leadingContent, afterFirstUserContent: props.afterFirstUserContent });
   const itemsByKey = useMemo(() => new Map(items.map((item) => [item.key, item])), [items]);
   const userRows = useMemo(() => items.filter((item) =>
     item.type === "message" && item.message.role === "user" && !item.message.is_internal,
@@ -329,8 +369,12 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const stickyMessage = stickyItem?.type === "message" ? stickyItem.message : undefined;
   const stickyPreview = useMemo(() => stickyMessage ? resolveUserMessagePreview(stickyMessage) : null, [stickyMessage]);
   const latest = useRef({ data, items, userRows, expandedGroups });
-  latest.current = { data, items, userRows, expandedGroups };
   const positionRef = useRef<TranscriptPosition>({ kind: "end" });
+  revealFoldHidingReadingAnchor(latest.current.items, items, positionRef.current, expandedGroups, (key) => {
+    autoOpenedFolds.current.add(key);
+    toggleExpandedGroup(key);
+  });
+  latest.current = { data, items, userRows, expandedGroups };
   const paginationDirection = useRef<"older" | "newer" | null>(null);
   const restored = useRef(false);
   const previousInset = useRef(data.renderedThreadId ? recallScrollPosition(data.renderedThreadId)?.topInset ?? 16 : 16);
@@ -356,7 +400,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       findViewportMessageAnchor(view.viewport),
       position.kind === "reading" ? { key: position.key, offset: position.offset } : view.getReadingAnchor(),
       previousInset.current,
-      current.expandedGroups,
+      withoutKeys(current.expandedGroups, autoOpenedFolds.current),
     );
   }, []);
 
@@ -493,7 +537,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
         />
       </div>
       <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={(item, id) => (
-          <div className={cn("w-full px-4 sm:px-[var(--chat-gutter,--spacing(8))]", item.type === "narrative-row" ? narrativeRowMargin(item.index) : item.type === "tool-row" ? undefined : "py-2")} data-performance-virtual-item-key={isMessageListPerformanceBuild() ? item.key : undefined}>
+          <div className={cn("w-full px-4 sm:px-[var(--chat-gutter,--spacing(8))]", transcriptRowPadding(item))} data-performance-virtual-item-key={isMessageListPerformanceBuild() ? item.key : undefined}>
             <div className="w-full overflow-x-clip" style={{ paddingRight: props.contentPaddingRight }}>
             <div
               className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0 overflow-x-clip", highlightedKey === id && "animate-flash-highlight")}
@@ -501,10 +545,12 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
             >
               {item.type === "leading-content" || item.type === "after-first-user-content" ? (
                 <div data-testid="message-list-leading-content">{item.content}</div>
+              ) : item.type === "fold-note" ? (
+                <WorkFoldNote text={item.text} />
               ) : item.type === "narrative-row" || item.type === "tool-row" ? (
                 <TranscriptNarrativeRow row={item} threadId={data.renderedThreadId} expanded={expandedGroups.has(transcriptGroupKey(item))} entering={enteringGroups.has(transcriptGroupKey(item))} onToggle={toggleGroup} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} />
               ) : (
-                <TranscriptItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={props.onBranch} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} onScrollToMessage={scrollToMessage} currentTurnMessageIdByThread={data.currentTurnMessageIdByThread} threadId={data.renderedThreadId} showParentAgentProvenance={props.showParentAgentProvenance ?? true} />
+                <TranscriptItemRenderer item={item} expanded={expandedGroups.has(item.key)} onToggleGroup={toggleGroup} turnExpandRef={turnExpandRef} onBranch={props.onBranch} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} onScrollToMessage={scrollToMessage} currentTurnMessageIdByThread={data.currentTurnMessageIdByThread} threadId={data.renderedThreadId} showParentAgentProvenance={props.showParentAgentProvenance ?? true} />
               )}
             </div>
             </div>

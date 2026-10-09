@@ -175,6 +175,7 @@ describe("PullRequestFileTree", () => {
           previousPath: "src/old.ts",
           changeType: "renamed",
           binary: true,
+          additions: null, deletions: null, untracked: false,
         }]}
         activePath={null}
         onActivate={vi.fn()}

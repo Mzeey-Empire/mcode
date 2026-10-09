@@ -31,22 +31,7 @@ vi.mock("../NarrativeRows", () => ({
   ),
 }));
 
-vi.mock("../TurnFooter", () => ({
-  TurnFooter: ({
-    counts,
-    outcome,
-  }: {
-    counts: { steps: number; subagents: number };
-    outcome?: string | null;
-  }) => (
-    <>
-      <div data-testid="persisted-footer-steps" data-subagents={counts.subagents} data-outcome={outcome ?? ""}>{counts.steps}</div>
-    </>
-  ),
-}));
-
 import { PersistedNarrative } from "../PersistedNarrative";
-import { PersistedTurnFooter } from "../PersistedTurnFooter";
 import { PersistedTurnHooks } from "../PersistedTurnHooks";
 
 function tool(id: string, toolName = "Read"): ToolCallRecord {
@@ -108,77 +93,21 @@ describe("persisted child timeline thread selection", () => {
     });
   });
 
-  it("reads persisted narrative and footer records from the explicitly rendered child thread", async () => {
+  it("reads persisted narrative and hook records from the explicitly rendered child thread", async () => {
     const user = userEvent.setup();
     render(
       <>
         <PersistedNarrative threadId="child-thread" messageId="assistant-1" messageContent="Child result" />
-        <PersistedTurnFooter threadId="child-thread" messageId="assistant-1" />
         <PersistedTurnHooks threadId="child-thread" messageId="assistant-1" />
       </>,
     );
 
     expect(screen.getByTestId("persisted-row-ids")).toHaveTextContent("child-tool");
     expect(screen.getByTestId("persisted-row-ids")).not.toHaveTextContent("parent-agent");
-    expect(screen.getByTestId("persisted-footer-steps")).toHaveTextContent("1");
     await user.hover(screen.getByRole("button", { name: "Hooks" }));
     const dialog = await screen.findByRole("dialog", { name: "Hooks" });
     expect(dialog).toHaveTextContent("ChildStop");
     expect(dialog).not.toHaveTextContent("ParentStop");
-  });
-
-  it("renders a canonical footer without requesting detail itself", () => {
-    recordsByThread.delete("child-thread");
-
-    render(
-      <PersistedTurnFooter
-        threadId="child-thread"
-        messageId="assistant-1"
-        summary={{
-          counts: { steps: 2, thoughts: 1, subagents: 1 },
-          durationMs: 2_500,
-        }}
-      />,
-    );
-
-    expect(screen.getByTestId("persisted-footer-steps")).toHaveTextContent("2");
-    expect(screen.getByTestId("persisted-footer-steps")).toHaveAttribute("data-subagents", "1");
-  });
-
-  it("renders the elapsed time for a completed canonical turn without tools", () => {
-    recordsByThread.delete("child-thread");
-
-    render(
-      <PersistedTurnFooter
-        threadId="child-thread"
-        messageId="assistant-1"
-        summary={{
-          counts: { steps: 0, thoughts: 0, subagents: 0 },
-          durationMs: 2_500,
-        }}
-      />,
-    );
-
-    expect(screen.getByTestId("persisted-footer-steps")).toHaveTextContent("0");
-  });
-
-  it("keeps an outcome-only footer when the turn has no activity counts", () => {
-    recordsByThread.delete("child-thread");
-
-    render(
-      <PersistedTurnFooter
-        threadId="child-thread"
-        messageId="assistant-1"
-        summary={{
-          counts: { steps: 0, thoughts: 0, subagents: 0 },
-          durationMs: null,
-          outcome: "interrupted",
-          outcomeExecutionId: "execution-7",
-        }}
-      />,
-    );
-
-    expect(screen.getByTestId("persisted-footer-steps")).toHaveAttribute("data-outcome", "interrupted");
   });
 
   it("routes persisted subagent rows through the chat detail callback", () => {

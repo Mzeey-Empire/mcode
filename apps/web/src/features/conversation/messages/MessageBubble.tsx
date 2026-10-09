@@ -11,9 +11,6 @@ import {
   getAttachmentTransportUrlSnapshot,
   subscribeToAttachmentTransportUrl,
 } from "@/lib/attachment-url";
-import { resolveModelDisplayLabel } from "@/lib/format-model-label";
-import { useProviderModelsStore } from "@/stores/providerModelsStore";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { isHandoffMessage, parseHandoffJson } from "@/components/chat/handoff-utils";
 import { HandoffCard } from "@/components/chat/HandoffCard";
 import { FileAttachmentTile } from "@/components/chat/FileAttachmentTile";
@@ -391,8 +388,12 @@ function ImageThumbnail({
   return <div className={frame}>{imgEl}</div>;
 }
 
-/** Copy button with check feedback, visible on parent hover. */
-function CopyButton({ content }: { content: string }) {
+const HOVER_COPY_CLASS = "flex h-7 w-7 items-center justify-center rounded-md bg-hover/60 text-muted opacity-0 transition-all hover:bg-hover hover:text-ink group-hover/msg:opacity-100";
+const HOVER_BRANCH_CLASS = "flex h-7 w-7 items-center justify-center rounded-md bg-hover/60 text-muted opacity-0 scale-90 transition-all duration-150 hover:bg-primary/10 hover:text-primary group-hover/msg:opacity-100 group-hover/msg:scale-100";
+const RESTING_ACTION_CLASS = "flex size-6 items-center justify-center rounded-sm text-muted outline-none transition-colors hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus";
+
+/** Copy button with check feedback. User messages reveal it on hover. */
+function CopyButton({ content, className = HOVER_COPY_CLASS }: { content: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -413,7 +414,7 @@ function CopyButton({ content }: { content: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      className="flex h-7 w-7 items-center justify-center rounded-md bg-hover/60 text-muted opacity-0 transition-all hover:bg-hover hover:text-ink group-hover/msg:opacity-100"
+      className={className}
       aria-label="Copy message"
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -421,8 +422,19 @@ function CopyButton({ content }: { content: string }) {
   );
 }
 
-/** Branch button visible on hover, matching CopyButton style. */
-function BranchButton({ onClick }: { onClick: () => void }) {
+/** The fork glyph from the finished-turn actions row in Paper. */
+function ForkIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20.25 9.25V3.75H14.75" />
+      <path d="M9.25 3.75H3.75V9.25" />
+      <path d="M12 12V20.25M12 12L19.5 4.5M12 12L4.5 4.5" />
+    </svg>
+  );
+}
+
+/** Fork button matching CopyButton. User messages reveal it on hover. */
+function BranchButton({ onClick, resting = false }: { onClick: () => void; resting?: boolean }) {
   return (
     <Tooltip>
       <TooltipTrigger
@@ -430,10 +442,10 @@ function BranchButton({ onClick }: { onClick: () => void }) {
           <button
             type="button"
             onClick={onClick}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-hover/60 text-muted opacity-0 scale-90 transition-all duration-150 hover:bg-primary/10 hover:text-primary group-hover/msg:opacity-100 group-hover/msg:scale-100"
+            className={resting ? RESTING_ACTION_CLASS : HOVER_BRANCH_CLASS}
             aria-label="Fork from this message"
           >
-            <GitFork size={14} />
+            {resting ? <ForkIcon /> : <GitFork size={14} />}
           </button>
         }
       />
@@ -877,81 +889,26 @@ function AssistantResponseText({
   );
 }
 
-/** Resolves the catalog display label for an assistant message model. */
-function useAssistantModelDisplayLabel(message: Message): string | null {
-  const threadProvider = useWorkspaceStore((state) =>
-    state.threads.find((thread) => thread.id === message.thread_id)?.provider,
-  );
-  const providerCatalog = useProviderModelsStore((state) => threadProvider ? state.models[threadProvider] : undefined);
-  return useMemo(
-    () => message.model ? resolveModelDisplayLabel(message.model, { catalog: providerCatalog }) : null,
-    [message.model, providerCatalog],
-  );
-}
-
-/** Renders completed assistant message controls and provenance metadata. */
-function AssistantMessageFooter({
+/** Renders completed assistant fork and copy controls, visible at rest. */
+function AssistantMessageActions({
   message,
   textContent,
-  formattedTime,
-  modelDisplayLabel,
   isAgentResponseComplete,
   onBranch,
 }: {
   message: Message;
   textContent: string;
-  formattedTime: string;
-  modelDisplayLabel: string | null;
   isAgentResponseComplete: boolean;
   onBranch?: (messageId: string) => void;
 }) {
   if (!isAgentResponseComplete) return null;
   return (
-    <div className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-1 px-1">
-      <AssistantMessageActions message={message} textContent={textContent} onBranch={onBranch} />
-      <AssistantMessageMetadata message={message} modelDisplayLabel={modelDisplayLabel} formattedTime={formattedTime} />
-    </div>
-  );
-}
-
-/** Renders completed assistant fork and copy controls. */
-function AssistantMessageActions({
-  message,
-  textContent,
-  onBranch,
-}: {
-  message: Message;
-  textContent: string;
-  onBranch?: (messageId: string) => void;
-}) {
-  const hasActions = Boolean(onBranch || textContent.trim());
-  if (!hasActions) return null;
-  return (
-    <div className="flex items-center gap-x-3 opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100" data-testid="agent-message-actions">
-      {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
-      {textContent.trim() && <CopyButton content={textContent} />}
+    <div className="flex h-6 items-center gap-1" data-testid="agent-message-actions">
+      {onBranch && <BranchButton resting onClick={() => onBranch(message.id)} />}
+      {textContent.trim() && <CopyButton content={textContent} className={RESTING_ACTION_CLASS} />}
       <PersistedTurnHooks threadId={message.thread_id} messageId={message.id} />
     </div>
   );
-}
-
-/** Renders the quiet model, usage, cost, and time metadata for an assistant message. */
-function AssistantMessageMetadata({
-  message,
-  modelDisplayLabel,
-  formattedTime,
-}: {
-  message: Message;
-  modelDisplayLabel: string | null;
-  formattedTime: string;
-}) {
-  const metadata = [
-    modelDisplayLabel,
-    message.tokens_used != null ? `${message.tokens_used.toLocaleString()} tok` : null,
-    message.cost_usd != null ? `$${message.cost_usd.toFixed(4)}` : null,
-    formattedTime,
-  ].filter(Boolean).join(" · ");
-  return <span className="ml-auto font-mono text-xs tabular-nums text-muted/55" data-testid="agent-message-metadata">{metadata}</span>;
 }
 
 /** Renders an assistant message, including its live response state. */
@@ -966,11 +923,6 @@ function AssistantMessageContent({
   const { imageAttachments, fileAttachments, imageSlides } = useMessageAttachments(message);
   const textContent = useMemo(() => stripInjectedFiles(message.content), [message.content]);
   const isAnsweredPlanMessage = useThreadRecord(message.thread_id, (record) => record.answeredPlanMessageIds.has(message.id));
-  const modelDisplayLabel = useAssistantModelDisplayLabel(message);
-  const formattedTime = useMemo(
-    () => new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    [message.timestamp],
-  );
   const goal = parseGoalStatusNotice(textContent);
   if (goal) return <AssistantGoalNotice goal={goal} />;
   const assistantContentEmpty = isAssistantContentEmpty(message.content, isTextStillArriving(textIsStreaming, agentDisplayState));
@@ -996,11 +948,9 @@ function AssistantMessageContent({
         textIsStreaming={textIsStreaming}
         isAgentResponseComplete={isAgentResponseComplete}
       />
-      <AssistantMessageFooter
+      <AssistantMessageActions
         message={message}
         textContent={textContent}
-        formattedTime={formattedTime}
-        modelDisplayLabel={modelDisplayLabel}
         isAgentResponseComplete={isAgentResponseComplete}
         onBranch={onBranch}
       />
