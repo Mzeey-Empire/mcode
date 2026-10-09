@@ -89,13 +89,21 @@ describe("repository pull request targets", () => {
     expect(run.mock.calls.map(([args]) => args.find((arg) => arg.startsWith("number=")))).toEqual(["number=42", undefined, undefined]);
   });
 
-  it("preserves the search edge when an exact-number bonus fills a limit-one first page", async () => {
+  it("preserves search cursors and lists an exact-number bonus only once across limit-one pages", async () => {
     const run = vi.fn<GithubPullRequestCommandRunner["run"]>()
       .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { repository: { pullRequest: { ...targetNode(42), state: "OPEN" } } } }), stderr: "" })
-      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { search: { ...page([targetNode(9)], true, "next"), issueCount: 3 } } }), stderr: "" });
-    const result = await new GithubPullRequestClient({ run }).listRepositoryOpenPullRequests({ ...targetRequest(), query: "#42", limit: 1 });
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { search: { ...page([targetNode(9)], true, "next"), issueCount: 3 } } }), stderr: "" })
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { search: { ...page([targetNode(42)], true, "last"), issueCount: 3 } } }), stderr: "" })
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { search: { ...page([targetNode(10)]), issueCount: 3 } } }), stderr: "" });
+    const client = new GithubPullRequestClient({ run });
+    const result = await client.listRepositoryOpenPullRequests({ ...targetRequest(), query: "#42", limit: 1 });
     expect(result.items.map((item) => item.number)).toEqual([42, 9]);
     expect([result.total, result.nextCursor]).toEqual([3, "next"]);
+    const second = await client.listRepositoryOpenPullRequests({ ...targetRequest(), query: "#42", limit: 1, cursor: result.nextCursor ?? undefined });
+    expect(second).toEqual({ ok: true, items: [], total: 3, nextCursor: "last" });
+    const third = await client.listRepositoryOpenPullRequests({ ...targetRequest(), query: "#42", limit: 1, cursor: second.nextCursor ?? undefined });
+    expect(third.items.map((item) => item.number)).toEqual([10]);
+    expect(third.nextCursor).toBeNull();
   });
 
   it.each([

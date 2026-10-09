@@ -1958,6 +1958,8 @@ implements PullRequestRemoteClient, PullRequestRemoteMutationClient {
     );
     try {
       const page = parsePullRequestTargetPage(data, Boolean(query));
+      page.items = page.items.filter((item) => !request.cursor || !/^#?\d+$/.test(query ?? "")
+        || item.number !== Number(query?.replace(/^#/, "")));
       // The exact lookup is independent of search; retain every edge behind GitHub's cursor.
       if (exact) page.items = [exact, ...page.items.filter((item) => item.number !== exact.number)];
       return page;
