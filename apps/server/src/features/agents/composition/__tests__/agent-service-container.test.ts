@@ -79,6 +79,10 @@ describe("AgentService container composition", () => {
     expect(container.resolve(AgentService)).toBeInstanceOf(AgentService);
   });
 
+  it("gives the turn runtime the store's snapshot ref pins", () => {
+    expect(container.resolve("TurnRuntimeSnapshotRefPins")).toBe(container.resolve(SnapshotRefPins));
+  });
+
   it("starts one writer and a fixed execution pool from the opened database", async () => {
     workerRuntime = container.resolve(WorkerOwnedTurnRuntime);
     await workerRuntime.whenReady();

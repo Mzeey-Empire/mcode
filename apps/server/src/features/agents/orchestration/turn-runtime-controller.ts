@@ -253,7 +253,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     private readonly workerFiles?: ExecutionFileEvidenceCoordinator,
     @inject("WorkerTurnSnapshotService", { isOptional: true })
     private readonly snapshots?: SnapshotService,
-    @inject(SnapshotRefPins, { isOptional: true })
+    // A class token is always constructible, so `isOptional` only takes effect on a string alias.
+    @inject("TurnRuntimeSnapshotRefPins", { isOptional: true })
     private readonly pins?: SnapshotRefPins,
   ) {
     this.turnDiffs = turnDiffs;

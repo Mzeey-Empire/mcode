@@ -223,6 +223,9 @@ export function registerAgentServices(container: DependencyContainer): void {
   container.register("WorkerTurnSnapshotService", {
     useFactory: (c) => c.resolve(SnapshotService),
   });
+  container.register("TurnRuntimeSnapshotRefPins", {
+    useFactory: (c) => c.resolve(SnapshotRefPins),
+  });
   container.register<TurnFinalizer>(TURN_FINALIZER, {
     useFactory: instanceCachingFactory((c) => new TurnFinalizer(
       c.resolve(MessageRepo),
