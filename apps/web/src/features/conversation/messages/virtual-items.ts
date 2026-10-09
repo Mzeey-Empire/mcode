@@ -724,8 +724,16 @@ function dedupeVolatileItems(stableItems: readonly ChatVirtualItem[], volatileIt
   return volatileItems.filter((item) => item.type !== "message" || !isAgentDisplayActive(item.agentDisplayState) || !stableKeys.has(item.key));
 }
 
-function isAssistantInsertionPoint(item: ChatVirtualItem | undefined): item is Extract<ChatVirtualItem, { type: "message" }> {
-  return item?.type === "message" && item.message.role === "assistant" && !isPlanQuestionsMessage(item.message.content);
+/**
+ * A plan-questions message takes the narrative only once its own work fold precedes it.
+ * The fold exists only after that turn settles, so a later turn's narrative still appends below the questions.
+ */
+function isAssistantInsertionPoint(stableItems: readonly ChatVirtualItem[], index: number): boolean {
+  const item = stableItems[index];
+  if (item?.type !== "message" || item.message.role !== "assistant") return false;
+  if (!isPlanQuestionsMessage(item.message.content)) return true;
+  const previous = stableItems[index - 1];
+  return previous?.type === "work-fold" && previous.messageId === item.message.id;
 }
 
 function isNarrativeHeadItem(item: ChatVirtualItem): boolean {
@@ -734,7 +742,7 @@ function isNarrativeHeadItem(item: ChatVirtualItem): boolean {
 
 function spliceNarrativeItems(stableItems: readonly ChatVirtualItem[], volatileItems: readonly ChatVirtualItem[], assistantIndex: number): ChatVirtualItem[] | undefined {
   const assistantItem = stableItems[assistantIndex];
-  if (!isAssistantInsertionPoint(assistantItem)) return undefined;
+  if (!assistantItem || !isAssistantInsertionPoint(stableItems, assistantIndex)) return undefined;
   const headItems = volatileItems.filter(isNarrativeHeadItem);
   const indicatorItems = volatileItems.filter((item) => item.type === "narrative-indicator");
   const tailItems = volatileItems.filter((item) => !isNarrativeHeadItem(item) && item.type !== "narrative-indicator");

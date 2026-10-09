@@ -968,6 +968,18 @@ describe("buildVirtualItems (combined)", () => {
     expect(narrativeIdx).toBeLessThan(a1Idx);
   });
 
+  it("keeps a settled plan-questions turn's own narrative under its work fold", () => {
+    const messages = [
+      makeMessage({ id: "u1", sequence: 1, role: "user", content: "build X" }),
+      makeMessage({ id: "a1", sequence: 2, role: "assistant", content: "```plan-questions\n[]\n```" }),
+    ];
+    const stable = buildStableItems(messages, undefined, undefined, { threadId: "thread-1", messageId: "a1" }, undefined, undefined, COMPLETED_AGENT, false, true);
+    const volatile = buildVolatileItems([makeToolCall({ id: "tc-1", isComplete: true })], COMPLETED_AGENT, undefined, undefined);
+    const result = buildVirtualItems(stable, volatile, true, "a1");
+
+    expect(result.map((item) => item.key).slice(1, 4)).toEqual(["work-fold:a1", "narrative-flow", "a1"]);
+  });
+
   it("narrative-flow is present when live tool calls exist", () => {
     const messages = [
       makeMessage({ id: "msg-1", sequence: 1, role: "assistant", content: "done" }),
