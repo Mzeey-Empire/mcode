@@ -446,8 +446,8 @@ interface DesktopBridge {
     offCommand(listener: (...args: unknown[]) => void): void;
     perform(action: DesktopWindowAction): Promise<void>;
     /**
-     * Subscribe to the window's full-screen state. Fires on every change and
-     * after each page load. Returns an unsubscribe function.
+     * Subscribe to the window's full-screen state. Fires immediately with the
+     * latest known state, then on every change. Returns an unsubscribe function.
      */
     onFullScreenChange(callback: (fullScreen: boolean) => void): () => void;
   };
