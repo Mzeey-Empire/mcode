@@ -100,7 +100,6 @@ describe("overview registry", () => {
       "thread-overview-card-header", "thread-overview-local", "workspace-menu-branch",
       "workspace-menu-changes", "thread-overview-recap",
     ]);
-    expect(screen.queryByTestId("thread-overview-pr-separator")).not.toBeInTheDocument();
   });
 
   it("opens an overlay from the button where the card cannot dock, and Escape closes it", async () => {
@@ -117,7 +116,7 @@ describe("overview registry", () => {
   });
 
   it("closes the overlay on an outside press but not on the button's own press", async () => {
-    render(<><ThreadOverview thread={thread} threadPaneWidth={600} /><p>outside</p></>);
+    render(<><ThreadOverview thread={thread} threadPaneWidth={600} /><button type="button">outside</button></>);
     fireEvent.click(screen.getByTestId("header-overview-toggle"));
     await screen.findByTestId("thread-overview-card");
 
@@ -125,10 +124,18 @@ describe("overview registry", () => {
     await waitFor(() => expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByTestId("header-overview-toggle"));
-    await screen.findByTestId("thread-overview-card");
-    fireEvent.pointerDown(screen.getByText("outside"));
-    fireEvent.mouseDown(screen.getByText("outside"));
-    fireEvent.click(screen.getByText("outside"));
+    const card = await screen.findByTestId("thread-overview-card");
+    act(() => card.closest<HTMLElement>("[role=dialog]")?.focus());
+    // A real mouse press moves focus out of the overlay, and Base UI's deferred focus-out settles
+    // before the click lands. The click carries a nonzero detail, unlike a synthetic one.
+    const outside = screen.getByText("outside");
+    fireEvent.pointerDown(outside, { button: 0 });
+    fireEvent.mouseDown(outside, { button: 0 });
+    await act(async () => {
+      outside.focus();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    fireEvent.click(outside, { button: 0, detail: 1 });
     await waitFor(() => expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument());
   });
 

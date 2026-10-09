@@ -64,12 +64,17 @@ export function ThreadOverview({ thread, threadPaneWidth }: ThreadOverviewProps)
   useOverviewLifecycle(thread.id, dockable);
   const closeOverlay = useCallback(() => useOverviewStore.getState().dismissOverlay(key), [key]);
   const handleOverlayOpenChange = useCallback((next: boolean, details: PopoverRootChangeEventDetails) => {
-    if (next) return;
-    // Side menus and dialogs opened from the card take focus without closing it.
-    if (details.reason === "focus-out") return;
-    // The button's own click toggles the overlay, so a press on it is not an outside press.
     const target = details.event?.target;
-    if (details.reason === "outside-press" && target instanceof Node && toggleRef.current?.contains(target)) return;
+    // Side menus and dialogs opened from the card take focus without closing it, and the button's
+    // own click toggles the overlay, so neither is a close. Cancelling rather than ignoring matters:
+    // an uncancelled close resets Base UI's press tracking and a later outside click is dropped.
+    const kept = next
+      || details.reason === "focus-out"
+      || (details.reason === "outside-press" && target instanceof Node && toggleRef.current?.contains(target));
+    if (kept) {
+      details.cancel();
+      return;
+    }
     closeOverlay();
   }, [closeOverlay]);
   const anchor = useMemo(() => (layer ? dockedCornerAnchor(layer) : toggleRef), [layer]);
