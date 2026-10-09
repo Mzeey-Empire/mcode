@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
-import type { Message, RecoveryIncident, SelectedTextComment, ThreadStartupKind } from "@mcode/contracts";
+import type { Message, RecoveryIncident, SelectedTextComment, ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Notice } from "@/components/ui/notice";
@@ -308,13 +308,17 @@ function PreparingThreadSurface({
 
 // A completed startup clears its pending entry, which can happen before the durable message arrives or the placeholder id is replaced.
 // The surface keeps echoing that startup's first message while the selected thread still owns it, so the bubble does not fall back to the title.
+// Any other terminal state either returns the message to the composer or stops after it was persisted, so no echo is needed.
 function useEchoedPendingStartup(thread: WorkspaceThread, pendingStartup: PendingStartup | undefined): PendingStartup | undefined {
   const [retained, setRetained] = useState(pendingStartup ? { threadId: thread.id, pendingStartup } : undefined);
-  const retainedBoundThreadId = useThreadStartupStore((s) => retained ? s.recordsByStartupId[retained.pendingStartup.startupId]?.threadId : undefined);
+  const retainedRecord = useThreadStartupStore((s) => retained ? s.recordsByStartupId[retained.pendingStartup.startupId] : undefined);
   if (pendingStartup && pendingStartup !== retained?.pendingStartup) setRetained({ threadId: thread.id, pendingStartup });
   if (pendingStartup) return pendingStartup;
-  const ownsRetained = retained !== undefined && (retained.threadId === thread.id || retainedBoundThreadId === thread.id);
-  return ownsRetained ? retained.pendingStartup : undefined;
+  return retained && threadOwnsCompletedEcho(thread, retained.threadId, retainedRecord) ? retained.pendingStartup : undefined;
+}
+
+function threadOwnsCompletedEcho(thread: WorkspaceThread, echoThreadId: string, record: ThreadStartup | undefined): boolean {
+  return record?.state === "completed" && (echoThreadId === thread.id || record.threadId === thread.id);
 }
 
 // The durable bubble's footer and message parts add height, so the preparing surface draws the same bubble to keep the trail still at hand-off.

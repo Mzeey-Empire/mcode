@@ -945,6 +945,46 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(bubbleFor(other).queryByText("design-notes.pdf")).toBeNull();
   });
 
+  it("stops echoing the first message when a cancelled startup returns it to the composer", () => {
+    const startupId = "00000000-0000-4000-8000-000000000033";
+    const thread = { ...makeThread({ id: "thread-cancelled-echo", title: "Prepare checkout", mode: "worktree", worktree_managed: true }), clientPreparing: true };
+    act(() => useThreadStartupStore.getState().apply({
+      startupId,
+      workspaceId: thread.workspace_id,
+      kind: "managed-worktree",
+      state: "cancelled",
+      phase: "setup",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "worktree", state: "completed" },
+        { phase: "setup", state: "cancelled" },
+        { phase: "agent", state: "pending" },
+      ],
+      transcript: [],
+      cancellation: "none",
+      revision: 1,
+      threadId: thread.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:01.000Z",
+    }));
+    chatViewTransportMock.getAutomaticSetup.mockResolvedValue({ gate: "not-required", attempt: null, queuedTurns: [] });
+    setupWorkspaceMock(defaultWorkspaceState({
+      activeThreadId: thread.id,
+      threads: [thread],
+      pendingStartupByThreadId: { [thread.id]: { startupId, context: "new-worktree", queuedMessage: "Review this spec" } },
+    }));
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
+    const view = render(<ChatView />);
+
+    setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread], pendingStartupByThreadId: {} }));
+    view.rerender(<ChatView />);
+
+    const bubble = screen.getByTestId("thread-preparing-shell").querySelector<HTMLElement>(`[data-message-id="preparing-${thread.id}"]`);
+    expect(bubble).not.toBeNull();
+    expect(within(bubble!).queryByText("Review this spec")).toBeNull();
+    expect(within(bubble!).getByText("Prepare checkout")).toBeInTheDocument();
+  });
+
   it("keeps the preparing shell through the optimistic-to-persisted startup handoff", async () => {
     const startupId = "00000000-0000-4000-8000-000000000024";
     const placeholder = {
