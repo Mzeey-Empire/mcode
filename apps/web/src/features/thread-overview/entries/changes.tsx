@@ -19,10 +19,8 @@ type ThreadOverviewChangeSummaryTransport = Pick<
   McodeTransport,
   | "listSnapshots"
   | "getSnapshotDiffStats"
-  | "getWorkingTreeFiles"
-  | "getBranchComparison"
-  | "getBranchFiles"
-  | "getReviewDiffStats"
+  | "getReviewComparison"
+  | "getReviewState"
 >;
 
 type LoadedChangeSummary = {
@@ -44,11 +42,6 @@ export interface ThreadOverviewChangeSummary {
 
 const EMPTY_CHANGE_SUMMARY: ThreadOverviewChangeSummary = {
   files: 0,
-  additions: 0,
-  deletions: 0,
-};
-
-const EMPTY_REVIEW_DIFF_STAT: ReviewDiffStat = {
   additions: 0,
   deletions: 0,
 };
@@ -138,7 +131,7 @@ export function hasVisibleThreadOverviewChangeSummary(
 
 /**
  * Resolves the Overview Changes row summary from the same priority as the
- * Review default: latest turn, then unstaged worktree, then branch comparison.
+ * Review default: latest turn, then uncommitted worktree, then branch comparison.
  */
 export async function resolveThreadOverviewChangeSummary({
   thread,
@@ -162,54 +155,26 @@ export async function resolveThreadOverviewChangeSummary({
     };
   }
 
-  const unstagedFiles = await transport
-    .getWorkingTreeFiles(thread.workspace_id, false, thread.id)
-    .catch(() => []);
-  if (unstagedFiles.length > 0) {
-    const stat = await transport
-      .getReviewDiffStats({
-        workspaceId: thread.workspace_id,
-        view: "unstaged",
-        threadId: thread.id,
-      })
-      .catch(() => EMPTY_REVIEW_DIFF_STAT);
-    return {
-      snapshots: resolvedSnapshots,
-      summary: summarizeGitChangeStats(unstagedFiles, stat),
-    };
+  const working = await transport.getReviewComparison({
+    workspaceId: thread.workspace_id, view: "uncommitted", threadId: thread.id,
+  });
+  if (working.files.length > 0) {
+    return { snapshots: resolvedSnapshots, summary: summarizeGitChangeStats(working.files.map((file) => file.path), working) };
   }
-
-  const comparison = await transport
-    .getBranchComparison(thread.workspace_id, thread.id)
-    .catch(() => null);
-  if (
-    !comparison ||
-    comparison.isUnborn ||
-    comparison.isComparisonAvailable === false ||
-    !comparison.base ||
-    !comparison.target
-  ) {
+  const state = await transport.getReviewState(thread.workspace_id, thread.id);
+  if (!state.isGitRepo || !("compare" in state.branchDefault)) {
     return { snapshots: resolvedSnapshots, summary: EMPTY_CHANGE_SUMMARY };
   }
-
-  const [files, stat] = await Promise.all([
-    transport
-      .getBranchFiles(thread.workspace_id, comparison.base, comparison.target, thread.id)
-      .catch(() => []),
-    transport
-      .getReviewDiffStats({
-        workspaceId: thread.workspace_id,
-        view: "branch",
-        base: comparison.base,
-        target: comparison.target,
-        threadId: thread.id,
-      })
-      .catch(() => EMPTY_REVIEW_DIFF_STAT),
-  ]);
-
+  const comparison = await transport.getReviewComparison({
+    workspaceId: thread.workspace_id,
+    view: "branch",
+    base: state.branchDefault.base,
+    target: state.branchDefault.compare,
+    threadId: thread.id,
+  });
   return {
     snapshots: resolvedSnapshots,
-    summary: summarizeGitChangeStats(files, stat),
+    summary: summarizeGitChangeStats(comparison.files.map((file) => file.path), comparison),
   };
 }
 

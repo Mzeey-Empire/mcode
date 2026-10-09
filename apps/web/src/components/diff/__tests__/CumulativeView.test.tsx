@@ -35,7 +35,7 @@ describe("CumulativeView summary lens", () => {
       <CumulativeView
         threadId="thread-1"
         comparison={{
-          files: [{ path: "apps/web/src/a.ts", previousPath: null, changeType: "modified", binary: false }],
+          files: [{ path: "apps/web/src/a.ts", previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }],
           additions: 1,
           deletions: 0,
         }}
@@ -63,7 +63,7 @@ describe("CumulativeView summary lens", () => {
       <CumulativeView
         threadId="thread-1"
         comparison={{
-          files: [{ path: "apps/web/src/a.ts", previousPath: null, changeType: "modified", binary: false }],
+          files: [{ path: "apps/web/src/a.ts", previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }],
           additions: 1,
           deletions: 0,
         }}

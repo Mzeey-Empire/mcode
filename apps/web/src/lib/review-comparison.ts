@@ -14,6 +14,7 @@ function fromEffect(effect: FileEffect): ReviewFileChange | null {
             ? "renamed"
             : "modified",
     binary: effect.binary,
+    additions: null, deletions: null, untracked: false,
   };
 }
 
@@ -28,6 +29,7 @@ export function reviewFilesForSnapshot(snapshot: TurnSnapshot): ReviewFileChange
     previousPath: null,
     changeType: "modified" as const,
     binary: false,
+    additions: null, deletions: null, untracked: false,
   }));
 }
 
@@ -71,6 +73,7 @@ function applyDeletedChange(
     current.delete(change.path);
     current.set(prior.previousPath, {
       path: prior.previousPath,
+      additions: null, deletions: null, untracked: false,
       previousPath: null,
       changeType: "deleted",
       binary: mergeBinary(prior, change),
@@ -120,7 +123,7 @@ function resolveAuthoritativeFileChange(
   path: string,
 ): ReviewFileChange {
   const change = current.get(path);
-  if (!change) return { path, previousPath: null, changeType: "modified", binary: false };
+  if (!change) return { path, previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false };
   if (change.changeType === "renamed" && change.previousPath === path) {
     return { ...change, previousPath: null, changeType: "modified" };
   }
@@ -134,6 +137,7 @@ export function pathsToReviewFiles(paths: readonly string[]): ReviewFileChange[]
     previousPath: null,
     changeType: "modified" as const,
     binary: false,
+    additions: null, deletions: null, untracked: false,
   }));
 }
 

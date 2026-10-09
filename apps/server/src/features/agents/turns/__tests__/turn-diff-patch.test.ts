@@ -14,7 +14,7 @@ describe("parseTurnDiff", () => {
   });
   it("parses complete native text with spaces and derives exact Review metadata", () => {
     const result = parseTurnDiff(patch);
-    expect(result?.files).toEqual([{ path: "a file.txt", previousPath: null, binary: false, changeType: "modified" }]);
+    expect(result?.files).toEqual([{ path: "a file.txt", previousPath: null, binary: false, changeType: "modified", additions: 1, deletions: 1, untracked: false }]);
     expect([result?.additions, result?.deletions]).toEqual([1, 1]);
     expect(result?.filePatches.get("a file.txt")).toBe(patch);
     expect(parseTurnDiff(patch.trimEnd())?.filePatches.get("a file.txt")).toBe(patch);
