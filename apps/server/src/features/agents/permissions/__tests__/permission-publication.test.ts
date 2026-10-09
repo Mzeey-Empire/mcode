@@ -69,6 +69,7 @@ describe("agent permission publication", () => {
   });
 
   it.each(["returns false", "throws"])("cancels and stops the thread when denying %s", (failure) => {
+    const error = vi.spyOn(logger, "error").mockImplementation(() => undefined);
     const publication = buildPublication();
     publication.resolvePermission.mockImplementation(() => {
       if (failure === "throws") throw new Error("sk-secret-12345");
@@ -82,6 +83,60 @@ describe("agent permission publication", () => {
     expect(publication.publishPermissionRequest).toHaveBeenCalledBefore(publication.resolvePermission);
     expect(publication.resolvePermission).toHaveBeenCalledBefore(publication.publishPermissionResolved);
     expect(publication.publishPermissionResolved).toHaveBeenCalledBefore(publication.stopSession);
+    if (failure === "throws") {
+      expect(error.mock.calls).toEqual([["Provider could not deny unreadable permission request", {
+        providerId: "claude", requestId: "request-1",
+      }]]);
+    }
+    expect(JSON.stringify(error.mock.calls)).not.toContain("sk-secret-12345");
+  });
+
+  it("publishes the stand-in before the adapter denial and the stand-in denial", () => {
+    const publication = buildPublication();
+    const published = vi.fn();
+    publication.publishPermissionRequest.mockImplementation((request) => published("permission.request", request));
+    publication.publishPermissionResolved.mockImplementation((resolution) => published("permission.resolved", resolution));
+    publication.resolvePermission.mockImplementation(() => {
+      publication.events.emit("permission_resolved", { requestId: "request-1", decision: "deny" });
+      return true;
+    });
+
+    publication.events.emit("permission_request", unreadableRequest);
+
+    expect(publication.resolvePermission.mock.calls).toEqual([["request-1", "deny"]]);
+    expect(published.mock.calls).toEqual([
+      ["permission.request", {
+        requestId: "request-1", threadId: "thread-1", toolName: "Unreadable request",
+        title: "Mcode couldn't read this request", input: {},
+      }],
+      ["permission.resolved", { requestId: "request-1", decision: "deny" }],
+      ["permission.resolved", { requestId: "request-1", decision: "deny" }],
+    ]);
+    expect(publication.stopSession).not.toHaveBeenCalled();
+  });
+
+  it("cancels and stops the thread when the provider cannot resolve permissions", () => {
+    const events = new NodeEvents.EventEmitter();
+    const publishPermissionRequest = vi.fn();
+    const publishPermissionResolved = vi.fn();
+    const stopSession = vi.fn(async (_threadId: string) => undefined);
+    publishAgentPermissionEvents({
+      providerRegistry: { resolveAll: () => [{ id: "claude", on: events.on.bind(events) }] },
+      publishPermissionRequest,
+      publishPermissionResolved,
+      stopSession,
+    });
+
+    events.emit("permission_request", unreadableRequest);
+
+    expect(publishPermissionRequest.mock.calls).toEqual([[{
+      requestId: "request-1", threadId: "thread-1", toolName: "Unreadable request",
+      title: "Mcode couldn't read this request", input: {},
+    }]]);
+    expect(publishPermissionResolved.mock.calls).toEqual([[{ requestId: "request-1", decision: "cancelled" }]]);
+    expect(stopSession.mock.calls).toEqual([["thread-1"]]);
+    expect(publishPermissionRequest).toHaveBeenCalledBefore(publishPermissionResolved);
+    expect(publishPermissionResolved).toHaveBeenCalledBefore(stopSession);
   });
 
   it("handles and logs a rejected session stop without exposing the error", async () => {
