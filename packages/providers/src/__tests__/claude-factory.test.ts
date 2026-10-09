@@ -61,7 +61,7 @@ describe("Claude public factory core and capabilities", () => {
   it.each([
     ["captured", "## Native plan\nShip it.",
       "The client captured your proposed plan. Reply with a one or two sentence summary of it, then stop and wait for the user to review it."],
-    ["oversized", "x".repeat(256 * 1024 + 1),
+    ["oversized", "x".repeat(64 * 1024 + 1),
       "The plan is too long for the client to capture. Shorten it and call ExitPlanMode again."],
     ["empty", "  ", "No plan was received. Write the full plan inside the ````mcode-plan fence in your reply instead."],
   ] as const)("finishes a textless native plan turn without inventing a message: %s", async (kind, markdown, reply) => {

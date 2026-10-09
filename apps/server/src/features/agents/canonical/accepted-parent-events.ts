@@ -2,6 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
 import {
   MessageSchema,
+  ProviderRuntimeEventSchema,
   type AgentEvent,
   type AgentItem,
   type AgentThread,
@@ -35,6 +36,7 @@ export function prepareAcceptedParentEvents(input: {
 }): { events: CanonicalAgentEventDraft[]; terminalMessage?: Message; storageOperation?: ExecutionSemanticOperation } {
   validateContext(input);
   const prepared = mutationEvents(input);
+  prepared.events = prepared.events.map(withoutNativePlanFile);
   const providerStarted = providerStartedEvent(input);
   // Leads the batch so a turn whose first frame is also its terminal frame still records the answer before it ends.
   if (providerStarted) prepared.events.unshift(providerStarted);
@@ -46,6 +48,17 @@ export function prepareAcceptedParentEvents(input: {
 
 type PreparationInput = Parameters<typeof prepareAcceptedParentEvents>[0];
 type PreparedEvents = ReturnType<typeof prepareAcceptedParentEvents>;
+
+function withoutNativePlanFile(draft: CanonicalAgentEventDraft): CanonicalAgentEventDraft {
+  if (draft.payload.type !== "item.recorded" || draft.payload.item.payload.projection !== "providerRuntimeEvent") return draft;
+  const item = draft.payload.item;
+  const runtime = ProviderRuntimeEventSchema().parse(item.payload.runtimeEvent);
+  if (!runtime.planCapture?.nativePlanFile) return draft;
+  const { nativePlanFile: _privateRef, ...planCapture } = runtime.planCapture;
+  // Ownership evidence persists in plan metadata, outside the public canonical stream.
+  return { ...draft, payload: { ...draft.payload, item: { ...item,
+    payload: { ...item.payload, runtimeEvent: { ...runtime, planCapture } } } } };
+}
 
 function mutationEvents(input: PreparationInput): PreparedEvents {
   const mutation = input.operation.mutation;

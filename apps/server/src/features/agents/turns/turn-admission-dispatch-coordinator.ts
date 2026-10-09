@@ -476,6 +476,7 @@ export class TurnAdmissionDispatchCoordinator {
     lease: TurnRuntimeLease,
     runtime: TurnRuntimeAdmissionAuthority,
   ): Promise<PreparedTurnDispatch> {
+    await this.preparePlanFile(prepared.command);
     const cwd = this.resolveWorkingDirectory(prepared);
     const review = await this.approvalReviews.resolve({
       requestedMode: prepared.command.approvalReviewMode,
@@ -493,6 +494,12 @@ export class TurnAdmissionDispatchCoordinator {
         await this.attachments.removeStoredAttachments(prepared.command.threadId, attachmentData.stored);
       }
       throw error;
+    }
+  }
+
+  private async preparePlanFile(command: SendMessageCommand): Promise<void> {
+    if (command.interactionMode === "plan" || command.planAction || command.markPlanAnswerForMessageId) {
+      await this.plans.prepareTurn(command.threadId);
     }
   }
 

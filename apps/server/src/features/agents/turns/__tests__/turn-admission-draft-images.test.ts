@@ -7,6 +7,8 @@ import * as NodeEvents from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IAgentProvider, IProviderRegistry, ProviderId, StagedDraftImage } from "@mcode/contracts";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { resolveThreadPlanFile } from "@mcode/shared";
+import { PlanFileWriter } from "../../planning/plan-file-writer.js";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
@@ -86,8 +88,40 @@ async function fixture(providerId: ProviderId = "codex", beforeCommit: () => Pro
   };
   const stagedPath = (image: StagedDraftImage) => NodePath.join(directory, "attachments", thread.id, "draft", `${image.stagingId}.png`);
   const copies = () => NodeFS.readdirSync(NodePath.join(directory, "attachments", thread.id)).filter((name) => name !== "draft");
-  return { admission, runtime, thread, attachments, messages, send, stage, stagedPath, copies };
+  const planRepo = new PlanRepo(db, writer);
+  plans.bindPlanProjection(undefined, new PlanFileWriter((id) => planRepo.listByThread(id), () => directory));
+  return { admission, runtime, thread, attachments, messages, send, stage, stagedPath, copies, planRepo };
 }
+
+describe("plan file admission", () => {
+  const commands: Partial<SendMessageCommand>[] = [
+    { interactionMode: "plan" }, { planAction: "revise" }, { planAction: "implement" },
+    { markPlanAnswerForMessageId: "question-message" },
+  ];
+
+  it.each(commands)("refreshes a stale plan file before admitting %j", async (command) => {
+    let filename = "";
+    const f = await fixture("codex", async () => {
+      expect(NodeFS.readFileSync(filename, "utf8")).toBe("# Current plan");
+    });
+    const assistant = await f.messages.create(f.thread.id, "assistant", "Summary", 1);
+    await f.planRepo.create(f.thread.id, assistant.id, { title: "Current", contentMd: "# Current plan", captureSource: "fence" }, "codex");
+    filename = resolveThreadPlanFile(directory, f.thread.id);
+    NodeFS.mkdirSync(NodePath.dirname(filename), { recursive: true });
+    NodeFS.writeFileSync(filename, "# Stale plan");
+    const admitted = await f.send([], command.markPlanAnswerForMessageId ? { markPlanAnswerForMessageId: assistant.id } : command);
+    expect(admitted.kind).toBe("dispatch");
+  });
+
+  it.each(commands)("refuses admission if the plan refresh fails for %j", async (command) => {
+    const f = await fixture();
+    const assistant = await f.messages.create(f.thread.id, "assistant", "Summary", 1);
+    await f.planRepo.create(f.thread.id, assistant.id, { title: "Current", contentMd: "# Current plan", captureSource: "fence" }, "codex");
+    NodeFS.mkdirSync(resolveThreadPlanFile(directory, f.thread.id), { recursive: true });
+    await expect(f.send([], command)).rejects.toMatchObject({ code: expect.stringMatching(/^(EISDIR|EPERM|EACCES)$/) });
+    expect(f.messages.listByThread(f.thread.id, 10).messages.map((message) => message.id)).toEqual([assistant.id]);
+  });
+});
 
 describe("draft image admission", () => {
   it("copies the staged image into the admitted message and keeps it after a cross-window discard", async () => {

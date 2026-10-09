@@ -5,8 +5,9 @@ import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentEventSchema, type AgentEvent, type PlanVersion, type ProviderRuntimeEvent } from "@mcode/contracts";
-import { resolveThreadPlanFile } from "@mcode/shared";
+import { AgentEventSchema, CanonicalAgentProgressFrameSchema, WS_CHANNELS, WS_METHODS, type AgentEvent, type PlanVersion, type ProviderRuntimeEvent } from "@mcode/contracts";
+import { logger, resolveThreadPlanFile } from "@mcode/shared";
+import { CanonicalAgentStore } from "../../canonical/canonical-agent-store.js";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
@@ -19,9 +20,12 @@ import { PlanStore } from "../persistence/plan-store.js";
 import { PlanFileWriter } from "../plan-file-writer.js";
 import { PlanService, PlanServiceError } from "../plan-service.js";
 
-const pushes = vi.hoisted(() => ({ versions: [] as unknown[] }));
+const pushes = vi.hoisted(() => ({ versions: [] as unknown[], frames: [] as unknown[] }));
 vi.mock("../../../../application/transport/push.js", () => ({
-  broadcast: (channel: string, data: unknown) => { if (channel === "plan.versionUpserted") pushes.versions.push(data); },
+  broadcast: (channel: string, data: unknown) => {
+    if (channel === "plan.versionUpserted") pushes.versions.push(data);
+    if (channel === "agent.canonical") pushes.frames.push(data);
+  },
   subscribedThreadIds: () => new Set<string>(),
 }));
 const threadId = "plan-thread";
@@ -60,6 +64,7 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
     handler = new ExecutionWorkerHandler(new CanonicalExecutionWriterPort(canonicalWriter, () => {}, undefined, undefined, progress));
     service = new PlanService(owner, progress, files);
     pushes.versions.length = 0;
+    pushes.frames.length = 0;
   });
 
   afterEach(async () => {
@@ -68,6 +73,7 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
     await owner.close();
     db.close(true);
     NodeFS.rmSync(directory, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
   function fork(contentMd = "# Edited") {
@@ -96,7 +102,7 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
           payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: value, ...(planCapture ? { planCapture } : {}) } }, createdAt: now, updatedAt: now } } };
   }
 
-  async function captureAndFinish() {
+  async function captureAndFinish(waitForSaves = true) {
     const content = "````mcode-plan\n# Revised by agent\nDo the new work.\n````";
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [event(1, "textDelta", { delta: content, isFinalResponse: true })] });
@@ -104,7 +110,12 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
       events: [event(2, "message", { content, tokens: null })] });
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [event(3, "turnComplete")],
       terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
-    await expect.poll(() => progress.depth().pending, { timeout: 10_000 }).toBe(0);
+    if (waitForSaves) await expect.poll(() => progress.depth().pending, { timeout: 10_000 }).toBe(0);
+  }
+
+  function insertCanonicalItem(id: string, payload: string) {
+    db.prepare("INSERT INTO canonical_agent_items (id, thread_id, turn_id, kind, payload_json, provider_identities_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id, threadId, execution.turnId, "system", payload, "[]", now, now);
   }
 
   it("rejects a save during an unfinished execution with no write", async () => {
@@ -122,6 +133,41 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
     expect(await service.saveVersion(input)).toEqual(draft);
     expect(plans.listByThread(threadId)).toEqual([ready, draft]);
     expect(NodeFS.readFileSync(resolveThreadPlanFile(directory, threadId), "utf8")).toBe(input.contentMd);
+  });
+
+  it("ignores a stale nonterminal checkpoint once its turn is terminal", async () => {
+    await start();
+    await captureAndFinish();
+    db.prepare("UPDATE canonical_agent_ingest_checkpoints SET terminal_outcome = NULL WHERE execution_id = ?").run(execution.executionId);
+    expect(new CanonicalAgentStore(db).listUnfinishedCheckpoints()).toEqual([]);
+    const latest = plans.listByThread(threadId)[1];
+    const saved = await service.saveVersion({ ...fork(), baseVersionId: latest.id });
+    expect(saved).toMatchObject({ version: 3, baseVersionId: latest.id, revision: 1 });
+  });
+
+  it("returns and broadcasts committed saves despite a failed file rename", async () => {
+    NodeFS.mkdirSync(resolveThreadPlanFile(directory, threadId), { recursive: true });
+    const log = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    const input = fork();
+    const saved = await service.saveVersion(input);
+    expect(saved).toMatchObject({ id: input.versionId, revision: 1, contentMd: input.contentMd });
+    expect(plans.getById(saved.id)).toEqual(saved);
+    expect(pushes.versions).toEqual([{ threadId, version: saved }]);
+    expect(log).toHaveBeenCalledWith("Failed to project committed plan file", expect.objectContaining({ threadId }));
+    const next = await service.saveVersion({ ...input, baseRevision: saved.revision, contentMd: "# Next edit" });
+    expect(next).toMatchObject({ revision: 2, contentMd: "# Next edit" });
+  });
+
+  it("finishes canonical saves and retires receipts when the plan file cannot be written", async () => {
+    NodeFS.mkdirSync(resolveThreadPlanFile(directory, threadId), { recursive: true });
+    const log = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    await start();
+    await captureAndFinish();
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
+    expect(canonicalWriter.pendingAcknowledgementCount).toBe(0);
+    expect(plans.listByThread(threadId).map((plan) => [plan.version, plan.status])).toEqual([[1, "superseded"], [2, "ready"]]);
+    expect(pushes.versions).toContainEqual({ threadId, version: plans.listByThread(threadId)[1] });
+    expect(log).toHaveBeenCalledWith("Failed to project committed plan file", expect.objectContaining({ threadId }));
   });
 
   it("increments equal revisions, rejects higher/lower revisions, and permits only the identical lost-response replay", async () => {
@@ -238,6 +284,23 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
       .toEqual([[1, "accepted"], [2, "ready"]]);
   });
 
+  it("orders a fork behind the planning turn while its accepted saves are still queued", async () => {
+    await start();
+    db.exec("BEGIN IMMEDIATE");
+    let saved: Promise<PlanVersion>;
+    try {
+      await captureAndFinish(false);
+      expect(progress.depth().pending).toBeGreaterThan(0);
+      const latest = progress.reloadPlans(threadId)[1];
+      expect(latest).toMatchObject({ version: 2, status: "ready" });
+      saved = service.saveVersion({ ...fork("# Queued fork"), baseVersionId: latest.id });
+    } finally {
+      db.exec("COMMIT");
+    }
+    expect(await saved).toMatchObject({ version: 3, revision: 1, contentMd: "# Queued fork" });
+    expect(plans.listByThread(threadId).map((plan) => [plan.version, plan.status])).toEqual([[1, "superseded"], [2, "ready"], [3, "draft"]]);
+  });
+
   it("retains native capture ownership only on the server", async () => {
     const nativePlanFile = { path: NodePath.join(directory, "native-plan.md"), sessionId: "native-session", sha256: "a".repeat(64) };
     await start("claude");
@@ -254,6 +317,13 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
       .toEqual({ native_plan_file_json: JSON.stringify(nativePlanFile) });
     expect(JSON.stringify(snapshot)).not.toContain("nativePlanFile");
     expect(JSON.stringify(pushes.versions)).not.toContain(nativePlanFile.path);
+    const frames = pushes.frames.map((frame) => CanonicalAgentProgressFrameSchema().parse(frame));
+    expect(JSON.stringify(frames)).toContain("# Native plan");
+    expect(JSON.stringify(frames)).not.toContain("nativePlanFile");
+    expect(JSON.stringify(frames)).not.toContain(nativePlanFile.path);
+    const storedItems = db.prepare("SELECT payload_json FROM canonical_agent_items WHERE thread_id = ?").all(threadId);
+    expect(JSON.stringify(storedItems)).toContain("# Native plan");
+    expect(JSON.stringify(storedItems)).not.toContain("nativePlanFile");
     expect(NodeFS.existsSync(nativePlanFile.path)).toBe(false);
   });
 
@@ -276,14 +346,35 @@ describe("PlanService on the application SQLite writer", { timeout: 30_000 }, ()
 
   it("loads legacy canonical payloads as ready without rewriting retained history", async () => {
     await start();
-    const legacy = { id: ready.id, threadId, messageId: ready.messageId, version: 1, title: ready.title,
-      contentMd: ready.contentMd, sectionsJson: [], changeSummary: null, status: "draft", createdAt: ready.createdAt,
+    const contentMd = "x".repeat(100_000);
+    db.prepare("UPDATE plans SET content_md = ? WHERE id = ?").run(contentMd, ready.id);
+    const legacy = { id: NodeCrypto.randomUUID(), threadId, messageId: ready.messageId, version: 2, title: ready.title,
+      contentMd, sectionsJson: [], changeSummary: null, status: "draft", createdAt: ready.createdAt,
       providerId: "unknown-legacy-provider" };
     const payload = JSON.stringify({ projection: "plan", plan: legacy });
-    db.prepare("INSERT INTO canonical_agent_items (id, thread_id, turn_id, kind, payload_json, provider_identities_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-      .run("legacy-plan", threadId, execution.turnId, "system", payload, "[]", now, now);
-    expect((await service.snapshot({ threadId })).versions).toEqual([ready]);
+    insertCanonicalItem("legacy-plan", payload);
+    const snapshot = await service.snapshot({ threadId });
+    expect(snapshot.versions).toHaveLength(2);
+    expect(snapshot.versions[0]).toEqual({ ...ready, contentMd });
+    expect(snapshot.versions[1]).toMatchObject({ id: legacy.id, contentMd, status: "ready", author: "agent", revision: 0 });
+    expect(WS_METHODS()["plan.snapshot"].result.parse(snapshot)).toEqual(snapshot);
+    expect(new CanonicalAgentStore(db).loadAcceptedFeatureSeed(threadId).plans).toEqual(snapshot.versions);
+    for (const version of snapshot.versions) {
+      expect(WS_CHANNELS["plan.versionUpserted"].parse({ threadId, version })).toEqual({ threadId, version });
+    }
     expect(db.prepare("SELECT payload_json FROM canonical_agent_items WHERE id = ?").get("legacy-plan")).toEqual({ payload_json: payload });
+  });
+
+  it("skips malformed and foreign legacy items without hiding valid versions", async () => {
+    await start();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+    insertCanonicalItem("invalid-json", "{");
+    insertCanonicalItem("invalid-plan", JSON.stringify({ projection: "plan", plan: { id: "invalid" } }));
+    insertCanonicalItem("foreign-plan", JSON.stringify({ projection: "plan", plan: { ...ready, threadId: "another-thread" } }));
+    insertCanonicalItem("missing-plan", JSON.stringify({ projection: "plan" }));
+    expect((await service.snapshot({ threadId })).versions).toEqual([ready]);
+    expect(warn.mock.calls.filter(([message]) => message === "Skipping unreadable historic plan")
+      .map(([, details]) => details?.itemId).sort()).toEqual(["foreign-plan", "invalid-plan", "missing-plan"]);
   });
 
   it("rejects missing threads and foreign version identities without exposing their rows", async () => {

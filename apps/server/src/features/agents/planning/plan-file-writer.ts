@@ -1,7 +1,7 @@
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
-import { getMcodeDir, resolveThreadPlanFile } from "@mcode/shared";
+import { getMcodeDir, logger, resolveThreadPlanFile } from "@mcode/shared";
 import type { PlanVersion } from "@mcode/contracts";
 
 /** Serializes atomic file projections and reads the latest row when each write starts. */
@@ -19,6 +19,17 @@ export class PlanFileWriter {
     const settled = () => { if (this.pending.get(threadId) === next) this.pending.delete(threadId); };
     void next.then(settled, settled);
     return next;
+  }
+
+  /** A derived file failure must not invalidate an already committed version. */
+  async writeAfterCommit(threadId: string): Promise<void> {
+    try {
+      await this.write(threadId);
+    } catch (error) {
+      logger.error("Failed to project committed plan file", {
+        threadId, error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async project(threadId: string): Promise<void> {

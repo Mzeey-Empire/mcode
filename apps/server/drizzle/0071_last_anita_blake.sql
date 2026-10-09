@@ -19,7 +19,14 @@ CREATE TABLE `__new_plans` (
 	FOREIGN KEY (`message_id`) REFERENCES `messages`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-INSERT INTO `__new_plans`("id", "thread_id", "message_id", "version", "title", "content_md", "author", "provider_id", "capture_source", "base_version_id", "revision", "native_plan_file_json", "status", "created_at", "updated_at", "accepted_at") SELECT "id", "thread_id", "message_id", "version", "title", "content_md", 'agent', NULL, 'fence', NULL, 0, NULL, CASE WHEN "status" = 'draft' THEN 'ready' ELSE "status" END, "created_at", "created_at", NULL FROM `plans`;--> statement-breakpoint
+INSERT INTO `__new_plans`("id", "thread_id", "message_id", "version", "title", "content_md", "author", "provider_id", "capture_source", "base_version_id", "revision", "native_plan_file_json", "status", "created_at", "updated_at", "accepted_at")
+SELECT p.id, p.thread_id, m.id,
+  ROW_NUMBER() OVER (PARTITION BY p.thread_id ORDER BY p.version, p.created_at, p.id),
+  p.title, p.content_md, 'agent', NULL, 'fence', NULL, 0, NULL,
+  CASE WHEN p.status = 'draft' THEN 'ready' ELSE p.status END, p.created_at, p.created_at, NULL
+FROM plans p
+JOIN threads t ON t.id = p.thread_id
+LEFT JOIN messages m ON m.id = p.message_id;--> statement-breakpoint
 DROP TABLE `plans`;--> statement-breakpoint
 ALTER TABLE `__new_plans` RENAME TO `plans`;--> statement-breakpoint
 CREATE INDEX `idx_plans_thread` ON `plans` (`thread_id`);--> statement-breakpoint

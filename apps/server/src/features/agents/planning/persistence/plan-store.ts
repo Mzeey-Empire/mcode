@@ -1,7 +1,8 @@
 import type { Database } from "bun:sqlite";
-import { and, asc, desc, eq, ne } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import * as NodeCrypto from "node:crypto";
+import { logger } from "@mcode/shared";
 import { PlanVersionSchema, type PlanSaveVersion, type PlanVersion, type ProviderId } from "@mcode/contracts";
 import { plans, canonicalAgentItems } from "../../../../runtime/persistence/sqlite/schema.js";
 import { readCanonicalPlan } from "../legacy-plan-record.js";
@@ -40,7 +41,10 @@ export class PlanStore {
     return this.db.transaction((): PlanSaveResult => {
       if (!this.threadExists(input.threadId)) return { ok: false, code: "thread_not_found", latestVersion: null };
       const latest = this.listByThread(input.threadId).at(-1) ?? null;
-      if (this.db.prepare("SELECT 1 FROM canonical_agent_ingest_checkpoints WHERE thread_id = ? AND terminal_outcome IS NULL LIMIT 1").get(input.threadId)) {
+      if (this.db.prepare(`SELECT 1 FROM canonical_agent_ingest_checkpoints checkpoint
+        JOIN canonical_agent_turns turn ON turn.id = checkpoint.turn_id
+        WHERE checkpoint.thread_id = ? AND checkpoint.terminal_outcome IS NULL
+          AND turn.status IN ('Pending', 'Running') LIMIT 1`).get(input.threadId)) {
         return { ok: false, code: "plan_busy", latestVersion: latest };
       }
       return this.saveAvailableVersion(input, latest);
@@ -82,17 +86,32 @@ export class PlanStore {
   snapshot(threadId: string): PlanSnapshotResult {
     return this.db.transaction((): PlanSnapshotResult => {
       if (!this.threadExists(threadId)) return { ok: false, code: "thread_not_found", latestVersion: null };
-      const historic: PlanVersion[] = [];
-      for (const item of this.orm.select().from(canonicalAgentItems).where(eq(canonicalAgentItems.threadId, threadId)).orderBy(asc(canonicalAgentItems.updatedAt)).all()) {
+      return { ok: true, versions: this.listWithHistory(threadId) };
+    })();
+  }
+
+  /** Read retained plan projections alongside the authoritative version rows. */
+  listWithHistory(threadId: string): PlanVersion[] {
+    const historic: PlanVersion[] = [];
+    const items = this.orm.select().from(canonicalAgentItems).where(and(
+      eq(canonicalAgentItems.threadId, threadId),
+      sql`CASE WHEN json_valid(${canonicalAgentItems.payloadJson}) THEN json_extract(${canonicalAgentItems.payloadJson}, '$.projection') END = 'plan'`,
+    )).orderBy(asc(canonicalAgentItems.updatedAt)).all();
+    for (const item of items) {
+      try {
         const payload: unknown = JSON.parse(item.payloadJson);
-        if (typeof payload === "object" && payload !== null && "projection" in payload && payload.projection === "plan" && "plan" in payload) {
-          const plan = readCanonicalPlan(payload.plan);
+        if (typeof payload === "object" && payload !== null) {
+          const plan = readCanonicalPlan("plan" in payload ? payload.plan : undefined);
           if (plan.threadId !== threadId) throw new Error("Canonical plan belongs to another thread");
           historic.push(plan);
         }
+      } catch (error) {
+        logger.warn("Skipping unreadable historic plan", {
+          threadId, itemId: item.id, error: error instanceof Error ? error.message : String(error),
+        });
       }
-      return { ok: true, versions: mergePlanVersions(historic, this.listByThread(threadId)) };
-    })();
+    }
+    return mergePlanVersions(historic, this.listByThread(threadId));
   }
 
   private threadExists(threadId: string): boolean {

@@ -716,7 +716,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     const content = '````mcode-plan\n# Plan\n\n## Build\nBuild it\n````';
     await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 2, "textDelta", { delta: content, isFinalResponse: true })] });
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "message", { content, tokens: null })] });
-    const plan = progress.listPlans(execution.threadId)?.[0];
+    const plan = progress.reloadPlans(execution.threadId)?.[0];
     if (!plan) throw new Error("Expected accepted plan before saving");
     expect(progress.reloadPlans(execution.threadId)).toEqual([plan]);
     await send(5, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 4, "system", {

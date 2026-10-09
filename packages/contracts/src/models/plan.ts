@@ -2,7 +2,7 @@ import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderIdSchema } from "./settings.js";
 
-/** Maximum UTF-16 content length accepted for a plan version. */
+/** Maximum UTF-16 content length accepted for a new plan write. */
 export const PLAN_MAX_CONTENT_CHARS = 64 * 1024;
 
 /** Private provider evidence carried to persistence, never included in public versions. */
@@ -37,7 +37,7 @@ export const PlanVersionSchema = lazySchema(() =>
     messageId: z.string().nullable(),
     version: z.number().int().min(1),
     title: z.string().min(1).max(200),
-    contentMd: z.string().max(PLAN_MAX_CONTENT_CHARS),
+    contentMd: z.string(),
     status: PlanVersionStatusSchema(),
     author: z.enum(["agent", "user"]),
     providerId: ProviderIdSchema.nullable(),

@@ -104,10 +104,12 @@ export async function runCursorAcpTraceProfile(
 export async function replayCursorPlanRequest(
   fixture: ProviderFixtureManifest,
   params: Parameters<NonNullable<ReturnType<CursorAcpClientBridge["createClient"]>["extMethod"]>>[1],
+  onResponse?: (response: Awaited<ReturnType<NonNullable<ReturnType<CursorAcpClientBridge["createClient"]>["extMethod"]>>>) => void,
 ): Promise<PlanCapture[]> {
   const { trace } = getCursorAcpTraceFixture(fixture);
   const replay = createCursorAcpTraceReplay(trace);
-  await replay.requestExtMethod("cursor/create_plan", params);
+  const response = await replay.requestExtMethod("cursor/create_plan", params);
+  onResponse?.(response);
   return replay.planCaptures;
 }
 

@@ -256,9 +256,16 @@ export class CanonicalAcceptedProgress {
     return structuredClone(thread.features.plans);
   }
 
-  /** Plan readers retain live captures until their database projection catches up. */
-  listPlans(threadId: string): PlanVersion[] {
-    return this.reloadPlans(threadId);
+  /** A post-turn fork must follow accepted writes that have not reached SQLite yet. */
+  async waitForTerminalSaves(threadId: string): Promise<void> {
+    const thread = this.threads.get(threadId);
+    if (!thread?.head) return;
+    const status = thread.state.turns[thread.head.execution.turnId]?.status;
+    if (status === "Pending" || status === "Running") return;
+    const saving = thread.owner.savingState();
+    if (saving.kind === "failed") throw saving.error;
+    if (thread.owner.recoveryCut().retained.length === 0) return;
+    await new Promise<void>((resolve, reject) => thread.waiters.add({ resolve, reject }));
   }
 
   /** Task hydration reads the accepted board while its compatibility row is still queued. */
@@ -820,7 +827,7 @@ export class CanonicalAcceptedProgress {
   private async projectSavedPlans(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): Promise<void> {
     if (!batch.write.features?.planRecords?.length) return;
     this.reloadPlans(batch.execution.threadId);
-    await this.planFiles?.write(batch.execution.threadId);
+    await this.planFiles?.writeAfterCommit(batch.execution.threadId);
   }
 
   private async retireSavedReceipts(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>,

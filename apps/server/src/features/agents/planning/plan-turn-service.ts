@@ -32,7 +32,7 @@ type ClaudePlanAnswerModeProvider = {
 @injectable()
 export class PlanTurnService {
   private readonly executionByThread = new Map<string, PlanExecutionState>();
-  private projection: { progress: Pick<CanonicalAcceptedProgress, "reloadPlans"> | undefined; files: PlanFileWriter } | undefined;
+  private projection: { progress: Pick<CanonicalAcceptedProgress, "reloadPlans" | "waitForTerminalSaves"> | undefined; files: PlanFileWriter } | undefined;
 
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
@@ -43,8 +43,14 @@ export class PlanTurnService {
   ) {}
 
   /** Connect the legacy capture path to the same post-commit projections as canonical capture. */
-  bindPlanProjection(progress: Pick<CanonicalAcceptedProgress, "reloadPlans"> | undefined, files: PlanFileWriter): void {
+  bindPlanProjection(progress: Pick<CanonicalAcceptedProgress, "reloadPlans" | "waitForTerminalSaves"> | undefined, files: PlanFileWriter): void {
     this.projection = { progress, files };
+  }
+
+  /** Refuse admission when the provider would see a stale plan file. */
+  async prepareTurn(threadId: string): Promise<void> {
+    await this.projection?.progress?.waitForTerminalSaves(threadId);
+    await this.projection?.files.write(threadId);
   }
 
   /** Start parsing one plan-question generation turn. */
@@ -178,11 +184,12 @@ ${userMessage}`;
   ): Promise<void> {
     if (execution.hasPersistedPlan()) return;
     try {
-      await this.planRepo.create(threadId, messageId, ready, ProviderIdSchema.parse(this.threadRepo.findById(threadId)?.provider));
+      const provider = ProviderIdSchema.safeParse(this.threadRepo.findById(threadId)?.provider);
+      await this.planRepo.create(threadId, messageId, ready, provider.success ? provider.data : null);
       execution.markPlanPersisted();
       this.projection?.progress?.reloadPlans(threadId);
-      await this.projection?.files.write(threadId);
       for (const version of this.planRepo.listByThread(threadId)) broadcast("plan.versionUpserted", { threadId, version });
+      await this.projection?.files.writeAfterCommit(threadId);
     } catch (error) {
       logger.error("Failed to persist plan output", {
         threadId,

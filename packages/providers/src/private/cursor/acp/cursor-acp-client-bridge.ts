@@ -9,7 +9,7 @@ import type {
   SessionNotification,
 } from "@agentclientprotocol/sdk";
 import { logger } from "@mcode/shared";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType, PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts";
 import type { AgentEvent, PermissionDecision, PermissionRequest } from "@mcode/contracts";
 import type { CursorProviderPorts } from "../../../factory-types.js";
 import { buildCursorAskQuestionExtResponse } from "./cursor-acp-ask-question.js";
@@ -180,8 +180,9 @@ export class CursorAcpClientBridge {
   ): AcpExtMethodResponse {
     const record = toRecord(params) ?? {};
     const planMarkdown = extractCursorCreatePlanMarkdown(record);
-    if (planMarkdown && planMarkdown.length > 256 * 1024) {
+    if (planMarkdown && planMarkdown.length > PLAN_MAX_CONTENT_CHARS) {
       logger.warn("Ignoring oversized native plan capture", { threadId: entry.threadId, length: planMarkdown.length });
+      return { outcome: { outcome: "rejected" }, message: "The plan is too long for the client to capture. Shorten it and call create_plan again." };
     } else if (planMarkdown) {
       this.deps.emitPlanCaptured({ threadId: entry.threadId, markdown: planMarkdown, source: "native" }, entry);
     } else {

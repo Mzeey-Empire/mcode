@@ -135,6 +135,7 @@ describe("successful database migration recovery", () => {
     const db = new Database(databasePath, { strict: true });
     const id = "00000000-0000-4000-8000-000000000071";
     const createdAt = "2026-10-01T00:00:00.000Z";
+    const contentMd = "x".repeat(100_000);
     try {
       db.exec("PRAGMA foreign_keys = ON");
       migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(previous) });
@@ -142,17 +143,30 @@ describe("successful database migration recovery", () => {
       db.prepare("INSERT INTO threads (id, workspace_id, title, branch) VALUES (?, ?, ?, ?)").run("plan-thread", "plan-ws", "Plan", "main");
       db.prepare("INSERT INTO messages (id, thread_id, role, content, sequence) VALUES (?, ?, ?, ?, ?)").run("plan-message", "plan-thread", "assistant", "Summary", 1);
       db.prepare("INSERT INTO plans (id, thread_id, message_id, version, title, content_md, sections_json, change_summary, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(id, "plan-thread", "plan-message", 1, "Plan", "# Plan", "[]", "old", "draft", createdAt);
+        .run(id, "plan-thread", "plan-message", 1, "Plan", contentMd, "[]", "old", "draft", createdAt);
+      db.exec("PRAGMA foreign_keys = OFF");
+      const insertLegacy = db.prepare("INSERT INTO plans (id, thread_id, message_id, version, title, content_md, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+      insertLegacy.run("accepted", "plan-thread", "plan-message", 1, "Accepted", "# Accepted", "accepted", createdAt);
+      insertLegacy.run("superseded", "plan-thread", "plan-message", 1, "Superseded", "# Superseded", "superseded", createdAt);
+      insertLegacy.run("orphan-message", "plan-thread", "deleted-message", 2, "Retained", "# Retained", "draft", createdAt);
+      insertLegacy.run("orphan-thread", "deleted-thread", "deleted-message", 1, "Deleted", "# Deleted", "draft", createdAt);
+      db.exec("PRAGMA foreign_keys = ON");
       migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
       expect(db.prepare("SELECT * FROM plans WHERE id = ?").get(id)).toEqual({
-        id, thread_id: "plan-thread", message_id: "plan-message", version: 1, title: "Plan", content_md: "# Plan",
+        id, thread_id: "plan-thread", message_id: "plan-message", version: 1, title: "Plan", content_md: contentMd,
         author: "agent", provider_id: null, capture_source: "fence", base_version_id: null,
         revision: 0, native_plan_file_json: null, status: "ready", created_at: createdAt, updated_at: createdAt, accepted_at: null,
       });
       expect(() => db.prepare("INSERT INTO plans (id, thread_id, version, title, content_md, author, capture_source) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run("duplicate", "plan-thread", 1, "Duplicate", "", "user", "edit")).toThrow();
+        .run("duplicate", "plan-thread", 1, "Duplicate", "", "user", "edit")).toThrow(/UNIQUE constraint failed: plans.thread_id, plans.version/);
+      expect(db.prepare("SELECT id, version, status, message_id, author, revision FROM plans ORDER BY version").all()).toEqual([
+        { id, version: 1, status: "ready", message_id: "plan-message", author: "agent", revision: 0 },
+        { id: "accepted", version: 2, status: "accepted", message_id: "plan-message", author: "agent", revision: 0 },
+        { id: "superseded", version: 3, status: "superseded", message_id: "plan-message", author: "agent", revision: 0 },
+        { id: "orphan-message", version: 4, status: "ready", message_id: null, author: "agent", revision: 0 },
+      ]);
       db.prepare("INSERT INTO plans (id, thread_id, message_id, version, title, content_md, author, capture_source) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)")
-        .run("draft", "plan-thread", 2, "Edited", "# Edited", "user", "edit");
+        .run("draft", "plan-thread", 5, "Edited", "# Edited", "user", "edit");
       expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally { db.close(true); }
   });

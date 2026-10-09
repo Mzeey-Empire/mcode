@@ -21,16 +21,17 @@ export class PlanServiceError extends Error {
 /** User plan writes bypass canonical ownership and rejoin it only through a cache reload. */
 export class PlanService {
   constructor(private readonly writer: ApplicationDatabaseWriter,
-    private readonly progress: Pick<CanonicalAcceptedProgress, "reloadPlans"> | undefined,
+    private readonly progress: Pick<CanonicalAcceptedProgress, "reloadPlans" | "waitForTerminalSaves"> | undefined,
     private readonly files: PlanFileWriter) {}
 
   /** Save or replay one revision-checked draft and publish only after commit. */
   async saveVersion(input: PlanSaveVersion): Promise<PlanVersion> {
+    await this.progress?.waitForTerminalSaves(input.threadId);
     const result = await this.writer.execute(planWriteOperations.saveVersion, input);
     if (!result.ok) throw new PlanServiceError(result);
     this.progress?.reloadPlans(input.threadId);
-    await this.files.write(input.threadId);
     broadcast("plan.versionUpserted", { threadId: input.threadId, version: result.version });
+    await this.files.writeAfterCommit(input.threadId);
     return result.version;
   }
 
