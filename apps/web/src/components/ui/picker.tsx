@@ -128,12 +128,16 @@ export function Picker<T>(props: PickerProps<T>) {
   // The highlight belongs to one list; a new tab or query starts over from the selection. Reset during render
   // rather than keying by listKey, so returning to an earlier query doesn't revive its old highlight.
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  // A row action can remove its own row, such as unstarring in Favourites. The highlight then moves to the
+  // neighbour that slides into its place instead of jumping to a row that may be scrolled out of view.
+  const [neighborKey, setNeighborKey] = useState<string | null>(null);
   const [highlightListKey, setHighlightListKey] = useState(listKey);
   if (highlightListKey !== listKey) {
     setHighlightListKey(listKey);
     setActiveKey(null);
+    setNeighborKey(null);
   }
-  const activeRowKey = resolveActiveKey(rows, activeKey, selectedKey);
+  const activeRowKey = resolveActiveKey(rows, [activeKey, neighborKey], selectedKey);
   const activeIndex = rows.findIndex(({ row }) => row.key === activeRowKey);
   const loadMore = useLoadMoreOnce(props, listKey);
 
@@ -150,10 +154,7 @@ export function Picker<T>(props: PickerProps<T>) {
       return;
     }
     if (isRowActionShortcut(event)) {
-      const row = rows[activeIndex]?.row;
-      if (!row?.action) return;
-      event.preventDefault();
-      row.action.run();
+      runActiveRowAction(event);
       return;
     }
     const target = highlightTarget(rows, activeIndex, event.key);
@@ -162,10 +163,20 @@ export function Picker<T>(props: PickerProps<T>) {
     moveHighlight(target);
   };
 
+  const runActiveRowAction = (event: KeyboardEvent<HTMLInputElement>) => {
+    const action = rows[activeIndex]?.row.action;
+    if (!action) return;
+    event.preventDefault();
+    const below = nextReachableRow(rows, activeIndex, 1);
+    setNeighborKey(rows[below === -1 ? nextReachableRow(rows, activeIndex, -1) : below]?.row.key ?? null);
+    action.run();
+  };
+
   const moveHighlight = (next: number) => {
     const key = rows[next]?.row.key;
     if (key === undefined) return;
     setActiveKey(key);
+    setNeighborKey(null);
     // Only keyboard moves scroll; hover highlights must never move the list under the pointer.
     document.getElementById(optionId(listId, next))?.scrollIntoView?.({ block: "nearest" });
     if (next >= rows.length - LOAD_MORE_ROWS) loadMore();
@@ -265,10 +276,14 @@ function isReachable(row: PickerRow): boolean {
   return !row.disabled || row.action !== undefined;
 }
 
-/** The highlighted row survives appended pages; otherwise it falls back to the selection, then the first enabled row. */
-function resolveActiveKey<T>(rows: readonly ListRow<T>[], activeKey: string | null, selectedKey?: string): string | null {
+/**
+ * The highlighted row, or the neighbour recorded for it, survives appended pages and row removals; otherwise the
+ * highlight falls back to the selection, then the first enabled row.
+ */
+function resolveActiveKey<T>(rows: readonly ListRow<T>[], highlighted: readonly (string | null)[], selectedKey?: string): string | null {
   const isEnabled = (key: string | null | undefined) => rows.some(({ row }) => row.key === key && !row.disabled);
-  if (rows.some(({ row }) => row.key === activeKey && isReachable(row))) return activeKey;
+  const kept = highlighted.find((key) => rows.some(({ row }) => row.key === key && isReachable(row)));
+  if (kept !== undefined) return kept;
   if (isEnabled(selectedKey)) return selectedKey ?? null;
   return rows.find(({ row }) => !row.disabled)?.row.key ?? null;
 }

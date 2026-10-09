@@ -365,6 +365,35 @@ describe("Picker", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it("keeps the highlight in place when a row action removes its own row", async () => {
+    function RemovablePicker() {
+      const [names, setNames] = useState(["a", "b", "c", "d"]);
+      return (
+        <Picker<string>
+          query=""
+          onQueryChange={() => {}}
+          items={names}
+          total={names.length}
+          status="ready"
+          selectedKey="a"
+          renderItem={(name) => ({
+            key: name,
+            name,
+            action: { label: `Remove ${name}`, icon: <span>*</span>, run: () => setNames((current) => current.filter((entry) => entry !== name)) },
+          })}
+          onSelect={() => {}}
+        />
+      );
+    }
+    render(<RemovablePicker />);
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Control>}d{/Control}");
+    expect(screen.queryByRole("option", { name: /^c/ })).toBeNull();
+    expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(screen.getByRole("option", { name: /^b/ })).toHaveAttribute("data-active");
+  });
+
   it("hides the count while the total is unknown", () => {
     render(<PagedPicker total={null} />);
     expect(screen.queryByText(/^Showing/)).toBeNull();
