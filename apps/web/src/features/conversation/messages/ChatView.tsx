@@ -235,7 +235,6 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
     activeThread,
     activeThreadId,
     setForkMode,
-    setPendingPrefill,
     updateThreadTitle,
   } = state;
   const selectedTextCommentEditor = useComposerDraftStore((store) =>
@@ -317,7 +316,6 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
   const interactions = useMemo<ChatViewInteractions>(() => ({
     onBranch: handleBranch,
     ...selectedTextComments.interactions,
-    onPromptSelect: setPendingPrefill,
     onStopSafely: handleStopSafely,
     onContinueWithoutSaving: handleContinueWithoutSaving,
     onDismissCliError: handleDismissCliError,
@@ -333,7 +331,6 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
     handleSaveTitle,
     handleStopSafely,
     selectedTextComments.interactions,
-    setPendingPrefill,
   ]);
   const recovery: ChatRecoveryBannerState = {
     incident: recoveryIncident,
