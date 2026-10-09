@@ -31,6 +31,9 @@ const REGISTRATION_ERROR_COPY: Record<WorkspaceCreateErrorCode, string> = {
   permission_denied: "Mcode can't read this folder.",
 };
 
+// The workspace store keeps the raw failure; transport and server messages are not user copy.
+const UNEXPECTED_ADD_ERROR_COPY = "Mcode couldn't add this folder. Try again.";
+
 const FILE_MANAGER_NAME = isWindows ? "File Explorer" : isMac ? "Finder" : "Files";
 
 type BrowseDirectoryState =
@@ -61,7 +64,8 @@ function browseDirectoryReducer(
  *   client-side substring filter against the returned entries.
  * - `Enter` on a highlighted folder appends its name + a trailing `/` to the
  *   query, descending into it.
- * - `Cmd/Ctrl+Enter` adds an exact, explicitly chosen directory as a project.
+ * - `Cmd/Ctrl+Enter` adds an exact, explicitly chosen directory as a project, unless it is home
+ *   or a filesystem root.
  * - On desktop, the footer opens the native folder dialog and adds the chosen folder.
  */
 export function BrowseView() {
@@ -77,7 +81,7 @@ export function BrowseView() {
   const { directoryPath, leafFilter } = getBrowseQueryParts(query, isDrivesMode);
   const [browseAttempt, setBrowseAttempt] = useState(0);
   const { result, loading, error } = useBrowseDirectory(directoryPath, browseAttempt);
-  const { addError, isAdding, handleAdd, handlePickFolder } = useBrowseAddAction({
+  const { addError, canAdd, handleAdd, handlePickFolder } = useBrowseAddAction({
     query,
     leafFilter,
     isDrivesMode,
@@ -98,17 +102,10 @@ export function BrowseView() {
     () => getFilteredEntries(result, leafFilter),
     [result, leafFilter],
   );
-  const { canAddCurrentDirectory, canAscend } = getBrowseCapabilities({
-    leafFilter,
-    isDrivesMode,
-    result,
-    loading,
-    error,
-    isAdding,
-  });
+  const canAscend = Boolean(!isDrivesMode && leafFilter === "" && result?.parent);
 
   useRegisteredBrowseActions({
-    canAddCurrentDirectory,
+    canAddCurrentDirectory: canAdd,
     handleAdd,
     canAscend,
     handleAscend,
@@ -172,34 +169,6 @@ function getFilteredEntries(result: BrowseResult | null, leafFilter: string) {
   return filterBrowseEntries(result.entries, leafFilter);
 }
 
-function getBrowseCapabilities({
-  leafFilter,
-  isDrivesMode,
-  result,
-  loading,
-  error,
-  isAdding,
-}: {
-  leafFilter: string;
-  isDrivesMode: boolean;
-  result: BrowseResult | null;
-  loading: boolean;
-  error: string | null;
-  isAdding: boolean;
-}) {
-  return {
-    canAddCurrentDirectory: canAddCurrentDirectory({
-      leafFilter,
-      isDrivesMode,
-      result,
-      loading,
-      error,
-      isAdding,
-    }),
-    canAscend: Boolean(!isDrivesMode && leafFilter === "" && result?.parent),
-  };
-}
-
 function canAddCurrentDirectory({
   leafFilter,
   isDrivesMode,
@@ -253,9 +222,14 @@ function useBrowseAddAction({
   const [addErrorState, setAddErrorState] = useState<{
     readonly query: string;
     readonly message: string;
+    readonly rejectedPath: string | null;
   } | null>(null);
   const [isAdding, setIsAdding] = useState(false);
-  const isCurrentDirectoryAddable = canAddCurrentDirectory({
+  const currentError = addErrorState?.query === query ? addErrorState : null;
+  const addError = currentError?.message ?? null;
+  // The listing that made this folder addable is stale once the server rejects it; editing the path re-checks it.
+  const isRejected = currentError !== null && currentError.rejectedPath === result?.path;
+  const isCurrentDirectoryAddable = !isRejected && canAddCurrentDirectory({
     leafFilter,
     isDrivesMode,
     result,
@@ -264,8 +238,6 @@ function useBrowseAddAction({
     isAdding,
   });
 
-  const addError = addErrorState?.query === query ? addErrorState.message : null;
-
   // A reused registration opens the existing project the same way a new one does.
   const addFolder = useCallback(async (path: string) => {
     setAddErrorState(null);
@@ -273,13 +245,13 @@ function useBrowseAddAction({
     try {
       const created = await createWorkspace(undefined, path);
       if (!created.ok) {
-        setAddErrorState({ query, message: REGISTRATION_ERROR_COPY[created.error.code] });
+        setAddErrorState({ query, message: REGISTRATION_ERROR_COPY[created.error.code], rejectedPath: path });
         return;
       }
       beginNewThread(created.workspace.id);
       close();
-    } catch (cause) {
-      setAddErrorState({ query, message: cause instanceof Error ? cause.message : String(cause) });
+    } catch {
+      setAddErrorState({ query, message: UNEXPECTED_ADD_ERROR_COPY, rejectedPath: null });
     } finally {
       setIsAdding(false);
     }
@@ -294,7 +266,7 @@ function useBrowseAddAction({
     if (path) await addFolder(path);
   }, [addFolder]);
 
-  return { addError, isAdding, handleAdd, handlePickFolder };
+  return { addError, canAdd: isCurrentDirectoryAddable, handleAdd, handlePickFolder };
 }
 
 function useBrowseNavigation({
@@ -379,14 +351,6 @@ function BrowseList({
 }) {
   return (
     <CommandList className="max-h-80">
-      <BrowseMessages
-        loading={loading}
-        error={error}
-        result={result}
-        isDrivesMode={isDrivesMode}
-        leafFilter={leafFilter}
-        filteredEntries={filteredEntries}
-      />
       <BrowseEntries
         error={error}
         result={result}
@@ -394,6 +358,14 @@ function BrowseList({
         leafFilter={leafFilter}
         filteredEntries={filteredEntries}
         onSelect={onSelect}
+      />
+      <BrowseMessages
+        loading={loading}
+        error={error}
+        result={result}
+        isDrivesMode={isDrivesMode}
+        leafFilter={leafFilter}
+        filteredEntries={filteredEntries}
       />
     </CommandList>
   );
@@ -502,7 +474,7 @@ function BrowseEntries({
   filteredEntries: BrowseResult["entries"];
   onSelect: (entryName: string) => void;
 }) {
-  if (error || filteredEntries.length === 0) return null;
+  if (error) return null;
 
   return (
     <CommandGroup heading={getEntriesHeading(result, isDrivesMode, leafFilter)}>
@@ -559,8 +531,14 @@ function BrowseAddError({ addError }: { addError: string | null }) {
 
 function OpenInFileManager({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="text-caption text-muted hover:text-ink">
+    <Button
+      type="button"
+      variant="ghost"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      className="h-6 rounded-badge px-1.5 text-caption text-muted hover:text-ink"
+    >
       Open in {FILE_MANAGER_NAME}
-    </button>
+    </Button>
   );
 }

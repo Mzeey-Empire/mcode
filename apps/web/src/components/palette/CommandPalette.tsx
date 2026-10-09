@@ -165,10 +165,6 @@ function keepInputFocus(event: MouseEvent): void {
   event.preventDefault();
 }
 
-/**
- * Input row. Lists lead with a search icon; a folder path swaps it for a back arrow to the view
- * that started browsing and adds the Add chip on the right.
- */
 function PaletteInput({
   placeholder,
   query,

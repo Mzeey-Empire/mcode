@@ -34,7 +34,9 @@ export class WorkspaceService {
   ) {}
 
   /**
-   * Create a new workspace, or return the existing one if the path is already registered.
+   * Create a new workspace, or return the existing one (`reused: true`) if the path is already
+   * registered. Rejects a path that is not an absolute, readable, specific folder with a typed
+   * error instead of throwing. The name defaults to the folder name.
    * Detects whether the path is a git repository and stores the result.
    * If a soft-deleted workspace occupies the path and cleanup has finished (no threads
    * remain), it is evicted automatically. If cleanup is still in progress, force-deletes
