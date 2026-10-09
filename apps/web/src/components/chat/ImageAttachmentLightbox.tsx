@@ -350,7 +350,7 @@ export const ImageAttachmentLightbox = memo(function ImageAttachmentLightbox({
         <DialogPrimitive.Popup
           data-slot="image-attachment-lightbox-popup"
           className={cn(
-            "app-viewport-fixed fixed z-(--layer-modal) flex flex-col bg-transparent p-0 shadow-none ring-0 outline-none",
+            "fixed inset-0 z-(--layer-modal) flex flex-col bg-transparent p-0 shadow-none ring-0 outline-none",
             "data-open:animate-in data-open:fade-in-0",
             "data-closed:animate-out data-closed:fade-out-0",
           )}

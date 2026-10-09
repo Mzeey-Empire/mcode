@@ -1,0 +1,45 @@
+/*
+ * Window chrome reserves. The Windows/Linux caption buttons are a native
+ * overlay (Window Controls Overlay); env(titlebar-area-*) reports the free area
+ * left of them, so the reserve is everything right of that area. Outside an
+ * overlay the env() fallbacks resolve the reserve to 0.
+ *
+ * --traffic-lights-reserve is written by window-chrome.ts because it depends on
+ * full-screen state that only the main process knows.
+ */
+:root {
+  --caption-reserve: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+  --traffic-lights-reserve: 0px;
+}
+
+.window-drag {
+  app-region: drag;
+}
+
+.window-drag :is(button, a, input, textarea, select, [role="button"], [contenteditable="true"]) {
+  app-region: no-drag;
+}
+
+[data-canvas-header] {
+  padding-right: calc(var(--caption-reserve) + 0.8rem);
+}
+
+/* A visible right panel owns the top-right corner, so it carries the reserve instead. */
+[data-content-row]:has([data-right-panel-root][data-visible="true"]) [data-canvas-header] {
+  padding-right: 0.8rem;
+}
+
+.caption-strip {
+  display: none;
+}
+
+:root[data-window-chrome="caption-overlay"] .caption-strip {
+  display: block;
+  height: var(--spacing-row-comfortable);
+  flex-shrink: 0;
+  padding-right: var(--caption-reserve);
+}
+
+.window-drag .window-no-drag {
+  app-region: no-drag;
+}

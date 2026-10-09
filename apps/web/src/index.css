@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "./components/shell/caption-reserve.css";
 
 @source inline("text-xs text-sm text-base text-lg text-xl text-2xl text-3xl text-4xl text-5xl rounded-sm rounded-md rounded-lg rounded-xl rounded-2xl rounded-3xl rounded-4xl h-8 h-12 h-14 w-8 w-12 w-14 size-8 size-12 size-14 p-4 gap-4");
 
@@ -99,8 +100,6 @@
    its resolved value, so a role-to-role reference would keep the light value
    under a nested `.dark`. */
 :root {
-  --desktop-title-bar-height: 0px;
-  --z-desktop-title-bar: 60;
   /* --page sits a step below --background so floating panel surfaces read as
      slightly elevated against the page chrome. Replaces inter-panel divider lines. */
   --page: var(--neutral-100);
@@ -152,20 +151,6 @@
   --diff-remove-gutter: oklch(0.78 0.11 25);
   --diff-remove-text: oklch(0.48 0.15 25);
   --diff-remove-strong: oklch(0.55 0.17 25);
-}
-
-:root[data-mcode-desktop] {
-  /* Matches the 48px DesktopTitleBar (h-12) and the Windows titleBarOverlay
-     height in create-window so native caption buttons are never clipped. */
-  --desktop-title-bar-height: 3rem;
-}
-
-.app-viewport-fixed {
-  inset: var(--desktop-title-bar-height) 0 0;
-}
-
-.app-panel-top-inset {
-  top: calc(var(--desktop-title-bar-height) + 0.6rem);
 }
 
 .dark {

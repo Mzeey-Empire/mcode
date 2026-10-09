@@ -70,8 +70,6 @@ export interface PullRequestDetailPaneProps {
   identityKey: string;
   summaryFallback?: PullRequestSummaryRecord | null;
   isNarrow: boolean;
-  /** Reserves the top-left slot occupied by the collapsed-sidebar reveal control. */
-  reserveSidebarReveal?: boolean;
   onClose: () => void;
   /** Focus target used when narrow activation replaces the inbox. */
   backButtonRef?: Ref<HTMLButtonElement>;
@@ -714,7 +712,6 @@ interface PullRequestDetailPaneContentProps {
   tabs: ReactNode;
   reviewAction: ReactNode;
   isNarrow: boolean;
-  reserveSidebarReveal: boolean;
   onClose: () => void;
   backButtonRef?: Ref<HTMLButtonElement>;
   capabilities: ReturnType<typeof usePullRequestStore.getState>["capabilities"];
@@ -739,7 +736,6 @@ function PullRequestDetailPaneContent({
   tabs,
   reviewAction,
   isNarrow,
-  reserveSidebarReveal,
   onClose,
   backButtonRef,
   capabilities,
@@ -766,7 +762,6 @@ function PullRequestDetailPaneContent({
         tabs={tabs}
         viewAction={detail ? reviewAction : null}
         isNarrow={isNarrow}
-        reserveSidebarReveal={reserveSidebarReveal}
         onBack={isNarrow ? onClose : undefined}
         backButtonRef={backButtonRef}
         onClose={isNarrow ? undefined : onClose}
@@ -1124,7 +1119,6 @@ export function PullRequestDetailPane({
   identityKey,
   summaryFallback = null,
   isNarrow,
-  reserveSidebarReveal = false,
   onClose,
   backButtonRef,
   transport,
@@ -1214,7 +1208,6 @@ export function PullRequestDetailPane({
         tabs={detailTabs}
         reviewAction={reviewAction}
         isNarrow={isNarrow}
-        reserveSidebarReveal={reserveSidebarReveal}
         onClose={onClose}
         backButtonRef={backButtonRef}
         capabilities={capabilities}

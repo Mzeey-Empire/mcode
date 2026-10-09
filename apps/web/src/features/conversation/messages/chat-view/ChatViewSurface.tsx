@@ -17,7 +17,7 @@ import { NewThreadProjectPicker } from "@/components/chat/NewThreadProjectPicker
 import { PlanQuestionWizard } from "@/components/chat/PlanQuestionWizard";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
 import { McodeLogo } from "@/components/brand/McodeLogo";
-import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
+import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
@@ -183,7 +183,7 @@ function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: strin
 function NewThreadSurface({ state, onPromptSelect }: { state: ChatViewState; onPromptSelect: (text: string) => void }) {
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background">
-      {state.sidebarCollapsed && <div className="absolute left-2 top-2 z-(--layer-sticky)"><SidebarRevealButton /></div>}
+      <CanvasHeader />
       <NewThreadWelcome projectName={state.activeWorkspaceName || undefined} onPromptSelect={onPromptSelect} />
       <Composer isNewThread workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />
     </div>
@@ -256,9 +256,8 @@ function PreparingStartupContent({
 
 function PreparingThreadHeader({ thread, state, startupPending }: { thread: WorkspaceThread; state: ChatViewState; startupPending: boolean }) {
   return (
-    <div className="flex h-11 items-center justify-between border-b border-border pr-4 pl-2">
-      <div className="flex min-w-0 items-center gap-2">
-        {state.sidebarCollapsed && <SidebarRevealButton />}
+    <CanvasHeader className="border-b border-border">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <span data-testid="chat-header-title" className="text-fade text-sm font-medium">
           {thread.title}
           {(thread.clientPreparing || startupPending) && <span className="ml-2 inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary/60 align-middle" aria-hidden />}
@@ -271,7 +270,7 @@ function PreparingThreadHeader({ thread, state, startupPending }: { thread: Work
           </Tooltip>
         )}
       </div>
-    </div>
+    </CanvasHeader>
   );
 }
 
@@ -314,10 +313,10 @@ function ThreadPreparingShell({
 }
 
 /** Renders the selected-row shell when no matching workspace thread remains. */
-function MissingThreadSurface({ sidebarCollapsed }: { sidebarCollapsed: boolean }) {
+function MissingThreadSurface() {
   return (
     <div className="flex h-full flex-col bg-background">
-      {sidebarCollapsed && <div className="flex h-11 items-center border-b border-border/40 pl-2"><SidebarRevealButton /></div>}
+      <CanvasHeader />
       <div className="flex flex-1 items-center justify-center"><div className="text-center"><h2 className="text-lg font-medium text-ink">Select a thread</h2><p className="mt-1 text-sm text-muted">Choose a thread from the sidebar or create a new one.</p></div></div>
     </div>
   );
@@ -327,10 +326,10 @@ function MissingThreadSurface({ sidebarCollapsed }: { sidebarCollapsed: boolean 
 function ActiveThreadHeader({ state, editingThreadId, onEditingThreadIdChange, onSaveTitle }: { state: ChatViewState; editingThreadId: string | null; onEditingThreadIdChange: (threadId: string | null) => void; onSaveTitle: (title: string) => void }) {
   const thread = state.activeThread!;
   return (
-    <div className="flex h-11 items-center justify-between border-b border-border pr-4 pl-2">
-      <div className="flex items-center gap-2">
-        {state.sidebarCollapsed && <SidebarRevealButton />}
-        <div data-testid="chat-header-title" onDoubleClick={() => onEditingThreadIdChange(thread.id)} className="cursor-text">
+    <CanvasHeader className="border-b border-border">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {/* Double-click renames, so the title must not hand the gesture to the window. */}
+        <div data-testid="chat-header-title" onDoubleClick={() => onEditingThreadIdChange(thread.id)} className="window-no-drag cursor-text">
           <ThreadTitleEditor title={thread.title} isEditing={editingThreadId === thread.id} onSave={onSaveTitle} onCancel={() => onEditingThreadIdChange(null)} />
         </div>
         {thread.parent_thread_id && state.parentThreadExists && (
@@ -341,7 +340,7 @@ function ActiveThreadHeader({ state, editingThreadId, onEditingThreadIdChange, o
         )}
       </div>
       <HeaderActions thread={thread} threadPaneWidth={state.threadPaneWidth} />
-    </div>
+    </CanvasHeader>
   );
 }
 
@@ -772,7 +771,7 @@ export function ChatViewSurface(props: ChatViewSurfaceProps) {
   const startupDismissed = useThreadStartupStore((s) =>
     startupLookup.startup ? s.dismissedStartupIds.has(startupLookup.startup.startupId) : false);
   if (!state.activeThreadId) return <NewThreadSurface state={state} onPromptSelect={props.interactions.onPromptSelect} />;
-  if (!state.activeThread) return <MissingThreadSurface sidebarCollapsed={state.sidebarCollapsed} />;
+  if (!state.activeThread) return <MissingThreadSurface />;
   if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <ThreadPreparingShell thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} />;
   return <ActiveThreadSurface {...props} />;
 }

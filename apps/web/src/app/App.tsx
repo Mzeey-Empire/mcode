@@ -6,12 +6,12 @@ import {
   useRef,
   lazy,
   Suspense,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatView } from "@/features/conversation";
 import { openSubagentDetail, openSubagentsRoster } from "@/features/subagents";
-import { Notice } from "@/components/ui/notice";
 import { useUpdateStore } from "@/stores/updateStore";
 import { useToastStore } from "@/stores/toastStore";
 import { friendlyUpdateError } from "@/lib/update-error-message";
@@ -33,6 +33,7 @@ import { useUiStore } from "@/stores/uiStore";
 import { initShortcuts } from "@/lib/shortcuts";
 import { summonTab } from "@/lib/summon-tab";
 import { executeCommand, registerCommand } from "@/lib/command-registry";
+import { registerSettingsSectionCommands, registerWindowCommands } from "./window-commands";
 import { setContext } from "@/lib/context-tracker";
 import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
 import { useIdleReclamation } from "@/hooks/useIdleReclamation";
@@ -46,7 +47,9 @@ import {
   BrowserSurfaceHostRoot,
 } from "@/features/preview";
 import { TerminalPoolHost, TerminalPoolSlotProvider } from "@/features/terminal";
-import { DesktopTitleBar } from "@/components/desktop/DesktopTitleBar";
+import { CanvasHeader } from "@/components/shell/CanvasHeader";
+import { ShellChromeProvider } from "@/components/shell/shell-chrome-context";
+import { installWindowChrome } from "@/components/shell/window-chrome";
 import {
   useNavigationHistoryStore,
   type NavigationHistoryState,
@@ -81,7 +84,6 @@ const LazyPullRequestSurface = lazy(async () => {
 type AppLayoutProps = {
   isDesktop: boolean;
   navigationHistory: NavigationHistoryState;
-  isValidLocation: (location: NavigationLocation) => boolean;
   navigateHistory: (direction: "back" | "forward") => void;
   outerRowRef: RefObject<HTMLDivElement | null>;
   contentRowRef: RefObject<HTMLDivElement | null>;
@@ -231,7 +233,7 @@ function FloatingSidebar({
         aria-label="Close project tree"
         aria-hidden={exiting}
         inert={exiting}
-        className={`app-viewport-fixed fixed z-(--layer-modal-backdrop) bg-ink/10 backdrop-blur-xs duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
+        className={`fixed inset-0 z-(--layer-modal-backdrop) bg-ink/10 backdrop-blur-xs duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
           exiting ? "pointer-events-none animate-out fade-out-0" : "animate-in fade-in-0"
         }`}
         onClick={() => useUiStore.getState().closeFloatingSidebar()}
@@ -241,7 +243,7 @@ function FloatingSidebar({
         data-testid="sidebar-floating"
         aria-hidden={exiting}
         inert={exiting}
-        className={`app-panel-top-inset fixed bottom-1.5 left-1.5 z-(--layer-modal) flex w-sidebar overflow-hidden rounded-lg bg-page shadow-floating ring-1 ring-border/40 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
+        className={`fixed top-1.5 bottom-1.5 left-1.5 z-(--layer-modal) flex w-sidebar overflow-hidden rounded-lg bg-page shadow-floating ring-1 ring-border/40 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
           exiting
             ? "pointer-events-none animate-out fade-out-0 slide-out-to-left-4 duration-200"
             : "animate-in fade-in-0 slide-in-from-left-4 duration-250"
@@ -264,11 +266,10 @@ function PullRequestMainSurface({
   isDesktop,
   pullRequestTab,
   setPullRequestTab,
-  isValidLocation,
   navigateHistory,
 }: Pick<
   AppLayoutProps,
-  "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "isValidLocation" | "navigateHistory"
+  "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "navigateHistory"
 >) {
   const handleHistoryBack = () => {
     if (useNavigationHistoryStore.getState().canGoBack(isValidLocation)) {
@@ -289,24 +290,42 @@ function PullRequestMainSurface({
   );
 }
 
+/** Stacks an empty canvas header over a surface that has no header of its own. */
+function CanvasSurface({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <CanvasHeader />
+      <div className="min-h-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
 function AppPrimarySurface(props: Pick<
   AppLayoutProps,
-  "settingsOpen" | "settingsSection" | "showPullRequests" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "isValidLocation" | "navigateHistory"
+  "settingsOpen" | "settingsSection" | "showPullRequests" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "navigateHistory"
 >) {
   if (props.settingsOpen) {
     return (
-      <Suspense fallback={null}>
-        <LazySettingsView section={props.settingsSection} />
-      </Suspense>
+      <CanvasSurface>
+        <Suspense fallback={null}>
+          <LazySettingsView section={props.settingsSection} />
+        </Suspense>
+      </CanvasSurface>
     );
   }
-  if (props.showPullRequests) return <PullRequestMainSurface {...props} />;
+  if (props.showPullRequests) {
+    return (
+      <CanvasSurface>
+        <PullRequestMainSurface {...props} />
+      </CanvasSurface>
+    );
+  }
   return <ChatView onSubagentSelect={openSubagentDetail} onOpenSubagents={openSubagentsRoster} />;
 }
 
 function AppMainSurface(props: Pick<
   AppLayoutProps,
-  "rightPanelMaximized" | "showPullRequests" | "showNewThreadCanvas" | "settingsOpen" | "settingsSection" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "isValidLocation" | "navigateHistory"
+  "rightPanelMaximized" | "showPullRequests" | "showNewThreadCanvas" | "settingsOpen" | "settingsSection" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "navigateHistory"
 > & { mainRef: (element: HTMLElement | null) => void }) {
   if (props.rightPanelMaximized && !props.showPullRequests) return null;
   const useFlexibleWidth = props.showNewThreadCanvas || props.settingsOpen || props.showPullRequests;
@@ -334,14 +353,6 @@ function RightPanelSlot({
   );
 }
 
-/** Shows a busy notice while the WebSocket reconnects or re-authenticates. */
-function ConnectionNotice() {
-  const status = useConnectionStore((s) => s.status);
-  if (status !== "reconnecting" && status !== "authFailed") return null;
-  const title = status === "authFailed" ? "Re-authenticating after server restart" : "Reconnecting to server";
-  return <div className="px-4 pt-2"><Notice tone="warning" busy title={title} /></div>;
-}
-
 function AppLayout(props: AppLayoutProps) {
   // State, not a ref: the toast lane must re-measure when the main surface mounts or unmounts.
   const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
@@ -351,16 +362,12 @@ function AppLayout(props: AppLayoutProps) {
   return (
     <TerminalPoolSlotProvider>
       <TooltipProvider delay={400}>
+        <ShellChromeProvider
+          sidebarDocked={props.dockedSidebarVisible && !props.sidebarFloating}
+          canGoBack={props.navigationHistory.canGoBack(isValidLocation)}
+          canGoForward={props.navigationHistory.canGoForward(isValidLocation)}
+        >
         <div className="flex h-screen flex-col overflow-hidden bg-page text-ink">
-          {props.isDesktop ? (
-            <DesktopTitleBar
-              canGoBack={props.navigationHistory.canGoBack(props.isValidLocation)}
-              canGoForward={props.navigationHistory.canGoForward(props.isValidLocation)}
-              onBack={() => props.navigateHistory("back")}
-              onForward={() => props.navigateHistory("forward")}
-            />
-          ) : null}
-          <ConnectionNotice />
           <div ref={props.outerRowRef} className="flex flex-1 overflow-hidden">
             {!props.sidebarFloating && (
               <DockedSidebar
@@ -383,12 +390,13 @@ function AppLayout(props: AppLayoutProps) {
                 closeSettings={props.closeSettings}
               />
             )}
-            <div ref={props.contentRowRef} data-testid="content-row" className="flex min-w-0 flex-1 overflow-hidden">
+            <div ref={props.contentRowRef} data-testid="content-row" data-content-row="" className="flex min-w-0 flex-1 overflow-hidden">
               <AppMainSurface {...props} mainRef={setMainElement} />
               <RightPanelSlot {...props} />
             </div>
           </div>
         </div>
+        </ShellChromeProvider>
         <TerminalPoolHost />
         <BrowserSurfaceHostRoot />
         <BrowserAutomationHost />
@@ -404,6 +412,29 @@ function AppLayout(props: AppLayoutProps) {
       </TooltipProvider>
     </TerminalPoolSlotProvider>
   );
+}
+
+/** Whether a history entry still points at something that exists. */
+function isValidLocation(location: NavigationLocation): boolean {
+  const workspace = useWorkspaceStore.getState();
+  if (
+    location.workspaceId &&
+    !workspace.workspaces.some((item) => item.id === location.workspaceId)
+  ) {
+    return false;
+  }
+  if (location.kind === "thread") {
+    return (
+      location.workspaceId !== workspace.activeWorkspaceId ||
+      workspace.threads.some((thread) => thread.id === location.threadId)
+    );
+  }
+  if (location.kind === "pullRequestDetail") {
+    return Boolean(
+      usePullRequestStore.getState().entities[location.identityKey],
+    );
+  }
+  return true;
 }
 
 /** Root application component. Initializes WS transport and push listeners. */
@@ -475,31 +506,6 @@ export function App() {
     }
   }, [settingsOpen]);
 
-  const isValidLocation = useCallback(
-    (location: NavigationLocation): boolean => {
-      const workspace = useWorkspaceStore.getState();
-      if (
-        location.workspaceId &&
-        !workspace.workspaces.some((item) => item.id === location.workspaceId)
-      ) {
-        return false;
-      }
-      if (location.kind === "thread") {
-        return (
-          location.workspaceId !== workspace.activeWorkspaceId ||
-          workspace.threads.some((thread) => thread.id === location.threadId)
-        );
-      }
-      if (location.kind === "pullRequestDetail") {
-        return Boolean(
-          usePullRequestStore.getState().entities[location.identityKey],
-        );
-      }
-      return true;
-    },
-    [],
-  );
-
   const replayLocation = useCallback(
     async (location: NavigationLocation): Promise<boolean> => {
       const workspace = useWorkspaceStore.getState();
@@ -562,7 +568,7 @@ export function App() {
         if (!restored) navigateHistory(direction);
       });
     },
-    [isValidLocation, replayLocation],
+    [replayLocation],
   );
 
   const closeSettings = useCallback(() => {
@@ -571,7 +577,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!isDesktop) return;
     let location: NavigationLocation;
     if (settingsOpen) {
       location = {
@@ -602,12 +607,16 @@ export function App() {
     activePullRequestKey,
     activeThreadId,
     activeWorkspaceId,
-    isDesktop,
     primarySurface,
     pullRequestTab,
     settingsOpen,
     settingsSection,
   ]);
+
+  useEffect(
+    () => installWindowChrome(document.documentElement, window.desktopBridge?.window),
+    [],
+  );
 
   useEffect(() => {
     startPushListeners();
@@ -864,6 +873,8 @@ export function App() {
           void window.desktopBridge?.preview.openGuestDevTools();
         },
       }),
+      ...registerSettingsSectionCommands(),
+      ...(window.desktopBridge?.window ? registerWindowCommands(window.desktopBridge.window) : []),
       // Thread switching: Cmd+1 through Cmd+9
       ...Array.from({ length: 9 }, (_, i) =>
         registerCommand({
@@ -889,19 +900,7 @@ export function App() {
   useEffect(() => {
     const desktopWindow = window.desktopBridge?.window;
     if (!desktopWindow?.onCommand || !desktopWindow.offCommand) return;
-    const listener = desktopWindow.onCommand((command) => {
-      if (command === "settings.keyboard" || command === "settings.about") {
-        window.dispatchEvent(
-          new CustomEvent("mcode:open-settings", {
-            detail: {
-              section: command === "settings.keyboard" ? "keyboard" : "about",
-            },
-          }),
-        );
-        return;
-      }
-      executeCommand(command);
-    });
+    const listener = desktopWindow.onCommand((command) => executeCommand(command));
     return () => desktopWindow.offCommand?.(listener);
   }, []);
 
@@ -925,7 +924,6 @@ export function App() {
     <AppLayout
       isDesktop={isDesktop}
       navigationHistory={navigationHistory}
-      isValidLocation={isValidLocation}
       navigateHistory={navigateHistory}
       outerRowRef={outerRowRef}
       contentRowRef={contentRowRef}

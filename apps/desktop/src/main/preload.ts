@@ -16,8 +16,15 @@ import {
   type PreviewSurfaceDiscardRequest,
 } from "../features/preview/contracts/surface-lifecycle.js";
 
+// Main sends the full-screen state on every load, often before the renderer
+// subscribes, so keep the latest value and replay it to each new subscriber.
+let latestFullScreen: boolean | undefined;
+ipcRenderer.on("window:full-screen", (_event, fullScreen: unknown) => {
+  latestFullScreen = fullScreen === true;
+});
+
 contextBridge.exposeInMainWorld("desktopBridge", {
-  /** Platform facts and allowlisted native window actions for the custom title bar. */
+  /** Platform facts, full-screen state, and allowlisted native window actions. */
   window: {
     platform: hostRuntime.platform,
     isDevelopment: Boolean(process.env.ELECTRON_RENDERER_URL),
@@ -31,6 +38,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
     perform(action: string): Promise<void> {
       return ipcRenderer.invoke("window:perform", action);
+    },
+    onFullScreenChange(callback: (fullScreen: boolean) => void): () => void {
+      const listener = (_event: unknown, fullScreen: unknown) => callback(fullScreen === true);
+      ipcRenderer.on("window:full-screen", listener);
+      if (latestFullScreen !== undefined) callback(latestFullScreen);
+      return () => ipcRenderer.removeListener("window:full-screen", listener);
     },
   },
   /** Get the WebSocket URL (with auth token) and IPC path for connecting to the server. */

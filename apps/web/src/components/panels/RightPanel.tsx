@@ -47,6 +47,7 @@ import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { getTransport } from "@/transport";
 import { cn } from "@/lib/utils";
 import { ResizableRightPanel } from "./ResizableRightPanel";
+import { PanelCaptionStrip } from "@/components/shell/CanvasHeader";
 
 /** One thread/workspace Browser panel retained by the warm LRU pool. */
 export interface WarmPreviewScope {
@@ -588,8 +589,10 @@ function RightPanelFrame({
       style={getRightPanelVisibilityStyle(panelVisible)}
       className={getRightPanelClassName(panelVisible, maximized)}
       data-right-panel-root=""
+      data-visible={panelVisible}
       inert={!panelVisible ? true : undefined}
     >
+      <PanelCaptionStrip maximized={maximized} />
       {children}
     </ResizableRightPanel>
   );

@@ -10,7 +10,7 @@
  * test group.
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import React from "react";
 
 describe('Sidebar "Edit settings.json" button', () => {
@@ -138,15 +138,12 @@ describe('Sidebar "Edit settings.json" button', () => {
     );
   });
 
-  it("omits desktop branding and collapse controls from the project sidebar", () => {
+  it("keeps branding and the collapse control in the desktop sidebar header", () => {
     renderProjectSidebar();
 
-    expect(
-      screen.queryByRole("img", { name: "Mcode" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Collapse sidebar" }),
-    ).not.toBeInTheDocument();
+    const header = screen.getByTestId("sidebar-header");
+    expect(within(header).getByRole("img", { name: "Mcode" })).toBeInTheDocument();
+    expect(within(header).getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument();
   });
 
   it("does not display a keyboard shortcut beside thread search", () => {

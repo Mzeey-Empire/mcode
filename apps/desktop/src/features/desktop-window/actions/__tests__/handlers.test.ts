@@ -9,14 +9,12 @@ const handlersTest = vi.hoisted(() => {
     }),
   };
   const browserWindowFromWebContents = vi.fn();
-  const app = { isPackaged: false, quit: vi.fn() };
-  return { handlers, ipcMain, browserWindowFromWebContents, app };
+  return { handlers, ipcMain, browserWindowFromWebContents };
 });
 
 vi.mock("electron", () => ({
   ipcMain: handlersTest.ipcMain,
   BrowserWindow: { fromWebContents: handlersTest.browserWindowFromWebContents },
-  app: handlersTest.app,
 }));
 
 import { registerDesktopWindowActionHandler } from "../handlers.js";
@@ -29,23 +27,29 @@ describe("Desktop Window action IPC handler", () => {
   });
 
   it("authorizes the sender window and dispatches an allowed action", () => {
-    const close = vi.fn();
-    const window = { isDestroyed: vi.fn(() => false), close };
+    let fullScreen = false;
+    const window = {
+      isDestroyed: vi.fn(() => false),
+      isFullScreen: vi.fn(() => fullScreen),
+      setFullScreen: vi.fn((value: boolean) => {
+        fullScreen = value;
+      }),
+    };
     handlersTest.browserWindowFromWebContents.mockReturnValue(window);
 
     const handler = handlersTest.handlers.get("window:perform")!;
-    handler({ sender: { id: 1 } }, "closeWindow");
+    handler({ sender: { id: 1 } }, "toggleFullScreen");
 
     expect(handlersTest.browserWindowFromWebContents).toHaveBeenCalledWith({ id: 1 });
-    expect(close).toHaveBeenCalledOnce();
+    expect(window.setFullScreen).toHaveBeenCalledWith(true);
   });
 
-  it("rejects invalid action values before resolving a sender window", () => {
+  // The allowlist test in window-actions.test.ts pins the six accepted names, so
+  // any other name, including the retired close and edit actions, lands here.
+  it.each(["execute arbitrary code", "close", "edit", ""])("rejects %j before resolving a sender window", (action) => {
     const handler = handlersTest.handlers.get("window:perform")!;
 
-    expect(() => handler({ sender: {} }, "execute arbitrary code")).toThrow(
-      "Invalid desktop window action",
-    );
+    expect(() => handler({ sender: {} }, action)).toThrow("Invalid desktop window action");
     expect(handlersTest.browserWindowFromWebContents).not.toHaveBeenCalled();
   });
 
@@ -53,15 +57,16 @@ describe("Desktop Window action IPC handler", () => {
     const handler = handlersTest.handlers.get("window:perform")!;
     const destroyed = {
       isDestroyed: vi.fn(() => true),
-      close: vi.fn(),
+      isFullScreen: vi.fn(() => false),
+      setFullScreen: vi.fn(),
     };
     handlersTest.browserWindowFromWebContents
       .mockReturnValueOnce(null)
       .mockReturnValueOnce(destroyed);
 
-    handler({ sender: { id: 1 } }, "closeWindow");
-    handler({ sender: { id: 2 } }, "closeWindow");
+    handler({ sender: { id: 1 } }, "toggleFullScreen");
+    handler({ sender: { id: 2 } }, "toggleFullScreen");
 
-    expect(destroyed.close).not.toHaveBeenCalled();
+    expect(destroyed.setFullScreen).not.toHaveBeenCalled();
   });
 });

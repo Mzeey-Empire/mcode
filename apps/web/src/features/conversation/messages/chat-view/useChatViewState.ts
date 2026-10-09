@@ -6,7 +6,6 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useOverviewStore } from "@/stores/overviewStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
-import { useUiStore } from "@/stores/uiStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useActiveWorkspaceThread, useParentThreadExists } from "@/features/projects/state/workspace-selectors";
 import { hasResidentContent } from "../../hydration/resident-content";
@@ -76,7 +75,6 @@ export function useChatViewState() {
   const activeThreadId = useWorkspaceStore((state) => state.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const activeDraftId = useWorkspaceStore((state) => state.activeDraftId);
-  const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed);
   const updateThreadTitle = useWorkspaceStore((state) => state.updateThreadTitle);
   const setActiveThread = useWorkspaceStore((state) => state.setActiveThread);
   const setForkMode = useThreadStore((state) => state.setForkMode);
@@ -164,7 +162,6 @@ export function useChatViewState() {
     setPendingPrefill,
     setActiveThread,
     setForkMode,
-    sidebarCollapsed,
     targetPaintable: effectiveTargetPaintable,
     threadPaneWidth,
     updateThreadTitle,

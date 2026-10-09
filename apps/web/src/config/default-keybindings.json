@@ -18,6 +18,12 @@
   { "key": "mod+alt+b", "command": "rightPanel.toggle" },
   { "key": "mod+j", "command": "terminal.toggle" },
   { "key": "mod+,", "command": "settings.open", "when": "!inputFocused" },
+  { "key": "mod+=", "command": "window.zoomIn", "when": "rendererOwnsWindowKeys" },
+  { "key": "mod+plus", "command": "window.zoomIn", "when": "rendererOwnsWindowKeys" },
+  { "key": "mod+shift+plus", "command": "window.zoomIn", "when": "rendererOwnsWindowKeys" },
+  { "key": "mod+-", "command": "window.zoomOut", "when": "rendererOwnsWindowKeys" },
+  { "key": "mod+0", "command": "window.zoomReset", "when": "rendererOwnsWindowKeys" },
+  { "key": "F11", "command": "window.toggleFullScreen", "when": "rendererOwnsWindowKeys" },
   {
     "key": "mod+shift+?",
     "command": "shortcuts.help",

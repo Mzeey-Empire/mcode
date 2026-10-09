@@ -14,7 +14,6 @@ import {
   usePullRequestDetailStore,
 } from "@/features/pull-requests/state/pullRequestDetailStore";
 import { usePullRequestStore } from "@/features/pull-requests/state/pullRequestStore";
-import { useUiStore } from "@/stores/uiStore";
 import type { PullRequestTransport } from "@/transport/pull-requests";
 
 const layout = vi.hoisted(() => ({ width: 420 }));
@@ -61,17 +60,12 @@ vi.mock("../PullRequestDetailPane", () => ({
     summaryFallback,
     onClose,
     backButtonRef,
-    reserveSidebarReveal,
   }: {
     summaryFallback?: PullRequestSummary | null;
     onClose: () => void;
     backButtonRef?: Ref<HTMLButtonElement>;
-    reserveSidebarReveal?: boolean;
   }) => (
     <div aria-label="Selected pull request">
-      {reserveSidebarReveal && (
-        <span data-testid="pull-request-sidebar-reveal-spacer" />
-      )}
       <span>{summaryFallback?.title}</span>
       <button ref={backButtonRef} type="button" onClick={onClose}>
         Back to inbox
@@ -154,48 +148,6 @@ describe("PullRequestSurface", () => {
     inboxMounts.count = 0;
     usePullRequestStore.getState().reset();
     usePullRequestDetailStore.setState({ entries: {}, activeKey: null });
-    useUiStore.setState({
-      sidebarCollapsed: false,
-      sidebarCollapsedByLayout: false,
-      sidebarFloating: false,
-    });
-  });
-
-  it("keeps a collapsed sidebar recoverable from the surface header", () => {
-    useUiStore.setState({
-      sidebarCollapsed: true,
-      sidebarCollapsedByLayout: true,
-    });
-    renderSurface();
-
-    const reveal = screen.getByRole("button", { name: "Expand sidebar" });
-    expect(reveal).toBeVisible();
-    fireEvent.click(reveal);
-
-    expect(useUiStore.getState().sidebarCollapsed).toBe(false);
-    expect(screen.queryByRole("button", { name: "Expand sidebar" })).toBeNull();
-  });
-
-  it("reserves the sidebar reveal slot beside the narrow detail back action", async () => {
-    useUiStore.setState({
-      sidebarCollapsed: true,
-      sidebarCollapsedByLayout: true,
-    });
-    const transport = fakeTransport();
-    seedSelection();
-    renderSurface(transport);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Activate pull request" }),
-    );
-
-    expect(
-      await screen.findByTestId("pull-request-sidebar-reveal-spacer"),
-    ).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Expand sidebar" }),
-    ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Back to inbox" })).toBeVisible();
   });
 
   it("starts at 420px in the mounted inbox and loads detail only after activation", async () => {

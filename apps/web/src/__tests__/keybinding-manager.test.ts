@@ -46,6 +46,26 @@ describe("parseKeybinding", () => {
     const parsed = parseKeybinding("mod+,");
     expect(parsed).toEqual({ mod: true, shift: false, alt: false, key: "," });
   });
+
+  it("spells the plus key as plus because + separates the parts", () => {
+    expect(parseKeybinding("mod+plus")).toEqual({ mod: true, shift: false, alt: false, key: "+" });
+  });
+});
+
+describe("plus key matching", () => {
+  it("matches Ctrl+Plus from the numpad and Ctrl+Shift+= on a US layout", () => {
+    expect(matchesKeyEvent(parseKeybinding("mod+plus"), createKeyEvent({ key: "+", ctrlKey: true }))).toBe(true);
+    expect(
+      matchesKeyEvent(
+        parseKeybinding("mod+shift+plus"),
+        createKeyEvent({ key: "+", ctrlKey: true, shiftKey: true }),
+      ),
+    ).toBe(true);
+  });
+
+  it("shows the plus key as a + keycap", () => {
+    expect(keybindingKeycaps("mod+plus", false)).toEqual(["Ctrl", "+"]);
+  });
 });
 
 describe("matchesKeyEvent", () => {

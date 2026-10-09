@@ -84,19 +84,20 @@ export function createWindow(
     ...(dependencies.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 14, y: 12 },
+          // y centres the 12px lights on the renderer's 48px header row.
+          trafficLightPosition: { x: 14, y: 18 },
         }
       : {
           titleBarStyle: "hidden" as const,
           titleBarOverlay: {
             color: "#00000000",
-            symbolColor: "#8a8a92",
+            // Dark-theme --color-muted (oklch(65% 0.005 260)) as sRGB hex.
+            symbolColor: "#8d8f92",
             // 48 CSS px: Electron computes the usable overlay height as
             // ceil(height * scaleFactor) / scaleFactor, so at 125%/150%
-            // display scaling a 40px overlay renders taller than the 40px
-            // title bar and the caption buttons get clipped. Keep this in
-            // sync with the title bar height in DesktopTitleBar and
-            // --desktop-title-bar-height in the renderer stylesheet.
+            // display scaling a 40px overlay renders taller than a 40px
+            // header and the caption buttons get clipped. Keep this in sync
+            // with the 48px sidebar and canvas header rows in the renderer.
             height: 48,
           },
         }),
@@ -121,6 +122,7 @@ export function createWindow(
 
   window.setMenuBarVisibility(false);
   forwardRendererConsoleErrors(window);
+  forwardFullScreenState(window);
 
   window.once("closed", () => {
     dependencies.hooks.disposePreviewForWindow(window);
@@ -162,4 +164,17 @@ export function createWindow(
   dependencies.hooks.attachServerWindow(window);
 
   return window;
+}
+
+// The renderer drops the macOS traffic-light reserve in full screen. Resend on
+// every load so a reload while full screen does not start from a stale default.
+// The events carry their own state because Windows fires them before
+// isFullScreen() flips.
+function forwardFullScreenState(window: BrowserWindow): void {
+  const send = (fullScreen: boolean) => {
+    if (!window.isDestroyed()) window.webContents.send("window:full-screen", fullScreen);
+  };
+  window.on("enter-full-screen", () => send(true));
+  window.on("leave-full-screen", () => send(false));
+  window.webContents.on("did-finish-load", () => send(window.isFullScreen()));
 }

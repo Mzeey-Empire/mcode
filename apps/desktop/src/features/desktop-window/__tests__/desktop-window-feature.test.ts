@@ -151,8 +151,8 @@ describe("Desktop Window feature entry point", () => {
     );
 
     const actionHandler = desktopWindowFeatureTest.handlers.get("window:perform");
-    actionHandler?.({ sender: {} }, "quit");
-    expect(desktopWindowFeatureTest.app.quit).toHaveBeenCalledOnce();
+    actionHandler?.({ sender: {} }, "zoomReset");
+    expect(firstWindow.webContents.setZoomLevel).toHaveBeenCalledWith(0);
     expect(deps.lifecycleHooks.setupSpellcheck).toHaveBeenCalledOnce();
     expect(deps.lifecycleHooks.attachServerWindow).toHaveBeenCalledOnce();
 

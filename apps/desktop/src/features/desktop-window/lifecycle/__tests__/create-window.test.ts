@@ -14,6 +14,7 @@ const createWindowTest = vi.hoisted(() => {
     once: vi.fn((event: string, listener: Listener) => addListener(event, listener)),
     setWindowOpenHandler: vi.fn(),
     getURL: vi.fn(() => "http://localhost:5173/"),
+    send: vi.fn(),
     openDevTools: vi.fn(),
   };
   const window = {
@@ -24,6 +25,7 @@ const createWindowTest = vi.hoisted(() => {
     show: vi.fn(),
     setMenuBarVisibility: vi.fn(),
     isDestroyed: vi.fn(() => false),
+    isFullScreen: vi.fn(() => false),
     loadURL: vi.fn(),
     loadFile: vi.fn(),
   };
@@ -101,7 +103,7 @@ describe("Desktop Window creation", () => {
       titleBarStyle: "hidden",
       titleBarOverlay: {
         color: "#00000000",
-        symbolColor: "#8a8a92",
+        symbolColor: "#8d8f92",
         height: 48,
       },
       webPreferences: {
@@ -118,13 +120,30 @@ describe("Desktop Window creation", () => {
     expect(hooks.attachServerWindow).toHaveBeenCalledWith(createWindowTest.window);
   });
 
-  it("keeps the macOS title-bar and traffic-light options", () => {
+  it("centres the macOS traffic lights on the 48px header row", () => {
     createWindow({ platform: "darwin", isDesktopDev: () => false, hooks: createHooks() });
     const options = createWindowTest.BrowserWindow.mock.calls[0][0] as Record<string, any>;
 
     expect(options.titleBarStyle).toBe("hiddenInset");
-    expect(options.trafficLightPosition).toEqual({ x: 14, y: 12 });
+    expect(options.trafficLightPosition).toEqual({ x: 14, y: 18 });
     expect(options.titleBarOverlay).toBeUndefined();
+  });
+
+  it("tells the renderer when full screen changes and after each load", () => {
+    createWindow({ platform: "darwin", isDesktopDev: () => false, hooks: createHooks() });
+
+    // Windows fires each event while isFullScreen() still reports the old state.
+    createWindowTest.window.isFullScreen.mockReturnValue(false);
+    createWindowTest.emit("enter-full-screen");
+    createWindowTest.window.isFullScreen.mockReturnValue(true);
+    createWindowTest.emit("did-finish-load");
+    createWindowTest.emit("leave-full-screen");
+
+    expect(createWindowTest.webContents.send.mock.calls).toEqual([
+      ["window:full-screen", true],
+      ["window:full-screen", true],
+      ["window:full-screen", false],
+    ]);
   });
 
   it("shows on first paint and clears the fallback timer", () => {

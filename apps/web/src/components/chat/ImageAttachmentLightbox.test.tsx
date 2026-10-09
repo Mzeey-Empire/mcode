@@ -11,7 +11,7 @@ const createItems = (source: string, count = 3) =>
   }));
 
 describe("ImageAttachmentLightbox", () => {
-  it("keeps the full-screen preview below the desktop title bar", async () => {
+  it("covers the whole viewport, since no title bar sits above it", async () => {
     render(
       <ImageAttachmentLightbox
         open
@@ -26,9 +26,9 @@ describe("ImageAttachmentLightbox", () => {
     );
 
     const popup = await screen.findByRole("dialog");
-    expect(popup).toHaveClass("app-viewport-fixed");
+    expect(popup).toHaveClass("inset-0");
     expect(document.querySelector('[data-slot="dialog-overlay"]')).toHaveClass(
-      "app-viewport-fixed",
+      "inset-0",
     );
   });
 

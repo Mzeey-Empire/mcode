@@ -75,7 +75,6 @@ export interface PullRequestInboxProps {
   onActivate?: (identityKey: string) => void;
   listboxRef?: RefObject<HTMLDivElement | null>;
   spacious?: boolean;
-  reserveSidebarReveal?: boolean;
 }
 
 function teamLimitationMessage(reason: string): string {
@@ -98,18 +97,13 @@ function inboxSurfaceClassName(spacious: boolean): string {
 
 function PullRequestInboxHeading({
   viewerLogin,
-  reserveSidebarReveal,
 }: {
   viewerLogin: string | undefined;
-  reserveSidebarReveal: boolean;
 }) {
   return (
     <div
       data-testid="pull-request-inbox-heading-column"
-      className={cn(
-        "mx-auto w-full max-w-[720px] shrink-0 px-5 pb-5 pt-8 lg:pt-16",
-        reserveSidebarReveal && "max-lg:pl-14 max-lg:pt-4",
-      )}
+      className="mx-auto w-full max-w-[720px] shrink-0 px-5 pb-5 pt-8 lg:pt-16"
     >
       <h1 id="pull-request-surface-title" className="text-xl font-medium tracking-tight text-ink">
         Pull requests
@@ -429,7 +423,6 @@ export function PullRequestInbox({
   onActivate,
   listboxRef,
   spacious = false,
-  reserveSidebarReveal = false,
 }: PullRequestInboxProps) {
   const relationship = usePullRequestStore((state) => state.relationship);
   const states = usePullRequestStore((state) => state.states);
@@ -754,7 +747,7 @@ export function PullRequestInbox({
     <div className={inboxSurfaceClassName(spacious)}>
       <PullRequestInboxHeading
         viewerLogin={viewer?.login}
-        reserveSidebarReveal={reserveSidebarReveal}
+        
       />
       <div
         data-testid="pull-request-inbox-filter-column"

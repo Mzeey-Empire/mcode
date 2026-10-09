@@ -13,6 +13,11 @@ export interface ContextState {
    * Used so landing-only shortcuts do not fire in chat or fullscreen settings.
    */
   showLanding: boolean;
+  /**
+   * Desktop on Windows or Linux, where no native menu exists and the renderer
+   * owns the zoom and full-screen keys. On macOS the native menu roles own them.
+   */
+  rendererOwnsWindowKeys: boolean;
 }
 
 /** Valid context key names. */
@@ -26,6 +31,7 @@ function getDefaultContext(): ContextState {
     commandPaletteOpen: false,
     settingsOpen: false,
     showLanding: false,
+    rendererOwnsWindowKeys: false,
   };
 }
 

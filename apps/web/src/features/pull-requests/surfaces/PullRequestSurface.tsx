@@ -1,12 +1,10 @@
 import type { PullRequestSummary } from "@mcode/contracts";
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ResizableRightPanel } from "@/components/panels/ResizableRightPanel";
-import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { cn } from "@/lib/utils";
 import { usePullRequestDetailStore } from "@/features/pull-requests/state/pullRequestDetailStore";
 import { usePullRequestStore } from "@/features/pull-requests/state/pullRequestStore";
-import { useUiStore } from "@/stores/uiStore";
 import type { PullRequestTransport } from "@/transport/pull-requests";
 import {
   PullRequestDetailPane,
@@ -41,7 +39,6 @@ interface PullRequestSurfaceLayoutProps extends PullRequestSurfaceProps {
   width: number;
   detailWidthOverride: number | null;
   setDetailWidthOverride: (width: number | null) => void;
-  showSidebarReveal: boolean;
 }
 
 function inboxPaneClassName(activeKey: string | null, isWide: boolean, isNarrow: boolean): string {
@@ -61,14 +58,13 @@ function PullRequestInboxPane({
   transport,
   activateDetail,
   listboxRef,
-  showSidebarReveal,
-}: Pick<PullRequestSurfaceLayoutProps, "activeKey" | "transport" | "activateDetail" | "listboxRef" | "showSidebarReveal"> & {
+}: Pick<PullRequestSurfaceLayoutProps, "activeKey" | "transport" | "activateDetail" | "listboxRef"> & {
   isWide: boolean;
   isNarrow: boolean;
 }) {
   return (
     <div data-testid="pull-request-inbox-pane" hidden={isNarrow && Boolean(activeKey)} aria-hidden={isNarrow && Boolean(activeKey)} className={inboxPaneClassName(activeKey, isWide, isNarrow)}>
-      <PullRequestInbox transport={transport} onActivate={activateDetail} listboxRef={listboxRef} spacious={!activeKey} reserveSidebarReveal={showSidebarReveal} />
+      <PullRequestInbox transport={transport} onActivate={activateDetail} listboxRef={listboxRef} spacious={!activeKey} />
     </div>
   );
 }
@@ -116,7 +112,6 @@ function PullRequestSurfaceLayout({
   width,
   detailWidthOverride,
   setDetailWidthOverride,
-  showSidebarReveal,
 }: PullRequestSurfaceLayoutProps) {
   const isWide = width >= MASTER_DETAIL_MIN_WIDTH;
   const isNarrow = !isWide;
@@ -128,7 +123,6 @@ function PullRequestSurfaceLayout({
       identityKey={activeKey}
       summaryFallback={activeSummary}
       isNarrow={isNarrow}
-      reserveSidebarReveal={showSidebarReveal && isNarrow}
       onClose={onHistoryBack ?? closeDetail}
       backButtonRef={detailBackButtonRef}
       transport={transport}
@@ -144,9 +138,8 @@ function PullRequestSurfaceLayout({
 
   return (
     <section ref={surfaceRef} aria-labelledby="pull-request-surface-title" data-layout={isWide ? "master-detail" : "narrow"} className="relative flex h-full min-h-0 flex-col bg-page">
-      {showSidebarReveal && <div className="absolute left-3 top-3 z-(--layer-sticky)"><SidebarRevealButton /></div>}
       <div className="flex min-h-0 flex-1">
-        <PullRequestInboxPane activeKey={activeKey} isWide={isWide} isNarrow={isNarrow} transport={transport} activateDetail={activateDetail} listboxRef={listboxRef} showSidebarReveal={showSidebarReveal} />
+        <PullRequestInboxPane activeKey={activeKey} isWide={isWide} isNarrow={isNarrow} transport={transport} activateDetail={activateDetail} listboxRef={listboxRef} />
         <PullRequestDetailPanel activeKey={activeKey} isWide={isWide} detailWidth={detailWidth} defaultDetailWidth={defaultDetailWidth} detailMaxWidth={detailMaxWidth} width={width} setDetailWidthOverride={setDetailWidthOverride} detailReveal={detailReveal} />
       </div>
     </section>
@@ -160,8 +153,6 @@ export function PullRequestSurface({
   onActiveTabChange,
   onHistoryBack,
 }: PullRequestSurfaceProps) {
-  const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed);
-  const showSidebarReveal = sidebarCollapsed && !window.desktopBridge;
   const activeKey = usePullRequestDetailStore((state) => state.activeKey);
   const activeSummary = usePullRequestStore((state) =>
     activeKey ? (state.entities[activeKey] ?? null) : null,
@@ -220,7 +211,6 @@ export function PullRequestSurface({
       width={width}
       detailWidthOverride={detailWidthOverride}
       setDetailWidthOverride={setDetailWidthOverride}
-      showSidebarReveal={showSidebarReveal}
     />
   );
 }

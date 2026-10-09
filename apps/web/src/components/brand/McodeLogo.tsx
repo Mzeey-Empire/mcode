@@ -5,9 +5,9 @@ const LOGO_SRC = `${import.meta.env.BASE_URL}brand/mcode-layered-route-cutout.sv
 /** Named size classes for each Mcode logo surface. */
 export const MCODE_LOGO_SCALES = {
   sidebar: {
-    root: "gap-1.5",
-    mark: "h-8 w-8",
-    wordmark: "text-sm",
+    root: "h-control-compact gap-1 pl-1",
+    mark: "size-[2.2rem]",
+    wordmark: "text-sm leading-5",
   },
   newThread: {
     root: "",
