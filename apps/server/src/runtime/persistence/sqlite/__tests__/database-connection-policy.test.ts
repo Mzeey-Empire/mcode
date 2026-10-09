@@ -5,6 +5,8 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { openDatabase } from "../database.js";
+import { openReadOnlyDatabase } from "../read-only-database.js";
+import { applySQLiteConnectionPolicy } from "../sqlite-connection-policy.js";
 
 describe("SQLite connection policy", () => {
   let database: Database | undefined;
@@ -73,7 +75,81 @@ describe("SQLite connection policy", () => {
     expect(run).toHaveBeenCalledWith("PRAGMA optimize = 0x10002");
     expect(run).not.toHaveBeenCalledWith("PRAGMA optimize");
   });
+
+  // The writer worker and read-only readers open while another connection can
+  // hold the file lock, as the last connection does while it checkpoints on close.
+  describe("opening while another connection holds the file lock", () => {
+    const holdMs = 300;
+    let databasePath: string;
+    let released: Promise<void> | undefined;
+
+    beforeEach(() => {
+      databasePath = NodePath.join(directory, "mcode.db");
+      openDatabase({ dbPath: databasePath }).close(true);
+    });
+
+    // Runs before the outer cleanup removes the directory, which the holder still has open after a failure.
+    afterEach(async () => {
+      await released;
+      released = undefined;
+    });
+
+    it("waits for the lock before the owner policy switches to WAL", async () => {
+      ({ released } = await holdExclusiveLock(databasePath, holdMs));
+      const startedAt = performance.now();
+      database = new Database(databasePath, { strict: true, readwrite: true });
+
+      applySQLiteConnectionPolicy(database, true);
+
+      expect(performance.now() - startedAt).toBeGreaterThanOrEqual(holdMs / 2);
+      expect(pragmaValue(database, "journal_mode")).toBe("wal");
+    });
+
+    it("waits for the lock before a read-only connection checks WAL", async () => {
+      ({ released } = await holdExclusiveLock(databasePath, holdMs));
+      const startedAt = performance.now();
+
+      database = openReadOnlyDatabase(databasePath);
+
+      expect(performance.now() - startedAt).toBeGreaterThanOrEqual(holdMs / 2);
+      expect(pragmaValue(database, "journal_mode")).toBe("wal");
+    });
+  });
 });
+
+/**
+ * Hold an exclusive file lock on another thread, since a busy wait blocks the opening thread.
+ * Resolves once the lock is held. The release promise is wrapped so awaiting this call does not also wait for release.
+ */
+async function holdExclusiveLock(
+  databasePath: string,
+  holdMs: number,
+): Promise<{ released: Promise<void> }> {
+  const source = `
+    import { Database } from "bun:sqlite";
+    self.onmessage = ({ data }) => {
+      const db = new Database(data.databasePath);
+      db.run("PRAGMA locking_mode = EXCLUSIVE");
+      db.run("BEGIN EXCLUSIVE");
+      db.run("COMMIT");
+      postMessage("held");
+      setTimeout(() => { db.close(); postMessage("released"); }, data.holdMs);
+    };`;
+  const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+  const worker = new Worker(url, { type: "module" });
+  const messages = (expected: string) => new Promise<void>((resolve, reject) => {
+    worker.addEventListener("message", ({ data }) => { if (data === expected) resolve(); });
+    worker.addEventListener("error", (event) => reject(new Error(event.message)));
+  });
+  const held = messages("held");
+  const released = messages("released").finally(() => {
+    worker.terminate();
+    URL.revokeObjectURL(url);
+  });
+  worker.postMessage({ databasePath, holdMs });
+  await held;
+  return { released };
+}
 
 function pragmaValue(database: Database, name: string): unknown {
   const row = database.query(`PRAGMA ${name}`).get() as Record<string, unknown>;
