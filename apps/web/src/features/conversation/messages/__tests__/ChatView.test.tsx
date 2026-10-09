@@ -1,9 +1,9 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 import type { ReactNode } from "react";
-import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
+import type { StoredAttachment, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
 
 // Store mocks must be declared before importing the component under test.
 
@@ -300,7 +300,7 @@ function recoveryIncident(
 function defaultWorkspaceState(overrides: Partial<{
   activeThreadId: string | null;
   threads: Thread[];
-  pendingStartupByThreadId: Record<string, { startupId: string; context: "new-direct" | "new-worktree" | "new-existing-worktree" | "branch-direct" | "branch-worktree" | "branch-existing-worktree"; queuedMessage: string }>;
+  pendingStartupByThreadId: Record<string, { startupId: string; context: "new-direct" | "new-worktree" | "new-existing-worktree" | "branch-direct" | "branch-worktree" | "branch-existing-worktree"; queuedMessage: string; queuedAttachments?: StoredAttachment[] }>;
   updateThreadTitle: ReturnType<typeof vi.fn>;
 }> = {}) {
   const thread = makeThread();
@@ -843,6 +843,29 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("startup-trail")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
     expect(screen.queryByTestId("message-list")).not.toBeInTheDocument();
+  });
+
+  it("draws the first message's attachments in the preparing bubble", () => {
+    const thread = { ...makeThread({ id: "thread-with-attachment", mode: "worktree", worktree_managed: true }), clientPreparing: true };
+    setupWorkspaceMock(defaultWorkspaceState({
+      activeThreadId: thread.id,
+      threads: [thread],
+      pendingStartupByThreadId: {
+        [thread.id]: {
+          startupId: "00000000-0000-4000-8000-000000000031",
+          context: "new-worktree",
+          queuedMessage: "Review this spec",
+          queuedAttachments: [{ id: "att-1", name: "design-notes.pdf", mimeType: "application/pdf", sizeBytes: 2_048 }],
+        },
+      },
+    }));
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
+
+    render(<ChatView />);
+
+    const shell = screen.getByTestId("thread-preparing-shell");
+    expect(within(shell).getByText("Review this spec")).toBeInTheDocument();
+    expect(within(shell).getByText("design-notes.pdf")).toBeInTheDocument();
   });
 
   it("keeps the preparing shell through the optimistic-to-persisted startup handoff", async () => {
