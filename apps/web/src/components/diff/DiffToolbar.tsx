@@ -1,3 +1,4 @@
+import type { ReviewState } from "@mcode/contracts";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import {
@@ -9,7 +10,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { getTransport } from "@/transport";
+import { useReviewState } from "@/hooks/useReviewState";
 import type { PanelScope } from "@/lib/panel-tabs";
 import { visibleReviewViews, defaultReviewView } from "@/lib/review-views";
 import { BranchRefPicker } from "./BranchRefPicker";
@@ -53,20 +54,15 @@ export function DiffToolbar({
   const setReviewViewForThread = useDiffStore((s) => s.setReviewViewForThread);
   const getReviewView = useDiffStore((s) => s.getReviewView);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
-  const [commitProbeNonce, setCommitProbeNonce] = useState(0);
+  const [reviewProbeNonce, setReviewProbeNonce] = useState(0);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeThread = useWorkspaceStore(
     (s) => s.threads.find((t) => t.id === s.activeThreadId) ?? null,
   );
-  const threadBranch = useWorkspaceStore((s) => {
-    const thread = s.threads.find((t) => t.id === s.activeThreadId);
-    return thread?.branch ?? undefined;
-  });
   const diffScopeRevision = useDiffStore((s) =>
     activeWorkspaceId ? (s.diffRevisionByScope[activeThreadId ?? activeWorkspaceId] ?? 0) : 0,
   );
-  const [branchProbeNonce, setBranchProbeNonce] = useState(0);
 
   const isGitRepo = useWorkspaceStore((s) =>
     s.workspaces.find((w) => w.id === s.activeWorkspaceId)?.is_git_repo ?? false,
@@ -93,27 +89,10 @@ export function DiffToolbar({
     () => visibleReviewViews(scope, { isGitRepo }),
     [scope, isGitRepo],
   );
-  const commitAvailability = useCommitAvailability({
-    activeWorkspaceId,
-    activeThreadId,
-    threadBranch,
-    isGitRepo,
-    diffScopeRevision,
-    commitProbeNonce,
-  });
-  const branchAvailability = useBranchAvailability({
-    activeWorkspaceId,
-    activeThreadId,
-    isGitRepo,
-    diffScopeRevision,
-    branchProbeNonce,
-  });
-  const workingTreeDirty = useWorkingTreeDirty({
-    activeWorkspaceId,
-    activeThreadId,
-    isGitRepo,
-    diffScopeRevision,
-  });
+  const { state: reviewState, isDirty: workingTreeDirty } = useReviewState(
+    isGitRepo ? activeWorkspaceId : null, activeThreadId, reviewProbeNonce,
+  );
+  const { commitAvailability, branchAvailability } = reviewAvailability(reviewState, isGitRepo);
 
   useReviewViewSynchronization({
     activeThreadId,
@@ -147,8 +126,7 @@ export function DiffToolbar({
       onViewMenuOpenChange={(open) => {
         setViewMenuOpen(open);
         if (open) {
-          setCommitProbeNonce((nonce) => nonce + 1);
-          setBranchProbeNonce((nonce) => nonce + 1);
+          setReviewProbeNonce((nonce) => nonce + 1);
         }
       }}
       reviewDiffStat={reviewDiffStat}
@@ -161,6 +139,18 @@ export function DiffToolbar({
       controlsSlotRef={controlsSlotRef}
     />
   );
+}
+
+function reviewAvailability(state: ReviewState | null, isGitRepo: boolean): {
+  commitAvailability: CommitAvailability;
+  branchAvailability: BranchAvailability;
+} {
+  if (!isGitRepo || state?.isGitRepo === false) return { commitAvailability: "empty", branchAvailability: "empty" };
+  if (!state) return { commitAvailability: "loading", branchAvailability: "loading" };
+  return {
+    commitAvailability: (state.commitsAhead?.count ?? 0) > 0 ? "available" : "empty",
+    branchAvailability: "compare" in state.branchDefault ? "available" : "empty",
+  };
 }
 
 function useReviewViewSynchronization(input: ReviewViewSynchronizationInput): void {
@@ -600,164 +590,4 @@ function BranchOperand({
       />
     </div>
   );
-}
-
-function useCommitAvailability({
-  activeWorkspaceId,
-  activeThreadId,
-  threadBranch,
-  isGitRepo,
-  diffScopeRevision,
-  commitProbeNonce,
-}: {
-  activeWorkspaceId: string | null;
-  activeThreadId: string | null;
-  threadBranch?: string;
-  isGitRepo: boolean;
-  diffScopeRevision: number;
-  commitProbeNonce: number;
-}): CommitAvailability {
-  const [result, setResult] = useState<{ key: string; value: CommitAvailability } | null>(null);
-  const canProbe = activeWorkspaceId !== null && isGitRepo;
-  const key = JSON.stringify([
-    activeWorkspaceId,
-    activeThreadId,
-    threadBranch,
-    diffScopeRevision,
-    commitProbeNonce,
-  ]);
-
-  useEffect(() => {
-    if (!canProbe || !activeWorkspaceId) return;
-
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const transport = getTransport();
-        const branch = activeThreadId
-          ? threadBranch
-          : ((await transport.getCurrentBranch(activeWorkspaceId)) ?? undefined);
-        const commits = await transport.getGitLog(
-          activeWorkspaceId,
-          branch,
-          1,
-          undefined,
-          activeThreadId ?? undefined,
-          { skip: 0, includeStats: false },
-        );
-        if (!cancelled) setResult({ key, value: commits.length > 0 ? "available" : "empty" });
-      } catch {
-        if (!cancelled) setResult({ key, value: "empty" });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeWorkspaceId,
-    activeThreadId,
-    threadBranch,
-    canProbe,
-    key,
-  ]);
-
-  if (!canProbe) return "empty";
-  return result?.key === key ? result.value : "loading";
-}
-
-/** Probe whether the Branch view has a resolvable comparison for the active scope. */
-function useBranchAvailability({
-  activeWorkspaceId,
-  activeThreadId,
-  isGitRepo,
-  diffScopeRevision,
-  branchProbeNonce,
-}: {
-  activeWorkspaceId: string | null;
-  activeThreadId: string | null;
-  isGitRepo: boolean;
-  diffScopeRevision: number;
-  branchProbeNonce: number;
-}): BranchAvailability {
-  const [result, setResult] = useState<{ key: string; value: BranchAvailability } | null>(null);
-  const canProbe = activeWorkspaceId !== null && isGitRepo;
-  const key = JSON.stringify([
-    activeWorkspaceId,
-    activeThreadId,
-    diffScopeRevision,
-    branchProbeNonce,
-  ]);
-
-  useEffect(() => {
-    if (!canProbe || !activeWorkspaceId) return;
-
-    let cancelled = false;
-
-    void getTransport()
-      .getBranchComparison(activeWorkspaceId, activeThreadId ?? undefined)
-      .then((result) => {
-        if (cancelled) return;
-        // Treat a missing flag as available for older servers; only explicit false
-        // disables the view (local-only default branch, unborn repo, etc.).
-        const available = !result.isUnborn && result.isComparisonAvailable !== false;
-        setResult({ key, value: available ? "available" : "empty" });
-      })
-      .catch(() => {
-        if (!cancelled) setResult({ key, value: "empty" });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeWorkspaceId, activeThreadId, canProbe, key]);
-
-  if (!canProbe) return "empty";
-  return result?.key === key ? result.value : "loading";
-}
-
-/**
- * Probes whether the active scope's working tree has uncommitted changes — the
- * `isDirty` signal for the per-thread Review default (ADR-0011). Refetches on
- * `diffScopeRevision` bumps; returns false while loading, off-git, or on error.
- */
-function useWorkingTreeDirty({
-  activeWorkspaceId,
-  activeThreadId,
-  isGitRepo,
-  diffScopeRevision,
-}: {
-  activeWorkspaceId: string | null;
-  activeThreadId: string | null;
-  isGitRepo: boolean;
-  diffScopeRevision: number;
-}): boolean {
-  const [result, setResult] = useState<{ key: string; value: boolean } | null>(null);
-  const canProbe = activeWorkspaceId !== null && isGitRepo;
-  const key = JSON.stringify([activeWorkspaceId, activeThreadId, diffScopeRevision]);
-
-  useEffect(() => {
-    if (!canProbe || !activeWorkspaceId) return;
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const files = await getTransport().getWorkingTreeFiles(
-          activeWorkspaceId,
-          false,
-          activeThreadId ?? undefined,
-        );
-        if (!cancelled) setResult({ key, value: files.length > 0 });
-      } catch {
-        if (!cancelled) setResult({ key, value: false });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeWorkspaceId, activeThreadId, canProbe, key]);
-
-  return canProbe && result?.key === key ? result.value : false;
 }

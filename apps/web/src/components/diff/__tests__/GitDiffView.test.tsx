@@ -10,7 +10,7 @@ vi.mock("../FileList", () => ({
 
 const resolved = {
   comparison: {
-    files: [{ path: "selected.ts", previousPath: null, changeType: "modified" as const, binary: false }],
+    files: [{ path: "selected.ts", previousPath: null, changeType: "modified" as const, binary: false, additions: null, deletions: null, untracked: false }],
     additions: 1,
     deletions: 0,
   },

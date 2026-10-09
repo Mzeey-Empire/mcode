@@ -40,6 +40,7 @@ export async function loadFileDiff(
   id: string,
   filePath: string,
   threadId?: string,
+  untracked = false,
 ): Promise<string> {
   switch (source) {
     case "turn-diff":
@@ -49,7 +50,7 @@ export async function loadFileDiff(
     case "cumulative":
       return transport.getCumulativeDiff(id, filePath);
     case "unstaged":
-      return transport.getWorkingTreeDiff(id, false, filePath, undefined, threadId);
+      return transport.getWorkingTreeDiff(id, false, filePath, undefined, threadId, untracked);
     case "staged":
       return transport.getWorkingTreeDiff(id, true, filePath, undefined, threadId);
     case "branch":

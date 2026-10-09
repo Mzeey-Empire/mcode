@@ -132,9 +132,13 @@ function getGitComparisonId(input: ComparisonLoadInput & { readonly viewMode: Gi
 
 async function loadCumulativeComparison(input: ComparisonLoadInput): Promise<LoadedComparison> {
   const stats = await getTransport().getCumulativeDiffStats(input.activeThreadId!);
+  const statsByPath = new Map(stats.map((entry) => [entry.filePath, entry]));
   return {
     comparison: {
-      files: cumulativeReviewFiles(input.snapshots ?? [], stats.map((entry) => entry.filePath)),
+      files: cumulativeReviewFiles(input.snapshots ?? [], stats.map((entry) => entry.filePath)).map((file) => {
+        const counts = statsByPath.get(file.path);
+        return { ...file, additions: file.binary ? null : counts?.additions ?? null, deletions: file.binary ? null : counts?.deletions ?? null };
+      }),
       additions: sumReviewFileAdditions(stats),
       deletions: sumReviewFileDeletions(stats),
     },

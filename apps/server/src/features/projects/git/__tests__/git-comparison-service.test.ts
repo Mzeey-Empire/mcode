@@ -97,7 +97,7 @@ describe("GitComparisonService unified output", () => {
       new Error("unknown parent"),
     );
     fake.setResponse(
-      ["diff", "--find-renames", "4b825dc642cb6eb9a060e54bf899d69f82049264..abc1234"],
+      ["diff", "--find-renames", "4b825dc642cb6eb9a060e54bf8d69288fbee4904..abc1234"],
       { stdout: patch, stderr: "" },
     );
 
@@ -114,5 +114,29 @@ describe("GitComparisonService unified output", () => {
     await expect(service.readBranchComparisonDiffStat("/repo", "main", "HEAD")).resolves.toBe(
       "example.txt | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)",
     );
+  });
+
+  it("preserves per-file counts, rename destinations, and binary nulls", async () => {
+    fake.setResponse(["diff", "--name-status", "-z", "--find-renames", "--find-copies", "--cached"], {
+      stdout: "A\0notes.md\0R100\0old.txt\0new.txt\0M\0image.bin\0", stderr: "",
+    });
+    fake.setResponse(["diff", "--numstat", "-z", "--find-renames", "--find-copies", "--cached"], {
+      stdout: "3\t0\tnotes.md\0" + "2\t1\t\0old.txt\0new.txt\0-\t-\timage.bin\0", stderr: "",
+    });
+    expect(await service.readReviewComparison(workspaceId, "staged", {})).toEqual({
+      files: [
+        { path: "image.bin", previousPath: null, changeType: "modified", binary: true, additions: null, deletions: null, untracked: false },
+        { path: "new.txt", previousPath: "old.txt", changeType: "renamed", binary: false, additions: 2, deletions: 1, untracked: false },
+        { path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 3, deletions: 0, untracked: false },
+      ], additions: 5, deletions: 1,
+    });
+  });
+
+  it("rejects over 10,000 untracked files before resolving or building an index", async () => {
+    fake.setResponse(["ls-files", "--others", "--exclude-standard", "-z"], {
+      stdout: Array.from({ length: 10_001 }, (_, index) => `file-${index}\0`).join(""), stderr: "",
+    });
+    await expect(service.readReviewComparison(workspaceId, "unstaged", {})).rejects.toThrow();
+    expect(fake.calls.map((call) => call.args)).toEqual([["-C", "/repo", "ls-files", "--others", "--exclude-standard", "-z"]]);
   });
 });

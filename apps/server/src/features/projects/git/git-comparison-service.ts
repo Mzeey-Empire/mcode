@@ -1,17 +1,30 @@
 import { inject, injectable } from "tsyringe";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodePath from "node:path";
+import * as NodeCrypto from "node:crypto";
 import { logger, truncateUnifiedDiff } from "@mcode/shared";
 import type {
   BranchComparison,
   GitCommit,
   ReviewComparison,
   ReviewFileChange,
+  ReviewState,
 } from "@mcode/contracts";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import type { GitExecutor } from "./execution/index.js";
 import { GitRepositoryService } from "./git-repository-service.js";
 
-const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf899d69f82049264";
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const MAX_REVIEW_COMPARISON_FILES = 10_000;
+
+/** A Git failure that S10-03 can translate into a comparison outcome. */
+export class ReviewComparisonError extends Error {
+  readonly kind = "git-error";
+  constructor(readonly summary: string, readonly detail: string) {
+    super(`${summary}: ${detail}`);
+    this.name = "ReviewComparisonError";
+  }
+}
 
 /** Computes Git history, diffs, file lists, and branch comparisons. */
 @injectable()
@@ -110,19 +123,6 @@ export class GitComparisonService {
     }
   }
 
-  /** List changed files in a working tree. */
-  async listWorkingTreeChangedFiles(workspaceId: string, staged: boolean, repoPath?: string): Promise<string[]> {
-    const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
-    const args = ["-C", cwd, "diff", "--name-only"];
-    if (staged) args.push("--cached");
-    try {
-      const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
-      return stdout.trim().split("\n").filter(Boolean);
-    } catch {
-      return [];
-    }
-  }
-
   /** Read a working-tree diff, optionally for a single file. */
   async readWorkingTreeDiff(
     workspaceId: string,
@@ -130,11 +130,18 @@ export class GitComparisonService {
     filePath?: string,
     maxLines?: number,
     repoPath?: string,
+    untracked = false,
   ): Promise<string> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
     const args = ["-C", cwd, "diff", "--find-renames"];
     if (staged) args.push("--cached");
-    if (filePath) args.push("--", filePath);
+    if (filePath) args.push("--", untracked ? `:(literal)${filePath}` : filePath);
+    if (untracked && !staged) {
+      return this.withIntentToAddIndex(cwd, async (env) => {
+        const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000, env });
+        return truncateUnifiedDiff(stdout, maxLines);
+      }, filePath);
+    }
     try {
       const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
       return truncateUnifiedDiff(stdout, maxLines);
@@ -162,25 +169,6 @@ export class GitComparisonService {
       { timeout: 10_000 },
     );
     return stdout;
-  }
-
-  /** List files changed on the target side of a branch comparison. */
-  async listBranchComparisonChangedFiles(workspaceId: string, base?: string, target?: string, repoPath?: string): Promise<string[]> {
-    const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
-    const resolvedBase = base ?? await this.detectDefaultBranch(cwd);
-    if (!resolvedBase) return [];
-    const resolvedTarget = target ?? "HEAD";
-    assertSafeRef(resolvedBase);
-    assertSafeRef(resolvedTarget);
-    try {
-      const { stdout } = await this.gitExecutor.exec(
-        ["-C", cwd, "diff", "--name-only", `${resolvedBase}...${resolvedTarget}`],
-        { timeout: 10_000 },
-      );
-      return stdout.trim().split("\n").filter(Boolean);
-    } catch {
-      return [];
-    }
   }
 
   /** Read a branch comparison diff, optionally for one file. */
@@ -211,31 +199,87 @@ export class GitComparisonService {
   /** Read a file and stat batch for one Review comparison view. */
   async readReviewComparison(
     workspaceId: string,
-    view: "unstaged" | "staged" | "branch" | "commit",
+    view: ReviewView,
     opts: { base?: string; target?: string; sha?: string },
     repoPath?: string,
   ): Promise<ReviewComparison> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
     const suffix = await this.resolveReviewComparisonSuffix(cwd, view, opts);
     if (!suffix) return emptyReviewComparison();
+    if (view === "unstaged" || view === "uncommitted") {
+      return this.withIntentToAddIndex(cwd, (env, untracked) =>
+        this.runReviewComparison(cwd, suffix, env, untracked)).catch((error: unknown) => {
+          if (error instanceof ReviewComparisonError || isReviewComparisonLimitError(error)) throw error;
+          throw new ReviewComparisonError("Could not read Review comparison", gitErrorDetail(error));
+        });
+    }
     return this.readReviewComparisonWithCommitFallback(cwd, view, opts.sha, suffix);
   }
 
-  /** Read Review-panel additions and deletions. */
-  async readReviewDiffStats(
-    workspaceId: string,
-    view: "unstaged" | "staged" | "branch" | "commit",
-    opts: { base?: string; target?: string; sha?: string },
-    repoPath?: string,
-  ): Promise<{ additions: number; deletions: number }> {
-    const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
-    const suffix = await this.resolveReviewComparisonSuffix(cwd, view, opts);
-    if (!suffix) return emptyReviewDiffStats();
+  private async withIntentToAddIndex<T>(
+    cwd: string,
+    run: (env: NodeJS.ProcessEnv, untracked: ReadonlySet<string>) => Promise<T>,
+    filePath?: string,
+  ): Promise<T> {
+    const args = ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"];
+    if (filePath) args.push("--", `:(literal)${filePath}`);
+    const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
+    const paths = stdout.split("\0").filter(Boolean);
+    assertReviewComparisonFileCount(paths.length);
+    const index = await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--git-path", "index"]);
+    const source = NodePath.resolve(cwd, index.stdout.trim());
+    const temporary = NodePath.join(NodePath.dirname(source), `mcode-review-index-${NodeCrypto.randomUUID()}`);
+    const env = { GIT_INDEX_FILE: temporary };
     try {
-      return await this.readReviewDiffStatsForRange(cwd, suffix);
-    } catch {
-      return this.readCommitReviewDiffStatsFallback(cwd, view, opts.sha);
+      await this.copyReviewIndex(cwd, source, temporary, env);
+      for (const batch of batchReviewPaths(paths)) {
+        await this.gitExecutor.exec(["-C", cwd, "add", "-N", "--", ...batch], { env, timeout: 10_000 });
+      }
+      return await run(env, new Set(paths));
+    } catch (error) {
+      if (error instanceof ReviewComparisonError || isReviewComparisonLimitError(error)) throw error;
+      throw new ReviewComparisonError("Could not read Review comparison", gitErrorDetail(error));
+    } finally {
+      await NodeFSPromises.unlink(temporary).catch((error: unknown) => {
+        if (!hasErrorCode(error, "ENOENT")) throw error;
+      });
     }
+  }
+
+  private async copyReviewIndex(cwd: string, source: string, temporary: string, env: NodeJS.ProcessEnv): Promise<void> {
+    try {
+      await NodeFSPromises.copyFile(source, temporary);
+    } catch (error) {
+      if (!hasErrorCode(error, "ENOENT")) throw error;
+      // ENOENT can also name the destination directory. Only an absent source permits an empty index.
+      const absent = await NodeFSPromises.lstat(source).then(() => false, (failure: unknown) => {
+        if (hasErrorCode(failure, "ENOENT")) return true;
+        throw failure;
+      });
+      if (!absent) throw error;
+      await this.gitExecutor.exec(["-C", cwd, "read-tree", "--empty"], { env, timeout: 10_000 });
+    }
+  }
+
+  /** Probe dirty state and the existing ADR-0007 default comparison ladder. */
+  async readReviewState(workspaceId: string, repoPath?: string, savedBaseBranch?: string | null): Promise<ReviewState> {
+    const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
+    const { stdout } = await this.gitExecutor.exec(
+      ["-C", cwd, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"],
+      { timeout: 10_000, env: { GIT_OPTIONAL_LOCKS: "0" } },
+    );
+    const status = parseReviewStatus(stdout);
+    if (!status.head) return { isGitRepo: true, ...status, commitsAhead: null, branchDefault: { unavailable: "unborn" } };
+    const base = await this.resolveCommitListBase(cwd, status.branch ?? "HEAD", undefined);
+    const commitsAhead = base ? {
+      base,
+      count: Number((await this.gitExecutor.exec(["-C", cwd, "rev-list", "--count", `${base}..HEAD`], { timeout: 10_000 })).stdout.trim()),
+    } : null;
+    const selection = await this.selectBranchComparison(cwd, savedBaseBranch);
+    const branchDefault = selection.isComparisonAvailable && selection.base && selection.target
+      ? { compare: selection.target, base: selection.base }
+      : { unavailable: "no-base" as const };
+    return { isGitRepo: true, ...status, commitsAhead, branchDefault };
   }
 
   /** Resolve the default Branch comparison and the available references. */
@@ -262,35 +306,25 @@ export class GitComparisonService {
     return stdout.trim();
   }
 
-  private async runReviewComparison(cwd: string, range: readonly string[]): Promise<ReviewComparison> {
-    const [names, numstat] = await Promise.all([
+  private async runReviewComparison(cwd: string, range: readonly string[], env?: NodeJS.ProcessEnv, untracked: ReadonlySet<string> = new Set()): Promise<ReviewComparison> {
+    // Both children must settle before the temporary index is removed.
+    const results = await Promise.allSettled([
       this.gitExecutor.exec(
         ["-C", cwd, "diff", "--name-status", "-z", "--find-renames", "--find-copies", ...range],
-        { timeout: 10_000 },
+        { timeout: 10_000, env },
       ),
       this.gitExecutor.exec(
         ["-C", cwd, "diff", "--numstat", "-z", "--find-renames", "--find-copies", ...range],
-        { timeout: 10_000 },
+        { timeout: 10_000, env },
       ),
     ]);
-    return {
-      files: parseReviewFileChanges(names.stdout, parseBinaryPaths(numstat.stdout)),
-      ...this.parseNumstatTotal(numstat.stdout.replaceAll("\0", "\n")),
-    };
-  }
-
-  private parseNumstatTotal(stdout: string): { additions: number; deletions: number } {
-    let additions = 0;
-    let deletions = 0;
-    for (const line of stdout.trim().split("\n")) {
-      if (!line.includes("\t")) continue;
-      const [additionsText, deletionsText] = line.split("\t");
-      const parsedAdditions = additionsText === "-" ? 0 : Number.parseInt(additionsText ?? "", 10);
-      const parsedDeletions = deletionsText === "-" ? 0 : Number.parseInt(deletionsText ?? "", 10);
-      if (Number.isFinite(parsedAdditions)) additions += parsedAdditions;
-      if (Number.isFinite(parsedDeletions)) deletions += parsedDeletions;
-    }
-    return { additions, deletions };
+    const [names, numstat] = results;
+    if (names.status === "rejected") throw names.reason;
+    if (numstat.status === "rejected") throw numstat.reason;
+    const stats = parsePerFileNumstat(numstat.value.stdout);
+    const files = parseReviewFileChanges(names.value.stdout, parseBinaryPaths(numstat.value.stdout))
+      .map((file) => ({ ...file, ...stats.get(file.path), untracked: untracked.has(file.path) }));
+    return { files, additions: files.reduce((sum, file) => sum + (file.additions ?? 0), 0), deletions: files.reduce((sum, file) => sum + (file.deletions ?? 0), 0) };
   }
 
   private async resolveCommitListBase(
@@ -310,6 +344,7 @@ export class GitComparisonService {
   ): Promise<string[] | null> {
     switch (view) {
       case "unstaged": return [];
+      case "uncommitted": return [(await this.hasCommits(cwd)) ? "HEAD" : EMPTY_TREE];
       case "staged": return ["--cached"];
       case "branch": return this.resolveBranchReviewSuffix(cwd, opts);
       case "commit": return resolveCommitReviewSuffix(opts.sha);
@@ -340,31 +375,6 @@ export class GitComparisonService {
       if (isReviewComparisonLimitError(error) || view !== "commit") throw error;
       assertSafeSha(sha);
       return this.runReviewComparison(cwd, [EMPTY_TREE, sha]);
-    }
-  }
-
-  private async readReviewDiffStatsForRange(
-    cwd: string,
-    suffix: readonly string[],
-  ): Promise<{ additions: number; deletions: number }> {
-    const { stdout } = await this.gitExecutor.exec(
-      ["-C", cwd, "diff", "--numstat", ...suffix],
-      { timeout: 10_000 },
-    );
-    return this.parseNumstatTotal(stdout);
-  }
-
-  private async readCommitReviewDiffStatsFallback(
-    cwd: string,
-    view: ReviewView,
-    sha: string | undefined,
-  ): Promise<{ additions: number; deletions: number }> {
-    if (view !== "commit") return emptyReviewDiffStats();
-    assertSafeSha(sha);
-    try {
-      return await this.readReviewDiffStatsForRange(cwd, [EMPTY_TREE, sha]);
-    } catch {
-      return emptyReviewDiffStats();
     }
   }
 
@@ -493,7 +503,7 @@ export class GitComparisonService {
   }
 }
 
-type ReviewView = "unstaged" | "staged" | "branch" | "commit";
+type ReviewView = "unstaged" | "staged" | "branch" | "commit" | "uncommitted";
 
 type ReviewComparisonOptions = { base?: string; target?: string; sha?: string };
 
@@ -581,8 +591,71 @@ function isReviewComparisonLimitError(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith("Review comparison is limited");
 }
 
-function emptyReviewDiffStats(): { additions: number; deletions: number } {
-  return { additions: 0, deletions: 0 };
+function hasErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
+}
+
+function gitErrorDetail(error: unknown): string {
+  if (error instanceof Error && "stderr" in error && typeof error.stderr === "string") return error.stderr;
+  return String(error);
+}
+
+function batchReviewPaths(paths: readonly string[]): string[][] {
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let chars = 0;
+  for (const path of paths) {
+    const literal = `:(literal)${path}`;
+    if (batch.length >= 128 || chars + literal.length > 20_000) {
+      batches.push(batch);
+      batch = [];
+      chars = 0;
+    }
+    batch.push(literal);
+    chars += literal.length;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
+function parsePerFileNumstat(stdout: string): Map<string, { additions: number | null; deletions: number | null }> {
+  const fields = stdout.split("\0");
+  const stats = new Map<string, { additions: number | null; deletions: number | null }>();
+  for (let index = 0; index < fields.length;) {
+    const record = fields[index++] ?? "";
+    const parsed = parseNumstatRecord(record);
+    if (!parsed) continue;
+    const [added, deleted] = record.split("\t");
+    const path = parsed.path || fields[index + 1];
+    if (!parsed.path) index += 2;
+    if (path) stats.set(path, {
+      additions: parsed.binary ? null : Number(added),
+      deletions: parsed.binary ? null : Number(deleted),
+    });
+  }
+  return stats;
+}
+
+function reviewStatusHeader(records: readonly string[], prefix: string, absent: string): string | null {
+  const value = records.find((record) => record.startsWith(prefix))?.slice(prefix.length);
+  return !value || value === absent ? null : value;
+}
+
+function parseReviewStatus(stdout: string): Pick<Extract<ReviewState, { isGitRepo: true }>, "head" | "branch" | "uncommitted"> {
+  const records = stdout.split("\0");
+  const head = reviewStatusHeader(records, "# branch.oid ", "(initial)");
+  const branch = reviewStatusHeader(records, "# branch.head ", "(detached)");
+  const uncommitted = { staged: 0, unstaged: 0, untracked: 0 };
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index] ?? "";
+    if (record.startsWith("? ")) uncommitted.untracked++;
+    if (/^[12u] /.test(record)) {
+      if (record[2] !== ".") uncommitted.staged++;
+      if (record[3] !== ".") uncommitted.unstaged++;
+      if (record.startsWith("2 ")) index++;
+    }
+  }
+  return { head, branch, uncommitted };
 }
 
 function selectBranchComparison(context: BranchComparisonContext): BranchComparisonSelection {
@@ -654,7 +727,8 @@ function parseReviewFileChanges(stdout: string, binaryPaths: ReadonlySet<string>
     files.push(parsed.file);
     assertReviewComparisonFileCount(files.length);
   }
-  return files.sort((left, right) => left.path.localeCompare(right.path));
+  return [...new Map(files.map((file) => [file.path, file])).values()]
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function parseReviewFileChange(
@@ -689,6 +763,9 @@ function parseMovedFileChange(
       previousPath,
       changeType: code === "R" ? "renamed" : "copied",
       binary: binaryPaths.has(path),
+      additions: null,
+      deletions: null,
+      untracked: false,
     },
     nextIndex: index + 3,
   };
@@ -708,6 +785,9 @@ function parseStandardFileChange(
       previousPath: null,
       changeType: standardFileChangeType(code),
       binary: binaryPaths.has(path),
+      additions: null,
+      deletions: null,
+      untracked: false,
     },
     nextIndex: index + 2,
   };

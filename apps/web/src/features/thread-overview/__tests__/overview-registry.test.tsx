@@ -22,10 +22,7 @@ vi.mock("@/transport", async (importOriginal) => ({
 }));
 
 function mockLoadedEntries() {
-  vi.mocked(mockTransport.getWorkingTreeFiles).mockResolvedValue([
-    "src/example.ts",
-  ]);
-  vi.mocked(mockTransport.getReviewDiffStats).mockResolvedValue({ additions: 7, deletions: 2 });
+  vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({ files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 7, deletions: 2 });
   vi.mocked(mockTransport.getRemoteUrl).mockResolvedValue({ label: "example/repo", webUrl: "https://github.com/example/repo" });
 }
 
@@ -41,9 +38,8 @@ describe("overview registry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetThreadRecapRequestStateForTest();
-    vi.mocked(mockTransport.getWorkingTreeFiles).mockReset().mockResolvedValue([]);
     vi.mocked(mockTransport.getRemoteUrl).mockReset().mockResolvedValue({ label: "test-project", webUrl: null });
-    vi.mocked(mockTransport.getReviewDiffStats).mockReset().mockResolvedValue({ additions: 0, deletions: 0 });
+    vi.mocked(mockTransport.getReviewComparison).mockReset().mockResolvedValue({ files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 0, deletions: 0 });
     useWorkspaceStore.setState({
       workspaces: [createMockWorkspace({ id: thread.workspace_id })],
       threads: [thread],
@@ -142,14 +138,14 @@ describe("overview registry", () => {
   it("shows loaded Changes and repository results on reopen while refreshing them silently", async () => {
     mockLoadedEntries();
     render(<ThreadOverview thread={thread} threadPaneWidth={600} />);
-    expect(mockTransport.getWorkingTreeFiles).not.toHaveBeenCalled();
+    expect(mockTransport.getReviewComparison).not.toHaveBeenCalled();
     expect(mockTransport.getRemoteUrl).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId("header-overview-toggle"));
     await waitFor(() => expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "7 additions, 2 deletions"));
     expect(screen.getByText("example/repo")).toBeInTheDocument();
-    expect(mockTransport.getWorkingTreeFiles).toHaveBeenCalledTimes(1);
+    expect(mockTransport.getReviewComparison).toHaveBeenCalledTimes(1);
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(1);
 
     await closeOverview();
@@ -158,7 +154,7 @@ describe("overview registry", () => {
     expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "7 additions, 2 deletions");
     expect(screen.getByText("example/repo")).toBeInTheDocument();
-    await waitFor(() => expect(mockTransport.getWorkingTreeFiles).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockTransport.getReviewComparison).toHaveBeenCalledTimes(2));
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(2);
   });
 
@@ -216,7 +212,7 @@ describe("overview registry", () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
     await screen.findByTestId("thread-overview-change-summary");
     await closeOverview();
-    vi.mocked(mockTransport.getReviewDiffStats).mockResolvedValue({ additions: 11, deletions: 3 });
+    vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({ files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 11, deletions: 3 });
     vi.mocked(mockTransport.getSnapshotDiffStats).mockResolvedValue([
       { filePath: "src/example.ts", additions: 11, deletions: 3, changeType: "modified" },
     ]);
@@ -231,7 +227,7 @@ describe("overview registry", () => {
         }]);
       }
     });
-    expect(mockTransport.getReviewDiffStats).toHaveBeenCalledTimes(1);
+    expect(mockTransport.getReviewComparison).toHaveBeenCalledTimes(1);
     expect(mockTransport.getSnapshotDiffStats).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId("header-overview-toggle"));
@@ -239,7 +235,7 @@ describe("overview registry", () => {
     await waitFor(() => expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "11 additions, 3 deletions"));
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(2);
-    expect(mockTransport.getReviewDiffStats).toHaveBeenCalledTimes(invalidation === "revision" ? 2 : 1);
+    expect(mockTransport.getReviewComparison).toHaveBeenCalledTimes(invalidation === "revision" ? 2 : 1);
     expect(mockTransport.getSnapshotDiffStats).toHaveBeenCalledTimes(invalidation === "snapshot" ? 1 : 0);
   });
 
@@ -250,12 +246,12 @@ describe("overview registry", () => {
     await screen.findByTestId("thread-overview-change-summary");
     await closeOverview();
     const nextThread = createMockThread({ ...thread, id: "next-thread" });
-    vi.mocked(mockTransport.getReviewDiffStats).mockResolvedValue({ additions: 19, deletions: 5 });
+    vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({ files: [{ path: "src/example.ts", previousPath: null, changeType: "added", binary: false, additions: null, deletions: null, untracked: true }], additions: 19, deletions: 5 });
     vi.mocked(mockTransport.getRemoteUrl).mockResolvedValue({ label: "example/next", webUrl: "https://github.com/example/next" });
     act(() => useDiffStore.getState().setSnapshots(nextThread.id, []));
     rerender(<ThreadOverview thread={nextThread} threadPaneWidth={600} />);
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(1);
-    expect(mockTransport.getWorkingTreeFiles).toHaveBeenCalledTimes(1);
+    expect(mockTransport.getReviewComparison).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTestId("header-overview-toggle"));
     expect(screen.getByTestId("thread-overview-change-loading")).toBeInTheDocument();
@@ -263,7 +259,7 @@ describe("overview registry", () => {
     await waitFor(() => expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "19 additions, 5 deletions"));
     expect(screen.getByText("example/next")).toBeInTheDocument();
-    expect(mockTransport.getWorkingTreeFiles).toHaveBeenLastCalledWith(thread.workspace_id, false, nextThread.id);
+    expect(mockTransport.getReviewComparison).toHaveBeenLastCalledWith({ workspaceId: thread.workspace_id, view: "uncommitted", threadId: nextThread.id });
     expect(mockTransport.getRemoteUrl).toHaveBeenLastCalledWith(thread.workspace_id, nextThread.id);
   });
 

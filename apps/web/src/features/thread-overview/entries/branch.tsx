@@ -73,17 +73,16 @@ function useThreadOverviewBranchState(thread: Thread, open: boolean): LoadedBran
     let cancelled = false;
     const loadBranches = async () => {
       try {
-        const [branches, unstaged, staged] = await Promise.all([
+        const [branches, comparison] = await Promise.all([
           getTransport().listBranches(thread.workspace_id),
-          getTransport().getWorkingTreeFiles(thread.workspace_id, false, thread.id).catch(() => []),
-          getTransport().getWorkingTreeFiles(thread.workspace_id, true, thread.id).catch(() => []),
+          getTransport().getReviewComparison({ workspaceId: thread.workspace_id, view: "uncommitted", threadId: thread.id }),
         ]);
 
         if (cancelled) return;
         setLoaded({
           status: "ready",
           branches,
-          uncommittedFiles: new Set([...unstaged, ...staged]).size,
+          uncommittedFiles: comparison.files.length,
         });
       } catch {
         if (!cancelled) setLoaded((previous) => ({ ...previous, status: "error" }));

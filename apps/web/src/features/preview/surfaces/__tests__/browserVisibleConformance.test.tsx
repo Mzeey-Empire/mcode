@@ -58,7 +58,7 @@ vi.mock("@/transport", async (importOriginal) => {
     getTransport: () => ({
       createBranch: vi.fn(),
       listSnapshots: vi.fn().mockResolvedValue([]),
-      getWorkingTreeFiles: vi.fn().mockResolvedValue([]),
+      getReviewState: vi.fn().mockResolvedValue({ isGitRepo: false }),
       getBranchComparison: vi.fn().mockResolvedValue(null),
       getRemoteUrl: vi.fn().mockResolvedValue({ label: "repo", webUrl: null }),
       readWorkspaceEnvironment: vi.fn().mockResolvedValue({
