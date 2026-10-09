@@ -234,6 +234,48 @@ describe("BrowseView", () => {
     expect(mocks.getPendingConfirm()).toEqual(expect.any(Function));
   });
 
+  it("offers Add again when the user leaves a rejected path and comes back", async () => {
+    mocks.palette.query = "~/gone/";
+    mocks.workspace.createWorkspace.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "path_not_found", message: "server copy" },
+    });
+
+    const { rerender } = render(<BrowseView />);
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    mocks.getPendingConfirm()?.();
+    await screen.findByRole("alert");
+
+    mocks.palette.query = "~/other/";
+    rerender(<BrowseView />);
+    mocks.palette.query = "~/gone/";
+    rerender(<BrowseView />);
+
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("starts one registration while an add is still pending", async () => {
+    let finish: (value: unknown) => void = () => {};
+    mocks.workspace.createWorkspace.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const showOpenDialog = vi.fn().mockResolvedValue("/home/mcode/src/app");
+    window.desktopBridge = { showOpenDialog } as unknown as typeof window.desktopBridge;
+    mocks.palette.query = "~/projects/";
+
+    render(<BrowseView />);
+    await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+    const confirm = mocks.getPendingConfirm();
+    confirm?.();
+    confirm?.();
+    fireEvent.click(screen.getByRole("button", { name: "Open in File Explorer" }));
+    finish({ ok: true, workspace: { id: "ws-projects" }, reused: false });
+
+    await waitFor(() => expect(mocks.palette.close).toHaveBeenCalledOnce());
+    expect(mocks.workspace.createWorkspace).toHaveBeenCalledOnce();
+    expect(showOpenDialog).not.toHaveBeenCalled();
+    expect(mocks.workspace.beginNewThread).toHaveBeenCalledWith("ws-projects");
+  });
+
   it("hides Open in File Explorer on the web", async () => {
     render(<BrowseView />);
 

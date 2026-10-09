@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useReducer } from "react";
+import { useState, useEffect, useCallback, useMemo, useReducer, useRef } from "react";
 import { ChevronRight, Folder } from "lucide-react";
 import type { FilesystemBrowseResult, WorkspaceCreateErrorCode } from "@mcode/contracts";
 import { CommandGroup, CommandItem, CommandList, CommandEmpty } from "@/components/ui/command";
@@ -230,6 +230,10 @@ function useBrowseAddAction({
     readonly rejectedPath: string | null;
   } | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  // Set synchronously so a second Add or dialog pick cannot start before the first re-renders.
+  const addInFlight = useRef(false);
+  // A rejection belongs to the path that produced it; returning to that path later re-checks it.
+  if (addErrorState && addErrorState.query !== query) setAddErrorState(null);
   const currentError = addErrorState?.query === query ? addErrorState : null;
   const addError = currentError?.message ?? null;
   // The listing that made this folder addable is stale once the server rejects it; editing the path re-checks it.
@@ -244,10 +248,14 @@ function useBrowseAddAction({
   });
 
   // A reused registration opens the existing project the same way a new one does.
-  const addFolder = useCallback(async (path: string) => {
-    setAddErrorState(null);
-    setIsAdding(true);
+  const addFolder = useCallback(async (choosePath: () => Promise<string | null | undefined>) => {
+    if (addInFlight.current) return;
+    addInFlight.current = true;
     try {
+      const path = await choosePath();
+      if (!path) return;
+      setAddErrorState(null);
+      setIsAdding(true);
       const created = await createWorkspace(undefined, path);
       if (!created.ok) {
         setAddErrorState({ query, message: REGISTRATION_ERROR_COPY[created.error.code], rejectedPath: path });
@@ -258,18 +266,19 @@ function useBrowseAddAction({
     } catch {
       setAddErrorState({ query, message: UNEXPECTED_ADD_ERROR_COPY, rejectedPath: null });
     } finally {
+      addInFlight.current = false;
       setIsAdding(false);
     }
   }, [beginNewThread, close, createWorkspace, query]);
 
   const handleAdd = useCallback(async () => {
-    if (isCurrentDirectoryAddable && result) await addFolder(result.path);
+    if (isCurrentDirectoryAddable && result) await addFolder(async () => result.path);
   }, [addFolder, isCurrentDirectoryAddable, result]);
 
-  const handlePickFolder = useCallback(async () => {
-    const path = await window.desktopBridge?.showOpenDialog({ title: "Add a project folder" });
-    if (path) await addFolder(path);
-  }, [addFolder]);
+  const handlePickFolder = useCallback(
+    () => addFolder(async () => window.desktopBridge?.showOpenDialog({ title: "Add a project folder" })),
+    [addFolder],
+  );
 
   return { addError, canAdd: isCurrentDirectoryAddable, handleAdd, handlePickFolder };
 }
