@@ -35,6 +35,11 @@ describe("SegmentedControl", () => {
     expect(screen.getAllByRole("radio").map((r) => r.tabIndex)).toEqual([0, -1, -1]);
   });
 
+  it("keeps the group reachable by Tab when the chosen option is disabled", () => {
+    render(<SegmentedControl options={opts} value="c" onChange={() => {}} />);
+    expect(screen.getAllByRole("radio").map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+  });
+
   it("moves the choice with arrow keys, skipping disabled options and wrapping", () => {
     const fn = vi.fn();
     render(<SegmentedControl options={opts} value="b" onChange={fn} />);

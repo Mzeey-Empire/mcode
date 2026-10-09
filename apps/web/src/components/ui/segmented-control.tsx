@@ -75,8 +75,9 @@ export function SegmentedControl({
 }: SegmentedControlProps) {
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const activeIndex = options.findIndex((option) => option.value === value);
-  // With no match the first enabled segment takes the tab stop, so the group stays reachable.
-  const tabStopIndex = activeIndex !== -1 ? activeIndex : options.findIndex((option) => !option.disabled);
+  // A disabled button can't take focus, so with no enabled match the first enabled segment takes the tab stop.
+  const tabStopIndex =
+    activeIndex !== -1 && !options[activeIndex]?.disabled ? activeIndex : options.findIndex((option) => !option.disabled);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const next = nextEnabledIndex(options, activeIndex, event.key);
