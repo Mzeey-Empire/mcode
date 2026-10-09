@@ -879,12 +879,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(within(bubble!).queryByText(thread.title)).toBeNull();
   });
 
-  it("keeps echoing the first message after a completed startup clears its pending entry", () => {
+  it("keeps echoing the first message when a completed startup clears its pending entry before the placeholder hands off", () => {
     const startupId = "00000000-0000-4000-8000-000000000032";
-    const thread = { ...makeThread({ id: "thread-early-completion", mode: "worktree", worktree_managed: true }), clientPreparing: true };
+    const placeholder = { ...makeThread({ id: "thread-early-placeholder", title: "Prepare checkout", mode: "worktree", worktree_managed: true }), clientPreparing: true };
+    const persisted = { ...placeholder, id: "thread-early-persisted" };
+    const other = { ...makeThread({ id: "thread-other", title: "Other thread", mode: "worktree", worktree_managed: true }), clientPreparing: true };
     act(() => useThreadStartupStore.getState().apply({
       startupId,
-      workspaceId: thread.workspace_id,
+      workspaceId: placeholder.workspace_id,
       kind: "managed-worktree",
       state: "completed",
       phase: "agent",
@@ -897,7 +899,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       transcript: [],
       cancellation: "none",
       revision: 1,
-      threadId: thread.id,
+      threadId: persisted.id,
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:01.000Z",
     }));
@@ -912,23 +914,35 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
         selectedTextComments: null,
       },
     };
-    setupWorkspaceMock(defaultWorkspaceState({
-      activeThreadId: thread.id,
-      threads: [thread],
-      pendingStartupByThreadId: { [thread.id]: pendingStartup },
-    }));
     chatViewTransportMock.getAutomaticSetup.mockResolvedValue({ gate: "not-required", attempt: null, queuedTurns: [] });
-    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
+    const showThread = (thread: typeof placeholder, pendingStartupByThreadId: Record<string, typeof pendingStartup>) => {
+      setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread], pendingStartupByThreadId }));
+      chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
+    };
+    const bubbleFor = (thread: typeof placeholder) => {
+      const bubble = screen.getByTestId("thread-preparing-shell").querySelector<HTMLElement>(`[data-message-id="preparing-${thread.id}"]`);
+      expect(bubble).not.toBeNull();
+      return within(bubble!);
+    };
+    const expectEcho = (thread: typeof placeholder) => {
+      expect(bubbleFor(thread).getByText("Review this spec")).toBeInTheDocument();
+      expect(bubbleFor(thread).getByText("design-notes.pdf")).toBeInTheDocument();
+    };
+
+    showThread(placeholder, { [placeholder.id]: pendingStartup });
     const view = render(<ChatView />);
-
-    setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread], pendingStartupByThreadId: {} }));
+    showThread(placeholder, {});
     view.rerender(<ChatView />);
+    expectEcho(placeholder);
 
-    const bubble = screen.getByTestId("thread-preparing-shell").querySelector<HTMLElement>(`[data-message-id="preparing-${thread.id}"]`);
-    expect(bubble).not.toBeNull();
-    expect(within(bubble!).getByText("Review this spec")).toBeInTheDocument();
-    expect(within(bubble!).getByText("design-notes.pdf")).toBeInTheDocument();
-    expect(within(bubble!).queryByText(thread.title)).toBeNull();
+    showThread(persisted, {});
+    view.rerender(<ChatView />);
+    expectEcho(persisted);
+
+    showThread(other, {});
+    view.rerender(<ChatView />);
+    expect(bubbleFor(other).getByText("Other thread")).toBeInTheDocument();
+    expect(bubbleFor(other).queryByText("design-notes.pdf")).toBeNull();
   });
 
   it("keeps the preparing shell through the optimistic-to-persisted startup handoff", async () => {

@@ -282,7 +282,7 @@ function PreparingThreadSurface({
   startup: ReturnType<typeof useThreadStartup>;
   pendingStartup: PendingStartup | undefined;
 }) {
-  const echoedStartup = useEchoedPendingStartup(pendingStartup, startup);
+  const echoedStartup = useEchoedPendingStartup(thread, pendingStartup);
   const needsSetupRecovery = startupNeedsSetupRecovery(startup);
   const automaticSetup = useProjectAutomaticSetup(
     thread.id,
@@ -306,13 +306,15 @@ function PreparingThreadSurface({
   );
 }
 
-// A completed startup clears its pending entry, which can happen before the durable message arrives.
-// The surface keeps echoing that startup's first message so the bubble does not fall back to the title meanwhile.
-function useEchoedPendingStartup(pendingStartup: PendingStartup | undefined, startup: ReturnType<typeof useThreadStartup>): PendingStartup | undefined {
-  const [retained, setRetained] = useState(pendingStartup);
-  if (pendingStartup && pendingStartup !== retained) setRetained(pendingStartup);
+// A completed startup clears its pending entry, which can happen before the durable message arrives or the placeholder id is replaced.
+// The surface keeps echoing that startup's first message while the selected thread still owns it, so the bubble does not fall back to the title.
+function useEchoedPendingStartup(thread: WorkspaceThread, pendingStartup: PendingStartup | undefined): PendingStartup | undefined {
+  const [retained, setRetained] = useState(pendingStartup ? { threadId: thread.id, pendingStartup } : undefined);
+  const retainedBoundThreadId = useThreadStartupStore((s) => retained ? s.recordsByStartupId[retained.pendingStartup.startupId]?.threadId : undefined);
+  if (pendingStartup && pendingStartup !== retained?.pendingStartup) setRetained({ threadId: thread.id, pendingStartup });
   if (pendingStartup) return pendingStartup;
-  return retained && startup?.startupId === retained.startupId ? retained : undefined;
+  const ownsRetained = retained !== undefined && (retained.threadId === thread.id || retainedBoundThreadId === thread.id);
+  return ownsRetained ? retained.pendingStartup : undefined;
 }
 
 // The durable bubble's footer and message parts add height, so the preparing surface draws the same bubble to keep the trail still at hand-off.
