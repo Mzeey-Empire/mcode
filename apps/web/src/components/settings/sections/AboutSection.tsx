@@ -85,6 +85,10 @@ export function AboutSection() {
     latestStable: string;
   }>(null);
 
+  /** The release line most recently asked for, until its switch settles. */
+  const requestedLine = useRef<UpdateReleaseLine | null>(null);
+  const channelSwitches = useRef<Promise<void>>(Promise.resolve());
+
   const bridge = typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
 
   /** Show the "Up to date" label for a few seconds, then clear it. */
@@ -171,7 +175,7 @@ export function AboutSection() {
    * updater. Persistence MUST happen first because the main process's next
    * periodic check re-reads settings.json — see auto-updater.ts.
    */
-  const applyChannelSwitch = async (
+  const persistChannel = async (
     next: UpdateReleaseLine,
     allowDowngrade: boolean,
   ): Promise<void> => {
@@ -182,19 +186,35 @@ export function AboutSection() {
   };
 
   /**
+   * Queue a channel switch behind any still in flight, so a quick Nightly then
+   * Stable from the arrow keys reaches the updater in that order and Stable wins.
+   */
+  const applyChannelSwitch = (next: UpdateReleaseLine, allowDowngrade: boolean): Promise<void> => {
+    requestedLine.current = next;
+    const run = channelSwitches.current.then(() => persistChannel(next, allowDowngrade));
+    // The queue only orders switches; each caller still sees its own failure through `run`.
+    channelSwitches.current = run.catch(() => undefined);
+    return run.finally(() => {
+      if (requestedLine.current === next) requestedLine.current = null;
+    });
+  };
+
+  /**
    * Handle a release-line change from the segmented control. Confirms with the user
    * when switching nightly → stable while running a newer-than-stable build,
    * because that path requires a downgrade install.
    */
   const handleChannelChange = async (next: UpdateReleaseLine): Promise<void> => {
-    if (next === releaseLine) return;
+    // `releaseLine` updates only after the settings round trip, so judge against the last line asked for.
+    const currentLine = requestedLine.current ?? releaseLine;
+    if (next === currentLine) return;
 
     // Conservative: when nightly → stable and we don't yet know latestStable
     // (fetch pending or failed), assume the switch would be a downgrade so the
     // dialog still gates the change. Prevents a fast click from sliding past
     // the confirmation while the network call is in flight.
     const wouldDowngrade =
-      releaseLine === "nightly" && next === "stable" && version
+      currentLine === "nightly" && next === "stable" && version
         ? !latestStable || semverGt(version, latestStable)
         : false;
 
