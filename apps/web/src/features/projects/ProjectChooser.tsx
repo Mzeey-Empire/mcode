@@ -146,7 +146,7 @@ function AddProjectRow({ onClick }: { readonly onClick: () => void }) {
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-hover",
+        "flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-hover active:bg-selected active:inset-ring-2 active:inset-ring-ink",
         FOCUS_RING_CLASS,
       )}
     >
