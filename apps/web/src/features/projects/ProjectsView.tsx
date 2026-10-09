@@ -4,7 +4,13 @@ import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useProjectSelectorStore } from "./state/projectSelectorStore";
 import { ProjectRow } from "./ProjectRow";
-import { Kbd } from "@/components/ui/kbd";
+import { PaletteFooterHints, type PaletteHint } from "@/components/palette/PaletteFooterHints";
+
+const PROJECTS_HINTS: readonly PaletteHint[] = [
+  { keys: ["↑", "↓"], label: "Navigate" },
+  { keys: ["Enter"], label: "Open" },
+  { keys: ["Esc"], label: "Close" },
+];
 
 /**
  * Palette subview listing pinned and recently-opened workspaces.
@@ -127,17 +133,14 @@ export function ProjectsView() {
         )}
       </CommandList>
 
-      <div className="flex items-center justify-between border-t border-border/50 px-3 py-1.5">
-        <span className="font-mono text-caption uppercase tracking-[0.12em] text-muted/30">
-          <Kbd>↑↓</Kbd> Navigate · <Kbd>Enter</Kbd> Open
-        </span>
-        <button
-          className="font-mono text-caption uppercase tracking-[0.12em] text-muted/50 hover:text-ink"
-          onClick={() => setQuery("~/")}
-        >
-          + Add project
-        </button>
-      </div>
+      <PaletteFooterHints
+        hints={PROJECTS_HINTS}
+        trailing={
+          <button type="button" className="text-caption text-muted hover:text-ink" onClick={() => setQuery("~/")}>
+            Add project
+          </button>
+        }
+      />
     </>
   );
 }

@@ -1,5 +1,6 @@
 import { CommandGroup, CommandItem, CommandList, CommandEmpty } from "@/components/ui/command";
 import type { View } from "@/stores/commandPaletteStore";
+import { PALETTE_LIST_HINTS, PaletteFooterHints } from "../PaletteFooterHints";
 
 /** Props for SelectionListView — the view data is the full selectionList View object. */
 interface Props {
@@ -12,20 +13,23 @@ interface Props {
  */
 export function SelectionListView({ view }: Props) {
   return (
-    <CommandList>
-      <CommandEmpty>No options available.</CommandEmpty>
-      <CommandGroup heading={view.title}>
-        {view.items.map((item) => (
-          <CommandItem
-            key={item.id}
-            value={item.id}
-            onSelect={() => view.onPick(item.id)}
-            className="px-3 py-2 text-body-small"
-          >
-            {item.title}
-          </CommandItem>
-        ))}
-      </CommandGroup>
-    </CommandList>
+    <>
+      <CommandList>
+        <CommandEmpty>No options available.</CommandEmpty>
+        <CommandGroup heading={view.title}>
+          {view.items.map((item) => (
+            <CommandItem
+              key={item.id}
+              value={item.id}
+              onSelect={() => view.onPick(item.id)}
+              className="text-body-small"
+            >
+              {item.title}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+      <PaletteFooterHints hints={PALETTE_LIST_HINTS} />
+    </>
   );
 }

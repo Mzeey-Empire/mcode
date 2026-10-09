@@ -18,6 +18,7 @@ import {
   type ThreadSortField,
 } from "@/stores/sidebarSearchStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { PALETTE_LIST_HINTS, PaletteFooterHints } from "../PaletteFooterHints";
 import { useUiStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useShallow } from "zustand/shallow";
@@ -268,6 +269,7 @@ export function ThreadSearchView() {
     <>
       <ThreadSearchToolbar loading={loading} resultLabel={resultLabel} providers={providers} />
       <ThreadSearchResults loading={loading} rows={rows} searchError={searchError} hasQuery={hasQuery} renderRow={(row) => <ThreadSearchResult key={row.thread.id} row={row} isRunning={runningThreadIds.has(row.thread.id)} hasPendingPermission={pendingPermissionThreadIds.has(row.thread.id)} checks={checksById[row.thread.id]} onSelect={() => handleSelect(row.thread)} />} />
+      <PaletteFooterHints hints={PALETTE_LIST_HINTS} />
     </>
   );
 }
