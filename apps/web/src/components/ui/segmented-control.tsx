@@ -82,12 +82,14 @@ export function SegmentedControl({
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     // Move from the focused segment: with a disabled choice, focus sits on a different segment than the value.
     const focusedIndex = segmentRefs.current.findIndex((segment) => segment === document.activeElement);
-    const next = nextEnabledIndex(options, focusedIndex !== -1 ? focusedIndex : activeIndex, event.key);
+    const from = focusedIndex !== -1 ? focusedIndex : activeIndex;
+    const next = nextEnabledIndex(options, from, event.key);
     const option = next === null ? undefined : options[next];
     if (next === null || option === undefined) return;
     event.preventDefault();
     segmentRefs.current[next]?.focus();
-    if (option.value !== value) onChange(option.value);
+    // Compare against where the move started, not `value`: an async owner may not have applied the last move yet.
+    if (next !== from) onChange(option.value);
   };
 
   return (

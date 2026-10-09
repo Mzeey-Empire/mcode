@@ -55,8 +55,21 @@ describe("SegmentedControl", () => {
     fireEvent.keyDown(group, { key: "ArrowRight" });
     expect(fn).toHaveBeenLastCalledWith("a");
     expect(screen.getByRole("radio", { name: "Option A" })).toHaveFocus();
+    // `value` is still "b" because the owner hasn't applied the first move; moving back must still report it.
     fireEvent.keyDown(group, { key: "ArrowLeft" });
-    expect(fn).toHaveBeenLastCalledWith("a");
+    expect(fn).toHaveBeenLastCalledWith("b");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not report a move that lands where it started", () => {
+    const fn = vi.fn();
+    const onlyA = [
+      { value: "a", label: "Option A" },
+      { value: "c", label: "Option C", disabled: true },
+    ];
+    render(<SegmentedControl options={onlyA} value="a" onChange={fn} />);
+    fireEvent.keyDown(screen.getByRole("radiogroup"), { key: "ArrowRight" });
+    expect(fn).not.toHaveBeenCalled();
   });
 
   it("jumps to the last enabled option on End", () => {
