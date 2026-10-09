@@ -451,17 +451,17 @@ function terminalDisplayOutcome(state: AgentDisplayState): TurnOutcome | undefin
 }
 
 /**
- * Mirrors the source the fold renders from (see `foldChildren`): live tools, else loaded records, else live
- * thoughts, else summary counts. Live tools win because records load in bounded windows; records beat
- * tool-less live state because a stopped turn's live state can drop its tools. A thought that repeats the
- * answer and hooks (shown in the actions row) produce no fold rows.
+ * Mirrors the source the fold renders from (see `foldChildren`): live rows, else loaded records, else summary
+ * counts. Live rows win because records load in bounded windows. Records still count when live state shows
+ * nothing, because a stopped turn can keep only a thought that repeats the answer while its tools were saved.
+ * Hooks (shown in the actions row) produce no fold rows.
  */
 function hasFoldableNarrative(message: Message, input: StableItemInput, summary: TurnSummary): boolean {
   const live = isCurrentResponse(message, input) ? input.currentTurnLiveNarrative : undefined;
-  if (live === "tools") return true;
+  if (live === "tools" || live === "thoughts") return true;
   const records = input.persistedNarrativeByMessage?.[message.id];
   if (records) return hasFoldRows(records, message.content);
-  if (live !== undefined) return live === "thoughts";
+  if (live === "empty") return false;
   return summary.counts.steps > 0 || summary.counts.thoughts > 0;
 }
 
