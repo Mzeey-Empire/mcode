@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -36,12 +37,24 @@ export interface PickerRow {
   readonly disabled?: boolean;
   /** Why a disabled row is unavailable, shown on hover and read as the row's description. */
   readonly disabledReason?: string;
+  /** Muted second line under the name, such as the provider a favourite belongs to. */
+  readonly description?: ReactNode;
+  /** A control after the name, such as a favourite star. Its clicks never pick the row. */
+  readonly action?: ReactNode;
+  /** Rows sharing a group sit together; a divider marks where the group changes. */
+  readonly group?: string;
 }
 
 /** One picker tab, drawn as a segment above the list. */
 export interface PickerTab {
   readonly id: string;
+  /** Visible name, or the accessible name and the muted caption when the tabs draw icons. */
   readonly label: string;
+  /** When every tab has one, tabs draw as icons and the active tab's label shows at the row's end. */
+  readonly icon?: ReactNode;
+  readonly disabled?: boolean;
+  /** Why a disabled tab is unavailable, shown on hover. */
+  readonly disabledReason?: string;
 }
 
 /** Where the list's data stands. A failure carries a title and the raw error for the detail line. */
@@ -180,16 +193,29 @@ export function Picker<T>(props: PickerProps<T>) {
 
 function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>, "tabs" | "activeTab" | "onTabChange">) {
   if (!tabs || tabs.length === 0) return null;
+  const iconOnly = tabs.every((tab) => tab.icon != null);
   return (
-    <div className="px-0.5 pb-1.5">
+    <div className="flex items-center gap-2 px-0.5 pb-1.5">
       <SegmentedControl
         size="compact"
-        fill
+        fill={!iconOnly}
+        iconOnly={iconOnly}
         aria-label="Picker tabs"
-        options={tabs.map((tab) => ({ value: tab.id, label: tab.label }))}
+        options={tabs.map((tab) => ({
+          value: tab.id,
+          label: tab.label,
+          icon: tab.icon,
+          disabled: tab.disabled,
+          title: tab.disabled ? tab.disabledReason : undefined,
+        }))}
         value={activeTab ?? ""}
         onChange={(id) => onTabChange?.(id)}
       />
+      {iconOnly ? (
+        <span aria-hidden className="ml-auto min-w-0 pr-1.5 text-caption text-fade text-muted">
+          {tabs.find((tab) => tab.id === activeTab)?.label}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -313,15 +339,21 @@ function PickerList<T>(props: PickerListProps<T>) {
         className="flex max-h-[17.2rem] flex-col gap-px overflow-y-auto pt-2"
       >
         {rows.map((entry, index) => (
-          <PickerOption
-            key={entry.row.key}
-            id={optionId(listId, index)}
-            row={entry.row}
-            active={index === activeIndex}
-            selected={entry.row.key === selectedKey}
-            onHighlight={() => onHighlight(entry.row.key)}
-            onPick={() => onPick(entry)}
-          />
+          <Fragment key={entry.row.key}>
+            {index > 0 && entry.row.group !== rows[index - 1]?.row.group ? (
+              <li role="presentation" aria-hidden className="shrink-0 py-1">
+                <div className="h-px bg-border" />
+              </li>
+            ) : null}
+            <PickerOption
+              id={optionId(listId, index)}
+              row={entry.row}
+              active={index === activeIndex}
+              selected={entry.row.key === selectedKey}
+              onHighlight={() => onHighlight(entry.row.key)}
+              onPick={() => onPick(entry)}
+            />
+          </Fragment>
         ))}
         {props.loading ? (
           <li role="presentation" className="flex h-8 shrink-0 items-center px-2">
@@ -376,7 +408,8 @@ function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, reas
       // Keeps focus in the search field so typing and arrow keys keep working after a click.
       onMouseDown={(event) => event.preventDefault()}
       className={cn(
-        "flex h-8 shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-active:bg-hover",
+        "group/option flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-active:bg-hover",
+        row.description == null ? "h-8" : "min-h-8 py-1.5",
         row.disabled && "cursor-default opacity-50",
       )}
     >
@@ -394,8 +427,23 @@ function PickerOptionContent({ row, selected }: { readonly row: PickerRow; reado
           {row.icon}
         </span>
       ) : null}
-      <span className={cn("min-w-0 flex-1 text-fade", row.mono && "font-mono text-caption")}>{row.name}</span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className={cn("text-fade", row.mono && "font-mono text-caption")}>{row.name}</span>
+        {row.description != null ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-caption text-muted">{row.description}</span>
+        ) : null}
+      </span>
       {row.tag ? <span className="shrink-0 text-caption text-muted">{row.tag}</span> : null}
+      {row.action != null ? (
+        // Owns its clicks so acting on the control never picks the row, and keeps focus in the search field.
+        <span
+          className="flex shrink-0 items-center"
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          {row.action}
+        </span>
+      ) : null}
       <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
         {selected ? <CheckIcon className="size-[1.4rem] text-ink" strokeWidth={1.5} /> : null}
       </span>

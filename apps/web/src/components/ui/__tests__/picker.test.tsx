@@ -271,6 +271,47 @@ describe("Picker", () => {
     await waitFor(() => expect(screen.getAllByText("Protected branch").some((node) => !node.hidden)).toBe(true));
   });
 
+  it("draws icon tabs with their labels as names and the active label as a caption", () => {
+    const tabs = [
+      { id: "branches", label: "Branches", icon: <span>B</span> },
+      { id: "prs", label: "Pull requests", icon: <span>P</span>, disabled: true, disabledReason: "No remote" },
+    ];
+    render(<PagedPicker tabs={tabs} />);
+    expect(screen.getByRole("radio", { name: "Branches" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Pull requests" })).toBeDisabled();
+    expect(screen.getByRole("radiogroup").parentElement).toHaveTextContent(/Branches$/);
+  });
+
+  it("divides rows where the group changes", () => {
+    render(<PagedPicker pages={1} renderItem={(branch) => ({ key: branch.name, name: branch.name, group: branch.name < "branch-002" ? "a" : "b" })} />);
+    const separators = screen.getByRole("listbox").querySelectorAll("li[role=presentation]");
+    expect(separators).toHaveLength(1);
+    expect(separators[0]?.nextElementSibling).toHaveTextContent("branch-002");
+  });
+
+  it("shows a second line and keeps a row action's clicks from picking the row", async () => {
+    const onSelect = vi.fn();
+    const onAction = vi.fn();
+    render(
+      <PagedPicker
+        onSelect={onSelect}
+        renderItem={(branch) => ({
+          key: branch.name,
+          name: branch.name,
+          description: "origin",
+          action: <button type="button" onClick={onAction}>Star {branch.name}</button>,
+        })}
+      />,
+    );
+    const search = screen.getByRole("combobox");
+    search.focus();
+    expect(screen.getByRole("option", { name: /branch-000/ })).toHaveTextContent("origin");
+    await userEvent.click(screen.getByRole("button", { name: "Star branch-000" }));
+    expect(onAction).toHaveBeenCalledOnce();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(search).toHaveFocus();
+  });
+
   it("hides the count while the total is unknown", () => {
     render(<PagedPicker total={null} />);
     expect(screen.queryByText(/^Showing/)).toBeNull();
