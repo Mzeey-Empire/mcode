@@ -70,6 +70,30 @@ function PagedPicker(props: Partial<PickerProps<Branch>> & { readonly pages?: nu
   );
 }
 
+/** Four rows whose action removes the row, as unstarring does in Favourites. */
+function RemovablePicker({ selectedKey }: { readonly selectedKey?: string }) {
+  const [names, setNames] = useState(["a", "b", "c", "d"]);
+  return (
+    <>
+    <button type="button" onClick={() => setNames((current) => [...current, "e"])}>Add row</button>
+    <Picker<string>
+      query=""
+      onQueryChange={() => {}}
+      items={names}
+      total={names.length}
+      status="ready"
+      selectedKey={selectedKey}
+      renderItem={(name) => ({
+        key: name,
+        name,
+        action: { label: `Remove ${name}`, icon: <span>*</span>, run: () => setNames((current) => current.filter((entry) => entry !== name)) },
+      })}
+      onSelect={() => {}}
+    />
+    </>
+  );
+}
+
 function scrollListTo(remainingPx: number) {
   const list = screen.getByRole("listbox");
   list.scrollTop = list.scrollHeight - list.clientHeight - remainingPx;
@@ -211,6 +235,16 @@ describe("Picker", () => {
     expect(screen.getByRole("combobox")).toHaveAttribute("aria-activedescendant", option.id);
   });
 
+  it("starts a new query from the selection, not the old highlight's slot", () => {
+    render(<PagedPicker selectedKey="branch-040" />);
+    const search = screen.getByRole("combobox");
+    fireEvent.keyDown(search, { key: "Home" });
+    for (let step = 0; step < 4; step += 1) fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "branch-005" }).id);
+    fireEvent.change(search, { target: { value: "branch-04" } });
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "branch-040" }).id);
+  });
+
   it("keeps the query when switching tabs", () => {
     const onTabChange = vi.fn();
     render(<PagedPicker onTabChange={onTabChange} />);
@@ -269,6 +303,149 @@ describe("Picker", () => {
     expect(row).toHaveAccessibleDescription("Protected branch");
     await userEvent.hover(row);
     await waitFor(() => expect(screen.getAllByText("Protected branch").some((node) => !node.hidden)).toBe(true));
+  });
+
+  it("draws icon tabs with their labels as names and the active label as a caption", () => {
+    const tabs = [
+      { id: "branches", label: "Branches", icon: <span>B</span> },
+      { id: "prs", label: "Pull requests", icon: <span>P</span>, disabled: true, disabledReason: "No remote" },
+    ];
+    render(<PagedPicker tabs={tabs} />);
+    expect(screen.getByRole("radio", { name: "Branches" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Pull requests" })).toBeDisabled();
+    expect(screen.getByRole("radiogroup").parentElement).toHaveTextContent(/Branches$/);
+  });
+
+  it("names an enabled icon tab in a hover tooltip", async () => {
+    render(<PagedPicker tabs={TABS.map((tab) => ({ ...tab, icon: <span>{tab.label[0]}</span> }))} />);
+    await userEvent.hover(screen.getByRole("radio", { name: "Pull requests" }));
+    await waitFor(() => expect(screen.getAllByText("Pull requests").some((node) => !node.hidden && !node.classList.contains("sr-only"))).toBe(true));
+  });
+
+  it("divides rows where the group changes", () => {
+    render(<PagedPicker pages={1} renderItem={(branch) => ({ key: branch.name, name: branch.name, group: branch.name < "branch-002" ? "a" : "b" })} />);
+    const separators = screen.getByRole("listbox").querySelectorAll("li[role=presentation]");
+    expect(separators).toHaveLength(1);
+    expect(separators[0]?.nextElementSibling).toHaveTextContent("branch-002");
+  });
+
+  it("shows a second line and keeps a row action's clicks from picking the row", async () => {
+    const onSelect = vi.fn();
+    const onAction = vi.fn();
+    render(
+      <PagedPicker
+        onSelect={onSelect}
+        renderItem={(branch) => ({
+          key: branch.name,
+          name: branch.name,
+          description: "origin",
+          action: { label: `Star ${branch.name}`, icon: <span>*</span>, run: () => onAction(branch.name) },
+        })}
+      />,
+    );
+    const search = screen.getByRole("combobox");
+    search.focus();
+    const row = screen.getByRole("option", { name: /branch-000/ });
+    expect(row).toHaveTextContent("origin");
+    expect(row).toHaveAccessibleDescription("Star branch-000 (Ctrl+D)");
+    const button = row.querySelector<HTMLButtonElement>("[data-slot=picker-row-action]");
+    expect(button).toHaveAttribute("tabindex", "-1");
+    await userEvent.click(button as HTMLButtonElement);
+    expect(onAction).toHaveBeenCalledWith("branch-000");
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(search).toHaveFocus();
+  });
+
+  it("runs the active row's action on Ctrl+D without picking it", async () => {
+    const onSelect = vi.fn();
+    const onAction = vi.fn();
+    render(
+      <PagedPicker
+        onSelect={onSelect}
+        renderItem={(branch) => ({
+          key: branch.name,
+          name: branch.name,
+          action: { label: `Star ${branch.name}`, icon: <span>*</span>, run: () => onAction(branch.name) },
+        })}
+      />,
+    );
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(onAction).toHaveBeenCalledWith("branch-000");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("lets the arrow keys reach a disabled row with an action so Ctrl+D runs it, while Enter still refuses it", async () => {
+    const onSelect = vi.fn();
+    const onAction = vi.fn();
+    render(
+      <PagedPicker
+        onSelect={onSelect}
+        renderItem={(branch) => ({
+          key: branch.name,
+          name: branch.name,
+          disabled: branch.name === "branch-001" || branch.name === "branch-002",
+          action: branch.name === "branch-002" ? undefined : { label: `Unstar ${branch.name}`, icon: <span>*</span>, run: () => onAction(branch.name) },
+        })}
+      />,
+    );
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{ArrowDown}");
+    const disabled = screen.getByRole("option", { name: /branch-001/ });
+    expect(disabled).toHaveAttribute("data-active");
+    expect(disabled).toHaveAttribute("aria-keyshortcuts", "Control+D");
+    await userEvent.keyboard("{Enter}");
+    expect(onSelect).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(onAction).toHaveBeenCalledWith("branch-001");
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: /branch-003/ })).toHaveAttribute("data-active");
+    await userEvent.click(disabled.querySelector("[data-slot=picker-row-action]") as HTMLElement);
+    expect(onAction).toHaveBeenLastCalledWith("branch-001");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("keeps the highlight in place when a row action removes its own row", async () => {
+    render(<RemovablePicker selectedKey="a" />);
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Control>}d{/Control}");
+    expect(screen.queryByRole("option", { name: /^c/ })).toBeNull();
+    expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(screen.getByRole("option", { name: /^b/ })).toHaveAttribute("data-active");
+  });
+
+  it("hands the opening highlight to the row in its slot when Ctrl+D removes it before any arrow key", async () => {
+    render(<RemovablePicker selectedKey="c" />);
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
+  });
+
+  it("hands the opening highlight to the row in its slot when its star is clicked without hovering", async () => {
+    render(<RemovablePicker selectedKey="c" />);
+    const c = screen.getByRole("option", { name: /^c/ });
+    await userEvent.click(c.querySelector("[data-slot=picker-row-action]") as HTMLElement);
+    expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
+  });
+
+  it("keeps a handed-over highlight on its new row when more rows arrive", async () => {
+    render(<RemovablePicker selectedKey="d" />);
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(screen.getByRole("option", { name: /^c/ })).toHaveAttribute("data-active");
+    await userEvent.click(screen.getByRole("button", { name: "Add row" }));
+    expect(screen.getByRole("option", { name: /^c/ })).toHaveAttribute("data-active");
+  });
+
+  it("hands a hovered row's highlight to the row in its slot when its action removes it", async () => {
+    render(<RemovablePicker />);
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    const c = screen.getByRole("option", { name: /^c/ });
+    fireEvent.mouseMove(c);
+    await userEvent.click(c.querySelector("[data-slot=picker-row-action]") as HTMLElement);
+    expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
   });
 
   it("hides the count while the total is unknown", () => {

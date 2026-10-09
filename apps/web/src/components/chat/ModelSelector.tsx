@@ -1,24 +1,8 @@
-import {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-  useId,
-  type ReactNode,
-} from "react";
-import { ChevronDown, Lock, Check, Star } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { formatContextWindow } from "./format-context-window";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { ChevronDown, Lock, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { Input } from "@/components/ui/input";
+import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   MODEL_PROVIDERS,
   findModelById,
@@ -35,17 +19,12 @@ import {
 import { tokenizeSearch, matchesAllTokens } from "@/lib/searchTokens";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 
-type ModelDefinition = ModelProvider["models"][number];
-
 /** Provider shown when the selected model belongs to no known provider. */
 const DEFAULT_PROVIDER_ID = "claude";
 
 function iconProviderIdFor(provider: ModelProvider | undefined): string {
   return provider?.id ?? DEFAULT_PROVIDER_ID;
 }
-
-/** Matches Tailwind `w-[52px]` for header alignment and icon-first rail. */
-const LEFT_RAIL_WIDTH_CLASS = "w-[52px]";
 
 /** How long to wait before retrying a provider after a failed fetch. */
 const FETCH_RETRY_COOLDOWN_MS = 30_000;
@@ -55,8 +34,8 @@ function catalogUsesModelGroups(models: ModelProvider["models"]): boolean {
   return models.some((model) => Boolean(model.group?.trim()));
 }
 
-/** Tooltip copy for the left rail when a row cannot open a catalog. */
-function providerRailUnavailableReason(
+/** Tooltip copy for a provider tab that cannot open a catalog. */
+function providerTabUnavailableReason(
   provider: ModelProvider,
   providerDisabled: boolean,
 ): string {
@@ -70,8 +49,10 @@ function providerRailUnavailableReason(
   return provider.name;
 }
 
-/** Left rail segment: browse starred models or a single provider's catalog. */
-type LeftRailSelection = "favorites" | string;
+const FAVORITES_TAB = "favorites";
+
+/** Picker tab: starred models or a single provider's catalog. */
+type ModelPickerTab = typeof FAVORITES_TAB | string;
 
 interface ModelSelectorProps {
   selectedModelId: string;
@@ -104,104 +85,17 @@ interface ProviderModelCatalog {
   fetchProviderModels: (providerId: string) => Promise<void>;
 }
 
-interface ModelSelectionState {
-  selectedModelId: string;
-  selectedProviderId?: string;
-  onSelect: (modelId: string, providerId: string) => void;
-}
-
-interface ModelSelectionProps extends ModelSelectionState {
-  modelId: string;
-  providerId: string;
-}
-
-interface FavoriteToggleProps {
-  providerId: string;
-  modelId: string;
-  label: string;
-  starred: boolean;
-  onToggle: (entry: ModelFavoriteEntry) => void;
-}
-
-interface FavoriteModelRowProps extends ModelSelectionState {
-  entry: ModelFavoriteEntry;
-  isFavorite: (providerId: string, modelId: string) => boolean;
-  onToggleFavorite: (entry: ModelFavoriteEntry) => void;
-}
-
-interface ModelRowProps extends ModelSelectionState {
-  model: ModelDefinition;
-  providerId: string;
-  isFavorite: (providerId: string, modelId: string) => boolean;
-  onToggleFavorite: (entry: ModelFavoriteEntry) => void;
-}
-
-interface GroupedModelListProps extends Omit<ModelRowProps, "model"> {
-  models: ModelProvider["models"];
-  panelId: string;
-  searchQuery: string;
-}
-
-interface ModelGroupProps extends Omit<GroupedModelListProps, "models" | "searchQuery"> {
-  label: string;
-  models: ModelProvider["models"];
-}
-
-interface FavoritesPanelProps {
-  favoritesVisible: readonly ModelFavoriteEntry[];
-  favoritesFiltered: readonly ModelFavoriteEntry[];
-  selectedModelId: string;
-  selectedProviderId?: string;
-  isFavorite: (providerId: string, modelId: string) => boolean;
-  onSelect: (modelId: string, providerId: string) => void;
-  onToggleFavorite: (entry: ModelFavoriteEntry) => void;
-}
-
-interface ProviderModelsPanelProps extends Omit<GroupedModelListProps, "models" | "searchQuery"> {
-  provider: ModelProvider;
-  searchQuery: string;
-  loading: boolean;
-  getModels: (provider: ModelProvider) => ModelProvider["models"];
-}
-
-interface ModelSelectorRightPanelProps extends Omit<FavoritesPanelProps, "favoritesVisible" | "favoritesFiltered"> {
-  leftRailSelection: LeftRailSelection;
-  favoritesVisible: readonly ModelFavoriteEntry[];
-  favoritesFiltered: readonly ModelFavoriteEntry[];
-  loadingProviders: Set<string>;
-  getModels: (provider: ModelProvider) => ModelProvider["models"];
-  panelId: string;
-  searchQuery: string;
-}
-
-interface ProviderRailItemProps {
-  provider: ModelProvider;
-  providerDisabled: boolean;
-  selected: boolean;
-  onClick: (provider: ModelProvider) => void;
-}
-
-interface ProviderRailProps {
-  providers: readonly ModelProvider[];
-  leftRailSelection: LeftRailSelection;
-  providerLocked: boolean | undefined;
-  getProviderDisabled: (providerId: string) => boolean;
-  onSelectFavorites: () => void;
-  onSelectProvider: (provider: ModelProvider) => void;
-}
-
-interface ModelSelectorPanelProps extends ModelSelectorRightPanelProps {
-  open: boolean;
-  providerLocked: boolean | undefined;
-  leftRailSelection: LeftRailSelection;
-  rightPanelSearch: string;
-  providersForLeftRail: readonly ModelProvider[];
-  panelSearchTestId: string;
-  searchAriaLabel: string;
-  onSearchChange: (value: string) => void;
-  getProviderDisabled: (providerId: string) => boolean;
-  onSelectFavorites: () => void;
-  onSelectProvider: (provider: ModelProvider) => void;
+/** One model the picker can list, from a provider catalog or the favourites. */
+interface ModelOption {
+  readonly modelId: string;
+  readonly providerId: string;
+  readonly label: string;
+  /** Catalog subgroup, so the list can divide groups. */
+  readonly group?: string;
+  /** Formatted end date of a model whose subscription access has ended. */
+  readonly endedOn?: string;
+  /** Favourites mix providers, so their rows name the provider under the model. */
+  readonly showProvider: boolean;
 }
 
 function findDisplayProvider(
@@ -240,14 +134,14 @@ function getSelectedModelPresentation(
 function getDefaultProviderId(
   selectedProviderId: string | undefined,
   displayProvider: ModelProvider | undefined,
-): LeftRailSelection {
+): ModelPickerTab {
   const preferredProviderId = selectedProviderId ?? displayProvider?.id;
   const providerExists = preferredProviderId
     ? MODEL_PROVIDERS.some((provider) => provider.id === preferredProviderId)
     : false;
 
   if (providerExists) return preferredProviderId!;
-  return MODEL_PROVIDERS.find((provider) => !provider.comingSoon)?.id ?? "favorites";
+  return MODEL_PROVIDERS.find((provider) => !provider.comingSoon)?.id ?? FAVORITES_TAB;
 }
 
 function getProvidersForLeftRail(
@@ -326,27 +220,8 @@ function groupModels(models: ModelProvider["models"]): { label: string; models: 
   }));
 }
 
-function isSelectedModel({
-  modelId,
-  providerId,
-  selectedModelId,
-  selectedProviderId,
-}: ModelSelectionProps): boolean {
-  return modelId === selectedModelId && providerId === selectedProviderId;
-}
-
-function getSelectedModelAriaLabel(label: string, selected: boolean): string {
-  return selected ? `${label}, selected` : `Select ${label}`;
-}
-
-function getSelectedModelClassName(selected: boolean): string {
-  return selected
-    ? "bg-selected text-ink"
-    : "text-ink hover:bg-selected/50 hover:text-ink";
-}
-
 function getFavoriteActionLabel(label: string, starred: boolean): string {
-  return starred ? `Remove ${label} from favorites` : `Add ${label} to favorites`;
+  return starred ? `Remove ${label} from favourites` : `Add ${label} to favourites`;
 }
 
 function getProviderDisabled(
@@ -357,41 +232,11 @@ function getProviderDisabled(
   return provider ? !provider.enabled : false;
 }
 
-function isProviderRailUnavailable(
+function isProviderTabUnavailable(
   provider: ModelProvider,
   providerDisabled: boolean,
 ): boolean {
   return provider.comingSoon || providerDisabled;
-}
-
-function getProviderRailTooltip(
-  provider: ModelProvider,
-  providerDisabled: boolean,
-): string {
-  if (isProviderRailUnavailable(provider, providerDisabled)) {
-    return providerRailUnavailableReason(provider, providerDisabled);
-  }
-  if (provider.models.length === 1) return `Select ${provider.models[0].label}`;
-  return `Browse ${provider.name} models`;
-}
-
-function getSearchAriaLabel(leftRailSelection: LeftRailSelection): string {
-  return leftRailSelection === "favorites"
-    ? "Filter favorites by name. Use multiple words to narrow results."
-    : "Filter models by name or id. Use multiple words to narrow results.";
-}
-
-function getPanelSearchTestId(
-  providerLocked: boolean | undefined,
-  displayProvider: ModelProvider | undefined,
-): string {
-  return providerLocked && displayProvider
-    ? "model-selector-locked-search"
-    : "model-selector-panel-search";
-}
-
-function getSearchPlaceholder(leftRailSelection: LeftRailSelection): string {
-  return leftRailSelection === "favorites" ? "Search favorites…" : "Search models…";
 }
 
 function useProviderModelCatalog(): ProviderModelCatalog {
@@ -454,13 +299,13 @@ function useProviderModelCatalog(): ProviderModelCatalog {
   return { getModels, loadingProviders, fetchProviderModels };
 }
 
-function useResetModelSelectorPanel(
+function useResetPickerOnOpen(
   open: boolean,
   providerLocked: boolean | undefined,
   displayProvider: ModelProvider | undefined,
-  defaultProviderId: LeftRailSelection,
-  setLeftRailSelection: (selection: LeftRailSelection) => void,
-  setRightPanelSearch: (searchQuery: string) => void,
+  defaultProviderId: ModelPickerTab,
+  setActiveTab: (tab: ModelPickerTab) => void,
+  setQuery: (searchQuery: string) => void,
 ): void {
   const previouslyOpen = useRef(false);
   const displayProviderId = displayProvider?.id;
@@ -468,28 +313,28 @@ function useResetModelSelectorPanel(
   useEffect(() => {
     const opened = open && !previouslyOpen.current;
     if (opened) {
-      const nextSelection = providerLocked && displayProviderId
+      const nextTab = providerLocked && displayProviderId
         ? displayProviderId
         : defaultProviderId;
-      setLeftRailSelection(nextSelection);
-      setRightPanelSearch("");
+      setActiveTab(nextTab);
+      setQuery("");
     }
     previouslyOpen.current = open;
-  }, [open, providerLocked, displayProviderId, defaultProviderId, setLeftRailSelection, setRightPanelSearch]);
+  }, [open, providerLocked, displayProviderId, defaultProviderId, setActiveTab, setQuery]);
 }
 
 function useFetchProviderModelsWhenOpen(
   open: boolean,
   locked: boolean,
-  leftRailSelection: LeftRailSelection,
+  activeTab: ModelPickerTab,
   favoritesVisible: readonly ModelFavoriteEntry[],
   fetchProviderModels: (providerId: string) => Promise<void>,
 ): void {
   useEffect(() => {
     if (!open || locked) return;
 
-    if (leftRailSelection !== "favorites") {
-      void fetchProviderModels(leftRailSelection);
+    if (activeTab !== FAVORITES_TAB) {
+      void fetchProviderModels(activeTab);
       return;
     }
 
@@ -497,631 +342,100 @@ function useFetchProviderModelsWhenOpen(
     for (const providerId of providerIds) {
       void fetchProviderModels(providerId);
     }
-  }, [open, locked, leftRailSelection, favoritesVisible, fetchProviderModels]);
+  }, [open, locked, activeTab, favoritesVisible, fetchProviderModels]);
 }
 
-function FavoriteToggle({
-  providerId,
-  modelId,
-  label,
-  starred,
-  onToggle,
-}: FavoriteToggleProps) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-compact"
-      className="h-7 w-7 shrink-0 text-muted hover:text-ink"
-      aria-label={getFavoriteActionLabel(label, starred)}
-      onClick={(event) => {
-        event.stopPropagation();
-        onToggle({ providerId, modelId, label });
-      }}
-    >
-      <Star
-        size={12}
-        className={cn(starred && "fill-muted text-muted")}
-        aria-hidden
-      />
-    </Button>
-  );
+function optionKey(providerId: string, modelId: string): string {
+  return `${providerId}:${modelId}`;
 }
 
-function ModelSelectionButton({
-  modelId,
-  providerId,
-  selectedModelId,
-  selectedProviderId,
-  onSelect,
-  label,
-  children,
-}: ModelSelectionProps & { label: string; children: ReactNode }) {
-  const selected = isSelectedModel({
-    modelId,
-    providerId,
-    selectedModelId,
-    selectedProviderId,
-    onSelect,
-  });
-
-  return (
-    <button
-      type="button"
-      aria-current={selected ? "true" : undefined}
-      aria-label={getSelectedModelAriaLabel(label, selected)}
-      onClick={() => onSelect(modelId, providerId)}
-      className={cn(
-        "flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-xs",
-        getSelectedModelClassName(selected),
-      )}
-    >
-      {children}
-    </button>
-  );
+function providerName(providerId: string): string {
+  return MODEL_PROVIDERS.find((provider) => provider.id === providerId)?.name ?? providerId;
 }
 
-function FavoriteModelRow({
-  entry,
-  selectedModelId,
-  selectedProviderId,
-  onSelect,
-  isFavorite,
-  onToggleFavorite,
-}: FavoriteModelRowProps) {
-  const starred = isFavorite(entry.providerId, entry.modelId);
-
-  return (
-    <div
-      key={`${entry.providerId}:${entry.modelId}`}
-      className="flex w-full items-center gap-0.5 rounded px-1"
-    >
-      <FavoriteToggle
-        providerId={entry.providerId}
-        modelId={entry.modelId}
-        label={entry.label}
-        starred={starred}
-        onToggle={onToggleFavorite}
-      />
-      <ModelSelectionButton
-        modelId={entry.modelId}
-        providerId={entry.providerId}
-        selectedModelId={selectedModelId}
-        selectedProviderId={selectedProviderId}
-        onSelect={onSelect}
-        label={entry.label}
-      >
-        <ProviderIcon provider={entry.providerId} size={12} />
-        <span className="text-fade text-left">{entry.label}</span>
-      </ModelSelectionButton>
-    </div>
-  );
-}
-
-function GatedModelRow({ model }: { model: ModelDefinition }) {
-  const endDate = new Date(`${model.availableUntil}T00:00:00`).toLocaleDateString(undefined, {
+function formatEndDate(availableUntil: string): string {
+  return new Date(`${availableUntil}T00:00:00`).toLocaleDateString(undefined, {
     day: "numeric",
     month: "short",
     year: "numeric",
   });
-
-  return (
-    <div key={model.id} className="flex w-full items-center gap-0.5 rounded px-1">
-      <span className="h-7 w-7 shrink-0" aria-hidden />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              disabled
-              data-testid={`model-row-gated-${model.id}`}
-              aria-label={`${model.label}, no longer available`}
-              className="flex min-w-0 flex-1 cursor-not-allowed items-center gap-2 rounded px-2 py-1.5 text-xs text-muted/60"
-            >
-              <span className="flex-1 text-fade text-left">{model.label}</span>
-              <span className="text-xs tabular-nums shrink-0">Ended {endDate}</span>
-            </button>
-          }
-        />
-        <TooltipContent side="right">
-          Subscription access to {model.label} ended on {endDate}.
-        </TooltipContent>
-      </Tooltip>
-    </div>
-  );
 }
 
-function ModelMetadata({ model }: { model: ModelDefinition }) {
-  const contextLabel = formatContextWindow(model.contextWindow);
-  const availableUntil = model.availableUntil
-    ? new Date(`${model.availableUntil}T00:00:00`).toLocaleDateString(undefined, {
-      day: "numeric",
-      month: "short",
-    })
-    : undefined;
-
-  return (
-    <>
-      {contextLabel && (
-        <span className="text-xs text-muted/60 tabular-nums shrink-0">
-          {contextLabel}
-        </span>
-      )}
-      {model.multiplier != null && (
-        <span className="text-xs text-muted/60 tabular-nums shrink-0">
-          {model.multiplier}x
-        </span>
-      )}
-      {availableUntil && (
-        <span className="text-xs text-muted/60 tabular-nums shrink-0">
-          Until {availableUntil}
-        </span>
-      )}
-    </>
-  );
-}
-
-function AvailableModelRow({
-  model,
-  providerId,
-  selectedModelId,
-  selectedProviderId,
-  onSelect,
-  isFavorite,
-  onToggleFavorite,
-}: ModelRowProps) {
-  const selected = isSelectedModel({
-    modelId: model.id,
-    providerId,
-    selectedModelId,
-    selectedProviderId,
-    onSelect,
-  });
-  const starred = isFavorite(providerId, model.id);
-
-  return (
-    <div key={model.id} className="flex w-full items-center gap-0.5 rounded px-1">
-      <FavoriteToggle
-        providerId={providerId}
-        modelId={model.id}
-        label={model.label}
-        starred={starred}
-        onToggle={onToggleFavorite}
-      />
-      <ModelSelectionButton
-        modelId={model.id}
-        providerId={providerId}
-        selectedModelId={selectedModelId}
-        selectedProviderId={selectedProviderId}
-        onSelect={onSelect}
-        label={model.label}
-      >
-        <span className="flex-1 text-fade text-left">{model.label}</span>
-        <ModelMetadata model={model} />
-        {selected && <Check size={10} className="shrink-0 text-ink" aria-hidden />}
-      </ModelSelectionButton>
-    </div>
-  );
-}
-
-function ModelRow(props: ModelRowProps) {
-  return isModelAvailable(props.model)
-    ? <AvailableModelRow {...props} />
-    : <GatedModelRow model={props.model} />;
-}
-
-function ModelGroup({
-  label,
-  models,
-  panelId,
-  providerId,
-  selectedModelId,
-  selectedProviderId,
-  onSelect,
-  isFavorite,
-  onToggleFavorite,
-}: ModelGroupProps) {
-  const groupSlug = label.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_-]/g, "");
-  const headingId = `${panelId}-g-${providerId}-${groupSlug}`;
-
-  return (
-    <div key={label}>
-      <div
-        className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none"
-        id={headingId}
-      >
-        {label}
-      </div>
-      <div aria-labelledby={headingId}>
-        {models.map((model) => (
-          <ModelRow
-            key={model.id}
-            model={model}
-            providerId={providerId}
-            selectedModelId={selectedModelId}
-            selectedProviderId={selectedProviderId}
-            onSelect={onSelect}
-            isFavorite={isFavorite}
-            onToggleFavorite={onToggleFavorite}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function GroupedModelList({
-  models,
-  providerId,
-  selectedModelId,
-  selectedProviderId,
-  onSelect,
-  isFavorite,
-  onToggleFavorite,
-  panelId,
-  searchQuery,
-}: GroupedModelListProps) {
+function providerModelOptions(
+  providerId: string,
+  models: ModelProvider["models"],
+  searchQuery: string,
+): ModelOption[] {
   const filteredModels = filterModelsBySearchQuery(models, searchQuery);
-  const groups = groupModels(filteredModels);
-
-  if (!groups) {
-    return filteredModels.map((model) => (
-      <ModelRow
-        key={model.id}
-        model={model}
-        providerId={providerId}
-        selectedModelId={selectedModelId}
-        selectedProviderId={selectedProviderId}
-        onSelect={onSelect}
-        isFavorite={isFavorite}
-        onToggleFavorite={onToggleFavorite}
-      />
-    ));
-  }
-
-  return groups.map((group) => (
-    <ModelGroup
-      key={group.label}
-      label={group.label}
-      models={group.models}
-      panelId={panelId}
-      providerId={providerId}
-      selectedModelId={selectedModelId}
-      selectedProviderId={selectedProviderId}
-      onSelect={onSelect}
-      isFavorite={isFavorite}
-      onToggleFavorite={onToggleFavorite}
-    />
-  ));
-}
-
-function EmptyFavoritesMessage({
-  hasFavorites,
-}: {
-  hasFavorites: boolean;
-}) {
-  const message = hasFavorites
-    ? "No favorites match your search."
-    : "No favorites yet. Open a provider on the left, then star models you use often.";
-
-  return (
-    <p className="px-3 py-8 text-center text-xs text-muted leading-relaxed">
-      {message}
-    </p>
+  const groups = groupModels(filteredModels) ?? [{ label: undefined, models: filteredModels }];
+  return groups.flatMap((group) =>
+    group.models.map((model) => ({
+      modelId: model.id,
+      providerId,
+      label: model.label,
+      group: group.label,
+      endedOn: accessEndedOn(model),
+      showProvider: false,
+    })),
   );
 }
 
-function FavoritesPanel({
-  favoritesVisible,
-  favoritesFiltered,
-  selectedModelId,
-  selectedProviderId,
-  isFavorite,
-  onSelect,
-  onToggleFavorite,
-}: FavoritesPanelProps) {
-  if (favoritesFiltered.length === 0) {
-    return <EmptyFavoritesMessage hasFavorites={favoritesVisible.length > 0} />;
-  }
-
-  return (
-    <div className="space-y-0.5">
-      <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">
-        Favorites
-      </div>
-      {favoritesFiltered.map((entry) => (
-        <FavoriteModelRow
-          key={`${entry.providerId}:${entry.modelId}`}
-          entry={entry}
-          selectedModelId={selectedModelId}
-          selectedProviderId={selectedProviderId}
-          onSelect={onSelect}
-          isFavorite={isFavorite}
-          onToggleFavorite={onToggleFavorite}
-        />
-      ))}
-    </div>
-  );
+function accessEndedOn(model: ModelProvider["models"][number]): string | undefined {
+  return model.availableUntil && !isModelAvailable(model) ? formatEndDate(model.availableUntil) : undefined;
 }
 
-function ProviderCatalogContent({
-  loading,
-  provider,
-  models,
-  ...modelListProps
-}: Omit<ProviderModelsPanelProps, "getModels"> & {
-  models: ModelProvider["models"];
-}) {
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <Spinner size={16} className="text-muted" />
-        <span className="sr-only">Loading models</span>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {!catalogUsesModelGroups(models) && (
-        <div className="px-3 py-1 text-xs font-medium uppercase tracking-wider text-muted/60 select-none">
-          {provider.name}
-        </div>
-      )}
-      <GroupedModelList models={models} {...modelListProps} />
-    </>
-  );
+function favoriteModelOptions(
+  favorites: readonly ModelFavoriteEntry[],
+  getModels: (provider: ModelProvider) => ModelProvider["models"],
+): ModelOption[] {
+  return favorites.map((favorite) => {
+    // A star outlives the model's access, so each favourite is checked against its provider's catalog.
+    const provider = MODEL_PROVIDERS.find((entry) => entry.id === favorite.providerId);
+    const model = provider && getModels(provider).find((entry) => entry.id === favorite.modelId);
+    return {
+      modelId: favorite.modelId,
+      providerId: favorite.providerId,
+      label: favorite.label,
+      endedOn: model ? accessEndedOn(model) : undefined,
+      showProvider: true,
+    };
+  });
 }
 
-function ProviderModelsPanel({
-  provider,
-  loading,
-  getModels,
-  ...modelListProps
-}: ProviderModelsPanelProps) {
-  const models = getModels(provider);
-
-  return (
-    <div className="space-y-0.5">
-      <ProviderCatalogContent
-        provider={provider}
-        loading={loading}
-        models={models}
-        {...modelListProps}
-      />
-    </div>
-  );
+function getPickerTabs(
+  providers: readonly ModelProvider[],
+  lockedToProvider: boolean,
+  isProviderDisabled: (providerId: string) => boolean,
+): PickerTab[] {
+  const providerTabs = providers.map((provider): PickerTab => {
+    const providerDisabled = isProviderDisabled(provider.id);
+    const unavailable = isProviderTabUnavailable(provider, providerDisabled);
+    return {
+      id: provider.id,
+      label: provider.name,
+      icon: <ProviderIcon provider={provider.id} className="size-[1.4rem]" />,
+      disabled: unavailable,
+      disabledReason: unavailable ? providerTabUnavailableReason(provider, providerDisabled) : undefined,
+    };
+  });
+  if (lockedToProvider) return providerTabs;
+  return [
+    { id: FAVORITES_TAB, label: "Favourites", icon: <Star aria-hidden className="size-[1.4rem]" strokeWidth={1.5} /> },
+    ...providerTabs,
+  ];
 }
 
-function ModelSelectorRightPanel({
-  leftRailSelection,
-  favoritesVisible,
-  favoritesFiltered,
-  loadingProviders,
-  getModels,
-  panelId,
-  searchQuery,
-  selectedModelId,
-  selectedProviderId,
-  isFavorite,
-  onSelect,
-  onToggleFavorite,
-}: ModelSelectorRightPanelProps) {
-  if (leftRailSelection === "favorites") {
-    return (
-      <FavoritesPanel
-        favoritesVisible={favoritesVisible}
-        favoritesFiltered={favoritesFiltered}
-        selectedModelId={selectedModelId}
-        selectedProviderId={selectedProviderId}
-        isFavorite={isFavorite}
-        onSelect={onSelect}
-        onToggleFavorite={onToggleFavorite}
-      />
-    );
-  }
-
-  const provider = MODEL_PROVIDERS.find((entry) => entry.id === leftRailSelection);
-  if (!provider) return null;
-
-  return (
-    <ProviderModelsPanel
-      provider={provider}
-      loading={loadingProviders.has(provider.id)}
-      getModels={getModels}
-      panelId={panelId}
-      searchQuery={searchQuery}
-      providerId={provider.id}
-      selectedModelId={selectedModelId}
-      selectedProviderId={selectedProviderId}
-      isFavorite={isFavorite}
-      onSelect={onSelect}
-      onToggleFavorite={onToggleFavorite}
-    />
-  );
-}
-
-function ProviderUnavailableIndicator({ unavailable }: { unavailable: boolean }) {
-  return unavailable
-    ? (
-      <span
-        className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-muted/80"
-        aria-hidden
-      />
-    )
-    : null;
-}
-
-function ProviderRailItem({
-  provider,
-  providerDisabled,
-  selected,
-  onClick,
-}: ProviderRailItemProps) {
-  const unavailable = isProviderRailUnavailable(provider, providerDisabled);
-  const tooltip = getProviderRailTooltip(provider, providerDisabled);
-  const isCurrent = selected && provider.models.length !== 1 && !unavailable;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            data-testid={`model-group-${provider.id}`}
-            data-disabled={providerDisabled ? "true" : "false"}
-            disabled={unavailable}
-            aria-current={isCurrent ? "true" : undefined}
-            aria-label={unavailable ? tooltip : provider.name}
-            onClick={() => onClick(provider)}
-            className={cn(
-              "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors",
-              unavailable && "cursor-not-allowed opacity-45",
-              !unavailable && "text-ink hover:bg-selected/40 hover:text-ink",
-              isCurrent && "bg-selected text-ink",
-            )}
-          >
-            <ProviderIcon
-              provider={provider.id}
-              size={20}
-              className={cn(provider.comingSoon && "opacity-50")}
-            />
-            <ProviderUnavailableIndicator unavailable={unavailable} />
-          </button>
-        }
-      />
-      <TooltipContent side="right">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function ProviderRail({
-  providers,
-  leftRailSelection,
-  providerLocked,
-  getProviderDisabled,
-  onSelectFavorites,
-  onSelectProvider,
-}: ProviderRailProps) {
-  const favoritesSelected = leftRailSelection === "favorites";
-
-  return (
-    <nav
-      className={cn(
-        LEFT_RAIL_WIDTH_CLASS,
-        "flex shrink-0 flex-col items-center gap-1 overflow-y-auto bg-hover/15 py-1",
-      )}
-      aria-label={providerLocked ? "Scope and favorites" : "Favorites and providers"}
-    >
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              data-testid="model-selector-rail-favorites"
-              onClick={onSelectFavorites}
-              aria-current={favoritesSelected ? "true" : undefined}
-              aria-label="Favorites"
-              className={cn(
-                "flex h-10 w-10 items-center justify-center rounded-md transition-colors",
-                favoritesSelected
-                  ? "bg-selected text-ink"
-                  : "text-muted hover:bg-selected/40 hover:text-ink",
-              )}
-            >
-              <Star
-                size={18}
-                className={cn(favoritesSelected && "fill-muted text-muted")}
-                aria-hidden
-              />
-            </button>
-          }
-        />
-        <TooltipContent side="right">Saved models</TooltipContent>
-      </Tooltip>
-
-      <div className="my-0.5 h-px w-8 shrink-0 bg-border/50" aria-hidden />
-
-      {providers.map((provider) => (
-        <ProviderRailItem
-          key={provider.id}
-          provider={provider}
-          providerDisabled={getProviderDisabled(provider.id)}
-          selected={leftRailSelection === provider.id}
-          onClick={onSelectProvider}
-        />
-      ))}
-    </nav>
-  );
-}
-
-function ModelSelectorPanel({
-  open,
-  providerLocked,
-  leftRailSelection,
-  rightPanelSearch,
-  providersForLeftRail,
-  panelSearchTestId,
-  searchAriaLabel,
-  onSearchChange,
-  getProviderDisabled,
-  onSelectFavorites,
-  onSelectProvider,
-  ...rightPanelProps
-}: ModelSelectorPanelProps) {
-  if (!open) return null;
-
-  return (
-    <PopoverContent
-      id={rightPanelProps.panelId}
-      role="dialog"
-      aria-label="Choose model and provider"
-      side="top"
-      align="start"
-      className="flex h-[min(440px,calc(100vh-8rem))] w-[min(92vw,520px)] flex-col overflow-hidden p-0"
-    >
-      <div className="flex shrink-0 border-b border-border/40">
-        <div
-          className={cn(LEFT_RAIL_WIDTH_CLASS, "shrink-0 border-r border-border/40")}
-          aria-hidden="true"
-        />
-        <div className="min-w-0 flex-1 p-1.5">
-          <Input
-            size="compact"
-            placeholder={getSearchPlaceholder(leftRailSelection)}
-            value={rightPanelSearch}
-            onChange={(event) => onSearchChange(event.target.value)}
-            data-testid={panelSearchTestId}
-            className="h-7"
-            aria-label={searchAriaLabel}
-          />
-        </div>
-      </div>
-
-      <div className="flex min-h-0 flex-1 divide-x divide-border/40">
-        <ProviderRail
-          providers={providersForLeftRail}
-          leftRailSelection={leftRailSelection}
-          providerLocked={providerLocked}
-          getProviderDisabled={getProviderDisabled}
-          onSelectFavorites={onSelectFavorites}
-          onSelectProvider={onSelectProvider}
-        />
-
-        <div
-          className="min-h-0 min-w-0 flex-1 overflow-y-auto p-1"
-          role="region"
-          aria-label="Model list"
-        >
-          <ModelSelectorRightPanel
-            {...rightPanelProps}
-            leftRailSelection={leftRailSelection}
-            searchQuery={rightPanelSearch}
-          />
-        </div>
-      </div>
-    </PopoverContent>
-  );
+function favoriteAction(
+  option: ModelOption,
+  starred: boolean,
+  onToggle: (entry: ModelFavoriteEntry) => void,
+): PickerRowAction {
+  return {
+    label: getFavoriteActionLabel(option.label, starred),
+    icon: <Star className={starred ? "fill-primary text-primary" : "text-ink"} strokeWidth={1.5} />,
+    pinned: starred,
+    run: () => onToggle({ providerId: option.providerId, modelId: option.modelId, label: option.label }),
+  };
 }
 
 function LockedModelLabel({
@@ -1141,7 +455,10 @@ function LockedModelLabel({
   );
 }
 
-/** Renders a model selection dropdown and controls selection state. */
+/**
+ * Composer model picker: a {@link Picker} with a Favourites tab and one tab per provider. A locked
+ * thread shows the model as a label; a provider-locked thread keeps only its provider's tab.
+ */
 export function ModelSelector({
   selectedModelId,
   selectedProviderId,
@@ -1150,16 +467,15 @@ export function ModelSelector({
   providerLocked,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
-  const [leftRailSelection, setLeftRailSelection] = useState<LeftRailSelection>("favorites");
-  const [rightPanelSearch, setRightPanelSearch] = useState("");
-  const panelId = useId();
+  const [activeTab, setActiveTab] = useState<ModelPickerTab>(FAVORITES_TAB);
+  const [query, setQuery] = useState("");
 
   const favorites = useModelFavoritesStore((store) => store.entries);
   const toggleFavorite = useModelFavoritesStore((store) => store.toggleFavorite);
-  const isFavorite = useModelFavoritesStore((store) => store.isFavorite);
   const availabilityList = useProviderAvailabilityStore((store) => store.providers);
   const { getModels, loadingProviders, fetchProviderModels } = useProviderModelCatalog();
   const presentation = getSelectedModelPresentation(selectedModelId, selectedProviderId);
+  const { displayProvider } = presentation;
 
   const canUseProvider = useCallback(
     (providerId: string) => isProviderUsable(providerId, availabilityList),
@@ -1169,55 +485,65 @@ export function ModelSelector({
     (providerId: string) => getProviderDisabled(providerId, availabilityList),
     [availabilityList],
   );
-  const defaultProviderId = getDefaultProviderId(selectedProviderId, presentation.displayProvider);
-  const providersForLeftRail = getProvidersForLeftRail(providerLocked, presentation.displayProvider);
-  const favoritesVisible = useMemo(
-    () => getVisibleFavorites(favorites, canUseProvider, providerLocked, presentation.displayProvider),
-    [favorites, canUseProvider, providerLocked, presentation.displayProvider],
+  const defaultProviderId = getDefaultProviderId(selectedProviderId, displayProvider);
+  const tabs = getPickerTabs(
+    getProvidersForLeftRail(providerLocked, displayProvider),
+    Boolean(providerLocked && displayProvider),
+    isProviderDisabled,
   );
-  const favoritesFiltered = useMemo(
-    () => filterFavoritesBySearchQuery(favoritesVisible, rightPanelSearch),
-    [favoritesVisible, rightPanelSearch],
+  const favoritesVisible = useMemo(
+    () => getVisibleFavorites(favorites, canUseProvider, providerLocked, displayProvider),
+    [favorites, canUseProvider, providerLocked, displayProvider],
+  );
+  const starredKeys = useMemo(
+    () => new Set(favorites.map((favorite) => optionKey(favorite.providerId, favorite.modelId))),
+    [favorites],
   );
 
-  useResetModelSelectorPanel(
-    open,
-    providerLocked,
-    presentation.displayProvider,
-    defaultProviderId,
-    setLeftRailSelection,
-    setRightPanelSearch,
+  const items = useMemo(() => {
+    if (activeTab === FAVORITES_TAB) {
+      return favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query), getModels);
+    }
+    const provider = MODEL_PROVIDERS.find((entry) => entry.id === activeTab);
+    return provider ? providerModelOptions(provider.id, getModels(provider), query) : [];
+  }, [activeTab, favoritesVisible, getModels, query]);
+
+  const renderItem = useCallback(
+    (option: ModelOption): PickerRow => {
+      const key = optionKey(option.providerId, option.modelId);
+      const starred = starredKeys.has(key);
+      return {
+        key,
+        name: option.label,
+        group: option.group,
+        disabled: option.endedOn !== undefined,
+        disabledReason: option.endedOn && `Subscription access to ${option.label} ended on ${option.endedOn}.`,
+        description: option.showProvider ? (
+          <>
+            <ProviderIcon provider={option.providerId} size={12} />
+            <span className="min-w-0 text-fade">{providerName(option.providerId)}</span>
+          </>
+        ) : undefined,
+        // A model whose access ended can still be unstarred, but not newly starred.
+        action: option.endedOn && !starred ? undefined : favoriteAction(option, starred, toggleFavorite),
+      };
+    },
+    [starredKeys, toggleFavorite],
   );
-  useFetchProviderModelsWhenOpen(
-    open,
-    locked,
-    leftRailSelection,
-    favoritesVisible,
-    fetchProviderModels,
-  );
+
+  useResetPickerOnOpen(open, providerLocked, displayProvider, defaultProviderId, setActiveTab, setQuery);
+  useFetchProviderModelsWhenOpen(open, locked, activeTab, favoritesVisible, fetchProviderModels);
 
   const handleSelectModel = (modelId: string, providerId: string) => {
     onSelect(modelId, providerId);
     setOpen(false);
-  };
-  const selectLeftRail = (selection: LeftRailSelection) => {
-    setLeftRailSelection(selection);
-    setRightPanelSearch("");
-  };
-  const handleProviderRailClick = (provider: ModelProvider) => {
-    const providerDisabled = isProviderDisabled(provider.id);
-    if (isProviderRailUnavailable(provider, providerDisabled)) return;
-    if (provider.models.length === 1) {
-      handleSelectModel(provider.models[0].id, provider.id);
-      return;
-    }
-    selectLeftRail(provider.id);
   };
 
   if (locked) {
     return <LockedModelLabel {...presentation} />;
   }
 
+  const loading = activeTab !== FAVORITES_TAB && loadingProviders.has(activeTab);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -1234,31 +560,32 @@ export function ModelSelector({
           </Button>
         }
       />
-
-      <ModelSelectorPanel
-        open={open}
-        providerLocked={providerLocked}
-        leftRailSelection={leftRailSelection}
-        rightPanelSearch={rightPanelSearch}
-        providersForLeftRail={providersForLeftRail}
-        panelSearchTestId={getPanelSearchTestId(providerLocked, presentation.displayProvider)}
-        searchAriaLabel={getSearchAriaLabel(leftRailSelection)}
-        onSearchChange={setRightPanelSearch}
-        getProviderDisabled={isProviderDisabled}
-        onSelectFavorites={() => selectLeftRail("favorites")}
-        onSelectProvider={handleProviderRailClick}
-        favoritesVisible={favoritesVisible}
-        favoritesFiltered={favoritesFiltered}
-        loadingProviders={loadingProviders}
-        getModels={getModels}
-        panelId={panelId}
-        searchQuery={rightPanelSearch}
-        selectedModelId={presentation.normalizedModelId}
-        selectedProviderId={presentation.selectedProviderId}
-        isFavorite={isFavorite}
-        onSelect={handleSelectModel}
-        onToggleFavorite={toggleFavorite}
-      />
+      <PopoverContent
+        role="dialog"
+        aria-label="Choose model and provider"
+        side="top"
+        align="start"
+        className={PICKER_PANEL_CLASS}
+      >
+        <Picker
+          tabs={tabs}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          query={query}
+          onQueryChange={setQuery}
+          searchPlaceholder="Search models"
+          items={items}
+          total={null}
+          status={loading ? "loading" : "ready"}
+          selectedKey={
+            presentation.selectedProviderId
+              ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId)
+              : undefined
+          }
+          renderItem={renderItem}
+          onSelect={(option) => handleSelectModel(option.modelId, option.providerId)}
+        />
+      </PopoverContent>
     </Popover>
   );
 }

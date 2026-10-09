@@ -28,6 +28,8 @@ interface SegmentedControlProps {
   readonly size?: SegmentedControlSize;
   /** Stretches the tray to its container so segments share the width evenly. */
   readonly fill?: boolean;
+  /** Draws a borderless strip of icon segments; each label stays as its segment's accessible name. */
+  readonly iconOnly?: boolean;
   readonly "aria-label"?: string;
   readonly className?: string;
 }
@@ -70,6 +72,7 @@ export function SegmentedControl({
   onChange,
   size = "default",
   fill = false,
+  iconOnly = false,
   "aria-label": ariaLabel,
   className,
 }: SegmentedControlProps) {
@@ -99,9 +102,10 @@ export function SegmentedControl({
         aria-label={ariaLabel}
         onKeyDown={handleKeyDown}
         className={cn(
-          "items-center gap-2 rounded-control border border-control-border bg-panel p-[3px]",
+          "items-center",
+          // An icon strip sits in a picker's tab row, so it drops the tray and packs tight to fit every provider.
+          iconOnly ? "shrink-0 gap-0.5" : cn("gap-2 rounded-control border border-control-border bg-panel p-[3px]", TRAY_HEIGHT[size]),
           fill ? "flex w-full" : "inline-flex",
-          TRAY_HEIGHT[size],
           className,
         )}
       >
@@ -119,8 +123,8 @@ export function SegmentedControl({
               tabIndex={index === tabStopIndex ? 0 : -1}
               onClick={() => onChange(option.value)}
               className={cn(
-                "inline-flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-sm border border-transparent px-2 text-body-small transition-colors duration-(--duration-fast) ease-(--ease-standard)",
-                SEGMENT_HEIGHT[size],
+                "inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm border border-transparent text-body-small transition-colors duration-(--duration-fast) ease-(--ease-standard)",
+                iconOnly ? "h-7 w-[3rem] shrink-0" : cn("flex-1 px-2", SEGMENT_HEIGHT[size]),
                 FOCUS_RING_CLASS,
                 isActive
                   ? "bg-selected font-medium text-ink"
@@ -128,8 +132,17 @@ export function SegmentedControl({
                 option.disabled && "cursor-not-allowed opacity-50",
               )}
             >
-              {option.icon}
-              {option.label}
+              {iconOnly ? (
+                <>
+                  <span aria-hidden className="contents">{option.icon}</span>
+                  <span className="sr-only">{option.label}</span>
+                </>
+              ) : (
+                <>
+                  {option.icon}
+                  {option.label}
+                </>
+              )}
             </button>
           );
 
@@ -138,7 +151,7 @@ export function SegmentedControl({
           // Disabled buttons swallow pointer events, so the tooltip hangs off a wrapper instead.
           return (
             <Tooltip key={option.value}>
-              <TooltipTrigger render={<span className="flex min-w-0 flex-1" />}>{segment}</TooltipTrigger>
+              <TooltipTrigger render={<span className={cn("flex min-w-0", !iconOnly && "flex-1")} />}>{segment}</TooltipTrigger>
               <TooltipContent>{option.title}</TooltipContent>
             </Tooltip>
           );
