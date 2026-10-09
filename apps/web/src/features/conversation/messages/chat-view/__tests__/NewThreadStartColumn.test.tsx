@@ -29,7 +29,6 @@ function renderColumn(projectName: string | undefined) {
       projectName={projectName}
       workspaceId={projectName ? "ws-1" : undefined}
       draftId={null}
-      sidebarCollapsed={false}
     />,
   );
 }
