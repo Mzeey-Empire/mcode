@@ -70,6 +70,27 @@ function PagedPicker(props: Partial<PickerProps<Branch>> & { readonly pages?: nu
   );
 }
 
+/** Four rows whose action removes the row, as unstarring does in Favourites. */
+function RemovablePicker({ selectedKey }: { readonly selectedKey?: string }) {
+  const [names, setNames] = useState(["a", "b", "c", "d"]);
+  return (
+    <Picker<string>
+      query=""
+      onQueryChange={() => {}}
+      items={names}
+      total={names.length}
+      status="ready"
+      selectedKey={selectedKey}
+      renderItem={(name) => ({
+        key: name,
+        name,
+        action: { label: `Remove ${name}`, icon: <span>*</span>, run: () => setNames((current) => current.filter((entry) => entry !== name)) },
+      })}
+      onSelect={() => {}}
+    />
+  );
+}
+
 function scrollListTo(remainingPx: number) {
   const list = screen.getByRole("listbox");
   list.scrollTop = list.scrollHeight - list.clientHeight - remainingPx;
@@ -366,32 +387,30 @@ describe("Picker", () => {
   });
 
   it("keeps the highlight in place when a row action removes its own row", async () => {
-    function RemovablePicker() {
-      const [names, setNames] = useState(["a", "b", "c", "d"]);
-      return (
-        <Picker<string>
-          query=""
-          onQueryChange={() => {}}
-          items={names}
-          total={names.length}
-          status="ready"
-          selectedKey="a"
-          renderItem={(name) => ({
-            key: name,
-            name,
-            action: { label: `Remove ${name}`, icon: <span>*</span>, run: () => setNames((current) => current.filter((entry) => entry !== name)) },
-          })}
-          onSelect={() => {}}
-        />
-      );
-    }
-    render(<RemovablePicker />);
+    render(<RemovablePicker selectedKey="a" />);
     screen.getByRole("combobox").focus();
     await userEvent.keyboard("{ArrowDown}{ArrowDown}{Control>}d{/Control}");
     expect(screen.queryByRole("option", { name: /^c/ })).toBeNull();
     expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
     await userEvent.keyboard("{Control>}d{/Control}");
     expect(screen.getByRole("option", { name: /^b/ })).toHaveAttribute("data-active");
+  });
+
+  it("hands the opening highlight to the row in its slot when Ctrl+D removes it before any arrow key", async () => {
+    render(<RemovablePicker selectedKey="c" />);
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
+  });
+
+  it("hands a hovered row's highlight to the row in its slot when its action removes it", async () => {
+    render(<RemovablePicker />);
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    const c = screen.getByRole("option", { name: /^c/ });
+    fireEvent.mouseMove(c);
+    await userEvent.click(c.querySelector("[data-slot=picker-row-action]") as HTMLElement);
+    expect(screen.getByRole("option", { name: /^d/ })).toHaveAttribute("data-active");
   });
 
   it("hides the count while the total is unknown", () => {
