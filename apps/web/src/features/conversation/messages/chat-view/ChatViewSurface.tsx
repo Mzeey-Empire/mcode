@@ -1,7 +1,6 @@
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { GitFork } from "lucide-react";
-import type { RecoveryIncident, SelectedTextComment } from "@mcode/contracts";
-import { Badge } from "@/components/ui/badge";
+import type { Message, RecoveryIncident, SelectedTextComment, ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -25,7 +24,7 @@ import { useThreadDraftStore, type ThreadDraftPayload } from "@/stores/threadDra
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
-import { StartupProgressCard, useThreadStartup, type StartupDisplayContext } from "@/features/thread-startup";
+import { StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useThreadStartup } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
@@ -33,6 +32,7 @@ import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
 import { SavingDelayedDialog } from "../../saving/SavingDelayedDialog";
 import { TurnSavingNotice } from "../../saving/TurnSavingNotice";
+import { MessageBubble } from "../MessageBubble";
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
 import { tryGetConversationResidency } from "../../residency/conversation-residency";
 import type { ChatViewState } from "./useChatViewState";
@@ -120,11 +120,9 @@ export interface ChatViewSurfaceProps {
   dismissedError: string | null;
 }
 
-/** Renders a selected row while the server creates the backing thread. */
-function startupContext(context: ClientPreparingContext | undefined, startupKind?: StartupDisplayContext): StartupDisplayContext {
-  if (startupKind === "pull-request-review") return "pull-request-review";
-  if (startupKind === "managed-worktree") return "managed-worktree";
-  if (startupKind === "attached-worktree") return "attached-worktree";
+/** Startup kind for placeholder rows drawn before the server returns the record. */
+function startupKind(context: ClientPreparingContext | undefined, startup: ReturnType<typeof useThreadStartup>): ThreadStartupKind {
+  if (startup) return startup.kind;
   if (context === "new-existing-worktree" || context === "branch-existing-worktree") return "attached-worktree";
   if (context === "new-worktree" || context === "branch-worktree") return "managed-worktree";
   return "direct";
@@ -167,41 +165,29 @@ function CancelledStartupActions({ thread, startup }: { thread: WorkspaceThread;
   );
 }
 
-function PreparingStartupContent({
-  thread,
-  pendingStartup,
-  startup,
-  actions,
-}: {
-  thread: WorkspaceThread;
-  pendingStartup: PendingStartup | undefined;
-  startup: ReturnType<typeof useThreadStartup>;
-  actions: ReactNode;
+/** The thread's startup trail with the recovery actions for its current state. */
+function ThreadStartupTrail({ thread, startup, pendingStartup, actions }: {
+  readonly thread: WorkspaceThread;
+  readonly startup: ReturnType<typeof useThreadStartup>;
+  readonly pendingStartup: PendingStartup | undefined;
+  readonly actions?: ReactNode;
 }) {
-  if (thread.clientError && !showsAuthoritativeCancellation(thread, startup)) {
-    return <CollapsibleError error={thread.clientError} onRetry={() => { void useWorkspaceStore.getState().retryPreparingThread(thread.id); }} onDismiss={() => useWorkspaceStore.getState().dismissPreparingThread(thread.id)} />;
-  }
-  return <div className="w-full"><StartupProgressCard startup={startup} startupId={pendingStartup?.startupId ?? startup?.startupId} context={startupContext(pendingStartup?.context, startup?.kind)} actions={startup?.state === "cancelled" ? <CancelledStartupActions thread={thread} startup={startup} /> : actions} /></div>;
+  const threadId = startup?.threadId;
+  return (
+    <StartupStepsTrail
+      startup={startup}
+      startupId={pendingStartup?.startupId ?? startup?.startupId}
+      kind={startupKind(pendingStartup?.context, startup)}
+      actions={startup?.state === "cancelled" ? <CancelledStartupActions thread={thread} startup={startup} /> : actions}
+      onOpenTerminal={threadId ? () => { void openStartupSetupTerminal(thread.workspace_id, threadId); } : undefined}
+      onEditScript={threadId ? () => editStartupSetupScript(thread.workspace_id, threadId) : undefined}
+    />
+  );
 }
 
-function PreparingThreadHeader({ thread, state, startupPending }: { thread: WorkspaceThread; state: ChatViewState; startupPending: boolean }) {
-  return (
-    <CanvasHeader className="border-b border-border">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span data-testid="chat-header-title" className="text-fade text-sm font-medium">
-          {thread.title}
-          {(thread.clientPreparing || startupPending) && <span className="ml-2 inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary/60 align-middle" aria-hidden />}
-        </span>
-        {state.activeWorkspaceId && <Badge variant="secondary">{state.activeWorkspaceName}</Badge>}
-        {thread.parent_thread_id && state.parentThreadExists && (
-          <Tooltip>
-            <TooltipTrigger render={<button type="button" onClick={() => useWorkspaceStore.getState().setActiveThread(thread.parent_thread_id!)} className="flex shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-xs font-medium text-primary/80 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"><GitFork size={10} /><span>Forked</span></button>} />
-            <TooltipContent side="bottom" className="text-xs">Go to parent thread</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-    </CanvasHeader>
-  );
+/** One row laid out like a MessageList row, so the durable thread opens without a jump. */
+function PreparingTranscriptRow({ children }: { readonly children: ReactNode }) {
+  return <div className="w-full px-4 py-2 sm:px-8"><div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>{children}</div></div>;
 }
 
 /** Whether a resolved startup is stuck in a state the automatic-setup card can recover from. */
@@ -209,8 +195,12 @@ function startupNeedsSetupRecovery(startup: ReturnType<typeof useThreadStartup>)
   return startup?.state === "blocked" || startup?.state === "failed" || startup?.state === "interrupted";
 }
 
-/** Renders a selected row while the server creates the backing thread. */
-function ThreadPreparingShell({
+/**
+ * The thread surface's preparing variant, shown while the server creates or starts the thread.
+ *
+ * It mounts no conversation hooks because the selected id may still be a client placeholder.
+ */
+function PreparingThreadSurface({
   thread,
   state,
   startup,
@@ -221,6 +211,7 @@ function ThreadPreparingShell({
   startup: ReturnType<typeof useThreadStartup>;
   pendingStartup: PendingStartup | undefined;
 }) {
+  const echoedStartup = useEchoedPendingStartup(thread, pendingStartup);
   const needsSetupRecovery = startupNeedsSetupRecovery(startup);
   const automaticSetup = useProjectAutomaticSetup(
     thread.id,
@@ -228,18 +219,54 @@ function ThreadPreparingShell({
   );
   return (
     <div className="flex h-full flex-col bg-background" data-testid="thread-preparing-shell">
-      <PreparingThreadHeader thread={thread} state={state} startupPending={pendingStartup !== undefined} />
-      <div className="flex flex-1 flex-col justify-center px-4 py-8 sm:px-8">
-        <div className={`${PRIMARY_CONTENT_RAIL_CLASS} flex flex-col items-stretch gap-6`}>
-          <div className="flex justify-end">
-            <div className="min-w-0 max-w-[min(82%,56rem)] rounded-xl border border-border/50 bg-hover/15 px-4 py-3 text-sm text-ink/90"><p className="whitespace-pre-wrap break-words">{pendingStartup?.queuedMessage || thread.title}</p></div>
-          </div>
-          <PreparingStartupContent thread={thread} pendingStartup={pendingStartup} startup={startup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} thread={thread} startup={startup} pendingStartup={pendingStartup} />} />
-        </div>
+      <ThreadHeader state={state} />
+      <div className="min-h-0 flex-1 overflow-y-auto pt-4">
+        <PreparingTranscriptRow>
+          <MessageBubble message={preparingUserMessage(thread, echoedStartup)} />
+        </PreparingTranscriptRow>
+        <PreparingTranscriptRow>
+          {thread.clientError && !showsAuthoritativeCancellation(thread, startup)
+            ? <CollapsibleError error={thread.clientError} onRetry={() => { void useWorkspaceStore.getState().retryPreparingThread(thread.id); }} onDismiss={() => useWorkspaceStore.getState().dismissPreparingThread(thread.id)} />
+            : <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={pendingStartup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} thread={thread} startup={startup} pendingStartup={pendingStartup} />} />}
+        </PreparingTranscriptRow>
       </div>
       <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} />
     </div>
   );
+}
+
+// A completed startup clears its pending entry, which can happen before the durable message arrives or the placeholder id is replaced.
+// The surface keeps echoing that startup's first message while the selected thread still owns it, so the bubble does not fall back to the title.
+// Any other terminal state either returns the message to the composer or stops after it was persisted, so no echo is needed.
+function useEchoedPendingStartup(thread: WorkspaceThread, pendingStartup: PendingStartup | undefined): PendingStartup | undefined {
+  const [retained, setRetained] = useState(pendingStartup ? { threadId: thread.id, pendingStartup } : undefined);
+  const retainedRecord = useThreadStartupStore((s) => retained ? s.recordsByStartupId[retained.pendingStartup.startupId] : undefined);
+  if (pendingStartup && pendingStartup !== retained?.pendingStartup) setRetained({ threadId: thread.id, pendingStartup });
+  if (pendingStartup) return pendingStartup;
+  return retained && threadOwnsCompletedEcho(thread, retained.threadId, retainedRecord) ? retained.pendingStartup : undefined;
+}
+
+function threadOwnsCompletedEcho(thread: WorkspaceThread, echoThreadId: string, record: ThreadStartup | undefined): boolean {
+  return record?.state === "completed" && (echoThreadId === thread.id || record.threadId === thread.id);
+}
+
+// The durable bubble's footer and message parts add height, so the preparing surface draws the same bubble to keep the trail still at hand-off.
+function preparingUserMessage(thread: WorkspaceThread, pendingStartup: PendingStartup | undefined): Message {
+  return {
+    id: `preparing-${thread.id}`,
+    thread_id: thread.id,
+    role: "user",
+    // An attachment-only first message has empty text, and the durable bubble keeps it empty.
+    content: pendingStartup ? pendingStartup.queuedMessage : thread.title,
+    tool_calls: null,
+    files_changed: null,
+    cost_usd: null,
+    tokens_used: null,
+    timestamp: thread.created_at,
+    sequence: 0,
+    attachments: null,
+    ...pendingStartup?.queuedMessageParts,
+  };
 }
 
 /** Renders the selected-row shell when no matching workspace thread remains. */
@@ -252,16 +279,27 @@ function MissingThreadSurface() {
   );
 }
 
-/** Renders the active thread header and navigation controls. */
-function ActiveThreadHeader({ state, editingThreadId, onEditingThreadIdChange, onSaveTitle }: { state: ChatViewState; editingThreadId: string | null; onEditingThreadIdChange: (threadId: string | null) => void; onSaveTitle: (title: string) => void }) {
+/** Title editing for a durable thread; a preparing thread has nothing to rename yet. */
+interface ThreadHeaderRename {
+  readonly editingThreadId: string | null;
+  readonly onEditingThreadIdChange: (threadId: string | null) => void;
+  readonly onSaveTitle: (title: string) => void;
+}
+
+/** Renders the thread header for both surface variants; the preparing variant omits `rename` and has no actions yet. */
+function ThreadHeader({ state, rename }: { state: ChatViewState; rename?: ThreadHeaderRename }) {
   const thread = state.activeThread!;
   return (
     <CanvasHeader className="border-b border-border">
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        {/* Double-click renames, so the title must not hand the gesture to the window. */}
-        <div data-testid="chat-header-title" onDoubleClick={() => onEditingThreadIdChange(thread.id)} className="window-no-drag cursor-text">
-          <ThreadTitleEditor title={thread.title} isEditing={editingThreadId === thread.id} onSave={onSaveTitle} onCancel={() => onEditingThreadIdChange(null)} />
-        </div>
+        {rename ? (
+          // Double-click renames, so the title must not hand the gesture to the window.
+          <div data-testid="chat-header-title" onDoubleClick={() => rename.onEditingThreadIdChange(thread.id)} className="window-no-drag cursor-text">
+            <ThreadTitleEditor title={thread.title} isEditing={rename.editingThreadId === thread.id} onSave={rename.onSaveTitle} onCancel={() => rename.onEditingThreadIdChange(null)} />
+          </div>
+        ) : (
+          <span data-testid="chat-header-title" className="text-fade text-sm font-medium">{thread.title}</span>
+        )}
         {thread.parent_thread_id && state.parentThreadExists && (
           <Tooltip>
             <TooltipTrigger render={<button type="button" onClick={() => state.setActiveThread(thread.parent_thread_id!)} className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-xs font-medium text-primary/80 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"><GitFork size={10} /><span>Forked</span></button>} />
@@ -269,7 +307,7 @@ function ActiveThreadHeader({ state, editingThreadId, onEditingThreadIdChange, o
           </Tooltip>
         )}
       </div>
-      <HeaderActions thread={thread} threadPaneWidth={state.threadPaneWidth} />
+      {rename ? <HeaderActions thread={thread} threadPaneWidth={state.threadPaneWidth} /> : null}
     </CanvasHeader>
   );
 }
@@ -372,13 +410,15 @@ function KeptAliveTranscript({
   selected,
   visible,
   leadingContent,
+  afterFirstUserContent,
   messageListProps,
 }: {
   threadId: string;
   selected: boolean;
   visible: boolean;
   leadingContent: ReactNode;
-  messageListProps: Omit<ComponentProps<typeof MessageList>, "leadingContent" | "displayThreadId">;
+  afterFirstUserContent: ReactNode;
+  messageListProps: Omit<ComponentProps<typeof MessageList>, "leadingContent" | "afterFirstUserContent" | "displayThreadId">;
 }) {
   // The lease keeps a hidden transcript's record resident and self-heals it after
   // cache eviction; releasing on selection is a no-op while the thread is current.
@@ -399,7 +439,7 @@ function KeptAliveTranscript({
       inert={!visible}
       aria-hidden={!visible}
     >
-      <MessageList {...messageListProps} displayThreadId={threadId} leadingContent={leadingContent} />
+      <MessageList {...messageListProps} displayThreadId={threadId} leadingContent={leadingContent} afterFirstUserContent={afterFirstUserContent} />
     </div>
   );
 }
@@ -424,13 +464,15 @@ function ConversationStageContent({
   state,
   thread,
   leadingContent,
+  afterFirstUserContent,
   messageListProps,
 }: {
   stage: ConversationStage;
   state: ChatViewState;
   thread: WorkspaceThread;
   leadingContent: ReactNode;
-  messageListProps: Omit<ComponentProps<typeof MessageList>, "leadingContent" | "displayThreadId">;
+  afterFirstUserContent: ReactNode;
+  messageListProps: Omit<ComponentProps<typeof MessageList>, "leadingContent" | "afterFirstUserContent" | "displayThreadId">;
 }) {
   const visibleThreadId =
     stage === "hold" ? state.displayHoldThreadId
@@ -443,6 +485,7 @@ function ConversationStageContent({
       selected={id === state.activeThreadId}
       visible={id === visibleThreadId}
       leadingContent={id === state.activeThreadId ? leadingContent : undefined}
+      afterFirstUserContent={id === state.activeThreadId ? afterFirstUserContent : undefined}
       messageListProps={messageListProps}
     />
   ));
@@ -595,9 +638,10 @@ function shouldKeepPreparingShell(
   return pendingStartup !== undefined && startupResolving;
 }
 
-function ChatMessageStage({ state, interactions, automaticSetup, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup> }) {
+function ChatMessageStage({ state, interactions, automaticSetup, startupTrail, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup>; readonly startupTrail: ReactNode }) {
   const thread = state.activeThread!;
-  const automaticSetupTranscriptBlock = thread.mode === "worktree" && thread.worktree_managed === true
+  // An empty leading row still takes its 16px padding, which would push the transcript below the preparing surface.
+  const automaticSetupTranscriptBlock = thread.mode === "worktree" && thread.worktree_managed === true && automaticSetup.snapshot.gate === "blocked"
     ? <ProjectAutomaticSetupCard snapshot={automaticSetup.snapshot} busy={automaticSetup.busy} error={automaticSetup.error} onContinue={automaticSetup.continueWithoutSetup} onRetry={automaticSetup.retrySetup} onApprove={automaticSetup.approveSetup} />
     : undefined;
   const messageListProps = {
@@ -621,7 +665,7 @@ function ChatMessageStage({ state, interactions, automaticSetup, selectedTextCom
   };
   return (
     <div data-testid="chat-message-stage" className="animate-fade-up-in flex-1 min-h-0">
-      <ConversationStageContent stage={getConversationStage(state)} state={state} thread={thread} leadingContent={automaticSetupTranscriptBlock} messageListProps={messageListProps} />
+      <ConversationStageContent stage={getConversationStage(state)} state={state} thread={thread} leadingContent={automaticSetupTranscriptBlock} afterFirstUserContent={startupTrail} messageListProps={messageListProps} />
     </div>
   );
 }
@@ -648,7 +692,7 @@ function ConversationTransitionState({ threadId, threadTitle }: { threadId: stri
 }
 
 /** Renders the fully active conversation surface. */
-function ActiveThreadSurface(props: ChatViewSurfaceProps) {
+function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: ReturnType<typeof useThreadStartup> }) {
   const {
     state,
     interactions,
@@ -664,6 +708,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps) {
     onSubagentSelect,
     onOpenSubagents,
     dismissedError,
+    startup,
   } = props;
   const thread = state.activeThread!;
   const automaticSetup = useProjectAutomaticSetup(
@@ -677,13 +722,13 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps) {
     // gutters while docked. That keeps the composer at 520 or wider down to OVERVIEW_DOCK_MIN_CANVAS.
     <div ref={state.chatPaneRef} className={cn("relative flex h-full flex-col bg-background", state.overviewPaddingRight && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view">
       <OverviewLayer>
-        <ActiveThreadHeader state={state} editingThreadId={editingThreadId} onEditingThreadIdChange={onEditingThreadIdChange} onSaveTitle={interactions.onSaveTitle} />
+        <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} />
         <ActiveThreadBanners state={state} recovery={recovery} />
         {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
         <HandoffFallbackNotice threadId={thread.id} />
         <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
         <TurnSavingNotice lostProgress={state.lostProgress} />
-        <ChatMessageStage state={state} interactions={interactions} automaticSetup={automaticSetup} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
+        <ChatMessageStage state={state} interactions={interactions} automaticSetup={automaticSetup} startupTrail={startup ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
         {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
         <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} setupBlocked={automaticSetup.snapshot.gate === "blocked"} />
       </OverviewLayer>
@@ -706,6 +751,7 @@ export function ChatViewSurface(props: ChatViewSurfaceProps) {
     startupLookup.startup ? s.dismissedStartupIds.has(startupLookup.startup.startupId) : false);
   if (!state.activeThreadId) return <NewThreadStartColumn projectName={state.activeWorkspaceName || undefined} workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />;
   if (!state.activeThread) return <MissingThreadSurface />;
-  if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <ThreadPreparingShell thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} />;
-  return <ActiveThreadSurface {...props} />;
+  if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <PreparingThreadSurface thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} />;
+  // Keeping a cancelled startup's thread dismisses its record, so the trail leaves the transcript too.
+  return <ActiveThreadSurface {...props} startup={startupDismissed ? undefined : startupLookup.startup} />;
 }

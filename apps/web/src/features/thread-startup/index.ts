@@ -1,4 +1,6 @@
-/** Shared startup lifecycle state and visual progress display. */
-export { StartupProgressCard, type StartupDisplayContext, type StartupProgressCardProps } from "./StartupProgressCard";
+/** Startup steps trail shown under a thread's first message and in startup dialogs. */
+export { StartupStepsTrail, type StartupStepsTrailProps } from "./StartupStepsTrail";
+/** Setup recovery shortcuts shared by the trail's hosts. */
+export { editStartupSetupScript, openStartupSetupTerminal } from "./useStartupActions";
 /** Authoritative startup record state and recovery hook. */
 export { useThreadStartup, useThreadStartupStore } from "./state/thread-startup-store";

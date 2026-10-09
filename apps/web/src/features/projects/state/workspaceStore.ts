@@ -34,7 +34,7 @@ import {
   releaseBrowserAutomationThreadScope,
   releaseBrowserAutomationWorkspaceScopes,
 } from "@/features/preview/automation/browserAutomationStore";
-import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode, TurnRuntimeSnapshot } from "@mcode/contracts";
+import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode, TurnRuntimeSnapshot, Message } from "@mcode/contracts";
 import { sanitizeCustomBranchInput } from "@/lib/branch-name";
 import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
@@ -241,6 +241,21 @@ export interface PendingStartup {
   readonly context: ClientPreparingContext;
   /** First message echoed at transcript position while startup runs. */
   readonly queuedMessage: string;
+  /** The rest of the first message, drawn in the echoed bubble so it keeps its height when the durable message replaces it. */
+  readonly queuedMessageParts?: QueuedMessageParts;
+}
+
+/** Every first-message field besides text that adds rows to a user bubble. */
+export type QueuedMessageParts = Pick<Message, "attachments" | "mentions" | "previewAnnotations" | "selectedTextComments">;
+
+/** Mirrors what the server persists for the first message, dropping local attachment source paths. */
+function queuedMessageParts(attempt: PendingThreadCreation): QueuedMessageParts {
+  return {
+    attachments: attempt.attachments?.map(({ id, name, mimeType, sizeBytes }) => ({ id, name, mimeType, sizeBytes })) ?? null,
+    mentions: attempt.mentions ?? null,
+    previewAnnotations: attempt.previewAnnotations ?? null,
+    selectedTextComments: attempt.selectedTextComments ?? null,
+  };
 }
 
 /** Parameters to replay {@link McodeTransport.createAndSendMessage} after an optimistic insert. */
@@ -886,6 +901,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           startupId: placeholderId,
           context: clientPreparingContext,
           queuedMessage: attempt.displayContent ?? attempt.content,
+          queuedMessageParts: queuedMessageParts(attempt),
         },
       },
       activeDraftId: null,
@@ -1559,6 +1575,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             startupId: currentPending.startupId,
             context: currentPending.clientPreparingContext ?? state.pendingStartupByThreadId[placeholderId]?.context ?? "new-direct",
             queuedMessage: currentPending.displayContent ?? currentPending.content,
+            queuedMessageParts: queuedMessageParts(currentPending),
           },
         },
       }));
