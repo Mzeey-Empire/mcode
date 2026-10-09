@@ -102,8 +102,8 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
       { phase: "agent", state: "running" },
     ] });
     await coordinator.startInitialAgent(managedStartupId);
-    await coordinator.completeInitialAgent(managedStartupId);
-    expect(startups.get(managedStartupId)?.state).toBe("completed");
+    // Admission alone leaves the agent phase running until the provider answers.
+    expect(startups.get(managedStartupId)).toMatchObject({ state: "running", phase: "agent" });
   });
 
   it.each(["direct", "worktree"] as const)("records the real PR fetch phase in %s mode", async (mode) => {
@@ -357,8 +357,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     });
     expect(concurrentReplay).toMatchObject({ kind: "replay", thread: { id: created.thread.id } });
     await coordinator.startInitialAgent(directStartupId);
-    await coordinator.completeInitialAgent(directStartupId);
-    expect(startups.get(directStartupId)).toMatchObject({ state: "completed", threadId: created.thread.id });
+    expect(startups.get(directStartupId)).toMatchObject({ state: "running", phase: "agent", threadId: created.thread.id });
 
     const restarted = makeCoordinator(new ThreadStartupService(new ThreadStartupRepo(persistenceRuntime.reader, persistenceRuntime.writer), persistenceRuntime.writer));
     const restartedReplay = await restarted.createInitialTurn(command);
@@ -481,7 +480,7 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
     expect(admissions.admitInitialAutomaticTurn).not.toHaveBeenCalled();
   });
 
-  it("completes Direct startup only after first runtime admission and records a first-dispatch failure", async () => {
+  it("keeps Direct startup in its agent phase after first runtime admission and records a first-dispatch failure", async () => {
     const { workspace, startups, coordinator } = await harness();
 
     await coordinator.createInitialTurn({
@@ -490,12 +489,11 @@ describe("ThreadCreationCoordinator startup lifecycle", () => {
       startupId: directStartupId,
     });
     await coordinator.startInitialAgent(directStartupId);
-    await coordinator.completeInitialAgent(directStartupId);
 
     expect(startups.get(directStartupId)).toMatchObject({
-      state: "completed",
+      state: "running",
       phase: "agent",
-      steps: [{ phase: "thread", state: "completed" }, { phase: "agent", state: "completed" }],
+      steps: [{ phase: "thread", state: "completed" }, { phase: "agent", state: "running" }],
     });
 
     const failedStartupId = "00000000-0000-4000-8000-000000000004";
