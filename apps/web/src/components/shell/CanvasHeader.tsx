@@ -45,3 +45,18 @@ export function CanvasHeader({ children, className }: { readonly children?: Reac
     </>
   );
 }
+
+/**
+ * Top strip of the right panel. It keeps panel content clear of the
+ * Windows/Linux caption buttons, and takes over the sidebar controls when a
+ * maximized panel has replaced the canvas and the sidebar is not docked.
+ */
+export function PanelCaptionStrip({ maximized }: { readonly maximized: boolean }) {
+  const { sidebarDocked } = useShellChrome();
+  if (!maximized || sidebarDocked) return <div aria-hidden className="caption-strip window-drag" />;
+  return (
+    <header className="window-drag flex h-row-comfortable shrink-0 items-center pl-4 select-none">
+      <CollapsedSidebarControls />
+    </header>
+  );
+}
