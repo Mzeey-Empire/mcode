@@ -1,6 +1,7 @@
 import { instanceCachingFactory, Lifecycle, type DependencyContainer } from "tsyringe";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { ThreadStartupRepo } from "../persistence/thread-startup-repo.js";
+import { StartupAgentPhaseObserver } from "../startup-agent-phase-observer.js";
 import { ThreadStartupService } from "../thread-startup-service.js";
 
 /** Register thread startup persistence and lifecycle services. */
@@ -16,6 +17,11 @@ export function registerThreadStartupServices(container: DependencyContainer): v
         childContainer.resolve(ThreadStartupRepo),
         childContainer.resolve(ApplicationDatabaseWriter),
       ),
+    ),
+  });
+  container.register(StartupAgentPhaseObserver, {
+    useFactory: instanceCachingFactory(
+      (childContainer) => new StartupAgentPhaseObserver(childContainer.resolve(ThreadStartupService)),
     ),
   });
 }

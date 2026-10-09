@@ -110,6 +110,7 @@ import { prepareParentNarrativeRecoveryEvents } from "./parent-narrative-recover
 import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";
 import { ConversationDisplayMaterializationStore as ConversationDisplayMaterializer } from "../conversation/migrations/conversation-display-materialization-store.js";
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
+import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js";
 
 /** Capacity held back so volatile input cannot consume every semantic batch slot. */
 export const CANONICAL_AGENT_CONTROL_EVENT_RESERVE = 16;
@@ -393,6 +394,7 @@ export const publishCanonicalAgentEvents: CanonicalAgentEventPublisher = (events
   broadcast("agent.canonical", { phase: "saved", threadId, epoch: last.progressPosition?.epoch ?? `durable:${threadId}`,
     through: last.progressPosition?.sequence ?? 0,
     revision: { conversationRevision: last.durableRevision, rosterRevision: 0 }, events: [...events] });
+  notifyCommittedCanonicalEvents(events);
 };
 
 /** Owns validation, semantic reduction, atomic canonical persistence, and post-commit publication. */
