@@ -67,7 +67,7 @@ function initialEvents(): CanonicalAgentEventEnvelope[] {
         approvalReviewMode: "manual",
         approvalReviewReason: "manual-requested",
         providerIdentities: [],
-        startedAt: null,
+        startedAt: null, providerStartedAt: null,
         endedAt: null,
         createdAt: NOW,
         updatedAt: NOW,

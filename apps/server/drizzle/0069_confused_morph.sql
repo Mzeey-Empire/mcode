@@ -1,0 +1,1 @@
+ALTER TABLE `canonical_agent_turns` ADD `provider_started_at` text;

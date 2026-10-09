@@ -153,8 +153,8 @@ export class ThreadCreationCoordinator {
     if (startupId) await this.startups()?.advance(startupId, "agent");
   }
 
-  /** Complete a startup after its initial command is handled or receives runtime admission. */
-  async completeInitialAgent(startupId: string | undefined): Promise<void> {
+  /** Complete a startup whose initial command was handled without a provider turn, so no provider frame will come. */
+  async completeHandledInitialCommand(startupId: string | undefined): Promise<void> {
     if (startupId) await this.startups()?.complete(startupId);
   }
 

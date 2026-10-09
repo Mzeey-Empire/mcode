@@ -107,6 +107,7 @@ function events(): CanonicalAgentEventDraft[] {
           approvalReviewReason: "manual-requested",
           providerIdentities: sourceIdentities,
           startedAt: null,
+          providerStartedAt: null,
           endedAt: null,
           createdAt: NOW,
           updatedAt: NOW,

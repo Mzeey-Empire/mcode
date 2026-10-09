@@ -1162,7 +1162,7 @@ describe("automatic Project Setup", () => {
     });
   });
 
-  it("completes an interrupted startup and dispatches the queued Turn on Continue", async () => {
+  it("resumes an interrupted startup into its agent phase and dispatches the queued Turn on Continue", async () => {
     let startups!: ThreadStartupService;
     const startupId = "00000000-0000-4000-8000-0000000000aa";
     const threadId = "00000000-0000-4000-8000-0000000000a1";
@@ -1194,7 +1194,8 @@ describe("automatic Project Setup", () => {
 
     expect(snapshot.gate).toBe("released-by-continue");
     expect(dispatch).toHaveBeenCalledOnce();
-    expect(startups.findByThreadId(threadId)?.state).toBe("completed");
+    // The dispatched Turn's first provider frame, not the drain, completes the startup.
+    expect(startups.findByThreadId(threadId)).toMatchObject({ state: "running", phase: "agent" });
     expect(startups.findByThreadId(threadId)?.steps[2].detail).toEqual({ phase: "setup", skipReason: "user-skipped" });
   });
 

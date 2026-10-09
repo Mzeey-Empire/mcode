@@ -217,20 +217,21 @@ describe("AgentService.createAndSend defaults", () => {
       attempt: null,
       queuedTurns: [{ state: "dispatched", dispatchedAt: expect.any(String) }],
     });
+    // The dispatched Turn holds the agent phase until its provider answers.
     expect(threadStartups.get("00000000-0000-4000-8000-000000000001")).toMatchObject({
-      state: "completed",
+      state: "running",
       phase: "agent",
       steps: [
         { phase: "thread", state: "completed" },
         { phase: "worktree", state: "completed" },
         { phase: "setup", state: "skipped" },
-        { phase: "agent", state: "completed" },
+        { phase: "agent", state: "running" },
       ],
     });
     providerCompletion.resolve();
   });
 
-  it("dispatches a follow-up Turn queued behind automatic Setup after the first Turn completes its startup", async () => {
+  it("dispatches a follow-up Turn queued behind automatic Setup after the first Turn is dispatched", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-drain-"));
     roots.push(root);
     const setupCompletion = deferred<TerminalCommandCompletion>();
@@ -284,7 +285,8 @@ describe("AgentService.createAndSend defaults", () => {
     setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
     await creating;
     await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
-    expect(threadStartups.get(startupId)).toMatchObject({ state: "completed", phase: "agent" });
+    // Dispatch alone leaves the startup waiting for the provider's first frame.
+    expect(threadStartups.get(startupId)).toMatchObject({ state: "running", phase: "agent" });
 
     // Ending the first session releases the drain loop so it claims the second queued Turn.
     await service.stopSession(managed.id);

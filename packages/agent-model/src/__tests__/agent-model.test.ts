@@ -239,6 +239,55 @@ describe("canonical agent model", () => {
     expect(lateError.state.turns["turn-1"]?.status).toBe("Completed");
   });
 
+  it("records the first provider frame once and ignores a later claim", () => {
+    const envelope = AgentEventEnvelopeSchema(CanonicalAgentEventSchema);
+    const turnRouting = { threadId: "thread-1", turnId: "turn-1", executionId };
+    const created = envelope.parse({
+      ...threadRecordedEvent("event-1", 1),
+      eventId: "event-2",
+      acceptedSequence: 2,
+      routing: turnRouting,
+      payload: {
+        type: "turn.created",
+        turn: {
+          id: "turn-1", threadId: "thread-1", status: "Pending", trigger: { kind: "user" },
+          permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested",
+          providerIdentities: [], startedAt: null, endedAt: null, ...timestamps,
+        },
+      },
+    });
+    const providerStarted = (eventId: string, acceptedSequence: number, at: string) => envelope.parse({
+      ...created, eventId, acceptedSequence, payload: { type: "turn.provider-started", at },
+    });
+
+    const thread = reduceAgentEvent(createAgentModelState(), threadRecordedEvent("event-1", 1));
+    const pending = reduceAgentEvent(thread.state, created);
+    expect(pending.state.turns["turn-1"]?.providerStartedAt).toBeNull();
+
+    const first = reduceAgentEvent(pending.state, providerStarted("event-3", 3, "2026-08-09T12:00:01.000Z"));
+    const replay = reduceAgentEvent(first.state, providerStarted("event-3", 3, "2026-08-09T12:00:01.000Z"));
+    const later = reduceAgentEvent(first.state, providerStarted("event-4", 4, "2026-08-09T12:00:05.000Z"));
+
+    expect(first.outcome).toBe("applied");
+    expect(first.state.turns["turn-1"]?.providerStartedAt).toBe("2026-08-09T12:00:01.000Z");
+    expect(replay.outcome).toBe("duplicate");
+    expect(replay.state).toBe(first.state);
+    expect(later.outcome).toBe("duplicate");
+    expect(later.state.turns["turn-1"]?.providerStartedAt).toBe("2026-08-09T12:00:01.000Z");
+  });
+
+  it("reads a turn saved before provider start tracking as never started", () => {
+    const savedTurn = {
+      id: "turn-1", threadId: "thread-1", status: "Completed", trigger: { kind: "user" },
+      permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested",
+      providerIdentities: [], startedAt: timestamps.createdAt, endedAt: timestamps.updatedAt, ...timestamps,
+    };
+
+    const parsed = AgentModelStateSchema.parse({ ...createAgentModelState(), turns: { "turn-1": savedTurn } });
+
+    expect(parsed.turns["turn-1"]?.providerStartedAt).toBeNull();
+  });
+
   it("reduces an explicit cancellation to the Cancelled terminal status", () => {
     const initialState = createAgentModelState();
     const thread = threadRecordedEvent("event-1", 1);

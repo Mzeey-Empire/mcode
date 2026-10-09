@@ -448,7 +448,8 @@ const ConversationNewerPageMethod: {
 
 const SetThreadSubscriptionsMethod: {
   params: z.ZodType<SetThreadSubscriptionsInput>;
-  result: z.ZodType<SetThreadSubscriptionsResult>;
+  // Recoveries carry canonical turns whose defaulted fields make the wire input differ from the parsed output.
+  result: z.ZodType<SetThreadSubscriptionsResult, z.ZodTypeDef, unknown>;
 } = {
   params: SetThreadSubscriptionsSchema(),
   result: SetThreadSubscriptionsResultSchema(),

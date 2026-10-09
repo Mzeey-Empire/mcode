@@ -30,7 +30,7 @@ const turn: AgentTurn = {
   id: execution.turnId, threadId: execution.threadId, executionId: execution.executionId,
   status: "Running", trigger: { kind: "user" }, permissionMode: "supervised",
   approvalReviewMode: "manual", approvalReviewReason: "default", providerIdentities: [],
-  startedAt: STARTED_AT, endedAt: null, createdAt: STARTED_AT, updatedAt: STARTED_AT,
+  startedAt: STARTED_AT, providerStartedAt: null, endedAt: null, createdAt: STARTED_AT, updatedAt: STARTED_AT,
 };
 
 function operation(mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation {
@@ -201,15 +201,16 @@ describe("prepareAcceptedParentEvents", () => {
     const before = structuredClone(op);
     const result = prepare(op, { [discarded.id]: discarded, [existing.id]: existing });
 
-    expect(result.events[0]).toBe(raw);
-    expect(result.events[1]?.payload).toMatchObject({ type: "item.recorded", item: {
+    expect(result.events[0]?.payload).toEqual({ type: "turn.provider-started", at: ACCEPTED_AT });
+    expect(result.events[1]).toBe(raw);
+    expect(result.events[2]?.payload).toMatchObject({ type: "item.recorded", item: {
       parentItemId: "toolCall:parent-tool", payload: { projection: "narrativeRecovery",
         identity: "child", model: "child-model", reasoningEffort: "high" },
     } });
-    expect(result.events[2]?.payload).toMatchObject({ type: "item.recorded", item: {
+    expect(result.events[3]?.payload).toMatchObject({ type: "item.recorded", item: {
       id: discarded.id, payload: { projection: "narrativeRecoveryDiscarded" },
     } });
-    expect(result.events[3]).toMatchObject({ eventId: "lease:2:publication:0", routing: execution,
+    expect(result.events[4]).toMatchObject({ eventId: "lease:2:publication:0", routing: execution,
       payload: { type: "publication.recorded", publicationId: "7", event: {
         type: "toolUse", toolInput: { file_path: "file.txt" },
       } } });
@@ -433,6 +434,43 @@ describe("prepareAcceptedParentEvents", () => {
       narrative: changed, identity: "child", model: "child-model", reasoningEffort: "high",
     } });
     expect(result.storageOperation?.mutation).toMatchObject({ kind: "finish-live-event", projection: { narrative: [changed] } });
+  });
+
+  it("records the provider start before a terminal frame that is also the first frame", () => {
+    const op = { ...finish("completed", []), livePublication: [{ after: "terminal" as const,
+      event: { type: "turnComplete" as const, threadId: thread.id, reason: "end_turn",
+        costUsd: null, tokensIn: 1, tokensOut: 1 } }] } satisfies ExecutionSemanticOperation;
+    const result = prepare(op);
+
+    expect(result.events[0]).toMatchObject({ eventId: `${execution.executionId}:provider-started`, routing: execution,
+      payload: { type: "turn.provider-started", at: ACCEPTED_AT } });
+    const state = applyPrepared(result.events);
+    expect(state.turns[turn.id]).toMatchObject({ status: "Completed", providerStartedAt: ACCEPTED_AT });
+  });
+
+  it("does not treat a synthesized turn start, session noise, or pre-answer Claude frames as the provider answering", () => {
+    const op = { ...operation({ kind: "checkpoint", phase: "running", nativeCursor: null }),
+      livePublication: [
+        { after: "writer" as const, event: { type: "turnStarted" as const, threadId: thread.id } },
+        { after: "writer" as const, event: { type: "system" as const, threadId: thread.id, subtype: "init" } },
+        { after: "writer" as const, event: { type: "hookStarted" as const, threadId: thread.id,
+          hookName: "SessionStart", hookType: "permission" as const } },
+        { after: "writer" as const, event: { type: "rateLimited" as const, threadId: thread.id, active: false } },
+        { after: "writer" as const, event: { type: "assistantMessageBoundary" as const, threadId: thread.id,
+          isFinalResponse: true } },
+      ] } satisfies ExecutionSemanticOperation;
+
+    expect(prepare(op).events.map((event) => event.payload.type)).not.toContain("turn.provider-started");
+  });
+
+  it("records the provider start only while the turn has none", () => {
+    const op = { ...operation({ kind: "checkpoint", phase: "running", nativeCursor: null }),
+      livePublication: [{ after: "writer" as const, event: { type: "textDelta" as const, threadId: thread.id,
+        delta: "Hi" } }] } satisfies ExecutionSemanticOperation;
+    const started = prepareAcceptedParentEvents({ operation: op, thread, turn: { ...turn, providerStartedAt: STARTED_AT },
+      items: {}, publicationIds: ["7"], messageSequence: 3, acceptedAt: ACCEPTED_AT });
+
+    expect(started.events.map((event) => event.payload.type)).not.toContain("turn.provider-started");
   });
 
   it("finishes an empty turn without inventing an assistant message", () => {

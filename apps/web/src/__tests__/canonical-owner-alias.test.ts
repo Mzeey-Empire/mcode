@@ -26,7 +26,7 @@ function familyState(): AgentModelState {
   state.threads[OWNER] = { ...commonThread, id: OWNER };
   state.threads[CHILD] = { ...commonThread, id: CHILD, parentThreadId: OWNER, owningParentThreadId: OWNER };
   const commonTurn = { status: "Running" as const, permissionMode: "full" as const, approvalReviewMode: "manual" as const,
-    approvalReviewReason: "manual-requested" as const, providerIdentities: [], startedAt: NOW, endedAt: null, createdAt: NOW, updatedAt: NOW };
+    approvalReviewReason: "manual-requested" as const, providerIdentities: [], startedAt: NOW, providerStartedAt: null, endedAt: null, createdAt: NOW, updatedAt: NOW };
   state.turns[OWNER_TURN] = { ...commonTurn, id: OWNER_TURN, threadId: OWNER, executionId: OWNER_EXECUTION, trigger: { kind: "user" } };
   state.turns[CHILD_TURN] = { ...commonTurn, id: CHILD_TURN, threadId: CHILD, executionId: CHILD_EXECUTION,
     trigger: { kind: "child", sourceThreadId: OWNER, sourceTurnId: OWNER_TURN } };

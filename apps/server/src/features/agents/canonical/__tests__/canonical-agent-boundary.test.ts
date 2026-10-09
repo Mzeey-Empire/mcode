@@ -100,6 +100,7 @@ function initialDrafts(): CanonicalAgentEventDraft[] {
           approvalReviewReason: "manual-requested",
           providerIdentities: sourceIdentities,
           startedAt: null,
+          providerStartedAt: null,
           endedAt: null,
           createdAt: NOW,
           updatedAt: NOW,
@@ -434,6 +435,21 @@ describe("CanonicalAgentBoundary", () => {
     expect(published).toHaveBeenCalledTimes(1);
     expect(published.mock.calls[0]![0]).toHaveLength(3);
     expect(published.mock.calls[0]![0].every((event) => event.durableRevision === 1)).toBe(true);
+  });
+
+  it("persists the first provider frame time across a reopen", () => {
+    sink.commit({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running",
+      events: initialDrafts() });
+    expect(sink.loadTurn(TURN_ID)?.providerStartedAt).toBeNull();
+
+    sink.commit({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: [{
+      eventId: `${EXECUTION_ID}:provider-started`,
+      routing: { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID },
+      sourceProviderId: "codex", sourceIdentities: [],
+      payload: { type: "turn.provider-started", at: NOW },
+    }] });
+
+    expect(new CanonicalAgentBoundary(db, published).loadTurn(TURN_ID)?.providerStartedAt).toBe(NOW);
   });
 
   it("reports deferred canonical delivery without undoing the durable commit", () => {

@@ -36,7 +36,7 @@ function epochRecoveryFixture() {
     providerIdentities: [], activityState: "Active", conversationRevision: 1, rosterRevision: 0, createdAt: pending.oldestPendingAt, updatedAt: pending.oldestPendingAt };
   state.turns.turn = { id: "turn", threadId: pending.threadId, executionId: pending.executionId, status: "Running", trigger: { kind: "user" }, permissionMode: "full",
     approvalReviewMode: "manual", approvalReviewReason: "manual-requested", providerIdentities: [],
-    startedAt: pending.oldestPendingAt, endedAt: null, createdAt: pending.oldestPendingAt, updatedAt: pending.oldestPendingAt };
+    startedAt: pending.oldestPendingAt, providerStartedAt: null, endedAt: null, createdAt: pending.oldestPendingAt, updatedAt: pending.oldestPendingAt };
   resetThreadStoreForTests({ currentThreadId: pending.threadId, records: seedThreadRecord(pending.threadId, {
     runtimePhase: "running", turnExecutionId: pending.executionId,
     canonicalAgent: { ...createCanonicalAgentReplica(), state, durableState: state, revision: { conversationRevision: 1, rosterRevision: 0 },

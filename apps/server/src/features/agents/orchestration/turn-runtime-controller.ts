@@ -1196,7 +1196,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       deliveryAttempt: active.deliveryAttempt, outcome }) : null;
   }
 
-  /** Start a prepared first-turn command and return its authoritative admission outcome. */
+  /** Start a prepared first-turn command and report whether a provider turn admitted it. */
   private async sendInitialMessageAndSnapshot(
     command: SendMessageCommand,
     onError: (error: unknown) => Promise<void>,
@@ -2088,10 +2088,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         await this.threadCreation.failInitialAgent(created.startupId);
       }, () => this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId));
       runtimeSnapshot = initialDispatch.runtimeSnapshot;
-      if (!initialDispatch.failed && (
-        initialDispatch.providerAdmitted || this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId)
-      )) {
-        await this.threadCreation.completeInitialAgent(created.startupId);
+      // A provider turn finishes the startup through StartupAgentPhaseObserver once the provider answers. A command
+      // handled without a provider turn has nothing to wait for, so it finishes the startup here.
+      if (!initialDispatch.failed && !initialDispatch.providerAdmitted
+        && this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId)) {
+        await this.threadCreation.completeHandledInitialCommand(created.startupId);
       }
     } catch (error) {
       await this.threadCreation.failInitialAgent(created.startupId);
@@ -2138,7 +2139,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
           throw new Error(`Queued Turn finished without runtime dispatch: ${submission.threadId}`);
         }),
       ]);
-      if (!cancellationWon) await this.threadCreation.completeInitialAgent(startupId);
     } catch (error) {
       await this.threadCreation.failInitialAgent(startupId);
       throw error;

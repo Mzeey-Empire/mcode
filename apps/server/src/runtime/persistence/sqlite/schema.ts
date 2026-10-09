@@ -633,6 +633,7 @@ export const canonicalAgentTurns = sqliteTable(
     approvalReviewReason: text("approval_review_reason").notNull().default("manual-requested"),
     providerIdentitiesJson: text("provider_identities_json").notNull().default("[]"),
     startedAt: text("started_at"),
+    providerStartedAt: text("provider_started_at"),
     endedAt: text("ended_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),

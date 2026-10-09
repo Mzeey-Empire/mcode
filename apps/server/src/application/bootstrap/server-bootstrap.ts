@@ -59,7 +59,7 @@ import {
   ThreadDeletionTeardownService,
   ThreadService,
 } from "../../features/thread-control";
-import { ThreadStartupService } from "../../features/thread-startup";
+import { StartupAgentPhaseObserver, ThreadStartupService } from "../../features/thread-startup";
 import {
   AgentPermissionService,
   AgentService,
@@ -325,6 +325,8 @@ workspaceEnvironmentService.setAutomaticSetupDispatcher({
 const turnRecoveryService = container.resolve(TurnRecoveryService);
 const threadControlService = container.resolve(ThreadControlService);
 const threadStartupService = container.resolve(ThreadStartupService);
+const startupAgentPhaseObserver = container.resolve(StartupAgentPhaseObserver);
+startupAgentPhaseObserver.start();
 const externalThreadControlPairingService = container.resolve(ExternalThreadControlPairingService);
 const externalThreadControlMcpRuntime = container.resolve(ExternalThreadControlMcpRuntime);
 const gitComparison = container.resolve(GitComparisonService);
@@ -1020,6 +1022,8 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => container.resolve<TurnFinalizer>(TURN_FINALIZER).drain());
   await captureCleanupFailure(() => container.resolve(AgentEventPublicationRegistry).drain());
   await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
+  // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.
+  await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
   shutdownCoordinator.setPhase("close application database writer");
   await captureCleanupFailure(() => databaseWriter.close());
 
