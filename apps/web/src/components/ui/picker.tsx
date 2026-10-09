@@ -39,10 +39,27 @@ export interface PickerRow {
   readonly disabledReason?: string;
   /** Muted second line under the name, such as the provider a favourite belongs to. */
   readonly description?: ReactNode;
-  /** A control after the name, such as a favourite star. Its clicks never pick the row. */
-  readonly action?: ReactNode;
+  /** A secondary action on the row, such as starring it. Running it never picks the row. */
+  readonly action?: PickerRowAction;
   /** Rows sharing a group sit together; a divider marks where the group changes. */
   readonly group?: string;
+}
+
+/** The shortcut that runs the highlighted row's action from the search field. */
+const ROW_ACTION_SHORTCUT = { aria: "Control+D", label: "Ctrl+D" } as const;
+
+/**
+ * A row's secondary action. A listbox option cannot hold a focusable control, so the button answers
+ * the pointer only and the keyboard reaches it through {@link ROW_ACTION_SHORTCUT}.
+ */
+export interface PickerRowAction {
+  /** What the action does, read as part of the row's description. */
+  readonly label: string;
+  /** The button's face. Decorative: the label carries the meaning. */
+  readonly icon: ReactNode;
+  /** Keeps the button visible when the row is not highlighted, such as a filled star. */
+  readonly pinned?: boolean;
+  readonly run: () => void;
 }
 
 /** One picker tab, drawn as a segment above the list. */
@@ -132,6 +149,13 @@ export function Picker<T>(props: PickerProps<T>) {
       select(rows[activeIndex]);
       return;
     }
+    if (isRowActionShortcut(event)) {
+      const row = rows[activeIndex]?.row;
+      if (!row?.action || row.disabled) return;
+      event.preventDefault();
+      row.action.run();
+      return;
+    }
     const target = highlightTarget(rows, activeIndex, event.key);
     if (target === null) return;
     event.preventDefault();
@@ -195,7 +219,7 @@ function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>,
   if (!tabs || tabs.length === 0) return null;
   const iconOnly = tabs.every((tab) => tab.icon != null);
   return (
-    <div className="flex items-center gap-2 px-0.5 pb-1.5">
+    <div className={cn("flex items-center px-0.5 pb-1.5", iconOnly ? "mb-1 gap-0.5 border-b border-border pt-0.5" : "gap-2")}>
       <SegmentedControl
         size="compact"
         fill={!iconOnly}
@@ -393,7 +417,25 @@ function PickerOption(props: PickerOptionProps) {
   );
 }
 
+/** What an option reads after its name: why it is disabled, and how to run its action from the keyboard. */
+function optionDescriptions(id: string, row: PickerRow, reason: string | undefined) {
+  // The shortcut only reaches the highlighted row, and a disabled row is never highlighted.
+  const actionHint = row.action && !row.disabled ? `${row.action.label} (${ROW_ACTION_SHORTCUT.label})` : undefined;
+  const describedBy = [reason && `${id}-reason`, actionHint && `${id}-action`].filter(Boolean).join(" ");
+  return {
+    describedBy: describedBy || undefined,
+    keyShortcuts: actionHint ? ROW_ACTION_SHORTCUT.aria : undefined,
+    spans: (
+      <>
+        {reason ? <span id={`${id}-reason`} hidden>{reason}</span> : null}
+        {actionHint ? <span id={`${id}-action`} hidden>{actionHint}</span> : null}
+      </>
+    ),
+  };
+}
+
 function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
+  const descriptions = optionDescriptions(id, row, reason);
   return (
     <li
       {...(row.disabled ? undefined : { onMouseMove: active ? undefined : onHighlight, onClick: onPick })}
@@ -403,7 +445,8 @@ function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, reas
       role="option"
       aria-selected={selected}
       aria-disabled={row.disabled || undefined}
-      aria-describedby={reason ? `${id}-reason` : undefined}
+      aria-describedby={descriptions.describedBy}
+      aria-keyshortcuts={descriptions.keyShortcuts}
       data-active={active || undefined}
       // Keeps focus in the search field so typing and arrow keys keep working after a click.
       onMouseDown={(event) => event.preventDefault()}
@@ -413,8 +456,9 @@ function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, reas
         row.disabled && "cursor-default opacity-50",
       )}
     >
+      {/* A disabled row keeps its action for the pointer, so a starred row whose model went away can be unstarred. */}
       <PickerOptionContent row={row} selected={selected} />
-      {reason ? <span id={`${id}-reason`} hidden>{reason}</span> : null}
+      {descriptions.spans}
     </li>
   );
 }
@@ -434,21 +478,40 @@ function PickerOptionContent({ row, selected }: { readonly row: PickerRow; reado
         ) : null}
       </span>
       {row.tag ? <span className="shrink-0 text-caption text-muted">{row.tag}</span> : null}
-      {row.action != null ? (
-        // Owns its clicks so acting on the control never picks the row, and keeps focus in the search field.
-        <span
-          className="flex shrink-0 items-center"
-          onClick={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.preventDefault()}
-        >
-          {row.action}
-        </span>
-      ) : null}
+      {row.action ? <PickerRowActionButton action={row.action} /> : null}
       <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
         {selected ? <CheckIcon className="size-[1.4rem] text-ink" strokeWidth={1.5} /> : null}
       </span>
     </>
   );
+}
+
+function PickerRowActionButton({ action }: { readonly action: PickerRowAction }) {
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-hidden
+      data-slot="picker-row-action"
+      onClick={(event) => {
+        // Running the action must never also pick the row underneath it.
+        event.stopPropagation();
+        action.run();
+      }}
+      onMouseDown={(event) => event.preventDefault()}
+      className={cn(
+        "flex size-[1.4rem] shrink-0 items-center justify-center rounded-xs [&_svg]:size-[1.4rem]",
+        // An unpinned action shows only on the highlighted or hovered row, so the list reads as a column of names.
+        !action.pinned && "opacity-0 group-hover/option:opacity-100 group-data-active/option:opacity-100",
+      )}
+    >
+      {action.icon}
+    </button>
+  );
+}
+
+function isRowActionShortcut(event: KeyboardEvent<HTMLInputElement>): boolean {
+  return (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "d";
 }
 
 function PickerFailure({ status, onRetry }: { readonly status: { readonly failed: string; readonly detail?: string }; readonly onRetry?: () => void }) {

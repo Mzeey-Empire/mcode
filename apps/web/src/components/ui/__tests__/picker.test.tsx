@@ -299,17 +299,46 @@ describe("Picker", () => {
           key: branch.name,
           name: branch.name,
           description: "origin",
-          action: <button type="button" onClick={onAction}>Star {branch.name}</button>,
+          action: { label: `Star ${branch.name}`, icon: <span>*</span>, run: () => onAction(branch.name) },
         })}
       />,
     );
     const search = screen.getByRole("combobox");
     search.focus();
-    expect(screen.getByRole("option", { name: /branch-000/ })).toHaveTextContent("origin");
-    await userEvent.click(screen.getByRole("button", { name: "Star branch-000" }));
-    expect(onAction).toHaveBeenCalledOnce();
+    const row = screen.getByRole("option", { name: /branch-000/ });
+    expect(row).toHaveTextContent("origin");
+    expect(row).toHaveAccessibleDescription("Star branch-000 (Ctrl+D)");
+    const button = row.querySelector<HTMLButtonElement>("[data-slot=picker-row-action]");
+    expect(button).toHaveAttribute("tabindex", "-1");
+    await userEvent.click(button as HTMLButtonElement);
+    expect(onAction).toHaveBeenCalledWith("branch-000");
     expect(onSelect).not.toHaveBeenCalled();
     expect(search).toHaveFocus();
+  });
+
+  it("runs the active row's action on Ctrl+D without picking it, and keeps the shortcut off disabled rows", async () => {
+    const onSelect = vi.fn();
+    const onAction = vi.fn();
+    render(
+      <PagedPicker
+        onSelect={onSelect}
+        renderItem={(branch) => ({
+          key: branch.name,
+          name: branch.name,
+          disabled: branch.name === "branch-001",
+          action: { label: `Star ${branch.name}`, icon: <span>*</span>, run: () => onAction(branch.name) },
+        })}
+      />,
+    );
+    screen.getByRole("combobox").focus();
+    await userEvent.keyboard("{Control>}d{/Control}");
+    expect(onAction).toHaveBeenCalledWith("branch-000");
+    expect(onSelect).not.toHaveBeenCalled();
+    const disabled = screen.getByRole("option", { name: /branch-001/ });
+    expect(disabled).not.toHaveAttribute("aria-keyshortcuts");
+    await userEvent.click(disabled.querySelector("[data-slot=picker-row-action]") as HTMLElement);
+    expect(onAction).toHaveBeenLastCalledWith("branch-001");
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("hides the count while the total is unknown", () => {

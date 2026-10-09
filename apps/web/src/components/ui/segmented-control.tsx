@@ -28,7 +28,7 @@ interface SegmentedControlProps {
   readonly size?: SegmentedControlSize;
   /** Stretches the tray to its container so segments share the width evenly. */
   readonly fill?: boolean;
-  /** Draws each segment as its icon alone; the label stays as the segment's accessible name. */
+  /** Draws a borderless strip of icon segments; each label stays as its segment's accessible name. */
   readonly iconOnly?: boolean;
   readonly "aria-label"?: string;
   readonly className?: string;
@@ -102,9 +102,10 @@ export function SegmentedControl({
         aria-label={ariaLabel}
         onKeyDown={handleKeyDown}
         className={cn(
-          "items-center gap-2 rounded-control border border-control-border bg-panel p-[3px]",
+          "items-center",
+          // An icon strip sits in a picker's tab row, so it drops the tray and packs tight to fit every provider.
+          iconOnly ? "shrink-0 gap-0.5" : cn("gap-2 rounded-control border border-control-border bg-panel p-[3px]", TRAY_HEIGHT[size]),
           fill ? "flex w-full" : "inline-flex",
-          TRAY_HEIGHT[size],
           className,
         )}
       >
@@ -123,8 +124,7 @@ export function SegmentedControl({
               onClick={() => onChange(option.value)}
               className={cn(
                 "inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm border border-transparent text-body-small transition-colors duration-(--duration-fast) ease-(--ease-standard)",
-                iconOnly ? "w-[3rem] shrink-0" : "flex-1 px-2",
-                SEGMENT_HEIGHT[size],
+                iconOnly ? "h-7 w-[3rem] shrink-0" : cn("flex-1 px-2", SEGMENT_HEIGHT[size]),
                 FOCUS_RING_CLASS,
                 isActive
                   ? "bg-selected font-medium text-ink"
