@@ -26,6 +26,8 @@ export interface PickerRow {
   /** Stable identity, compared with `selectedKey`. */
   readonly key: string;
   readonly name: string;
+  /** Drawn before the name, such as a provider mark. Decorative: the name carries the meaning. */
+  readonly icon?: ReactNode;
   /** Draws the name in the mono face, for branch names, ids and paths. */
   readonly mono?: boolean;
   /** Short muted detail on the right, such as a group or a source. */
@@ -387,6 +389,11 @@ function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, reas
 function PickerOptionContent({ row, selected }: { readonly row: PickerRow; readonly selected: boolean }) {
   return (
     <>
+      {row.icon != null ? (
+        <span aria-hidden className="flex size-4 shrink-0 items-center justify-center text-muted [&_svg]:size-[1.4rem]">
+          {row.icon}
+        </span>
+      ) : null}
       <span className={cn("min-w-0 flex-1 text-fade", row.mono && "font-mono text-caption")}>{row.name}</span>
       {row.tag ? <span className="shrink-0 text-caption text-muted">{row.tag}</span> : null}
       <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">

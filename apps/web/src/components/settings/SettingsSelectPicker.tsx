@@ -14,7 +14,7 @@ export interface SettingsPickOption {
   /** Shown as the row's muted tag when the options span more than one group, e.g. the model family. */
   readonly group?: string;
   readonly disabled?: boolean;
-  /** Drawn on the trigger beside the chosen label. */
+  /** Drawn before the label on its row, and on the trigger when chosen. */
   readonly icon?: ReactNode;
   /** Why a disabled option is unavailable. Ignored on enabled options. */
   readonly title?: string;
@@ -43,6 +43,7 @@ function toRow(option: SettingsPickOption, showGroup: boolean): PickerRow {
   return {
     key: option.value,
     name: option.label,
+    icon: option.icon,
     tag: showGroup ? option.group : undefined,
     disabled: option.disabled,
     disabledReason: option.disabled ? option.title : undefined,

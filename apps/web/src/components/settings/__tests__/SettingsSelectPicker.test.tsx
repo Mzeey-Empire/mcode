@@ -68,6 +68,17 @@ describe("SettingsSelectPicker", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("draws each option's icon on its row without adding to the row's name", async () => {
+    const withIcons: SettingsPickOption[] = [
+      { value: "claude", label: "Claude", icon: <svg data-testid="icon-claude" /> },
+      { value: "codex", label: "Codex", icon: <svg data-testid="icon-codex" /> },
+    ];
+    render(<Harness initial="claude" onChange={() => {}} options={withIcons} />);
+    await open();
+    const codex = screen.getByRole("option", { name: "Codex" });
+    expect(codex).toContainElement(screen.getByTestId("icon-codex"));
+  });
+
   it("tags rows with their group only when the options span several groups", async () => {
     const grouped: SettingsPickOption[] = [
       { value: "a", label: "Alpha", group: "Claude" },
