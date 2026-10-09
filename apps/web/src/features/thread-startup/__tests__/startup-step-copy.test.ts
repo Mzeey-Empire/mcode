@@ -79,6 +79,17 @@ describe("startupTrailRows", () => {
     ]);
   });
 
+  it("shows a pull request fetch as its number and branch, falling back to the ref", () => {
+    const rows = startupTrailRows(managed([
+      { phase: "fetch", state: "completed", startedAt: at(0), endedAt: at(3), detail: { phase: "fetch", ref: "pull/1804/head", pullRequestNumber: 1804, branch: "feat/sidebar-resize" } },
+      { phase: "fetch", state: "completed", startedAt: at(0), endedAt: at(3), detail: { phase: "fetch", ref: "pull/1804/head", pullRequestNumber: 1804 } },
+    ]), { now: 0 });
+    expect(rows.map((row) => row.meta)).toEqual([
+      ["#1804 · feat/sidebar-resize", "0:03"],
+      ["#1804", "0:03"],
+    ]);
+  });
+
   it("shows the skip reason and no duration for skipped setup", () => {
     const [setup] = startupTrailRows(managed([
       { phase: "setup", state: "skipped", startedAt: at(0), endedAt: at(0), detail: { phase: "setup", skipReason: "thread-running-here" } },

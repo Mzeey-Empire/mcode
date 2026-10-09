@@ -131,8 +131,16 @@ function setupArgument(step: ThreadStartupStep, setupCommand: string | undefined
   return step.state === "pending" ? undefined : setupCommand;
 }
 
+type FetchDetail = Extract<NonNullable<ThreadStartupStep["detail"]>, { phase: "fetch" }>;
+
+/** A pull request fetch reads as `#1804 · branch`; its raw `pull/N/head` ref means nothing to the user. */
+function fetchArgument(detail: FetchDetail): string {
+  if (detail.pullRequestNumber === undefined) return detail.ref;
+  return [`#${detail.pullRequestNumber}`, detail.branch].filter((part) => part !== undefined).join(" · ");
+}
+
 function stepArgument(step: ThreadStartupStep, setupCommand: string | undefined): string | undefined {
-  if (step.detail?.phase === "fetch") return step.detail.ref;
+  if (step.detail?.phase === "fetch") return fetchArgument(step.detail);
   if (step.detail?.phase === "worktree") return step.detail.folderName;
   return step.phase === "setup" ? setupArgument(step, setupCommand) : undefined;
 }
