@@ -44,6 +44,7 @@ export interface GitRouterDeps {
   gitRepository: Pick<
     GitRepositoryService,
     | "listBranches"
+    | "listRefsAt"
     | "getCurrentBranch"
     | "checkout"
     | "getRemoteUrl"
@@ -69,6 +70,9 @@ type GitHandlerMap = {
 };
 
 const gitHandlers: GitHandlerMap = {
+  "git.refs.list": (deps, params) => deps.gitRepository.listRefsAt(
+    resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId), params,
+  ),
   "git.listBranches": (deps, params) =>
     isGitWorkspace(deps, params.workspaceId)
       ? deps.gitRepository.listBranches(params.workspaceId)

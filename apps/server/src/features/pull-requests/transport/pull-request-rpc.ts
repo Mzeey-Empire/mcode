@@ -16,6 +16,7 @@ import type {
   Thread,
   Workspace,
   WsMethodName,
+  PullRequestTargetsListParams,
 } from "@mcode/contracts";
 import { validateBranchName } from "@mcode/shared";
 import type { WebSocket } from "ws";
@@ -36,6 +37,7 @@ import type { CiWatcherService, WatchEntry } from "../status/ci-watcher.js";
 type GithubPullRequestMethod =
   | "github.branchPr"
   | "github.listOpenPrs"
+  | "github.pullRequestTargets.list"
   | "github.checkStatus"
   | "github.generatePrDraft"
   | "github.createPr";
@@ -99,6 +101,7 @@ const DEFAULT_PULL_REQUEST_CONNECTION = {};
 const githubPullRequestMethods: Record<GithubPullRequestMethod, true> = {
   "github.branchPr": true,
   "github.listOpenPrs": true,
+  "github.pullRequestTargets.list": true,
   "github.checkStatus": true,
   "github.generatePrDraft": true,
   "github.createPr": true,
@@ -195,6 +198,8 @@ export async function routePullRequestRpc(
       return deps.githubService.listOpenPrs(
         githubParams<GithubListOpenPrsParams>(params).workspaceId,
       );
+    case "github.pullRequestTargets.list":
+      return deps.githubService.listPullRequestTargets(githubParams<PullRequestTargetsListParams>(params));
     case "github.checkStatus":
       return routeCheckStatus(deps, githubParams<GithubCheckStatusParams>(params));
     case "github.generatePrDraft": {

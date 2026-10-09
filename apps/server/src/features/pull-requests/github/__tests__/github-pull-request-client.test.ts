@@ -1,4 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import "reflect-metadata";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { GithubService } from "../github-service.js";
+import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
+import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
 import {
   PULL_REQUEST_CURSOR_COMPONENT_MAX_LENGTH,
   PULL_REQUEST_DETAIL_TEXT_MAX_LENGTH,
@@ -21,6 +29,124 @@ import {
   decodePullRequestFileLocator,
   normalizeGithubPullRequestFile,
 } from "../github-pull-request-file-normalizers.js";
+
+function targetNode(number: number) {
+  return { number, title: `PR ${number}`, headRefName: `feature/${number}`, author: { login: "author" },
+    isCrossRepository: false, url: `https://github.com/owner/repo/pull/${number}` };
+}
+
+function targetRequest() {
+  return { owner: "owner", name: "repo", signal: new AbortController().signal };
+}
+
+describe("repository pull request targets", () => {
+  it("uses the open repository connection and pages past 30 using GitHub totalCount", async () => {
+    const run = vi.fn<GithubPullRequestCommandRunner["run"]>()
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { repository: { pullRequests: {
+        ...page(Array.from({ length: 30 }, (_, i) => targetNode(i + 1)), true, "cursor-30"), totalCount: 42,
+      } } } }), stderr: "" })
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { repository: { pullRequests: {
+        ...page(Array.from({ length: 12 }, (_, i) => targetNode(i + 31))), totalCount: 42,
+      } } } }), stderr: "" });
+    const client = new GithubPullRequestClient({ run });
+    const first = await client.listRepositoryOpenPullRequests(targetRequest());
+    const second = await client.listRepositoryOpenPullRequests({ ...targetRequest(), cursor: first.nextCursor ?? undefined });
+    expect(first.items.map((item) => item.number)).toEqual(Array.from({ length: 30 }, (_, i) => i + 1));
+    expect(second.items.map((item) => item.number)).toEqual([31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]);
+    expect([first.total, second.total, first.nextCursor, second.nextCursor]).toEqual([42, 42, "cursor-30", null]);
+    expect(first.items[0]).toEqual({ ...targetNode(1), author: "author" });
+    const firstArgs = run.mock.calls[0]?.[0] ?? [];
+    const document = firstArgs.find((arg) => arg.startsWith("query=")) ?? "";
+    expect(document).toContain("repository(owner: $owner, name: $name)");
+    expect(document).toContain("pullRequests(states: OPEN, first: $first, after: $after");
+    expect(document).toContain("orderBy: {field: UPDATED_AT, direction: DESC}");
+    expect(document).toContain("totalCount pageInfo");
+    expect(firstArgs).toEqual(expect.arrayContaining(["owner=owner", "name=repo", "first=30", "after=null"]));
+    expect(run.mock.calls[1]?.[0]).toEqual(expect.arrayContaining(["after=cursor-30"]));
+  });
+
+  it("uses repository-scoped search and issueCount without exposing remote author objects", async () => {
+    const run = vi.fn<GithubPullRequestCommandRunner["run"]>().mockResolvedValue({
+      stdout: JSON.stringify({ data: { search: { ...page([{ ...targetNode(7), author: null }], true, "search-next"), issueCount: 99 } } }), stderr: "",
+    });
+    const result = await new GithubPullRequestClient({ run }).listRepositoryOpenPullRequests({ ...targetRequest(), query: " Sidebar ", limit: 1, cursor: "search-before" });
+    expect(result).toEqual({ ok: true, items: [{ ...targetNode(7), author: null }], total: 99, nextCursor: "search-next" });
+    expect(run.mock.calls[0]?.[0]).toEqual(expect.arrayContaining(["query=repo:owner/repo is:pr is:open Sidebar", "first=1", "after=search-before"]));
+    expect(run.mock.calls[0]?.[0].find((arg) => arg.startsWith("query=query"))).toContain("search(query: $query, type: ISSUE");
+  });
+
+  it.each(["42", "#42"])("fetches exact %s first, deduplicates the first page, and keeps the search total", async (query) => {
+    const run = vi.fn<GithubPullRequestCommandRunner["run"]>()
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { repository: { pullRequest: { ...targetNode(42), state: "OPEN" } } } }), stderr: "" })
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { search: { ...page([targetNode(9), targetNode(42)], true, "next"), issueCount: 7 } } }), stderr: "" })
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { search: { ...page([targetNode(10)]), issueCount: 7 } } }), stderr: "" });
+    const client = new GithubPullRequestClient({ run });
+    const first = await client.listRepositoryOpenPullRequests({ ...targetRequest(), query, limit: 2 });
+    const second = await client.listRepositoryOpenPullRequests({ ...targetRequest(), query, limit: 2, cursor: first.nextCursor ?? undefined });
+    expect(first.items.map((item) => item.number)).toEqual([42, 9]);
+    expect(first.total).toBe(7);
+    expect(second.items.map((item) => item.number)).toEqual([10]);
+    expect(run.mock.calls.map(([args]) => args.find((arg) => arg.startsWith("number=")))).toEqual(["number=42", undefined, undefined]);
+  });
+
+  it("preserves the search edge when an exact-number bonus fills a limit-one first page", async () => {
+    const run = vi.fn<GithubPullRequestCommandRunner["run"]>()
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { repository: { pullRequest: { ...targetNode(42), state: "OPEN" } } } }), stderr: "" })
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ data: { search: { ...page([targetNode(9)], true, "next"), issueCount: 3 } } }), stderr: "" });
+    const result = await new GithubPullRequestClient({ run }).listRepositoryOpenPullRequests({ ...targetRequest(), query: "#42", limit: 1 });
+    expect(result.items.map((item) => item.number)).toEqual([42, 9]);
+    expect([result.total, result.nextCursor]).toEqual([3, "next"]);
+  });
+
+  it.each([
+    [4, "not logged in", "unauthenticated"],
+    [1, "invalid cursor", "stale_cursor"],
+    ["ENOENT", "gh missing", "remote_unavailable"],
+    [1, "network unavailable", "remote_unavailable"],
+  ])("maps runner failure %s/%s to %s", async (code, stderr, expected) => {
+    const run = vi.fn<GithubPullRequestCommandRunner["run"]>().mockRejectedValue(Object.assign(new Error(stderr), { code, stderr }));
+    await expect(new GithubPullRequestClient({ run }).listRepositoryOpenPullRequests(targetRequest())).rejects.toMatchObject({ code: expected });
+  });
+
+  it("retains the reset time for a rate-limit response", async () => {
+    const run = vi.fn<GithubPullRequestCommandRunner["run"]>().mockRejectedValue(Object.assign(new Error("rate limit"), {
+      stderr: "API rate limit exceeded", stdout: "HTTP/2 403\r\nx-ratelimit-reset: 1791547200\r\n\r\n{}",
+    }));
+    await expect(new GithubPullRequestClient({ run }).listRepositoryOpenPullRequests(targetRequest())).rejects.toMatchObject({ code: "rate_limited", resetAt: "2026-10-09T12:00:00.000Z" });
+  });
+
+  it("rejects a malformed GitHub page instead of reporting an empty success", async () => {
+    const client = new GithubPullRequestClient({ run: async () => ({ stdout: '{"data":{"repository":null}}', stderr: "" }) });
+    await expect(client.listRepositoryOpenPullRequests(targetRequest())).rejects.toMatchObject({ code: "remote_unavailable" });
+  });
+});
+
+const targetRepo = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-pr-targets-1830-"));
+afterAll(() => NodeFS.rmSync(targetRepo, { recursive: true, force: true }));
+
+describe("GithubService.listPullRequestTargets", () => {
+  const workspace = { id: "project", name: "project", path: targetRepo, provider_config: {}, is_git_repo: true,
+    created_at: "", updated_at: "", pinned: false, last_opened_at: null, sort_order: 0, deleted_at: null };
+  const repository = new GitRepositoryService({ findById: () => workspace }, new RealGitExecutor());
+
+  it("returns remote_not_github for a real non-GitHub origin", async () => {
+    NodeChildProcess.execFileSync("git", ["init", targetRepo]);
+    NodeChildProcess.execFileSync("git", ["-C", targetRepo, "config", "remote.origin.url", "git@gitlab.com:owner/repo.git"]);
+    const client = new GithubPullRequestClient({ run: async () => { throw new Error("GitHub must not be called"); } });
+    const service = new GithubService({ findById: () => workspace }, { platform: "win32", architecture: "x64", nodeAbi: "127" }, repository, client);
+    expect(await service.listPullRequestTargets({ workspaceId: "project" })).toEqual({
+      ok: false, error: { code: "remote_not_github", message: "The origin remote is not a GitHub repository." },
+    });
+  });
+
+  it("normalizes an SSH origin and exposes client failures through the typed envelope", async () => {
+    NodeChildProcess.execFileSync("git", ["-C", targetRepo, "config", "remote.origin.url", "git@github.com:owner/repo.git"]);
+    const run = vi.fn<GithubPullRequestCommandRunner["run"]>().mockRejectedValue(Object.assign(new Error("Not logged in"), { code: 4 }));
+    const service = new GithubService({ findById: () => workspace }, { platform: "win32", architecture: "x64", nodeAbi: "127" }, repository, new GithubPullRequestClient({ run }));
+    expect(await service.listPullRequestTargets({ workspaceId: "project" })).toEqual({ ok: false, error: { code: "unauthenticated", message: "GitHub authentication is required." } });
+    expect(run.mock.calls[0]?.[0]).toEqual(expect.arrayContaining(["owner=owner", "name=repo"]));
+  });
+});
 
 function viewer(): PullRequestViewerContext {
   return {

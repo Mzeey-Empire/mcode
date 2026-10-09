@@ -1,7 +1,9 @@
 import * as NodePath from "node:path";
+import { z } from "zod";
 import { inject, injectable } from "tsyringe";
 import { logger, validateBranchName } from "@mcode/shared";
-import type { GitBranch, GitRemoteUrl } from "@mcode/contracts";
+import type { GitBranch, GitRemoteUrl, GitRefsListParams, GitRefsListResult, GitListError } from "@mcode/contracts";
+import { buildRefPage } from "./git-ref-targets.js";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import type { GitExecOptions, GitExecutor } from "./execution/index.js";
 
@@ -27,6 +29,24 @@ function assertSafeBranchCreationName(name: string): void {
   if (!/^(?!-)[A-Za-z0-9._/-]+$/.test(name) || name.includes("..") || name === "HEAD") {
     throw new Error(`Branch name contains invalid characters: ${name}`);
   }
+}
+
+const gitCommandFailureSchema = z.object({
+  stderr: z.string().optional(), message: z.string().optional(),
+  killed: z.boolean().optional(), code: z.union([z.string(), z.number()]).optional(),
+});
+
+function gitListError(error: unknown): GitListError {
+  const parsed = gitCommandFailureSchema.safeParse(error);
+  const failure = parsed.success ? parsed.data : {};
+  const detail = (failure.stderr || failure.message || "Git listing failed").split(/\r?\n/)[0]?.slice(0, 2000);
+  if (failure.killed || failure.code === "ETIMEDOUT") {
+    return { code: "timed_out", message: "Git target listing timed out.", detail };
+  }
+  return {
+    code: /not a git repository/i.test(failure.stderr ?? "") ? "not_a_repository" : "git_failed",
+    message: "Could not list Git targets.", detail,
+  };
 }
 
 function fallbackRemoteUrl(repoPath: string): GitRemoteUrl {
@@ -121,7 +141,7 @@ export class GitRepositoryService {
   private readonly defaultBranchCache = new Map<string, string | null>();
 
   constructor(
-    @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
+    @inject(WorkspaceRepo) private readonly workspaceRepo: Pick<WorkspaceRepo, "findById">,
     @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
   ) {}
 
@@ -305,6 +325,27 @@ export class GitRepositoryService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /** List qualified targets in the supplied checkout, preserving Git failures. */
+  async listRefsAt(
+    repoPath: string,
+    options: Omit<GitRefsListParams, "workspaceId" | "threadId">,
+  ): Promise<GitRefsListResult> {
+    try {
+      const [refs, worktrees] = await Promise.all([
+        this.gitExecutor.exec([
+          "-C", repoPath, "for-each-ref",
+          "--format=%(refname)%00%(refname:short)%00%(objectname)%00%(HEAD)%00%(worktreepath)%00%(committerdate:iso-strict)%00%(symref)",
+          "refs/heads", "refs/remotes",
+        ]),
+        this.gitExecutor.exec(["-C", repoPath, "worktree", "list", "--porcelain", "-z"]),
+      ]);
+      if (refs.stderr.trim()) throw Object.assign(new Error("Git could not list every ref"), { stderr: refs.stderr });
+      return buildRefPage(refs.stdout, worktrees.stdout, repoPath, options);
+    } catch (error) {
+      return { ok: false, error: gitListError(error) };
     }
   }
 

@@ -6,7 +6,10 @@
 
 import { injectable, inject } from "tsyringe";
 import * as NodeChildProcess from "node:child_process";
-import type { PrInfo, PrDetail, ChecksStatus, CheckRun } from "@mcode/contracts";
+import type { PrInfo, PrDetail, ChecksStatus, CheckRun, PullRequestTargetsListParams, PullRequestTargetsListResult } from "@mcode/contracts";
+import { PrInfoSchema } from "@mcode/contracts";
+import { GitRepositoryService } from "../../projects/git/git-repository-service.js";
+import { GithubPullRequestClient, GithubPullRequestClientError } from "./github-pull-request-client.js";
 import { logger } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
@@ -14,6 +17,14 @@ import { killProcessTree } from "../../../runtime/process/containment/process-ki
 
 const MAX_PULL_REQUESTS_PER_WATCH_BATCH = 25;
 const MAX_CHECK_CONTEXTS_PER_PULL_REQUEST = 100;
+
+function githubOriginIdentity(webUrl: string | null): { owner: string; name: string } | null {
+  if (!webUrl) return null;
+  const url = new URL(webUrl);
+  const match = url.pathname.match(/^\/([^/]+)\/([^/]+)$/);
+  if (url.hostname !== "github.com" || !match?.[1] || !match[2]) return null;
+  return { owner: match[1], name: match[2] };
+}
 
 /** One linked thread whose pull request lifecycle and checks need refreshing. */
 export interface PullRequestWatchTarget {
@@ -59,8 +70,10 @@ export class GithubService {
   private readonly waitQueue: Array<() => void> = [];
 
   constructor(
-    @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
+    @inject(WorkspaceRepo) private readonly workspaceRepo: Pick<WorkspaceRepo, "findById">,
     @inject("HostRuntime") private readonly hostRuntime: HostRuntime,
+    @inject(GitRepositoryService) private readonly gitRepository: GitRepositoryService,
+    @inject(GithubPullRequestClient) private readonly pullRequestClient: GithubPullRequestClient,
   ) {}
 
   /**
@@ -198,7 +211,7 @@ export class GithubService {
       let tracked: TrackedGithubProcess | null = null;
       const child = NodeChildProcess.execFile(
         "gh",
-        ["pr", "view", branch, "--json", "number,url,state"],
+        ["pr", "view", branch, "--json", "number,title,url,state"],
         { cwd, encoding: "utf-8", timeout: 10_000, windowsHide: true },
         (error, stdout) => {
           tracked?.finish();
@@ -207,23 +220,8 @@ export class GithubService {
             return;
           }
           try {
-            const data = JSON.parse(stdout) as {
-              number?: number;
-              url?: string;
-              state?: string;
-            };
-            if (
-              typeof data.number === "number" &&
-              typeof data.url === "string"
-            ) {
-              resolve({
-                number: data.number,
-                url: data.url,
-                state: data.state ?? "OPEN",
-              });
-            } else {
-              resolve(null);
-            }
+            const parsed = PrInfoSchema().safeParse(JSON.parse(stdout));
+            resolve(parsed.success ? parsed.data : null);
           } catch {
             resolve(null);
           }
@@ -231,6 +229,29 @@ export class GithubService {
       );
       tracked = this.trackProcess(child, { repoPath: cwd });
     });
+  }
+
+  /** Page open PR targets using the normalized origin identity. */
+  async listPullRequestTargets(params: PullRequestTargetsListParams): Promise<PullRequestTargetsListResult> {
+    const workspace = this.workspaceRepo.findById(params.workspaceId);
+    if (!workspace) throw new Error(`Workspace not found: ${params.workspaceId}`);
+    const remote = await this.gitRepository.getRemoteUrl(workspace.path);
+    const identity = githubOriginIdentity(remote.webUrl);
+    if (!identity) {
+      return { ok: false, error: { code: "remote_not_github", message: "The origin remote is not a GitHub repository." } };
+    }
+    try {
+      return await this.pullRequestClient.listRepositoryOpenPullRequests({
+        ...params, ...identity, signal: new AbortController().signal,
+      });
+    } catch (error) {
+      if (!(error instanceof GithubPullRequestClientError)) throw error;
+      return { ok: false, error: {
+        code: error.code, message: error.message,
+        ...(error.resetAt === undefined ? {} : { resetAt: error.resetAt }),
+        ...(error.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: error.retryAfterSeconds }),
+      } };
+    }
   }
 
   /** List open PRs for a workspace's repository. */
