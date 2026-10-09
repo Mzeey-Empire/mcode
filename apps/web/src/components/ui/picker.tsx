@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useId,
   useLayoutEffect,
   useMemo,
@@ -92,10 +93,14 @@ export function Picker<T>(props: PickerProps<T>) {
   const listId = useId();
   const rows = useMemo<ListRow<T>[]>(() => items.map((item) => ({ item, row: renderItem(item) })), [items, renderItem]);
   const listKey = `${props.activeTab ?? ""}\u0000${query}`;
-  // The highlight belongs to one list; a new tab or query starts over from the selection.
-  const [highlight, setHighlight] = useState<{ readonly listKey: string; readonly key: string } | null>(null);
-  const activeKey = highlight?.listKey === listKey ? highlight.key : null;
-  const setActiveKey = (key: string) => setHighlight({ listKey, key });
+  // The highlight belongs to one list; a new tab or query starts over from the selection. Reset during render
+  // rather than keying by listKey, so returning to an earlier query doesn't revive its old highlight.
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [highlightListKey, setHighlightListKey] = useState(listKey);
+  if (highlightListKey !== listKey) {
+    setHighlightListKey(listKey);
+    setActiveKey(null);
+  }
   const activeIndex = rows.findIndex(({ row }) => row.key === resolveActiveKey(rows, activeKey, selectedKey));
   const loadMore = useLoadMoreOnce(props, listKey);
 
@@ -267,18 +272,18 @@ function PickerList<T>(props: PickerListProps<T>) {
     if (remaining <= LOAD_MORE_ROWS * ROW_PITCH_PX) onNearEnd();
   }, [onNearEnd]);
 
-  // Declared before the measure effect so a new list is measured from the top, not the old offset.
+  // A new list (opening, a new query or tab) starts from the top with the resolved highlight in view, so Enter
+  // never picks a row the user can't see. Later moves scroll from the keyboard handler, never from hover.
+  const revealActive = useEffectEvent(() => {
+    if (activeIndex === -1) return;
+    document.getElementById(optionId(listId, activeIndex))?.scrollIntoView?.({ block: "nearest" });
+  });
+  // Declared before the measure effect so a new list is measured after it has scrolled.
   useLayoutEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
+    revealActive();
   }, [listKey]);
   useLayoutEffect(measure, [measure, rows.length]);
-
-  // Opening on a selection far down the list brings it into view once; later moves scroll from the keyboard handler.
-  const initialActiveIndex = useRef(activeIndex);
-  useEffect(() => {
-    if (initialActiveIndex.current === -1) return;
-    document.getElementById(optionId(listId, initialActiveIndex.current))?.scrollIntoView?.({ block: "nearest" });
-  }, [listId]);
 
   return (
     <div className="relative">
@@ -341,6 +346,8 @@ function PickerOption(props: PickerOptionProps) {
 function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
   return (
     <li
+      {...(row.disabled ? undefined : { onMouseMove: active ? undefined : onHighlight, onClick: onPick })}
+      // After the row's own handlers so the tooltip trigger's hover handlers on a disabled row survive.
       {...triggerProps}
       id={id}
       role="option"
@@ -350,8 +357,6 @@ function PickerOptionItem({ id, row, active, selected, onHighlight, onPick, reas
       data-active={active || undefined}
       // Keeps focus in the search field so typing and arrow keys keep working after a click.
       onMouseDown={(event) => event.preventDefault()}
-      onMouseMove={row.disabled || active ? undefined : onHighlight}
-      onClick={row.disabled ? undefined : onPick}
       className={cn(
         "flex h-8 shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-active:bg-hover",
         row.disabled && "cursor-default opacity-50",

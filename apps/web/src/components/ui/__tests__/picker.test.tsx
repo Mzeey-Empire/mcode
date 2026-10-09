@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { Picker, type PickerProps, type PickerStatus } from "@/components/ui/picker";
 
@@ -136,6 +137,14 @@ describe("Picker", () => {
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowDown" });
     expect(scrollIntoView).toHaveBeenCalledOnce();
     expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByRole("option", { name: "branch-005" }));
+
+    // Clearing a filter starts a new list; the highlight returns to the selection and must be visible again.
+    const search = screen.getByRole("combobox");
+    fireEvent.change(search, { target: { value: "branch-04" } });
+    scrollIntoView.mockClear();
+    fireEvent.change(search, { target: { value: "" } });
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "branch-040" }).id);
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(screen.getByRole("option", { name: "branch-040" }));
   });
 
   it("does not ask for more while a page is loading", () => {
@@ -219,7 +228,7 @@ describe("Picker", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load more branches");
   });
 
-  it("names why a disabled row is unavailable", () => {
+  it("names why a disabled row is unavailable, in its description and a hover tooltip", async () => {
     render(
       <PagedPicker
         renderItem={(branch) => ({
@@ -230,7 +239,10 @@ describe("Picker", () => {
         })}
       />,
     );
-    expect(screen.getByRole("option", { name: "branch-001" })).toHaveAccessibleDescription("Protected branch");
+    const row = screen.getByRole("option", { name: "branch-001" });
+    expect(row).toHaveAccessibleDescription("Protected branch");
+    await userEvent.hover(row);
+    await waitFor(() => expect(screen.getAllByText("Protected branch").some((node) => !node.hidden)).toBe(true));
   });
 
   it("hides the count while the total is unknown", () => {
