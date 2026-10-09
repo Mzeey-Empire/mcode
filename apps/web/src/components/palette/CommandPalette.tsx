@@ -11,10 +11,11 @@ import { RootView } from "./views/RootView";
 import { ProjectsView } from "@/features/projects";
 import { BrowseView } from "./views/BrowseView";
 import { SelectionListView } from "./views/SelectionListView";
+import { SourcesView } from "./views/SourcesView";
 import { ThreadSearchView } from "./views/ThreadSearchView";
 import { isBrowseQuery, getPaletteMode } from "./CommandPalette.logic";
 import { cn } from "@/lib/utils";
-import { DIALOG_FADE_CLASS, DIALOG_SURFACE_CLASS } from "@/components/ui/overlay-surface";
+import { DIALOG_FADE_CLASS } from "@/components/ui/overlay-surface";
 
 type PaletteView = ReturnType<typeof useCommandPaletteStore.getState>["viewStack"][number];
 
@@ -41,16 +42,29 @@ function consumePendingBack(event: KeyboardEvent): void {
   back();
 }
 
-function getPaletteDetails(browseMode: boolean, top: PaletteView | undefined, query: string): { placeholder: string; inputLabel: string; modeLabel: string; widthClass: string } {
-  if (browseMode) return { placeholder: "Type a path or filter…", inputLabel: "Folder path or folder filter", modeLabel: "browse", widthClass: "max-w-[680px]" };
-  if (top?.kind === "projects") return { placeholder: "Search projects…", inputLabel: "Command palette search", modeLabel: "projects", widthClass: "max-w-2xl" };
-  if (top?.kind === "threadSearch") return { placeholder: "Search threads, projects, branches, worktrees…", inputLabel: "Search threads", modeLabel: "threads", widthClass: "max-w-3xl" };
-  if (top?.kind === "selectionList") return { placeholder: `Search ${top.title.toLowerCase()}…`, inputLabel: "Command palette search", modeLabel: getPaletteMode(query), widthClass: "max-w-xl" };
-  return { placeholder: "Search commands, type ~/ to browse, > for actions only…", inputLabel: "Command palette search", modeLabel: getPaletteMode(query), widthClass: "max-w-xl" };
+/**
+ * Paper's 02a list styling, applied from the palette root so every view's groups and rows match
+ * without changing the shared `Command` primitives other pickers use. The extra attribute in each
+ * selector outranks the primitives' own `[cmdk-group-heading]` and `aria-selected` utilities.
+ */
+const PALETTE_LIST_CLASS = cn(
+  "[&_[cmdk-group][data-slot]]:p-0",
+  "[&_[cmdk-group]_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group]_[cmdk-group-heading]]:pt-0.5 [&_[cmdk-group]_[cmdk-group-heading]]:pb-1 [&_[cmdk-group]_[cmdk-group-heading]]:font-normal",
+  "[&_[cmdk-item][data-slot]]:rounded-badge [&_[cmdk-item][aria-selected=true]]:bg-hover",
+);
+
+function getPaletteDetails(browseMode: boolean, top: PaletteView | undefined, query: string): { placeholder: string; inputLabel: string; modeLabel: string } {
+  if (browseMode) return { placeholder: "Type a path or filter…", inputLabel: "Folder path or folder filter", modeLabel: "browse" };
+  if (top?.kind === "sources") return { placeholder: "Search sources, or type ~/ to browse", inputLabel: "Search sources", modeLabel: "sources" };
+  if (top?.kind === "projects") return { placeholder: "Search projects…", inputLabel: "Command palette search", modeLabel: "projects" };
+  if (top?.kind === "threadSearch") return { placeholder: "Search threads, projects, branches, worktrees…", inputLabel: "Search threads", modeLabel: "threads" };
+  if (top?.kind === "selectionList") return { placeholder: `Search ${top.title.toLowerCase()}…`, inputLabel: "Command palette search", modeLabel: getPaletteMode(query) };
+  return { placeholder: "Search commands, type ~/ to browse, > for actions only…", inputLabel: "Command palette search", modeLabel: getPaletteMode(query) };
 }
 
 function PaletteViewContent({ browseMode, top }: { browseMode: boolean; top: PaletteView | undefined }) {
   if (browseMode) return <BrowseView />;
+  if (top?.kind === "sources") return <SourcesView />;
   if (top?.kind === "projects") return <ProjectsView />;
   if (top?.kind === "threadSearch") return <ThreadSearchView />;
   if (top?.kind === "selectionList") return <SelectionListView view={top} />;
@@ -61,13 +75,9 @@ function PaletteViewContent({ browseMode, top }: { browseMode: boolean; top: Pal
  * Top-center floating command palette overlay — the single shell that handles
  * commands, project picking, thread switching, and folder browsing.
  *
- * Mode is derived from the input query each render (see `getPaletteMode`):
- * - Empty / actions-only / search modes render `<RootView />`.
- * - Browse / drives modes render `<BrowseView />`.
- *
- * The user disambiguates intent by typing — there is no view switching for
- * folder browsing. View-stack `push` is reserved for explicit submenus
- * (currently only `projects` and `selectionList`).
+ * A path query (`~/`, a drive) renders `<BrowseView />` from any view, so folder
+ * browsing needs no view of its own. Otherwise the top of the view stack picks
+ * the view, and the root view's mode comes from the query (see `getPaletteMode`).
  */
 export function CommandPalette() {
   const isOpen = useCommandPaletteStore((s) => s.isOpen);
@@ -104,14 +114,17 @@ export function CommandPalette() {
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={(o) => !o && close()} modal="trap-focus">
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className={cn("fixed inset-0 z-(--layer-modal) bg-ink/10 backdrop-blur-xs", DIALOG_FADE_CLASS)} />
+        <DialogPrimitive.Backdrop data-slot="palette-backdrop" className={cn("fixed inset-0 z-(--layer-modal) bg-page/60", DIALOG_FADE_CLASS)} />
         <DialogPrimitive.Popup
           data-testid="command-palette"
           aria-label="Command palette"
-          className={cn("fixed left-1/2 top-[clamp(4rem,14vh,8rem)] z-(--layer-modal) w-full -translate-x-1/2 px-4 outline-none", DIALOG_FADE_CLASS, paletteDetails.widthClass)}
+          className={cn("fixed left-1/2 top-20 z-(--layer-modal) w-[60rem] max-w-[calc(100vw-3.2rem)] -translate-x-1/2 outline-none", DIALOG_FADE_CLASS)}
         >
           <Command
-            className={cn("overflow-hidden", DIALOG_SURFACE_CLASS)}
+            className={cn(
+              "gap-px overflow-hidden rounded-[1.2rem] border border-border bg-panel p-1.5 text-ink shadow-popover",
+              PALETTE_LIST_CLASS,
+            )}
             // We do all filtering/ranking ourselves (filterCommandPaletteGroups,
             // BrowseView's leaf prefix filter, ProjectsView's substring filter),
             // so disable cmdk's built-in filter. Letting it run against the raw
@@ -172,59 +185,57 @@ function PaletteInput({
   onAddClick: () => void;
 }) {
   return (
-    <div
-      data-slot="palette-input-wrapper"
-      data-palette-mode={modeLabel}
-      className={cn(
-        "relative flex items-center border-b border-border/60",
-        browseMode ? "h-[60px] px-[20px]" : "h-12 px-4",
-      )}
-    >
-      <SearchIcon className={cn("size-4 shrink-0 text-muted/75", browseMode ? "mr-3" : "mr-2.5")} />
-      <CommandPrimitive.Input
-        autoFocus
-        data-slot="palette-input"
-        placeholder={placeholder}
-        value={query}
-        aria-label={inputLabel}
-        onValueChange={setQuery}
-        onKeyDownCapture={onKeyDown}
-        className={cn(
-          // Reserve right padding for the browse action so the typed path
-          // remains visible beneath long folder names.
-          "flex w-full bg-transparent outline-none placeholder:text-muted/70 disabled:cursor-not-allowed disabled:opacity-50",
-          browseMode ? "h-[60px] pe-[148px] font-mono text-body-small" : "h-12 text-sm",
+    <>
+      <div
+        data-slot="palette-input-wrapper"
+        data-palette-mode={modeLabel}
+        className="flex h-[3.4rem] shrink-0 items-center gap-2 px-2.5"
+      >
+        <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" strokeWidth={1.5} />
+        <CommandPrimitive.Input
+          autoFocus
+          data-slot="palette-input"
+          placeholder={placeholder}
+          value={query}
+          aria-label={inputLabel}
+          onValueChange={setQuery}
+          onKeyDownCapture={onKeyDown}
+          className={cn(
+            "min-w-0 flex-1 bg-transparent text-body-small text-ink outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-50",
+            browseMode && "font-mono",
+          )}
+        />
+        {browseMode && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="inline-flex shrink-0">
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="compact"
+                    data-testid="palette-add-folder"
+                    disabled={!canAdd}
+                    onMouseDown={(e) => {
+                      // Prevent the input from losing focus, which would dismiss cmdk highlight.
+                      e.preventDefault();
+                    }}
+                    onClick={onAddClick}
+                    className="h-[2.6rem] gap-1.5 px-2.5 text-caption"
+                  >
+                    <Plus size={14} />
+                    Add project
+                  </Button>
+                </span>
+              }
+            />
+            <TooltipContent>
+              {canAdd ? "Add this folder as a project" : "Choose a folder before adding a project"}
+            </TooltipContent>
+          </Tooltip>
         )}
-      />
-      {browseMode && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="absolute end-[16px] top-1/2 inline-flex -translate-y-1/2">
-                <Button
-                  type="button"
-                  variant="default"
-                  size="compact"
-                  data-testid="palette-add-folder"
-                  disabled={!canAdd}
-                  onMouseDown={(e) => {
-                    // Prevent the input from losing focus, which would dismiss cmdk highlight.
-                    e.preventDefault();
-                  }}
-                  onClick={onAddClick}
-                  className="h-[36px] min-w-[132px] gap-[8px] px-[16px] text-body-small"
-                >
-                  <Plus size={14} />
-                  Add project
-                </Button>
-              </span>
-            }
-          />
-          <TooltipContent>
-            {canAdd ? "Add this folder as a project" : "Choose a folder before adding a project"}
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </div>
+      </div>
+      <div aria-hidden data-slot="palette-divider" className="mx-0.5 mt-0.5 mb-1 h-px shrink-0 bg-border" />
+    </>
   );
 }

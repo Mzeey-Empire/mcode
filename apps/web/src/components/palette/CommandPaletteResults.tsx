@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import {
   CommandGroup,
   CommandItem,
@@ -13,34 +12,24 @@ interface Props {
   groups: PaletteGroup[];
   /** Called when the user selects an item. Receives the item's value. */
   onSelect: (value: string) => void;
-  /** Optional trailing content to render after the group list (e.g. an action row). */
-  footer?: ReactNode;
 }
 
 /**
  * Renders ranked palette groups using cmdk Command.Group and Command.Item.
- * Section headings use mono small-caps style per the design spec.
  */
-export function CommandPaletteResults({ groups, onSelect, footer }: Props) {
+export function CommandPaletteResults({ groups, onSelect }: Props) {
   return (
     <CommandList className="max-h-80 overflow-y-auto">
       <CommandEmpty>No results found.</CommandEmpty>
       {groups.map((group) => (
-        <CommandGroup
-          key={group.heading}
-          heading={
-            <span className="px-3 py-1.5 font-mono text-caption uppercase tracking-[0.18em] text-muted/70">
-              {group.heading}
-            </span>
-          }
-        >
+        <CommandGroup key={group.heading} heading={group.heading}>
           {group.items.map((item) => (
             <CommandItem
               key={item.value}
               value={item.value}
               keywords={item.searchTerms}
               onSelect={() => onSelect(item.value)}
-              className="flex items-center gap-2 px-3 py-2 text-body-small"
+              className="text-body-small"
             >
               <span className="flex-1 text-fade">{item.title}</span>
               {item.description && (
@@ -52,7 +41,6 @@ export function CommandPaletteResults({ groups, onSelect, footer }: Props) {
           ))}
         </CommandGroup>
       ))}
-      {footer}
     </CommandList>
   );
 }

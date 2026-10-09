@@ -28,12 +28,13 @@ describe("commandPaletteStore", () => {
     expect(useCommandPaletteStore.getState().viewStack).toEqual([{ kind: "root" }]);
   });
 
-  it("open({ intent: 'addProject' }) opens at root with seeded '~/' query", () => {
+  it("open({ intent: 'addProject' }) opens the sources view with an empty query", () => {
+    useCommandPaletteStore.getState().setQuery("~/stale");
     useCommandPaletteStore.getState().open({ intent: "addProject" });
     const state = useCommandPaletteStore.getState();
     expect(state.isOpen).toBe(true);
-    expect(state.viewStack).toEqual([{ kind: "root" }]);
-    expect(state.query).toBe("~/");
+    expect(state.viewStack).toEqual([{ kind: "sources" }]);
+    expect(state.query).toBe("");
   });
 
   it("pop on single-item stack closes the palette", () => {
