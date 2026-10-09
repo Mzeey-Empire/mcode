@@ -207,7 +207,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       responseTextIsStreaming: input.responseTextIsStreaming,
       persistedNarrativeByMessage: input.persistedNarrativeByMessage,
       turnSummariesByMessageId: input.turnSummariesByMessageId,
-      currentTurnHasNarrative: settledLiveNarrativeHasRows(input),
+      currentTurnLiveNarrative: settledLiveNarrative(input),
     };
     const stableItems = sameStableTranscriptInput(previousStableInput, stableInput)
       ? previousStableItems
@@ -220,7 +220,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
         stableInput.turnSummariesByMessageId,
         stableInput.agentDisplayState,
         stableInput.responseTextIsStreaming,
-        stableInput.currentTurnHasNarrative,
+        stableInput.currentTurnLiveNarrative,
       );
     previousStableInput = stableInput;
     previousStableItems = stableItems;
@@ -245,7 +245,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
 type StableTranscriptInput = Pick<TranscriptProjectionInput,
   "messages" | "persistedFilesChanged" | "latestTurnWithChanges" | "currentTurn" | "agentDisplayState"
   | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId"> & {
-  currentTurnHasNarrative: boolean | undefined;
+  currentTurnLiveNarrative: SettledLiveNarrative | undefined;
 };
 
 function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, current: StableTranscriptInput): boolean {
@@ -257,21 +257,24 @@ function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, 
     && previous.responseTextIsStreaming === current.responseTextIsStreaming
     && previous.persistedNarrativeByMessage === current.persistedNarrativeByMessage
     && previous.turnSummariesByMessageId === current.turnSummariesByMessageId
-    && previous.currentTurnHasNarrative === current.currentTurnHasNarrative;
+    && previous.currentTurnLiveNarrative === current.currentTurnLiveNarrative;
 }
 
 function hasLiveNarrative(input: TranscriptProjectionInput): boolean {
   return input.toolCalls.length > 0 || (input.thoughtSegments?.length ?? 0) > 0;
 }
 
+/** What a settled current turn's live state can put under its fold. */
+export type SettledLiveNarrative = "tools" | "thoughts" | "empty";
+
 /**
  * Undefined when the turn still runs (it has no fold yet) or holds no live narrative, so records and the summary decide.
  * Thoughts go through the fold's own row builder, because a thought that repeats the answer renders no row.
  */
-function settledLiveNarrativeHasRows(input: TranscriptProjectionInput): boolean | undefined {
+function settledLiveNarrative(input: TranscriptProjectionInput): SettledLiveNarrative | undefined {
   if (isAgentDisplayActive(input.agentDisplayState) || !hasLiveNarrative(input)) return undefined;
-  if (input.toolCalls.length > 0) return true;
-  return buildNarrativeItems({
+  if (input.toolCalls.length > 0) return "tools";
+  const hasThoughtRows = buildNarrativeItems({
     toolCalls: [],
     hooks: [],
     thoughtSegments: input.thoughtSegments ?? [],
@@ -279,6 +282,7 @@ function settledLiveNarrativeHasRows(input: TranscriptProjectionInput): boolean 
     isAgentRunning: false,
     committedAssistantBody: input.committedAssistantBody,
   }).items.some((item) => item.type !== "hook" && item.type !== "delta");
+  return hasThoughtRows ? "thoughts" : "empty";
 }
 
 /** Represents an item rendered in the virtualized chat list: messages, tool indicators, or streaming text. */
@@ -379,10 +383,10 @@ export function buildStableItems(
   turnSummariesByMessageId?: Record<string, TurnSummary>,
   currentAgentDisplayState?: AgentDisplayState,
   responseTextIsStreaming?: boolean,
-  currentTurnHasNarrative?: boolean,
+  currentTurnLiveNarrative?: SettledLiveNarrative,
 ): ChatVirtualItem[] {
   return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
-    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnHasNarrative,
+    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative,
   }));
 }
 
@@ -394,8 +398,8 @@ interface StableItemInput {
   turnSummariesByMessageId?: Record<string, TurnSummary>;
   currentAgentDisplayState?: AgentDisplayState;
   responseTextIsStreaming?: boolean;
-  /** Whether the live turn produced tools or thoughts that the fold should own once it settles. */
-  currentTurnHasNarrative?: boolean;
+  /** What the settled current turn's live state can put under its fold. */
+  currentTurnLiveNarrative?: SettledLiveNarrative;
 };
 
 function isCurrentResponse(message: Message, input: StableItemInput): boolean {
@@ -447,14 +451,17 @@ function terminalDisplayOutcome(state: AgentDisplayState): TurnOutcome | undefin
 }
 
 /**
- * Loaded records, then live rows, decide before summary counts, because the fold renders from them in that order:
- * a thought that repeats the answer and hooks (shown in the actions row) produce no fold rows.
- * Records come first because a stopped turn's live state can drop its tools.
+ * Mirrors the source the fold renders from (see `foldChildren`): live tools, else loaded records, else live
+ * thoughts, else summary counts. Live tools win because records load in bounded windows; records beat
+ * tool-less live state because a stopped turn's live state can drop its tools. A thought that repeats the
+ * answer and hooks (shown in the actions row) produce no fold rows.
  */
 function hasFoldableNarrative(message: Message, input: StableItemInput, summary: TurnSummary): boolean {
+  const live = isCurrentResponse(message, input) ? input.currentTurnLiveNarrative : undefined;
+  if (live === "tools") return true;
   const records = input.persistedNarrativeByMessage?.[message.id];
   if (records) return hasFoldRows(records, message.content);
-  if (isCurrentResponse(message, input) && input.currentTurnHasNarrative !== undefined) return input.currentTurnHasNarrative;
+  if (live !== undefined) return live === "thoughts";
   return summary.counts.steps > 0 || summary.counts.thoughts > 0;
 }
 

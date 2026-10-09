@@ -143,6 +143,24 @@ describe("transcript narrative rows", () => {
     expect(open.map(rowLabel)).toEqual(["work-fold", "tool-group", "message", "turn-meta-line"]);
   });
 
+  it("keeps a settled turn's live tools when only part of its records has loaded", () => {
+    const records = { answer: { hooks: [], thoughts: [], tools: [{
+      id: "tool-0", message_id: "answer", parent_tool_call_id: null, tool_name: "Bash", input_summary: "pwd",
+      output_summary: "done", status: "completed" as const, started_at: new Date(1200).toISOString(),
+      completed_at: new Date(1300).toISOString(), sort_order: 0,
+    }] } };
+    const turn = { threadId: "thread", executionId: "execution", messageId: "answer" };
+    const projected = createTranscriptItemProjector()({
+      messages: [message("answer", "Done", "execution")], currentTurn: turn,
+      agentDisplayState: { phase: "completed" }, agentStartTime: 1000, streamingText: undefined,
+      toolCalls: [0, 1].map((index) => ({ id: `tool-${index}`, toolName: "Read", toolInput: { file_path: `f${index}` }, output: "done", isError: false, isComplete: true, startedAt: 1200 + index, completedAt: 1300 + index })),
+      committedAssistantBody: "Done", persistedNarrativeByMessage: records,
+    });
+    const open = expandTranscriptNarrative(projected, records, new Set(["work-fold:answer"]), turn);
+    const groups = expandTranscriptToolGroups(open, new Set(open.map((row) => row.key)));
+    expect(groups.filter((row) => row.type === "tool-row")).toHaveLength(2);
+  });
+
   it("bounds persisted narrative expansion for very large saved tool histories", () => {
     const records: NonNullable<PersistedNarrativeRecords> = {
       hooks: [],
