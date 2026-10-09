@@ -3,6 +3,7 @@ import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
 import type { RecoveryIncident, SelectedTextComment } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Notice } from "@/components/ui/notice";
 import { Spinner } from "@/components/ui/spinner";
@@ -745,7 +746,9 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps) {
   const conversationErrorBanner = state.messageCount > 0 || state.isAgentRunning ? conversationErrorLabel(state) : null;
   const showCliError = isVisibleCliError(state.sessionError, dismissedError);
   return (
-    <div ref={state.chatPaneRef} className="relative flex h-full flex-col bg-background" data-testid="chat-view">
+    // The docked card's reserve takes the right gutter's room, so rows and the composer use 24px
+    // gutters while docked. That keeps the composer at 520 or wider down to OVERVIEW_DOCK_MIN_CANVAS.
+    <div ref={state.chatPaneRef} className={cn("relative flex h-full flex-col bg-background", state.overviewPaddingRight && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view">
       <OverviewLayer>
         <ActiveThreadHeader state={state} editingThreadId={editingThreadId} onEditingThreadIdChange={onEditingThreadIdChange} onSaveTitle={interactions.onSaveTitle} />
         <ActiveThreadBanners state={state} recovery={recovery} />
