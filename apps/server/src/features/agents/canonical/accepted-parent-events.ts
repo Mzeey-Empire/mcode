@@ -52,7 +52,10 @@ type PreparedEvents = ReturnType<typeof prepareAcceptedParentEvents>;
 function withoutNativePlanFile(draft: CanonicalAgentEventDraft): CanonicalAgentEventDraft {
   if (draft.payload.type !== "item.recorded" || draft.payload.item.payload.projection !== "providerRuntimeEvent") return draft;
   const item = draft.payload.item;
-  const runtime = ProviderRuntimeEventSchema().parse(item.payload.runtimeEvent);
+  // Only strips the private ref; validating runtime events belongs to execution ingress, not this filter.
+  const parsed = ProviderRuntimeEventSchema().safeParse(item.payload.runtimeEvent);
+  if (!parsed.success) return draft;
+  const runtime = parsed.data;
   if (!runtime.planCapture?.nativePlanFile) return draft;
   const { nativePlanFile: _privateRef, ...planCapture } = runtime.planCapture;
   // Ownership evidence persists in plan metadata, outside the public canonical stream.
