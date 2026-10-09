@@ -383,6 +383,20 @@ describe("SnapshotRefPins", () => {
     expect(listRefs(repo)).toEqual(settled);
   }, TEST_TIMEOUT_MS);
 
+  it("writes one row when a startup sweep and a worker-loss settle race for the same attempt", async () => {
+    const repo = createRepo();
+    const interrupted = await interruptedTurn(repo);
+    const store = await restart(interrupted.store);
+    await store.recovery.reconcileOnStartup();
+
+    await Promise.all([store.pins.sweep(), store.pins.settleExecution("thread-1", interrupted.executionId)]);
+    await store.pins.sweep();
+
+    const rows = snapshotRows(store, "assistant-1");
+    expect(rows).toHaveLength(1);
+    expect(listRefs(repo)).toEqual([`refs/mcode/${store.storeId}/snapshots/${rows[0]?.id}`]);
+  }, TEST_TIMEOUT_MS);
+
   it("keeps the baseline when the snapshot write fails and writes the row on the next start", async () => {
     const repo = createRepo();
     const interrupted = await interruptedTurn(repo);

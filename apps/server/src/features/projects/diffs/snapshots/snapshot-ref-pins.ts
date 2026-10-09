@@ -19,7 +19,7 @@ import {
   workspaces,
 } from "../../../../runtime/persistence/sqlite/schema.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
-import { persistTurnSnapshot } from "../../../agents/turns/persistence/turn-finalization-write-operations.js";
+import { persistInterruptedAttemptSnapshot } from "../../../agents/turns/persistence/turn-finalization-write-operations.js";
 import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
@@ -294,10 +294,11 @@ export class SnapshotRefPins {
     }));
     if (!ok || !captured) return;
     if (options.stopAt === "before-row-write") throw new SnapshotPinFaultStop("before-row-write");
-    let snapshotId: string | undefined;
+    let snapshotId: string | null = null;
     const written = await this.guard("write interrupted snapshot", { threadId }, async () => {
       if (!captured) return;
-      ({ snapshotId } = await this.writer.execute(persistTurnSnapshot, {
+      // A concurrent pass that already wrote the row returns null; the sweep pins that row.
+      ({ snapshotId } = await this.writer.execute(persistInterruptedAttemptSnapshot, {
         snapshot: {
           messageId, threadId, refBefore: listed.tree, refAfter: captured.refAfter,
           filesChanged: captured.filesChanged, worktreePath: null,
