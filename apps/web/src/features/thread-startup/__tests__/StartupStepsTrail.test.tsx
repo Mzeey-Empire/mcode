@@ -95,6 +95,20 @@ describe("StartupStepsTrail", () => {
     expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1);
   });
 
+  it("re-reads the script while setup runs until the attempt records it, then stops", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse(at(3)) });
+    renderTrail({ startup: startup(), kind: "managed-worktree" });
+    await waitFor(() => expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("startup-step-setup")).not.toHaveTextContent("bun install");
+
+    setupScript("bun install");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("bun install");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(startupTransport.getAutomaticSetup).toHaveBeenCalledTimes(2);
+  });
+
   it("expands the live setup row into the script and output tail", async () => {
     setupScript("bun install");
     renderTrail({

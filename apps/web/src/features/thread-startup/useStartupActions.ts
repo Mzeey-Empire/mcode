@@ -8,12 +8,14 @@ import { getTransport } from "@/transport";
 import { useThreadStartupStore } from "./state/thread-startup-store";
 
 const TERMINAL_STATES: ReadonlySet<ThreadStartup["state"]> = new Set(["completed", "failed", "cancelled", "interrupted"]);
+const SCRIPT_RETRY_MS = 1_000;
 
 /**
  * Reads the setup script for the 04b header and the setup row argument.
  *
  * The startup record carries no script text, so this reads the automatic setup gate
- * once per setup step state change and never on an interval.
+ * once per setup step state change. The step turns running before the setup attempt
+ * records its script, so a running step re-reads every second until the script arrives.
  */
 export function useStartupSetupScript(startup: ThreadStartup | undefined): string | undefined {
   const threadId = startup?.threadId;
@@ -22,12 +24,22 @@ export function useStartupSetupScript(startup: ThreadStartup | undefined): strin
   useEffect(() => {
     if (!threadId || !setupState || setupState === "pending") return;
     let current = true;
-    getTransport().getAutomaticSetup(threadId).then(
-      (snapshot) => { if (current) setLoaded({ threadId, script: snapshot.attempt?.snapshot?.script ?? null }); },
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const read = () => getTransport().getAutomaticSetup(threadId).then(
+      (snapshot) => {
+        if (!current) return;
+        const script = snapshot.attempt?.snapshot?.script ?? null;
+        setLoaded({ threadId, script });
+        if (script === null && setupState === "running") retry = setTimeout(read, SCRIPT_RETRY_MS);
+      },
       // The script only labels the row and header; without it the trail still shows every state.
       () => undefined,
     );
-    return () => { current = false; };
+    void read();
+    return () => {
+      current = false;
+      clearTimeout(retry);
+    };
   }, [threadId, setupState]);
   return loaded && loaded.threadId === threadId ? loaded.script ?? undefined : undefined;
 }

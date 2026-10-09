@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
-import type { RecoveryIncident, SelectedTextComment, ThreadStartupKind } from "@mcode/contracts";
+import type { Message, RecoveryIncident, SelectedTextComment, ThreadStartupKind } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Notice } from "@/components/ui/notice";
@@ -33,6 +33,7 @@ import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
 import { SavingDelayedDialog } from "../../saving/SavingDelayedDialog";
 import { TurnSavingNotice } from "../../saving/TurnSavingNotice";
+import { MessageBubble } from "../MessageBubble";
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
 import { tryGetConversationResidency } from "../../residency/conversation-residency";
 import type { ChatViewState } from "./useChatViewState";
@@ -291,9 +292,7 @@ function PreparingThreadSurface({
       <ThreadHeader state={state} />
       <div className="min-h-0 flex-1 overflow-y-auto pt-4">
         <PreparingTranscriptRow>
-          <div className="flex justify-end">
-            <div className="min-w-0 max-w-[min(82%,56rem)] overflow-hidden break-words rounded-lg rounded-br-md bg-selected px-3 py-1.5 text-sm text-ink"><p className="whitespace-pre-wrap leading-relaxed">{pendingStartup?.queuedMessage || thread.title}</p></div>
-          </div>
+          <MessageBubble message={preparingUserMessage(thread, pendingStartup?.queuedMessage || thread.title)} />
         </PreparingTranscriptRow>
         <PreparingTranscriptRow>
           {thread.clientError && !showsAuthoritativeCancellation(thread, startup)
@@ -304,6 +303,23 @@ function PreparingThreadSurface({
       <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} />
     </div>
   );
+}
+
+// The durable bubble's footer adds height, so the preparing surface draws the same bubble to keep the trail still at hand-off.
+function preparingUserMessage(thread: WorkspaceThread, content: string): Message {
+  return {
+    id: `preparing-${thread.id}`,
+    thread_id: thread.id,
+    role: "user",
+    content,
+    tool_calls: null,
+    files_changed: null,
+    cost_usd: null,
+    tokens_used: null,
+    timestamp: thread.created_at,
+    sequence: 0,
+    attachments: null,
+  };
 }
 
 /** Renders the selected-row shell when no matching workspace thread remains. */
@@ -677,7 +693,8 @@ function shouldKeepPreparingShell(
 
 function ChatMessageStage({ state, interactions, automaticSetup, startupTrail, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup>; readonly startupTrail: ReactNode }) {
   const thread = state.activeThread!;
-  const automaticSetupTranscriptBlock = thread.mode === "worktree" && thread.worktree_managed === true
+  // An empty leading row still takes its 16px padding, which would push the transcript below the preparing surface.
+  const automaticSetupTranscriptBlock = thread.mode === "worktree" && thread.worktree_managed === true && automaticSetup.snapshot.gate === "blocked"
     ? <ProjectAutomaticSetupCard snapshot={automaticSetup.snapshot} busy={automaticSetup.busy} error={automaticSetup.error} onContinue={automaticSetup.continueWithoutSetup} onRetry={automaticSetup.retrySetup} onApprove={automaticSetup.approveSetup} />
     : undefined;
   const messageListProps = {
