@@ -168,10 +168,6 @@
   top: calc(var(--desktop-title-bar-height) + 0.6rem);
 }
 
-.app-toast-stack {
-  max-height: calc(100vh - var(--desktop-title-bar-height) - 1.2rem);
-}
-
 .dark {
   /* --page is darker than --background so floating panels appear lifted off the chrome. */
   --page: var(--neutral-950);
@@ -421,6 +417,31 @@
     animation: none;
   }
 }
+/* Toasts slide down from under the conversation header. Close and auto-hide
+   play the same motion in reverse; reduced motion keeps only a short fade. */
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(-1.6rem); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-toast-enter {
+  animation: toast-enter var(--duration-overlay) var(--ease-standard) both;
+}
+.animate-toast-exit {
+  animation: toast-enter var(--duration-overlay) var(--ease-standard) reverse both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-toast-enter {
+    animation: toast-fade var(--duration-fast) var(--ease-standard) both;
+  }
+  .animate-toast-exit {
+    animation: toast-fade var(--duration-fast) var(--ease-standard) reverse both;
+  }
+}
+
 .animate-fade-up-in {
   animation: fade-up-in var(--duration-standard) var(--ease-standard);
 }

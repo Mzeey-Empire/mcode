@@ -152,11 +152,11 @@ describe("ActiveGoalChip", () => {
     await userEvent.click(screen.getByLabelText("Clear active goal"));
 
     await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith(
-        "info",
-        "Goal was not cleared",
-        "The provider did not report an active goal to clear.",
-      ),
+      expect(showToast).toHaveBeenCalledWith({
+        kind: "info",
+        title: "Goal was not cleared",
+        meta: "The provider did not report an active goal to clear.",
+      }),
     );
   });
 
@@ -171,11 +171,11 @@ describe("ActiveGoalChip", () => {
     await userEvent.click(screen.getByLabelText("Clear active goal"));
 
     await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith(
-        "error",
-        "Goal controls unavailable",
-        "This provider does not support app-level goal controls.",
-      ),
+      expect(showToast).toHaveBeenCalledWith({
+        kind: "failed",
+        title: "Goal controls unavailable",
+        meta: "This provider does not support app-level goal controls.",
+      }),
     );
   });
 
@@ -186,7 +186,7 @@ describe("ActiveGoalChip", () => {
     await userEvent.click(screen.getByLabelText("Clear active goal"));
 
     await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith("error", "Could not clear goal", "clear failed"),
+      expect(showToast).toHaveBeenCalledWith({ kind: "failed", title: "Could not clear goal", meta: "clear failed" }),
     );
   });
 

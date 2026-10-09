@@ -129,28 +129,28 @@ export function useActiveGoalActions(threadId: string): ActiveGoalActions {
         if (!isCurrentAction(actionScopeRef.current, threadId, "clearRequestId", scope.clearRequestId)) return;
         updateState({ lookupSource: lookup.source, lookupReason: lookup.reason ?? null });
         if (lookup.source === "unsupported") {
-          useToastStore.getState().show(
-            "error",
-            "Goal controls unavailable",
-            "This provider does not support app-level goal controls.",
-          );
+          useToastStore.getState().show({
+            kind: "failed",
+            title: "Goal controls unavailable",
+            meta: "This provider does not support app-level goal controls.",
+          });
           return;
         }
         if (lookup.goal && !lookup.authoritative) {
-          useToastStore.getState().show(
-            "info",
-            "Goal was not cleared",
-            "The provider did not report an active goal to clear.",
-          );
+          useToastStore.getState().show({
+            kind: "info",
+            title: "Goal was not cleared",
+            meta: "The provider did not report an active goal to clear.",
+          });
         }
       })
       .catch((error) => {
         if (!isCurrentAction(actionScopeRef.current, threadId, "clearRequestId", scope.clearRequestId)) return;
-        useToastStore.getState().show(
-          "error",
-          "Could not clear goal",
-          normalizeGoalActionError(error),
-        );
+        useToastStore.getState().show({
+          kind: "failed",
+          title: "Could not clear goal",
+          meta: normalizeGoalActionError(error),
+        });
       })
       .finally(() => {
         if (!isCurrentAction(actionScopeRef.current, threadId, "clearRequestId", scope.clearRequestId)) return;

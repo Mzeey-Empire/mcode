@@ -97,7 +97,11 @@ export function createTerminalForScope(scopeId: string): void {
 function showCreateFailure(error: unknown): void {
   const message =
     error instanceof Error ? error.message : "Could not create terminal";
-  useToastStore.getState().show("error", "Failed to create terminal", message);
+  useToastStore.getState().show({
+    kind: "failed",
+    title: "Failed to create terminal",
+    meta: message,
+  });
 }
 
 /** Ensures a Terminal tab has its first PTY-backed rail instance. */

@@ -552,10 +552,11 @@ describe("threadStore reconnect and queued follow-ups", () => {
     expect(useThreadStore.getState().pendingStopCounts[THREAD_ID]).toBeUndefined();
     expect(useToastStore.getState().toasts).toHaveLength(toastCount);
     if (toastCount) expect(useToastStore.getState().toasts[0]).toMatchObject({
-      level: "error", title: "Couldn't stop this turn", message: "Try Stop again. Connection unavailable",
+      kind: "failed", title: "Couldn't stop this turn", meta: "Try Stop again. Connection unavailable",
     });
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(useToastStore.getState().toasts).toHaveLength(0);
+    // Failed toasts stay until the user closes them.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(useToastStore.getState().toasts).toHaveLength(toastCount);
   });
 
   it("cancels a scheduled drain when a Stop snapshot arrives first", async () => {

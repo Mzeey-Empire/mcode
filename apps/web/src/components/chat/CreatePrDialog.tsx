@@ -360,7 +360,11 @@ export function CreatePrDialog({
       // Transition to ready before closing so the reset effect can clear the form.
       form.setState("ready");
       onOpenChange(false);
-      useToastStore.getState().show("info", "Pull request created", `PR #${result.number} opened on GitHub`);
+      useToastStore.getState().show({
+        kind: "info",
+        title: "Pull request created",
+        meta: `PR #${result.number} opened on GitHub`,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "PR creation failed";
       form.setError(message);

@@ -197,29 +197,29 @@ export function useComposerAgentControlState({
   useEffect(() => {
     if (interactionMode !== INTERACTION_MODES.PLAN || planCapability) return;
     detachPlan();
-    useToastStore.getState().show(
-      "info",
-      "Plan removed",
-      "The selected provider does not support Plan.",
-    );
+    useToastStore.getState().show({
+      kind: "info",
+      title: "Plan removed",
+      meta: "The selected provider does not support Plan.",
+    });
   }, [detachPlan, interactionMode, planCapability]);
   useEffect(() => {
     if (!goalPending || goalCapability) return;
     onGoalPendingChange(false);
-    useToastStore.getState().show(
-      "info",
-      "Goal removed",
-      "The selected provider does not support this capability.",
-    );
+    useToastStore.getState().show({
+      kind: "info",
+      title: "Goal removed",
+      meta: "The selected provider does not support this capability.",
+    });
   }, [goalCapability, goalPending, onGoalPendingChange]);
   useEffect(() => {
     if (orchestrationMode !== ORCHESTRATION_MODES.PROACTIVE || orchestrationCapability) return;
     detachOrchestration();
-    useToastStore.getState().show(
-      "info",
-      "Orchestration removed",
-      "The selected provider or model does not support this capability.",
-    );
+    useToastStore.getState().show({
+      kind: "info",
+      title: "Orchestration removed",
+      meta: "The selected provider or model does not support this capability.",
+    });
   }, [detachOrchestration, orchestrationCapability, orchestrationMode]);
 
   return {

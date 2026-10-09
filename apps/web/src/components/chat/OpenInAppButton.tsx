@@ -57,7 +57,11 @@ export function OpenInAppButton({ dirPath, threadId, threadOverride }: OpenInApp
       getTransport()
         .openIn(appId, dirPath)
         .catch((err) =>
-          useToastStore.getState().show("error", `Could not open ${label}`, String(err?.message ?? err)),
+          useToastStore.getState().show({
+            kind: "failed",
+            title: `Could not open ${label}`,
+            meta: String(err?.message ?? err),
+          }),
         );
     },
     [apps, dirPath],

@@ -588,12 +588,11 @@ export function PullRequestReviewTaskDialog({
       }
       if (generationRef.current !== generation) return;
       if (result.warnings?.length) {
-        useToastStore.getState().show(
-          "info",
-          "Review task created",
-          result.warnings.join(" "),
-          8_000,
-        );
+        useToastStore.getState().show({
+          kind: "info",
+          title: "Review task created",
+          meta: result.warnings.join(" "),
+        });
       }
       onOpenChange(false);
     },

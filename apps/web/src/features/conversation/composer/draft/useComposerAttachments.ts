@@ -166,11 +166,11 @@ export function useComposerAttachments(context: ComposerAttachmentContext): Comp
       persist: persistPathlessAttachment,
       reportFailure: () => {
         attachmentPreparationFailureCountRef.current += 1;
-        useToastStore.getState().show(
-          "error",
-          "Could not attach file",
-          "The file was not saved. Try again.",
-        );
+        useToastStore.getState().show({
+          kind: "failed",
+          title: "Could not attach file",
+          meta: "The file was not saved. Try again.",
+        });
       },
       commit: (prepared) => {
         releaseReservation();

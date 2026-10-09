@@ -18,6 +18,7 @@ describe("StatusMark", () => {
     ["attention", "Action required"],
     ["success", "Completed"],
     ["error", "Failed"],
+    ["info", "Info"],
   ] as const)("names the %s mark with its label", (state, label) => {
     render(<StatusMark state={state} label={label} />);
 

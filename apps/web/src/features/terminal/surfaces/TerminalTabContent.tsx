@@ -58,7 +58,11 @@ export function TerminalTabContent({ threadId }: TerminalTabContentProps) {
       console.error("[terminal] Failed to create terminal", err);
       const message =
         err instanceof Error ? err.message : "Could not create terminal";
-      useToastStore.getState().show("error", "Failed to create terminal", message);
+      useToastStore.getState().show({
+        kind: "failed",
+        title: "Failed to create terminal",
+        meta: message,
+      });
     }
   }, [threadId]);
 

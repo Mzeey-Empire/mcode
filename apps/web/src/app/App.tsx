@@ -23,6 +23,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useOverviewStore } from "@/stores/overviewStore";
 import { COMPOSER_MIN_WIDTH, useDiffStore } from "@/stores/diffStore";
 import {
   usePreviewDesignModeStore,
@@ -38,7 +39,7 @@ import { useIdleReclamation } from "@/hooks/useIdleReclamation";
 import { useComposerLayoutGuard } from "@/hooks/useComposerLayoutGuard";
 import { showRightPanelAdaptive, toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ToastContainer } from "@/components/Toast";
+import { ToastLane } from "@/components/ui/toast";
 import type { SettingsSection } from "@/components/settings/settings-nav";
 import {
   BrowserAutomationHost,
@@ -306,11 +307,12 @@ function AppPrimarySurface(props: Pick<
 function AppMainSurface(props: Pick<
   AppLayoutProps,
   "rightPanelMaximized" | "showPullRequests" | "showNewThreadCanvas" | "settingsOpen" | "settingsSection" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "isValidLocation" | "navigateHistory"
->) {
+> & { mainRef: (element: HTMLElement | null) => void }) {
   if (props.rightPanelMaximized && !props.showPullRequests) return null;
   const useFlexibleWidth = props.showNewThreadCanvas || props.settingsOpen || props.showPullRequests;
   return (
     <main
+      ref={props.mainRef}
       className="flex-1 overflow-hidden bg-background"
       style={{ minWidth: useFlexibleWidth ? 0 : `min(100%, ${COMPOSER_MIN_WIDTH}px)` }}
     >
@@ -341,6 +343,11 @@ function ConnectionNotice() {
 }
 
 function AppLayout(props: AppLayoutProps) {
+  // State, not a ref: the toast lane must re-measure when the main surface mounts or unmounts.
+  const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
+  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const overviewReserved = useOverviewStore((s) => s.reserveThreadId !== null && s.reserveThreadId === activeThreadId);
+  const chatVisible = !props.settingsOpen && !props.showPullRequests && !props.showNewThreadCanvas;
   return (
     <TerminalPoolSlotProvider>
       <TooltipProvider delay={400}>
@@ -377,7 +384,7 @@ function AppLayout(props: AppLayoutProps) {
               />
             )}
             <div ref={props.contentRowRef} data-testid="content-row" className="flex min-w-0 flex-1 overflow-hidden">
-              <AppMainSurface {...props} />
+              <AppMainSurface {...props} mainRef={setMainElement} />
               <RightPanelSlot {...props} />
             </div>
           </div>
@@ -389,7 +396,11 @@ function AppLayout(props: AppLayoutProps) {
           <LazyCommandPalette />
         </Suspense>
         <ShortcutHelpDialog />
-        <ToastContainer />
+        <ToastLane
+          anchor={mainElement}
+          fallbackRef={props.contentRowRef}
+          reserveOverview={chatVisible && overviewReserved}
+        />
       </TooltipProvider>
     </TerminalPoolSlotProvider>
   );
@@ -624,7 +635,11 @@ export function App() {
       // non-blocking toast states what happened without a persistent red bar.
       if (status.state === "error") {
         const friendly = friendlyUpdateError(status.message);
-        useToastStore.getState().show("error", friendly.title, friendly.body);
+        useToastStore.getState().show({
+          kind: "failed",
+          title: friendly.title,
+          meta: friendly.body,
+        });
       }
       useUpdateStore.getState().setStatus(status);
     });

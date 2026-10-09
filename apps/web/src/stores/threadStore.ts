@@ -2654,7 +2654,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (useWorkspaceStore.getState().activeThreadId !== event.threadId) return;
     const actualLabel = actual?.label ?? actualModel;
     const requestedLabel = findModelById(event.requestedModel)?.label ?? event.requestedModel;
-    useToastStore.getState().show("info", `Switched to ${actualLabel}`, `${requestedLabel} was unavailable`);
+    useToastStore.getState().show({
+      kind: "info",
+      title: `Switched to ${actualLabel}`,
+      meta: `${requestedLabel} was unavailable`,
+    });
   };
 
   const agentErrorMessage = (threadId: string, error: string): Message => ({
@@ -2698,7 +2702,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const handleMcpStartupStatus = (event: Extract<AgentEvent, { type: "mcpServerStartupStatus" }>): void => {
     if (event.status !== "failed" || useWorkspaceStore.getState().activeThreadId !== event.threadId) return;
     const reason = event.error || event.failureReason || "Startup failed";
-    useToastStore.getState().show("error", "MCP server unavailable", `The turn will continue without it. ${event.name}: ${reason}`);
+    useToastStore.getState().show({
+      kind: "failed",
+      title: "MCP server unavailable",
+      meta: `The turn will continue without it. ${event.name}: ${reason}`,
+    });
   };
 
   const handleStopCommandFailure = (threadId: string, executionAtStop: string | null, error: unknown): void => {
@@ -2711,7 +2719,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       || (phase === "idle" && get().runningThreadIds.has(threadId));
     if (!canStillStop || useWorkspaceStore.getState().activeThreadId !== threadId) return;
     const reason = error instanceof Error ? error.message : String(error);
-    useToastStore.getState().show("error", "Couldn't stop this turn", `Try Stop again. ${reason}`);
+    useToastStore.getState().show({
+      kind: "failed",
+      title: "Couldn't stop this turn",
+      meta: `Try Stop again. ${reason}`,
+    });
   };
 
   const ignoreAgentEvent = (): void => {};

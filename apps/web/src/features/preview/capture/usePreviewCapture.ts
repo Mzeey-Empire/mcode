@@ -35,7 +35,11 @@ function formatCaptureError(code: string): string {
 
 function showCaptureErrorIfNeeded(res: CaptureResult | ContextCaptureResult): void {
   if (res.ok || CAPTURE_ERROR_SILENT.has(res.error)) return;
-  useToastStore.getState().show("error", "Could not capture preview", formatCaptureError(res.error));
+  useToastStore.getState().show({
+    kind: "failed",
+    title: "Could not capture preview",
+    meta: formatCaptureError(res.error),
+  });
 }
 
 /** Discriminator for the source of a successful capture. */
@@ -113,7 +117,11 @@ export function usePreviewCapture({
       try {
         res = await preview.capturePictureReference();
       } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+        useToastStore.getState().show({
+          kind: "failed",
+          title: "Could not capture preview",
+          meta: "Screenshot failed.",
+        });
         return;
       }
 
@@ -151,7 +159,11 @@ export function usePreviewCapture({
       try {
         res = await preview.capturePictureReferenceRegion();
       } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+        useToastStore.getState().show({
+          kind: "failed",
+          title: "Could not capture preview",
+          meta: "Screenshot failed.",
+        });
         return;
       }
 
@@ -189,7 +201,11 @@ export function usePreviewCapture({
       try {
         res = await preview.capturePictureReferenceElementPick();
       } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+        useToastStore.getState().show({
+          kind: "failed",
+          title: "Could not capture preview",
+          meta: "Screenshot failed.",
+        });
         return { ok: false };
       }
 
@@ -228,7 +244,11 @@ export function usePreviewCapture({
       try {
         res = await preview.capturePageContext();
       } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Context capture failed.");
+        useToastStore.getState().show({
+          kind: "failed",
+          title: "Could not capture preview",
+          meta: "Context capture failed.",
+        });
         return;
       }
 
@@ -264,7 +284,11 @@ export function usePreviewCapture({
     try {
       res = await preview.captureAnnotationSnapshot(overlay);
     } catch {
-      useToastStore.getState().show("error", "Could not save annotation", "Screenshot failed.");
+      useToastStore.getState().show({
+        kind: "failed",
+        title: "Could not save annotation",
+        meta: "Screenshot failed.",
+      });
       return null;
     }
     showCaptureErrorIfNeeded(res);
@@ -285,7 +309,11 @@ export function usePreviewCapture({
     try {
       return await preview.capturePictureReferenceElementPick();
     } catch {
-      useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+      useToastStore.getState().show({
+        kind: "failed",
+        title: "Could not capture preview",
+        meta: "Screenshot failed.",
+      });
       return null;
     }
   }, [threadId]);

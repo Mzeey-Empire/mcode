@@ -172,9 +172,9 @@ await activateTestConversation(THREAD_A);
       } as AgentEvent);
 
       expect(useToastStore.getState().toasts).toMatchObject([{
-        level: "error",
+        kind: "failed",
         title: "MCP server unavailable",
-        message: "The turn will continue without it. filesystem: Connection refused",
+        meta: "The turn will continue without it. filesystem: Connection refused",
       }]);
       expect(getTestThreadMessages(THREAD_A)).toEqual(beforeMessages);
       expect(readActiveThreadField((record) => record.runtimePhase)).toBe("running");
@@ -197,9 +197,9 @@ await activateTestConversation(THREAD_A);
       } as AgentEvent);
 
       expect(useToastStore.getState().toasts[0]).toMatchObject({
-        level: "error",
+        kind: "failed",
         title: "MCP server unavailable",
-        message: `The turn will continue without it. filesystem: ${reason}`,
+        meta: `The turn will continue without it. filesystem: ${reason}`,
       });
     });
 

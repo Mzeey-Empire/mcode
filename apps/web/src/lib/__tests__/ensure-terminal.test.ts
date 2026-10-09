@@ -56,9 +56,9 @@ describe("createTerminalForScope", () => {
     expect(terminalCreate).toHaveBeenCalledTimes(2);
     expect(useToastStore.getState().toasts).toContainEqual(
       expect.objectContaining({
-        level: "error",
+        kind: "failed",
         title: "Failed to create terminal",
-        message: "PTY host is unhealthy",
+        meta: "PTY host is unhealthy",
       }),
     );
   });

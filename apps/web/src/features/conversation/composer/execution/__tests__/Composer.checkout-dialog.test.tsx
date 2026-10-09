@@ -1013,9 +1013,9 @@ describe("Composer checkout confirmation", () => {
 
     await waitFor(() => expect(useToastStore.getState().toasts).toContainEqual(
       expect.objectContaining({
-        level: "error",
+        kind: "failed",
         title: "Could not send message",
-        message: "Message dispatch failed",
+        meta: "Message dispatch failed",
       }),
     ));
     expect(lastComposerText).toBe("Retry this message");
@@ -1668,9 +1668,9 @@ describe("Composer checkout confirmation", () => {
     await waitFor(() => {
       expect(useToastStore.getState().toasts).toEqual([
         expect.objectContaining({
-          level: "error",
+          kind: "failed",
           title: "Could not attach file",
-          message: "The file was not saved. Try again.",
+          meta: "The file was not saved. Try again.",
         }),
       ]);
     });

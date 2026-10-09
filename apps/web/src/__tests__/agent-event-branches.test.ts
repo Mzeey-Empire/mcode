@@ -1386,7 +1386,7 @@ describe("session.modelFallback", () => {
 
     const toasts = useToastStore.getState().toasts;
     expect(toasts).toHaveLength(1);
-    expect(toasts[0].level).toBe("info");
+    expect(toasts[0].kind).toBe("info");
     expect(toasts[0].title).toContain("Sonnet");
   });
 

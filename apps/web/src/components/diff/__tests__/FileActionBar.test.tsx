@@ -121,10 +121,10 @@ describe("FileActionBar", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: /copy file path/i }));
-    expect(show).toHaveBeenCalledWith(
-      "error",
-      "Couldn't copy path",
-      "Clipboard API is unavailable in this environment.",
-    );
+    expect(show).toHaveBeenCalledWith({
+      kind: "failed",
+      title: "Couldn't copy path",
+      meta: "Clipboard API is unavailable in this environment.",
+    });
   });
 });
