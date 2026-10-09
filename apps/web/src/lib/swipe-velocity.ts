@@ -13,21 +13,31 @@ const VELOCITY_WINDOW_MS = 80;
  */
 export class SwipeVelocity {
   private samples: SwipeSample[] = [];
+  private direction = 0;
 
   /** Starts a new gesture at `sample`. */
   reset(sample: SwipeSample) {
     this.samples = [sample];
+    this.direction = 0;
   }
 
-  /** Starts measuring again from the newest sample, as when a swipe reverses. */
-  restart() {
-    this.samples = this.samples.slice(-1);
-  }
-
-  /** Records a move, keeping one sample older than the window as the baseline. */
-  track(sample: SwipeSample) {
+  /**
+   * Records a move, keeping one sample older than the window as the baseline.
+   * A reversal restarts measurement from the turning point, so speed toward
+   * rest never borrows the outward movement before it. Returns whether it reversed.
+   */
+  track(sample: SwipeSample): boolean {
+    const latest = this.samples.at(-1);
+    const direction = latest ? Math.sign(sample.x - latest.x) : 0;
+    const reversed = direction !== 0 && this.direction !== 0 && direction !== this.direction;
+    if (direction !== 0) this.direction = direction;
+    if (reversed && latest) this.samples = [latest];
     this.samples.push(sample);
-    const windowStart = sample.time - VELOCITY_WINDOW_MS;
+    this.trimTo(sample.time - VELOCITY_WINDOW_MS);
+    return reversed;
+  }
+
+  private trimTo(windowStart: number) {
     while (this.samples.length > 2 && (this.samples[1]?.time ?? windowStart + 1) <= windowStart) this.samples.shift();
   }
 

@@ -44,4 +44,14 @@ describe("SwipeVelocity", () => {
 
     expect(velocity.pxPerMs({ x: 20, time: 40 })).toBeCloseTo(-2);
   });
+
+  it("restarts from the turning point when a swipe reverses", () => {
+    const velocity = new SwipeVelocity();
+    velocity.reset({ x: 0, time: 0 });
+    velocity.track({ x: 80, time: 16 });
+    expect(velocity.track({ x: 60, time: 32 })).toBe(true);
+    velocity.track({ x: 50, time: 48 });
+
+    expect(velocity.pxPerMs({ x: 50, time: 49 })).toBeLessThan(0);
+  });
 });

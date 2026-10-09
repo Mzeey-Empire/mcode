@@ -285,29 +285,22 @@ interface SwipeState {
 
 interface WheelGesture {
   dx: number;
-  direction: number;
   peakSpeed: number;
   readonly velocity: SwipeVelocity;
   timer: ReturnType<typeof setTimeout> | null;
 }
 
-/** Adds one wheel delta to the gesture. The first delta only sets the baseline; a reversal restarts the speed. */
+/** Adds one wheel delta to the gesture. The first delta only sets the baseline; a reversal drops the peak. */
 function trackWheel(gesture: WheelGesture, delta: number, time: number) {
-  const direction = Math.sign(delta);
   gesture.dx += delta;
   const sample = { x: gesture.dx, time };
   if (gesture.timer === null) {
     gesture.velocity.reset(sample);
-  } else {
-    if (direction !== gesture.direction) {
-      gesture.velocity.restart();
-      gesture.peakSpeed = 0;
-    }
-    const speed = gesture.velocity.pxPerMs(sample);
-    if (Math.abs(speed) > Math.abs(gesture.peakSpeed)) gesture.peakSpeed = speed;
-    gesture.velocity.track(sample);
+    return;
   }
-  gesture.direction = direction;
+  if (gesture.velocity.track(sample)) gesture.peakSpeed = 0;
+  const speed = gesture.velocity.pxPerMs(sample);
+  if (Math.abs(speed) > Math.abs(gesture.peakSpeed)) gesture.peakSpeed = speed;
 }
 
 interface DragStart {
@@ -338,7 +331,7 @@ function useSwipeToDismiss(onDismiss: () => void) {
   const start = useRef<DragStart | null>(null);
   const dragged = useRef(false);
   const velocity = useRef(new SwipeVelocity());
-  const wheel = useRef<WheelGesture>({ dx: 0, direction: 0, peakSpeed: 0, velocity: new SwipeVelocity(), timer: null });
+  const wheel = useRef<WheelGesture>({ dx: 0, peakSpeed: 0, velocity: new SwipeVelocity(), timer: null });
   const [swipe, setSwipe] = useState<SwipeState>({ phase: "idle", dx: 0, width: 1 });
 
   useEffect(() => {
@@ -353,7 +346,6 @@ function useSwipeToDismiss(onDismiss: () => void) {
     clearTimeout(gesture.timer ?? undefined);
     gesture.timer = null;
     gesture.dx = 0;
-    gesture.direction = 0;
     gesture.peakSpeed = 0;
   }, []);
 

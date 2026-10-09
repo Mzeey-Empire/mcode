@@ -237,4 +237,24 @@ describe("ToastLane", () => {
 
     expect(store().toasts).toEqual([]);
   });
+
+  it("keeps a toast when a pointer drag turns back toward rest", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(340);
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    renderLane();
+    show({ kind: "failed", title: "Bump Electron" });
+    const card = within(lane()).getByRole("alert");
+
+    fireEvent.pointerDown(card, { button: 0, pointerId: 1, clientX: 0 });
+    for (const clientX of [80, 60, 50]) {
+      act(() => void vi.advanceTimersByTime(16));
+      fireEvent.pointerMove(card, { pointerId: 1, buttons: 1, clientX });
+    }
+    act(() => void vi.advanceTimersByTime(1));
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: 50 });
+    act(() => void vi.advanceTimersByTime(200));
+    act(() => void vi.advanceTimersByTime(200));
+
+    expect(store().toasts).toHaveLength(1);
+  });
 });
