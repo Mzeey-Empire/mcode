@@ -452,4 +452,35 @@ describe("Picker", () => {
     render(<PagedPicker total={null} />);
     expect(screen.queryByText(/^Showing/)).toBeNull();
   });
+
+  it("labels a group with a text row in place of the divider", () => {
+    render(
+      <PagedPicker
+        renderItem={(branch) => {
+          const inA = branch.name < "branch-002";
+          return { key: branch.name, name: branch.name, group: inA ? "a" : "b", groupLabel: inA ? undefined : "Pull requests" };
+        }}
+      />,
+    );
+    const presentation = screen.getByRole("listbox").querySelectorAll("li[role=presentation]");
+    expect(presentation).toHaveLength(1);
+    expect(presentation[0]).toHaveAttribute("data-slot", "picker-group-label");
+    expect(presentation[0]).toHaveTextContent("Pull requests");
+    expect(presentation[0]?.nextElementSibling).toHaveTextContent("branch-002");
+  });
+
+  it("pages without a spinner row, but shows one while the list is empty", () => {
+    const { rerender } = render(<PagedPicker status="loading" />);
+    expect(screen.getAllByRole("option")).toHaveLength(50);
+    expect(screen.queryByLabelText("Loading")).toBeNull();
+
+    rerender(<PagedPicker status="loading" items={[]} />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+  });
+
+  it("fills the selected row", () => {
+    render(<PagedPicker selectedKey="branch-007" />);
+    expect(screen.getByRole("option", { name: "branch-007" })).toHaveAttribute("data-selected");
+    expect(screen.getByRole("option", { name: "branch-008" })).not.toHaveAttribute("data-selected");
+  });
 });
