@@ -157,13 +157,52 @@ describe("StartupStepsTrail", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 
-  it("asks for approval on a blocked step", () => {
+  it("shows a setup the server blocked on a failed command as failed, keeping its output reachable", async () => {
+    setupScript("bun install");
     renderTrail({
-      startup: startup({ state: "blocked", steps: [{ phase: "thread", state: "completed" }, { phase: "setup", state: "blocked", startedAt: at(2) }] }),
+      startup: startup({
+        state: "blocked",
+        steps: [
+          { phase: "thread", state: "completed" },
+          { phase: "setup", state: "blocked", startedAt: at(2), endedAt: at(16), detail: { phase: "setup", exitCode: 1 } },
+          { phase: "agent", state: "pending" },
+        ],
+        transcript: [{ phase: "setup", content: "$ bun install\nerror: lockfile had changes\n", createdAt: at(3) }],
+        block: { code: "SETUP_FAILED", message: "Project Setup did not complete successfully", actions: ["retry", "continue"], detail: "error: lockfile had changes" },
+      }),
+      kind: "managed-worktree",
+      onOpenTerminal: vi.fn(),
+    });
+
+    expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "failed");
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Setup failedexit 1 · 0:14");
+    expect(screen.getByRole("alert")).toHaveTextContent("error: lockfile had changes");
+    await userEvent.click(screen.getByRole("button", { name: "Show setup output" }));
+    expect(screen.getByRole("log", { name: "Setup output" })).toHaveTextContent("error: lockfile had changes");
+    expect(screen.getByRole("button", { name: "Open terminal" })).toBeInTheDocument();
+  });
+
+  it("explains a block with its message when the server has no output line to show", () => {
+    renderTrail({
+      startup: startup({
+        state: "blocked",
+        steps: [{ phase: "thread", state: "completed" }, { phase: "setup", state: "blocked", startedAt: at(2), endedAt: at(2) }],
+        block: { code: "SETUP_UNAVAILABLE", message: "Project Setup could not start", actions: ["retry", "continue"] },
+      }),
       kind: "managed-worktree",
     });
-    expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "attention");
-    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Setup needs approval");
+    expect(screen.getByRole("alert")).toHaveTextContent("Project Setup could not start");
+  });
+
+  it("announces state changes without the ticking duration", () => {
+    const { rerender } = renderTrail({ kind: "managed-worktree" });
+    expect(screen.getByRole("status")).toHaveTextContent(/^Preparing thread$/);
+
+    rerender(<TooltipProvider><StartupStepsTrail startup={startup()} kind="managed-worktree" /></TooltipProvider>);
+    expect(screen.getByRole("status")).toHaveTextContent(/^Running setup$/);
+
+    rerender(<TooltipProvider><StartupStepsTrail startup={startup({ state: "completed", phase: "agent", steps: [{ phase: "thread", state: "completed" }, { phase: "agent", state: "completed", startedAt: at(0), endedAt: at(8) }] })} kind="managed-worktree" /></TooltipProvider>);
+    expect(screen.getByRole("status")).toHaveTextContent(/^Thread started$/);
   });
 
   it("shows skipped setup and an opened worktree without durations", () => {

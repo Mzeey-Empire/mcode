@@ -11,7 +11,7 @@ import {
 export type TrailPhase = Exclude<ThreadStartupPhase, "thread">;
 
 /** Visual treatment of one trail row, mapped from its step state. */
-export type TrailRowTone = "done" | "live" | "pending" | "failed" | "attention" | "skipped" | "cancelled";
+export type TrailRowTone = "done" | "live" | "pending" | "failed" | "skipped" | "cancelled";
 
 /** One rendered step of the startup trail. */
 export interface StartupTrailRow {
@@ -38,7 +38,7 @@ interface StepVerbs {
   readonly completed: string;
   readonly failed: string;
   readonly skipped: string;
-  /** Subject for "{name} stopped" and "{name} needs approval". */
+  /** Subject for "{name} stopped". */
   readonly name: string;
 }
 
@@ -51,7 +51,8 @@ const AGENT: StepVerbs = { pending: "Start thread", running: "Starting thread", 
 const TONE_BY_STATE: Record<ThreadStartupStepState, TrailRowTone> = {
   pending: "pending",
   running: "live",
-  blocked: "attention",
+  // The server blocks a startup only when setup fails or cannot launch, so a blocked step reads as failed.
+  blocked: "failed",
   completed: "done",
   failed: "failed",
   // An interrupted step offers the failed-state actions, so it reads as failed.
@@ -107,7 +108,7 @@ export function startupStepLabel(kind: ThreadStartupKind, step: ThreadStartupSte
     case "skipped":
       return verbs[step.state];
     case "blocked":
-      return `${verbs.name} needs approval`;
+      return verbs.failed;
     case "cancelled":
       return "Cancelled";
     case "interrupted":
@@ -126,7 +127,7 @@ function skipReasonCopy(detail: SetupDetail | undefined): string | undefined {
 function setupArgument(step: ThreadStartupStep, setupCommand: string | undefined): string | undefined {
   const detail = step.detail?.phase === "setup" ? step.detail : undefined;
   if (step.state === "skipped") return skipReasonCopy(detail);
-  if (step.state === "failed" && detail?.exitCode !== undefined) return `exit ${detail.exitCode}`;
+  if ((step.state === "failed" || step.state === "blocked") && detail?.exitCode !== undefined) return `exit ${detail.exitCode}`;
   return step.state === "pending" ? undefined : setupCommand;
 }
 
@@ -147,6 +148,9 @@ function stepDuration(kind: ThreadStartupKind, step: ThreadStartupStep, now: num
   const end = step.endedAt ? Date.parse(step.endedAt) : step.state === "running" ? now : undefined;
   return end === undefined ? undefined : formatStartupDuration(end - Date.parse(step.startedAt));
 }
+
+// A stopped setup keeps its output open, since that output is what explains the stop.
+const SETUP_OUTPUT_STATES: ReadonlySet<ThreadStartupStepState> = new Set(["running", "blocked", "failed", "interrupted"]);
 
 function isTrailStep(step: ThreadStartupStep): step is ThreadStartupStep & { phase: TrailPhase } {
   return step.phase !== "thread";
@@ -169,9 +173,17 @@ export function startupTrailRows(
       // Paper sets a failed row's argument and duration as one "exit 1 · 0:14" run.
       meta: tone === "failed" && segments.length > 1 ? [segments.join(" · ")] : segments,
       title: step.detail?.phase === "worktree" ? step.detail.path : undefined,
-      expandable: step.phase === "setup" && step.state === "running",
+      expandable: step.phase === "setup" && SETUP_OUTPUT_STATES.has(step.state),
     };
   });
+}
+
+/** What a screen reader hears when the trail changes state. It never includes a ticking duration. */
+export function startupTrailAnnouncement(startup: Pick<ThreadStartup, "kind" | "state" | "steps"> | undefined): string {
+  if (!startup) return "Preparing thread";
+  if (startup.state === "completed") return "Thread started";
+  const current = startup.steps.filter(isTrailStep).filter((step) => step.state !== "pending").at(-1);
+  return current ? startupStepLabel(startup.kind, current) : "Preparing thread";
 }
 
 /** Pending rows drawn before the server returns the first startup record. */

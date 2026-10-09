@@ -11,6 +11,7 @@ import {
   setupCommandLine,
   startupHasLiveStep,
   startupTrailRows,
+  startupTrailAnnouncement,
   startupTrailSummary,
   type StartupTrailRow,
   type TrailRowTone,
@@ -35,7 +36,6 @@ const LABEL_CLASS: Record<TrailRowTone, string> = {
   live: "font-medium text-ink",
   pending: "text-muted",
   failed: "font-medium text-error",
-  attention: "font-medium text-ink",
   skipped: "text-muted",
   cancelled: "font-medium text-ink",
 };
@@ -50,8 +50,6 @@ function StatusMark({ tone }: { readonly tone: TrailRowTone }) {
       return <span className="size-1 rounded-full bg-muted" />;
     case "failed":
       return <CircleAlert size={14} className="text-error" />;
-    case "attention":
-      return <CircleAlert size={14} className="text-muted" />;
     case "skipped":
       return <Minus size={12} className="text-muted" />;
     case "cancelled":
@@ -136,9 +134,10 @@ function useLiveNow(live: boolean): number {
 }
 
 function StartupDetailLine({ startup }: { readonly startup: ThreadStartup | undefined }) {
-  const detail = startup?.block?.detail ?? startup?.error?.detail;
+  const reason = startup?.block ?? startup?.error;
+  const detail = reason?.detail ?? reason?.message;
   if (!detail) return null;
-  return <p data-testid="startup-detail" className="whitespace-pre-wrap break-words pb-2 pl-6 pt-1 font-mono text-caption text-muted">{detail}</p>;
+  return <p role="alert" data-testid="startup-detail" className="whitespace-pre-wrap break-words pb-2 pl-6 pt-1 font-mono text-caption text-muted">{detail}</p>;
 }
 
 function TrailActions({ actions, onCancel }: { readonly actions: ReactNode; readonly onCancel?: () => void }) {
@@ -181,9 +180,11 @@ export function StartupStepsTrail({ startup, startupId, kind, actions, onOpenTer
   const startedRow = completedStartup
     ? <StartedRow startup={completedStartup} setupCommand={setupCommandLine(setupScript)} expanded={stepsOpen} onToggle={() => setStepsOpen((open) => !open)} />
     : null;
-  if (completedStartup && !stepsOpen) return <section aria-label="Thread startup" data-testid="startup-trail">{startedRow}</section>;
+  const announcement = <p role="status" className="sr-only">{startupTrailAnnouncement(startup)}</p>;
+  if (completedStartup && !stepsOpen) return <section aria-label="Thread startup" data-testid="startup-trail">{announcement}{startedRow}</section>;
   return (
     <section aria-label="Thread startup" aria-busy={startup ? startupHasLiveStep(startup) : true} data-testid="startup-trail" className="flex flex-col gap-0.5">
+      {announcement}
       {startedRow}
       <TrailSteps startup={startup} kind={kind} setupScript={setupScript} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} />
       <StartupDetailLine startup={startup} />

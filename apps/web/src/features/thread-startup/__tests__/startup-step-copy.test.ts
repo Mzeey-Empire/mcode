@@ -57,6 +57,13 @@ describe("startupTrailRows", () => {
     expect(setup).toMatchObject({ tone: "failed", label: "Setup failed", meta: ["exit 1 · 0:14"] });
   });
 
+  it("reads a setup step the server blocked on a failed command as failed, with its exit code and open output", () => {
+    const [setup] = startupTrailRows(managed([
+      { phase: "setup", state: "blocked", startedAt: at(0), endedAt: at(14), detail: { phase: "setup", exitCode: 1 } },
+    ]), { now: 0, setupCommand: "bun install" });
+    expect(setup).toEqual({ phase: "setup", tone: "failed", label: "Setup failed", meta: ["exit 1 · 0:14"], title: undefined, expandable: true });
+  });
+
   it("labels blocked, interrupted, cancelled and skipped steps", () => {
     const rows = startupTrailRows(managed([
       { phase: "fetch", state: "interrupted", startedAt: at(0), endedAt: at(2), detail: { phase: "fetch", ref: "origin/main" } },
@@ -67,7 +74,7 @@ describe("startupTrailRows", () => {
     expect(rows.map(({ label, meta, tone }) => ({ label, meta, tone }))).toEqual([
       { label: "Fetch stopped", meta: ["origin/main · 0:02"], tone: "failed" },
       { label: "Cancelled", meta: ["0:09"], tone: "cancelled" },
-      { label: "Setup needs approval", meta: ["bun install"], tone: "attention" },
+      { label: "Setup failed", meta: ["bun install"], tone: "failed" },
       { label: "Thread didn't start", meta: ["0:30"], tone: "failed" },
     ]);
   });
