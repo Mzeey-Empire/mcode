@@ -12,6 +12,8 @@ import * as NodeCrypto from "node:crypto";
 import type { DiffStats } from "@mcode/contracts";
 import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
 
 const MAX_ATTRIBUTED_PATHS = 16_384;
 const MAX_PATHS_PER_GIT_CALL = 128;
@@ -206,7 +208,14 @@ function collectDiffStats(
 /** Service for capturing and comparing git working tree snapshots. */
 @injectable()
 export class SnapshotService {
-  constructor(@inject("GitExecutor") private readonly gitExecutor: GitExecutor) {}
+  private readonly mutationLock: RepositoryGitMutationLock;
+
+  constructor(
+    @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
+    @inject(RepositoryGitMutationLock, { isOptional: true }) mutationLock?: RepositoryGitMutationLock,
+  ) {
+    this.mutationLock = mutationLock ?? new RepositoryGitMutationLock(hostRuntime);
+  }
 
   /**
    * Capture the current working tree state as a tree object SHA.
@@ -217,8 +226,15 @@ export class SnapshotService {
    *
    * Identical working trees produce identical tree SHAs (content-addressable),
    * so consecutive calls on a clean tree return the same value.
+   *
+   * Runs under the repository mutation lock, so a pin created in the same lock region names
+   * the tree before any other Git mutation of this checkout can run.
    */
-  async captureRef(cwd: string): Promise<string> {
+  captureRef(cwd: string): Promise<string> {
+    return this.mutationLock.run(cwd, () => this.captureRefUnlocked(cwd));
+  }
+
+  private async captureRefUnlocked(cwd: string): Promise<string> {
     const timeout = RealGitExecutor.DEFAULT_TIMEOUT;
 
     if (await this.isWorkingTreeClean(cwd, timeout)) {

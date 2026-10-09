@@ -11,17 +11,18 @@ import { snapshotInput } from "./turn-snapshot-write-operations.js";
 export const persistTurnSnapshot = databaseWriteOperation("turnFinalization.persistSnapshot", z.object({
   snapshot: snapshotInput,
   markFilesChanged: z.boolean(),
-}).strict(), z.void());
+}).strict(), z.object({ snapshotId: z.string().min(1) }).strict());
 
 /** Construct terminal snapshot persistence against the writer connection. */
 export function turnFinalizationWriteHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {
   const snapshots = new TurnSnapshotStore(db);
   const orm = drizzle(db);
   return new Map([[persistTurnSnapshot.name, databaseWriteHandler(persistTurnSnapshot, (input) => {
-    snapshots.create(input.snapshot);
+    const created = snapshots.create(input.snapshot);
     if (input.markFilesChanged) {
       orm.update(threads).set({ hasFileChanges: 1 })
         .where(and(eq(threads.id, input.snapshot.threadId), eq(threads.hasFileChanges, 0))).run();
     }
+    return { snapshotId: created.id };
   })]]);
 }
