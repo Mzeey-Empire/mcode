@@ -55,6 +55,10 @@ Internal guides are grouped in topic subfolders. Use this index to find a guide.
 - [Terminal workload corpus](internals/performance/terminal-workload-corpus.md)
 - [SQLite performance profile](internals/performance/sqlite-performance-profile.md)
 
+### CI
+
+- [Pull request CI](internals/ci/pull-request-ci.md): runner choice, serial tests, and cache and sandbox traps
+
 ### Persistence and settings
 
 - [Database migrations](internals/persistence/db-migrations.md)
