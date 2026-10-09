@@ -7,12 +7,20 @@ function tool(overrides: Partial<ToolCall> = {}): ToolCall {
 }
 
 describe("tool activity label", () => {
-  it.each(["Bash", "Shell", "Terminal", "command_execution"])("reads the %s command on one line, never the provider description", (toolName) => {
+  it.each(["Bash", "PowerShell", "Shell", "Terminal", "command_execution"])("reads the %s command on one line, never the provider description", (toolName) => {
     expect(toolActivityLabel(tool({ toolName, toolInput: { command: "bun run\n  lint", description: "Lint the web app" } }))).toBe("Running bun run lint");
   });
 
   it("falls back when a shell call has no command", () => {
     expect(toolActivityLabel(tool({ toolName: "Bash", toolInput: { description: "Lint the web app" } }))).toBe("Running command");
+  });
+
+  it("reads the command and file from the summarized input that live recovery stores", () => {
+    expect(toolActivityLabel(tool({ toolName: "Bash", toolInput: { _summary: 'node -e "console.log(1)"' } }))).toBe('Running node -e "console.log(1)"');
+    expect(toolActivityLabel(tool({ toolName: "command_execution", toolInput: { _summary: '{"command":"bun run lint"}' } }))).toBe("Running bun run lint");
+    expect(toolActivityLabel(tool({ toolName: "PowerShell", toolInput: { _summary: '{"command":"node -e \\"x\\"","description":"Run node"}' } }))).toBe('Running node -e "x"');
+    expect(toolActivityLabel(tool({ toolInput: { _summary: "F:\\repo\\.dev\\fixture-repo\\README.md" } }))).toBe("Reading README.md");
+    expect(toolActivityLabel(tool({ toolName: "Edit", toolInput: { _summary: "/repo/app.ts" } }))).toBe("Editing app.ts");
   });
 
   it("names the file for Read, Edit and Write", () => {

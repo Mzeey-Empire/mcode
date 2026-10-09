@@ -1274,6 +1274,22 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       expect(record.input_summary).toBe(command);
     });
 
+    it("summarizes Claude's Windows PowerShell tool as its plain command", async () => {
+      seedAssistantMessage("m1", "done", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, {
+        toolCallId: "ps-1",
+        toolName: "PowerShell",
+        toolInput: { command: "node -e \"console.log('lint ok')\"", description: "Run node script", timeout: 60000 },
+      });
+
+      await store.persistNarrative(THREAD, "m1", "done", "completed");
+
+      const [record] = new ToolCallRecordRepo(db, agentStorageTestWriter(db)).listByMessage("m1");
+      expect(record.input_summary).toBe("node -e \"console.log('lint ok')\"");
+    });
+
   });
 
   describe("Classification precedence + is_final_response safety net", () => {

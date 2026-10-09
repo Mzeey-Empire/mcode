@@ -47,6 +47,7 @@ export const DEFAULT_ICON: IconComponent = Wrench;
 
 /** Provider-specific shell tool names normalized to `Bash`. */
 const SHELL_TOOL_ALIASES: Record<string, "Bash"> = {
+  PowerShell: "Bash",
   Shell: "Bash",
   Terminal: "Bash",
   command_execution: "Bash",

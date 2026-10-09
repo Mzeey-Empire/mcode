@@ -1,6 +1,7 @@
 import type { ToolCall } from "@/transport/types";
 import { isShellTool, resolveToolName, TOOL_PHASE_LABELS } from "@/components/chat/tool-renderers/constants";
 import { stripPlanFences } from "@/lib/plan-fences";
+import { extractNarrativeCommand } from "./extract-narrative-command";
 import type { ThoughtSegment } from "./types";
 
 const LABEL_LIMIT = 120;
@@ -37,18 +38,26 @@ export function currentActivityHeading(segments: readonly ThoughtSegment[]): str
   return heading;
 }
 
+/** Live recovered tool calls keep only the server's input summary, which for file tools is the bare path. */
+function filePath(tool: ToolCall): unknown {
+  return tool.toolInput.file_path ?? tool.toolInput.path ?? tool.toolInput._summary;
+}
+
 function fileActivity(tool: ToolCall, name: string): string | undefined {
   const verbs: Record<string, string> = { Read: "Reading", Edit: "Editing", Write: "Writing" };
   const verb = verbs[name];
-  const path = tool.toolInput.file_path ?? tool.toolInput.path;
+  const path = filePath(tool);
   if (!verb || typeof path !== "string") return undefined;
   const file = shortLabel(path.split(/[\\/]/).at(-1));
   return file ? shortLabel(`${verb} ${file}`) : undefined;
 }
 
-/** Shells read the command itself for every provider, so all providers word the same action alike. */
+/**
+ * Shells read the command itself for every provider, so all providers word the same action alike.
+ * Live recovered calls carry only the server's `_summary`, so this shares the shell row's extraction.
+ */
 function shellActivity(tool: ToolCall): string {
-  const command = shortLabel(tool.toolInput.command);
+  const command = shortLabel(extractNarrativeCommand(tool));
   return shortLabel(command && `Running ${command}`) ?? "Running command";
 }
 
