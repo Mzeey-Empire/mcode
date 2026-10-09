@@ -4,7 +4,6 @@ import { AttachmentPreview } from "@/components/chat/AttachmentPreview";
 import { ComposerAddMenu } from "@/components/chat/ComposerAddMenu";
 import { ComposerBranchBar } from "@/components/chat/ComposerBranchBar";
 import { ComposerQueueList } from "@/components/chat/ComposerQueueList";
-import { CompactingBanner } from "@/components/chat/CompactingBanner";
 import { ContextTracker } from "@/components/chat/ContextTracker";
 import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPopup";
 import { PlanPreview } from "@/components/chat/PlanPreview";
@@ -84,7 +83,6 @@ interface ComposerContentSurfaceProps {
     readonly selectedTextComments: readonly SelectedTextComment[];
     readonly selectedTextCommentEditor?: SelectedTextCommentEditorDraft;
     readonly unavailableSelectedTextCommentIds: readonly string[];
-    readonly isCompacting: boolean;
     readonly hasRetryState: boolean;
     readonly isThreadScaffold: boolean;
     readonly hasContent: boolean;
@@ -375,8 +373,7 @@ function ComposerAttachmentSurface({
     <>
       <AnnotationAttachmentRow model={model} actions={actions} />
       <AttachmentPreview attachments={model.attachments} onRemove={actions.onRemoveAttachment} />
-      {model.isCompacting && <CompactingBanner />}
-      {!model.isCompacting && model.hasRetryState && model.threadId && (
+      {model.hasRetryState && model.threadId && (
         <RetryBanner threadId={model.threadId} />
       )}
       {model.isDragOver && (

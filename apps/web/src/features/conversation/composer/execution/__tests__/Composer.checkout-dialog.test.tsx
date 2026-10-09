@@ -255,10 +255,6 @@ vi.mock("@/components/chat/ContextTracker", () => ({
   ContextTracker: () => <div />,
 }));
 
-vi.mock("@/components/chat/CompactingBanner", () => ({
-  CompactingBanner: () => <div />,
-}));
-
 vi.mock("@/components/chat/RetryBanner", () => ({
   RetryBanner: () => <div />,
 }));

@@ -428,7 +428,6 @@ export function Composer({
   const annotationScopeId = surfaceState.annotationScopeId;
   const isThreadScaffold = surfaceState.isThreadScaffold;
   const contextEntry = useThreadRecord(threadId, (r) => r.context);
-  const isCompacting = useThreadRecord(threadId, (r) => r.isCompacting);
   const handoffStatus = useThreadStore((s) =>
     threadId ? getHandoffStatus(getThreadRecord(s.records, threadId)) : undefined,
   );
@@ -680,7 +679,6 @@ export function Composer({
             selectedTextComments: form.state.selectedTextComments,
             selectedTextCommentEditor: form.state.selectedTextCommentEditor,
             unavailableSelectedTextCommentIds,
-            isCompacting,
             hasRetryState,
             isThreadScaffold: surfaceState.isThreadScaffold,
             hasContent: surfaceState.hasContent,
