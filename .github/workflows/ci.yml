@@ -14,10 +14,45 @@ concurrency:
 env:
   SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
 
-# Set the CI_LINUX_RUNNER repository variable to a runner label, such as
-# ubuntu-24.04, to move every PR check off Blacksmith when spend runs high.
-# Delete the variable to return to the per-job Blacksmith defaults.
 jobs:
+  # Splits PR checks between paid Blacksmith runners and free GitHub-hosted
+  # runners by PR number parity, so each PR stays on one provider and keeps
+  # warm caches. Set the CI_LINUX_RUNNER repository variable to `blacksmith`
+  # or `github` to pin every PR to one provider.
+  pick-runner:
+    name: Pick Runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      small: ${{ steps.pick.outputs.small }}
+      large: ${{ steps.pick.outputs.large }}
+    steps:
+      - id: pick
+        env:
+          MODE: ${{ vars.CI_LINUX_RUNNER || 'round-robin' }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            blacksmith) provider=blacksmith ;;
+            github) provider=github ;;
+            round-robin)
+              if [ $((PR_NUMBER % 2)) -eq 0 ]; then provider=blacksmith; else provider=github; fi ;;
+            *)
+              echo "::error::CI_LINUX_RUNNER must be blacksmith, github or round-robin, got '$MODE'"
+              exit 1 ;;
+          esac
+          if [ "$provider" = blacksmith ]; then
+            small=blacksmith-2vcpu-ubuntu-2404
+            large=blacksmith-4vcpu-ubuntu-2404
+          else
+            small=ubuntu-24.04
+            large=ubuntu-24.04
+          fi
+          echo "small=$small" >> "$GITHUB_OUTPUT"
+          echo "large=$large" >> "$GITHUB_OUTPUT"
+          echo "PR #$PR_NUMBER ($MODE) runs on $provider: $small, $large" >> "$GITHUB_STEP_SUMMARY"
+
   pr-title:
     name: PR Title
     # A few seconds of work is billed as a full Blacksmith minute.
@@ -30,7 +65,8 @@ jobs:
 
   typecheck:
     name: Typecheck
-    runs-on: ${{ vars.CI_LINUX_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
+    needs: pick-runner
+    runs-on: ${{ needs.pick-runner.outputs.small }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -74,7 +110,8 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ${{ vars.CI_LINUX_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
+    needs: pick-runner
+    runs-on: ${{ needs.pick-runner.outputs.small }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -107,7 +144,8 @@ jobs:
 
   test:
     name: Test
-    runs-on: ${{ vars.CI_LINUX_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    needs: pick-runner
+    runs-on: ${{ needs.pick-runner.outputs.large }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -150,7 +188,8 @@ jobs:
 
   build-check:
     name: Build Check
-    runs-on: ${{ vars.CI_LINUX_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
+    needs: pick-runner
+    runs-on: ${{ needs.pick-runner.outputs.small }}
     timeout-minutes: 20
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
