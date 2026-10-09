@@ -1,6 +1,11 @@
 import * as NodeChildProcess from "node:child_process";
 import { z } from "zod";
 import {
+  repositoryPullRequestTargetsQuery, searchPullRequestTargetsQuery, parsePullRequestTargetPage,
+  exactPullRequestTargetQuery, parseExactPullRequestTarget,
+  type RepositoryPullRequestTargetsRequest,
+} from "./github-pull-request-targets.js";
+import {
   PULL_REQUEST_CURSOR_COMPONENT_MAX_LENGTH,
   PULL_REQUEST_FILE_MAX_COUNT,
   PULL_REQUEST_PATCH_MAX_BYTES,
@@ -1106,6 +1111,7 @@ const githubErrorClassifications: ReadonlyArray<{
   code: PullRequestErrorCode;
   fragments: readonly string[];
 }> = [
+  { code: "not_found", fragments: ["could not resolve to a pullrequest"] },
   { code: "unauthenticated", fragments: ["not logged", "authentication", "http 401"] },
   { code: "rate_limited", fragments: ["rate limit", "secondary rate"] },
   { code: "forbidden", fragments: ["forbidden", "http 403", "resource not accessible"] },
@@ -1129,24 +1135,40 @@ function safeErrorMessage(code: PullRequestErrorCode): string {
   }
 }
 
+const commandErrorSchema = z.object({
+  message: z.string().optional(), stderr: z.string().optional(), stdout: z.string().optional(),
+  code: z.union([z.number(), z.string()]).optional(), name: z.string().optional(),
+});
+
 function normalizeCommandError(error: unknown, signal: AbortSignal): GithubPullRequestClientError {
-  const commandError = error as NodeChildProcess.ExecFileException & { stderr?: string };
+  const parsed = commandErrorSchema.safeParse(error);
+  const commandError = parsed.success ? parsed.data : {};
   if (isAbortedCommand(signal, commandError)) {
     return new GithubPullRequestClientError("cancelled", safeErrorMessage("cancelled"));
   }
   const diagnostic = commandErrorDiagnostic(commandError);
   const code = commandError?.code === 4 ? "unauthenticated" : classifyErrorMessage(diagnostic);
-  return new GithubPullRequestClientError(code, safeErrorMessage(code));
+  return new GithubPullRequestClientError(
+    code, safeErrorMessage(code), undefined,
+    code === "rate_limited" ? rateLimitResetAt(`${commandError.stdout ?? ""}\n${diagnostic}`) : undefined,
+  );
+}
+
+function rateLimitResetAt(headers: string): string | undefined {
+  const seconds = /^x-ratelimit-reset:\s*(\d+)\s*$/im.exec(headers)?.[1];
+  if (!seconds) return undefined;
+  const time = Number(seconds) * 1000;
+  return Number.isSafeInteger(time) && time <= 8_640_000_000_000_000 ? new Date(time).toISOString() : undefined;
 }
 
 function isAbortedCommand(
   signal: AbortSignal,
-  error: NodeChildProcess.ExecFileException & { stderr?: string },
+  error: { code?: string | number; name?: string },
 ): boolean {
   return signal.aborted || error?.code === "ABORT_ERR" || error?.name === "AbortError";
 }
 
-function commandErrorDiagnostic(error: NodeChildProcess.ExecFileException & { stderr?: string }): string {
+function commandErrorDiagnostic(error: { message?: string; stderr?: string }): string {
   return `${error?.message ?? ""}\n${error?.stderr ?? ""}`.slice(0, 8_192);
 }
 
@@ -1192,7 +1214,7 @@ function parseViewerTeamNodeIds(
 type GithubGraphqlVariables = Readonly<Record<string, string | number | boolean | null>>;
 
 function graphqlArgs(query: string, variables: GithubGraphqlVariables): string[] {
-  const args = ["api", "graphql", "-f", `query=${query}`];
+  const args = ["api", "graphql", "-i", "-f", `query=${query}`];
   for (const [name, value] of Object.entries(variables)) {
     args.push(
       typeof value === "string" ? "-f" : "-F",
@@ -1203,7 +1225,8 @@ function graphqlArgs(query: string, variables: GithubGraphqlVariables): string[]
 }
 
 function parseGraphqlData(stdout: string): Record<string, unknown> {
-  const parsedJson = parseIncludedResponse(stdout).body;
+  const response = parseIncludedResponse(stdout);
+  const parsedJson = response.body;
   const envelope = githubGraphqlEnvelopeSchema.safeParse(parsedJson);
   if (!envelope.success) {
     throw new GithubPullRequestClientError(
@@ -1213,7 +1236,10 @@ function parseGraphqlData(stdout: string): Record<string, unknown> {
   }
   if (envelope.data.errors?.length) {
     const code = classifyErrorMessage(envelope.data.errors[0].message);
-    throw new GithubPullRequestClientError(code, safeErrorMessage(code));
+    throw new GithubPullRequestClientError(
+      code, safeErrorMessage(code), undefined,
+      code === "rate_limited" ? rateLimitResetAt(response.headers) : undefined,
+    );
   }
   if (!envelope.data.data) {
     throw new GithubPullRequestClientError(
@@ -1918,6 +1944,48 @@ implements PullRequestRemoteClient, PullRequestRemoteMutationClient {
   constructor(
     private readonly runner: GithubPullRequestCommandRunner = new ExecFileGithubCommandRunner(),
   ) {}
+
+  /** List one repository's open PR targets with GitHub totals and continuation cursors. */
+  async listRepositoryOpenPullRequests(request: RepositoryPullRequestTargetsRequest) {
+    const query = request.query?.trim();
+    const exact = await this.getExactPullRequestTarget(request);
+    const variables: GithubGraphqlVariables = query
+      ? { query: `repo:${request.owner}/${request.name} is:pr is:open ${query}`, first: request.limit ?? 30, after: request.cursor ?? null }
+      : { owner: request.owner, name: request.name, first: request.limit ?? 30, after: request.cursor ?? null };
+    const data = await this.runGraphql(
+      query ? searchPullRequestTargetsQuery : repositoryPullRequestTargetsQuery,
+      variables, request.signal,
+    );
+    try {
+      const page = parsePullRequestTargetPage(data, Boolean(query));
+      page.items = page.items.filter((item) => !request.cursor || !/^#?\d+$/.test(query ?? "")
+        || item.number !== Number(query?.replace(/^#/, "")));
+      // The exact lookup is independent of search; retain every edge behind GitHub's cursor.
+      if (exact) page.items = [exact, ...page.items.filter((item) => item.number !== exact.number)];
+      return page;
+    } catch {
+      throw new GithubPullRequestClientError("remote_unavailable", "GitHub returned invalid pull request targets.");
+    }
+  }
+
+  private async getExactPullRequestTarget(request: RepositoryPullRequestTargetsRequest) {
+    const query = request.query?.trim() ?? "";
+    if (request.cursor || !/^#?\d+$/.test(query)) return null;
+    const number = Number(query.replace(/^#/, ""));
+    if (number > 2_147_483_647) return null;
+    try {
+      const data = await this.runGraphql(exactPullRequestTargetQuery, {
+        owner: request.owner, name: request.name, number,
+      }, request.signal);
+      return parseExactPullRequestTarget(data);
+    } catch (error) {
+      if (error instanceof GithubPullRequestClientError && error.code === "not_found") return null;
+      if (error instanceof z.ZodError) {
+        throw new GithubPullRequestClientError("remote_unavailable", "GitHub returned an invalid exact pull request target.");
+      }
+      throw error;
+    }
+  }
 
   private async runGraphql(
     query: string,

@@ -85,9 +85,9 @@ import { ToolCallRecordSchema } from "../models/tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "../models/thought-segment.js";
 import { HookExecutionRecordSchema } from "../models/hook-execution.js";
 import { NarrativeEntrySchema, TurnRangeSchema } from "../models/narrative-entry.js";
-import { GitBranchSchema, WorktreeSchema, BranchComparisonSchema, GitRefSchema, GitRemoteUrlSchema, GitBranchNameSchema } from "../git.js";
+import { GitBranchSchema, WorktreeSchema, BranchComparisonSchema, GitRefNameSchema, GitRemoteUrlSchema, GitBranchNameSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
-import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema } from "../github.js";
+import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema, PullRequestTargetsListParamsSchema, PullRequestTargetsListResultSchema } from "../github.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
@@ -866,6 +866,10 @@ export const WS_METHODS = lazySchema(() => ({
     params: ThreadControlUserStopInputSchema(),
     result: ThreadStopResultSchema(),
   },
+  "git.refs.list": {
+    params: GitRefsListParamsSchema(),
+    result: GitRefsListResultSchema(),
+  },
   "git.listBranches": {
     params: z.object({ workspaceId: z.string() }),
     result: z.array(GitBranchSchema()),
@@ -875,7 +879,7 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.string().nullable(),
   },
   "git.checkout": {
-    params: z.object({ workspaceId: z.string(), branch: GitRefSchema }),
+    params: z.object({ workspaceId: z.string(), branch: GitRefNameSchema }),
     result: z.void(),
   },
   "git.createBranch": {
@@ -908,8 +912,8 @@ export const WS_METHODS = lazySchema(() => ({
   "git.log": {
     params: z.object({
       workspaceId: z.string(),
-      branch: GitRefSchema.optional(),
-      baseBranch: GitRefSchema.optional(),
+      branch: GitRefNameSchema.optional(),
+      baseBranch: GitRefNameSchema.optional(),
       limit: z.number().int().min(1).max(500).optional(),
       skip: z.number().int().min(0).optional(),
       includeStats: z.boolean().optional(),
@@ -965,9 +969,9 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({
       workspaceId: z.string(),
       /** Base ref of the comparison; omit to use the detected default branch. */
-      base: GitRefSchema.optional(),
+      base: GitRefNameSchema.optional(),
       /** Target ref of the comparison; omit to use HEAD. */
-      target: GitRefSchema.optional(),
+      target: GitRefNameSchema.optional(),
       threadId: z.string().optional(),
     }),
     result: z.array(z.string()),
@@ -976,9 +980,9 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({
       workspaceId: z.string(),
       /** Base ref of the comparison; omit to use the detected default branch. */
-      base: GitRefSchema.optional(),
+      base: GitRefNameSchema.optional(),
       /** Target ref of the comparison; omit to use HEAD. */
-      target: GitRefSchema.optional(),
+      target: GitRefNameSchema.optional(),
       filePath: z.string().optional(),
       maxLines: z.number().int().positive().optional(),
       threadId: z.string().optional(),
@@ -1017,8 +1021,8 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({
       workspaceId: z.string(),
       view: z.enum(["unstaged", "staged", "branch", "commit"]),
-      base: GitRefSchema.optional(),
-      target: GitRefSchema.optional(),
+      base: GitRefNameSchema.optional(),
+      target: GitRefNameSchema.optional(),
       sha: z.string().optional(),
       threadId: z.string().optional(),
     }),
@@ -1230,6 +1234,10 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ branch: z.string(), cwd: z.string() }),
     result: PrInfoSchema().nullable(),
   },
+  "github.pullRequestTargets.list": {
+    params: PullRequestTargetsListParamsSchema(),
+    result: PullRequestTargetsListResultSchema(),
+  },
   "github.listOpenPrs": {
     params: z.object({ workspaceId: z.string() }),
     result: z.array(PrDetailSchema()),
@@ -1293,7 +1301,7 @@ export const WS_METHODS = lazySchema(() => ({
   "git.push": {
     params: z.object({
       workspaceId: z.string(),
-      branch: GitRefSchema,
+      branch: GitRefNameSchema,
       /** Active thread lets linked Review tasks use their persisted explicit push target. */
       threadId: z.string().optional(),
     }),

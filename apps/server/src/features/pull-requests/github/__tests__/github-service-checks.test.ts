@@ -1,7 +1,6 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as NodeEvents from "node:events";
-import type { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 
 const { mockExecFile } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
@@ -24,6 +23,13 @@ vi.mock("@mcode/shared", () => ({
 }));
 
 import { GithubService } from "../github-service.js";
+import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
+import { GithubPullRequestClient } from "../github-pull-request-client.js";
+
+const gitRepository = new GitRepositoryService({ findById: () => undefined }, {
+  exec: async () => { throw new Error("Unexpected git command"); },
+});
+const pullRequestClient = new GithubPullRequestClient();
 
 const TEST_HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "127" } as const;
 
@@ -47,7 +53,7 @@ describe("GithubService.getCheckRuns", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockKillProcessTree.mockResolvedValue(undefined);
-    ghService = new GithubService({} as WorkspaceRepo, TEST_HOST_RUNTIME);
+    ghService = new GithubService({ findById: () => undefined }, TEST_HOST_RUNTIME, gitRepository, pullRequestClient);
     vi.spyOn(ghService, "resolveRepoSlug").mockResolvedValue("owner/test-repo");
   });
 
@@ -495,7 +501,7 @@ describe("GithubService.getPullRequestWatchSnapshots", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockKillProcessTree.mockResolvedValue(undefined);
-    ghService = new GithubService({} as WorkspaceRepo, TEST_HOST_RUNTIME);
+    ghService = new GithubService({ findById: () => undefined }, TEST_HOST_RUNTIME, gitRepository, pullRequestClient);
     vi.spyOn(ghService, "resolveRepoSlug").mockResolvedValue("owner/test-repo");
   });
 
@@ -724,7 +730,7 @@ describe("GithubService.resolveRepoSlug", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    ghService = new GithubService({} as WorkspaceRepo, TEST_HOST_RUNTIME);
+    ghService = new GithubService({ findById: () => undefined }, TEST_HOST_RUNTIME, gitRepository, pullRequestClient);
   });
 
   it("returns owner/repo from gh repo view", async () => {

@@ -314,6 +314,7 @@ export const PullRequestErrorCodeSchema = lazySchema(() =>
     "invalid_input",
     "stale_cursor",
     "remote_unavailable",
+    "remote_not_github",
     "cancelled",
     "head_missing",
     "workspace_mapping_missing",

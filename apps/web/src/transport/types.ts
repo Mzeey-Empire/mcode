@@ -17,6 +17,10 @@ import type {
   PaginatedMessages,
   AttachmentMeta,
   GitBranch,
+  GitRefsListParams,
+  GitRefsListResult,
+  PullRequestTargetsListParams,
+  PullRequestTargetsListResult,
   BranchComparison,
   WorktreeInfo,
   PrInfo,
@@ -113,6 +117,8 @@ import type {
 // Re-export shared types from the contracts package (single source of truth).
 export type { PlanAction } from "@mcode/contracts";
 export type {
+  GitRefsListResult,
+  PullRequestTargetsListResult,
   Workspace,
   WorkspaceEnrichment,
   WorkspaceEnvironmentDocument,
@@ -401,6 +407,10 @@ export interface McodeTransport {
 
   // Git branch commands
   listBranches(workspaceId: string): Promise<GitBranch[]>;
+  /** List qualified branch and worktree targets for one picker page. */
+  listRefs(params: GitRefsListParams): Promise<GitRefsListResult>;
+  /** List repository pull request targets with a GitHub total. */
+  listPullRequestTargets(params: PullRequestTargetsListParams): Promise<PullRequestTargetsListResult>;
   getCurrentBranch(workspaceId: string): Promise<string | null>;
   checkoutBranch(workspaceId: string, branch: string): Promise<void>;
   createBranch(workspaceId: string, name: string, threadId?: string): Promise<{ branch: string }>;

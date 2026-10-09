@@ -11,6 +11,8 @@ import type {
   ProviderCatalogRequest,
   ProviderCatalogSnapshot,
   PrInfo,
+  GitRefsListResult,
+  PullRequestTargetsListResult,
   PrDetail,
   ToolCallRecord,
   ThoughtSegmentRecord,
@@ -1158,6 +1160,8 @@ export function createWsTransport(
 
     // Git
     listBranches: (workspaceId) => rpc<GitBranch[]>("git.listBranches", { workspaceId }),
+    listRefs: (params) => rpc<GitRefsListResult>("git.refs.list", params),
+    listPullRequestTargets: (params) => rpc<PullRequestTargetsListResult>("github.pullRequestTargets.list", params),
     getCurrentBranch: (workspaceId) => rpc<string | null>("git.currentBranch", { workspaceId }),
     checkoutBranch: (workspaceId, branch) =>
       rpc<void>("git.checkout", { workspaceId, branch }),

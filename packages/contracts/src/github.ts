@@ -1,16 +1,48 @@
 import { z } from "zod";
 import { lazySchema } from "./utils/lazySchema.js";
+import { pagedTargetResultSchema } from "./git.js";
+import { PullRequestErrorSchema } from "./pull-requests.js";
 
 /** PR metadata returned by the server. */
 export const PrInfoSchema = lazySchema(() =>
   z.object({
     number: z.number(),
+    title: z.string(),
     url: z.string(),
     state: z.string(),
   }),
 );
 /** Basic PR metadata returned by the server. */
 export type PrInfo = z.infer<ReturnType<typeof PrInfoSchema>>;
+
+/** Open pull request available as a new-thread target. */
+export const PullRequestTargetSchema = lazySchema(() => z.object({
+  number: z.number().int().positive(),
+  title: z.string().max(512),
+  headRefName: z.string().min(1).max(255),
+  author: z.string().max(100).nullable(),
+  isCrossRepository: z.boolean(),
+  url: z.string().url().max(2048),
+}));
+/** Pull request target row. */
+export type PullRequestTarget = z.infer<ReturnType<typeof PullRequestTargetSchema>>;
+
+/** Repository-scoped pull request target page input. */
+export const PullRequestTargetsListParamsSchema = lazySchema(() => z.object({
+  workspaceId: z.string().min(1).max(256),
+  query: z.string().trim().max(200).optional(),
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.number().int().min(1).max(50).default(30),
+}));
+/** Caller input for a pull request target page. */
+export type PullRequestTargetsListParams = z.input<ReturnType<typeof PullRequestTargetsListParamsSchema>>;
+
+/** Pull request page with a GitHub total or a typed error. */
+export const PullRequestTargetsListResultSchema = lazySchema(() => pagedTargetResultSchema(
+  PullRequestTargetSchema(), PullRequestErrorSchema(),
+));
+/** Pull request target listing result. */
+export type PullRequestTargetsListResult = z.infer<ReturnType<typeof PullRequestTargetsListResultSchema>>;
 
 /** Detailed PR metadata for branch picker and URL detection. */
 export const PrDetailSchema = lazySchema(() =>
