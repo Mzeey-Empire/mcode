@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const windowActionsTest = vi.hoisted(() => ({
-  app: { isPackaged: false, quit: vi.fn() },
-}));
-
-vi.mock("electron", () => ({ app: windowActionsTest.app }));
+vi.mock("electron", () => ({ app: { isPackaged: false } }));
 
 import {
   DESKTOP_WINDOW_ACTIONS,
@@ -15,12 +11,6 @@ function createWindow() {
   let fullScreen = false;
   let devToolsOpen = false;
   const webContents = {
-    undo: vi.fn(),
-    redo: vi.fn(),
-    cut: vi.fn(),
-    copy: vi.fn(),
-    paste: vi.fn(),
-    selectAll: vi.fn(),
     getZoomLevel: vi.fn(() => 1),
     setZoomLevel: vi.fn(),
     reloadIgnoringCache: vi.fn(),
@@ -34,7 +24,6 @@ function createWindow() {
   };
   const window = {
     webContents,
-    close: vi.fn(),
     isFullScreen: vi.fn(() => fullScreen),
     setFullScreen: vi.fn((value: boolean) => {
       fullScreen = value;
@@ -45,7 +34,6 @@ function createWindow() {
 
 describe("Desktop Window native actions", () => {
   beforeEach(() => {
-    windowActionsTest.app.quit.mockClear();
     vi.stubEnv("ELECTRON_RENDERER_URL", "");
   });
 
@@ -53,16 +41,8 @@ describe("Desktop Window native actions", () => {
     vi.unstubAllEnvs();
   });
 
-  it("keeps the complete native action allowlist", () => {
+  it("allows only window actions, leaving edit commands to Chromium", () => {
     expect([...DESKTOP_WINDOW_ACTIONS]).toEqual([
-      "closeWindow",
-      "quit",
-      "undo",
-      "redo",
-      "cut",
-      "copy",
-      "paste",
-      "selectAll",
       "zoomIn",
       "zoomOut",
       "zoomReset",
@@ -70,31 +50,6 @@ describe("Desktop Window native actions", () => {
       "reload",
       "toggleDevTools",
     ]);
-  });
-
-  it.each([
-    ["undo", "undo"],
-    ["redo", "redo"],
-    ["cut", "cut"],
-    ["copy", "copy"],
-    ["paste", "paste"],
-    ["selectAll", "selectAll"],
-  ] as const)("applies the %s edit action", (action, method) => {
-    const fixture = createWindow();
-
-    performDesktopWindowAction(fixture.window as never, action);
-
-    expect(fixture.webContents[method]).toHaveBeenCalledOnce();
-  });
-
-  it("closes the target window and quits the application", () => {
-    const fixture = createWindow();
-
-    performDesktopWindowAction(fixture.window as never, "closeWindow");
-    performDesktopWindowAction(fixture.window as never, "quit");
-
-    expect(fixture.window.close).toHaveBeenCalledOnce();
-    expect(windowActionsTest.app.quit).toHaveBeenCalledOnce();
   });
 
   it("changes zoom by one half level and resets it", () => {

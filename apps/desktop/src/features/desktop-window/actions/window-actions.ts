@@ -1,17 +1,12 @@
-import { app, type BrowserWindow } from "electron";
+import type { BrowserWindow } from "electron";
 
 import { isDesktopDev } from "../../../main/is-desktop-dev.js";
 
-/** Native window and edit commands accepted from the context-isolated renderer. */
+/**
+ * Native window commands accepted from the context-isolated renderer. Edit
+ * commands are absent on purpose: Chromium handles them natively in text fields.
+ */
 export type DesktopWindowAction =
-  | "closeWindow"
-  | "quit"
-  | "undo"
-  | "redo"
-  | "cut"
-  | "copy"
-  | "paste"
-  | "selectAll"
   | "zoomIn"
   | "zoomOut"
   | "zoomReset"
@@ -22,14 +17,6 @@ export type DesktopWindowAction =
 /** Explicit allowlist for native actions exposed through IPC. */
 export const DESKTOP_WINDOW_ACTIONS: ReadonlySet<DesktopWindowAction> =
   new Set([
-    "closeWindow",
-    "quit",
-    "undo",
-    "redo",
-    "cut",
-    "copy",
-    "paste",
-    "selectAll",
     "zoomIn",
     "zoomOut",
     "zoomReset",
@@ -41,14 +28,6 @@ export const DESKTOP_WINDOW_ACTIONS: ReadonlySet<DesktopWindowAction> =
 const WINDOW_ACTION_HANDLERS: Readonly<
   Record<Exclude<DesktopWindowAction, "reload" | "toggleDevTools">, (window: BrowserWindow) => void>
 > = {
-  closeWindow: (window) => window.close(),
-  quit: () => app.quit(),
-  undo: (window) => window.webContents.undo(),
-  redo: (window) => window.webContents.redo(),
-  cut: (window) => window.webContents.cut(),
-  copy: (window) => window.webContents.copy(),
-  paste: (window) => window.webContents.paste(),
-  selectAll: (window) => window.webContents.selectAll(),
   zoomIn: (window) => window.webContents.setZoomLevel(window.webContents.getZoomLevel() + 0.5),
   zoomOut: (window) => window.webContents.setZoomLevel(window.webContents.getZoomLevel() - 0.5),
   zoomReset: (window) => window.webContents.setZoomLevel(0),
