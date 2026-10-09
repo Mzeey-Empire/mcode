@@ -49,11 +49,6 @@ jobs:
             small=ubuntu-24.04
             large=ubuntu-24.04
           fi
-          # Timing-sensitive tests fail on the noisier GitHub runners, so Test
-          # stays on Blacksmith in round-robin until #2020 is fixed.
-          if [ "$MODE" = round-robin ]; then
-            large=blacksmith-4vcpu-ubuntu-2404
-          fi
           echo "small=$small" >> "$GITHUB_OUTPUT"
           echo "large=$large" >> "$GITHUB_OUTPUT"
           echo "PR #$PR_NUMBER ($MODE) runs on $provider: $small, $large" >> "$GITHUB_STEP_SUMMARY"
@@ -210,7 +205,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-turbo-test-
       - run: bun install --frozen-lockfile
-      - run: bun run test
+      # Every Vitest run sizes its worker pool to all cores, so parallel package
+      # tasks oversubscribe a 4 vCPU runner and starve timing-sensitive tests.
+      - run: bun run test --concurrency=1
 
   build-check:
     name: Build Check
