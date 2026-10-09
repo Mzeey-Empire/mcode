@@ -576,6 +576,16 @@ export const turnSnapshots = sqliteTable(
   ],
 );
 
+/**
+ * The single identity row of this database file. Its id namespaces the Git refs that pin this
+ * database's snapshots, so a copied or moved file mints a new id instead of sharing refs.
+ */
+export const storeIdentity = sqliteTable("store_identity", {
+  storeId: text("store_id").notNull(),
+  databasePath: text("database_path").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 /** One settled native turn-diff record per assistant message. */
 export const turnDiffSnapshots = sqliteTable(
   "turn_diff_snapshots",
