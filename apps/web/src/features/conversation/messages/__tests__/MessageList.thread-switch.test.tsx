@@ -1300,7 +1300,7 @@ describe("MessageList thread switch", () => {
     expect(screen.getByText("History thought 199")).toBeInTheDocument();
   });
 
-  it("opens a settling turn's fold when the reader is inside its rows", async () => {
+  it("opens a settling turn's fold for this visit when the reader is inside its rows", async () => {
     const thoughts = Array.from({ length: 40 }, (_, index) => ({
       text: `Live thought ${index}`, startedAt: index * 1000, endedAt: index * 1000 + 500, isExplicitNonFinal: true,
     }));
@@ -1325,6 +1325,13 @@ describe("MessageList thread switch", () => {
     expect(screen.getByTestId("work-fold")).toHaveAttribute("aria-expanded", "true");
     expect(container.querySelector(`[data-transcript-key="${before?.key}"]`)).not.toBeNull();
     expect(recallScrollPosition("thread-A")?.rowAnchor).toEqual(before);
+
+    readAt(viewport, viewport.scrollTop + 10);
+    expect(recallScrollPosition("thread-A")?.expandedGroups?.has("work-fold:answer")).toBe(false);
+    fireEvent.click(screen.getByTestId("work-fold"));
+    fireEvent.click(screen.getByTestId("work-fold"));
+    readAt(viewport, viewport.scrollTop + 10);
+    expect(recallScrollPosition("thread-A")?.expandedGroups?.has("work-fold:answer")).toBe(true);
   });
 
   it("holds reading posture on append until the user returns to the tail", async () => {

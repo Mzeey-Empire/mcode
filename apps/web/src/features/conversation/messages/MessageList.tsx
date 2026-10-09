@@ -332,6 +332,10 @@ function revealFoldHidingReadingAnchor(
   if (fold) open(fold.key);
 }
 
+function withoutKeys(keys: ReadonlySet<string>, removed: ReadonlySet<string>): ReadonlySet<string> {
+  return removed.size === 0 ? keys : new Set([...keys].filter((key) => !removed.has(key)));
+}
+
 function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data: MessageListData }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLElement | null>(null);
@@ -346,7 +350,10 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const [highlightedKey, setHighlightedKey] = useState<string>();
   const { expanded: expandedGroups, present: presentGroups, entering: enteringGroups, toggle: toggleExpandedGroup } = useTranscriptGroupExpansion(() =>
     data.renderedThreadId ? recallScrollPosition(data.renderedThreadId)?.expandedGroups ?? new Set() : new Set());
+  // A fold the settle reveal opened collapses on the next visit unless the user touches it.
+  const autoOpenedFolds = useRef(new Set<string>());
   const toggleGroup = useCallback((key: string) => {
+    autoOpenedFolds.current.delete(key);
     const view = controllerRef.current;
     const top = view?.rowTop(key);
     if (top !== undefined) view?.moveTo({ kind: "reading", key, offset: -top });
@@ -363,7 +370,10 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const stickyPreview = useMemo(() => stickyMessage ? resolveUserMessagePreview(stickyMessage) : null, [stickyMessage]);
   const latest = useRef({ data, items, userRows, expandedGroups });
   const positionRef = useRef<TranscriptPosition>({ kind: "end" });
-  revealFoldHidingReadingAnchor(latest.current.items, items, positionRef.current, expandedGroups, toggleExpandedGroup);
+  revealFoldHidingReadingAnchor(latest.current.items, items, positionRef.current, expandedGroups, (key) => {
+    autoOpenedFolds.current.add(key);
+    toggleExpandedGroup(key);
+  });
   latest.current = { data, items, userRows, expandedGroups };
   const paginationDirection = useRef<"older" | "newer" | null>(null);
   const restored = useRef(false);
@@ -390,7 +400,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
       findViewportMessageAnchor(view.viewport),
       position.kind === "reading" ? { key: position.key, offset: position.offset } : view.getReadingAnchor(),
       previousInset.current,
-      current.expandedGroups,
+      withoutKeys(current.expandedGroups, autoOpenedFolds.current),
     );
   }, []);
 
