@@ -37,8 +37,14 @@ export function parseKeybinding(str: string): ParsedKeybinding {
     mod: modifiers.includes("mod"),
     shift: modifiers.includes("shift"),
     alt: modifiers.includes("alt"),
-    key: key.toLowerCase(),
+    key: normalizeKeyName(key),
   };
+}
+
+// "+" separates the parts of a binding string, so the plus key is spelled "plus".
+function normalizeKeyName(key: string): string {
+  const lower = key.toLowerCase();
+  return lower === "plus" ? "+" : lower;
 }
 
 /**
@@ -157,6 +163,7 @@ export function keybindingKeycaps(key: string, isMac: boolean): string[] {
     enter: "Enter",
     "\\": "\\",
     ",": ",",
+    plus: "+",
   };
 
   keycaps.push(keyDisplay[keyPart.toLowerCase()] ?? keyPart.toUpperCase());

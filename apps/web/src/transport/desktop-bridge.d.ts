@@ -435,7 +435,7 @@ interface SpellcheckBridge {
  * (file dialogs, clipboard, editor launching, etc.).
  */
 interface DesktopBridge {
-  /** Platform facts and allowlisted native actions used by the Electron title bar. */
+  /** Platform facts, full-screen state, and allowlisted native window actions. */
   window: {
     readonly platform:
       "aix" | "darwin" | "freebsd" | "linux" | "openbsd" | "sunos" | "win32";
@@ -445,6 +445,11 @@ interface DesktopBridge {
     ): (...args: unknown[]) => void;
     offCommand(listener: (...args: unknown[]) => void): void;
     perform(action: DesktopWindowAction): Promise<void>;
+    /**
+     * Subscribe to the window's full-screen state. Fires on every change and
+     * after each page load. Returns an unsubscribe function.
+     */
+    onFullScreenChange(callback: (fullScreen: boolean) => void): () => void;
   };
   /** Return the URL and IPC path of the local mcode server. */
   getServerUrl(): Promise<{ url: string; ipcPath: string }>;
@@ -534,14 +539,6 @@ interface DesktopBridge {
 
 /** Native actions accepted by the desktop window IPC boundary. */
 export type DesktopWindowAction =
-  | "closeWindow"
-  | "quit"
-  | "undo"
-  | "redo"
-  | "cut"
-  | "copy"
-  | "paste"
-  | "selectAll"
   | "zoomIn"
   | "zoomOut"
   | "zoomReset"

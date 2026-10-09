@@ -104,7 +104,7 @@ export function CommandPalette() {
   return (
     <DialogPrimitive.Root open={isOpen} onOpenChange={(o) => !o && close()} modal="trap-focus">
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className={cn("app-viewport-fixed fixed z-(--layer-modal) bg-ink/10 backdrop-blur-xs", DIALOG_FADE_CLASS)} />
+        <DialogPrimitive.Backdrop className={cn("fixed inset-0 z-(--layer-modal) bg-ink/10 backdrop-blur-xs", DIALOG_FADE_CLASS)} />
         <DialogPrimitive.Popup
           data-testid="command-palette"
           aria-label="Command palette"

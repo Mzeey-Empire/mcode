@@ -588,8 +588,11 @@ function RightPanelFrame({
       style={getRightPanelVisibilityStyle(panelVisible)}
       className={getRightPanelClassName(panelVisible, maximized)}
       data-right-panel-root=""
+      data-visible={panelVisible}
       inert={!panelVisible ? true : undefined}
     >
+      {/* Keeps panel content clear of the Windows/Linux caption buttons. */}
+      <div aria-hidden className="caption-strip window-drag" />
       {children}
     </ResizableRightPanel>
   );

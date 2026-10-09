@@ -12,9 +12,8 @@ import { Button } from "@/components/ui/button";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import type { SettingsSection } from "@/components/settings/settings-nav";
 import { UpdateIndicator } from "./UpdateIndicator";
-import { PanelCollapseIcon } from "./SidebarRevealButton";
 import { useUiStore } from "@/stores/uiStore";
-import { McodeLogo } from "@/components/brand/McodeLogo";
+import { SidebarHeader } from "@/components/shell/SidebarHeader";
 import { cn } from "@/lib/utils";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 
@@ -36,10 +35,9 @@ interface SidebarProps {
   onCloseSettings?: () => void;
 }
 
-function SidebarTitle({ settingsOpen, onCloseSettings, onCollapse }: { settingsOpen: boolean | undefined; onCloseSettings: (() => void) | undefined; onCollapse: () => void }) {
-  if (IS_DESKTOP && !settingsOpen) return null;
-  return <div className="flex h-11 items-center justify-between border-b border-border/40 pl-2 pr-2.5">
-    {settingsOpen ? <div className="flex items-center gap-2"><Button variant="ghost" size="icon-compact" onClick={onCloseSettings} aria-label="Back to chat" className="text-muted"><ArrowLeft size={15} /></Button><span className="text-sm font-semibold text-muted">Settings</span></div> : <><McodeLogo /><Button variant="ghost" size="icon-compact" onClick={onCollapse} aria-label="Collapse sidebar" className="text-muted"><PanelCollapseIcon className="transition-transform duration-200 group-hover/button:-translate-x-px" /></Button></>}
+function SettingsBackRow({ onCloseSettings }: { onCloseSettings: (() => void) | undefined }) {
+  return <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border/40 px-2">
+    <Button variant="ghost" size="icon-compact" onClick={onCloseSettings} aria-label="Back to chat" className="text-muted"><ArrowLeft size={15} /></Button><span className="text-sm font-semibold text-muted">Settings</span>
   </div>;
 }
 
@@ -73,7 +71,6 @@ export function Sidebar({
   onOpenSettings,
   onCloseSettings,
 }: SidebarProps) {
-  const collapseSidebar = useUiStore((s) => s.collapseSidebar);
   const primarySurface = useUiStore((s) => s.primarySurface);
   const setPrimarySurface = useUiStore((s) => s.setPrimarySurface);
 
@@ -85,7 +82,8 @@ export function Sidebar({
 
   return (
     <div className={cn("flex h-full flex-col bg-page", settingsOpen ? "w-40 max-w-[42vw] sm:w-56 md:w-sidebar md:max-w-none" : "w-sidebar max-w-[55vw] md:max-w-none", className)}>
-      <SidebarTitle settingsOpen={settingsOpen} onCloseSettings={onCloseSettings} onCollapse={collapseSidebar} />
+      <SidebarHeader />
+      {settingsOpen ? <SettingsBackRow onCloseSettings={onCloseSettings} /> : null}
       <SidebarBody settingsOpen={settingsOpen} settingsSection={settingsSection} onSettingsSection={onSettingsSection} primarySurface={primarySurface} onNewThread={() => { setPrimarySurface("chat"); useWorkspaceStore.getState().beginNewThread(); }} onOpenThreadSearch={() => useCommandPaletteStore.getState().open({ intent: "threadSearch" })} onOpenPullRequests={() => setPrimarySurface("pullRequests")} />
       <SidebarFooter settingsOpen={settingsOpen} onOpenSettings={onOpenSettings} onEditSettings={handleEditJson} />
     </div>

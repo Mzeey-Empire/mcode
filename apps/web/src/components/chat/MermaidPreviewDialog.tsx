@@ -124,7 +124,7 @@ function MermaidPreviewDialogCanvas({
         <DialogOverlay className="bg-background/92 supports-backdrop-filter:backdrop-blur-sm" />
         <DialogPrimitive.Popup
           className={cn(
-            "app-viewport-fixed fixed z-(--layer-modal) flex min-h-0 flex-col bg-background outline-none",
+            "fixed inset-0 z-(--layer-modal) flex min-h-0 flex-col bg-background outline-none",
             DIALOG_FADE_CLASS,
           )}
         >

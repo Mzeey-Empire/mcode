@@ -10,6 +10,7 @@ function createKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
     ctrlKey: overrides.ctrlKey ?? false,
     metaKey: overrides.metaKey ?? false,
     shiftKey: overrides.shiftKey ?? false,
+    altKey: overrides.altKey ?? false,
     bubbles: true,
     cancelable: true,
   });
@@ -126,5 +127,64 @@ describe("terminal.toggle keybinding (regression #304)", () => {
     expect(handler).toHaveBeenCalled();
 
     document.body.removeChild(input);
+  });
+});
+
+describe("window keys", () => {
+  const presses: [string, Partial<KeyboardEvent>][] = [
+    ["window.zoomIn", { key: "=", ctrlKey: true }],
+    ["window.zoomIn", { key: "+", ctrlKey: true }],
+    ["window.zoomIn", { key: "+", ctrlKey: true, shiftKey: true }],
+    ["window.zoomOut", { key: "-", ctrlKey: true }],
+    ["window.zoomReset", { key: "0", ctrlKey: true }],
+    ["window.toggleFullScreen", { key: "F11" }],
+  ];
+  let cleanup: (() => void) | undefined;
+  let fired: string[];
+
+  function start(platform: "win32" | "linux" | "darwin" | undefined): void {
+    vi.stubGlobal(
+      "desktopBridge",
+      platform ? { window: { platform, isDevelopment: false } } : undefined,
+    );
+    fired = [];
+    for (const id of new Set(presses.map(([command]) => command))) {
+      registerCommand({ id, title: id, category: "View", handler: () => fired.push(id) });
+    }
+    cleanup = initShortcuts();
+  }
+
+  beforeEach(() => {
+    clearKeybindings();
+    clearCommands();
+    resetContext();
+  });
+
+  afterEach(() => {
+    cleanup?.();
+    vi.unstubAllGlobals();
+    document.body.replaceChildren();
+  });
+
+  it.each(["win32", "linux"] as const)("fire on %s desktop even while a text field has focus", (platform) => {
+    start(platform);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+
+    for (const [, press] of presses) input.dispatchEvent(createKeyEvent(press));
+
+    expect(fired).toEqual(presses.map(([command]) => command));
+  });
+
+  it.each([
+    ["macOS desktop, where the native menu owns them", "darwin"],
+    ["the web build", undefined],
+  ] as const)("do nothing on %s", (_label, platform) => {
+    start(platform);
+
+    for (const [, press] of presses) document.dispatchEvent(createKeyEvent(press));
+
+    expect(fired).toEqual([]);
   });
 });

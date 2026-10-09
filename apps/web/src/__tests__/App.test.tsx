@@ -12,6 +12,8 @@ import { App } from "../app/App";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { useUiStore } from "@/stores/uiStore";
+import { useNavigationHistoryStore } from "@/stores/navigationHistoryStore";
+import { executeCommand, getAllCommands } from "@/lib/command-registry";
 
 const getRecoveryIncident = vi.hoisted(() => vi.fn());
 
@@ -120,6 +122,7 @@ describe("App", () => {
   beforeEach(() => {
     getRecoveryIncident.mockReset();
     getRecoveryIncident.mockResolvedValue(null);
+    useNavigationHistoryStore.setState({ entries: [], index: -1 });
     useUiStore.setState({
       primarySurface: "chat",
       sidebarCollapsed: false,
@@ -327,56 +330,103 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the persistent navigation title bar only for Electron", () => {
+  function installDesktopWindow(isDevelopment: boolean) {
+    let commandListener: ((command: string) => void) | undefined;
+    const perform = vi.fn().mockResolvedValue(undefined);
     (window as unknown as Record<string, unknown>).desktopBridge = {
       window: {
         platform: "win32",
-        isDevelopment: false,
-        perform: vi.fn(),
+        isDevelopment,
+        perform,
+        onFullScreenChange: () => () => {},
+        onCommand: (callback: (command: string) => void) => {
+          commandListener = callback;
+          return callback;
+        },
+        offCommand: vi.fn(),
       },
     };
+    return { perform, sendCommand: (command: string) => commandListener?.(command) };
+  }
 
-    const { unmount } = render(<App />);
-    const titleBar = screen.getByTestId("desktop-title-bar");
-    expect(titleBar).toHaveClass("h-12", "bg-page");
-    expect(titleBar).toHaveStyle({ zIndex: "var(--z-desktop-title-bar)" });
-    expect(
-      within(titleBar).getByRole("button", { name: "Back" }),
-    ).toBeDisabled();
-    expect(
-      within(titleBar).getByRole("button", { name: "Forward" }),
-    ).toBeDisabled();
+  it("renders no title bar on desktop, only the shared header strip", () => {
+    installDesktopWindow(false);
 
-    unmount();
+    render(<App />);
+
+    const headers = [...document.querySelectorAll("header")];
+    expect(headers.map((header) => header.dataset.testid ?? ("canvasHeader" in header.dataset ? "canvas" : "other"))).toEqual(["sidebar-header", "canvas"]);
+    expect(screen.queryByRole("menubar")).not.toBeInTheDocument();
+    const header = screen.getByTestId("sidebar-header");
+    expect(within(header).getByRole("button", { name: "Back" })).toBeDisabled();
+    expect(within(header).getByRole("button", { name: "Forward" })).toBeDisabled();
+    expect(document.documentElement).toHaveAttribute("data-window-chrome", "caption-overlay");
   });
 
-  it("keeps the reconnect banner below the Electron title bar", () => {
-    (window as unknown as Record<string, unknown>).desktopBridge = {
-      window: {
-        platform: "win32",
-        isDevelopment: false,
-        perform: vi.fn(),
-      },
-    };
+  it("gives the canvas header the sidebar controls once the sidebar collapses", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+    const canvasHeader = document.querySelector("[data-canvas-header]");
+    expect(canvasHeader).not.toBeNull();
+    expect(within(canvasHeader as HTMLElement).getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+    expect(within(canvasHeader as HTMLElement).getByRole("button", { name: "Back" })).toBeInTheDocument();
+  });
+
+  it("keeps the reconnect banner below the canvas header", () => {
     useConnectionStore.setState({ status: "reconnecting" });
 
     render(<App />);
 
-    const titleBar = screen.getByTestId("desktop-title-bar");
+    const canvasHeader = document.querySelector("[data-canvas-header]");
     const banner = screen.getByText("Reconnecting to server");
+    expect(canvasHeader).not.toBeNull();
     expect(
-      titleBar.compareDocumentPosition(banner) & Node.DOCUMENT_POSITION_FOLLOWING,
+      (canvasHeader as HTMLElement).compareDocumentPosition(banner) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
   });
 
-  it("does not render the desktop title bar for a partial feature bridge", () => {
+  it("routes desktop menu commands through the command registry", () => {
+    const { perform, sendCommand } = installDesktopWindow(false);
+
+    render(<App />);
+    act(() => sendCommand("window.zoomIn"));
+    act(() => sendCommand("window.toggleFullScreen"));
+
+    expect(perform.mock.calls).toEqual([["zoomIn"], ["toggleFullScreen"]]);
+  });
+
+  it("opens Settings sections from the palette commands on every platform", async () => {
+    render(<App />);
+
+    act(() => {
+      executeCommand("settings.about");
+    });
+
+    expect(await screen.findByRole("button", { name: "Back to chat" })).toBeInTheDocument();
+  });
+
+  it.each([
+    [false, ["window.toggleFullScreen", "window.zoomIn", "window.zoomOut", "window.zoomReset"]],
+    [true, ["window.reload", "window.toggleDevTools", "window.toggleFullScreen", "window.zoomIn", "window.zoomOut", "window.zoomReset"]],
+  ])("registers the window commands (development %s)", (isDevelopment, expected) => {
+    installDesktopWindow(isDevelopment);
+
+    render(<App />);
+
+    const ids = getAllCommands().map((command) => command.id).filter((id) => id.startsWith("window.")).sort();
+    expect(ids).toEqual(expected);
+  });
+
+  it("registers no window commands for a partial feature bridge", () => {
     (window as unknown as Record<string, unknown>).desktopBridge = {
       preview: {},
     };
 
-    const { unmount } = render(<App />);
-    expect(screen.queryByTestId("desktop-title-bar")).not.toBeInTheDocument();
+    render(<App />);
 
-    unmount();
+    expect(getAllCommands().some((command) => command.id.startsWith("window."))).toBe(false);
+    expect(document.documentElement).toHaveAttribute("data-window-chrome", "web");
   });
 });

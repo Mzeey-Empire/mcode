@@ -30,7 +30,7 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "app-viewport-fixed fixed isolate z-(--layer-modal) bg-ink/10 supports-backdrop-filter:backdrop-blur-xs",
+        "fixed inset-0 isolate z-(--layer-modal) bg-ink/10 supports-backdrop-filter:backdrop-blur-xs",
         DIALOG_FADE_CLASS,
         className
       )}

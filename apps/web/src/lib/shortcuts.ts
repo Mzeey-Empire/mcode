@@ -91,6 +91,8 @@ function dispatchForwardedShortcut(combo: string): void {
  */
 export function initShortcuts(overrides?: Keybinding[]): () => void {
   loadKeybindings(defaultKeybindings as Keybinding[], overrides);
+  const platform = window.desktopBridge?.window?.platform;
+  setContext("rendererOwnsWindowKeys", platform !== undefined && platform !== "darwin");
   document.addEventListener("keydown", handleKeyDown);
   document.addEventListener("focusin", updateFocusContext);
   document.addEventListener("focusout", updateFocusContext);

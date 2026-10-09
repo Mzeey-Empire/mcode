@@ -25,7 +25,6 @@ export interface PullRequestDetailToolbarProps {
   /** View-specific action shown before persistent pull request actions. */
   viewAction?: ReactNode;
   isNarrow?: boolean;
-  reserveSidebarReveal?: boolean;
   onBack?: () => void;
   backButtonRef?: Ref<HTMLButtonElement>;
   onClose?: () => void;
@@ -48,13 +47,11 @@ export interface PullRequestDetailToolbarProps {
 function ToolbarLeading({
   model,
   isNarrow,
-  reserveSidebarReveal,
   onBack,
   backButtonRef,
-}: Pick<PullRequestDetailToolbarProps, "model" | "isNarrow" | "reserveSidebarReveal" | "onBack" | "backButtonRef">) {
+}: Pick<PullRequestDetailToolbarProps, "model" | "isNarrow" | "onBack" | "backButtonRef">) {
   return (
     <div className="flex min-w-0 items-center gap-2">
-      {isNarrow && reserveSidebarReveal && <span aria-hidden data-testid="pull-request-sidebar-reveal-spacer" className="w-8 shrink-0" />}
       {isNarrow ? (onBack ? <Button ref={backButtonRef} type="button" variant="ghost" size="icon-compact" aria-label="Back to pull requests" onClick={onBack}><ArrowLeft size={14} aria-hidden /></Button> : null) : (
         <>
           <GitPullRequest size={14} aria-hidden className="shrink-0 text-muted" />
@@ -101,7 +98,6 @@ export function PullRequestDetailToolbar({
   tabs,
   viewAction,
   isNarrow = false,
-  reserveSidebarReveal = false,
   onBack,
   backButtonRef,
   onClose,
@@ -122,7 +118,7 @@ export function PullRequestDetailToolbar({
       className="shrink-0 border-b border-border/35 bg-page/95 px-3"
     >
       <div className="grid h-12 min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-4">
-        <ToolbarLeading model={model} isNarrow={isNarrow} reserveSidebarReveal={reserveSidebarReveal} onBack={onBack} backButtonRef={backButtonRef} />
+        <ToolbarLeading model={model} isNarrow={isNarrow} onBack={onBack} backButtonRef={backButtonRef} />
 
         {tabs}
 
