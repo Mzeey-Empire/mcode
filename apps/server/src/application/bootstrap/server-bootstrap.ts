@@ -901,6 +901,7 @@ async function bootstrapServer(): Promise<void> {
     // Provider work must start only after every client-visible history route has
     // one durable display representation.
     startAgentOrchestration({
+      stopSession: (threadId) => agentService.stopSession(threadId),
       runtime: container.resolve(AgentEventPublicationRuntimePort),
       publicationRegistry: container.resolve(AgentEventPublicationRegistry),
       threadRepo,

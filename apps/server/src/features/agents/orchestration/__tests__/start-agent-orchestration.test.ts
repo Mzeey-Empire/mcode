@@ -27,6 +27,7 @@ async function buildOrchestration() {
   const pullRequestCompletionEffect = { schedule: vi.fn() };
 
   startAgentOrchestration({
+    stopSession: vi.fn(async () => undefined),
     runtime,
     publicationRegistry,
     threadRepo,

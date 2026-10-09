@@ -69,8 +69,9 @@ export class CursorAcpClientBridge {
     const pending = this.pendingPermissions.get(requestId);
     if (!pending) return false;
     this.pendingPermissions.delete(requestId);
-    this.deps.emitPermissionResolved(requestId, decision);
-    pending.resolve({ outcome: mapDecisionToAcpOutcome(decision, pending.options) });
+    const outcome = mapDecisionToAcpOutcome(decision, pending.options);
+    this.deps.emitPermissionResolved(requestId, outcome.outcome === "cancelled" ? "cancelled" : decision);
+    pending.resolve({ outcome });
     return true;
   }
 
@@ -225,7 +226,7 @@ export class CursorAcpClientBridge {
 
   /** Handles a protocol permission request for one live Cursor session. */
   async requestPermission(
-    entry: CursorAcpSessionEntry,
+    entry: Pick<CursorAcpSessionEntry, "permissionMode" | "threadId" | "mcodeSessionId">,
     params: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
     if (entry.permissionMode === "full") {

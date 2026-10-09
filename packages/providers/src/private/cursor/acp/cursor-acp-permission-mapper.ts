@@ -44,8 +44,8 @@ export function pickFullAccessAllowOption(options: PermissionOption[]): string |
 /**
  * Maps an mcode user decision onto an ACP {@link RequestPermissionOutcome}.
  *
- * Prefer option kinds that match the intent; fallback to `options[0]` so a host
- * misconfiguration cannot wedge the prompt turn indefinitely.
+ * Prefer option kinds that match the intent; cancel when none match so a
+ * decision can never select an option with the opposite meaning.
  */
 export function mapDecisionToAcpOutcome(
   decision: PermissionDecision,
@@ -70,9 +70,8 @@ export function mapDecisionToAcpOutcome(
   } else {
     optionId = pickKind(["reject_once", "reject_always"]);
   }
-  const resolved = optionId ?? options[0]?.optionId;
-  if (!resolved) {
+  if (!optionId) {
     return { outcome: "cancelled" };
   }
-  return { outcome: "selected", optionId: resolved };
+  return { outcome: "selected", optionId };
 }
