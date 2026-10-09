@@ -16,10 +16,9 @@ import {
   type ModelDefinition,
 } from "@/lib/model-registry";
 import { SettingRow } from "../SettingRow";
-import { SegControl } from "../SegControl";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingsGroup } from "../SettingsGroup";
-import { SearchableGroupedPicker } from "../SearchableGroupedPicker";
-import { SettingsProviderPicker } from "../SettingsProviderPicker";
+import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
 import { Switch } from "@/components/ui/switch";
 import type { ContextWindowMode, ProviderAvailability, SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
 import { Sparkles } from "lucide-react";
@@ -45,9 +44,9 @@ const REASONING_LEVEL_LABELS: Record<string, string> = {
   ultra: "Ultra",
 };
 
-type ProviderOptions = ComponentProps<typeof SettingsProviderPicker>["options"];
-type ModelPickerOptions = ComponentProps<typeof SearchableGroupedPicker>["options"];
-type ReasoningOptions = ComponentProps<typeof SegControl>["options"];
+type ProviderOptions = readonly SettingsPickOption[];
+type ModelPickerOptions = readonly SettingsPickOption[];
+type ReasoningOptions = ComponentProps<typeof SegmentedControl>["options"];
 
 /**
  * Builds a provider option for the Model / Utility Model pickers. A provider is
@@ -657,8 +656,9 @@ function DefaultModelSettings({
   return (
     <SettingsGroup title="Model defaults" description="Defaults applied when you start a new thread.">
       <SettingRow label="Provider" configKey="model.defaults.provider" hint="AI provider for new threads.">
-        <SettingsProviderPicker
+        <SettingsSelectPicker
           value={provider}
+          searchPlaceholder="Search providers"
           onChange={onProviderChange}
           options={providerOptions}
           data-testid="settings-default-provider-trigger"
@@ -666,11 +666,11 @@ function DefaultModelSettings({
       </SettingRow>
       <SettingRow label="Default model" configKey="model.defaults.id" hint="New threads start with this model.">
         <div className="flex flex-col items-end gap-2">
-          <SearchableGroupedPicker
+          <SettingsSelectPicker
             value={modelId}
             onChange={onModelChange}
             options={modelOptions}
-            searchPlaceholder="Search models…"
+            searchPlaceholder="Search models"
             loading={modelsLoading}
             data-testid="settings-default-model-trigger"
           />
@@ -687,12 +687,12 @@ function DefaultModelSettings({
         hint="Used when the primary model is unavailable. Off disables fallback."
       >
         <div className="flex flex-col items-end gap-2">
-          <SearchableGroupedPicker
+          <SettingsSelectPicker
             value={fallbackId}
             onChange={onFallbackChange}
             options={fallbackOptions}
             emptyTriggerLabel="Off"
-            searchPlaceholder="Search models…"
+            searchPlaceholder="Search models"
             loading={modelsLoading}
             data-testid="settings-fallback-model-trigger"
           />
@@ -705,7 +705,7 @@ function DefaultModelSettings({
       </SettingRow>
       {showReasoning && (
         <SettingRow label="Reasoning effort" configKey="model.defaults.reasoning" hint={reasoningHint}>
-          <SegControl options={reasoningOptions} value={reasoning} onChange={onReasoningChange} />
+          <SegmentedControl options={reasoningOptions} value={reasoning} onChange={onReasoningChange} />
         </SettingRow>
       )}
       {showFastMode && (
@@ -723,7 +723,7 @@ function DefaultModelSettings({
           configKey="model.defaults.contextWindow"
           hint="200k is the standard window. 1M uses the extended beta window on Opus 4.7/4.6 and Sonnet 4.6."
         >
-          <SegControl
+          <SegmentedControl
             options={[
               { value: "200k", label: "200K" },
               { value: "1m", label: "1M", disabled: !supports1MContextWindow(modelId) },
@@ -739,7 +739,7 @@ function DefaultModelSettings({
           configKey="model.defaults.thinking"
           hint="Enable extended thinking for Haiku 4.5. Effort-tier models ignore this and use the reasoning level instead."
         >
-          <SegControl
+          <SegmentedControl
             options={[
               { value: "off", label: "Off" },
               { value: "on", label: "On" },
@@ -783,8 +783,9 @@ function UtilityModelSettings({
         configKey="model.utility.provider"
         hint="AI provider for lightweight tasks (PR drafts, diff summaries). Auto inherits from the default provider above."
       >
-        <SettingsProviderPicker
+        <SettingsSelectPicker
           value={utilityProvider}
+          searchPlaceholder="Search providers"
           onChange={onUtilityProviderChange}
           options={utilityProviderOptions}
           data-testid="settings-utility-provider-trigger"
@@ -796,12 +797,12 @@ function UtilityModelSettings({
         hint="Model for utility tasks. Auto selects a provider-appropriate cheap default."
       >
         {utilityProvider ? (
-          <SearchableGroupedPicker
+          <SettingsSelectPicker
             value={utilityModelId}
             onChange={onUtilityModelChange}
             options={utilityModelOptions.map(({ value, label, group }) => ({ value, label, group }))}
             emptyTriggerLabel="Auto"
-            searchPlaceholder="Search utility models…"
+            searchPlaceholder="Search utility models"
             loading={utilityModelsLoading}
             data-testid="settings-utility-model-trigger"
           />

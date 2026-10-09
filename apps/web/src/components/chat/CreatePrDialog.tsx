@@ -20,7 +20,7 @@ import {
   CommandItem,
 } from "@/components/ui/command";
 import { Switch } from "@/components/ui/switch";
-import { SegControl } from "@/components/settings/SegControl";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
@@ -606,7 +606,7 @@ function PrDescriptionEditor({ form, isDisabled, onRegenerate }: PrDescriptionPa
             disabled={isDisabled}
             onRegenerate={onRegenerate}
           />
-          <SegControl
+          <SegmentedControl
             options={[
               { value: "write", label: "Write" },
               { value: "preview", label: "Preview" },

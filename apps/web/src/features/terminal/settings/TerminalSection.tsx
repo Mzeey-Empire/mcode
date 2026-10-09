@@ -19,7 +19,7 @@ import { useTerminalSettingsStore, type TerminalWorkspaceOverride } from "./term
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { RangeControl } from "@/components/settings/RangeControl";
 import { SectionHeading } from "@/components/settings/SectionHeading";
-import { SegControl } from "@/components/settings/SegControl";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingRow } from "@/components/settings/SettingRow";
 
 const INHERIT_PROFILE = "__terminal_inherit__";
@@ -566,21 +566,21 @@ function TerminalPresentationSection({ model }: { readonly model: TerminalSectio
         />
       </SettingRow>
       <SettingRow label="Font size" configKey="terminal.presentation.fontSize">
-        <SegControl
+        <SegmentedControl
           options={(["xs", "sm", "md", "lg", "xl"] as const).map((value) => ({ value, label: value.toUpperCase(), disabled: model.pending }))}
           value={presentation.fontSize}
           onChange={(value) => model.updatePresentation("fontSize", value as typeof presentation.fontSize)}
         />
       </SettingRow>
       <SettingRow label="Line height" configKey="terminal.presentation.lineHeight">
-        <SegControl
+        <SegmentedControl
           options={(["compact", "normal", "relaxed"] as const).map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1), disabled: model.pending }))}
           value={presentation.lineHeight}
           onChange={(value) => model.updatePresentation("lineHeight", value as typeof presentation.lineHeight)}
         />
       </SettingRow>
       <SettingRow label="Cursor style" configKey="terminal.presentation.cursorStyle">
-        <SegControl
+        <SegmentedControl
           options={(["block", "underline", "bar"] as const).map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1), disabled: model.pending }))}
           value={presentation.cursorStyle}
           onChange={(value) => model.updatePresentation("cursorStyle", value as typeof presentation.cursorStyle)}
@@ -608,7 +608,7 @@ function TerminalBehaviorSection({ model }: { readonly model: TerminalSectionMod
         <RangeControl ariaLabel="Session limit" min={1} max={20} value={behavior.sessionLimit} onCommit={(value) => model.updateBehavior("sessionLimit", value)} />
       </SettingRow>
       <SettingRow label="Confirm on kill" configKey="terminal.behavior.confirmOnKill">
-        <SegControl
+        <SegmentedControl
           options={[
             { value: "never", label: "Never", disabled: model.pending },
             { value: "withChildProcesses", label: "With child processes", disabled: model.pending },
@@ -634,7 +634,7 @@ function TerminalAccessibilitySection({ model }: { readonly model: TerminalSecti
     <section aria-labelledby="terminal-accessibility-heading">
       <h2 id="terminal-accessibility-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-ink">Accessibility</h2>
       <SettingRow label="Screen reader" configKey="terminal.accessibility.screenReaderMode" hint="Automatic uses the terminal default.">
-        <SegControl
+        <SegmentedControl
           options={[
             { value: "off", label: "Off", disabled: model.pending },
             { value: "auto", label: "Automatic", disabled: model.pending },

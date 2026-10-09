@@ -4,7 +4,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { SettingRow } from "../SettingRow";
 import { SectionHeading } from "../SectionHeading";
 import { Switch } from "@/components/ui/switch";
-import { SegControl } from "../SegControl";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Spinner } from "@/components/ui/spinner";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import type { Settings, UpdateCheckInterval, UpdateReleaseLine } from "@mcode/contracts";
@@ -44,7 +44,7 @@ function UpdateStatusControl({ status, statusLabel, canCheck, isBusy, onInstall,
 }
 
 function AboutSettingsRows({ version, updatesHint, status, statusLabel, canCheck, isBusy, onInstall, onCheck, releaseLine, onReleaseLineChange, checkInterval, onCheckIntervalChange, autoDownload, onAutoDownloadChange, autoInstallOnQuit, onAutoInstallOnQuitChange }: { version: string | null | undefined; updatesHint: string; status: UpdateStatus; statusLabel: string; canCheck: boolean; isBusy: boolean; onInstall: () => void; onCheck: () => void; releaseLine: UpdateReleaseLine; onReleaseLineChange: (value: UpdateReleaseLine) => void; checkInterval: UpdateCheckInterval; onCheckIntervalChange: (value: UpdateCheckInterval) => void; autoDownload: boolean; onAutoDownloadChange: (value: boolean) => void; autoInstallOnQuit: boolean; onAutoInstallOnQuitChange: (value: boolean) => void }) {
-  return <div><SettingRow label="Version" hint="Currently installed build."><span className="font-mono text-xs text-muted tabular-nums">{version || "—"}</span></SettingRow><SettingRow label="Updates" hint={updatesHint}><UpdateStatusControl status={status} statusLabel={statusLabel} canCheck={canCheck} isBusy={isBusy} onInstall={onInstall} onCheck={onCheck} /></SettingRow><SettingRow label="Release line" hint="Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them."><SegControl options={RELEASE_LINE_OPTIONS} value={releaseLine} onChange={(value) => onReleaseLineChange(value as UpdateReleaseLine)} /></SettingRow><SettingRow label="Check interval" hint="How often to poll for new releases. Takes effect on next launch."><SegControl options={INTERVAL_OPTIONS} value={checkInterval} onChange={(value) => onCheckIntervalChange(value as UpdateCheckInterval)} /></SettingRow><SettingRow label="Auto-download" hint="Download updates in the background as soon as they are available."><Switch checked={autoDownload} onCheckedChange={onAutoDownloadChange} /></SettingRow><SettingRow label="Auto-install on quit" hint="Apply downloaded updates automatically when the app closes."><Switch checked={autoInstallOnQuit} onCheckedChange={onAutoInstallOnQuitChange} /></SettingRow></div>;
+  return <div><SettingRow label="Version" hint="Currently installed build."><span className="font-mono text-xs text-muted tabular-nums">{version || "—"}</span></SettingRow><SettingRow label="Updates" hint={updatesHint}><UpdateStatusControl status={status} statusLabel={statusLabel} canCheck={canCheck} isBusy={isBusy} onInstall={onInstall} onCheck={onCheck} /></SettingRow><SettingRow label="Release line" hint="Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them."><SegmentedControl options={RELEASE_LINE_OPTIONS} value={releaseLine} onChange={(value) => onReleaseLineChange(value as UpdateReleaseLine)} /></SettingRow><SettingRow label="Check interval" hint="How often to poll for new releases. Takes effect on next launch."><SegmentedControl options={INTERVAL_OPTIONS} value={checkInterval} onChange={(value) => onCheckIntervalChange(value as UpdateCheckInterval)} /></SettingRow><SettingRow label="Auto-download" hint="Download updates in the background as soon as they are available."><Switch checked={autoDownload} onCheckedChange={onAutoDownloadChange} /></SettingRow><SettingRow label="Auto-install on quit" hint="Apply downloaded updates automatically when the app closes."><Switch checked={autoInstallOnQuit} onCheckedChange={onAutoInstallOnQuitChange} /></SettingRow></div>;
 }
 
 function getUpdatePreferences(settings: Settings): { autoDownload: boolean; autoInstallOnQuit: boolean; checkInterval: UpdateCheckInterval; releaseLine: UpdateReleaseLine } {
@@ -84,6 +84,10 @@ export function AboutSection() {
     currentVersion: string;
     latestStable: string;
   }>(null);
+
+  /** The latest channel switch asked for, until it settles. Compared by identity: the same line can be queued twice. */
+  const requestedLine = useRef<{ readonly line: UpdateReleaseLine } | null>(null);
+  const channelSwitches = useRef<Promise<void>>(Promise.resolve());
 
   const bridge = typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
 
@@ -171,7 +175,7 @@ export function AboutSection() {
    * updater. Persistence MUST happen first because the main process's next
    * periodic check re-reads settings.json — see auto-updater.ts.
    */
-  const applyChannelSwitch = async (
+  const persistChannel = async (
     next: UpdateReleaseLine,
     allowDowngrade: boolean,
   ): Promise<void> => {
@@ -182,19 +186,36 @@ export function AboutSection() {
   };
 
   /**
-   * Handle a release-line change from the SegControl. Confirms with the user
+   * Queue a channel switch behind any still in flight, so a quick Nightly then
+   * Stable from the arrow keys reaches the updater in that order and Stable wins.
+   */
+  const applyChannelSwitch = (next: UpdateReleaseLine, allowDowngrade: boolean): Promise<void> => {
+    const request = { line: next };
+    requestedLine.current = request;
+    const run = channelSwitches.current.then(() => persistChannel(next, allowDowngrade));
+    // The queue only orders switches; each caller still sees its own failure through `run`.
+    channelSwitches.current = run.catch(() => undefined);
+    return run.finally(() => {
+      if (requestedLine.current === request) requestedLine.current = null;
+    });
+  };
+
+  /**
+   * Handle a release-line change from the segmented control. Confirms with the user
    * when switching nightly → stable while running a newer-than-stable build,
    * because that path requires a downgrade install.
    */
   const handleChannelChange = async (next: UpdateReleaseLine): Promise<void> => {
-    if (next === releaseLine) return;
+    // `releaseLine` updates only after the settings round trip, so judge against the last line asked for.
+    const currentLine = requestedLine.current?.line ?? releaseLine;
+    if (next === currentLine) return;
 
     // Conservative: when nightly → stable and we don't yet know latestStable
     // (fetch pending or failed), assume the switch would be a downgrade so the
     // dialog still gates the change. Prevents a fast click from sliding past
     // the confirmation while the network call is in flight.
     const wouldDowngrade =
-      releaseLine === "nightly" && next === "stable" && version
+      currentLine === "nightly" && next === "stable" && version
         ? !latestStable || semverGt(version, latestStable)
         : false;
 

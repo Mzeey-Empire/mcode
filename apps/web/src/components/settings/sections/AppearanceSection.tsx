@@ -1,6 +1,6 @@
 import { useSettingsStore } from "@/stores/settingsStore";
 import { SettingRow } from "../SettingRow";
-import { SegControl } from "../SegControl";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SectionHeading } from "../SectionHeading";
 import type { Theme } from "@mcode/contracts";
 
@@ -20,7 +20,7 @@ export function AppearanceSection() {
         configKey="appearance.theme"
         hint="Color scheme for the interface."
       >
-        <SegControl
+        <SegmentedControl
           options={[
             { value: "system", label: "System" },
             { value: "dark", label: "Dark" },

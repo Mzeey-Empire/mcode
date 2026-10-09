@@ -1,6 +1,6 @@
 import { useSettingsStore } from "@/stores/settingsStore";
 import { SettingRow } from "../SettingRow";
-import { SegControl } from "../SegControl";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { RangeControl } from "../RangeControl";
 import { SectionHeading } from "../SectionHeading";
 import type { AgentDefaultMode } from "@mcode/contracts";
@@ -38,7 +38,7 @@ export function AgentSection() {
         configKey="agent.defaults.mode"
         hint="Interaction mode for new sessions."
       >
-        <SegControl
+        <SegmentedControl
           options={[
             { value: "plan", label: "Plan" },
             { value: "build", label: "Build" },
@@ -54,7 +54,7 @@ export function AgentSection() {
         configKey="agent.defaults.permission"
         hint="Supervised requires approval before file writes."
       >
-        <SegControl
+        <SegmentedControl
           options={[
             { value: "full", label: "Full" },
             { value: "supervised", label: "Supervised" },

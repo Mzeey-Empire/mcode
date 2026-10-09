@@ -6,10 +6,7 @@ import { openInAppIcon } from "@/components/chat/openInAppIcons";
 import type { OpenInApp } from "@/transport/types";
 import { SettingRow } from "../SettingRow";
 import { SectionHeading } from "../SectionHeading";
-import {
-  SettingsProviderPicker,
-  type SettingsProviderPickOption,
-} from "../SettingsProviderPicker";
+import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
 
 /** Empty `defaultEditor` selects tier-3 auto-resolution (the "Auto" option). */
 const AUTO_VALUE = "";
@@ -23,14 +20,14 @@ const AUTO_VALUE = "";
  *
  * @param apps - All registry apps with detection status, from {@link useOpenInApps}.
  * @param currentValue - The saved `externalApps.defaultEditor` value.
- * @returns Ordered options for {@link SettingsProviderPicker}.
+ * @returns Ordered options for {@link SettingsSelectPicker}.
  */
 export function buildOpenInAppOptions(
   apps: readonly OpenInApp[],
   currentValue: string,
-): SettingsProviderPickOption[] {
+): SettingsPickOption[] {
   const installed = apps.filter((app) => app.detected);
-  const options: SettingsProviderPickOption[] = [
+  const options: SettingsPickOption[] = [
     {
       value: AUTO_VALUE,
       label: "Auto",
@@ -83,12 +80,11 @@ export function ExternalAppsSection() {
           configKey="externalApps.defaultEditor"
           hint="New threads open in this app. Auto picks your highest-priority installed editor and falls back to File Explorer."
         >
-          <SettingsProviderPicker
+          <SettingsSelectPicker
             value={defaultEditor}
             onChange={(v) => void update({ externalApps: { defaultEditor: v } })}
             options={options}
-            searchPlaceholder="Search apps…"
-            searchAriaLabel="Search apps"
+            searchPlaceholder="Search apps"
             data-testid="settings-default-open-in-trigger"
           />
         </SettingRow>
