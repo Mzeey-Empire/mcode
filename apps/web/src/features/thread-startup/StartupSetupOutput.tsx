@@ -10,6 +10,8 @@ export interface StartupSetupOutputProps {
   readonly script?: string;
   /** Startup transcript; only setup-phase output feeds the tail. */
   readonly transcript: ThreadStartup["transcript"];
+  /** Start of the current setup attempt. Retry keeps the transcript, so earlier attempts' output is dropped. */
+  readonly since?: string;
   readonly onOpenTerminal?: () => void;
   readonly onEditScript?: () => void;
 }
@@ -17,8 +19,8 @@ export interface StartupSetupOutputProps {
 const LINE_CLASS = "font-mono text-caption leading-5";
 
 /** Splits streamed setup chunks into display lines, dropping the trailing partial newline. */
-function setupOutputLines(transcript: ThreadStartup["transcript"]): string[] {
-  const text = transcript.filter((entry) => entry.phase === "setup").map((entry) => entry.content).join("");
+function setupOutputLines(transcript: ThreadStartup["transcript"], since: string): string[] {
+  const text = transcript.filter((entry) => entry.phase === "setup" && entry.createdAt >= since).map((entry) => entry.content).join("");
   return text.split(/\r?\n/).filter((line, index, lines) => line.length > 0 || index < lines.length - 1);
 }
 
@@ -47,9 +49,9 @@ function CardIconButton({ label, onClick, children }: { readonly label: string; 
 }
 
 /** Renders the setup script and a bottom-anchored live tail of its output. */
-export function StartupSetupOutput({ script, transcript, onOpenTerminal, onEditScript }: StartupSetupOutputProps) {
+export function StartupSetupOutput({ script, transcript, since = "", onOpenTerminal, onEditScript }: StartupSetupOutputProps) {
   const commands = scriptLines(script);
-  const output = setupOutputLines(transcript);
+  const output = setupOutputLines(transcript, since);
   return (
     <div data-testid="startup-setup-output" className="w-full max-w-[56rem] overflow-clip rounded-md border border-border bg-panel">
       <div className="relative min-h-10 border-b border-border px-3 py-2.5 pr-16">

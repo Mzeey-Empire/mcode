@@ -157,7 +157,7 @@ function TrailSteps({ startup, kind, setupScript, onOpenTerminal, onEditScript }
   const now = useLiveNow(startupHasLiveStep(startup));
   const rows = startup ? startupTrailRows(startup, { now, setupCommand: setupCommandLine(setupScript) }) : placeholderTrailRows(kind);
   const setupOutput = startup && outputOpen
-    ? <StartupSetupOutput script={setupScript} transcript={startup.transcript} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} />
+    ? <StartupSetupOutput script={setupScript} transcript={startup.transcript} since={startup.steps.find((step) => step.phase === "setup")?.startedAt} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} />
     : null;
   return rows.map((row) => (
     <div key={row.phase} className="flex flex-col gap-0.5">
@@ -183,7 +183,7 @@ export function StartupStepsTrail({ startup, startupId, kind, actions, onOpenTer
   const announcement = <p role="status" className="sr-only">{startupTrailAnnouncement(startup)}</p>;
   if (completedStartup && !stepsOpen) return <section aria-label="Thread startup" data-testid="startup-trail">{announcement}{startedRow}</section>;
   return (
-    <section aria-label="Thread startup" aria-busy={startup ? startupHasLiveStep(startup) : true} data-testid="startup-trail" className="flex flex-col gap-0.5">
+    <section aria-label="Thread startup" data-testid="startup-trail" className="flex flex-col gap-0.5">
       {announcement}
       {startedRow}
       <TrailSteps startup={startup} kind={kind} setupScript={setupScript} onOpenTerminal={onOpenTerminal} onEditScript={onEditScript} />

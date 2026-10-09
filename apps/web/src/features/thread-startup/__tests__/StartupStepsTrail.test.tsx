@@ -182,6 +182,20 @@ describe("StartupStepsTrail", () => {
     expect(screen.getByRole("button", { name: "Open terminal" })).toBeInTheDocument();
   });
 
+  it("shows only the current attempt's output after Retry setup", async () => {
+    const failedOutput = { phase: "setup" as const, content: "error: lockfile had changes\n", createdAt: at(3) };
+    const retried = (transcript: ThreadStartup["transcript"]) => startup({ steps: [
+      { phase: "thread", state: "completed" },
+      { phase: "setup", state: "running", startedAt: at(20) },
+    ], transcript });
+    const { rerender } = renderTrail({ startup: retried([failedOutput]), kind: "managed-worktree" });
+    await userEvent.click(screen.getByRole("button", { name: "Show setup output" }));
+    expect(screen.getByRole("log", { name: "Setup output" })).toHaveTextContent(/^$/);
+
+    rerender(<TooltipProvider><StartupStepsTrail startup={retried([failedOutput, { phase: "setup", content: "resolved 412 packages\n", createdAt: at(21) }])} kind="managed-worktree" /></TooltipProvider>);
+    expect(screen.getByRole("log", { name: "Setup output" })).toHaveTextContent(/^resolved 412 packages$/);
+  });
+
   it("explains a block with its message when the server has no output line to show", () => {
     renderTrail({
       startup: startup({
