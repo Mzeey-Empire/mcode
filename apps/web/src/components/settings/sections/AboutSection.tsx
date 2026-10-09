@@ -85,8 +85,8 @@ export function AboutSection() {
     latestStable: string;
   }>(null);
 
-  /** The release line most recently asked for, until its switch settles. */
-  const requestedLine = useRef<UpdateReleaseLine | null>(null);
+  /** The latest channel switch asked for, until it settles. Compared by identity: the same line can be queued twice. */
+  const requestedLine = useRef<{ readonly line: UpdateReleaseLine } | null>(null);
   const channelSwitches = useRef<Promise<void>>(Promise.resolve());
 
   const bridge = typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
@@ -190,12 +190,13 @@ export function AboutSection() {
    * Stable from the arrow keys reaches the updater in that order and Stable wins.
    */
   const applyChannelSwitch = (next: UpdateReleaseLine, allowDowngrade: boolean): Promise<void> => {
-    requestedLine.current = next;
+    const request = { line: next };
+    requestedLine.current = request;
     const run = channelSwitches.current.then(() => persistChannel(next, allowDowngrade));
     // The queue only orders switches; each caller still sees its own failure through `run`.
     channelSwitches.current = run.catch(() => undefined);
     return run.finally(() => {
-      if (requestedLine.current === next) requestedLine.current = null;
+      if (requestedLine.current === request) requestedLine.current = null;
     });
   };
 
@@ -206,7 +207,7 @@ export function AboutSection() {
    */
   const handleChannelChange = async (next: UpdateReleaseLine): Promise<void> => {
     // `releaseLine` updates only after the settings round trip, so judge against the last line asked for.
-    const currentLine = requestedLine.current ?? releaseLine;
+    const currentLine = requestedLine.current?.line ?? releaseLine;
     if (next === currentLine) return;
 
     // Conservative: when nightly → stable and we don't yet know latestStable

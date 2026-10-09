@@ -43,4 +43,27 @@ describe("AboutSection release line", () => {
     await waitFor(() => expect(saves).toHaveLength(2));
     expect(saves[1]?.partial).toEqual({ updates: { channel: "stable" } });
   });
+
+  it("keeps the latest request when an earlier switch to the same line settles first", async () => {
+    render(<AboutSection />);
+    const stable = screen.getByRole("radio", { name: "Stable" });
+    stable.focus();
+    const group = screen.getByRole("radiogroup", { name: (_, el) => el.contains(stable) });
+    fireEvent.keyDown(group, { key: "ArrowRight" });
+    fireEvent.keyDown(group, { key: "ArrowLeft" });
+    fireEvent.keyDown(group, { key: "ArrowRight" });
+    await waitFor(() => expect(saves).toHaveLength(1));
+
+    // The first Nightly settling must not forget that the third request, also Nightly, is still the latest.
+    saves[0]?.resolve();
+    await waitFor(() => expect(saves).toHaveLength(2));
+    fireEvent.keyDown(group, { key: "ArrowLeft" });
+    for (const count of [3, 4]) {
+      saves[count - 2]?.resolve();
+      await waitFor(() => expect(saves).toHaveLength(count));
+    }
+    expect(saves.map((save) => save.partial)).toEqual(
+      ["nightly", "stable", "nightly", "stable"].map((channel) => ({ updates: { channel } })),
+    );
+  });
 });
