@@ -170,7 +170,7 @@ export class TurnFinalizer {
       }
       return;
     }
-    this.turnRefBefore.set(threadId, { ref, cwd, fileTrackerGeneration, ...(pin ? { pin } : {}) });
+    this.turnRefBefore.set(threadId, { ref, cwd, fileTrackerGeneration, pin });
   }
 
   /** The last persisted assistant message id, for attaching late hooks (Stop/SessionEnd). */

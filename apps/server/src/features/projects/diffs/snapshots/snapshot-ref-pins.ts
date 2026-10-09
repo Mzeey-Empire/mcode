@@ -1,9 +1,4 @@
-/**
- * Git refs that keep turn snapshot trees reachable, so `git gc` cannot prune them.
- *
- * Every ref lives under `refs/mcode/<storeId>/`, where the store id names one database file.
- * This module owns the ref names, the pin commits, and the sweep that reconciles refs with rows.
- */
+/** Git refs that keep turn snapshot trees reachable, so `git gc` cannot prune them. */
 
 import type { Database } from "bun:sqlite";
 import { and, asc, eq, gte, isNull } from "drizzle-orm";
@@ -31,7 +26,6 @@ import { SNAPSHOT_STORE_ID, type StoreId } from "./snapshot-store-identity.js";
 /** Pin of a turn's pre-turn tree while the turn has no snapshot row yet. */
 export type BaselinePin =
   | { readonly kind: "baseline"; readonly threadId: string; readonly executionId: string }
-  /** A provider-originated generation has no admitted execution, so its tree names the pin. */
   | { readonly kind: "baseline-tree"; readonly threadId: string; readonly tree: string };
 
 /** Every ref shape this module owns inside one store namespace. */
@@ -104,7 +98,7 @@ export function formatPinRef(storeId: StoreId, pin: PinRef): string {
   }
 }
 
-/** Parse a ref this store owns. Returns null for any other ref, including `reverts/`. */
+/** Parse a ref this store owns. Returns null for any ref outside this store's pin shapes. */
 export function parsePinRef(storeId: StoreId, ref: string): PinRef | null {
   const prefix = storeRefPrefix(storeId);
   if (!ref.startsWith(prefix)) return null;
@@ -142,6 +136,10 @@ interface ListedPin {
 
 type ListedBaseline = ListedPin & { readonly pin: Extract<PinRef, { kind: "baseline" }> };
 
+function isListedBaseline(listed: ListedPin): listed is ListedBaseline {
+  return listed.pin.kind === "baseline";
+}
+
 interface SweepRepository {
   readonly cwd: string;
   readonly workspaceIds: ReadonlySet<string>;
@@ -166,8 +164,8 @@ export class SnapshotRefPins {
   }
 
   /**
-   * Capture a turn's pre-turn tree and pin it in the same lock region. Capture failures reject
-   * as before; pin failures are logged so they never fail the turn.
+   * Capture a turn's pre-turn tree and pin it in the same lock region. Capture failures reject;
+   * pin failures are logged so they never fail the turn.
    */
   captureBaseline(cwd: string, threadId: string, executionId: string | undefined): Promise<{ tree: string; pin: BaselinePin }> {
     return this.lock.run(cwd, async () => {
@@ -211,7 +209,7 @@ export class SnapshotRefPins {
       if (!cwd) return;
       const ref = formatPinRef(this.storeId, { kind: "baseline", threadId, executionId });
       const [listed] = await this.listPins(cwd, ref);
-      if (listed?.pin.kind === "baseline") await this.settleBaseline(cwd, { ...listed, pin: listed.pin }, options);
+      if (listed && isListedBaseline(listed)) await this.settleBaseline(cwd, listed, options);
     });
   }
 
@@ -245,7 +243,7 @@ export class SnapshotRefPins {
 
   private async sweepRepository(repository: SweepRepository, options: SnapshotPinPassOptions): Promise<void> {
     for (const listed of await this.listPins(repository.cwd)) {
-      if (listed.pin.kind === "baseline") await this.settleBaseline(repository.cwd, { ...listed, pin: listed.pin }, options);
+      if (isListedBaseline(listed)) await this.settleBaseline(repository.cwd, listed, options);
     }
     const pinnedSnapshots = await this.releaseOrphans(repository.cwd, options);
     for (const row of this.snapshotRowsFor(repository.workspaceIds)) {
@@ -254,7 +252,6 @@ export class SnapshotRefPins {
     }
   }
 
-  /** Delete snapshot pins without rows and tree baselines of idle threads. Returns the kept snapshot ids. */
   private async releaseOrphans(cwd: string, options: SnapshotPinPassOptions): Promise<Set<string>> {
     const kept = new Set<string>();
     for (const { pin } of await this.listPins(cwd)) {
@@ -283,7 +280,6 @@ export class SnapshotRefPins {
     await this.release(repositoryCwd, listed.pin);
   }
 
-  /** Persist the snapshot an interrupted attempt never wrote, then move its pin onto the row. */
   private async writeInterruptedSnapshot(listed: ListedBaseline, messageId: string, options: SnapshotPinPassOptions): Promise<void> {
     const { threadId } = listed.pin;
     const cwd = this.threadWorkingDirectory(threadId);
@@ -294,22 +290,19 @@ export class SnapshotRefPins {
       captured = { refAfter, filesChanged: await this.snapshots.getFilesChanged(cwd, listed.tree, refAfter) };
     }));
     if (!ok || !captured) return;
+    const { refAfter, filesChanged } = captured;
     if (options.stopAt === "before-row-write") throw new SnapshotPinFaultStop("before-row-write");
     let snapshotId: string | null = null;
     const written = await this.guard("write interrupted snapshot", { threadId }, async () => {
-      if (!captured) return;
       // A concurrent pass that already wrote the row returns null; the sweep pins that row.
       ({ snapshotId } = await this.writer.execute(persistInterruptedAttemptSnapshot, {
-        snapshot: {
-          messageId, threadId, refBefore: listed.tree, refAfter: captured.refAfter,
-          filesChanged: captured.filesChanged, worktreePath: null,
-        },
-        markFilesChanged: captured.filesChanged.length > 0,
+        snapshot: { messageId, threadId, refBefore: listed.tree, refAfter, filesChanged, worktreePath: null },
+        markFilesChanged: filesChanged.length > 0,
       }));
     });
     if (!written || !snapshotId) return;
     if (options.stopAt === "after-row-write") throw new SnapshotPinFaultStop("after-row-write");
-    await this.transferToSnapshot(cwd, { id: snapshotId, refBefore: listed.tree, refAfter: captured.refAfter }, listed.pin);
+    await this.transferToSnapshot(cwd, { id: snapshotId, refBefore: listed.tree, refAfter }, listed.pin);
   }
 
   private async baselineCommitFor(cwd: string, baseline: BaselinePin | null, refBefore: string): Promise<string | null> {
@@ -331,7 +324,6 @@ export class SnapshotRefPins {
     return stdout;
   }
 
-  /** List pins under this store's prefix, or one exact ref when given. */
   private async listPins(cwd: string, exactRef?: string): Promise<ListedPin[]> {
     const stdout = await this.exec(cwd, [
       "for-each-ref", "--format=%(refname) %(objectname) %(tree)", exactRef ?? storeRefPrefix(this.storeId),
@@ -349,8 +341,7 @@ export class SnapshotRefPins {
   private async treesExist(cwd: string, row: PinnableSnapshot): Promise<boolean> {
     if (!OBJECT_ID.test(row.refBefore) || !OBJECT_ID.test(row.refAfter)) return false;
     for (const tree of [row.refBefore, row.refAfter]) {
-      const exists = await this.git.exec(["-C", cwd, "cat-file", "-t", tree], { timeout: RealGitExecutor.DEFAULT_TIMEOUT })
-        .then(({ stdout }) => stdout.trim() === "tree", () => false);
+      const exists = await this.exec(cwd, ["cat-file", "-t", tree]).then((out) => out.trim() === "tree", () => false);
       if (!exists) return false;
     }
     return true;
