@@ -180,12 +180,60 @@ describe("ToastLane", () => {
 
     fireEvent.wheel(card, { deltaX: -10, deltaY: 0 });
     fireEvent.pointerDown(card, { button: 0, pointerId: 1, clientX: 0 });
-    fireEvent.pointerMove(card, { pointerId: 1, clientX: 150 });
+    fireEvent.pointerMove(card, { pointerId: 1, buttons: 1, clientX: 150 });
     // Released before the wheel gesture's quiet gap ends.
     fireEvent.pointerUp(card, { pointerId: 1, clientX: 150 });
     // Separate steps let React render between the wheel end (120ms) and the fly-out (160ms), as a browser would.
     act(() => void vi.advanceTimersByTime(130));
     act(() => void vi.advanceTimersByTime(300));
+
+    expect(store().toasts).toEqual([]);
+  });
+
+  it("does not read a slow sideways trackpad scroll as a flick", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(340);
+    renderLane();
+    show({ kind: "failed", title: "Bump Electron" });
+    const card = within(lane()).getByRole("alert");
+
+    // 5px per 16ms is 0.31px/ms, under the flick speed.
+    for (let step = 0; step < 2; step++) {
+      fireEvent.wheel(card, { deltaX: -5, deltaY: 0 });
+      act(() => void vi.advanceTimersByTime(16));
+    }
+    act(() => void vi.advanceTimersByTime(200));
+    act(() => void vi.advanceTimersByTime(200));
+
+    expect(store().toasts).toHaveLength(1);
+  });
+
+  it("keeps a toast when a fast trackpad swipe reverses back to rest", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(340);
+    renderLane();
+    show({ kind: "failed", title: "Bump Electron" });
+    const card = within(lane()).getByRole("alert");
+
+    for (const [deltaX, gap] of [[-40, 16], [-40, 32], [40, 32], [40, 0]] as const) {
+      fireEvent.wheel(card, { deltaX, deltaY: 0 });
+      act(() => void vi.advanceTimersByTime(gap));
+    }
+    act(() => void vi.advanceTimersByTime(200));
+    act(() => void vi.advanceTimersByTime(200));
+
+    expect(store().toasts).toHaveLength(1);
+  });
+
+  it("still takes trackpad swipes after a press released outside the card", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(340);
+    renderLane();
+    show({ kind: "failed", title: "Bump Electron" });
+    const card = within(lane()).getByRole("alert");
+
+    // The press never becomes a drag, so its release outside the card is never seen.
+    fireEvent.pointerDown(card, { button: 0, pointerId: 1, clientX: 0 });
+    for (let step = 0; step < 4; step++) fireEvent.wheel(card, { deltaX: -40, deltaY: 0 });
+    act(() => void vi.advanceTimersByTime(200));
+    act(() => void vi.advanceTimersByTime(200));
 
     expect(store().toasts).toEqual([]);
   });

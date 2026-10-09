@@ -285,9 +285,29 @@ interface SwipeState {
 
 interface WheelGesture {
   dx: number;
-  peakPxPerMs: number;
+  direction: number;
+  peakSpeed: number;
   readonly velocity: SwipeVelocity;
   timer: ReturnType<typeof setTimeout> | null;
+}
+
+/** Adds one wheel delta to the gesture. The first delta only sets the baseline; a reversal restarts the speed. */
+function trackWheel(gesture: WheelGesture, delta: number, time: number) {
+  const direction = Math.sign(delta);
+  gesture.dx += delta;
+  const sample = { x: gesture.dx, time };
+  if (gesture.timer === null) {
+    gesture.velocity.reset(sample);
+  } else {
+    if (direction !== gesture.direction) {
+      gesture.velocity.restart();
+      gesture.peakSpeed = 0;
+    }
+    const speed = gesture.velocity.pxPerMs(sample);
+    if (Math.abs(speed) > Math.abs(gesture.peakSpeed)) gesture.peakSpeed = speed;
+    gesture.velocity.track(sample);
+  }
+  gesture.direction = direction;
 }
 
 interface DragStart {
@@ -318,7 +338,7 @@ function useSwipeToDismiss(onDismiss: () => void) {
   const start = useRef<DragStart | null>(null);
   const dragged = useRef(false);
   const velocity = useRef(new SwipeVelocity());
-  const wheel = useRef<WheelGesture>({ dx: 0, peakPxPerMs: 0, velocity: new SwipeVelocity(), timer: null });
+  const wheel = useRef<WheelGesture>({ dx: 0, direction: 0, peakSpeed: 0, velocity: new SwipeVelocity(), timer: null });
   const [swipe, setSwipe] = useState<SwipeState>({ phase: "idle", dx: 0, width: 1 });
 
   useEffect(() => {
@@ -333,7 +353,8 @@ function useSwipeToDismiss(onDismiss: () => void) {
     clearTimeout(gesture.timer ?? undefined);
     gesture.timer = null;
     gesture.dx = 0;
-    gesture.peakPxPerMs = 0;
+    gesture.direction = 0;
+    gesture.peakSpeed = 0;
   }, []);
 
   useEffect(() => cancelWheel, [cancelWheel]);
@@ -342,8 +363,10 @@ function useSwipeToDismiss(onDismiss: () => void) {
     if (!prefersReducedMotion()) setSwipe({ phase: "dragging", dx, width });
   };
 
-  const release = (dx: number, width: number, pxPerMs: number) => {
-    if (Math.abs(dx) <= width * SWIPE_DISMISS_FRACTION && pxPerMs <= FLICK_PX_PER_MS) {
+  /** `speed` is signed; a flick only counts when it moves away from the card's resting place. */
+  const release = (dx: number, width: number, speed: number) => {
+    const flicked = dx !== 0 && Math.sign(speed) === Math.sign(dx) && Math.abs(speed) > FLICK_PX_PER_MS;
+    if (Math.abs(dx) <= width * SWIPE_DISMISS_FRACTION && !flicked) {
       setSwipe({ phase: "settling", dx: 0, width });
     } else if (prefersReducedMotion()) {
       onDismiss();
@@ -362,6 +385,11 @@ function useSwipeToDismiss(onDismiss: () => void) {
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const origin = start.current;
     if (!origin || event.pointerId !== origin.pointerId) return;
+    // A press released outside the card before it became a drag never reaches onPointerUp.
+    if (event.buttons === 0) {
+      start.current = null;
+      return;
+    }
     velocity.current.track({ x: event.clientX, time: event.timeStamp });
     const dx = event.clientX - origin.x;
     if (!dragged.current && Math.abs(dx) < DRAG_SLOP_PX) return;
@@ -387,22 +415,18 @@ function useSwipeToDismiss(onDismiss: () => void) {
   };
 
   // A trackpad swipe arrives as horizontal wheel deltas with no end event; a short quiet gap ends it.
-  // Momentum decays the speed toward the end, so the gesture's peak speed decides a flick.
+  // Momentum decays the speed toward the end, so the peak speed since the last reversal decides a flick.
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (start.current || swipe.phase === "flung" || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+    if (dragged.current && start.current) return;
+    if (swipe.phase === "flung" || Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
     const width = event.currentTarget.offsetWidth;
-    const gesture = wheel.current;
-    if (gesture.timer === null) gesture.velocity.reset({ x: 0, time: event.timeStamp });
-    gesture.dx -= event.deltaX;
-    const sample = { x: gesture.dx, time: event.timeStamp };
-    gesture.peakPxPerMs = Math.max(gesture.peakPxPerMs, gesture.velocity.pxPerMs(sample));
-    gesture.velocity.track(sample);
-    follow(gesture.dx, width);
-    clearTimeout(gesture.timer ?? undefined);
-    gesture.timer = setTimeout(() => {
-      const { dx, peakPxPerMs } = gesture;
+    trackWheel(wheel.current, -event.deltaX, event.timeStamp);
+    follow(wheel.current.dx, width);
+    clearTimeout(wheel.current.timer ?? undefined);
+    wheel.current.timer = setTimeout(() => {
+      const { dx, peakSpeed } = wheel.current;
       cancelWheel();
-      release(dx, width, peakPxPerMs);
+      release(dx, width, peakSpeed);
     }, WHEEL_GESTURE_END_MS);
   };
 

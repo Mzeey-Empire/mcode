@@ -36,4 +36,12 @@ describe("SwipeVelocity", () => {
 
     expect(velocity.pxPerMs({ x: 60, time: 300 })).toBe(0);
   });
+
+  it("signs the speed by direction", () => {
+    const velocity = new SwipeVelocity();
+    velocity.reset({ x: 100, time: 0 });
+    velocity.track({ x: 60, time: 20 });
+
+    expect(velocity.pxPerMs({ x: 20, time: 40 })).toBeCloseTo(-2);
+  });
 });

@@ -19,6 +19,11 @@ export class SwipeVelocity {
     this.samples = [sample];
   }
 
+  /** Starts measuring again from the newest sample, as when a swipe reverses. */
+  restart() {
+    this.samples = this.samples.slice(-1);
+  }
+
   /** Records a move, keeping one sample older than the window as the baseline. */
   track(sample: SwipeSample) {
     this.samples.push(sample);
@@ -27,7 +32,7 @@ export class SwipeVelocity {
   }
 
   /**
-   * Absolute speed in px/ms ending at `sample`, from the oldest sample inside
+   * Signed speed in px/ms ending at `sample`, from the oldest sample inside
    * the window, or from the sample just before the window when none is inside.
    */
   pxPerMs(sample: SwipeSample) {
@@ -35,6 +40,6 @@ export class SwipeVelocity {
     const prior = this.samples.filter((entry) => entry.time < sample.time);
     const baseline = prior.find((entry) => entry.time >= windowStart) ?? prior.at(-1);
     if (!baseline) return 0;
-    return Math.abs(sample.x - baseline.x) / Math.max(1, sample.time - baseline.time);
+    return (sample.x - baseline.x) / Math.max(1, sample.time - baseline.time);
   }
 }
