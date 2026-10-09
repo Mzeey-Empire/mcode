@@ -760,11 +760,18 @@ _Avoid_: Failed, which states that the write did not happen
 ## Thread overview
 
 ### Overview
-The chat-header popover that recaps the active thread's working context (its
-changes, current branch, and pull-request state) and hosts the git actions for
-that thread (Commit-or-push, Create PR). An enrichment of the former plain
-header menu (`header-workspace-menu`) into a live status surface, modelled on
-Codex's "Environment" panel. Code symbol: `ThreadOverview`.
+The card that recaps the active thread's working context (its changes, current
+branch, and pull-request state) and hosts the git actions for that thread
+(Commit-or-push, Create PR), modelled on Codex's "Environment" panel. Its rows
+group into four sections: lane, activity, terminals, and summary. Code symbol:
+`ThreadOverview`.
+
+**Docked or overlay.** The card docks in the chat canvas's top-right corner by
+default, and the timeline and composer make room for it, whenever the canvas is
+wide enough and the right panel is closed. Otherwise the header button opens it
+as an overlay at the same corner, which closes on Escape or an outside press.
+Closing a docked card with the header button is remembered per thread for the
+session.
 
 **Thread-scoped.** The Overview lives in the chat header, which renders only
 when a thread is active. With no thread open there is no Overview; the
@@ -800,7 +807,7 @@ the distinction does not earn its place.
 
 _Avoid_: calling this surface "Summary." [[Summary]] is the AI prose lens of
 the Cumulative diff (a diff-to-prose toggle inside the Review tab), a different
-surface. The Overview is a status-and-actions menu, not a diff lens.
+surface. The Overview is a status-and-actions card, not a diff lens.
 
 ### Recap
 A short AI-generated one-line "what you're working on" for the active thread,

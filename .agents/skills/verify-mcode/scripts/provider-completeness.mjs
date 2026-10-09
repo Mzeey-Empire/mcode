@@ -2108,7 +2108,7 @@ async function reopenFullAccessThread(page, workspace, thread) {
   const threadTitle = page.getByTestId("thread-title").filter({ hasText: thread.title });
   await threadTitle.waitFor({ state: "visible", timeout: 15_000 });
   await threadTitle.click();
-  await page.getByTestId("thread-overview-masthead").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByTestId("header-overview-toggle").waitFor({ state: "visible", timeout: 15_000 });
 }
 export async function closeReview(page) { const review = page.getByTestId("review-last-turn"); if (await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click(); }
 const REVIEW_LOADING_INDICATOR_SELECTOR = '[data-testid="review-refresh-progress"], [data-testid="review-diff-stat-loading"]';
