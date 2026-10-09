@@ -126,6 +126,23 @@ describe("transcript narrative rows", () => {
     expect(projected.filter((item) => item.type === "work-fold")).toEqual([]);
   });
 
+  it("folds saved tools that a stopped turn's live state dropped", () => {
+    const records = { answer: { hooks: [], thoughts: [], tools: [{
+      id: "tool", message_id: "answer", parent_tool_call_id: null, tool_name: "Bash", input_summary: "pwd",
+      output_summary: "done", status: "completed" as const, started_at: new Date(1200).toISOString(),
+      completed_at: new Date(1300).toISOString(), sort_order: 0,
+    }] } };
+    const turn = { threadId: "thread", executionId: "execution", messageId: "answer" };
+    const projected = createTranscriptItemProjector()({
+      messages: [message("answer", "Done", "execution")], currentTurn: turn,
+      agentDisplayState: { phase: "completed" }, agentStartTime: 1000, streamingText: undefined, toolCalls: [],
+      thoughtSegments: [{ text: "Done", startedAt: 1000, endedAt: 1100 }],
+      committedAssistantBody: "Done", persistedNarrativeByMessage: records,
+    });
+    const open = expandTranscriptNarrative(projected, records, new Set(["work-fold:answer"]), turn);
+    expect(open.map(rowLabel)).toEqual(["work-fold", "tool-group", "message", "turn-meta-line"]);
+  });
+
   it("bounds persisted narrative expansion for very large saved tool histories", () => {
     const records: NonNullable<PersistedNarrativeRecords> = {
       hooks: [],

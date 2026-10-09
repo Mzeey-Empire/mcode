@@ -129,7 +129,7 @@ type NarrativeFlowVirtualItem = Extract<ChatVirtualItem, { type: "narrative-flow
 /**
  * Expands open work folds into their narrative rows without changing message order.
  * A settled current turn still carries its live narrative-flow item after the fold,
- * so an open fold shows those live rows and a closed fold drops them.
+ * so an open fold shows those live rows until the turn's saved records load, and a closed fold drops them.
  */
 export function expandTranscriptNarrative(
   items: readonly ChatVirtualItem[],
@@ -186,7 +186,7 @@ function foldChildren(
   const note: TranscriptFoldNoteItem[] = fold.approvalNote
     ? [{ type: "fold-note", key: `${fold.key}:approval`, messageId: fold.messageId, text: fold.approvalNote }]
     : [];
-  const rows = live
+  const rows = live && !context.recordsByMessage[fold.messageId]
     ? liveNarrativeRows(live, context.livePrefix, context.transitions)
     : persistedFoldRows(fold, context.recordsByMessage, context.messages.get(fold.messageId)?.outcomeExecutionId);
   return [...note, ...rows];

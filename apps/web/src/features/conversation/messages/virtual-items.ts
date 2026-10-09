@@ -447,13 +447,14 @@ function terminalDisplayOutcome(state: AgentDisplayState): TurnOutcome | undefin
 }
 
 /**
- * Live rows, then loaded records, decide before summary counts, because the fold renders from them:
+ * Loaded records, then live rows, decide before summary counts, because the fold renders from them in that order:
  * a thought that repeats the answer and hooks (shown in the actions row) produce no fold rows.
+ * Records come first because a stopped turn's live state can drop its tools.
  */
 function hasFoldableNarrative(message: Message, input: StableItemInput, summary: TurnSummary): boolean {
-  if (isCurrentResponse(message, input) && input.currentTurnHasNarrative !== undefined) return input.currentTurnHasNarrative;
   const records = input.persistedNarrativeByMessage?.[message.id];
   if (records) return hasFoldRows(records, message.content);
+  if (isCurrentResponse(message, input) && input.currentTurnHasNarrative !== undefined) return input.currentTurnHasNarrative;
   return summary.counts.steps > 0 || summary.counts.thoughts > 0;
 }
 
