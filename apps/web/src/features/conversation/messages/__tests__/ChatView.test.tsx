@@ -717,7 +717,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     render(<ChatView />);
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
-    expect(screen.getAllByTestId("startup-progress")).toHaveLength(1);
+    expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Environment setup")).toBeNull();
     await user.click(await screen.findByRole("button", { name: "Retry setup" }));
@@ -840,7 +840,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     render(<ChatView />);
 
-    expect(screen.getByTestId("startup-progress")).toBeInTheDocument();
+    expect(screen.getByTestId("startup-trail")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
     expect(screen.queryByTestId("message-list")).not.toBeInTheDocument();
   });
@@ -881,7 +881,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     const view = render(<ChatView />);
     const preparingShell = screen.getByTestId("thread-preparing-shell");
-    expect(screen.getAllByTestId("startup-progress")).toHaveLength(1);
+    expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
     await waitFor(() => expect(chatViewTransportMock.getThreadStartup).toHaveBeenCalledWith(startupId));
     const recoveryCallsBeforeAgentAdmission = {
       get: chatViewTransportMock.getThreadStartup.mock.calls.length,
@@ -897,7 +897,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     view.rerender(<ChatView />);
 
     expect(screen.getByTestId("thread-preparing-shell")).toBe(preparingShell);
-    expect(screen.getAllByTestId("startup-progress")).toHaveLength(1);
+    expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
     await waitFor(() => {
@@ -980,7 +980,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     render(<ChatView />);
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
-    expect(screen.getAllByTestId("startup-progress")).toHaveLength(1);
+    expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
     await waitFor(() => expect(chatViewTransportMock.listThreadStartups).toHaveBeenCalledWith(restoredThread.workspace_id));
@@ -1032,7 +1032,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     render(<ChatView />);
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
-    expect(screen.getAllByTestId("startup-progress")).toHaveLength(1);
+    expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
 
@@ -1041,7 +1041,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
-    expect(screen.getAllByTestId("startup-progress")).toHaveLength(1);
+    expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
   });
 
@@ -1091,9 +1091,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     render(<ChatView />);
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
-    expect(screen.getByTestId("startup-progress")).toHaveTextContent("Startup cancelled");
-    expect(screen.getByText("Run project setup").closest("li")).toHaveAttribute("data-state", "cancelled");
-    expect(screen.getByText("Start agent").closest("li")).toHaveAttribute("data-state", "pending");
+    expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "cancelled");
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Cancelled");
+    expect(screen.getByTestId("startup-step-agent")).toHaveAttribute("data-tone", "pending");
+    expect(screen.getByRole("button", { name: "Start over" })).toBeInTheDocument();
     expect(screen.queryByText("Error: Thread startup was cancelled")).toBeNull();
     expect(screen.queryByTestId("chat-message-stage")).not.toBeInTheDocument();
   });
@@ -1250,14 +1251,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:00.000Z",
     });
-    chatViewTransportMock.getAutomaticSetup.mockResolvedValueOnce({ gate: "not-required", attempt: null, queuedTurns: [] });
+    chatViewTransportMock.getAutomaticSetup.mockResolvedValue({ gate: "not-required", attempt: null, queuedTurns: [] });
     setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
 
     render(<ChatView />);
     await waitFor(() => expect(useProjectAutomaticSetupStore.getState().snapshotsByThread[thread.id])
       .toEqual({ gate: "not-required", attempt: null, queuedTurns: [] }));
-    expect(screen.getByTestId("startup-progress")).toHaveTextContent("Startup failed");
+    expect(screen.getByTestId("startup-step-agent")).toHaveTextContent("Thread didn't start");
     expect(screen.queryByRole("button", { name: "Remove incomplete thread" })).toBeNull();
   });
 
@@ -1289,7 +1290,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     render(<ChatView />);
 
-    expect(screen.getByTestId("startup-progress")).toBeInTheDocument();
+    expect(screen.getByTestId("startup-trail")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
   });
 
@@ -1322,7 +1323,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("startup-progress")).not.toBeInTheDocument();
+    expect(screen.getByTestId("startup-started-row")).toHaveTextContent("Started in");
   });
 
   it("holds the outgoing transcript while a selected cold thread hydrates", () => {
@@ -1418,7 +1419,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(held).toBeVisible();
     expect(screen.getByTestId("conversation-hold-overlay")).toBeInTheDocument();
     expect(screen.queryByTestId("thread-preparing-shell")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("startup-progress")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("startup-trail")).not.toBeInTheDocument();
   });
 
   it("drops a stale hold when rapid switching reaches another cold thread", () => {

@@ -205,9 +205,8 @@ describe("PullRequestReviewTaskDialog", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create Review task" }));
 
-    expect(await screen.findByText("Load pull request")).toBeInTheDocument();
-    expect(screen.getByText("Prepare review checkout")).toBeInTheDocument();
-    expect(screen.getByText("Start agent")).toBeInTheDocument();
+    expect(await screen.findByTestId("startup-step-worktree")).toHaveTextContent("Create worktree");
+    expect(screen.getByTestId("startup-step-agent")).toHaveTextContent("Start thread");
     expect(vi.mocked(transport.createReviewTask).mock.calls[1]?.[0]).toMatchObject({
       startupId: expect.stringMatching(/^[0-9a-f-]{36}$/),
     });

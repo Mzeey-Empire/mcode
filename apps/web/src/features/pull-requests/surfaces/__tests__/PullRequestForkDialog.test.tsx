@@ -228,9 +228,8 @@ describe("PullRequestForkDialog", () => {
     );
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Start pending fork" }));
-    expect(screen.getByTestId("startup-progress")).toHaveTextContent(
-      "Preparing managed checkout",
-    );
+    expect(screen.getByTestId("startup-step-worktree")).toHaveTextContent("Create worktree");
+    expect(screen.getByTestId("startup-step-setup")).toHaveTextContent("Run setup");
 
   });
 

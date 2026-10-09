@@ -11,7 +11,7 @@ import { GitFork } from "lucide-react";
 import { ErrorIcon } from "@/components/ui/icon-map";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Composer } from "@/features/conversation";
-import { StartupProgressCard, useThreadStartup } from "@/features/thread-startup";
+import { StartupStepsTrail, useThreadStartup } from "@/features/thread-startup";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -209,10 +209,10 @@ function PullRequestForkComposer({
   if (preparingThread) {
     return (
       <div className="p-5">
-        <StartupProgressCard
+        <StartupStepsTrail
           startup={startup}
           startupId={pendingStartupId}
-          context={target.mode === "existing-worktree" ? "attached-worktree" : "managed-worktree"}
+          kind={target.mode === "existing-worktree" ? "attached-worktree" : "managed-worktree"}
         />
       </div>
     );

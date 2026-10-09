@@ -41,7 +41,7 @@ import { useOverviewStore } from "@/stores/overviewStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { StartupProgressCard, useThreadStartup } from "@/features/thread-startup";
+import { StartupStepsTrail, useThreadStartup } from "@/features/thread-startup";
 import {
   getPullRequestReviewTaskTransport,
   type PullRequestReviewTaskTransport,
@@ -320,10 +320,10 @@ function ReviewTaskPreparing({
   if (startupId) {
     return (
       <div className="px-5 py-5">
-        <StartupProgressCard
+        <StartupStepsTrail
           startup={startup}
           startupId={startupId}
-          context="pull-request-review"
+          kind="pull-request-review"
         />
       </div>
     );
@@ -426,10 +426,10 @@ function ReviewTaskPreparedContent({
       <SourceReadout source={prepared.source} />
       {phase === "submitting" && startupId ? (
         <div className="px-5 pt-4">
-          <StartupProgressCard
+          <StartupStepsTrail
             startup={startup}
             startupId={startupId}
-            context="pull-request-review"
+            kind="pull-request-review"
           />
         </div>
       ) : null}
