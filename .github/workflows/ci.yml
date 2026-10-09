@@ -14,10 +14,14 @@ concurrency:
 env:
   SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
 
+# Set the CI_LINUX_RUNNER repository variable to a runner label, such as
+# ubuntu-24.04, to move every PR check off Blacksmith when spend runs high.
+# Delete the variable to return to the per-job Blacksmith defaults.
 jobs:
   pr-title:
     name: PR Title
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # A few seconds of work is billed as a full Blacksmith minute.
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: amannn/action-semantic-pull-request@v5
@@ -26,7 +30,7 @@ jobs:
 
   typecheck:
     name: Typecheck
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_LINUX_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -70,7 +74,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_LINUX_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -103,7 +107,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_LINUX_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -146,7 +150,7 @@ jobs:
 
   build-check:
     name: Build Check
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_LINUX_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     timeout-minutes: 20
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
