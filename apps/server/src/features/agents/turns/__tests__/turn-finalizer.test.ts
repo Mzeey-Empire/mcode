@@ -10,7 +10,7 @@ import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-rep
 import { ThoughtSegmentRepo } from "../../conversation/narrative/persistence/thought-segment-repo.js";
 import { HookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
-import { TurnFinalizer } from "../turn-finalizer.js";
+import { TurnFinalizer, type TurnBaselinePins } from "../turn-finalizer.js";
 import { deriveTurnAssistantMessageId } from "../turn-assistant-message-id.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
@@ -681,6 +681,7 @@ describe("TurnFinalizer.finalize — git snapshot write", () => {
     fileTracker?: TurnFileTracker;
     captureRef?: SnapshotService["captureRef"];
     getFilesChanged?: SnapshotService["getFilesChanged"];
+    pins?: TurnBaselinePins;
   }) {
     const db = openFinalizerDatabase();
     const writer = writerFor(db);
@@ -695,7 +696,7 @@ describe("TurnFinalizer.finalize — git snapshot write", () => {
     } as unknown as SnapshotService;
     const turnSnapshotRepo = new TurnSnapshotRepo(db, writer);
     const finalizer = new TurnFinalizer(messageRepo, threadRepo, narrativeStore, snapshotService,
-      turnSnapshotRepo, writer, options?.fileTracker);
+      turnSnapshotRepo, writer, options?.fileTracker, undefined, undefined, undefined, options?.pins);
     const beginTurn = () => {
       narrativeStore.beginTurn(THREAD);
       narrativeStore.resetTurnCounters(THREAD);
@@ -724,6 +725,31 @@ describe("TurnFinalizer.finalize — git snapshot write", () => {
     await finalizer.finalize(THREAD, "completed");
     expect(turnSnapshotRepo.listByThread(THREAD)).toHaveLength(1);
     expect(threadRepo.findById(THREAD)?.has_file_changes).toBe(true);
+  });
+
+  it("moves the baseline pin onto the written snapshot row", async () => {
+    const pins = { transferToSnapshot: vi.fn(async () => true), release: vi.fn(async () => true) };
+    const { finalizer, turnSnapshotRepo } = await build(["src/index.ts"], { pins });
+    const pin = { kind: "baseline", threadId: THREAD, executionId: "exec-1" } as const;
+    finalizer.recordTurnRef(THREAD, "abc111", "/workspace", undefined, pin);
+    await finalizer.finalize(THREAD, "completed");
+    const row = turnSnapshotRepo.getByMessage("msg-1");
+    expect(pins.transferToSnapshot).toHaveBeenCalledWith(
+      "/workspace", { id: row?.id, refBefore: "abc111", refAfter: "def222" }, pin);
+    expect(pins.release).not.toHaveBeenCalled();
+  });
+
+  it("releases the baseline pin of a turn that writes no snapshot", async () => {
+    const pins = { transferToSnapshot: vi.fn(async () => true), release: vi.fn(async () => true) };
+    const { finalizer, turnSnapshotRepo } = await build([], {
+      pins, captureRef: vi.fn(async () => { throw new Error("capture failed"); }),
+    });
+    const pin = { kind: "baseline", threadId: THREAD, executionId: "exec-1" } as const;
+    finalizer.recordTurnRef(THREAD, "abc111", "/workspace", undefined, pin);
+    await finalizer.finalize(THREAD, "completed");
+    expect(turnSnapshotRepo.listByThread(THREAD)).toEqual([]);
+    expect(pins.release).toHaveBeenCalledWith("/workspace", pin);
+    expect(pins.transferToSnapshot).not.toHaveBeenCalled();
   });
 
   it("creates the turn snapshot row with the correct values", async () => {

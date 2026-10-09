@@ -72,6 +72,7 @@ import {
 } from "../../features/agents";
 import { AgentEventPublicationRegistry } from "../../features/agents/orchestration/agent-event-publication-registry.js";
 import { WorkerOwnedTurnRuntime } from "../../features/agents/execution/worker-owned-turn-runtime.js";
+import { SnapshotRefPins } from "../../features/projects/diffs/snapshots/snapshot-ref-pins.js";
 import { ProviderTurnEventApplication } from "../../features/agents/turns/provider-turn-event-application.js";
 import { TURN_FINALIZER, TurnFinalizer } from "../../features/agents/turns/turn-finalizer.js";
 import {
@@ -352,6 +353,7 @@ const threadRepo = container.resolve(ThreadRepo);
 const providerRegistry = container.resolve(ProviderRegistry);
 const providerEventIngress = container.resolve(ProviderEventIngress);
 const workerOwnedTurnRuntime = container.resolve(WorkerOwnedTurnRuntime);
+const snapshotRefPins = container.resolve(SnapshotRefPins);
 const cursorProvider = container.resolve<CursorProviderBoundary>("CursorProvider");
 const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
@@ -1020,6 +1022,7 @@ async function shutdown(): Promise<void> {
   shutdownCoordinator.setPhase("drain terminal persistence and execution workers");
   await captureCleanupFailure(() => container.resolve(ProviderTurnEventApplication).drainPersistence());
   await captureCleanupFailure(() => container.resolve<TurnFinalizer>(TURN_FINALIZER).drain());
+  await captureCleanupFailure(() => snapshotRefPins.drain());
   await captureCleanupFailure(() => container.resolve(AgentEventPublicationRegistry).drain());
   await captureCleanupFailure(() => workerOwnedTurnRuntime.close());
   // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.

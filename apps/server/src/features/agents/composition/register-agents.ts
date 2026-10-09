@@ -57,6 +57,7 @@ import { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
 import { GitRepositoryService } from "../../projects/git/git-repository-service.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
+import { SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import { FileService } from "../../projects/files/file-service.js";
 import { WorkspaceEnvironmentService } from "../../projects/index.js";
 import { ProviderAvailabilityService } from "../../providers/availability/provider-availability-service.js";
@@ -234,6 +235,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(PARENT_TURN_DURABILITY),
       c.resolve(ParentAssistantTextCheckpointService),
       c.resolve(TurnDiffService),
+      c.resolve(SnapshotRefPins),
     )),
   });
   container.register<TurnFileEffects>(TURN_FILE_EFFECTS, {
@@ -244,6 +246,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       c.resolve(SnapshotService),
       c.resolve(TURN_FILE_TRACKER),
       c.resolve(TURN_FINALIZER),
+      c.resolve(SnapshotRefPins),
     )),
   });
   container.register<TurnAdmissionDispatchCoordinator>(TURN_ADMISSION_DISPATCH_COORDINATOR, {

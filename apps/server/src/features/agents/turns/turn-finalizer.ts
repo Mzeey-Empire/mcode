@@ -37,13 +37,19 @@ import type { ParentAssistantTextCheckpointService } from "./parent-assistant-te
 import { deriveTurnAssistantMessageId } from "./turn-assistant-message-id.js";
 import type { TurnDiffService, SettleTurnDiff } from "./turn-diff-service.js";
 import { AssistantExecutionState, type AssistantMaterializationInput } from "./assistant-execution-state.js";
+import type { BaselinePin, PinnableSnapshot, SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pins.js";
 
 /** Pre-turn git ref captured at send time, used to diff the turn's file changes. */
 interface TurnRef {
   ref: string | null;
   cwd: string;
   fileTrackerGeneration?: number;
+  /** Keeps `ref` reachable until the turn's snapshot pin replaces it. */
+  pin?: BaselinePin;
 }
+
+/** Pin operations the finalizer needs to move a turn's baseline onto its snapshot. */
+export type TurnBaselinePins = Pick<SnapshotRefPins, "transferToSnapshot" | "release">;
 
 interface MaterializedAssistantRow {
   id: string;
@@ -93,6 +99,7 @@ export class TurnFinalizer {
     private readonly canonicalSink?: ParentTurnDurability,
     private readonly parentAssistantTextCheckpoints?: ParentAssistantTextCheckpointService,
     private readonly turnDiffs?: TurnDiffService,
+    private readonly pins?: TurnBaselinePins,
   ) {}
 
   /** Append a streaming assistant-text delta for the current turn. */
@@ -141,13 +148,14 @@ export class TurnFinalizer {
   }
 
   /** Record the pre-turn git ref so the turn's file changes can be diffed at finalize. */
-  recordTurnRef(threadId: string, ref: string | null, cwd: string, fileTrackerGeneration?: number): void {
+  recordTurnRef(threadId: string, ref: string | null, cwd: string, fileTrackerGeneration?: number, pin?: BaselinePin): void {
     if (fileTrackerGeneration !== undefined) {
       const generationRefs = this.turnRefsByGeneration.get(threadId) ?? new Map<number, TurnRef>();
       const existingGeneration = generationRefs.get(fileTrackerGeneration);
-      const turnRef = existingGeneration ?? { ref, cwd, fileTrackerGeneration };
+      const turnRef: TurnRef = existingGeneration ?? { ref, cwd, fileTrackerGeneration };
       turnRef.ref = ref;
       turnRef.cwd = cwd;
+      turnRef.pin = pin;
       generationRefs.set(fileTrackerGeneration, turnRef);
       while (generationRefs.size > 4) {
         const oldest = generationRefs.keys().next().value as number | undefined;
@@ -162,7 +170,7 @@ export class TurnFinalizer {
       }
       return;
     }
-    this.turnRefBefore.set(threadId, { ref, cwd, fileTrackerGeneration });
+    this.turnRefBefore.set(threadId, { ref, cwd, fileTrackerGeneration, ...(pin ? { pin } : {}) });
   }
 
   /** The last persisted assistant message id, for attaching late hooks (Stop/SessionEnd). */
@@ -286,19 +294,20 @@ export class TurnFinalizer {
     anchor: AssistantMaterializationAnchor,
   ): Promise<void> {
     if (!this.hasRecordableActivity(threadId)) {
-      this.discardUnmaterializedTurn(threadId, turnRef);
+      await this.discardUnmaterializedTurn(threadId, turnRef);
       return;
     }
     const materialized = await this.materializeAssistantRow(threadId, true, false, false, anchor);
     if (!materialized) {
-      this.discardUnmaterializedTurn(threadId, turnRef);
+      await this.discardUnmaterializedTurn(threadId, turnRef);
       return;
     }
     await this.persistCompatibilityFinalize(threadId, executionId, outcome, turnRef, materialized, settleDiff);
   }
 
-  private discardUnmaterializedTurn(threadId: string, turnRef: TurnRef | undefined): void {
+  private async discardUnmaterializedTurn(threadId: string, turnRef: TurnRef | undefined): Promise<void> {
     this.lastPersistedMessageIdByThread.delete(threadId);
+    await this.settleBaselinePin(turnRef, null);
     this.clearTurn(threadId, turnRef);
   }
 
@@ -475,6 +484,7 @@ export class TurnFinalizer {
   private async discardCanonicalProjection(threadId: string, executionId: string, turnRef: TurnRef | undefined): Promise<void> {
     this.lastPersistedMessageIdByThread.delete(threadId);
     await this.parentAssistantTextCheckpoints?.retire(executionId);
+    await this.settleBaselinePin(turnRef, null);
     this.clearTurn(threadId, turnRef);
   }
 
@@ -524,7 +534,10 @@ export class TurnFinalizer {
   ): Promise<string[]> {
     if (replayedTerminal) {
       const existing = this.turnSnapshotRepo.getByMessage(messageId);
-      if (existing) return existing.files_changed;
+      if (existing) {
+        await this.settleBaselinePin(refData, { id: existing.id, refBefore: existing.ref_before, refAfter: existing.ref_after });
+        return existing.files_changed;
+      }
     }
     const filesChanged = this.workspaceEffectPaths(fileEffects);
     if (!refData) return filesChanged;
@@ -546,8 +559,23 @@ export class TurnFinalizer {
   ): Promise<string[]> {
     const refAfter = await this.captureRefAfter(threadId, refData);
     const filesChanged = await this.snapshotFilesChanged(refData, fileEffects, refAfter, initialFilesChanged);
-    if (this.shouldSkipSnapshot(fileEffects, refData.ref, refAfter)) return filesChanged;
+    if (this.shouldSkipSnapshot(fileEffects, refData.ref, refAfter)) {
+      await this.settleBaselinePin(refData, null);
+      return filesChanged;
+    }
     return this.writeTurnSnapshot(threadId, messageId, refData, refAfter, fileEffects, filesChanged);
+  }
+
+  /**
+   * Move the turn's baseline pin onto its snapshot row, or release it when the turn has no
+   * diffable row. A failed snapshot write never reaches here, so its baseline stays for the sweep.
+   */
+  private async settleBaselinePin(refData: TurnRef | undefined, snapshot: PinnableSnapshot | null): Promise<void> {
+    const pin = refData?.pin;
+    if (!refData || !pin || !this.pins) return;
+    refData.pin = undefined;
+    if (snapshot?.refBefore && snapshot.refAfter) await this.pins.transferToSnapshot(refData.cwd, snapshot, pin);
+    else await this.pins.release(refData.cwd, pin);
   }
 
   private async captureRefAfter(threadId: string, refData: TurnRef): Promise<string | null> {
@@ -590,20 +618,22 @@ export class TurnFinalizer {
     filesChanged: string[],
   ): Promise<string[]> {
     const hasFileEffects = (fileEffects?.fileCount ?? 0) > 0;
+    const refBefore = refData.ref ?? "";
+    const refAfterTree = refAfter ?? "";
+    let snapshotId: string;
     try {
-      await this.writer.execute(persistTurnSnapshot, {
+      ({ snapshotId } = await this.writer.execute(persistTurnSnapshot, {
         snapshot: {
           messageId,
           threadId,
-          refBefore: refData.ref ?? "",
-          refAfter: refAfter ?? "",
+          refBefore,
+          refAfter: refAfterTree,
           filesChanged,
           ...(fileEffects ? { fileEffects } : {}),
           worktreePath: null,
         },
         markFilesChanged: hasFileEffects || filesChanged.length > 0,
-      });
-      return filesChanged;
+      }));
     } catch (err) {
       if (err instanceof DatabaseWriteOutcomeUnknown) throw err;
       logger.warn("Failed to capture turn snapshot", {
@@ -612,6 +642,8 @@ export class TurnFinalizer {
       });
       return filesChanged;
     }
+    await this.settleBaselinePin(refData, { id: snapshotId, refBefore, refAfter: refAfterTree });
+    return filesChanged;
   }
 
   /**

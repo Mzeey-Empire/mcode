@@ -150,6 +150,7 @@ interface SweepRepository {
 @injectable()
 export class SnapshotRefPins {
   private readonly orm: BunSQLiteDatabase;
+  private readonly background = new Set<Promise<void>>();
 
   constructor(
     @inject("GitExecutor") private readonly git: GitExecutor,
@@ -211,6 +212,20 @@ export class SnapshotRefPins {
       const [listed] = await this.listPins(cwd, ref);
       if (listed?.pin.kind === "baseline") await this.settleBaseline(cwd, { ...listed, pin: listed.pin }, options);
     });
+  }
+
+  /**
+   * Run pin work without holding the caller. The work is tracked so shutdown can drain it before
+   * the database and repositories it reads go away.
+   */
+  runInBackground(work: () => Promise<void>): void {
+    const task = work().finally(() => this.background.delete(task));
+    this.background.add(task);
+  }
+
+  /** Wait for every background pass, including passes started while draining. */
+  async drain(): Promise<void> {
+    while (this.background.size > 0) await Promise.allSettled(this.background);
   }
 
   /**
