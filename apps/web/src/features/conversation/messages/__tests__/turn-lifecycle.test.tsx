@@ -240,3 +240,25 @@ describe("one lifecycle for the current turn", () => {
     expect(shouldQueueActiveThreadSubmit(THREAD, true, null, false, "follow-up")).toBe(false);
   });
 });
+
+describe("work fold presence", () => {
+  const settled = { ...answer("settled-answer", "settled-execution"), outcome: "completed" as const };
+
+  function foldKeys(records: PersistedNarrativeRecordsByMessage) {
+    return buildStableItems([settled], undefined, undefined, undefined, records)
+      .filter((row) => row.type === "work-fold").map((row) => row.key);
+  }
+
+  function thought(text: string, isFinalResponse: number) {
+    return { id: `thought-${isFinalResponse}`, message_id: settled.id, text, started_at: NOW, ended_at: NOW, sort_order: 0, is_final_response: isFinalResponse };
+  }
+
+  it("omits the fold when the only thought is the answer itself", () => {
+    expect(foldKeys({ [settled.id]: { tools: [], hooks: [], thoughts: [thought("Saved answer", 1)] } })).toEqual([]);
+  });
+
+  it("keeps the fold when a thought precedes the answer", () => {
+    expect(foldKeys({ [settled.id]: { tools: [], hooks: [], thoughts: [thought("Checking the README first.", 0)] } }))
+      .toEqual(["work-fold:settled-answer"]);
+  });
+});

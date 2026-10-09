@@ -2,6 +2,7 @@ import type { AgentTurnStatus, PermissionDecision, TurnOutcome, TurnRuntimePhase
 import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport/types";
 import type { NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/types";
 import { computeLiveStreamingText } from "../narrative/build-narrative";
+import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
@@ -428,15 +429,20 @@ function terminalDisplayOutcome(state: AgentDisplayState): TurnOutcome | undefin
   return state.phase === "streaming" || state.phase === "finalizing" ? undefined : state.phase;
 }
 
-/** Hooks render in the actions row, so a hooks-only turn has nothing to fold. */
+/**
+ * Records decide when they are loaded, because the fold renders from them: a thought
+ * that repeats the answer and hooks (shown in the actions row) produce no fold rows.
+ */
 function hasFoldableNarrative(message: Message, input: StableItemInput, summary: TurnSummary): boolean {
-  if (summary.counts.steps > 0 || summary.counts.thoughts > 0) return true;
-  if (hasNarrativeRecords(input.persistedNarrativeByMessage?.[message.id])) return true;
-  return isCurrentResponse(message, input) && input.currentTurnHasNarrative === true;
+  if (isCurrentResponse(message, input) && input.currentTurnHasNarrative === true) return true;
+  const records = input.persistedNarrativeByMessage?.[message.id];
+  if (records) return hasFoldRows(records, message.content);
+  return summary.counts.steps > 0 || summary.counts.thoughts > 0;
 }
 
-function hasNarrativeRecords(records: { tools: readonly unknown[]; thoughts: readonly unknown[] } | undefined): boolean {
-  return records !== undefined && (records.tools.length > 0 || records.thoughts.length > 0);
+function hasFoldRows(records: NonNullable<PersistedNarrativeRecords>, messageContent: string): boolean {
+  return buildPersistedNarrativeItems({ ...records, messageContent })
+    .some((item) => item.type !== "hook" && item.type !== "delta");
 }
 
 function workFoldItem(message: Message, input: StableItemInput, summary: TurnSummary): ChatVirtualItem | undefined {
