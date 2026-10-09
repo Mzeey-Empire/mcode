@@ -236,7 +236,7 @@ function useBrowseAddAction({
   if (addErrorState && addErrorState.query !== query) setAddErrorState(null);
   const currentError = addErrorState?.query === query ? addErrorState : null;
   const addError = currentError?.message ?? null;
-  // The listing that made this folder addable is stale once the server rejects it; editing the path re-checks it.
+  // The listing that made this folder addable is stale once the server rejects it.
   const isRejected = currentError !== null && currentError.rejectedPath === result?.path;
   const isCurrentDirectoryAddable = !isRejected && canAddCurrentDirectory({
     leafFilter,
