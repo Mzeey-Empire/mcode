@@ -88,7 +88,7 @@ jobs:
       matrix:
         include:
           - target-id: windows-x64
-            runner: windows-2025
+            runner: windows-2022
             platform: windows
             arch: x64
             build-args: --config.compression=store
@@ -103,7 +103,7 @@ jobs:
             arch: arm64
             build-args: --mac --arm64
           - target-id: macos-x64
-            runner: macos-26
+            runner: macos-26-intel
             platform: macos
             arch: x64
             build-args: --mac --x64
