@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { ModeSelector, ALL_MODE_OPTIONS, type ComposerMode, type ModeOption } from "@/components/chat/ModeSelector";
-import { NewThreadProjectPicker } from "@/components/chat/NewThreadProjectPicker";
+import { ProjectChooser } from "@/features/projects/ProjectChooser";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -94,7 +94,21 @@ export function ComposerNewThreadContext({
           )}
         </>
       ) : (
-        <NewThreadProjectPicker />
+        <ProjectChooser
+          side="top"
+          trigger={
+            <Button
+              type="button"
+              variant="ghost"
+              size="compact"
+              data-testid="new-thread-project-picker"
+              className={`${CONTEXT_CONTROL_CLASS} text-ink/90 hover:bg-selected/70`}
+            >
+              <Folder size={14} className="size-3.5 text-muted" aria-hidden />
+              Choose project
+            </Button>
+          }
+        />
       )}
     </div>
   );
