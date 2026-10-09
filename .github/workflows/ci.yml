@@ -66,7 +66,9 @@ jobs:
   typecheck:
     name: Typecheck
     needs: pick-runner
-    runs-on: ${{ needs.pick-runner.outputs.small }}
+    # Skipped required checks count as passing, so run and fail instead.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.pick-runner.outputs.small || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -79,6 +81,11 @@ jobs:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
+      - name: Require a runner choice
+        if: needs.pick-runner.result != 'success'
+        run: |
+          echo "::error::Pick Runner failed, so this check did not run. Check the CI_LINUX_RUNNER repository variable."
+          exit 1
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -111,7 +118,9 @@ jobs:
   lint:
     name: Lint
     needs: pick-runner
-    runs-on: ${{ needs.pick-runner.outputs.small }}
+    # Skipped required checks count as passing, so run and fail instead.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.pick-runner.outputs.small || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -120,6 +129,11 @@ jobs:
       SKIP_ELECTRON_REBUILD: "1"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
+      - name: Require a runner choice
+        if: needs.pick-runner.result != 'success'
+        run: |
+          echo "::error::Pick Runner failed, so this check did not run. Check the CI_LINUX_RUNNER repository variable."
+          exit 1
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -145,7 +159,9 @@ jobs:
   test:
     name: Test
     needs: pick-runner
-    runs-on: ${{ needs.pick-runner.outputs.large }}
+    # Skipped required checks count as passing, so run and fail instead.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.pick-runner.outputs.large || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -154,6 +170,11 @@ jobs:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
+      - name: Require a runner choice
+        if: needs.pick-runner.result != 'success'
+        run: |
+          echo "::error::Pick Runner failed, so this check did not run. Check the CI_LINUX_RUNNER repository variable."
+          exit 1
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -189,12 +210,19 @@ jobs:
   build-check:
     name: Build Check
     needs: pick-runner
-    runs-on: ${{ needs.pick-runner.outputs.small }}
+    # Skipped required checks count as passing, so run and fail instead.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.pick-runner.outputs.small || 'ubuntu-24.04' }}
     timeout-minutes: 20
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
+      - name: Require a runner choice
+        if: needs.pick-runner.result != 'success'
+        run: |
+          echo "::error::Pick Runner failed, so this check did not run. Check the CI_LINUX_RUNNER repository variable."
+          exit 1
       - uses: actions/checkout@v4
       - name: Configure node-gyp headers
         shell: bash
@@ -227,6 +255,15 @@ jobs:
 
       - name: Smoke test server bundle
         run: bun apps/desktop/scripts/desktop-packaging/package-validation/smoke-test.mjs --bundle
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces, so Electron falls
+      # back to its SUID sandbox helper, which must be root-owned with mode 4755.
+      - name: Configure Electron sandbox helper
+        shell: bash
+        run: |
+          sandbox="$(dirname "$(cd apps/desktop && node -p 'require("electron")')")/chrome-sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
 
       - name: Smoke launch desktop app
         timeout-minutes: 3
