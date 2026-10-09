@@ -1,4 +1,6 @@
-FROM ubuntu:22.04
+# Microsoft's mirror of the Docker Hub image. Anonymous Docker Hub pulls from shared
+# GitHub-hosted runner IPs fail with 429 rate limits; MCR has no anonymous pull limit.
+FROM mcr.microsoft.com/mirror/docker/library/ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 

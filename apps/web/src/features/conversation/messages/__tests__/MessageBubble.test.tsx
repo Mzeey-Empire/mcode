@@ -593,8 +593,9 @@ describe("MessageBubble agent response state", () => {
     timestamp: "2026-08-27T11:12:00.000Z",
   });
 
-  it("shows completed metadata while keeping response actions hover-only", () => {
-    const { getByTestId } = render(
+  it("shows fork and copy at rest, reachable by keyboard, with no model or cost metadata", async () => {
+    const user = userEvent.setup();
+    const { getByTestId, queryByText } = render(
       <MessageBubble
         message={makeAgentMessage()}
         onBranch={vi.fn()}
@@ -602,15 +603,18 @@ describe("MessageBubble agent response state", () => {
       />,
     );
 
-    expect(getByTestId("agent-message-metadata")).toHaveTextContent("128 tok");
-    expect(getByTestId("agent-message-actions")).toHaveClass(
-      "opacity-0",
-      "group-hover/msg:opacity-100",
-      "group-focus-within/msg:opacity-100",
-    );
+    const actions = getByTestId("agent-message-actions");
+    const fork = within(actions).getByRole("button", { name: /fork/i });
+    const copy = within(actions).getByRole("button", { name: /copy/i });
+    for (const element of [actions, fork, copy]) expect(element.className).not.toMatch(/opacity-0/);
+    await user.tab();
+    expect(fork).toHaveFocus();
+    await user.tab();
+    expect(copy).toHaveFocus();
+    expect(queryByText(/128 tok/)).not.toBeInTheDocument();
   });
 
-  it("withholds metadata and response actions until the agent completes", () => {
+  it("withholds response actions until the agent completes", () => {
     const { queryByTestId } = render(
       <MessageBubble
         message={makeAgentMessage()}
@@ -619,7 +623,6 @@ describe("MessageBubble agent response state", () => {
       />,
     );
 
-    expect(queryByTestId("agent-message-metadata")).not.toBeInTheDocument();
     expect(queryByTestId("agent-message-actions")).not.toBeInTheDocument();
   });
 });

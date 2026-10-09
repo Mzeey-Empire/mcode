@@ -3,8 +3,8 @@ import { PermissionRequestCard } from "@/components/chat/PermissionRequestCard";
 import { TurnChangeSummary } from "@/components/chat/TurnChangeSummary";
 import { NarrativeFlow, type SubagentRosterTarget } from "@/features/conversation/narrative";
 import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeIndicator";
-import { PersistedNarrative } from "@/features/conversation/narrative/PersistedNarrative";
-import { PersistedTurnFooter } from "@/features/conversation/narrative/PersistedTurnFooter";
+import { TurnMetaLine } from "../../turn/TurnMetaLine";
+import { WorkFold, workFoldLabel } from "../../turn/WorkFold";
 import { MessageBubble } from "../MessageBubble";
 import { VisibleNarrativeLoader } from "../TranscriptNarrativeRow";
 import type { ChatVirtualItem } from "../virtual-items";
@@ -13,6 +13,10 @@ import type { ChatVirtualItem } from "../virtual-items";
 export interface TranscriptItemRendererProps {
   /** The virtual transcript row to render. */
   item: ChatVirtualItem;
+  /** Whether this row's disclosure is open. Only work folds read it. */
+  expanded?: boolean;
+  /** Opens or closes a work fold by its row key. */
+  onToggleGroup?: (key: string) => void;
   /** Manual expansion state for persisted turn-change summaries. */
   turnExpandRef?: RefObject<Map<string, boolean>>;
   /** Activates branch mode from a message. */
@@ -117,30 +121,22 @@ function NarrativeFlowTranscriptItemRenderer({ item, onSubagentSelect, onOpenSub
   );
 }
 
-/** Renders durable narrative records. */
-function PersistedNarrativeTranscriptItemRenderer({ item, threadId, onSubagentSelect, onOpenSubagents }: TranscriptItemRendererProps) {
-  const narrative = item as Extract<ChatVirtualItem, { type: "persisted-narrative" }>;
+/** Renders the settled turn's work fold. */
+function WorkFoldTranscriptItemRenderer({ item, expanded, onToggleGroup }: TranscriptItemRendererProps) {
+  const fold = item as Extract<ChatVirtualItem, { type: "work-fold" }>;
   return (
-    <PersistedNarrative
-      threadId={threadId}
-      messageId={narrative.messageId}
-      messageContent={narrative.messageContent}
-      onSubagentSelect={onSubagentSelect}
-      onOpenSubagents={onOpenSubagents}
+    <WorkFold
+      label={workFoldLabel(fold.outcome, fold.durationMs)}
+      expanded={expanded === true}
+      onToggle={() => onToggleGroup?.(fold.key)}
     />
   );
 }
 
-/** Renders the durable turn footer. */
-function PersistedTurnFooterTranscriptItemRenderer({ item, threadId }: TranscriptItemRendererProps) {
-  const footer = item as Extract<ChatVirtualItem, { type: "persisted-turn-footer" }>;
-  return (
-    <PersistedTurnFooter
-      threadId={threadId}
-      messageId={footer.messageId}
-      summary={footer.summary}
-    />
-  );
+/** Renders the settled turn's step counts. */
+function TurnMetaLineTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
+  const meta = item as Extract<ChatVirtualItem, { type: "turn-meta-line" }>;
+  return <TurnMetaLine steps={meta.steps} subagents={meta.subagents} />;
 }
 
 /** Renders live narrative progress below the response. */
@@ -163,8 +159,8 @@ const TRANSCRIPT_ITEM_COMPONENTS: Record<ChatVirtualItem["type"], TranscriptItem
   "turn-changes": TurnChangesTranscriptItemRenderer,
   "permission-request": PermissionRequestTranscriptItemRenderer,
   "narrative-flow": NarrativeFlowTranscriptItemRenderer,
-  "persisted-narrative": PersistedNarrativeTranscriptItemRenderer,
-  "persisted-turn-footer": PersistedTurnFooterTranscriptItemRenderer,
+  "work-fold": WorkFoldTranscriptItemRenderer,
+  "turn-meta-line": TurnMetaLineTranscriptItemRenderer,
   "narrative-indicator": NarrativeIndicatorTranscriptItemRenderer,
 };
 
@@ -174,6 +170,7 @@ function sameTranscriptItemContext(
   next: TranscriptItemRendererProps,
 ): boolean {
   return previous.turnExpandRef === next.turnExpandRef
+    && previous.expanded === next.expanded
     && previous.threadId === next.threadId
     && previous.showParentAgentProvenance === next.showParentAgentProvenance
     && previous.currentTurnMessageIdByThread === next.currentTurnMessageIdByThread;
@@ -185,6 +182,7 @@ function sameTranscriptItemHandlers(
   next: TranscriptItemRendererProps,
 ): boolean {
   return previous.onBranch === next.onBranch
+    && previous.onToggleGroup === next.onToggleGroup
     && previous.onSubagentSelect === next.onSubagentSelect
     && previous.onOpenSubagents === next.onOpenSubagents
     && previous.onScrollToMessage === next.onScrollToMessage;
@@ -204,6 +202,8 @@ function sameTranscriptItemRendererProps(
 /** Renders one discriminated transcript item without owning transcript or viewport state. */
 export const TranscriptItemRenderer = memo(function TranscriptItemRenderer({
   item,
+  expanded,
+  onToggleGroup,
   turnExpandRef,
   onBranch,
   onSubagentSelect,
@@ -217,6 +217,8 @@ export const TranscriptItemRenderer = memo(function TranscriptItemRenderer({
   return (
     <ItemComponent
       item={item}
+      expanded={expanded}
+      onToggleGroup={onToggleGroup}
       turnExpandRef={turnExpandRef}
       onBranch={onBranch}
       onSubagentSelect={onSubagentSelect}

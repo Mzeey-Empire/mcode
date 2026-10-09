@@ -48,6 +48,7 @@ export const CanonicalAgentEventSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.literal("turn.created"), turn: PendingAgentTurnSchema }).strict(),
   z.object({ type: z.literal("turn.started"), startedAt: CanonicalTimestampSchema }).strict(),
+  z.object({ type: z.literal("turn.provider-started"), at: CanonicalTimestampSchema }).strict(),
   z.object({ type: z.literal("turn.completed"), endedAt: CanonicalTimestampSchema }).strict(),
   z
     .object({

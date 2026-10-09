@@ -155,6 +155,8 @@ export const mockTransport: McodeTransport = {
   countBlockedThreadCleanupCandidates: vi.fn().mockResolvedValue({ count: 0 }),
   retryThreadCleanup: vi.fn().mockResolvedValue(createMockThread()),
   listBranches: vi.fn().mockResolvedValue([]),
+  listRefs: vi.fn().mockResolvedValue({ ok: true, items: [], total: 0, nextCursor: null }),
+  listPullRequestTargets: vi.fn().mockResolvedValue({ ok: true, items: [], total: 0, nextCursor: null }),
   getCurrentBranch: vi.fn().mockResolvedValue("main"),
   checkoutBranch: vi.fn().mockResolvedValue(undefined),
   createBranch: vi.fn().mockResolvedValue({ branch: "feat/test" }),
@@ -355,9 +357,7 @@ export const mockTransport: McodeTransport = {
   getGitLog: vi.fn().mockResolvedValue([]),
   getCommitDiff: vi.fn().mockResolvedValue(""),
   getCommitFiles: vi.fn().mockResolvedValue([]),
-  getWorkingTreeFiles: vi.fn().mockResolvedValue([]),
   getWorkingTreeDiff: vi.fn().mockResolvedValue(""),
-  getBranchFiles: vi.fn().mockResolvedValue([]),
   getBranchDiff: vi.fn().mockResolvedValue(""),
   getBranchComparison: vi
     .fn()
@@ -369,7 +369,7 @@ export const mockTransport: McodeTransport = {
       isComparisonAvailable: false,
     }),
   getRemoteUrl: vi.fn().mockResolvedValue({ webUrl: null, label: "test-project" }),
-  getReviewDiffStats: vi.fn().mockResolvedValue({ additions: 0, deletions: 0 }),
+  getReviewState: vi.fn().mockResolvedValue({ isGitRepo: true, head: "abc123", branch: "main", uncommitted: { staged: 0, unstaged: 0, untracked: 0 }, commitsAhead: null, branchDefault: { unavailable: "no-base" } }),
   push: vi.fn().mockResolvedValue({ success: true }),
   generatePrDraft: vi.fn().mockResolvedValue({ title: "", body: "" }),
   createPr: vi.fn().mockResolvedValue({ number: 1, url: "" }),

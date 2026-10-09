@@ -70,8 +70,12 @@ async function gitComparison(deps: TurnDiffRouterDeps, snapshot: TurnSnapshot, i
     resolveCwd(deps, snapshot), snapshot.ref_before, snapshot.ref_after,
     attributedWorkspacePaths(snapshot), attributedWorkspacePathGroups(snapshot),
   );
+  const statsByPath = new Map(stats.map((entry) => [entry.filePath, entry]));
   return {
-    files: fallbackFiles(snapshot),
+    files: fallbackFiles(snapshot).map((file) => {
+      const counts = statsByPath.get(file.path);
+      return { ...file, additions: file.binary ? null : counts?.additions ?? null, deletions: file.binary ? null : counts?.deletions ?? null };
+    }),
     additions: stats.reduce((total, entry) => total + entry.additions, 0),
     deletions: stats.reduce((total, entry) => total + entry.deletions, 0),
     turnDiff: { id, phase: "settled", source: "git", fidelity: "same-file-changes-possible", revision: 0 },
@@ -80,8 +84,9 @@ async function gitComparison(deps: TurnDiffRouterDeps, snapshot: TurnSnapshot, i
 
 function fallbackFiles(snapshot: TurnSnapshot): ReviewFileChange[] {
   const effects = snapshot.file_effects?.effects.filter((effect) => effect.scope === "workspace") ?? [];
-  if (effects.length === 0) return snapshot.files_changed.map((path) => ({ path, previousPath: null, changeType: "modified", binary: false }));
+  if (effects.length === 0) return snapshot.files_changed.map((path) => ({ path, previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }));
   return effects.map((effect) => ({ path: effect.path, previousPath: effect.oldPath ?? null, binary: effect.binary,
+    additions: null, deletions: null, untracked: false,
     changeType: effect.kind === "removed" ? "deleted" : effect.kind === "edited" ? "modified" : effect.kind }));
 }
 

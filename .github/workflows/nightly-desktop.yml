@@ -21,7 +21,7 @@ env:
 
 jobs:
   setup:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
@@ -102,22 +102,22 @@ jobs:
       matrix:
         include:
           - target-id: windows-x64
-            runner: blacksmith-2vcpu-windows-2025
+            runner: windows-2022
             platform: windows
             arch: x64
             build-args: --config.publish.channel=nightly
           - target-id: linux-x64
-            runner: blacksmith-2vcpu-ubuntu-2404
+            runner: ubuntu-24.04
             platform: linux
             arch: x64
             build-args: --config.publish.channel=nightly
           - target-id: macos-arm64
-            runner: blacksmith-6vcpu-macos-26
+            runner: macos-26
             platform: macos
             arch: arm64
             build-args: --mac --arm64 --config.publish.channel=nightly
           - target-id: macos-x64
-            runner: blacksmith-6vcpu-macos-26
+            runner: macos-26-intel
             platform: macos
             arch: x64
             build-args: --mac --x64 --config.publish.channel=nightly
@@ -137,7 +137,7 @@ jobs:
   aggregate:
     needs: [setup, package]
     if: needs.setup.outputs.should_build == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

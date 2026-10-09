@@ -1,7 +1,8 @@
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
-import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
+import { GitFork } from "lucide-react";
 import type { Message, RecoveryIncident, SelectedTextComment, ThreadStartup, ThreadStartupKind } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Notice } from "@/components/ui/notice";
 import { Spinner } from "@/components/ui/spinner";
@@ -12,17 +13,15 @@ import { ConversationHoldOverlay } from "@/components/chat/ConversationHoldOverl
 import { HandoffDocDialog, useHandoffFallback } from "@/components/chat/handoff-fallback";
 import { HeaderActions } from "@/components/chat/HeaderActions";
 import { InterruptedSessionsBanner } from "@/components/chat/InterruptedSessionsBanner";
-import { NewThreadProjectPicker } from "@/components/chat/NewThreadProjectPicker";
 import { PlanQuestionWizard } from "@/components/chat/PlanQuestionWizard";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
-import { McodeLogo } from "@/components/brand/McodeLogo";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
-import { cn } from "@/lib/utils";
 import { useThreadDraftStore, type ThreadDraftPayload } from "@/stores/threadDraftStore";
+import { OverviewLayer } from "@/features/thread-overview/overview-layer";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
 import { StartupStepsTrail, editStartupSetupScript, openStartupSetupTerminal, useThreadStartup } from "@/features/thread-startup";
@@ -37,29 +36,7 @@ import { MessageBubble } from "../MessageBubble";
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
 import { tryGetConversationResidency } from "../../residency/conversation-residency";
 import type { ChatViewState } from "./useChatViewState";
-
-const NEW_THREAD_STARTERS = [
-  {
-    label: "Explore and understand code",
-    prompt: "Explore this codebase and explain how it works.",
-    icon: ScanSearch,
-  },
-  {
-    label: "Build a new feature, app, or tool",
-    prompt: "Build a new feature, app, or tool in this project.",
-    icon: Hammer,
-  },
-  {
-    label: "Review code and suggest changes",
-    prompt: "Review this codebase and suggest concrete improvements.",
-    icon: SearchCode,
-  },
-  {
-    label: "Fix issues and failures",
-    prompt: "Find and fix issues or failures in this project.",
-    icon: Bug,
-  },
-] as const;
+import { NewThreadStartColumn } from "./NewThreadStartColumn";
 
 /** Actions that the visual chat surface routes to stores, transport, and composer state. */
 export interface ChatViewInteractions {
@@ -87,8 +64,6 @@ export interface ChatViewInteractions {
   onSelectedTextCommentSourceUnavailable: (request: SelectedTextCommentSourceNavigationRequest) => void;
   /** Moves a restored source editor to its card when source loading fails. */
   onSelectedTextCommentEditorSourceUnavailable: (editor: SelectedTextCommentEditorDraft) => void;
-  /** Prefills the new-thread composer with a starter prompt. */
-  onPromptSelect: (text: string) => void;
   /** Stops the active agent after saving has stalled. */
   onStopSafely: () => Promise<void>;
   /** Continues a stalled turn without saving its recovery state. */
@@ -143,52 +118,6 @@ export interface ChatViewSurfaceProps {
   onOpenSubagents?: (target: SubagentRosterTarget) => void;
   /** Error dismissed within the active thread. */
   dismissedError: string | null;
-}
-
-/** Renders the welcome canvas for a workspace without an active thread. */
-function NewThreadWelcome({ projectName, onPromptSelect }: { projectName?: string; onPromptSelect: (text: string) => void }) {
-  return (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-10">
-      <div key={projectName ?? "projectless"} data-testid="new-thread-welcome" className="animate-fade-up-in flex w-full max-w-[80rem] flex-col items-center gap-7 text-center">
-        <McodeLogo variant="newThread" markOnly />
-        <h1 aria-label={projectName ? `What should we build in ${projectName}?` : undefined} className="text-balance text-2xl font-medium tracking-[-0.025em] text-ink sm:text-2xl">
-          {projectName ? (
-            <>
-              What should we build in{" "}
-              <NewThreadProjectPicker
-                placement="bottom"
-                triggerTooltip="Change project"
-                trigger={
-                  <Button type="button" variant="link" size="compact" data-testid="new-thread-active-project-picker" className="h-auto min-h-0 gap-0 rounded-sm px-0 py-0 align-baseline !text-2xl font-[inherit] leading-[inherit] text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus/60 sm:!text-2xl">
-                    {projectName}<span className="text-ink">?</span>
-                  </Button>
-                }
-              />
-            </>
-          ) : "What should we work on?"}
-        </h1>
-        <div data-testid="new-thread-starters" className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(18rem,100%),1fr))] gap-3">
-          {NEW_THREAD_STARTERS.map(({ label, prompt, icon: Icon }) => (
-            <Button key={label} type="button" variant="outline" onClick={() => onPromptSelect(prompt)} className="group h-auto min-h-24 flex-col items-start justify-between rounded-xl border-border/70 bg-transparent px-4 py-4 text-left shadow-none hover:border-primary/35 hover:bg-selected/45">
-              <Icon className="size-4 text-primary transition-transform duration-200 group-hover:-translate-y-0.5 motion-reduce:transform-none" aria-hidden />
-              <span className="w-full max-w-[18ch] text-wrap text-sm font-medium leading-5 text-ink/90">{label}</span>
-            </Button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Renders the welcome canvas and new-thread composer. */
-function NewThreadSurface({ state, onPromptSelect }: { state: ChatViewState; onPromptSelect: (text: string) => void }) {
-  return (
-    <div className="relative flex h-full min-h-0 flex-col bg-background">
-      <CanvasHeader />
-      <NewThreadWelcome projectName={state.activeWorkspaceName || undefined} onPromptSelect={onPromptSelect} />
-      <Composer isNewThread workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />
-    </div>
-  );
 }
 
 /** Startup kind for placeholder rows drawn before the server returns the record. */
@@ -789,16 +718,20 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
   const conversationErrorBanner = state.messageCount > 0 || state.isAgentRunning ? conversationErrorLabel(state) : null;
   const showCliError = isVisibleCliError(state.sessionError, dismissedError);
   return (
-    <div ref={state.chatPaneRef} className="flex h-full flex-col bg-background" data-testid="chat-view">
-      <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} />
-      <ActiveThreadBanners state={state} recovery={recovery} />
-      {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
-      <HandoffFallbackNotice threadId={thread.id} />
-      <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
-      <TurnSavingNotice lostProgress={state.lostProgress} />
-      <ChatMessageStage state={state} interactions={interactions} automaticSetup={automaticSetup} startupTrail={startup ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
-      {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
-      <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} setupBlocked={automaticSetup.snapshot.gate === "blocked"} />
+    // The docked card's reserve takes the right gutter's room, so rows and the composer use 24px
+    // gutters while docked. That keeps the composer at 520 or wider down to OVERVIEW_DOCK_MIN_CANVAS.
+    <div ref={state.chatPaneRef} className={cn("relative flex h-full flex-col bg-background", state.overviewPaddingRight && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view">
+      <OverviewLayer>
+        <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} />
+        <ActiveThreadBanners state={state} recovery={recovery} />
+        {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
+        <HandoffFallbackNotice threadId={thread.id} />
+        <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
+        <TurnSavingNotice lostProgress={state.lostProgress} />
+        <ChatMessageStage state={state} interactions={interactions} automaticSetup={automaticSetup} startupTrail={startup ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
+        {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
+        <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} setupBlocked={automaticSetup.snapshot.gate === "blocked"} />
+      </OverviewLayer>
     </div>
   );
 }
@@ -816,7 +749,7 @@ export function ChatViewSurface(props: ChatViewSurfaceProps) {
   });
   const startupDismissed = useThreadStartupStore((s) =>
     startupLookup.startup ? s.dismissedStartupIds.has(startupLookup.startup.startupId) : false);
-  if (!state.activeThreadId) return <NewThreadSurface state={state} onPromptSelect={props.interactions.onPromptSelect} />;
+  if (!state.activeThreadId) return <NewThreadStartColumn projectName={state.activeWorkspaceName || undefined} workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />;
   if (!state.activeThread) return <MissingThreadSurface />;
   if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <PreparingThreadSurface thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} />;
   // Keeping a cancelled startup's thread dismisses its record, so the trail leaves the transcript too.

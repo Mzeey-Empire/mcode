@@ -49,15 +49,15 @@ describe("GitComparisonService.readReviewComparison", () => {
     });
     const service = new GitComparisonService({} as WorkspaceRepo, mock.executor);
 
-    const result = await service.readReviewComparison("ws-1", "unstaged", {}, "/repo");
+    const result = await service.readReviewComparison("ws-1", "staged", {}, "/repo");
 
     expect(result).toEqual({
       files: [
-        { path: "assets/logo.png", previousPath: null, changeType: "modified", binary: true },
-        { path: "src/added.ts", previousPath: null, changeType: "added", binary: false },
-        { path: "src/copy.ts", previousPath: "src/base.ts", changeType: "copied", binary: false },
-        { path: "src/gone.ts", previousPath: null, changeType: "deleted", binary: false },
-        { path: "src/new.ts", previousPath: "src/old.ts", changeType: "renamed", binary: false },
+        { path: "assets/logo.png", previousPath: null, changeType: "modified", binary: true, additions: null, deletions: null, untracked: false },
+        { path: "src/added.ts", previousPath: null, changeType: "added", binary: false, additions: 2, deletions: 0, untracked: false },
+        { path: "src/copy.ts", previousPath: "src/base.ts", changeType: "copied", binary: false, additions: 0, deletions: 0, untracked: false },
+        { path: "src/gone.ts", previousPath: null, changeType: "deleted", binary: false, additions: 0, deletions: 3, untracked: false },
+        { path: "src/new.ts", previousPath: "src/old.ts", changeType: "renamed", binary: false, additions: 0, deletions: 0, untracked: false },
       ],
       additions: 2,
       deletions: 3,
@@ -72,7 +72,7 @@ describe("GitComparisonService.readReviewComparison", () => {
       : { stdout: "-\t-\tsrc/name\twith-tab.bin\0", stderr: "" });
     const service = new GitComparisonService({} as WorkspaceRepo, mock.executor);
 
-    await expect(service.readReviewComparison("ws-1", "unstaged", {}, "/repo")).resolves.toMatchObject({
+    await expect(service.readReviewComparison("ws-1", "staged", {}, "/repo")).resolves.toMatchObject({
       files: [{ path: "src/name\twith-tab.bin", binary: true }],
     });
   });
@@ -85,7 +85,7 @@ describe("GitComparisonService.readReviewComparison", () => {
       : { stdout: "", stderr: "" });
     const service = new GitComparisonService({} as WorkspaceRepo, mock.executor);
 
-    await expect(service.readReviewComparison("ws-1", "unstaged", {}, "/repo")).rejects.toThrow(
+    await expect(service.readReviewComparison("ws-1", "staged", {}, "/repo")).rejects.toThrow(
       "Review comparison is limited to 10000 files",
     );
   });
@@ -95,7 +95,7 @@ describe("GitComparisonService.readReviewComparison", () => {
     mock.execFn.mockRejectedValue(new Error("git unavailable"));
     const service = new GitComparisonService({} as WorkspaceRepo, mock.executor);
 
-    await expect(service.readReviewComparison("ws-1", "unstaged", {}, "/repo")).rejects.toThrow(
+    await expect(service.readReviewComparison("ws-1", "staged", {}, "/repo")).rejects.toThrow(
       "git unavailable",
     );
   });
@@ -103,7 +103,7 @@ describe("GitComparisonService.readReviewComparison", () => {
   it("retries a root commit against the empty tree", async () => {
     const mock = createMockGitExecutor();
     mock.execFn.mockImplementation(async (args) => {
-      if (!args.includes("4b825dc642cb6eb9a060e54bf899d69f82049264")) {
+      if (!args.includes("4b825dc642cb6eb9a060e54bf8d69288fbee4904")) {
         throw new Error("unknown revision sha~1");
       }
       return args.includes("--name-status")

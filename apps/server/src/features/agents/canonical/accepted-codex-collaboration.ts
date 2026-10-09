@@ -648,7 +648,7 @@ function startedTurn(id: string, executionId: string, threadId: string, action: 
   return { id, executionId, threadId, status: "Running", trigger: { kind: "child", sourceThreadId: action.source.threadId,
     sourceTurnId: action.source.turnId, sourceItemId: action.source.itemId }, permissionMode,
     approvalReviewMode: "manual", approvalReviewReason: "manual-requested", providerIdentities,
-    startedAt: now, endedAt: null, createdAt: now, updatedAt: now };
+    startedAt: now, providerStartedAt: null, endedAt: null, createdAt: now, updatedAt: now };
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
 function messageSource(payload: Record<string, unknown>): Record<string, unknown> { return isRecord(payload.message) ? payload.message : payload; }

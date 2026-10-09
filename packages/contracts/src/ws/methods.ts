@@ -85,9 +85,9 @@ import { ToolCallRecordSchema } from "../models/tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "../models/thought-segment.js";
 import { HookExecutionRecordSchema } from "../models/hook-execution.js";
 import { NarrativeEntrySchema, TurnRangeSchema } from "../models/narrative-entry.js";
-import { GitBranchSchema, WorktreeSchema, BranchComparisonSchema, GitRefSchema, GitRemoteUrlSchema, GitBranchNameSchema } from "../git.js";
+import { GitBranchSchema, WorktreeSchema, BranchComparisonSchema, GitRefNameSchema, GitRemoteUrlSchema, GitBranchNameSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
-import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema } from "../github.js";
+import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema, PullRequestTargetsListParamsSchema, PullRequestTargetsListResultSchema } from "../github.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { AgentStopResultSchema, TurnRuntimeSnapshotSchema } from "../models/turn-runtime.js";
 import { CanonicalSubagentStopRequestSchema, CanonicalSubagentStopResultSchema } from "../models/canonical-subagent-roster.js";
@@ -95,7 +95,7 @@ import { RecoveryIncidentSchema } from "../models/turn-recovery.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
 import { PlanStatusSchema, PlanRecordSchema, PlanActionSchema } from "../models/plan.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
-import { ReviewComparisonSchema } from "../models/review-comparison.js";
+import { ReviewComparisonSchema, ReviewStateSchema } from "../models/review-comparison.js";
 import {
   SettingsSchema,
   PartialSettingsSchema,
@@ -448,7 +448,8 @@ const ConversationNewerPageMethod: {
 
 const SetThreadSubscriptionsMethod: {
   params: z.ZodType<SetThreadSubscriptionsInput>;
-  result: z.ZodType<SetThreadSubscriptionsResult>;
+  // Recoveries carry canonical turns whose defaulted fields make the wire input differ from the parsed output.
+  result: z.ZodType<SetThreadSubscriptionsResult, z.ZodTypeDef, unknown>;
 } = {
   params: SetThreadSubscriptionsSchema(),
   result: SetThreadSubscriptionsResultSchema(),
@@ -866,6 +867,10 @@ export const WS_METHODS = lazySchema(() => ({
     params: ThreadControlUserStopInputSchema(),
     result: ThreadStopResultSchema(),
   },
+  "git.refs.list": {
+    params: GitRefsListParamsSchema(),
+    result: GitRefsListResultSchema(),
+  },
   "git.listBranches": {
     params: z.object({ workspaceId: z.string() }),
     result: z.array(GitBranchSchema()),
@@ -875,7 +880,7 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.string().nullable(),
   },
   "git.checkout": {
-    params: z.object({ workspaceId: z.string(), branch: GitRefSchema }),
+    params: z.object({ workspaceId: z.string(), branch: GitRefNameSchema }),
     result: z.void(),
   },
   "git.createBranch": {
@@ -908,8 +913,8 @@ export const WS_METHODS = lazySchema(() => ({
   "git.log": {
     params: z.object({
       workspaceId: z.string(),
-      branch: GitRefSchema.optional(),
-      baseBranch: GitRefSchema.optional(),
+      branch: GitRefNameSchema.optional(),
+      baseBranch: GitRefNameSchema.optional(),
       limit: z.number().int().min(1).max(500).optional(),
       skip: z.number().int().min(0).optional(),
       includeStats: z.boolean().optional(),
@@ -933,19 +938,13 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: z.array(z.string()),
   },
-  "git.workingTreeFiles": {
-    params: z.object({
-      workspaceId: z.string(),
-      staged: z.boolean(),
-      threadId: z.string().optional(),
-    }),
-    result: z.array(z.string()),
-  },
   "git.workingTreeDiff": {
     params: z.object({
       workspaceId: z.string(),
       staged: z.boolean(),
+      untracked: z.boolean().optional(),
       filePath: z.string().optional(),
+      previousPath: z.string().optional(),
       maxLines: z.number().int().positive().optional(),
       threadId: z.string().optional(),
     }),
@@ -961,24 +960,13 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: z.string(),
   },
-  "git.branchFiles": {
-    params: z.object({
-      workspaceId: z.string(),
-      /** Base ref of the comparison; omit to use the detected default branch. */
-      base: GitRefSchema.optional(),
-      /** Target ref of the comparison; omit to use HEAD. */
-      target: GitRefSchema.optional(),
-      threadId: z.string().optional(),
-    }),
-    result: z.array(z.string()),
-  },
   "git.branchDiff": {
     params: z.object({
       workspaceId: z.string(),
       /** Base ref of the comparison; omit to use the detected default branch. */
-      base: GitRefSchema.optional(),
+      base: GitRefNameSchema.optional(),
       /** Target ref of the comparison; omit to use HEAD. */
-      target: GitRefSchema.optional(),
+      target: GitRefNameSchema.optional(),
       filePath: z.string().optional(),
       maxLines: z.number().int().positive().optional(),
       threadId: z.string().optional(),
@@ -992,33 +980,21 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: BranchComparisonSchema(),
   },
-  /**
-   * Return total additions and deletions for a Review-panel git view.
-   * Ref semantics match the corresponding file-list methods so the stat
-   * total always agrees with the file list shown in the panel.
-   */
-  "git.reviewDiffStats": {
+  /** Probe repository state for Review availability and dirty defaults. */
+  "git.reviewState": {
     params: z.object({
       workspaceId: z.string(),
-      view: z.enum(["unstaged", "staged", "branch", "commit"]),
-      /** Branch view: base ref (already resolved client-side; omit to auto-detect). */
-      base: z.string().optional(),
-      /** Branch view: target ref (omit to use HEAD). */
-      target: z.string().optional(),
-      /** Commit view: commit SHA. */
-      sha: z.string().optional(),
-      /** Worktree thread — resolves the right cwd when the review is for a thread's worktree. */
       threadId: z.string().optional(),
     }),
-    result: z.object({ additions: z.number(), deletions: z.number() }),
+    result: ReviewStateSchema(),
   },
   /** Resolve file metadata and totals for one Review comparison in one RPC. */
   "git.reviewComparison": {
     params: z.object({
       workspaceId: z.string(),
-      view: z.enum(["unstaged", "staged", "branch", "commit"]),
-      base: GitRefSchema.optional(),
-      target: GitRefSchema.optional(),
+      view: z.enum(["unstaged", "staged", "branch", "commit", "uncommitted"]),
+      base: GitRefNameSchema.optional(),
+      target: GitRefNameSchema.optional(),
       sha: z.string().optional(),
       threadId: z.string().optional(),
     }),
@@ -1230,6 +1206,10 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ branch: z.string(), cwd: z.string() }),
     result: PrInfoSchema().nullable(),
   },
+  "github.pullRequestTargets.list": {
+    params: PullRequestTargetsListParamsSchema(),
+    result: PullRequestTargetsListResultSchema(),
+  },
   "github.listOpenPrs": {
     params: z.object({ workspaceId: z.string() }),
     result: z.array(PrDetailSchema()),
@@ -1293,7 +1273,7 @@ export const WS_METHODS = lazySchema(() => ({
   "git.push": {
     params: z.object({
       workspaceId: z.string(),
-      branch: GitRefSchema,
+      branch: GitRefNameSchema,
       /** Active thread lets linked Review tasks use their persisted explicit push target. */
       threadId: z.string().optional(),
     }),

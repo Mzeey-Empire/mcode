@@ -37,7 +37,7 @@ describe("TurnDiffService production settlement", () => {
     expect(service.push(update())).toBe("accepted");
     expect(repo.latest(identity.threadId)).toBeUndefined();
     expect(service.liveComparison(identity.threadId)).toEqual({
-      files: [{ path: "a.txt", previousPath: null, binary: false, changeType: "modified" }],
+      files: [{ path: "a.txt", previousPath: null, binary: false, changeType: "modified", additions: 1, deletions: 1, untracked: false }],
       additions: 1, deletions: 1,
       turnDiff: { id: "live:turn-1:execution-1:1:1", phase: "live", source: "native", fidelity: "agent", revision: 1 },
     });

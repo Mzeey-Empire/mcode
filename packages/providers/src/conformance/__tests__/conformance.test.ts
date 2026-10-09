@@ -606,6 +606,33 @@ describe("Provider fixture pipeline", () => {
   });
 });
 
+describe("First provider frame in core traces", () => {
+  // Structural stand-in for the server's provider-frame rule: session setup and the turn-start notice never prove the
+  // provider answered; a turn item or a completed terminal does. Errored or interrupted terminals mean it never did.
+  function firstProviderFrame(events: readonly SanitizedTraceEvent[]): SanitizedTraceEvent | undefined {
+    return events.find((event) => event.kind === "item" || (event.kind === "terminal" && event.status === "completed"));
+  }
+
+  function fixtureEvents(providerId: string, suffix: string): readonly SanitizedTraceEvent[] {
+    const file = ENABLED_PROVIDER_CONFORMANCE.find((registration) => registration.providerId === providerId)
+      ?.fixtureFiles.find((path) => path.endsWith(suffix));
+    if (!file) throw new Error(`Missing ${providerId} fixture ${suffix}`);
+    return loadProviderFixtureManifest(file).input.events;
+  }
+
+  it.each([
+    { providerId: "opencode", suffix: "opencode-core.synthetic.json", frame: { kind: "item", sequence: 3 } },
+    { providerId: "codex", suffix: "codex-core.captured.json", frame: { kind: "terminal", sequence: 3 } },
+  ])("places the $providerId first frame after its early turn start", ({ providerId, suffix, frame }) => {
+    const events = fixtureEvents(providerId, suffix);
+    const turnStart = events.find((event) => event.kind === "turn" && event.status === "started");
+
+    expect(turnStart?.sequence).toBe(2);
+    expect(firstProviderFrame(events)).toMatchObject(frame);
+    expect(firstProviderFrame(events)).not.toBe(turnStart);
+  });
+});
+
 describe("Deterministic canonical sink", () => {
   it.each([
     {

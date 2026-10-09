@@ -517,10 +517,12 @@ export type { FileEffect, TurnFileEffectSummary } from "./models/file-effect.js"
 export {
   ReviewFileChangeTypeSchema,
   ReviewFileChangeSchema,
+  ReviewStateSchema,
   ReviewComparisonSchema,
 } from "./models/review-comparison.js";
 export type {
   ReviewFileChange,
+  ReviewState,
   ReviewComparison,
 } from "./models/review-comparison.js";
 
@@ -912,9 +914,13 @@ export type {
 // Git / GitHub
 export { GitBranchSchema, WorktreeSchema, GitCommitSchema, BranchComparisonSchema, GitRemoteUrlSchema } from "./git.js";
 export type { GitBranch, WorktreeInfo, GitCommit, BranchComparison, GitRemoteUrl } from "./git.js";
+export { TargetWorktreeSchema, GitRefSchema, DetachedWorktreeTargetSchema, GitRefPurposeSchema, GitRefSideSchema, pagedTargetResultSchema, GitListErrorSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "./git.js";
+export type { TargetWorktree, GitRef, DetachedWorktreeTarget, GitRefPurpose, GitRefSide, GitListError, GitRefsListParams, GitRefsListResult } from "./git.js";
 
 export { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrParamsSchema, CreatePrResultSchema, CheckRunSchema, ChecksStatusSchema } from "./github.js";
 export type { PrInfo, PrDetail, PrDraft, CreatePrParams, CreatePrResult, CheckRun, ChecksStatus } from "./github.js";
+export { PullRequestTargetSchema, PullRequestTargetsListParamsSchema, PullRequestTargetsListResultSchema } from "./github.js";
+export type { PullRequestTarget, PullRequestTargetsListParams, PullRequestTargetsListResult } from "./github.js";
 
 export {
   PULL_REQUEST_LIST_DEFAULT_LIMIT,

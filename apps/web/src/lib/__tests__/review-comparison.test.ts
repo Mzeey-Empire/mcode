@@ -48,6 +48,7 @@ describe("cumulativeReviewFiles", () => {
         previousPath: "src/start.ts",
         changeType: "renamed",
         binary: false,
+        additions: null, deletions: null, untracked: false,
       },
     ]);
   });
@@ -58,7 +59,7 @@ describe("cumulativeReviewFiles", () => {
       snapshot("two", [effect("renamed", "a.ts", "b.ts")]),
     ], ["a.ts"]);
 
-    expect(files).toEqual([{ path: "a.ts", previousPath: null, changeType: "modified", binary: false }]);
+    expect(files).toEqual([{ path: "a.ts", previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }]);
   });
 
   it.each([
@@ -74,7 +75,7 @@ describe("cumulativeReviewFiles", () => {
       snapshot("two", [effect("added", "a.ts")]),
     ], ["a.ts"]);
 
-    expect(files).toEqual([{ path: "a.ts", previousPath: null, changeType: "modified", binary: false }]);
+    expect(files).toEqual([{ path: "a.ts", previousPath: null, changeType: "modified", binary: false, additions: null, deletions: null, untracked: false }]);
   });
 
   it("classifies rename then delete as deletion of the original path", () => {
@@ -83,6 +84,6 @@ describe("cumulativeReviewFiles", () => {
       snapshot("two", [effect("removed", "b.ts")]),
     ], ["a.ts"]);
 
-    expect(files).toEqual([{ path: "a.ts", previousPath: null, changeType: "deleted", binary: false }]);
+    expect(files).toEqual([{ path: "a.ts", previousPath: null, changeType: "deleted", binary: false, additions: null, deletions: null, untracked: false }]);
   });
 });

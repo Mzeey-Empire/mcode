@@ -95,6 +95,9 @@ export const AgentTurnSchema = z
     approvalReviewReason: z.string().min(1).max(128),
     providerIdentities: ProviderIdentitiesSchema,
     startedAt: CanonicalTimestampSchema.nullable(),
+    // When the provider sent its first real frame. Turns persisted before this
+    // field existed parse as null rather than failing validation.
+    providerStartedAt: CanonicalTimestampSchema.nullable().default(null),
     endedAt: CanonicalTimestampSchema.nullable(),
     ...RecordTimestampsSchema,
   })

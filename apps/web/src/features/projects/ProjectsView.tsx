@@ -4,7 +4,13 @@ import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useProjectSelectorStore } from "./state/projectSelectorStore";
 import { ProjectRow } from "./ProjectRow";
-import { Kbd } from "@/components/ui/kbd";
+import { PaletteFooterHints, type PaletteHint } from "@/components/palette/PaletteFooterHints";
+
+const PROJECTS_HINTS: readonly PaletteHint[] = [
+  { keys: ["↑", "↓"], label: "Navigate" },
+  { keys: ["Enter"], label: "Open" },
+  { keys: ["Esc"], label: "Close" },
+];
 
 /**
  * Palette subview listing pinned and recently-opened workspaces.
@@ -71,12 +77,11 @@ export function ProjectsView() {
               // CommandItem makes the row visible to cmdk's keyboard navigator.
               // p-0 removes CommandItem's own padding since ProjectRow has its own layout.
               // w-full/min-w-0: cmdk items shrink-wrap otherwise; fills list width for hit area + selection.
-              // group/cmd propagates aria-selected into ProjectRow via group-aria-selected/cmd
               <CommandItem
                 key={w.id}
                 value={`${w.name} ${w.path}`}
                 onSelect={() => handleSelect(w.id)}
-                className="w-full min-w-0 p-0 rounded-sm aria-selected:bg-transparent group/cmd"
+                className="w-full min-w-0 p-0"
               >
                 <ProjectRow
                   workspace={w}
@@ -95,7 +100,7 @@ export function ProjectsView() {
                 key={w.id}
                 value={`${w.name} ${w.path}`}
                 onSelect={() => handleSelect(w.id)}
-                className="w-full min-w-0 p-0 rounded-sm aria-selected:bg-transparent group/cmd"
+                className="w-full min-w-0 p-0"
               >
                 <ProjectRow
                   workspace={w}
@@ -114,7 +119,7 @@ export function ProjectsView() {
                 key={w.id}
                 value={`${w.name} ${w.path}`}
                 onSelect={() => handleSelect(w.id)}
-                className="w-full min-w-0 p-0 rounded-sm aria-selected:bg-transparent group/cmd"
+                className="w-full min-w-0 p-0"
               >
                 <ProjectRow
                   workspace={w}
@@ -127,17 +132,14 @@ export function ProjectsView() {
         )}
       </CommandList>
 
-      <div className="flex items-center justify-between border-t border-border/50 px-3 py-1.5">
-        <span className="font-mono text-caption uppercase tracking-[0.12em] text-muted/30">
-          <Kbd>↑↓</Kbd> Navigate · <Kbd>Enter</Kbd> Open
-        </span>
-        <button
-          className="font-mono text-caption uppercase tracking-[0.12em] text-muted/50 hover:text-ink"
-          onClick={() => setQuery("~/")}
-        >
-          + Add project
-        </button>
-      </div>
+      <PaletteFooterHints
+        hints={PROJECTS_HINTS}
+        trailing={
+          <button type="button" className="text-caption text-muted hover:text-ink" onClick={() => setQuery("~/")}>
+            Add project
+          </button>
+        }
+      />
     </>
   );
 }

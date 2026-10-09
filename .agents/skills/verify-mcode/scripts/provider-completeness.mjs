@@ -2020,18 +2020,14 @@ export async function waitForAutomaticReviewFooter(page, deadline = Date.now() +
 export async function openNewThreadForWorkspace(page, workspaceName) {
   const newThread = page.getByTestId("sidebar-new-thread");
   await newThread.click();
-  await page.getByTestId("new-thread-welcome").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByTestId("new-thread-start-column").waitFor({ state: "visible", timeout: 15_000 });
   await selectWorkspaceForNewThread(page, workspaceName);
   await waitForNewThreadWelcome(page, workspaceName);
 }
 
-/** Selects the workspace from either empty-thread project picker state. */
+/** Selects the workspace through the new-thread heading's project slot. */
 export async function selectWorkspaceForNewThread(page, workspaceName) {
-  const activeProjectPicker = page.getByTestId("new-thread-active-project-picker");
-  const projectPicker = await activeProjectPicker.isVisible().catch(() => false)
-    ? activeProjectPicker
-    : page.getByTestId("new-thread-project-picker");
-  await projectPicker.click();
+  await page.getByTestId("new-thread-project-slot").click();
   await page.getByRole("option", { name: workspaceName, exact: true }).click();
 }
 
@@ -2108,7 +2104,7 @@ async function reopenFullAccessThread(page, workspace, thread) {
   const threadTitle = page.getByTestId("thread-title").filter({ hasText: thread.title });
   await threadTitle.waitFor({ state: "visible", timeout: 15_000 });
   await threadTitle.click();
-  await page.getByTestId("thread-overview-masthead").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByTestId("header-overview-toggle").waitFor({ state: "visible", timeout: 15_000 });
 }
 export async function closeReview(page) { const review = page.getByTestId("review-last-turn"); if (await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click(); }
 const REVIEW_LOADING_INDICATOR_SELECTOR = '[data-testid="review-refresh-progress"], [data-testid="review-diff-stat-loading"]';

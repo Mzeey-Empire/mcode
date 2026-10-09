@@ -37,6 +37,7 @@ import * as NodeUtil from "node:util";
 import { z } from "zod";
 import { prepareAcceptedFeatureObservations, prepareAcceptedThreadSystemFeatures, type AcceptedFeatureObservations, type AcceptedChildPublicationOwner } from "./accepted-feature-observations.js";
 import type { AcceptedFeatureWriteMetadata } from "./accepted-feature-write.js";
+import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js";
 import type { StoredTask } from "../orchestration/persistence/task-repo.js";
 
 type AcceptedExecutionWriteIntent = ({ readonly kind: "execution"; readonly operation: ExecutionSemanticOperation }
@@ -133,6 +134,7 @@ export class CanonicalAcceptedProgress {
     if (operation?.mutation.kind === "begin") thread.head = seedAcceptedExecution(operation, thread.state);
     broadcast("agent.canonical", { phase: "saved", threadId, epoch: thread.epoch,
       through: thread.owner.recoveryCut().saved.sequence, revision: thread.revision, events: [...events] });
+    notifyCommittedCanonicalEvents(events);
   }
 
   /** Reserve the complete prepared operation before releasing its live frames. */
@@ -840,6 +842,7 @@ export class CanonicalAcceptedProgress {
       thread.revision = saved.revision;
       this.publishFamily({ phase: "saved", threadId: batch.execution.threadId, epoch: thread.epoch,
         through: saved.receipt.through.sequence, revision: saved.revision, events: [...saved.events] });
+      notifyCommittedCanonicalEvents(saved.events);
     }
     const completed = this.pendingSaved;
     this.pendingSaved = [];

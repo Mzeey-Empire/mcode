@@ -4,6 +4,7 @@ import type { AgentEvent, ProviderFileMutationStart } from "@mcode/contracts";
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import type { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
 import type { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
+import type { BaselinePin, SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { TurnFinalizer } from "./turn-finalizer.js";
 import type { TurnFileTracker } from "./turn-file-tracker.js";
@@ -26,10 +27,14 @@ export class TurnFileEffects {
     private readonly snapshots: SnapshotService,
     private readonly tracker: TurnFileTracker,
     private readonly finalizer: TurnFinalizer,
+    private readonly pins?: Pick<SnapshotRefPins, "captureBaseline">,
   ) {}
 
-  /** Initialize tracking for the active turn without waiting for the ref capture. */
-  ensure(threadId: string, cwdOverride?: string): Promise<void> {
+  /**
+   * Initialize tracking for the active turn without waiting for the ref capture. An admitted
+   * execution names the baseline pin; a provider-originated generation pins by tree.
+   */
+  ensure(threadId: string, cwdOverride?: string, executionId?: string): Promise<void> {
     const existing = this.setupByThread.get(threadId);
     if (existing) return existing;
     const cwd = this.resolveWorkingDirectory(threadId, cwdOverride);
@@ -39,7 +44,7 @@ export class TurnFileEffects {
     const setup = Promise.resolve();
     this.setupByThread.set(threadId, setup);
     this.activityByThread.set(threadId, setup);
-    this.captureBaseline(threadId, cwd, generation);
+    this.captureBaseline(threadId, cwd, generation, executionId);
     return setup;
   }
 
@@ -154,10 +159,10 @@ export class TurnFileEffects {
     }
   }
 
-  private captureBaseline(threadId: string, cwd: string, generation: number): void {
-    const capture = this.snapshots.captureRef(cwd).then(
-      async (refBefore) => {
-        this.finalizer.recordTurnRef(threadId, refBefore, cwd, generation);
+  private captureBaseline(threadId: string, cwd: string, generation: number, executionId: string | undefined): void {
+    const capture = this.captureBaselineRef(threadId, cwd, executionId).then(
+      async ({ tree: refBefore, pin }) => {
+        this.finalizer.recordTurnRef(threadId, refBefore, cwd, generation, pin);
         await this.tracker.setBaselineRef(threadId, generation, refBefore);
       },
       (error) => {
@@ -168,6 +173,15 @@ export class TurnFileEffects {
       },
     );
     this.refCaptureByThread.set(threadId, capture);
+  }
+
+  private async captureBaselineRef(
+    threadId: string,
+    cwd: string,
+    executionId: string | undefined,
+  ): Promise<{ tree: string; pin?: BaselinePin }> {
+    if (this.pins) return this.pins.captureBaseline(cwd, threadId, executionId);
+    return { tree: await this.snapshots.captureRef(cwd) };
   }
 
   private queue(threadId: string, action: () => Promise<void>): void {

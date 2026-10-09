@@ -34,7 +34,6 @@ export interface PersistedNarrativeProps {
  *
  * Persisted mode differences from live `NarrativeFlow`:
  *   - No `NarrativeIndicator` (the turn is over)
- *   - Always renders `TurnFooter` when there's at least one row
  *   - Sub-agents render via the same `SubagentRow` but lack the "active"
  *     visual treatment (no pulse, no primary tint)
  */

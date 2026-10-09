@@ -32,18 +32,17 @@ export interface GitRouterDeps {
     | "listCommits"
     | "readCommitDiff"
     | "listCommitChangedFiles"
-    | "listWorkingTreeChangedFiles"
     | "readWorkingTreeDiff"
     | "readFileAtRef"
-    | "listBranchComparisonChangedFiles"
     | "readBranchComparisonDiff"
     | "resolveBranchComparison"
-    | "readReviewDiffStats"
+    | "readReviewState"
     | "readReviewComparison"
   >;
   gitRepository: Pick<
     GitRepositoryService,
     | "listBranches"
+    | "listRefsAt"
     | "getCurrentBranch"
     | "checkout"
     | "getRemoteUrl"
@@ -69,6 +68,9 @@ type GitHandlerMap = {
 };
 
 const gitHandlers: GitHandlerMap = {
+  "git.refs.list": (deps, params) => deps.gitRepository.listRefsAt(
+    resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId), params,
+  ),
   "git.listBranches": (deps, params) =>
     isGitWorkspace(deps, params.workspaceId)
       ? deps.gitRepository.listBranches(params.workspaceId)
@@ -119,14 +121,6 @@ const gitHandlers: GitHandlerMap = {
     isGitWorkspace(deps, params.workspaceId)
       ? deps.gitComparison.listCommitChangedFiles(params.workspaceId, params.sha)
       : [],
-  "git.workingTreeFiles": (deps, params) =>
-    isGitWorkspace(deps, params.workspaceId)
-      ? deps.gitComparison.listWorkingTreeChangedFiles(
-        params.workspaceId,
-        params.staged,
-        resolveThreadRepoPath(deps, params.threadId),
-      )
-      : [],
   "git.workingTreeDiff": (deps, params) =>
     isGitWorkspace(deps, params.workspaceId)
       ? deps.gitComparison.readWorkingTreeDiff(
@@ -134,7 +128,9 @@ const gitHandlers: GitHandlerMap = {
         params.staged,
         params.filePath,
         params.maxLines,
-        resolveThreadRepoPath(deps, params.threadId),
+        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
+        params.untracked,
+        params.previousPath,
       )
       : "",
   // Hydration needs the real old/new contents; a soft "" here would let the
@@ -150,15 +146,6 @@ const gitHandlers: GitHandlerMap = {
       resolveThreadRepoPath(deps, params.threadId),
     );
   },
-  "git.branchFiles": (deps, params) =>
-    isGitWorkspace(deps, params.workspaceId)
-      ? deps.gitComparison.listBranchComparisonChangedFiles(
-        params.workspaceId,
-        params.base,
-        params.target,
-        resolveThreadRepoPath(deps, params.threadId),
-      )
-      : [],
   "git.branchDiff": (deps, params) =>
     isGitWorkspace(deps, params.workspaceId)
       ? deps.gitComparison.readBranchComparisonDiff(
@@ -181,22 +168,20 @@ const gitHandlers: GitHandlerMap = {
       thread?.checkout_state === "branchless" ? thread.base_branch ?? thread.branch : null,
     );
   },
-  "git.reviewDiffStats": (deps, params) =>
-    isGitWorkspace(deps, params.workspaceId)
-      ? deps.gitComparison.readReviewDiffStats(
-        params.workspaceId,
-        params.view,
-        { base: params.base, target: params.target, sha: params.sha },
-        resolveThreadRepoPath(deps, params.threadId),
-      )
-      : { additions: 0, deletions: 0 },
+  "git.reviewState": (deps, params) => {
+    if (!isGitWorkspace(deps, params.workspaceId)) return { isGitRepo: false };
+    const cwd = resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true);
+    const thread = params.threadId ? deps.threadRepo.findById(params.threadId) : null;
+    return deps.gitComparison.readReviewState(params.workspaceId, cwd,
+      thread?.checkout_state === "branchless" ? thread.base_branch ?? thread.branch : null);
+  },
   "git.reviewComparison": (deps, params) =>
     isGitWorkspace(deps, params.workspaceId)
       ? deps.gitComparison.readReviewComparison(
         params.workspaceId,
         params.view,
         { base: params.base, target: params.target, sha: params.sha },
-        resolveThreadRepoPath(deps, params.threadId),
+        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
       )
       : { files: [], additions: 0, deletions: 0 },
   "git.push": routeGitPush,
@@ -265,12 +250,15 @@ function resolveWorkspaceRepoPath(
   deps: GitRouterDeps,
   workspaceId: string,
   threadId?: string,
+  allowDraftThread = false,
 ): string {
   const workspace = deps.workspaceService.findById(workspaceId);
   if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
   if (!threadId) return workspace.path;
 
   const thread = deps.threadRepo.findById(threadId);
+  // Review can open before the composer persists its draft thread.
+  if (!thread && allowDraftThread) return workspace.path;
   if (!thread) throw new Error(`Thread not found: ${threadId}`);
   if (thread.workspace_id !== workspaceId) {
     throw new Error(`Thread ${threadId} does not belong to workspace ${workspaceId}`);

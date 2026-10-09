@@ -58,7 +58,7 @@ vi.mock("@/transport", async (importOriginal) => {
     getTransport: () => ({
       createBranch: vi.fn(),
       listSnapshots: vi.fn().mockResolvedValue([]),
-      getWorkingTreeFiles: vi.fn().mockResolvedValue([]),
+      getReviewState: vi.fn().mockResolvedValue({ isGitRepo: false }),
       getBranchComparison: vi.fn().mockResolvedValue(null),
       getRemoteUrl: vi.fn().mockResolvedValue({ label: "repo", webUrl: null }),
       readWorkspaceEnvironment: vi.fn().mockResolvedValue({
@@ -791,7 +791,7 @@ describe("visible Browser conformance observer", () => {
 
       expect(screen.queryByTestId("thread-overview-browser")).not.toBeInTheDocument();
       expect(await screen.findByRole("button", { name: "Thread overview" })).toHaveAttribute(
-        "aria-expanded",
+        "aria-pressed",
         "false",
       );
       await userEvent.click(screen.getByRole("button", { name: "Thread overview" }));

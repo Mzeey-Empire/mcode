@@ -553,8 +553,8 @@ export async function retrySave(run, { via = 'ui', maxMs = 8000 } = {}) {
   const acceptedComparison = compareEventIdentities(before.accepted, acceptedDescriptors(run));
   const audit = readAudit(run);
   const overview = run.page.getByRole('button', { name: 'Thread overview', exact: true });
-  if (await overview.getAttribute('aria-expanded') !== 'true') await overview.click({ timeout: 5000 });
-  await run.page.getByTestId('thread-overview-body').waitFor({ state: 'visible', timeout: 5000 });
+  if (await overview.getAttribute('aria-pressed') !== 'true') await overview.click({ timeout: 5000 });
+  await run.page.getByTestId('thread-overview-card').waitFor({ state: 'visible', timeout: 5000 });
   const saveRecoveryActionRemoved = await run.page.getByTestId('turn-save-recovery').count() === 0;
   if (!saveRecoveryActionRemoved) throw new Error('Overview still offers save recovery after its accepted suffix was saved');
   const result = { at: new Date().toISOString(), requestedAt, via, ...request,
@@ -587,7 +587,7 @@ async function performSaveRetry(run, via) {
     return { rpcResult };
   } else {
     const overview = run.page.getByRole('button', { name: 'Thread overview', exact: true });
-    if (await overview.getAttribute('aria-expanded') !== 'true') await overview.click({ timeout: 5000 });
+    if (await overview.getAttribute('aria-pressed') !== 'true') await overview.click({ timeout: 5000 });
     const button = run.page.getByTestId('turn-save-recovery').getByRole('button', { name: 'Retry save', exact: true });
     await button.waitFor({ state: 'visible', timeout: 5000 });
     if (await button.count() !== 1) throw new Error('Expected exactly one Overview Retry save button');

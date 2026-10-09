@@ -70,55 +70,20 @@ export function preferredSplitPanelWidth(contentRowWidth: number, fraction = 0.5
   return Math.max(PANEL_MIN_WIDTH, Math.min(target, max));
 }
 
-/** Visual thread column width used for Overview collision spacing. */
-export const OVERVIEW_THREAD_CONTENT_MAX_WIDTH_PX = 1536;
+/** Overview card width, from the Paper board. */
+export const OVERVIEW_CARD_WIDTH = 280;
 
-/** Right-side popover footprint for Overview (`w-80`) plus collision padding. */
-export const OVERVIEW_POPOVER_RESERVE_PX = 328;
+/** Overview card offset from the top of the chat canvas, clearing the header. */
+export const OVERVIEW_CARD_TOP = 56;
 
-/** Minimum breathing room between the centered thread column and the Overview. */
-export const OVERVIEW_THREAD_GAP_PX = 16;
+/** Overview card offset from the right edge of the chat canvas. */
+export const OVERVIEW_CARD_INSET = 16;
 
-/** Space from the thread rail to the pane edge while Overview sits beside it. */
-export const OVERVIEW_RIGHT_RESERVE_PX =
-  OVERVIEW_POPOVER_RESERVE_PX + OVERVIEW_THREAD_GAP_PX;
+/** Right padding the conversation reserves while the card is docked, from the Paper board. */
+export const OVERVIEW_CANVAS_RESERVE = 328;
 
-/** Smallest chat pane that can keep the composer usable beside Overview. */
-export const OVERVIEW_AUTO_OPEN_MIN_ROW =
-  COMPOSER_MIN_WIDTH + OVERVIEW_RIGHT_RESERVE_PX;
-
-/**
- * Whether the Overview should auto-open given the actual chat pane width.
- * The split row can stay wide while the right panel squeezes the thread; only
- * the pane that contains the composer is a trustworthy signal.
- */
-export function shouldAutoOpenOverview(args: {
-  threadPaneWidth: number;
-}): boolean {
-  return args.threadPaneWidth >= OVERVIEW_AUTO_OPEN_MIN_ROW;
-}
-
-/** Width at which a centered thread can sit beside the Overview with no offset. */
-export function overviewNoPaddingMinWidth(): number {
-  return OVERVIEW_THREAD_CONTENT_MAX_WIDTH_PX +
-    (OVERVIEW_RIGHT_RESERVE_PX * 2);
-}
-
-/** Right padding needed to keep centered thread content clear of the Overview. */
-export function overviewResponsivePaddingPx(contentWidth: number): number {
-  return Math.max(
-    0,
-    Math.min(OVERVIEW_RIGHT_RESERVE_PX, overviewNoPaddingMinWidth() - contentWidth),
-  );
-}
-
-/**
- * CSS equivalent of {@link overviewResponsivePaddingPx}, using the chat pane's
- * own width. The reservation follows the actual chat-pane width, including in split mode.
- */
-export function overviewResponsivePaddingRight(): string {
-  return `clamp(0px, calc(${overviewNoPaddingMinWidth()}px - 100%), ${OVERVIEW_RIGHT_RESERVE_PX}px)`;
-}
+/** Narrowest chat canvas that docks the card and still leaves the composer its minimum width. */
+export const OVERVIEW_DOCK_MIN_CANVAS = 896;
 
 /** Whether the project tree can dock inline beside a content row of `contentNeed` px. */
 export function canFitInlineSidebar(outerRowWidth: number, contentNeed: number): boolean {

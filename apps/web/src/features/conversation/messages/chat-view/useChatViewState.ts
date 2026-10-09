@@ -1,13 +1,12 @@
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { MAX_THREAD_SUBSCRIPTIONS } from "@mcode/contracts";
 import { useElementWidth } from "@/hooks/useElementWidth";
-import { overviewResponsivePaddingRight } from "@/lib/composer-layout";
+import { OVERVIEW_CANVAS_RESERVE } from "@/lib/composer-layout";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useComposerDraftStore } from "@/stores/composerDraftStore";
-import { useOverviewStore } from "@/stores/overviewStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useActiveWorkspaceThread, useParentThreadExists } from "@/features/projects/state/workspace-selectors";
+import { useOverviewPresentation } from "@/features/thread-overview/overview-presentation";
 import { hasResidentContent } from "../../hydration/resident-content";
 import { getConversationResidency } from "../../residency/conversation-residency";
 import { useActiveThreadRecord, useThreadRecord } from "../../state";
@@ -100,14 +99,13 @@ export function useChatViewState() {
   const historyLoading = useActiveThreadRecord((record) => record.loading);
   const sessionError = useActiveThreadRecord((record) => record.error);
   const sessionErrorSource = useActiveThreadRecord((record) => record.errorSource);
-  const setPendingPrefill = useComposerDraftStore((state) => state.setPendingPrefill);
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   const activeThread = useActiveWorkspaceThread((thread) => thread);
   const parentThreadExists = useParentThreadExists(activeThread?.parent_thread_id);
   const connectionStatus = useConnectionStore((state) => state.status);
   const chatPaneRef = useRef<HTMLDivElement>(null);
   const threadPaneWidth = useElementWidth(chatPaneRef, activeThreadId);
-  const reserveOverviewSpace = useOverviewStore((state) => state.reserveThreadId === activeThreadId);
+  const overviewDocked = useOverviewPresentation(activeThread ?? null, threadPaneWidth).presentation === "docked";
   const isAgentRunning = useThreadStore((state) =>
     activeThreadId ? isThreadExecuting(activeThreadId, state) : false);
   // A resident target record (kept-alive or previously hydrated) can paint
@@ -152,20 +150,18 @@ export function useChatViewState() {
     messageCount,
     parentThreadExists,
     recentThreadIds,
-    reserveOverviewSpace,
     residentContent,
     runningThreadIds,
     savingStatus,
     lostProgress,
     sessionError,
     sessionErrorSource,
-    setPendingPrefill,
     setActiveThread,
     setForkMode,
     targetPaintable: effectiveTargetPaintable,
     threadPaneWidth,
     updateThreadTitle,
-    overviewPaddingRight: reserveOverviewSpace ? overviewResponsivePaddingRight() : undefined,
+    overviewPaddingRight: overviewDocked ? `${OVERVIEW_CANVAS_RESERVE}px` : undefined,
   };
 }
 

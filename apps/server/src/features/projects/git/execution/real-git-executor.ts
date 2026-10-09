@@ -181,7 +181,7 @@ export class RealGitExecutor implements GitExecutor {
       timeout,
       windowsHide: true,
       encoding: "utf8",
-      ...(opts.env ? { env: opts.env } : {}),
+      ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
     });
     return {
@@ -196,7 +196,7 @@ export class RealGitExecutor implements GitExecutor {
     return await new Promise<GitExecResult>((resolve, reject) => {
       const child = NodeChildProcess.spawn("git", args, {
         windowsHide: true,
-        ...(opts.env ? { env: opts.env } : {}),
+        ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
         ...(opts.cwd ? { cwd: opts.cwd } : {}),
       });
       let stdout = "";

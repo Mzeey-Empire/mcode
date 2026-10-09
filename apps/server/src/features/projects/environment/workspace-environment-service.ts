@@ -1518,7 +1518,9 @@ export class WorkspaceEnvironmentService {
   /**
    * Settle a startup record that can no longer advance itself after a gate
    * release. Interrupted records complete (or honour a pending cancellation);
-   * an agent phase with no Turn left to dispatch is done.
+   * an agent phase with no Turn left to dispatch is done. Once a Turn was
+   * dispatched, its provider's first frame or early end settles the startup
+   * through StartupAgentPhaseObserver instead.
    */
   private async settleStartupAfterDrain(threadId: string): Promise<void> {
     const startups = this.options.threadStartups;
@@ -1528,7 +1530,8 @@ export class WorkspaceEnvironmentService {
       await startups?.markCancelled(startup.startupId);
       return;
     }
-    if (startup.state === "interrupted" || !this.hasPendingAutomaticTurns(threadId)) {
+    if (startup.state === "interrupted"
+      || (!this.hasPendingAutomaticTurns(threadId) && !this.hasDispatchedAutomaticTurn(threadId))) {
       await startups?.complete(startup.startupId);
     }
   }
@@ -1560,6 +1563,10 @@ export class WorkspaceEnvironmentService {
       if (snapshot.gate === "blocked" && recoverable) continue;
       await this.settleStartupAfterDrain(startup.threadId);
     }
+  }
+
+  private hasDispatchedAutomaticTurn(threadId: string): boolean {
+    return this.requireAutomaticRepository().snapshot(threadId).queuedTurns.some((turn) => turn.state === "dispatched");
   }
 
   private hasPendingAutomaticTurns(threadId: string): boolean {

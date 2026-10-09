@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { ReactNode, ReactElement } from "react";
 import type { Thread } from "@/transport/types";
-import type { ProviderUsageInfo, TurnSnapshot } from "@mcode/contracts";
+import type { ProviderUsageInfo, ReviewFileChange, TurnSnapshot } from "@mcode/contracts";
 import { createMockMessage } from "@/__tests__/mocks/transport";
 
 // vi.hoisted runs before vi.mock hoisting, so these are available in mock factories.
@@ -58,10 +58,9 @@ vi.mock("@/transport", async (importOriginal) => {
       getProviderUsage: mockGetProviderUsage,
       listSnapshots: vi.fn().mockResolvedValue([]),
       getSnapshotDiffStats: vi.fn().mockResolvedValue([]),
-      getWorkingTreeFiles: vi.fn().mockResolvedValue([]),
-      getReviewDiffStats: vi.fn().mockResolvedValue({ additions: 0, deletions: 0 }),
+      getReviewComparison: vi.fn().mockResolvedValue({ files: [], additions: 0, deletions: 0 }),
+      getReviewState: vi.fn().mockResolvedValue({ isGitRepo: false }),
       getBranchComparison: vi.fn().mockResolvedValue(null),
-      getBranchFiles: vi.fn().mockResolvedValue([]),
       readWorkspaceEnvironment: vi.fn().mockResolvedValue({
         document: { version: "0.0.1", actions: [] },
         revision: null,
@@ -439,9 +438,9 @@ describe("HeaderActions - consolidated header", () => {
     mockUseHasCommitsAhead.mockReturnValue(true);
   });
 
-  it("renders the consolidated workspace menu trigger", () => {
+  it("renders the Overview toggle", () => {
     renderHeaderActions();
-    expect(screen.getByTestId("header-workspace-menu")).toBeInTheDocument();
+    expect(screen.getByTestId("header-overview-toggle")).toBeInTheDocument();
   });
 
   it("uses the Settings2 Overview trigger without losing CI status", () => {
@@ -463,21 +462,19 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.getByTestId("thread-overview-ci-green")).toBeInTheDocument();
   });
 
-  it("places one Project Actions control before Project settings in the Overview masthead", () => {
+  it("places one Project Actions control before Project settings in the Overview header", () => {
     renderHeaderActions();
 
-    const masthead = screen.getByTestId("thread-overview-masthead");
-    const controls = within(masthead).getByTestId("thread-overview-masthead-controls");
-    const projectActions = within(masthead).getAllByRole("button", { name: "Project Actions" });
-    const projectSettings = within(masthead).getByRole("button", {
+    const header = screen.getByTestId("thread-overview-card-header");
+    const projectActions = within(header).getAllByRole("button", { name: "Project Actions" });
+    const projectSettings = within(header).getByRole("button", {
       name: "Open Project settings",
     });
 
     expect(projectActions).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Open Project settings" })).toHaveLength(1);
-    expect(controls).toHaveClass("ml-auto");
     expect(Boolean(projectActions[0].compareDocumentPosition(projectSettings) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(controls.lastElementChild).toBe(projectSettings);
+    expect(header.lastElementChild).toBe(projectSettings);
   });
 
   it("opens the Project environment panel through the adaptive route", () => {
@@ -626,13 +623,10 @@ describe("HeaderActions - consolidated header", () => {
 
     const usageTrigger = screen.getByTestId("thread-overview-usage");
     const prAction = screen.getByTestId("thread-overview-pr");
-    const prSeparator = screen.getByTestId("thread-overview-pr-separator");
     const recap = screen.getByTestId("thread-overview-recap");
     expect(usageTrigger).toHaveAttribute("aria-label", "Usage, 5-hour 12%, weekly 47%");
     expect(usageTrigger).toHaveAttribute("aria-expanded", "true");
-    expect(Boolean(usageTrigger.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(Boolean(usageTrigger.compareDocumentPosition(prSeparator) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(Boolean(prSeparator.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(usageTrigger.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
     expect(Boolean(usageTrigger.compareDocumentPosition(recap) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(usageTrigger).toHaveTextContent("Usage");
     expect(usageTrigger).not.toHaveTextContent("5-hour 12%, weekly 47%");
@@ -811,7 +805,7 @@ describe("HeaderActions - consolidated header", () => {
 
   it("keeps the consolidated menu and panel toggle on a direct-mode thread", () => {
     renderHeaderActions(makeThread({ mode: "direct" }));
-    expect(screen.getByTestId("header-workspace-menu")).toBeInTheDocument();
+    expect(screen.getByTestId("header-overview-toggle")).toBeInTheDocument();
     expect(screen.getByTestId("header-panel-toggle")).toBeInTheDocument();
   });
 });
@@ -1027,16 +1021,8 @@ function makeSummaryTransport(
   return {
     listSnapshots: vi.fn().mockResolvedValue([]),
     getSnapshotDiffStats: vi.fn().mockResolvedValue([]),
-    getWorkingTreeFiles: vi.fn().mockResolvedValue([]),
-    getBranchComparison: vi.fn().mockResolvedValue({
-      base: null,
-      target: null,
-      refs: [],
-      isUnborn: false,
-      isComparisonAvailable: false,
-    }),
-    getBranchFiles: vi.fn().mockResolvedValue([]),
-    getReviewDiffStats: vi.fn().mockResolvedValue({ additions: 0, deletions: 0 }),
+    getReviewComparison: vi.fn().mockResolvedValue({ files: [], additions: 0, deletions: 0 }),
+    getReviewState: vi.fn().mockResolvedValue({ isGitRepo: false }),
     ...overrides,
   };
 }
@@ -1061,7 +1047,7 @@ describe("resolveThreadOverviewChangeSummary", () => {
       getSnapshotDiffStats: vi.fn().mockResolvedValue([
         { filePath: "src/latest.ts", additions: 8, deletions: 2, changeType: "modified" },
       ]),
-      getWorkingTreeFiles: vi.fn().mockResolvedValue(["src/manual.ts"]),
+      getReviewComparison: vi.fn().mockResolvedValue({ files: [{ path: "src/manual.ts", previousPath: null, changeType: "modified", binary: false, additions: 0, deletions: 0, untracked: false } satisfies ReviewFileChange], additions: 0, deletions: 0 }),
     });
 
     const result = await resolveThreadOverviewChangeSummary({
@@ -1076,63 +1062,44 @@ describe("resolveThreadOverviewChangeSummary", () => {
 
     expect(result.summary).toEqual({ files: 1, additions: 8, deletions: 2 });
     expect(transport.getSnapshotDiffStats).toHaveBeenCalledWith("latest");
-    expect(transport.getWorkingTreeFiles).not.toHaveBeenCalled();
+    expect(transport.getReviewComparison).not.toHaveBeenCalled();
   });
 
-  it("falls back to unstaged worktree changes before branch comparison", async () => {
+  it("counts untracked files before branch comparison", async () => {
     const transport = makeSummaryTransport({
-      getWorkingTreeFiles: vi.fn().mockResolvedValue(["src/manual.ts"]),
-      getReviewDiffStats: vi.fn().mockResolvedValue({ additions: 5, deletions: 1 }),
-      getBranchComparison: vi.fn().mockResolvedValue({
-        base: "origin/main",
-        target: "feat/x",
-        refs: [],
-        isUnborn: false,
-        isComparisonAvailable: true,
+      getReviewComparison: vi.fn().mockResolvedValue({
+        files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 5, deletions: 0, untracked: true } satisfies ReviewFileChange],
+        additions: 5, deletions: 0,
       }),
     });
-
     const result = await resolveThreadOverviewChangeSummary({
-      thread: { id: "thread-1", workspace_id: "ws-1" },
-      snapshots: [],
-      transport,
+      thread: { id: "thread-1", workspace_id: "ws-1" }, snapshots: [], transport,
     });
-
-    expect(result.summary).toEqual({ files: 1, additions: 5, deletions: 1 });
-    expect(transport.getReviewDiffStats).toHaveBeenCalledWith({
-      workspaceId: "ws-1",
-      view: "unstaged",
-      threadId: "thread-1",
+    expect(result.summary).toEqual({ files: 1, additions: 5, deletions: 0 });
+    expect(transport.getReviewComparison).toHaveBeenCalledWith({
+      workspaceId: "ws-1", view: "uncommitted", threadId: "thread-1",
     });
-    expect(transport.getBranchComparison).not.toHaveBeenCalled();
+    expect(transport.getReviewState).not.toHaveBeenCalled();
   });
 
-  it("uses the default branch comparison when the thread has no turn or unstaged changes", async () => {
+  it("uses the default branch comparison when the thread has no turn or uncommitted changes", async () => {
     const transport = makeSummaryTransport({
-      getBranchComparison: vi.fn().mockResolvedValue({
-        base: "origin/main",
-        target: "feat/x",
-        refs: [],
-        isUnborn: false,
-        isComparisonAvailable: true,
+      getReviewState: vi.fn().mockResolvedValue({
+        isGitRepo: true, head: "abc123", branch: "feat/x",
+        uncommitted: { staged: 0, unstaged: 0, untracked: 0 }, commitsAhead: { count: 1, base: "origin/main" },
+        branchDefault: { base: "origin/main", compare: "feat/x" },
       }),
-      getBranchFiles: vi.fn().mockResolvedValue(["src/branch.ts"]),
-      getReviewDiffStats: vi.fn().mockResolvedValue({ additions: 13, deletions: 3 }),
+      getReviewComparison: vi.fn()
+        .mockResolvedValueOnce({ files: [], additions: 0, deletions: 0 })
+        .mockResolvedValueOnce({ files: [{ path: "src/branch.ts", previousPath: null, changeType: "modified", binary: false, additions: 13, deletions: 3, untracked: false } satisfies ReviewFileChange], additions: 13, deletions: 3 }),
     });
-
     const result = await resolveThreadOverviewChangeSummary({
-      thread: { id: "thread-1", workspace_id: "ws-1" },
-      snapshots: [],
-      transport,
+      thread: { id: "thread-1", workspace_id: "ws-1" }, snapshots: [], transport,
     });
-
     expect(result.summary).toEqual({ files: 1, additions: 13, deletions: 3 });
-    expect(transport.getBranchFiles).toHaveBeenCalledWith(
-      "ws-1",
-      "origin/main",
-      "feat/x",
-      "thread-1",
-    );
+    expect(transport.getReviewComparison).toHaveBeenLastCalledWith({
+      workspaceId: "ws-1", view: "branch", base: "origin/main", target: "feat/x", threadId: "thread-1",
+    });
   });
 
   it("hides the visible +/- summary when the resolved diff has no line delta", () => {

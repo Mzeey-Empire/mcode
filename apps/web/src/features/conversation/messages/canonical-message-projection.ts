@@ -2,7 +2,7 @@ import { ToolCallRecordSchema, type AgentItem, type AgentModelState, type AgentT
 import type { ToolCall } from "@/transport/types";
 import { recordToToolCall } from "../narrative/build-persisted-narrative";
 import { collapseSubagentCalls } from "../narrative/subagent-lifecycle";
-import type { ThoughtSegment, TurnFooterSummary } from "../narrative/types";
+import type { ThoughtSegment, TurnSummary } from "../narrative/types";
 import {
   agentDisplayStateFromCanonicalTurnStatus,
   type AgentDisplayState,
@@ -20,7 +20,7 @@ export interface CanonicalMessageProjection {
   currentTurnMessageId: string;
   currentTurnResponseKey: string;
   assistantResponseKeys: Record<string, string>;
-  turnSummariesByMessageId: Record<string, TurnFooterSummary>;
+  turnSummariesByMessageId: Record<string, TurnSummary>;
 }
 
 interface CanonicalProjectionInput {
@@ -120,7 +120,7 @@ function summaryToolCalls(items: readonly AgentItem[]): ToolCall[] {
   return collapseSubagentCalls(calls).filter((call) => call.parentToolCallId == null);
 }
 
-function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): TurnFooterSummary {
+function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): TurnSummary {
   const topLevelTools = summaryToolCalls(items);
   const reasoningItems = items.filter((item) => item.payload.projection === "codexChildReasoning");
   const activityItems = items.filter((item) =>
@@ -284,8 +284,8 @@ function projectedThoughtSegments(items: readonly AgentItem[], terminal: boolean
   return thoughts;
 }
 
-function turnSummaries(threadTurns: readonly AgentTurn[], threadItems: readonly AgentItem[]): Record<string, TurnFooterSummary> {
-  const summaries: Record<string, TurnFooterSummary> = {};
+function turnSummaries(threadTurns: readonly AgentTurn[], threadItems: readonly AgentItem[]): Record<string, TurnSummary> {
+  const summaries: Record<string, TurnSummary> = {};
   for (const turn of threadTurns.filter(isTerminalTurn)) {
     const turnItems = threadItems.filter((item) => item.turnId === turn.id).sort(compareItems);
     const answer = latestAssistantMessage(turnItems);

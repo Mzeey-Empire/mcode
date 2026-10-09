@@ -17,6 +17,10 @@ import type {
   PaginatedMessages,
   AttachmentMeta,
   GitBranch,
+  GitRefsListParams,
+  GitRefsListResult,
+  PullRequestTargetsListParams,
+  PullRequestTargetsListResult,
   BranchComparison,
   WorktreeInfo,
   PrInfo,
@@ -113,6 +117,8 @@ import type {
 // Re-export shared types from the contracts package (single source of truth).
 export type { PlanAction } from "@mcode/contracts";
 export type {
+  GitRefsListResult,
+  PullRequestTargetsListResult,
   Workspace,
   WorkspaceEnrichment,
   WorkspaceEnvironmentDocument,
@@ -401,6 +407,10 @@ export interface McodeTransport {
 
   // Git branch commands
   listBranches(workspaceId: string): Promise<GitBranch[]>;
+  /** List qualified branch and worktree targets for one picker page. */
+  listRefs(params: GitRefsListParams): Promise<GitRefsListResult>;
+  /** List repository pull request targets with a GitHub total. */
+  listPullRequestTargets(params: PullRequestTargetsListParams): Promise<PullRequestTargetsListResult>;
   getCurrentBranch(workspaceId: string): Promise<string | null>;
   checkoutBranch(workspaceId: string, branch: string): Promise<void>;
   createBranch(workspaceId: string, name: string, threadId?: string): Promise<{ branch: string }>;
@@ -766,41 +776,22 @@ export interface McodeTransport {
   getCommitDiff(workspaceId: string, sha: string, filePath?: string, maxLines?: number): Promise<string>;
   /** Get the list of files changed in a specific git commit. */
   getCommitFiles(workspaceId: string, sha: string): Promise<string[]>;
-  /** List working-tree files: staged (index vs HEAD) or unstaged (working vs index). Pass threadId to read the thread's worktree. */
-  getWorkingTreeFiles(workspaceId: string, staged: boolean, threadId?: string): Promise<string[]>;
   /** Get the unified diff for the working tree (staged or unstaged), optionally per file. Pass threadId to read the thread's worktree. */
-  getWorkingTreeDiff(workspaceId: string, staged: boolean, filePath?: string, maxLines?: number, threadId?: string): Promise<string>;
+  getWorkingTreeDiff(workspaceId: string, staged: boolean, filePath?: string, maxLines?: number, threadId?: string, untracked?: boolean, previousPath?: string): Promise<string>;
   /** Read a file's contents at a revision. `ref` follows `git show` rules; "" reads the staged index blob and "A...B" reads at the merge base. Pass threadId to read the thread's worktree. Rejects when the ref or file is absent. */
   readFileAtRef(workspaceId: string, ref: string, filePath: string, threadId?: string): Promise<string>;
-  /** List files differing between two refs (`base...target`, three-dot). Omit base/target to use the detected default branch → HEAD. Pass threadId to read the thread's worktree. */
-  getBranchFiles(workspaceId: string, base?: string, target?: string, threadId?: string): Promise<string[]>;
   /** Get the unified diff between two refs (`base...target`, three-dot), optionally per file. Omit base/target to use the detected default branch → HEAD. Pass threadId to read the thread's worktree. */
   getBranchDiff(workspaceId: string, base?: string, target?: string, filePath?: string, maxLines?: number, threadId?: string): Promise<string>;
   /** Resolve the default Branch comparison (base→target per ADR 0007) plus the refs that populate the pickers. Pass threadId so "current branch" is the thread's worktree branch. */
   getBranchComparison(workspaceId: string, threadId?: string): Promise<BranchComparison>;
   /** Resolve a workspace or thread checkout's origin remote into a normalized web URL and repository label. */
   getRemoteUrl(workspaceId: string, threadId?: string): Promise<GitRemoteUrl>;
-  /**
-   * Return total additions and deletions for a Review-panel git view.
-   * Ref semantics match the file-list methods so the stat total matches the
-   * panel's file list. Pass threadId to resolve the thread's worktree cwd.
-   */
-  getReviewDiffStats(params: {
-    workspaceId: string;
-    view: "unstaged" | "staged" | "branch" | "commit";
-    /** Branch view: base ref (already resolved client-side; omit to auto-detect). */
-    base?: string;
-    /** Branch view: target ref (omit to use HEAD). */
-    target?: string;
-    /** Commit view: commit SHA. */
-    sha?: string;
-    /** Worktree thread — resolves the right cwd. */
-    threadId?: string;
-  }): Promise<{ additions: number; deletions: number }>;
+  /** Probe dirty state and available Review comparisons. */
+  getReviewState(workspaceId: string, threadId?: string): Promise<import("@mcode/contracts").ReviewState>;
   /** Resolve file metadata and totals for one Review comparison in one request. */
   getReviewComparison(params: {
     workspaceId: string;
-    view: "unstaged" | "staged" | "branch" | "commit";
+    view: "unstaged" | "staged" | "branch" | "commit" | "uncommitted";
     base?: string;
     target?: string;
     sha?: string;

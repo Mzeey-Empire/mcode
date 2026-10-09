@@ -13,6 +13,9 @@ export const ReviewFileChangeSchema = lazySchema(() =>
     previousPath: z.string().min(1).max(4096).nullable(),
     changeType: ReviewFileChangeTypeSchema(),
     binary: z.boolean(),
+    additions: z.number().int().nonnegative().nullable(),
+    deletions: z.number().int().nonnegative().nullable(),
+    untracked: z.boolean(),
   }),
 );
 
@@ -37,3 +40,26 @@ export type ReviewFileChange = z.infer<ReturnType<typeof ReviewFileChangeSchema>
 
 /** One settled Review comparison shared by the diff and Files navigator. */
 export type ReviewComparison = z.infer<ReturnType<typeof ReviewComparisonSchema>>;
+
+/** Repository state used to choose and enable Review views. */
+export const ReviewStateSchema = lazySchema(() => z.discriminatedUnion("isGitRepo", [
+  z.object({ isGitRepo: z.literal(false) }),
+  z.object({
+    isGitRepo: z.literal(true),
+    head: z.string().nullable(),
+    branch: z.string().nullable(),
+    uncommitted: z.object({
+      staged: z.number().int().nonnegative(),
+      unstaged: z.number().int().nonnegative(),
+      untracked: z.number().int().nonnegative(),
+    }),
+    commitsAhead: z.object({ count: z.number().int().nonnegative(), base: z.string() }).nullable(),
+    branchDefault: z.union([
+      z.object({ compare: z.string(), base: z.string() }),
+      z.object({ unavailable: z.enum(["unborn", "no-base"]) }),
+    ]),
+  }),
+]));
+
+/** Repository state used to choose and enable Review views. */
+export type ReviewState = z.infer<ReturnType<typeof ReviewStateSchema>>;

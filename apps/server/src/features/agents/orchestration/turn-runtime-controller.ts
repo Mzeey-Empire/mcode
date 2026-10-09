@@ -40,6 +40,7 @@ import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/e
 import { WorkerOwnedTurnRuntime } from "../execution/worker-owned-turn-runtime.js";
 import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/provider-host-ports.js";
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
+import { SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pins.js";
 import type { DataOnlyParentTurnFinishInput } from "../canonical/canonical-parent-turn-write.js";
 import {
   TurnEventPipeline,
@@ -252,6 +253,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     private readonly workerFiles?: ExecutionFileEvidenceCoordinator,
     @inject("WorkerTurnSnapshotService", { isOptional: true })
     private readonly snapshots?: SnapshotService,
+    // A class token is always constructible, so `isOptional` only takes effect on a string alias.
+    @inject("TurnRuntimeSnapshotRefPins", { isOptional: true })
+    private readonly pins?: SnapshotRefPins,
   ) {
     this.turnDiffs = turnDiffs;
     this.turnEventPipeline = new TurnEventPipeline(this, eventApplication, turnDiffs, providerEventIngress,
@@ -280,8 +284,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Initialize file tracking once for the active turn, including provider-originated resumes. */
-  private ensureTurnFileTracking(threadId: string, cwdOverride?: string): Promise<void> {
-    const setup = this.turnFileEffects.ensure(threadId, cwdOverride);
+  private ensureTurnFileTracking(threadId: string, cwdOverride?: string, executionId?: string): Promise<void> {
+    const setup = this.turnFileEffects.ensure(threadId, cwdOverride, executionId);
     return setup;
   }
 
@@ -576,7 +580,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.turnAdmissions.markDispatchActive(lease.threadId);
     // The tracker generation must exist before turnStarted is ingested so its
     // canonical publication embed carries the same fileEffectTurnId the wire path enriched.
-    await this.ensureTurnFileTracking(lease.threadId, prepared.cwd);
+    await this.ensureTurnFileTracking(lease.threadId, prepared.cwd, lease.turnExecutionId);
     this.emitProviderEvent(prepared.provider, {
       type: "turnStarted",
       threadId: lease.threadId,
@@ -597,7 +601,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const provider = prepared.provider;
     let baselineRef: string | null = null;
     try {
-      baselineRef = await snapshots.captureRef(prepared.cwd);
+      baselineRef = this.pins
+        ? (await this.pins.captureBaseline(prepared.cwd, execution.threadId, execution.executionId)).tree
+        : await snapshots.captureRef(prepared.cwd);
     } catch (error) {
       logger.warn("Could not capture initial turn snapshot", {
         threadId: execution.threadId,
@@ -852,6 +858,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       if (active.terminalOutcome === "completed") this.featureEffects.refreshAfterTurn(execution.threadId);
       this.disarmTurnRetryWindow(execution.threadId);
       this.clearTurnEndedState(execution.threadId);
+      this.settlePinsInBackground(execution);
     } catch (error) {
       active.releaseStarted = false;
       await this.requireWorkerRuntime().recoverRejected(execution);
@@ -859,7 +866,15 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
   }
 
+  /** Git work must not hold the thread after release; pin failures are logged, never thrown. */
+  private settlePinsInBackground(execution: ExecutionIdentity): void {
+    const pins = this.pins;
+    pins?.runInBackground(() => pins.settleExecution(execution.threadId, execution.executionId));
+  }
+
   private handleWorkerRecovery(execution: ExecutionIdentity): void {
+    // Recovery has committed the interruption, so the baseline can become the attempt's snapshot.
+    this.settlePinsInBackground(execution);
     if (this.turnRuntime.snapshot(execution.threadId)?.turnExecutionId !== execution.executionId) return;
     const active = this.workerTurns.get(execution.threadId);
     if (active && active.execution.executionId !== execution.executionId) return;
@@ -1196,7 +1211,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       deliveryAttempt: active.deliveryAttempt, outcome }) : null;
   }
 
-  /** Start a prepared first-turn command and return its authoritative admission outcome. */
+  /** Start a prepared first-turn command and report whether a provider turn admitted it. */
   private async sendInitialMessageAndSnapshot(
     command: SendMessageCommand,
     onError: (error: unknown) => Promise<void>,
@@ -2088,10 +2103,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         await this.threadCreation.failInitialAgent(created.startupId);
       }, () => this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId));
       runtimeSnapshot = initialDispatch.runtimeSnapshot;
-      if (!initialDispatch.failed && (
-        initialDispatch.providerAdmitted || this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId)
-      )) {
-        await this.threadCreation.completeInitialAgent(created.startupId);
+      // A provider turn finishes the startup through StartupAgentPhaseObserver once the provider answers. A command
+      // handled without a provider turn has nothing to wait for, so it finishes the startup here.
+      if (!initialDispatch.failed && !initialDispatch.providerAdmitted
+        && this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId)) {
+        await this.threadCreation.completeHandledInitialCommand(created.startupId);
       }
     } catch (error) {
       await this.threadCreation.failInitialAgent(created.startupId);
@@ -2138,7 +2154,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
           throw new Error(`Queued Turn finished without runtime dispatch: ${submission.threadId}`);
         }),
       ]);
-      if (!cancellationWon) await this.threadCreation.completeInitialAgent(startupId);
     } catch (error) {
       await this.threadCreation.failInitialAgent(startupId);
       throw error;

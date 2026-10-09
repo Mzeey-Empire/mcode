@@ -9,11 +9,6 @@ export const MCODE_LOGO_SCALES = {
     mark: "size-[2.2rem]",
     wordmark: "text-sm leading-5",
   },
-  newThread: {
-    root: "",
-    mark: "h-14 w-14 opacity-60",
-    wordmark: "text-sm",
-  },
 } as const;
 
 /** Known Mcode logo variants. */

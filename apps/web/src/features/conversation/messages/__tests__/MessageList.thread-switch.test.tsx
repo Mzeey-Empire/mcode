@@ -109,7 +109,7 @@ function canonicalChildState(content: string, status: "Running" | "Completed") {
     approvalReviewMode: "manual",
     approvalReviewReason: "manual-requested",
     providerIdentities: [],
-    startedAt: timestamp,
+    startedAt: timestamp, providerStartedAt: null,
     endedAt: status === "Completed" ? timestamp : null,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -1112,6 +1112,7 @@ describe("MessageList thread switch", () => {
     const { container, rerender } = render(<MessageList />);
     let viewport = screen.getByTestId("transcript-viewport");
     const visibleCommandGroup = "Ran 32 commands";
+    fireEvent.click(screen.getByRole("button", { name: "Worked for 3m" }));
     fireEvent.click(screen.getByRole("button", { name: visibleCommandGroup }));
     expect(container.querySelectorAll("li").length).toBeGreaterThan(0);
     expect(container.querySelectorAll("li").length).toBeLessThan(60);
@@ -1284,16 +1285,53 @@ describe("MessageList thread switch", () => {
     recordOverridesByThread["thread-A"] = { narrativeByMessage: { answer: { tools: [], hooks: [], thoughts } } };
     const { container } = render(<MessageList />);
     await measureRows(container);
-    const tailRows = screen.getAllByText(/^History thought \d+$/);
-    expect(tailRows.length).toBeLessThan(30);
-    expect(screen.queryByText("History thought 0")).toBeNull();
-    expect(screen.getByText("History thought 199")).toBeInTheDocument();
-    readAt(screen.getByTestId("transcript-viewport"), 0);
+    expect(screen.queryByText(/^History thought \d+$/)).toBeNull();
+    fireEvent.click(screen.getByTestId("work-fold"));
     await measureRows(container);
     const headRows = screen.getAllByText(/^History thought \d+$/).map((row) => row.textContent);
     expect(headRows.length).toBeLessThan(30);
     expect(headRows).toEqual(Array.from({ length: headRows.length }, (_, index) => `History thought ${index}`));
     expect(screen.queryByText("History thought 199")).toBeNull();
+    readAt(screen.getByTestId("transcript-viewport"), 20_000);
+    await measureRows(container);
+    const tailRows = screen.getAllByText(/^History thought \d+$/);
+    expect(tailRows.length).toBeLessThan(30);
+    expect(screen.queryByText("History thought 0")).toBeNull();
+    expect(screen.getByText("History thought 199")).toBeInTheDocument();
+  });
+
+  it("opens a settling turn's fold for this visit when the reader is inside its rows", async () => {
+    const thoughts = Array.from({ length: 40 }, (_, index) => ({
+      text: `Live thought ${index}`, startedAt: index * 1000, endedAt: index * 1000 + 500, isExplicitNonFinal: true,
+    }));
+    messagesValue = [
+      { id: "prompt", thread_id: "thread-A", sequence: 0, role: "user", content: "Request" },
+      { id: "answer", thread_id: "thread-A", sequence: 1, role: "assistant", content: "Answer" },
+    ];
+    runningThreadIdsValue = new Set(["thread-A"]);
+    recordOverridesByThread["thread-A"] = { runtimePhase: "running", currentTurnMessageId: "answer", thoughtSegments: thoughts };
+    const { container, rerender } = render(<MessageList />);
+    await measureRows(container);
+    const viewport = screen.getByTestId("transcript-viewport");
+    readAt(viewport, 500);
+    const before = recallScrollPosition("thread-A")?.rowAnchor;
+    expect(before?.key).toMatch(/^narrative:/);
+
+    runningThreadIdsValue = new Set();
+    recordOverridesByThread["thread-A"] = { runtimePhase: "idle", currentTurnMessageId: "answer", thoughtSegments: thoughts };
+    act(() => rerender(<MessageList />));
+    await measureRows(container);
+
+    expect(screen.getByTestId("work-fold")).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelector(`[data-transcript-key="${before?.key}"]`)).not.toBeNull();
+    expect(recallScrollPosition("thread-A")?.rowAnchor).toEqual(before);
+
+    readAt(viewport, viewport.scrollTop + 10);
+    expect(recallScrollPosition("thread-A")?.expandedGroups?.has("work-fold:answer")).toBe(false);
+    fireEvent.click(screen.getByTestId("work-fold"));
+    fireEvent.click(screen.getByTestId("work-fold"));
+    readAt(viewport, viewport.scrollTop + 10);
+    expect(recallScrollPosition("thread-A")?.expandedGroups?.has("work-fold:answer")).toBe(true);
   });
 
   it("holds reading posture on append until the user returns to the tail", async () => {

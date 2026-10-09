@@ -1,7 +1,6 @@
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Separator } from "@/components/ui/separator";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { useOverviewUsage } from "@/features/thread-overview/use-overview-usage";
@@ -181,7 +180,6 @@ function UsageEntry({ thread }: { thread: Thread }) {
   }, [fetchProviderUsage, open, thread.id, thread.provider]);
   return (<ThreadOverviewWhen when={usageSummary !== null}>
     <>
-      <Separator className="my-1.5" />
       <ThreadOverviewUsageBars
         categories={usageCategories}
         summary={usageSummary ?? ""}

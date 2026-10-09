@@ -1,4 +1,25 @@
 import { describe, expect, it } from "vitest";
+
+describe("github.pullRequestTargets.list", () => {
+  it("keeps GitHub totals, cursors and nullable authors", () => {
+    const method = WS_METHODS()["github.pullRequestTargets.list"];
+    const page = { ok: true, total: 42, nextCursor: "github-cursor", items: [{
+      number: 12, title: "Fix navigation", headRefName: "fix/navigation", author: null,
+      isCrossRepository: true, url: "https://github.com/owner/repo/pull/12",
+    }] };
+    expect(method.result.parse(page)).toEqual(page);
+    expect(method.params.parse({ workspaceId: "project", query: "  navigation " })).toEqual({
+      workspaceId: "project", query: "navigation", limit: 30,
+    });
+    expect(method.params.safeParse({ workspaceId: "project", limit: 51 }).success).toBe(false);
+    expect(method.result.safeParse({ ...page, total: -1 }).success).toBe(false);
+  });
+
+  it("accepts a non-GitHub remote failure", () => {
+    const failure = { ok: false, error: { code: "remote_not_github", message: "Origin is not GitHub" } };
+    expect(WS_METHODS()["github.pullRequestTargets.list"].result.parse(failure)).toEqual(failure);
+  });
+});
 import {
   PULL_REQUEST_CURSOR_COMPONENT_MAX_LENGTH,
   PULL_REQUEST_CURSOR_MAX_LENGTH,

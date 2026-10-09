@@ -32,6 +32,8 @@ import { SkillService } from "../../features/agents/skills/catalog/skill-service
 import { PtyHostCleanupLedger } from "../../features/terminal/cleanup/terminal-cleanup-ledger.js";
 import { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
+import { SnapshotRefPins } from "../../features/projects/diffs/snapshots/snapshot-ref-pins.js";
+import { ensureSnapshotStoreId, SNAPSHOT_STORE_ID, type StoreId } from "../../features/projects/diffs/snapshots/snapshot-store-identity.js";
 import { SkillWatcherService } from "../../features/agents/skills/catalog/skill-watcher-service.js";
 import { DelegationTargetResolver } from "../../features/agents/collaboration/delegation-target-resolver.js";
 import { SettingsService } from "../../features/settings/settings-service.js";
@@ -124,15 +126,18 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
   const dbPath = resolveDatabasePath();
   const databaseWriter = new ApplicationDatabaseWriter(dbPath, undefined, { bootstrap: true });
   let db: Database;
+  let storeId: StoreId;
   try {
     await databaseWriter.whenReady();
     db = openReadOnlyDatabase(dbPath);
+    storeId = await ensureSnapshotStoreId(databaseWriter, dbPath, hostRuntime.platform);
   } catch (error) {
     try { await databaseWriter.close(); }
     catch (closeError) { throw new AggregateError([error, closeError], "Database owner initialization and cleanup failed"); }
     throw error;
   }
   container.register("Database", { useValue: db });
+  container.register(SNAPSHOT_STORE_ID, { useValue: storeId });
   container.registerInstance(ApplicationDatabaseWriter, databaseWriter);
   container.registerInstance(CanonicalAgentWriterClient, new CanonicalAgentWriterClient(databaseWriter));
   container.register(PtyHostCleanupLedger, {
@@ -192,6 +197,11 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
   container.register(
     SnapshotService,
     { useClass: SnapshotService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    SnapshotRefPins,
+    { useClass: SnapshotRefPins },
     { lifecycle: Lifecycle.Singleton },
   );
   registerHandoffServices(container);

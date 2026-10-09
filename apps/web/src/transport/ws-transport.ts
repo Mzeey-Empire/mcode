@@ -11,6 +11,8 @@ import type {
   ProviderCatalogRequest,
   ProviderCatalogSnapshot,
   PrInfo,
+  GitRefsListResult,
+  PullRequestTargetsListResult,
   PrDetail,
   ToolCallRecord,
   ThoughtSegmentRecord,
@@ -1158,6 +1160,8 @@ export function createWsTransport(
 
     // Git
     listBranches: (workspaceId) => rpc<GitBranch[]>("git.listBranches", { workspaceId }),
+    listRefs: (params) => rpc<GitRefsListResult>("git.refs.list", params),
+    listPullRequestTargets: (params) => rpc<PullRequestTargetsListResult>("github.pullRequestTargets.list", params),
     getCurrentBranch: (workspaceId) => rpc<string | null>("git.currentBranch", { workspaceId }),
     checkoutBranch: (workspaceId, branch) =>
       rpc<void>("git.checkout", { workspaceId, branch }),
@@ -1454,22 +1458,18 @@ export function createWsTransport(
       rpc<string>("git.commitDiff", { workspaceId, sha, filePath, maxLines }),
     getCommitFiles: (workspaceId, sha) =>
       rpc<string[]>("git.commitFiles", { workspaceId, sha }),
-    getWorkingTreeFiles: (workspaceId, staged, threadId?) =>
-      rpc<string[]>("git.workingTreeFiles", { workspaceId, staged, threadId }),
-    getWorkingTreeDiff: (workspaceId, staged, filePath?, maxLines?, threadId?) =>
-      rpc<string>("git.workingTreeDiff", { workspaceId, staged, filePath, maxLines, threadId }),
+    getWorkingTreeDiff: (workspaceId, staged, filePath?, maxLines?, threadId?, untracked?, previousPath?) =>
+      rpc<string>("git.workingTreeDiff", { workspaceId, staged, filePath, maxLines, threadId, untracked, previousPath }),
     readFileAtRef: (workspaceId, ref, filePath, threadId?) =>
       rpc<string>("git.fileAtRef", { workspaceId, ref, filePath, threadId }),
-    getBranchFiles: (workspaceId, base?, target?, threadId?) =>
-      rpc<string[]>("git.branchFiles", { workspaceId, base, target, threadId }),
     getBranchDiff: (workspaceId, base?, target?, filePath?, maxLines?, threadId?) =>
       rpc<string>("git.branchDiff", { workspaceId, base, target, filePath, maxLines, threadId }),
     getBranchComparison: (workspaceId, threadId?) =>
       rpc<BranchComparison>("git.branchComparison", { workspaceId, threadId }),
     getRemoteUrl: (workspaceId, threadId?) =>
       rpc<GitRemoteUrl>("git.getRemoteUrl", { workspaceId, threadId }),
-    getReviewDiffStats: (params) =>
-      rpc<{ additions: number; deletions: number }>("git.reviewDiffStats", params),
+    getReviewState: (workspaceId, threadId?) =>
+      rpc<import("@mcode/contracts").ReviewState>("git.reviewState", { workspaceId, threadId }),
     getReviewComparison: (params) =>
       rpc<import("@mcode/contracts").ReviewComparison>("git.reviewComparison", params),
 
