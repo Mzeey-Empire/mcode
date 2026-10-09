@@ -16,6 +16,7 @@ import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { deriveTurnAssistantMessageId } from "../turns/turn-assistant-message-id.js";
 import type { CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
 import { prepareParentNarrativeRecoveryEvents, retainCanonicalSubagentTarget } from "./parent-narrative-recovery-events.js";
+import { PROVIDER_FRAME_EVENT_TYPES } from "./provider-frame-events.js";
 
 const MAX_ACCEPTED_OPERATION_EVENTS = 8_192;
 
@@ -34,6 +35,9 @@ export function prepareAcceptedParentEvents(input: {
 }): { events: CanonicalAgentEventDraft[]; terminalMessage?: Message; storageOperation?: ExecutionSemanticOperation } {
   validateContext(input);
   const prepared = mutationEvents(input);
+  const providerStarted = providerStartedEvent(input);
+  // Leads the batch so a turn whose first frame is also its terminal frame still records the answer before it ends.
+  if (providerStarted) prepared.events.unshift(providerStarted);
   prepared.events.push(...publicationEvents(input));
   if (prepared.events.length === 0) prepared.events.push(checkpointEvent(input));
   assertEventCount(prepared.events.length);
@@ -277,6 +281,17 @@ function sanitizePublicationEvent(event: AgentEvent): AgentEvent {
   if (event.type === "toolUse") return { ...event, toolInput: sanitizePublicToolInput(event.toolInput, event.toolName) };
   if (event.type === "toolResult" && event.toolInput) return { ...event, toolInput: sanitizePublicToolInput(event.toolInput) };
   return event;
+}
+
+function providerStartedEvent(input: PreparationInput): CanonicalAgentEventDraft | undefined {
+  if (input.turn.providerStartedAt !== null || input.operation.mutation.kind === "post-terminal-event") return undefined;
+  const answered = (input.operation.livePublication ?? [])
+    .some((publication) => PROVIDER_FRAME_EVENT_TYPES.has(publication.event.type));
+  if (!answered) return undefined;
+  const executionId = input.operation.execution.executionId;
+  return { eventId: `${executionId}:provider-started`, routing: input.operation.execution,
+    sourceProviderId: input.thread.providerId, sourceIdentities: [],
+    payload: { type: "turn.provider-started", at: input.acceptedAt } };
 }
 
 function checkpointEvent(input: PreparationInput): CanonicalAgentEventDraft {

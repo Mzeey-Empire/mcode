@@ -367,6 +367,18 @@ class StructuralIngestOverflow extends Error {
   }
 }
 
+// Events that change an existing turn row, so a commit must load that turn before reducing them.
+const TURN_ROUTED_COMMIT_EVENT_TYPES: ReadonlySet<CanonicalAgentEvent["type"]> = new Set<CanonicalAgentEvent["type"]>([
+  "turn.started",
+  "turn.provider-started",
+  "turn.completed",
+  "turn.cancelled",
+  "turn.interrupted",
+  "turn.errored",
+  "ingest.overflow",
+  "turn.response-bound",
+]);
+
 /** Publishes one committed canonical semantic batch. */
 export type CanonicalAgentEventPublisher = (
   events: readonly CanonicalAgentEventEnvelope[],
@@ -3145,18 +3157,7 @@ export class CanonicalAgentStore {
 
   private commitTurnId(event: CanonicalAgentEventEnvelope): string | null {
     if (event.payload.type === "turn.created") return event.payload.turn.id;
-    if (
-      event.payload.type === "turn.started"
-      || event.payload.type === "turn.completed"
-      || event.payload.type === "turn.cancelled"
-      || event.payload.type === "turn.interrupted"
-      || event.payload.type === "turn.errored"
-      || event.payload.type === "ingest.overflow"
-      || event.payload.type === "turn.response-bound"
-    ) {
-      return event.routing.turnId ?? null;
-    }
-    return null;
+    return TURN_ROUTED_COMMIT_EVENT_TYPES.has(event.payload.type) ? event.routing.turnId ?? null : null;
   }
 
   private addCommitSequenceState(
@@ -3570,6 +3571,7 @@ export class CanonicalAgentStore {
       approvalReviewReason: placeholder("approvalReviewReason"),
       providerIdentitiesJson: placeholder("providerIdentitiesJson"),
       startedAt: placeholder("startedAt"),
+      providerStartedAt: placeholder("providerStartedAt"),
       endedAt: placeholder("endedAt"),
       createdAt: placeholder("createdAt"),
       updatedAt: placeholder("updatedAt"),
@@ -3581,6 +3583,7 @@ export class CanonicalAgentStore {
         approvalReviewReason: sql`excluded.approval_review_reason`,
         providerIdentitiesJson: sql`excluded.provider_identities_json`,
         startedAt: sql`excluded.started_at`,
+        providerStartedAt: sql`excluded.provider_started_at`,
         endedAt: sql`excluded.ended_at`,
         updatedAt: sql`excluded.updated_at`,
       },
@@ -3600,6 +3603,7 @@ export class CanonicalAgentStore {
       approvalReviewReason: parsed.approvalReviewReason,
       providerIdentitiesJson: JSON.stringify(parsed.providerIdentities),
       startedAt: parsed.startedAt,
+      providerStartedAt: parsed.providerStartedAt,
       endedAt: parsed.endedAt,
       createdAt: parsed.createdAt,
       updatedAt: parsed.updatedAt,
@@ -3852,6 +3856,7 @@ export class CanonicalAgentStore {
       approvalReviewReason: row.approvalReviewReason,
       providerIdentities: JSON.parse(String(row.providerIdentitiesJson)),
       startedAt: row.startedAt,
+      providerStartedAt: row.providerStartedAt,
       endedAt: row.endedAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
