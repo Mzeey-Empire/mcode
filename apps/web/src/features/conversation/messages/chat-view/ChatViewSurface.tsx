@@ -282,6 +282,7 @@ function PreparingThreadSurface({
   startup: ReturnType<typeof useThreadStartup>;
   pendingStartup: PendingStartup | undefined;
 }) {
+  const echoedStartup = useEchoedPendingStartup(pendingStartup, startup);
   const needsSetupRecovery = startupNeedsSetupRecovery(startup);
   const automaticSetup = useProjectAutomaticSetup(
     thread.id,
@@ -292,7 +293,7 @@ function PreparingThreadSurface({
       <ThreadHeader state={state} />
       <div className="min-h-0 flex-1 overflow-y-auto pt-4">
         <PreparingTranscriptRow>
-          <MessageBubble message={preparingUserMessage(thread, pendingStartup)} />
+          <MessageBubble message={preparingUserMessage(thread, echoedStartup)} />
         </PreparingTranscriptRow>
         <PreparingTranscriptRow>
           {thread.clientError && !showsAuthoritativeCancellation(thread, startup)
@@ -303,6 +304,15 @@ function PreparingThreadSurface({
       <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} />
     </div>
   );
+}
+
+// A completed startup clears its pending entry, which can happen before the durable message arrives.
+// The surface keeps echoing that startup's first message so the bubble does not fall back to the title meanwhile.
+function useEchoedPendingStartup(pendingStartup: PendingStartup | undefined, startup: ReturnType<typeof useThreadStartup>): PendingStartup | undefined {
+  const [retained, setRetained] = useState(pendingStartup);
+  if (pendingStartup && pendingStartup !== retained) setRetained(pendingStartup);
+  if (pendingStartup) return pendingStartup;
+  return retained && startup?.startupId === retained.startupId ? retained : undefined;
 }
 
 // The durable bubble's footer and message parts add height, so the preparing surface draws the same bubble to keep the trail still at hand-off.

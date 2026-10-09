@@ -879,6 +879,58 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(within(bubble!).queryByText(thread.title)).toBeNull();
   });
 
+  it("keeps echoing the first message after a completed startup clears its pending entry", () => {
+    const startupId = "00000000-0000-4000-8000-000000000032";
+    const thread = { ...makeThread({ id: "thread-early-completion", mode: "worktree", worktree_managed: true }), clientPreparing: true };
+    act(() => useThreadStartupStore.getState().apply({
+      startupId,
+      workspaceId: thread.workspace_id,
+      kind: "managed-worktree",
+      state: "completed",
+      phase: "agent",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "worktree", state: "completed" },
+        { phase: "setup", state: "completed" },
+        { phase: "agent", state: "completed" },
+      ],
+      transcript: [],
+      cancellation: "none",
+      revision: 1,
+      threadId: thread.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:01.000Z",
+    }));
+    const pendingStartup = {
+      startupId,
+      context: "new-worktree" as const,
+      queuedMessage: "Review this spec",
+      queuedMessageParts: {
+        attachments: [{ id: "att-1", name: "design-notes.pdf", mimeType: "application/pdf", sizeBytes: 2_048 }],
+        mentions: null,
+        previewAnnotations: null,
+        selectedTextComments: null,
+      },
+    };
+    setupWorkspaceMock(defaultWorkspaceState({
+      activeThreadId: thread.id,
+      threads: [thread],
+      pendingStartupByThreadId: { [thread.id]: pendingStartup },
+    }));
+    chatViewTransportMock.getAutomaticSetup.mockResolvedValue({ gate: "not-required", attempt: null, queuedTurns: [] });
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
+    const view = render(<ChatView />);
+
+    setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread], pendingStartupByThreadId: {} }));
+    view.rerender(<ChatView />);
+
+    const bubble = screen.getByTestId("thread-preparing-shell").querySelector<HTMLElement>(`[data-message-id="preparing-${thread.id}"]`);
+    expect(bubble).not.toBeNull();
+    expect(within(bubble!).getByText("Review this spec")).toBeInTheDocument();
+    expect(within(bubble!).getByText("design-notes.pdf")).toBeInTheDocument();
+    expect(within(bubble!).queryByText(thread.title)).toBeNull();
+  });
+
   it("keeps the preparing shell through the optimistic-to-persisted startup handoff", async () => {
     const startupId = "00000000-0000-4000-8000-000000000024";
     const placeholder = {
