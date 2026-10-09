@@ -21,7 +21,7 @@ describe("FilesystemBrowser", () => {
     expect(result.entries.map((e) => e.name).sort()).toEqual(["a_dir", "b.txt"]);
     expect(result.entries.find((e) => e.name === "a_dir")?.isDir).toBe(true);
     expect(result.parent).toBe(NodePath.dirname(tmp));
-    expect(result.isExactDirectory).toBe(true);
+    expect(result.requestedPath).toBe("folder");
     expect(result.isTooBroad).toBe(false);
   });
 
@@ -45,7 +45,7 @@ describe("FilesystemBrowser", () => {
     const result = await browser.browse(f);
     expect(result.path).toBe(tmp);
     expect(result.entries.some((e) => e.name === "x.txt")).toBe(true);
-    expect(result.isExactDirectory).toBe(false);
+    expect(result.requestedPath).toBe("file");
   });
 
   it("browse on a non-existent path walks up to nearest existing parent", async () => {
@@ -53,7 +53,7 @@ describe("FilesystemBrowser", () => {
     const result = await browser.browse(NodePath.join(tmp, "ghost", "child"));
     expect(result.path).toBe(tmp);
     expect(Array.isArray(result.entries)).toBe(true);
-    expect(result.isExactDirectory).toBe(false);
+    expect(result.requestedPath).toBe("missing");
   });
 
   // Picker is intentionally permissive — the user can browse anywhere they own,

@@ -25,7 +25,7 @@ let cachedDrivesAt = 0;
 type BrowseTarget = {
   path: string;
   isDirectory: boolean;
-  isExactDirectory: boolean;
+  requestedPath: FilesystemBrowseResult["requestedPath"];
 };
 
 /**
@@ -86,7 +86,7 @@ export class FilesystemBrowser {
       path: dir,
       parent: parentDir === dir ? null : parentDir,
       entries,
-      isExactDirectory: target.isExactDirectory,
+      requestedPath: target.requestedPath,
       isTooBroad: await isTooBroadFolder(await NodeFSPromises.realpath(dir)),
     };
   }
@@ -101,7 +101,7 @@ function windowsDrivePickerResponse(): FilesystemBrowseResult {
     path: "/",
     parent: null,
     entries: listWindowsDrives(),
-    isExactDirectory: false,
+    requestedPath: "missing",
     isTooBroad: true,
   };
 }
@@ -120,7 +120,7 @@ async function resolveBrowseTarget(input: string): Promise<BrowseTarget | null> 
       return {
         path,
         isDirectory: details.isDirectory(),
-        isExactDirectory: !resolvedToAncestor && details.isDirectory(),
+        requestedPath: resolvedToAncestor ? "missing" : details.isDirectory() ? "folder" : "file",
       };
     } catch {
       resolvedToAncestor = true;
@@ -136,5 +136,5 @@ async function resolveBrowseTarget(input: string): Promise<BrowseTarget | null> 
 async function resolveFallbackBrowseTarget(): Promise<BrowseTarget | null> {
   if (NodeOS.platform() === "win32") return null;
   const details = await NodeFSPromises.stat("/");
-  return { path: "/", isDirectory: details.isDirectory(), isExactDirectory: false };
+  return { path: "/", isDirectory: details.isDirectory(), requestedPath: "missing" };
 }

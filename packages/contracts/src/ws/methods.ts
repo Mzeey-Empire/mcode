@@ -626,8 +626,11 @@ export const FilesystemBrowseResultSchema = lazySchema(() => z.object({
   path: z.string(),
   parent: z.string().nullable(),
   entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
-  /** The requested path resolved to an existing directory without falling back to an ancestor. */
-  isExactDirectory: z.boolean(),
+  /**
+   * What the requested path names on disk. Only `folder` lists the path itself; `file` lists its
+   * folder and `missing` lists the nearest existing ancestor.
+   */
+  requestedPath: z.enum(["folder", "file", "missing"]),
   /** The listed folder is home or a filesystem root, which `workspace.create` refuses. */
   isTooBroad: z.boolean(),
 }));

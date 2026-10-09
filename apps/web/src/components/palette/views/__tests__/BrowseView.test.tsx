@@ -74,7 +74,7 @@ describe("BrowseView", () => {
         { name: "Projects", isDir: true },
         { name: "README.md", isDir: false },
       ],
-      isExactDirectory: true,
+      requestedPath: "folder",
       isTooBroad: false,
     });
   });
@@ -117,7 +117,7 @@ describe("BrowseView", () => {
       path: "/",
       parent: null,
       entries: [{ name: "C:", isDir: true }],
-      isExactDirectory: true,
+      requestedPath: "folder",
       isTooBroad: true,
     });
 
@@ -135,7 +135,7 @@ describe("BrowseView", () => {
       path: "/home/mcode",
       parent: "/home",
       entries: [{ name: "src", isDir: true }],
-      isExactDirectory: true,
+      requestedPath: "folder",
       isTooBroad: true,
     });
 
@@ -153,7 +153,7 @@ describe("BrowseView", () => {
       path: "/home/mcode/src/mcode",
       parent: "/home/mcode/src",
       entries: [{ name: "apps", isDir: true }],
-      isExactDirectory: true,
+      requestedPath: "folder",
       isTooBroad: false,
     });
 
@@ -174,7 +174,7 @@ describe("BrowseView", () => {
       path: "/home/mcode/src/mcode",
       parent: "/home/mcode/src",
       entries: [],
-      isExactDirectory: true,
+      requestedPath: "folder",
       isTooBroad: false,
     });
 
@@ -184,6 +184,22 @@ describe("BrowseView", () => {
     const heading = screen.getByRole("region", { name: "Folders in mcode" });
     expect(heading.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await waitFor(() => expect(mocks.getPendingConfirm()).toEqual(expect.any(Function)));
+  });
+
+  it("says a typed folder does not exist and keeps Add unavailable", async () => {
+    mocks.palette.query = "~/src/gone/";
+    mocks.filesystemBrowse.mockResolvedValue({
+      path: "/home/mcode/src",
+      parent: "/home/mcode",
+      entries: [{ name: "mcode", isDir: true }],
+      requestedPath: "missing",
+      isTooBroad: false,
+    });
+
+    render(<BrowseView />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This folder doesn't exist.");
+    expect(mocks.getPendingConfirm()).toBeNull();
   });
 
   it("says why a folder could not be added and keeps the palette open", async () => {

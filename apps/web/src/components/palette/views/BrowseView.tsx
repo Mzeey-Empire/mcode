@@ -31,6 +31,11 @@ const REGISTRATION_ERROR_COPY: Record<WorkspaceCreateErrorCode, string> = {
   permission_denied: "Mcode can't read this folder.",
 };
 
+const RESOLUTION_WARNING_COPY: Record<Exclude<BrowseResult["requestedPath"], "folder">, string> = {
+  missing: REGISTRATION_ERROR_COPY.path_not_found,
+  file: REGISTRATION_ERROR_COPY.not_a_directory,
+};
+
 // The workspace store keeps the raw failure; transport and server messages are not user copy.
 const UNEXPECTED_ADD_ERROR_COPY = "Mcode couldn't add this folder. Try again.";
 
@@ -195,7 +200,7 @@ function canAddCurrentDirectory({
 }
 
 function isAddableFolder(result: BrowseResult | null): boolean {
-  return Boolean(result?.isExactDirectory && !result.isTooBroad);
+  return Boolean(result?.requestedPath === "folder" && !result.isTooBroad);
 }
 
 function useBrowseAddAction({
@@ -393,7 +398,7 @@ function BrowseMessages({
       <BrowseResolutionWarning
         loading={loading}
         error={error}
-        isExactDirectory={result?.isExactDirectory}
+        requestedPath={result?.requestedPath}
         isDrivesMode={isDrivesMode}
       />
       <BrowseEmptyMessage
@@ -420,19 +425,19 @@ function BrowsePathErrorMessage({ error }: { error: string | null }) {
 function BrowseResolutionWarning({
   loading,
   error,
-  isExactDirectory,
+  requestedPath,
   isDrivesMode,
 }: {
   loading: boolean;
   error: string | null;
-  isExactDirectory: boolean | undefined;
+  requestedPath: BrowseResult["requestedPath"] | undefined;
   isDrivesMode: boolean;
 }) {
-  if (loading || error || isExactDirectory !== false || isDrivesMode) return null;
+  if (loading || error || !requestedPath || requestedPath === "folder" || isDrivesMode) return null;
 
   return (
     <div data-testid="browse-resolution-warning" className="mx-3 mb-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning" role="alert">
-      This path is not a folder. Choose a listed folder or revise the path.
+      {RESOLUTION_WARNING_COPY[requestedPath]}
     </div>
   );
 }
