@@ -233,7 +233,8 @@ function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>,
           label: tab.label,
           icon: tab.icon,
           disabled: tab.disabled,
-          title: tab.disabled ? tab.disabledReason : undefined,
+          // Icon tabs show no text, so every tab names itself on hover; text tabs only explain why they are disabled.
+          title: tab.disabled ? tab.disabledReason : iconOnly ? tab.label : undefined,
         }))}
         value={activeTab ?? ""}
         onChange={(id) => onTabChange?.(id)}
@@ -275,14 +276,16 @@ function useActiveRow<T>(rows: readonly ListRow<T>[], listKey: string, selectedK
   // rather than keying by listKey, so returning to an earlier query doesn't revive its old highlight.
   const [highlight, setHighlight] = useState<Highlight | null>(null);
   const [highlightListKey, setHighlightListKey] = useState(listKey);
+  // Read the reset value in this render too, so the stale highlight can't resolve to a slot in the new list.
+  const current = highlightListKey === listKey ? highlight : null;
   if (highlightListKey !== listKey) {
     setHighlightListKey(listKey);
     setHighlight(null);
   }
-  const activeRowKey = resolveActiveKey(rows, highlight, selectedKey);
+  const activeRowKey = resolveActiveKey(rows, current, selectedKey);
   const activeIndex = rows.findIndex(({ row }) => row.key === activeRowKey);
   // Adopt a handed-over highlight, so later appends or reorders track the replacement and not the removed row.
-  if (highlight && activeRowKey !== highlight.key) {
+  if (current && activeRowKey !== current.key) {
     setHighlight(activeRowKey === null ? null : { key: activeRowKey, index: activeIndex });
   }
   return { activeRowKey, activeIndex, setHighlight };

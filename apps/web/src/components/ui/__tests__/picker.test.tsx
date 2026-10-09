@@ -235,6 +235,16 @@ describe("Picker", () => {
     expect(screen.getByRole("combobox")).toHaveAttribute("aria-activedescendant", option.id);
   });
 
+  it("starts a new query from the selection, not the old highlight's slot", () => {
+    render(<PagedPicker selectedKey="branch-040" />);
+    const search = screen.getByRole("combobox");
+    fireEvent.keyDown(search, { key: "Home" });
+    for (let step = 0; step < 4; step += 1) fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "branch-005" }).id);
+    fireEvent.change(search, { target: { value: "branch-04" } });
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "branch-040" }).id);
+  });
+
   it("keeps the query when switching tabs", () => {
     const onTabChange = vi.fn();
     render(<PagedPicker onTabChange={onTabChange} />);
@@ -304,6 +314,12 @@ describe("Picker", () => {
     expect(screen.getByRole("radio", { name: "Branches" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "Pull requests" })).toBeDisabled();
     expect(screen.getByRole("radiogroup").parentElement).toHaveTextContent(/Branches$/);
+  });
+
+  it("names an enabled icon tab in a hover tooltip", async () => {
+    render(<PagedPicker tabs={TABS.map((tab) => ({ ...tab, icon: <span>{tab.label[0]}</span> }))} />);
+    await userEvent.hover(screen.getByRole("radio", { name: "Pull requests" }));
+    await waitFor(() => expect(screen.getAllByText("Pull requests").some((node) => !node.hidden && !node.classList.contains("sr-only"))).toBe(true));
   });
 
   it("divides rows where the group changes", () => {
