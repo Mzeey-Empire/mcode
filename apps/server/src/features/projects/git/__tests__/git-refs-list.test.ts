@@ -215,7 +215,7 @@ describe("GitRepositoryService.listRefsAt", () => {
 
   it("maps executor timeouts and rejects malformed cursors without restarting page one", async () => {
     const timed = new GitRepositoryService({ findById: () => undefined }, {
-      exec: async () => { throw Object.assign(new Error("Timed out"), { killed: true }); },
+      exec: async () => { throw Object.assign(new Error("Timed out"), { code: null, signal: "SIGTERM", stderr: "", killed: true }); },
     });
     expect(await timed.listRefsAt(root, { purpose: "new-thread" })).toEqual({
       ok: false, error: { code: "timed_out", message: "Git target listing timed out.", detail: "Timed out" },

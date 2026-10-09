@@ -33,13 +33,13 @@ function assertSafeBranchCreationName(name: string): void {
 
 const gitCommandFailureSchema = z.object({
   stderr: z.string().optional(), message: z.string().optional(),
-  killed: z.boolean().optional(), code: z.union([z.string(), z.number()]).optional(),
+  killed: z.boolean().optional(), code: z.union([z.string(), z.number()]).nullish(),
 });
 
 function gitListError(error: unknown): GitListError {
   const parsed = gitCommandFailureSchema.safeParse(error);
   const failure = parsed.success ? parsed.data : {};
-  const detail = (failure.stderr || failure.message || "Git listing failed").split(/\r?\n/)[0]?.slice(0, 2000);
+  const detail = (failure.stderr || failure.message || String(error)).split(/\r?\n/)[0]?.slice(0, 2000);
   if (failure.killed || failure.code === "ETIMEDOUT") {
     return { code: "timed_out", message: "Git target listing timed out.", detail };
   }
