@@ -39,7 +39,3 @@ Test, Typecheck, and Build Check restore Turbo outputs from the remote cache (`T
 ## Electron sandbox on Ubuntu 24.04
 
 Ubuntu 24.04 restricts unprivileged user namespaces, so Electron falls back to its SUID sandbox helper. On GitHub-hosted runners the helper is not root-owned, and the desktop smoke launch aborts. Build Check sets `chrome-sandbox` to `root:root` with mode `4755` before it launches the app.
-
-## Known flake
-
-Server tests sometimes fail with `Canonical writer open-failed: database is locked` on both providers. It is tracked in [#2022](https://github.com/Mzeey-Empire/mcode/issues/2022). Rerun the job, and add the run to that issue.
