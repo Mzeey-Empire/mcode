@@ -74,10 +74,11 @@ describe("WorkspaceService.create", () => {
     await NodeFSPromises.symlink(project, alias, "junction");
     const legacy = await repo.create("Legacy", alias, false);
 
-    const result = await service.create(undefined, alias);
-
-    expect(result).toMatchObject({ ok: true, reused: true, workspace: { id: legacy.id, path: alias } });
-    expect(repo.listAll()).toHaveLength(1);
+    for (const path of [alias, project]) {
+      const result = await service.create(undefined, path);
+      expect(result).toMatchObject({ ok: true, reused: true, workspace: { id: legacy.id, path: alias } });
+      expect(repo.listAll()).toHaveLength(1);
+    }
   });
 
   it("reuses the same folder, including a trailing separator, without a second row", async () => {
