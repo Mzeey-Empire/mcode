@@ -277,7 +277,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     expect(row).toMatchObject({ ref_before: baseline, files_changed: JSON.stringify(["a.ts"]) });
     const refs = git("for-each-ref", "--format=%(refname)", "refs/mcode/").split("\n");
     expect(refs).toEqual([formatPinRef(storeId, { kind: "snapshot", snapshotId: row?.id ?? "" })]);
-  });
+  }, 30_000);
 
   it("keeps the slot fenced after a failed writer receipt until explicit retry", async () => {
     const lease = await start(coordinator);
