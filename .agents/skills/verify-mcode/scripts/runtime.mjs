@@ -698,10 +698,11 @@ async function runFixtureGit(cwd, args) {
 }
 
 async function createWorktreeSetupWorkspace(socket, evidenceDirectory, record, deadline) {
-  const workspace = await socket.rpc("workspace.create", {
+  const created = await socket.rpc("workspace.create", {
     name: `Verify worktree Setup ${record.id.slice(-8)}`,
     path: record.sourceRepositoryPath,
   }, deadline);
+  const workspace = created?.ok ? created.workspace : null;
   if (!isOwnedWorktreeSetupWorkspace(workspace, record)) {
     throw actionable("workspace.create did not return the owned fixture workspace", "Run worktree-setup-cleanup with --confirm-cleanup, inspect runtime diagnostics, then retry.");
   }
@@ -1736,7 +1737,8 @@ async function stopOpenCodeAttachServe(run) {
 
 async function createOpenCodeResumeWorkspace(socket, repoRoot, run) {
   const name = `${OPENCODE_RESUME_WORKSPACE_NAME} ${fileStamp()}`;
-  const workspace = await socket.rpc("workspace.create", { name, path: repoRoot }, run.proofDeadline);
+  const created = await socket.rpc("workspace.create", { name, path: repoRoot }, run.proofDeadline);
+  const workspace = created?.ok ? created.workspace : null;
   if (typeof workspace?.id !== "string" || workspace.id.length === 0 || workspace.name !== name || !pathsMatch(workspace.path, repoRoot)) {
     throw actionable("workspace.create did not return the owned OpenCode resume workspace", "Run runtime diagnostics, then remove the named verification workspace before retrying.");
   }

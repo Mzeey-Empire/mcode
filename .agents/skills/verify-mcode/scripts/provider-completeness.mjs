@@ -332,7 +332,8 @@ export async function createOwnedFixtureWorkspace(socket, repoRoot, receipt) {
   if (existing.some((workspace) => pathsMatch(workspace?.path, receipt.fixtureDirectory))) throw new Error("Condition: a workspace already uses this verifier fixture directory.");
   let workspace;
   try {
-    workspace = await socket.rpc("workspace.create", { name: `Provider completeness ${receipt.runId}`, path: receipt.fixtureDirectory });
+    const created = await socket.rpc("workspace.create", { name: `Provider completeness ${receipt.runId}`, path: receipt.fixtureDirectory });
+    workspace = created?.ok ? created.workspace : null;
   } catch (error) {
     workspace = await reconcileOwnedFixtureWorkspace(socket, receipt, error);
     if (!workspace) throw error;

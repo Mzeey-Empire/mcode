@@ -865,10 +865,11 @@ export async function ensureFixtureWorkspace(socket, repoRoot, record, persist) 
   }
   record.workspaceCreationPending = true;
   persist();
-  const workspace = await socket.rpc("workspace.create", {
+  const created = await socket.rpc("workspace.create", {
     name: `Composer queue ${record.provider} ${record.marker}`,
     path: fixturePath,
   });
+  const workspace = created?.ok ? created.workspace : null;
   if (!isSafeId(workspace?.id) || typeof workspace?.name !== "string") {
     throw new Error("workspace.create did not return the owned fixture workspace");
   }
