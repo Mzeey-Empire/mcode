@@ -584,6 +584,7 @@ export const storeIdentity = sqliteTable("store_identity", {
   storeId: text("store_id").notNull(),
   databasePath: text("database_path").notNull(),
   createdAt: text("created_at").notNull(),
+  inheritedBefore: text("inherited_before"),
 });
 
 /** One settled native turn-diff record per assistant message. */

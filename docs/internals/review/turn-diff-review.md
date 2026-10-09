@@ -16,4 +16,4 @@ Git snapshots are loose tree objects, so `git gc` would prune them. Each databas
 
 Pins are ordinary refs. They appear in `git log --all` and in `git for-each-ref refs/mcode/`. A default clone or fetch copies only branches and tags, so clones do not inherit them; `git clone --mirror` does. Pin failures are logged and never fail a turn. Startup and `snapshot.cleanup` sweep the store's refs against its rows.
 
-The store id is bound to the database file's path. Moving or copying the data folder mints a new id, and the old store's refs stay until someone removes them by hand. `git for-each-ref refs/mcode/` lists them, and `git update-ref -d <ref>` removes one.
+The store id is bound to the database file's path. Moving or copying the data folder mints a new id. The new store pins only rows it writes after that point, because the old store's refs already keep the inherited trees. Without that rule every development runtime, which starts from a copy of the live database, would add refs to the user's repositories. The old store's refs stay until someone removes them by hand. `git for-each-ref refs/mcode/` lists them, and `git update-ref -d <ref>` removes one.

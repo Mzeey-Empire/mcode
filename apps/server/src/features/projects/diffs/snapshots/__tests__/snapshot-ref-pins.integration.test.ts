@@ -533,7 +533,7 @@ describe("SnapshotRefPins", () => {
     }
   }, TEST_TIMEOUT_MS);
 
-  it("removes an expired row's pin and backfills unpinned or copied rows", async () => {
+  it("removes an expired row's pin and backfills an unpinned row", async () => {
     const repo = createRepo();
     const store = await newStore();
     seedThread(store, { workspaceId: "workspace-1", path: repo, threadId: "thread-1" });
@@ -582,5 +582,26 @@ describe("snapshot store identity", () => {
 
     expect(copy.storeId).not.toBe(originalId);
     expect(reopened.storeId).toBe(originalId);
+  }, TEST_TIMEOUT_MS);
+
+  it("leaves a copied database's inherited rows to the original store and pins its own", async () => {
+    const repo = createRepo();
+    const original = await newStore();
+    seedThread(original, { workspaceId: "workspace-1", path: repo, threadId: "thread-1" });
+    const refBefore = await original.snapshots.captureRef(repo);
+    NodeFS.writeFileSync(NodePath.join(repo, "a.ts"), "export const a = 'edit';\n");
+    const refAfter = await original.snapshots.captureRef(repo);
+    const inheritedMessage = original.messages.create("thread-1", "assistant", "old", 1);
+    await writeSnapshotRow(original, { messageId: inheritedMessage.id, threadId: "thread-1", refBefore, refAfter });
+    await closeStore(original);
+    const copyPath = NodePath.join(temporaryDirectory("mcode-pin-copy-"), "app.sqlite");
+    NodeFS.copyFileSync(original.dbPath, copyPath);
+
+    const copy = await openStore(copyPath);
+    const ownMessage = copy.messages.create("thread-1", "assistant", "new", 2);
+    const ownId = await writeSnapshotRow(copy, { messageId: ownMessage.id, threadId: "thread-1", refBefore, refAfter });
+    await copy.pins.sweep();
+
+    expect(listRefs(repo)).toEqual([`refs/mcode/${copy.storeId}/snapshots/${ownId}`]);
   }, TEST_TIMEOUT_MS);
 });

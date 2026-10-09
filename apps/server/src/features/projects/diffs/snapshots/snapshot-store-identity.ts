@@ -35,11 +35,13 @@ export function storeIdentityWriteHandlers(db: Database): ReadonlyMap<string, (i
     const current = rows.length === 1 ? rows[0] : undefined;
     if (current && current.databasePath === input.databasePath) return StoreIdSchema.parse(current.storeId);
     // A copied or moved file must not share refs with the original, so its identity is replaced.
+    // Its existing rows belong to the original store, which keeps pinning them.
     orm.delete(storeIdentity).run();
     orm.insert(storeIdentity).values({
       storeId: input.candidateStoreId,
       databasePath: input.databasePath,
       createdAt: input.createdAt,
+      inheritedBefore: current ? input.createdAt : null,
     }).run();
     return input.candidateStoreId;
   })]]);

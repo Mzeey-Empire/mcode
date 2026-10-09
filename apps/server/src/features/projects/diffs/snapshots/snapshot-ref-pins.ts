@@ -6,7 +6,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, isNull } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
@@ -14,6 +14,7 @@ import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import {
   canonicalAgentIngestCheckpoints,
   messages,
+  storeIdentity,
   threads,
   turnSnapshots,
   workspaces,
@@ -411,11 +412,18 @@ export class SnapshotRefPins {
     return Boolean(this.orm.select({ id: turnSnapshots.id }).from(turnSnapshots).where(eq(turnSnapshots.id, snapshotId)).get());
   }
 
+  /**
+   * Rows to backfill. A copied file's older rows stay pinned by the store it was copied from, and
+   * pinning them again would make every development copy write refs into the user's repositories.
+   */
   private snapshotRowsFor(workspaceIds: ReadonlySet<string>): PinnableSnapshot[] {
+    const inheritedBefore = this.orm.select({ inheritedBefore: storeIdentity.inheritedBefore })
+      .from(storeIdentity).get()?.inheritedBefore;
     return this.orm.select({
       id: turnSnapshots.id, refBefore: turnSnapshots.refBefore, refAfter: turnSnapshots.refAfter,
       workspaceId: threads.workspaceId,
-    }).from(turnSnapshots).innerJoin(threads, eq(threads.id, turnSnapshots.threadId)).all()
+    }).from(turnSnapshots).innerJoin(threads, eq(threads.id, turnSnapshots.threadId))
+      .where(inheritedBefore ? gte(turnSnapshots.createdAt, inheritedBefore) : undefined).all()
       .filter((row) => workspaceIds.has(row.workspaceId));
   }
 

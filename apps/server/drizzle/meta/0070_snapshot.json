@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "834a2fb3-7aa4-4947-b960-58649a196971",
+  "id": "befc18b1-ec3a-465e-baca-cb978c875b25",
   "prevId": "d81d500f-96d7-42be-b36f-dfeb855b5079",
   "tables": {
     "canonical_agent_events": {
@@ -2922,6 +2922,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "inherited_before": {
+          "name": "inherited_before",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
