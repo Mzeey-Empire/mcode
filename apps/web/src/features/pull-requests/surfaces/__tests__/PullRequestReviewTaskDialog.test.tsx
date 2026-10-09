@@ -123,7 +123,7 @@ describe("PullRequestReviewTaskDialog", () => {
       ];
     });
     useCommandPaletteStore.getState().close();
-    useOverviewStore.setState({ reserveThreadId: null, requestedThreadId: null });
+    useOverviewStore.setState({ closedSubjects: new Set(), overlaySubject: null, requestedSubject: null });
     useUiStore.setState({ primarySurface: "pullRequests" });
   });
 
@@ -176,7 +176,7 @@ describe("PullRequestReviewTaskDialog", () => {
       false,
     );
     expect(workspaceState.setActiveThread).toHaveBeenCalledWith(reviewLink.threadId);
-    expect(useOverviewStore.getState().requestedThreadId).toBe(reviewLink.threadId);
+    expect(useOverviewStore.getState().requestedSubject).toBe(`thread:${reviewLink.threadId}`);
     expect(useUiStore.getState().primarySurface).toBe("chat");
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
@@ -377,7 +377,7 @@ describe("PullRequestReviewTaskDialog", () => {
     expect(await screen.findByText("Thread list unavailable")).toBeVisible();
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
     expect(workspaceState.setActiveThread).not.toHaveBeenCalled();
-    expect(useOverviewStore.getState().requestedThreadId).toBeNull();
+    expect(useOverviewStore.getState().requestedSubject).toBeNull();
     expect(useUiStore.getState().primarySurface).toBe("pullRequests");
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
@@ -410,7 +410,7 @@ describe("PullRequestReviewTaskDialog", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
     expect(workspaceState.setActiveThread).not.toHaveBeenCalled();
-    expect(useOverviewStore.getState().requestedThreadId).toBeNull();
+    expect(useOverviewStore.getState().requestedSubject).toBeNull();
     expect(useUiStore.getState().primarySurface).toBe("pullRequests");
   });
 });

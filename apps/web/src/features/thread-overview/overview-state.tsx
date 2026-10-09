@@ -44,11 +44,11 @@ export function getThreadOverviewCiDot(
   return null;
 }
 
-/** Keeps shared Git, setup and dialog state alive while the popover is closed. */
+/** Keeps shared Git, setup and dialog state alive while the card is hidden. */
 export function useOverviewState(
   thread: Thread,
   open: boolean,
-  setOverviewOpen: (open: boolean) => void,
+  closeOverlay: () => void,
 ) {
   const projectSetup = useProjectSetupAttempt(thread.id);
   const branchCreation = useThreadOverviewBranchCreation(thread.id);
@@ -70,10 +70,10 @@ export function useOverviewState(
   const createPrBranch = branchCreation.branch ?? thread.branch;
   const createBranchBaseBranch = thread.base_branch ?? thread.branch;
   const openProjectSettings = useCallback(() => {
-    setOverviewOpen(false);
+    closeOverlay();
     showRightPanelAdaptive(thread.workspace_id, thread.id);
     useDiffStore.getState().setRightPanelTab(thread.workspace_id, thread.id, "environment");
-  }, [setOverviewOpen, thread.id, thread.workspace_id]);
+  }, [closeOverlay, thread.id, thread.workspace_id]);
   const ciDot = useMemo(
     () => getThreadOverviewCiDot(effectivePr, checks),
     [checks, effectivePr],

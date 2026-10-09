@@ -106,7 +106,7 @@ export function formatThreadOverviewUsage(
   return [quotaSummary, costSummary, statusSummary].filter(Boolean).join(", ") || null;
 }
 
-/** Shared usage summary used by the usage row and the PR separator. */
+/** Usage summary and quota bars for the usage row. */
 export function useOverviewUsage(thread: Thread) {
   const usageInfo = useThreadRecord(
     thread.id,

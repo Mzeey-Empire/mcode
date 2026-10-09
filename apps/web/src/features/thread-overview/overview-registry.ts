@@ -17,8 +17,11 @@ import { UsageEntryBlock } from "./entries/usage";
 import { OverviewProjectActions, OverviewProjectActionsState, OverviewProjectSettings } from "./header-actions";
 import type { OverviewSubject } from "./overview-subject";
 
-/** Card sections for the later grouped overview layout. */
-export type OverviewSectionId = "lane" | "activity" | "terminals" | "summary";
+/** Card sections, top to bottom. A divider separates each pair of non-empty sections. */
+export const OVERVIEW_SECTIONS = ["lane", "activity", "terminals", "summary"] as const;
+
+/** One card section. */
+export type OverviewSectionId = (typeof OVERVIEW_SECTIONS)[number];
 
 /** One registered block of the overview card. */
 export interface OverviewEntry {
@@ -42,7 +45,7 @@ export interface OverviewHeaderAction {
   readonly State?: ComponentType<{ subject: OverviewSubject; children: ReactNode }>;
 }
 
-/** Body entries in the existing visual order; section grouping belongs to S03-02. */
+/** Body entries. The card groups them by section, then orders each section by `order`. */
 export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "setup", section: "lane", order: 0, subjects: ["thread"], Entry: SetupEntryBlock },
   { id: "save-recovery", section: "activity", order: 10, subjects: ["thread"], Entry: SaveRecoveryEntryBlock },
@@ -67,7 +70,7 @@ export const OVERVIEW_HEADER_ACTIONS: readonly OverviewHeaderAction[] = [
   { id: "settings", order: 10, subjects: ["thread"], Action: OverviewProjectSettings },
 ];
 
-/** Filters entries for the subject and preserves the current global row order. */
+/** Filters entries for the subject, sorted by `order`. */
 export function getOverviewEntries(subject: OverviewSubject): readonly OverviewEntry[] {
   return OVERVIEW_ENTRIES.filter(entry => entry.subjects.includes(subject.kind)).sort((a, b) => a.order - b.order);
 }

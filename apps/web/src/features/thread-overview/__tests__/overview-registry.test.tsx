@@ -30,8 +30,8 @@ function mockLoadedEntries() {
 }
 
 async function closeOverview() {
-  fireEvent.click(screen.getByTestId("header-workspace-menu"));
-  await waitFor(() => expect(screen.queryByTestId("thread-overview-body")).not.toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("header-overview-toggle"));
+  await waitFor(() => expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument());
 }
 
 describe("overview registry", () => {
@@ -50,7 +50,7 @@ describe("overview registry", () => {
       prUrlsByThreadId: {},
       checksById: {},
     });
-    useOverviewStore.setState({ reserveThreadId: null, requestedThreadId: null });
+    useOverviewStore.setState({ closedSubjects: new Set(), overlaySubject: null, requestedSubject: null });
     useDiffStore.setState({
       rightPanelByThread: {}, rightPanelFallbackByWorkspace: {},
       snapshotsByThread: { [thread.id]: [] }, diffRevisionByScope: {},
@@ -90,18 +90,53 @@ describe("overview registry", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders the direct-thread rows in their existing DOM order without empty-row separators", async () => {
+  it("renders the direct-thread rows grouped by section under the header", async () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
     await waitFor(() => expect(mockTransport.getRemoteUrl).toHaveBeenCalledWith(thread.workspace_id, thread.id));
-    const body = screen.getByTestId("thread-overview-body");
-    const rowIds = Array.from(body.querySelectorAll("[data-testid]"), element => element.getAttribute("data-testid"))
-      .filter(id => ["thread-overview-masthead", "thread-overview-masthead-controls", "workspace-menu-changes", "thread-overview-local", "workspace-menu-branch", "thread-overview-recap"].includes(id ?? ""));
+    const card = screen.getByTestId("thread-overview-card");
+    const rowIds = Array.from(card.querySelectorAll("[data-testid]"), element => element.getAttribute("data-testid"))
+      .filter(id => ["thread-overview-card-header", "workspace-menu-changes", "thread-overview-local", "workspace-menu-branch", "thread-overview-recap"].includes(id ?? ""));
     expect(rowIds).toEqual([
-      "thread-overview-masthead", "thread-overview-masthead-controls", "workspace-menu-changes",
-      "thread-overview-local", "workspace-menu-branch", "thread-overview-recap",
+      "thread-overview-card-header", "thread-overview-local", "workspace-menu-branch",
+      "workspace-menu-changes", "thread-overview-recap",
     ]);
-    expect(screen.queryByTestId("thread-overview-pr-separator")).not.toBeInTheDocument();
-    expect(body.querySelectorAll('[data-slot="separator"]')).toHaveLength(2);
+  });
+
+  it("opens an overlay from the button where the card cannot dock, and Escape closes it", async () => {
+    render(<ThreadOverview thread={thread} threadPaneWidth={600} />);
+    expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
+    expect(await screen.findByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "overlay");
+    expect(screen.getByTestId("header-overview-toggle")).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument());
+    expect(screen.getByTestId("header-overview-toggle")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("closes the overlay on an outside press but not on the button's own press", async () => {
+    render(<><ThreadOverview thread={thread} threadPaneWidth={600} /><button type="button">outside</button></>);
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
+    await screen.findByTestId("thread-overview-card");
+
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
+    await waitFor(() => expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
+    const card = await screen.findByTestId("thread-overview-card");
+    act(() => card.closest<HTMLElement>("[role=dialog]")?.focus());
+    // A real mouse press moves focus out of the overlay, and Base UI's deferred focus-out settles
+    // before the click lands. The click carries a nonzero detail, unlike a synthetic one.
+    const outside = screen.getByText("outside");
+    fireEvent.pointerDown(outside, { button: 0 });
+    fireEvent.mouseDown(outside, { button: 0 });
+    await act(async () => {
+      outside.focus();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    fireEvent.click(outside, { button: 0, detail: 1 });
+    await waitFor(() => expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument());
   });
 
   it("shows loaded Changes and repository results on reopen while refreshing them silently", async () => {
@@ -110,7 +145,7 @@ describe("overview registry", () => {
     expect(mockTransport.getWorkingTreeFiles).not.toHaveBeenCalled();
     expect(mockTransport.getRemoteUrl).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
     await waitFor(() => expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "7 additions, 2 deletions"));
     expect(screen.getByText("example/repo")).toBeInTheDocument();
@@ -118,7 +153,7 @@ describe("overview registry", () => {
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(1);
 
     await closeOverview();
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
     expect(screen.queryByTestId("thread-overview-change-loading")).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "7 additions, 2 deletions");
@@ -127,19 +162,19 @@ describe("overview registry", () => {
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(2);
   });
 
-  it("loads project actions once and keeps them across a popover close and reopen", async () => {
+  it("loads project actions once and keeps them across a close and reopen", async () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={600} />);
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
-    await screen.findByTestId("thread-overview-masthead-controls");
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
+    await screen.findByTestId("thread-overview-card-header");
     await waitFor(() => expect(mockTransport.readWorkspaceEnvironment).toHaveBeenCalledTimes(1));
     await closeOverview();
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
-    await screen.findByTestId("thread-overview-masthead-controls");
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
+    await screen.findByTestId("thread-overview-card-header");
     expect(mockTransport.readWorkspaceEnvironment).toHaveBeenCalledTimes(1);
     expect(mockTransport.listWorkspaceActionRuns).toHaveBeenCalledTimes(1);
   });
 
-  it("lists browser tabs once and stays subscribed while the popover is closed", async () => {
+  it("lists browser tabs once and stays subscribed while the card is closed", async () => {
     const off = vi.fn();
     const tabs = {
       list: vi.fn().mockResolvedValue({ ok: false }),
@@ -148,13 +183,13 @@ describe("overview registry", () => {
     vi.stubGlobal("desktopBridge", { preview: { tabs } });
     try {
       render(<ThreadOverview thread={thread} threadPaneWidth={600} />);
-      expect(screen.queryByTestId("thread-overview-body")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
       expect(tabs.list).toHaveBeenCalledTimes(1);
-      fireEvent.click(screen.getByTestId("header-workspace-menu"));
-      await screen.findByTestId("thread-overview-body");
+      fireEvent.click(screen.getByTestId("header-overview-toggle"));
+      await screen.findByTestId("thread-overview-card");
       await closeOverview();
-      fireEvent.click(screen.getByTestId("header-workspace-menu"));
-      await screen.findByTestId("thread-overview-body");
+      fireEvent.click(screen.getByTestId("header-overview-toggle"));
+      await screen.findByTestId("thread-overview-card");
       expect(tabs.list).toHaveBeenCalledTimes(1);
       expect(tabs.onUpdated).toHaveBeenCalledTimes(1);
       expect(off).not.toHaveBeenCalled();
@@ -171,7 +206,7 @@ describe("overview registry", () => {
     expect(screen.queryByTestId("thread-overview-repository")).not.toBeInTheDocument();
     await closeOverview();
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
     await screen.findByText("example/repo");
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(2);
   });
@@ -199,7 +234,7 @@ describe("overview registry", () => {
     expect(mockTransport.getReviewDiffStats).toHaveBeenCalledTimes(1);
     expect(mockTransport.getSnapshotDiffStats).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
     expect(screen.getByTestId("thread-overview-change-loading")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("thread-overview-change-summary"))
       .toHaveAttribute("aria-label", "11 additions, 3 deletions"));
@@ -211,7 +246,7 @@ describe("overview registry", () => {
   it("does not reuse another thread's loaded results", async () => {
     mockLoadedEntries();
     const { rerender } = render(<ThreadOverview thread={thread} threadPaneWidth={600} />);
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
     await screen.findByTestId("thread-overview-change-summary");
     await closeOverview();
     const nextThread = createMockThread({ ...thread, id: "next-thread" });
@@ -222,7 +257,7 @@ describe("overview registry", () => {
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledTimes(1);
     expect(mockTransport.getWorkingTreeFiles).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
     expect(screen.getByTestId("thread-overview-change-loading")).toBeInTheDocument();
     expect(screen.queryByText("example/repo")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("thread-overview-change-summary"))
@@ -232,7 +267,7 @@ describe("overview registry", () => {
     expect(mockTransport.getRemoteUrl).toHaveBeenLastCalledWith(thread.workspace_id, nextThread.id);
   });
 
-  it("keeps a pending Recap and its eventual error across popover unmounts", async () => {
+  it("keeps a pending Recap and its eventual error across card unmounts", async () => {
     let rejectRequest: (reason: Error) => void;
     const request = new Promise<{ text: string }>((_resolve, reject) => { rejectRequest = reject; });
     vi.mocked(mockTransport.generateRecap).mockReturnValueOnce(request);
@@ -243,13 +278,13 @@ describe("overview registry", () => {
     fireEvent.click(screen.getByTestId("thread-overview-recap-refresh"));
     expect(screen.getByTestId("thread-overview-recap-skeleton")).toBeInTheDocument();
     await closeOverview();
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
     expect(screen.getByTestId("thread-overview-recap-skeleton")).toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-recap-refresh")).toBeDisabled();
 
     await closeOverview();
     await act(async () => { rejectRequest(new Error("Recap request failed")); });
-    fireEvent.click(screen.getByTestId("header-workspace-menu"));
+    fireEvent.click(screen.getByTestId("header-overview-toggle"));
     expect(screen.queryByTestId("thread-overview-recap-skeleton")).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-recap-text")).toHaveTextContent("Recap unavailable");
     expect(screen.getByTestId("thread-overview-recap-refresh")).toBeEnabled();

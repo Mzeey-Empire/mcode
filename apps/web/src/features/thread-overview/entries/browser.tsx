@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { SiteFavicon } from "@/components/ui/favicon";
-import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type {
   BrowserAutomationLiveTarget,
@@ -183,7 +182,6 @@ function ThreadOverviewBrowserSection({ rows, onOpen }: ThreadOverviewBrowserSec
 
   return (
     <section aria-label="Browser" data-testid="thread-overview-browser">
-      <Separator className="my-1.5" />
       <div className="px-2 pt-1 text-xs font-medium text-muted">Browser</div>
       <div className="flex w-full flex-col gap-0.5">
         {rows.map(({ tab, controller }) => {

@@ -277,60 +277,67 @@ describe("ThreadOverview branchless Create PR", () => {
       controllers: new Map(),
     });
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {} });
-    useOverviewStore.setState({ reserveThreadId: null, requestedThreadId: null });
+    useOverviewStore.setState({ closedSubjects: new Set(), overlaySubject: null, requestedSubject: null });
     useDiffStore.setState({ rightPanelByThread: {}, rightPanelFallbackByWorkspace: {} });
     useProjectActionStore.setState({ runsByThread: {} });
     setLayoutMeasurements(1200, 1200);
   });
 
-  it("keeps Overview open when the normal right panel narrows the chat", () => {
+  it("docks the card open beside a canvas with room, and closes it from the button", async () => {
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={makeThread()} threadPaneWidth={1400} />);
+
+    expect(screen.getByTestId("header-overview-toggle")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
+
+    await user.click(screen.getByTestId("header-overview-toggle"));
+    expect(screen.getByTestId("header-overview-toggle")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
+  });
+
+  it("docks only from the minimum canvas width", () => {
+    const overview = render(<ThreadOverview thread={makeThread()} threadPaneWidth={896} />);
+    expect(screen.getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
+
+    overview.rerender(<ThreadOverview thread={makeThread()} threadPaneWidth={895} />);
+    expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
+    expect(screen.getByTestId("header-overview-toggle")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("gives way to the right panel and docks again when it closes", () => {
     const thread = makeThread();
     const overview = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
-    expect(screen.getByTestId("header-workspace-menu")).toHaveAttribute("aria-expanded", "true");
+    mockGetRightPanelVisible.mockReturnValue(true);
+    overview.rerender(<ThreadOverview thread={thread} threadPaneWidth={1000} />);
+    expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
+    expect(screen.getByTestId("header-overview-toggle")).toHaveAttribute("aria-pressed", "false");
+
+    mockGetRightPanelVisible.mockReturnValue(false);
+    overview.rerender(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    expect(screen.getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
+  });
+
+  it("keeps the user's close after the right panel opens and closes", async () => {
+    const user = userEvent.setup();
+    const thread = makeThread();
+    const overview = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("header-overview-toggle"));
 
     mockGetRightPanelVisible.mockReturnValue(true);
-    overview.rerender(<ThreadOverview thread={thread} threadPaneWidth={800} />);
+    overview.rerender(<ThreadOverview thread={thread} threadPaneWidth={1000} />);
+    mockGetRightPanelVisible.mockReturnValue(false);
+    overview.rerender(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
-    expect(screen.getByTestId("header-workspace-menu")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
   });
 
-  it("keeps Overview closed by default in a narrow chat pane", () => {
-    render(<ThreadOverview thread={makeThread()} threadPaneWidth={800} />);
-
-    expect(screen.getByTestId("header-workspace-menu")).toHaveAttribute("aria-expanded", "false");
-  });
-
-  it("reserves space while Overview can leave the composer usable", () => {
-    const overview = render(<ThreadOverview thread={makeThread()} threadPaneWidth={824} />);
-
-    expect(useOverviewStore.getState().reserveThreadId).toBe("thread-1");
-
-    overview.rerender(<ThreadOverview thread={makeThread()} threadPaneWidth={823} />);
-    expect(useOverviewStore.getState().reserveThreadId).toBeNull();
-  });
-
-  it("reserves space beside the visible right panel when the chat has room", () => {
-    mockGetRightPanelVisible.mockReturnValue(true);
-    render(<ThreadOverview thread={makeThread()} threadPaneWidth={824} />);
-
-    expect(useOverviewStore.getState().reserveThreadId).toBe("thread-1");
-  });
-
-  it("keeps an explicitly opened narrow Overview in overlay mode", async () => {
+  it("shows a requested Overview as an overlay where the card cannot dock", async () => {
     useOverviewStore.getState().requestOpen("thread-1");
     render(<ThreadOverview thread={makeThread()} threadPaneWidth={800} />);
 
-    await waitFor(() => expect(screen.getByTestId("header-workspace-menu")).toHaveAttribute("aria-expanded", "true"));
-    expect(useOverviewStore.getState().reserveThreadId).toBeNull();
-  });
-
-  it("does not clear a new thread's Overview reserve when the prior thread unmounts", () => {
-    const overview = render(<ThreadOverview thread={makeThread()} threadPaneWidth={1400} />);
-
-    overview.rerender(<ThreadOverview thread={makeThread({ id: "thread-2" })} threadPaneWidth={1400} />);
-
-    expect(useOverviewStore.getState().reserveThreadId).toBe("thread-2");
+    expect(await screen.findByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "overlay");
+    expect(useOverviewStore.getState().requestedSubject).toBeNull();
   });
 
   it("launches an idle Action in the background, then focuses its retained terminal", async () => {
@@ -698,16 +705,6 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(canStartBranchlessCreatePr(makeThread({ mode: "direct" }))).toBe(false);
   });
 
-  it("consumes a thread-keyed request to open Overview after navigation", async () => {
-    useOverviewStore.getState().requestOpen("thread-1");
-
-    render(<ThreadOverview thread={makeThread()} threadPaneWidth={500} />);
-
-    await waitFor(() =>
-      expect(useOverviewStore.getState().requestedThreadId).toBeNull(),
-    );
-  });
-
   it("shows a loaded sub-agent summary only when present and opens its panel", () => {
     const thread = makeThread();
     const first = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
@@ -740,7 +737,7 @@ describe("ThreadOverview branchless Create PR", () => {
     expect(mockOpenSubagentsPanel).toHaveBeenCalledOnce();
   });
 
-  it("renders the sub-agent summary below Usage", () => {
+  it("renders the sub-agent summary in Activity, above the Usage summary", () => {
     const thread = makeThread();
     mockThreadRecords.set(thread.id, {
       ...createEmptyThreadRecord(),
@@ -766,7 +763,7 @@ describe("ThreadOverview branchless Create PR", () => {
 
     const usage = screen.getByTestId("thread-overview-usage");
     const subagents = screen.getByTestId("thread-overview-subagents");
-    expect(usage.compareDocumentPosition(subagents) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(usage.compareDocumentPosition(subagents) & Node.DOCUMENT_POSITION_PRECEDING).not.toBe(0);
   });
 
   it("bounds the disc stack to three, lets the text carry the total, and omits the zero active count", () => {

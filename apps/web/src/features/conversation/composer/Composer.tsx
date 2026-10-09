@@ -632,7 +632,7 @@ export function Composer({
   const showComposerStatusBar = !!branchFromMessageId;
 
   return (
-    <div className="relative px-4 py-4 sm:px-8">
+    <div className="relative px-4 py-4 sm:px-[var(--chat-gutter,--spacing(8))]">
       <ComposerQueueToast toast={toast} />
 
       {/* Max-width wrapper to align with message list column */}

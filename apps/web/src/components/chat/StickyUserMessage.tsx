@@ -124,7 +124,7 @@ export function StickyUserMessage({
   return (
     <div
       ref={rootRef}
-      className="pointer-events-none absolute inset-x-0 top-0 z-(--layer-sticky) px-4 pb-2 pt-1 sm:px-8"
+      className="pointer-events-none absolute inset-x-0 top-0 z-(--layer-sticky) px-4 pb-2 pt-1 sm:px-[var(--chat-gutter,--spacing(8))]"
       data-testid="sticky-user-message"
     >
       <div className="w-full" style={{ paddingRight: contentPaddingRight }}>

@@ -71,7 +71,7 @@ export function MessageListOverlays({
   return (
     <>
       {shouldShowHandoffSkeleton(handoffStatus, messages) && (
-        <div className="px-4 py-4 sm:px-8">
+        <div className="px-4 py-4 sm:px-[var(--chat-gutter,--spacing(8))]">
           <div className={`${PRIMARY_CONTENT_RAIL_CLASS} space-y-2`}>
             <Skeleton className="h-3.5 w-3/4 animate-pulse rounded" />
             <Skeleton className="h-3.5 w-1/2 animate-pulse rounded" />

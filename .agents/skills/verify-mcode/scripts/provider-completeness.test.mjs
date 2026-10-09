@@ -850,7 +850,7 @@ NodeTest.test("runs the Electron Full access journey before dispatch and retains
     getByTestId: (testId) => {
       if (testId === "approval-review") return { count: async () => 0 };
       if (testId === "thread-title") return threadTitle;
-      if (testId === "thread-overview-masthead") return { waitFor: async () => { events.push("thread-opened"); } };
+      if (testId === "header-overview-toggle") return { waitFor: async () => { events.push("thread-opened"); } };
       return control;
     },
     getByRole: (role, options) => {

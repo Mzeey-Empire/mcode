@@ -7,14 +7,9 @@ import {
   canFitSideBySidePanel,
   minContentWidthForSideBySidePanel,
   minOuterWidthForInlineSidebar,
-  overviewNoPaddingMinWidth,
-  overviewResponsivePaddingPx,
-  OVERVIEW_POPOVER_RESERVE_PX,
-  OVERVIEW_RIGHT_RESERVE_PX,
-  OVERVIEW_THREAD_CONTENT_MAX_WIDTH_PX,
-  OVERVIEW_THREAD_GAP_PX,
+  OVERVIEW_CANVAS_RESERVE,
+  OVERVIEW_DOCK_MIN_CANVAS,
   preferredSplitPanelWidth,
-  shouldAutoOpenOverview,
 } from "@/lib/composer-layout";
 import { COMPOSER_MIN_WIDTH, PANEL_MIN_WIDTH, PANEL_SPLIT_GAP_PX } from "@/stores/diffStore";
 
@@ -56,49 +51,9 @@ describe("composer-layout", () => {
     expect(preferredSplitPanelWidth(600)).toBe(PANEL_MIN_WIDTH);
   });
 
-  it("auto-opens the Overview when the chat pane itself is wide", () => {
-    expect(shouldAutoOpenOverview({ threadPaneWidth: 1400 })).toBe(true);
-  });
-
-  it("opens Overview at the 824px composer-and-popover boundary", () => {
-    expect(COMPOSER_MIN_WIDTH + OVERVIEW_RIGHT_RESERVE_PX).toBe(824);
-    expect(shouldAutoOpenOverview({ threadPaneWidth: 823 })).toBe(false);
-    expect(shouldAutoOpenOverview({ threadPaneWidth: 824 })).toBe(true);
-  });
-
-  it("does not auto-open the Overview when the chat pane itself is narrow", () => {
-    expect(shouldAutoOpenOverview({ threadPaneWidth: 800 })).toBe(false);
-  });
-
-  it("keeps Overview beside a composer that remains usable", () => {
-    expect(shouldAutoOpenOverview({ threadPaneWidth: 960 })).toBe(true);
-  });
-
-  it("keeps the centered thread unpadded when the Overview can sit beside it", () => {
-    expect(overviewNoPaddingMinWidth()).toBe(
-      OVERVIEW_THREAD_CONTENT_MAX_WIDTH_PX +
-        OVERVIEW_RIGHT_RESERVE_PX * 2,
-    );
-    expect(overviewResponsivePaddingPx(overviewNoPaddingMinWidth())).toBe(0);
-  });
-
-  it("only shifts the thread by the collision amount on roomy Overview layouts", () => {
-    expect(overviewResponsivePaddingPx(overviewNoPaddingMinWidth() - 120)).toBe(120);
-  });
-
-  it("reserves the popover footprint and thread gap on narrow layouts", () => {
-    expect(OVERVIEW_RIGHT_RESERVE_PX).toBe(
-      OVERVIEW_POPOVER_RESERVE_PX + OVERVIEW_THREAD_GAP_PX,
-    );
-    expect(overviewResponsivePaddingPx(overviewNoPaddingMinWidth() - OVERVIEW_RIGHT_RESERVE_PX - 1)).toBe(
-      OVERVIEW_RIGHT_RESERVE_PX,
-    );
-  });
-
-  it("keeps the 1536px thread rail clear at a typical desktop pane width", () => {
-    expect(overviewResponsivePaddingPx(1576)).toBe(344);
-    expect(overviewResponsivePaddingPx(1900)).toBe(324);
-    expect(overviewResponsivePaddingPx(2224)).toBe(0);
+  it("docks the Overview only where the composer keeps its minimum width beside the reserve", () => {
+    expect(OVERVIEW_CANVAS_RESERVE).toBe(328);
+    expect(OVERVIEW_DOCK_MIN_CANVAS - OVERVIEW_CANVAS_RESERVE).toBeGreaterThanOrEqual(COMPOSER_MIN_WIDTH);
   });
 
   it("reports inline sidebar fit from outer-row width", () => {

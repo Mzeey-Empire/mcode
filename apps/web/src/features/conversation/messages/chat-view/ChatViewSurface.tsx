@@ -3,6 +3,7 @@ import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
 import type { RecoveryIncident, SelectedTextComment } from "@mcode/contracts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Notice } from "@/components/ui/notice";
 import { Spinner } from "@/components/ui/spinner";
@@ -23,6 +24,7 @@ import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { useThreadDraftStore, type ThreadDraftPayload } from "@/stores/threadDraftStore";
+import { OverviewLayer } from "@/features/thread-overview/overview-layer";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
 import { StartupProgressCard, useThreadStartup, type StartupDisplayContext } from "@/features/thread-startup";
@@ -743,16 +745,20 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps) {
   const conversationErrorBanner = state.messageCount > 0 || state.isAgentRunning ? conversationErrorLabel(state) : null;
   const showCliError = isVisibleCliError(state.sessionError, dismissedError);
   return (
-    <div ref={state.chatPaneRef} className="flex h-full flex-col bg-background" data-testid="chat-view">
-      <ActiveThreadHeader state={state} editingThreadId={editingThreadId} onEditingThreadIdChange={onEditingThreadIdChange} onSaveTitle={interactions.onSaveTitle} />
-      <ActiveThreadBanners state={state} recovery={recovery} />
-      {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
-      <HandoffFallbackNotice threadId={thread.id} />
-      <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
-      <TurnSavingNotice lostProgress={state.lostProgress} />
-      <ChatMessageStage state={state} interactions={interactions} automaticSetup={automaticSetup} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
-      {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
-      <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} setupBlocked={automaticSetup.snapshot.gate === "blocked"} />
+    // The docked card's reserve takes the right gutter's room, so rows and the composer use 24px
+    // gutters while docked. That keeps the composer at 520 or wider down to OVERVIEW_DOCK_MIN_CANVAS.
+    <div ref={state.chatPaneRef} className={cn("relative flex h-full flex-col bg-background", state.overviewPaddingRight && "[--chat-gutter:--spacing(6)]")} data-testid="chat-view">
+      <OverviewLayer>
+        <ActiveThreadHeader state={state} editingThreadId={editingThreadId} onEditingThreadIdChange={onEditingThreadIdChange} onSaveTitle={interactions.onSaveTitle} />
+        <ActiveThreadBanners state={state} recovery={recovery} />
+        {conversationErrorBanner ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">{conversationErrorBanner}: {state.sessionError}</p></div> : null}
+        <HandoffFallbackNotice threadId={thread.id} />
+        <SavingDelayedDialog open={state.savingStatus?.mode === "saving-delayed"} onStopSafely={interactions.onStopSafely} onContinueWithoutSaving={interactions.onContinueWithoutSaving} />
+        <TurnSavingNotice lostProgress={state.lostProgress} />
+        <ChatMessageStage state={state} interactions={interactions} automaticSetup={automaticSetup} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
+        {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
+        <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} setupBlocked={automaticSetup.snapshot.gate === "blocked"} />
+      </OverviewLayer>
     </div>
   );
 }

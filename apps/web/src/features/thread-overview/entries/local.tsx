@@ -1,7 +1,7 @@
 import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { sidePlacement } from "@/components/ui/side-placement";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
+import { OverviewSideMenu } from "@/features/thread-overview/overview-side-menu";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
@@ -140,12 +140,9 @@ function LocalEntry({ thread }: { thread: Thread }) {
         </Button>
       }
     />
-    <PopoverContent
-      {...sidePlacement(localRowRef)}
-      className="w-80 p-0"
-    >
+    <OverviewSideMenu rowRef={localRowRef} className="w-80">
       <ThreadOverviewLocalMenu worktreePath={dirPath} branch={checkoutLabel} />
-    </PopoverContent>
+    </OverviewSideMenu>
   </Popover>);
 }
 

@@ -493,7 +493,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
         />
       </div>
       <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={(item, id) => (
-          <div className={cn("w-full px-4 sm:px-8", item.type === "narrative-row" ? narrativeRowMargin(item.index) : item.type === "tool-row" ? undefined : "py-2")} data-performance-virtual-item-key={isMessageListPerformanceBuild() ? item.key : undefined}>
+          <div className={cn("w-full px-4 sm:px-[var(--chat-gutter,--spacing(8))]", item.type === "narrative-row" ? narrativeRowMargin(item.index) : item.type === "tool-row" ? undefined : "py-2")} data-performance-virtual-item-key={isMessageListPerformanceBuild() ? item.key : undefined}>
             <div className="w-full overflow-x-clip" style={{ paddingRight: props.contentPaddingRight }}>
             <div
               className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0 overflow-x-clip", highlightedKey === id && "animate-flash-highlight")}
