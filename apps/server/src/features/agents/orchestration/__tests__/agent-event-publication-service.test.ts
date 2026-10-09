@@ -15,6 +15,7 @@ async function fixture() {
   const thread = await threads.create(workspace.id, "Publication status", "direct", "main");
   const published: string[] = [];
   const publication = new AgentEventPublicationService({
+    stopSession: async () => undefined,
     threads, pullRequests: { schedule() {} },
     runtime: { getCurrentFileEffectTurnId: () => undefined, shouldSuppressTurnEnded: () => false,
       shouldSuppressTurnComplete: () => false, shouldSuppressTransientTurnError: () => false },

@@ -11,6 +11,7 @@ interface AgentOrchestrationDependencies {
   threadRepo: ThreadRepo;
   pullRequestCompletionEffect: Pick<TurnPullRequestCompletionEffect, "schedule">;
   providerRegistry: IProviderRegistry;
+  stopSession: (threadId: string) => Promise<unknown>;
   publishPermissionRequest: (request: PermissionRequest) => void;
   publishPermissionResolved: (payload: { requestId: string; decision: "allow" | "allow-session" | "deny" | "cancelled"; optionLabel?: string }) => void;
   publishThreadStatus: (payload: { threadId: string; status: "completed" | "errored" | "interrupted" }) => void;
@@ -26,6 +27,7 @@ export function startAgentOrchestration({
   threadRepo,
   pullRequestCompletionEffect,
   providerRegistry,
+  stopSession,
   publishPermissionRequest,
   publishPermissionResolved,
   publishThreadStatus,
@@ -35,6 +37,7 @@ export function startAgentOrchestration({
     threads: threadRepo,
     pullRequests: pullRequestCompletionEffect,
     providers: providerRegistry,
+    stopSession,
     publishPermissionRequest,
     publishPermissionResolved,
     publishThreadStatus,

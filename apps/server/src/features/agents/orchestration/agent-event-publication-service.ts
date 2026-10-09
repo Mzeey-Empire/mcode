@@ -20,6 +20,7 @@ export interface AgentEventPublicationDependencies {
   threads: Pick<ThreadRepo, "updateStatus">;
   pullRequests: Pick<TurnPullRequestCompletionEffect, "schedule">;
   providers: IProviderRegistry;
+  stopSession: (threadId: string) => Promise<unknown>;
   publishPermissionRequest(request: PermissionRequest): void;
   publishPermissionResolved(payload: { requestId: string; decision: "allow" | "allow-session" | "deny" | "cancelled"; optionLabel?: string }): void;
   publishThreadStatus(payload: { threadId: string; status: "completed" | "errored" | "interrupted" }): void;
@@ -34,6 +35,7 @@ export class AgentEventPublicationService {
   start(): void {
     publishAgentPermissionEvents({
       providerRegistry: this.dependencies.providers,
+      stopSession: this.dependencies.stopSession,
       publishPermissionRequest: this.dependencies.publishPermissionRequest,
       publishPermissionResolved: this.dependencies.publishPermissionResolved,
     });
