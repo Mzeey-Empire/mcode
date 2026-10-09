@@ -322,6 +322,11 @@ function createSurfaceRun(repoRoot, receipt, surface) {
 }
 
 /** Creates a unique verifier directory before registration, establishing exclusive ownership. */
+/** The workspace a `workspace.create` result registered, or null when it rejected the folder. */
+function registeredWorkspace(created) {
+  return created?.ok ? created.workspace : null;
+}
+
 export async function createOwnedFixtureWorkspace(socket, repoRoot, receipt) {
   const fixtureRoot = getRuntimePaths(repoRoot).fixtureRepoDir;
   if (!isWithin(receipt.fixtureDirectory, fixtureRoot)) throw new Error("Condition: verifier fixture directory escaped .dev/fixture-repo.");
@@ -333,7 +338,7 @@ export async function createOwnedFixtureWorkspace(socket, repoRoot, receipt) {
   let workspace;
   try {
     const created = await socket.rpc("workspace.create", { name: `Provider completeness ${receipt.runId}`, path: receipt.fixtureDirectory });
-    workspace = created?.ok ? created.workspace : null;
+    workspace = registeredWorkspace(created);
   } catch (error) {
     workspace = await reconcileOwnedFixtureWorkspace(socket, receipt, error);
     if (!workspace) throw error;
