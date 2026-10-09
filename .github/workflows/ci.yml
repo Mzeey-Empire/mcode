@@ -49,6 +49,11 @@ jobs:
             small=ubuntu-24.04
             large=ubuntu-24.04
           fi
+          # Timing-sensitive tests fail on the noisier GitHub runners, so Test
+          # stays on Blacksmith in round-robin until #2020 is fixed.
+          if [ "$MODE" = round-robin ]; then
+            large=blacksmith-4vcpu-ubuntu-2404
+          fi
           echo "small=$small" >> "$GITHUB_OUTPUT"
           echo "large=$large" >> "$GITHUB_OUTPUT"
           echo "PR #$PR_NUMBER ($MODE) runs on $provider: $small, $large" >> "$GITHUB_STEP_SUMMARY"
