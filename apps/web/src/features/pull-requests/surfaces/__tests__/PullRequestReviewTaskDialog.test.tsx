@@ -279,7 +279,7 @@ describe("PullRequestReviewTaskDialog", () => {
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
     await waitFor(() => expect(useCommandPaletteStore.getState().isOpen).toBe(true));
-    expect(useCommandPaletteStore.getState().query).toBe("~/");
+    expect(useCommandPaletteStore.getState().viewStack).toEqual([{ kind: "sources" }]);
   });
 
   it("returns focus to the worktree name after a path collision", async () => {
