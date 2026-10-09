@@ -1458,8 +1458,8 @@ export function createWsTransport(
       rpc<string>("git.commitDiff", { workspaceId, sha, filePath, maxLines }),
     getCommitFiles: (workspaceId, sha) =>
       rpc<string[]>("git.commitFiles", { workspaceId, sha }),
-    getWorkingTreeDiff: (workspaceId, staged, filePath?, maxLines?, threadId?, untracked?) =>
-      rpc<string>("git.workingTreeDiff", { workspaceId, staged, filePath, maxLines, threadId, untracked }),
+    getWorkingTreeDiff: (workspaceId, staged, filePath?, maxLines?, threadId?, untracked?, previousPath?) =>
+      rpc<string>("git.workingTreeDiff", { workspaceId, staged, filePath, maxLines, threadId, untracked, previousPath }),
     readFileAtRef: (workspaceId, ref, filePath, threadId?) =>
       rpc<string>("git.fileAtRef", { workspaceId, ref, filePath, threadId }),
     getBranchDiff: (workspaceId, base?, target?, filePath?, maxLines?, threadId?) =>

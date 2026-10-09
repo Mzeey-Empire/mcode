@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { ReactNode, ReactElement } from "react";
 import type { Thread } from "@/transport/types";
-import type { ProviderUsageInfo, TurnSnapshot } from "@mcode/contracts";
+import type { ProviderUsageInfo, ReviewFileChange, TurnSnapshot } from "@mcode/contracts";
 import { createMockMessage } from "@/__tests__/mocks/transport";
 
 // vi.hoisted runs before vi.mock hoisting, so these are available in mock factories.
@@ -1047,7 +1047,7 @@ describe("resolveThreadOverviewChangeSummary", () => {
       getSnapshotDiffStats: vi.fn().mockResolvedValue([
         { filePath: "src/latest.ts", additions: 8, deletions: 2, changeType: "modified" },
       ]),
-      getReviewComparison: vi.fn().mockResolvedValue({ files: [{ path: "src/manual.ts" }], additions: 0, deletions: 0 }),
+      getReviewComparison: vi.fn().mockResolvedValue({ files: [{ path: "src/manual.ts", previousPath: null, changeType: "modified", binary: false, additions: 0, deletions: 0, untracked: false } satisfies ReviewFileChange], additions: 0, deletions: 0 }),
     });
 
     const result = await resolveThreadOverviewChangeSummary({
@@ -1068,7 +1068,7 @@ describe("resolveThreadOverviewChangeSummary", () => {
   it("counts untracked files before branch comparison", async () => {
     const transport = makeSummaryTransport({
       getReviewComparison: vi.fn().mockResolvedValue({
-        files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 5, deletions: 0, untracked: true }],
+        files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 5, deletions: 0, untracked: true } satisfies ReviewFileChange],
         additions: 5, deletions: 0,
       }),
     });
@@ -1091,7 +1091,7 @@ describe("resolveThreadOverviewChangeSummary", () => {
       }),
       getReviewComparison: vi.fn()
         .mockResolvedValueOnce({ files: [], additions: 0, deletions: 0 })
-        .mockResolvedValueOnce({ files: [{ path: "src/branch.ts" }], additions: 13, deletions: 3 }),
+        .mockResolvedValueOnce({ files: [{ path: "src/branch.ts", previousPath: null, changeType: "modified", binary: false, additions: 13, deletions: 3, untracked: false } satisfies ReviewFileChange], additions: 13, deletions: 3 }),
     });
     const result = await resolveThreadOverviewChangeSummary({
       thread: { id: "thread-1", workspace_id: "ws-1" }, snapshots: [], transport,

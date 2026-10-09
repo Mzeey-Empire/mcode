@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GitRefsListResultSchema, type GitRefsListParams } from "@mcode/contracts";
 import { RealGitExecutor } from "../execution/real-git-executor.js";
 import { GitRepositoryService } from "../git-repository-service.js";
+import { GitComparisonService } from "../git-comparison-service.js";
 import { GitWorktreeService } from "../git-worktree-service.js";
 import { routeGitRpc, type GitRouterDeps } from "../transport/git-rpc.js";
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
@@ -85,6 +86,40 @@ beforeAll(() => {
 afterAll(() => NodeFS.rmSync(directory, { recursive: true, force: true }));
 
 describe("GitRepositoryService.listRefsAt", () => {
+  it("reads Review drafts from the workspace root and rejects foreign persisted threads", { timeout: 30_000 }, async () => {
+    const database = createOwnedTestDatabase();
+    const file = NodePath.join(root, "review-draft.txt");
+    NodeFS.writeFileSync(file, "workspace root\n");
+    try {
+      const workspaceRepo = new WorkspaceRepo(database.db, database.writer);
+      const threadRepo = new ThreadRepo(database.db, database.writer);
+      const workspace = await workspaceRepo.create("Review root", root, true);
+      const other = await workspaceRepo.create("Other checkout", linked, true);
+      const foreign = await threadRepo.create(other.id, "Foreign", "direct", "linked-branch");
+      const deps = {
+        ...routerDeps(workspaceRepo, threadRepo),
+        gitComparison: new GitComparisonService(workspaceRepo, new RealGitExecutor()),
+      };
+      const params = { workspaceId: workspace.id, threadId: "draft-thread" };
+      expect(await routeGitRpc("git.workingTreeDiff", {
+        ...params, staged: false, untracked: true, filePath: "review-draft.txt",
+      }, deps)).toContain("+workspace root");
+      expect(await routeGitRpc("git.reviewState", params, deps)).toMatchObject({
+        isGitRepo: true, branch: "context", uncommitted: { staged: 0, unstaged: 0, untracked: 1 },
+      });
+      expect(await routeGitRpc("git.reviewComparison", { ...params, view: "unstaged" }, deps)).toMatchObject({
+        files: [{ path: "review-draft.txt", untracked: true, additions: 1 }],
+      });
+      const mismatch = { workspaceId: workspace.id, threadId: foreign.id };
+      await expect(routeGitRpc("git.workingTreeDiff", { ...mismatch, staged: false }, deps)).rejects.toThrow(/does not belong/);
+      await expect(routeGitRpc("git.reviewState", mismatch, deps)).rejects.toThrow(/does not belong/);
+      await expect(routeGitRpc("git.reviewComparison", { ...mismatch, view: "unstaged" }, deps)).rejects.toThrow(/does not belong/);
+    } finally {
+      NodeFS.unlinkSync(file);
+      await database.close();
+    }
+  });
+
   it("routes a persisted thread to its linked checkout and rejects another workspace's thread", async () => {
     const database = createOwnedTestDatabase();
     try {

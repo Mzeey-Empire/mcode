@@ -53,12 +53,12 @@ describe("GitComparisonService unified output", () => {
     },
     {
       view: "unstaged",
-      args: ["diff", "--find-renames", "--", "example.txt"],
+      args: ["-c", "diff.autoRefreshIndex=false", "diff", "--find-renames", "--", ":(literal)example.txt"],
       read: (maxLines?: number) => service.readWorkingTreeDiff(workspaceId, false, "example.txt", maxLines),
     },
     {
       view: "staged",
-      args: ["diff", "--find-renames", "--cached", "--", "example.txt"],
+      args: ["-c", "diff.autoRefreshIndex=false", "diff", "--find-renames", "--cached", "--", ":(literal)example.txt"],
       read: (maxLines?: number) => service.readWorkingTreeDiff(workspaceId, true, "example.txt", maxLines),
     },
     {

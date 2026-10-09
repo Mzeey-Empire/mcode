@@ -342,7 +342,7 @@ export function ReviewDiffView({
       const pendingKey = `${scope} ${path}`;
       if (pendingPatches.current.has(pendingKey)) continue;
       pendingPatches.current.add(pendingKey);
-      void loadFileDiff(transport, source, id, path, threadId, file.untracked)
+      void loadFileDiff(transport, source, id, path, threadId, file.untracked, file.previousPath ?? undefined)
         .then((result) => {
           // Responses from a superseded identity land after the scope reset;
           // the scope tag keeps them out of the mounted comparison, and the

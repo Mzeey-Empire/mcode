@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactNode } from "react";
 import type {
   WorkspaceEnvironmentActionRun,
   WorkspaceEnvironmentAutomaticSetupSnapshot,
@@ -69,6 +69,10 @@ vi.mock("@/transport", async (importOriginal) => {
       listSnapshots: vi.fn().mockResolvedValue([]),
       getReviewComparison: mockGetReviewComparison,
       getReviewState: mockGetReviewState,
+      listBranches: vi.fn().mockResolvedValue([
+        { name: "main", shortSha: "abc123", type: "local", isCurrent: true },
+        { name: "feature/other", shortSha: "def456", type: "local", isCurrent: false },
+      ]),
       getBranchComparison: vi.fn().mockResolvedValue(null),
       getRemoteUrl: vi.fn().mockResolvedValue({ label: "repo", webUrl: null }),
       getAutomaticSetup: mockGetAutomaticSetup,
@@ -141,12 +145,6 @@ vi.mock("@/stores/threadStore", () => ({
 vi.mock("@/features/subagents", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/subagents")>()),
   openSubagentsRoster: mockOpenSubagentsPanel,
-}));
-
-vi.mock("@/components/ui/popover", () => ({
-  Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  PopoverTrigger: ({ render }: { render: ReactElement }) => render,
-  PopoverContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -313,6 +311,17 @@ describe("ThreadOverview branchless Create PR", () => {
       workspaceId: "ws-1", threadId: "thread-1", view: "uncommitted",
     });
     expect(mockGetReviewState).not.toHaveBeenCalled();
+  });
+
+  it("keeps branch choices when the uncommitted comparison fails", async () => {
+    mockGetReviewComparison.mockRejectedValue(new Error("Comparison unavailable"));
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={makeThread({ checkout_state: "named" })} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("workspace-menu-branch"));
+    expect(await screen.findByRole("button", { name: "feature/other" })).toBeInTheDocument();
+    expect(screen.getByTestId("thread-overview-current-branch")).toHaveTextContent("main");
+    expect(screen.queryByText("Branches unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Uncommitted:/)).not.toBeInTheDocument();
   });
 
   it("uses the state probe's detached comparison when the worktree is clean", async () => {
@@ -868,11 +877,14 @@ describe("ThreadOverview branchless Create PR", () => {
   });
 
   it("creates a named branch from the branchless worktree row", async () => {
+    const user = userEvent.setup();
     const thread = makeThread({ branch: "release", base_branch: "release" });
     mockWorkspaceState.threads = [thread];
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
-    expect(screen.getByText("HEAD")).toBeInTheDocument();
+    await user.click(screen.getByTestId("thread-overview-local"));
+    expect(await screen.findByText("HEAD")).toBeInTheDocument();
+    await user.click(screen.getByTestId("thread-overview-local"));
     expect(screen.queryByTestId("workspace-menu-branch")).not.toBeInTheDocument();
     expect(screen.queryByTestId("workspace-menu-create-pr")).not.toBeInTheDocument();
     expect(screen.getByTestId("workspace-menu-commit")).toBeDisabled();

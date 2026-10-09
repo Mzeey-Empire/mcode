@@ -131,19 +131,25 @@ export class GitComparisonService {
     maxLines?: number,
     repoPath?: string,
     untracked = false,
+    previousPath?: string,
   ): Promise<string> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
-    const args = ["-C", cwd, "diff", "--find-renames"];
+    // Patch output can refresh index stats even with optional locks disabled.
+    const args = ["-C", cwd, "-c", "diff.autoRefreshIndex=false", "diff", "--find-renames"];
     if (staged) args.push("--cached");
-    if (filePath) args.push("--", untracked ? `:(literal)${filePath}` : filePath);
+    if (filePath) {
+      args.push("--", `:(literal)${filePath}`);
+      if (previousPath) args.push(`:(literal)${previousPath}`);
+    }
     if (untracked && !staged) {
       return this.withIntentToAddIndex(cwd, async (env) => {
+        if (filePath && await isMissingReviewFile(cwd, filePath)) return "";
         const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000, env });
         return truncateUnifiedDiff(stdout, maxLines);
       }, filePath);
     }
     try {
-      const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
+      const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000, env: { GIT_OPTIONAL_LOCKS: "0" } });
       return truncateUnifiedDiff(stdout, maxLines);
     } catch {
       return "";
@@ -224,29 +230,44 @@ export class GitComparisonService {
     const args = ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"];
     if (filePath) args.push("--", `:(literal)${filePath}`);
     const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
-    const paths = stdout.split("\0").filter(Boolean);
-    assertReviewComparisonFileCount(paths.length);
+    const entries = stdout.split("\0").filter(Boolean);
+    assertReviewComparisonFileCount(entries.length);
+    const paths = entries.filter((path) => !path.endsWith("/"));
+    const directories = entries.filter((path) => path.endsWith("/"));
     const index = await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--git-path", "index"]);
     const source = NodePath.resolve(cwd, index.stdout.trim());
     const temporary = NodePath.join(NodePath.dirname(source), `mcode-review-index-${NodeCrypto.randomUUID()}`);
-    const env = { GIT_INDEX_FILE: temporary };
+    const env = { GIT_INDEX_FILE: temporary, GIT_OPTIONAL_LOCKS: "0" };
     try {
       await this.copyReviewIndex(cwd, source, temporary, env);
-      for (const batch of batchReviewPaths(paths)) {
-        await this.gitExecutor.exec(["-C", cwd, "add", "-N", "--", ...batch], { env, timeout: 10_000 });
-      }
+      if (paths.length) await this.addReviewUntracked(cwd, env, directories, filePath);
       return await run(env, new Set(paths));
     } catch (error) {
       if (error instanceof ReviewComparisonError || isReviewComparisonLimitError(error)) throw error;
       throw new ReviewComparisonError("Could not read Review comparison", gitErrorDetail(error));
     } finally {
-      await NodeFSPromises.unlink(temporary).catch((error: unknown) => {
+      for (const path of [temporary, `${temporary}.lock`]) await NodeFSPromises.unlink(path).catch((error: unknown) => {
         // Cleanup must preserve both successful comparisons and the original Git failure.
         if (!hasErrorCode(error, "ENOENT")) {
-          logger.warn("[withIntentToAddIndex] Failed to remove temporary index", { path: temporary, err: error });
+          logger.warn("[withIntentToAddIndex] Failed to remove temporary index", { path, err: error });
         }
       });
     }
+  }
+
+  private async addReviewUntracked(cwd: string, env: NodeJS.ProcessEnv, directories: string[], filePath?: string): Promise<void> {
+    let pathspecs = filePath ? [`:(literal)${filePath}`] : ["."];
+    if (!filePath) {
+      // A broad add would replace unmerged stages, hiding the conflict in Review.
+      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "ls-files", "--unmerged", "-z"], { env, timeout: 10_000 });
+      const conflicts = stdout.split("\0").filter(Boolean).map((entry) => entry.slice(entry.indexOf("\t") + 1));
+      pathspecs = [...pathspecs, ...new Set([...directories, ...conflicts].map((path) => `:(exclude,literal)${path}`))];
+    }
+    // Deleted tracked paths must remain in the index for rename detection.
+    await this.gitExecutor.exec(["-C", cwd, "add", "-N", "--ignore-removal", "--", ...pathspecs], { env, timeout: 10_000 })
+      .catch(async (error: unknown) => {
+        if (!filePath || !await isMissingReviewFile(cwd, filePath)) throw error;
+      });
   }
 
   private async copyReviewIndex(cwd: string, source: string, temporary: string, env: NodeJS.ProcessEnv): Promise<void> {
@@ -274,10 +295,9 @@ export class GitComparisonService {
     const status = parseReviewStatus(stdout);
     if (!status.head) return { isGitRepo: true, ...status, commitsAhead: null, branchDefault: { unavailable: "unborn" } };
     const base = await this.resolveCommitListBase(cwd, status.branch ?? "HEAD", undefined);
-    const commitsAhead = base ? {
-      base,
-      count: Number((await this.gitExecutor.exec(["-C", cwd, "rev-list", "--count", `${base}..HEAD`], { timeout: 10_000 })).stdout.trim()),
-    } : null;
+    const commitsAhead = base ? await this.gitExecutor.exec(
+      ["-C", cwd, "rev-list", "--count", `${base}..HEAD`], { timeout: 10_000 },
+    ).then(({ stdout }) => ({ base, count: Number(stdout.trim()) }), () => null) : null;
     const selection = await this.selectBranchComparison(cwd, savedBaseBranch);
     const branchDefault = selection.isComparisonAvailable && selection.base && selection.target
       ? { compare: selection.target, base: selection.base }
@@ -309,7 +329,7 @@ export class GitComparisonService {
     return stdout.trim();
   }
 
-  private async runReviewComparison(cwd: string, range: readonly string[], env?: NodeJS.ProcessEnv, untracked: ReadonlySet<string> = new Set()): Promise<ReviewComparison> {
+  private async runReviewComparison(cwd: string, range: readonly string[], env: NodeJS.ProcessEnv = { GIT_OPTIONAL_LOCKS: "0" }, untracked: ReadonlySet<string> = new Set()): Promise<ReviewComparison> {
     // Both children must settle before the temporary index is removed.
     const results = await Promise.allSettled([
       this.gitExecutor.exec(
@@ -603,22 +623,11 @@ function gitErrorDetail(error: unknown): string {
   return String(error);
 }
 
-function batchReviewPaths(paths: readonly string[]): string[][] {
-  const batches: string[][] = [];
-  let batch: string[] = [];
-  let chars = 0;
-  for (const path of paths) {
-    const literal = `:(literal)${path}`;
-    if (batch.length >= 128 || chars + literal.length > 20_000) {
-      batches.push(batch);
-      batch = [];
-      chars = 0;
-    }
-    batch.push(literal);
-    chars += literal.length;
-  }
-  if (batch.length) batches.push(batch);
-  return batches;
+async function isMissingReviewFile(cwd: string, filePath: string): Promise<boolean> {
+  return NodeFSPromises.lstat(NodePath.resolve(cwd, filePath)).then(() => false, (error: unknown) => {
+    if (hasErrorCode(error, "ENOENT")) return true;
+    throw error;
+  });
 }
 
 function parsePerFileNumstat(stdout: string): Map<string, { additions: number | null; deletions: number | null }> {

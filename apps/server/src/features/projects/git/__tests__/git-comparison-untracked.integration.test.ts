@@ -17,7 +17,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...actual, copyFile: vi.fn(actual.copyFile), unlink: vi.fn(actual.unlink) };
 });
 
-describe("Review comparisons with the real Git index", () => {
+describe("Review comparisons with the real Git index", { timeout: 30_000 }, () => {
   let owned: OwnedTestDatabase;
   let repo: WorkspaceRepo;
   let cwd: string;
@@ -79,6 +79,96 @@ describe("Review comparisons with the real Git index", () => {
       expect((await read(view)).files).toEqual([
         { path: "new.txt", previousPath: "old.txt", changeType: "renamed", binary: false, additions: 0, deletions: 0, untracked: true },
       ]);
+    }
+    const patch = await service.readWorkingTreeDiff("fixture", false, "new.txt", undefined, cwd, true, "old.txt");
+    expect(patch).toContain("similarity index 100%\nrename from old.txt\nrename to new.txt");
+    expect(patch).not.toContain("new file mode");
+  });
+
+  it.each([false, true])("excludes an embedded repository with a commit: %s", async (committed) => {
+    const nested = NodePath.join(cwd, "[nested]");
+    NodeFS.mkdirSync(nested);
+    git("-C", nested, "init", "-b", "main");
+    NodeFS.writeFileSync(NodePath.join(nested, "inner.txt"), "nested\n");
+    if (committed) {
+      git("-C", nested, "add", ".");
+      git("-C", nested, "-c", "user.name=Test", "-c", "user.email=test@example.test", "-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "nested");
+    }
+    write("visible.txt", "visible\n");
+    for (const view of ["unstaged", "uncommitted"] as const) {
+      expect((await read(view)).files).toEqual([
+        { path: "visible.txt", previousPath: null, changeType: "added", binary: false, additions: 1, deletions: 0, untracked: true },
+      ]);
+    }
+  });
+
+  it.each([false, true])("tolerates an untracked file removed after listing, single file: %s", async (singleFile) => {
+    write("gone.txt", "gone\n");
+    let adds = 0;
+    service = new GitComparisonService(repo, {
+      exec: async (args, options) => {
+        if (args.includes("add")) {
+          adds++;
+          NodeFS.unlinkSync(NodePath.join(cwd, "gone.txt"));
+        }
+        return executor.exec(args, options);
+      },
+    });
+    if (singleFile) {
+      expect(await service.readWorkingTreeDiff("fixture", false, "gone.txt", undefined, cwd, true)).toBe("");
+      expect(await service.readWorkingTreeDiff("fixture", false, "gone.txt", undefined, cwd, true)).toBe("");
+    } else {
+      expect(await read("unstaged")).toEqual({ files: [], additions: 0, deletions: 0 });
+    }
+    expect(adds).toBe(1);
+    expect(indexHash()).toBeNull();
+    expect(temporaryIndexes()).toEqual([]);
+  });
+
+  it("adds a large untracked set in one command without staging tracked edits", async () => {
+    write("tracked.txt", "base\n");
+    commit();
+    write("tracked.txt", "base\nedit\n");
+    for (let index = 0; index < 130; index++) write(`new-${index}.txt`, "new\n");
+    let adds = 0;
+    service = new GitComparisonService(repo, {
+      exec: (args, options) => {
+        if (args.includes("add")) adds++;
+        return executor.exec(args, options);
+      },
+    });
+    const comparison = await read("unstaged");
+    expect(comparison.files).toHaveLength(131);
+    expect(comparison.additions).toBe(131);
+    expect(comparison.deletions).toBe(0);
+    expect(comparison.files.find((file) => file.path === "tracked.txt")).toMatchObject({ additions: 1, deletions: 0, untracked: false });
+    expect(adds).toBe(1);
+    expect(git("diff", "--cached")).toBe("");
+  });
+
+  it("returns an empty rename patch when its untracked destination has disappeared", async () => {
+    write("old.txt", "base\n");
+    commit();
+    NodeFS.unlinkSync(NodePath.join(cwd, "old.txt"));
+    const before = indexHash();
+    expect(await service.readWorkingTreeDiff("fixture", false, "new.txt", undefined, cwd, true, "old.txt")).toBe("");
+    expect(indexHash()).toBe(before);
+    expect(temporaryIndexes()).toEqual([]);
+  });
+
+  it("preserves the real index stat cache after touching a tracked file", async () => {
+    write("tracked.txt", "base\n");
+    commit();
+    const before = indexHash();
+    const later = new Date(Date.now() + 60_000);
+    NodeFS.utimesSync(NodePath.join(cwd, "tracked.txt"), later, later);
+    for (const view of ["unstaged", "staged", "uncommitted"] as const) {
+      expect(await read(view)).toEqual({ files: [], additions: 0, deletions: 0 });
+      expect(indexHash(), view).toBe(before);
+    }
+    for (const staged of [false, true]) {
+      expect(await service.readWorkingTreeDiff("fixture", staged, "tracked.txt", undefined, cwd)).toBe("");
+      expect(indexHash(), `working-tree staged=${staged}`).toBe(before);
     }
   });
 
@@ -143,11 +233,14 @@ describe("Review comparisons with the real Git index", () => {
     commit();
     expect(() => git("merge", "other")).toThrow();
     expect(git("status", "--porcelain")).toBe("UU conflict.txt");
+    write("notes.md", "notes\n");
     expect((await read("unstaged")).files).toEqual([
       { path: "conflict.txt", previousPath: null, changeType: "modified", binary: false, additions: 4, deletions: 0, untracked: false },
+      { path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 1, deletions: 0, untracked: true },
     ]);
     expect((await read("uncommitted")).files).toEqual([
       { path: "conflict.txt", previousPath: null, changeType: "modified", binary: false, additions: 4, deletions: 0, untracked: false },
+      { path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 1, deletions: 0, untracked: true },
     ]);
   });
 
@@ -180,6 +273,35 @@ describe("Review comparisons with the real Git index", () => {
     };
     service = new GitComparisonService(repo, boundary);
     await expect(read("unstaged")).rejects.toMatchObject({ kind: "git-error" });
+  });
+
+  it("cleans the temporary index and lock after add times out", async () => {
+    write("notes.md", "notes\n");
+    service = new GitComparisonService(repo, {
+      exec: async (args, options) => {
+        if (args.includes("add")) {
+          const temporary = options?.env?.GIT_INDEX_FILE;
+          if (!temporary) throw new Error("Expected a temporary index");
+          NodeFS.writeFileSync(`${temporary}.lock`, "partial index");
+          throw Object.assign(new Error("Git timed out"), { killed: true });
+        }
+        return executor.exec(args, options);
+      },
+    });
+    await expect(read("unstaged")).rejects.toMatchObject({ kind: "git-error" });
+  });
+
+  it("keeps dirty counts when origin/HEAD points to a missing ref", async () => {
+    write("tracked.txt", "base\n");
+    commit();
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    write("tracked.txt", "changed\n");
+    write("notes.md", "notes\n");
+    expect(await service.readReviewState("fixture", cwd)).toEqual({
+      isGitRepo: true, head: git("rev-parse", "HEAD"), branch: "main",
+      uncommitted: { staged: 0, unstaged: 1, untracked: 1 }, commitsAhead: null,
+      branchDefault: { base: "main", compare: "origin/main" },
+    });
   });
 
   it("counts untracked-only and staged-only trees as dirty without refreshing the real index", async () => {

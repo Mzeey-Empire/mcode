@@ -943,6 +943,7 @@ export const WS_METHODS = lazySchema(() => ({
       staged: z.boolean(),
       untracked: z.boolean().optional(),
       filePath: z.string().optional(),
+      previousPath: z.string().optional(),
       maxLines: z.number().int().positive().optional(),
       threadId: z.string().optional(),
     }),

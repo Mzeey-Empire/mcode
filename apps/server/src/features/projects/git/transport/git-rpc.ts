@@ -128,8 +128,9 @@ const gitHandlers: GitHandlerMap = {
         params.staged,
         params.filePath,
         params.maxLines,
-        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
         params.untracked,
+        params.previousPath,
       )
       : "",
   // Hydration needs the real old/new contents; a soft "" here would let the
@@ -169,7 +170,7 @@ const gitHandlers: GitHandlerMap = {
   },
   "git.reviewState": (deps, params) => {
     if (!isGitWorkspace(deps, params.workspaceId)) return { isGitRepo: false };
-    const cwd = resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId);
+    const cwd = resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true);
     const thread = params.threadId ? deps.threadRepo.findById(params.threadId) : null;
     return deps.gitComparison.readReviewState(params.workspaceId, cwd,
       thread?.checkout_state === "branchless" ? thread.base_branch ?? thread.branch : null);
@@ -180,7 +181,7 @@ const gitHandlers: GitHandlerMap = {
         params.workspaceId,
         params.view,
         { base: params.base, target: params.target, sha: params.sha },
-        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId),
+        resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId, true),
       )
       : { files: [], additions: 0, deletions: 0 },
   "git.push": routeGitPush,
@@ -249,12 +250,15 @@ function resolveWorkspaceRepoPath(
   deps: GitRouterDeps,
   workspaceId: string,
   threadId?: string,
+  allowDraftThread = false,
 ): string {
   const workspace = deps.workspaceService.findById(workspaceId);
   if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
   if (!threadId) return workspace.path;
 
   const thread = deps.threadRepo.findById(threadId);
+  // Review can open before the composer persists its draft thread.
+  if (!thread && allowDraftThread) return workspace.path;
   if (!thread) throw new Error(`Thread not found: ${threadId}`);
   if (thread.workspace_id !== workspaceId) {
     throw new Error(`Thread ${threadId} does not belong to workspace ${workspaceId}`);

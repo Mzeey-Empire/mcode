@@ -52,6 +52,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ReviewDiffView refresh", () => {
+  it("fetches both paths when an untracked file is a rename", async () => {
+    transport.getWorkingTreeDiff.mockResolvedValue("diff --git a/old.txt b/file.txt\nsimilarity index 100%\nrename from old.txt\nrename to file.txt\n");
+    render(<ReviewDiffView {...props} files={[{
+      path: "file.txt", previousPath: "old.txt", changeType: "renamed", binary: false,
+      additions: 0, deletions: 0, untracked: true,
+    }]} />);
+    await waitFor(() => expect(transport.getWorkingTreeDiff).toHaveBeenCalledWith(
+      "workspace-fixture", false, "file.txt", undefined, "thread-fixture", true, "old.txt",
+    ));
+    await waitFor(() => expect(screen.getByTestId("items").textContent).toContain("old.txt"));
+  });
+
   it("refetches an expanded file when cacheVersion changes", async () => {
     const view = render(<ReviewDiffView {...props} />);
     await waitFor(() =>

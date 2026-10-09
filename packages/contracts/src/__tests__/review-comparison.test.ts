@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { ReviewComparisonSchema } from "../models/review-comparison.js";
+import { WS_METHODS } from "../ws/methods.js";
 
 describe("ReviewComparisonSchema", () => {
+  it("preserves both literal rename paths in a working-tree request", () => {
+    const params = {
+      workspaceId: "workspace", threadId: "draft", staged: false, untracked: true,
+      filePath: "new[1].txt", previousPath: "old[1].txt",
+    };
+    expect(WS_METHODS()["git.workingTreeDiff"].params.parse(params)).toEqual(params);
+  });
   it("accepts batched rename and binary metadata", () => {
     const result = ReviewComparisonSchema().parse({
       files: [

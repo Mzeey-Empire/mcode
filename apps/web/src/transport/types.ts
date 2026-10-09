@@ -777,7 +777,7 @@ export interface McodeTransport {
   /** Get the list of files changed in a specific git commit. */
   getCommitFiles(workspaceId: string, sha: string): Promise<string[]>;
   /** Get the unified diff for the working tree (staged or unstaged), optionally per file. Pass threadId to read the thread's worktree. */
-  getWorkingTreeDiff(workspaceId: string, staged: boolean, filePath?: string, maxLines?: number, threadId?: string, untracked?: boolean): Promise<string>;
+  getWorkingTreeDiff(workspaceId: string, staged: boolean, filePath?: string, maxLines?: number, threadId?: string, untracked?: boolean, previousPath?: string): Promise<string>;
   /** Read a file's contents at a revision. `ref` follows `git show` rules; "" reads the staged index blob and "A...B" reads at the merge base. Pass threadId to read the thread's worktree. Rejects when the ref or file is absent. */
   readFileAtRef(workspaceId: string, ref: string, filePath: string, threadId?: string): Promise<string>;
   /** Get the unified diff between two refs (`base...target`, three-dot), optionally per file. Omit base/target to use the detected default branch → HEAD. Pass threadId to read the thread's worktree. */

@@ -75,14 +75,14 @@ function useThreadOverviewBranchState(thread: Thread, open: boolean): LoadedBran
       try {
         const [branches, comparison] = await Promise.all([
           getTransport().listBranches(thread.workspace_id),
-          getTransport().getReviewComparison({ workspaceId: thread.workspace_id, view: "uncommitted", threadId: thread.id }),
+          getTransport().getReviewComparison({ workspaceId: thread.workspace_id, view: "uncommitted", threadId: thread.id }).catch(() => null),
         ]);
 
         if (cancelled) return;
         setLoaded({
           status: "ready",
           branches,
-          uncommittedFiles: comparison.files.length,
+          uncommittedFiles: comparison?.files.length ?? null,
         });
       } catch {
         if (!cancelled) setLoaded((previous) => ({ ...previous, status: "error" }));
