@@ -462,7 +462,8 @@ nothing left to hold in place.
 **The rule.** When a turn settles, `ThreadTranscript` compares the previous and
 next rows. If the reading anchor was a narrative or tool row of the settling
 turn, it opens that turn's fold in the same render, so the rows stay mounted
-under the anchor. Fold duration also comes from the canonical turn summary,
+under the anchor. That fold stays open for this visit only. Scroll memory
+leaves it out unless the user toggles it. Fold duration also comes from the canonical turn summary,
 not from a clock sampled in the client, so the label never re-samples on
 replay.
 
