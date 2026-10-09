@@ -80,7 +80,9 @@ export function SegmentedControl({
     activeIndex !== -1 && !options[activeIndex]?.disabled ? activeIndex : options.findIndex((option) => !option.disabled);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const next = nextEnabledIndex(options, activeIndex, event.key);
+    // Move from the focused segment: with a disabled choice, focus sits on a different segment than the value.
+    const focusedIndex = segmentRefs.current.findIndex((segment) => segment === document.activeElement);
+    const next = nextEnabledIndex(options, focusedIndex !== -1 ? focusedIndex : activeIndex, event.key);
     const option = next === null ? undefined : options[next];
     if (next === null || option === undefined) return;
     event.preventDefault();
