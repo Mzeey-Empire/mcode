@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 import type { ReactNode } from "react";
-import type { StoredAttachment, WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
+import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
 
 // Store mocks must be declared before importing the component under test.
 
@@ -206,7 +206,7 @@ vi.mock("@/components/chat/cli-error", () => ({
   isCliError: () => false,
 }));
 
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useWorkspaceStore, type QueuedMessageParts } from "@/features/projects/state/workspaceStore";
 import { useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { createMockMessage } from "@/__tests__/mocks/transport";
@@ -300,7 +300,7 @@ function recoveryIncident(
 function defaultWorkspaceState(overrides: Partial<{
   activeThreadId: string | null;
   threads: Thread[];
-  pendingStartupByThreadId: Record<string, { startupId: string; context: "new-direct" | "new-worktree" | "new-existing-worktree" | "branch-direct" | "branch-worktree" | "branch-existing-worktree"; queuedMessage: string; queuedAttachments?: StoredAttachment[] }>;
+  pendingStartupByThreadId: Record<string, { startupId: string; context: "new-direct" | "new-worktree" | "new-existing-worktree" | "branch-direct" | "branch-worktree" | "branch-existing-worktree"; queuedMessage: string; queuedMessageParts?: QueuedMessageParts }>;
   updateThreadTitle: ReturnType<typeof vi.fn>;
 }> = {}) {
   const thread = makeThread();
@@ -845,7 +845,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByTestId("message-list")).not.toBeInTheDocument();
   });
 
-  it("draws the first message's attachments in the preparing bubble", () => {
+  it.each([
+    { queuedMessage: "Review this spec", shown: "Review this spec" },
+    { queuedMessage: "", shown: undefined },
+  ])("draws the first message as the durable bubble will, text $queuedMessage", ({ queuedMessage, shown }) => {
     const thread = { ...makeThread({ id: "thread-with-attachment", mode: "worktree", worktree_managed: true }), clientPreparing: true };
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: thread.id,
@@ -854,8 +857,13 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
         [thread.id]: {
           startupId: "00000000-0000-4000-8000-000000000031",
           context: "new-worktree",
-          queuedMessage: "Review this spec",
-          queuedAttachments: [{ id: "att-1", name: "design-notes.pdf", mimeType: "application/pdf", sizeBytes: 2_048 }],
+          queuedMessage,
+          queuedMessageParts: {
+            attachments: [{ id: "att-1", name: "design-notes.pdf", mimeType: "application/pdf", sizeBytes: 2_048 }],
+            mentions: null,
+            previewAnnotations: null,
+            selectedTextComments: null,
+          },
         },
       },
     }));
@@ -864,8 +872,11 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     render(<ChatView />);
 
     const shell = screen.getByTestId("thread-preparing-shell");
-    expect(within(shell).getByText("Review this spec")).toBeInTheDocument();
     expect(within(shell).getByText("design-notes.pdf")).toBeInTheDocument();
+    const bubble = shell.querySelector<HTMLElement>(`[data-message-id="preparing-${thread.id}"]`);
+    expect(bubble).not.toBeNull();
+    if (shown) expect(within(bubble!).getByText(shown)).toBeInTheDocument();
+    expect(within(bubble!).queryByText(thread.title)).toBeNull();
   });
 
   it("keeps the preparing shell through the optimistic-to-persisted startup handoff", async () => {

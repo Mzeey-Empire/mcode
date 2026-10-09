@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { Bug, GitFork, Hammer, SearchCode, ScanSearch } from "lucide-react";
-import type { Message, RecoveryIncident, SelectedTextComment, StoredAttachment, ThreadStartupKind } from "@mcode/contracts";
+import type { Message, RecoveryIncident, SelectedTextComment, ThreadStartupKind } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Notice } from "@/components/ui/notice";
@@ -292,7 +292,7 @@ function PreparingThreadSurface({
       <ThreadHeader state={state} />
       <div className="min-h-0 flex-1 overflow-y-auto pt-4">
         <PreparingTranscriptRow>
-          <MessageBubble message={preparingUserMessage(thread, pendingStartup?.queuedMessage || thread.title, pendingStartup?.queuedAttachments)} />
+          <MessageBubble message={preparingUserMessage(thread, pendingStartup)} />
         </PreparingTranscriptRow>
         <PreparingTranscriptRow>
           {thread.clientError && !showsAuthoritativeCancellation(thread, startup)
@@ -305,20 +305,22 @@ function PreparingThreadSurface({
   );
 }
 
-// The durable bubble's footer and attachment rows add height, so the preparing surface draws the same bubble to keep the trail still at hand-off.
-function preparingUserMessage(thread: WorkspaceThread, content: string, attachments: readonly StoredAttachment[] = []): Message {
+// The durable bubble's footer and message parts add height, so the preparing surface draws the same bubble to keep the trail still at hand-off.
+function preparingUserMessage(thread: WorkspaceThread, pendingStartup: PendingStartup | undefined): Message {
   return {
     id: `preparing-${thread.id}`,
     thread_id: thread.id,
     role: "user",
-    content,
+    // An attachment-only first message has empty text, and the durable bubble keeps it empty.
+    content: pendingStartup ? pendingStartup.queuedMessage : thread.title,
     tool_calls: null,
     files_changed: null,
     cost_usd: null,
     tokens_used: null,
     timestamp: thread.created_at,
     sequence: 0,
-    attachments: attachments.length > 0 ? [...attachments] : null,
+    attachments: null,
+    ...pendingStartup?.queuedMessageParts,
   };
 }
 
