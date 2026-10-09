@@ -33,17 +33,17 @@ export interface ComposerOptionControlsProps {
 }
 
 const ACCESS_MODES: ReadonlyArray<AccessModeOption & { id: ComposerAccessMode }> = [
-  { id: "supervised", label: "Manual", icon: Eye },
-  { id: "automatic", label: "Auto", icon: ShieldCheck },
-  { id: "full", label: "Full access", icon: KeyRound },
+  { id: "supervised", label: "Ask me", icon: Eye },
+  { id: "automatic", label: "Approve for me", icon: ShieldCheck },
+  { id: "full", label: "Don't ask", icon: KeyRound },
 ];
 
 function isAccessModeDisabled(accessMode: ComposerAccessMode, permissionLocked: boolean): boolean {
   return permissionLocked && accessMode !== "full";
 }
 
-/** Why a locked provider dims every mode except Full access. */
-const PERMISSION_LOCKED_REASON = "This provider only runs with Full access";
+/** Why a locked provider dims every mode except Don't ask. */
+const PERMISSION_LOCKED_REASON = "This provider runs without approval prompts";
 
 /** Compact access-mode menu; renders generic or provider-native options. */
 export function AccessModeSelector({

@@ -46,14 +46,14 @@ describe("ComposerAccessControls", () => {
   it("marks the selected mode with the neutral menu check, never the primary colour", async () => {
     renderControls();
 
-    await openPicker(/Access mode: Manual/);
+    await openPicker(/Access mode: Ask me/);
 
     const rows = screen.getAllByRole("menuitemradio");
-    expect(rows.map((row) => row.textContent)).toEqual(["Manual", "Auto", "Full access"]);
-    const manual = screen.getByRole("menuitemradio", { name: "Manual" });
-    expect(manual).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("menuitemradio", { name: "Full access" })).toHaveAttribute("aria-checked", "false");
-    const check = manual.querySelector("svg.text-ink");
+    expect(rows.map((row) => row.textContent)).toEqual(["Ask me", "Approve for me", "Don't ask"]);
+    const askMe = screen.getByRole("menuitemradio", { name: "Ask me" });
+    expect(askMe).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemradio", { name: "Don't ask" })).toHaveAttribute("aria-checked", "false");
+    const check = askMe.querySelector("svg.text-ink");
     expect(check).not.toBeNull();
     expect(screen.getByRole("menu").innerHTML).not.toMatch(/primary/);
   });
@@ -65,53 +65,53 @@ describe("ComposerAccessControls", () => {
     });
 
     expect(screen.getAllByRole("button")).toHaveLength(1);
-    const user = await openPicker(/Access mode: Manual/);
-    expect(screen.queryByRole("menuitemradio", { name: "Auto" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("menuitemradio", { name: "Full access" }));
+    const user = await openPicker(/Access mode: Ask me/);
+    expect(screen.queryByRole("menuitemradio", { name: "Approve for me" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitemradio", { name: "Don't ask" }));
 
     expect(onSelectionChange).toHaveBeenCalledWith({ permissionMode: "full", approvalReviewMode: "manual" });
   });
 
-  it("dims locked modes with the reason and keeps Full access available", async () => {
+  it("dims locked modes with the reason and keeps Don't ask available", async () => {
     const onSelectionChange = renderControls({
       selection: { ...selection, provider: "copilot", permissionMode: "full" },
       permissionLocked: true,
       approvalReviewSupported: false,
     });
 
-    const user = await openPicker(/Access mode: Full access/);
+    const user = await openPicker(/Access mode: Don't ask/);
 
-    const manual = screen.getByRole("menuitemradio", { name: "Manual" });
-    expect(manual).toHaveAttribute("aria-disabled", "true");
-    expect(manual).toHaveAccessibleDescription("This provider only runs with Full access");
-    await user.click(manual);
+    const askMe = screen.getByRole("menuitemradio", { name: "Ask me" });
+    expect(askMe).toHaveAttribute("aria-disabled", "true");
+    expect(askMe).toHaveAccessibleDescription("This provider runs without approval prompts");
+    await user.click(askMe);
     expect(onSelectionChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("menuitemradio", { name: "Full access" })).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitemradio", { name: "Don't ask" })).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it.each([
-    ["Manual", { permissionMode: "supervised", approvalReviewMode: "manual" }],
-    ["Auto", { permissionMode: "supervised", approvalReviewMode: "automatic" }],
-    ["Full access", { permissionMode: "full", approvalReviewMode: "manual" }],
+    ["Ask me", { permissionMode: "supervised", approvalReviewMode: "manual" }],
+    ["Approve for me", { permissionMode: "supervised", approvalReviewMode: "automatic" }],
+    ["Don't ask", { permissionMode: "full", approvalReviewMode: "manual" }],
   ] as const)("maps %s to one atomic turn selection", async (label, patch) => {
     const onSelectionChange = renderControls();
 
-    const user = await openPicker(/Access mode: Manual/);
+    const user = await openPicker(/Access mode: Ask me/);
     await user.click(screen.getByRole("menuitemradio", { name: label }));
 
     expect(onSelectionChange).toHaveBeenCalledWith(patch);
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
   });
 
-  it.each([["inline", true], ["menu", false]] as const)("shows only Manual and Full access in the %s control when the provider does not support approval review", async (_surface, showInlineOptions) => {
+  it.each([["inline", true], ["menu", false]] as const)("shows only Ask me and Don't ask in the %s control when the provider does not support approval review", async (_surface, showInlineOptions) => {
     renderControls({ approvalReviewSupported: false, showInlineOptions });
 
-    await openPicker(/Access mode: Manual/);
+    await openPicker(/Access mode: Ask me/);
 
-    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["Manual", "Full access"]);
+    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["Ask me", "Don't ask"]);
   });
 
-  it("updates the picker when switching from an Auto provider to a provider without Auto", async () => {
+  it("updates the picker when the provider stops offering Approve for me", async () => {
     const onSelectionChange = vi.fn();
     const { rerender } = render(
       <ComposerAccessControls
@@ -125,7 +125,7 @@ describe("ComposerAccessControls", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /Access mode: Auto/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Access mode: Approve for me/ })).toBeInTheDocument();
     rerender(
       <ComposerAccessControls
         selection={{ ...selection, approvalReviewMode: "automatic" }}
@@ -137,9 +137,9 @@ describe("ComposerAccessControls", () => {
         onSelectionTouched={vi.fn()}
       />,
     );
-    await openPicker(/Access mode: Manual/);
+    await openPicker(/Access mode: Ask me/);
 
-    expect(screen.queryByRole("menuitemradio", { name: "Auto" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "Approve for me" })).not.toBeInTheDocument();
   });
 
   it.each([
