@@ -730,7 +730,8 @@ function UserMessageActions({
   onBranch?: (messageId: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-1.5">
+    // The row holds its button height even when empty, so a bubble that gains Fork, such as a preparing message becoming durable, does not grow.
+    <div className={cn("flex items-center gap-1.5", interactive && "min-h-7")}>
       {interactive && onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
       {interactive && displayText.trim() && <CopyButton content={displayText} />}
     </div>
