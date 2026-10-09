@@ -23,6 +23,7 @@ export type AgentEventHandlerTable = {
 /** Narrow store operations needed to validate one agent event. */
 export interface AgentEventPreflightContext {
   clearApiRetry: (threadId: string) => void;
+  clearRateLimit: (threadId: string) => void;
   acceptPublication?: (event: AgentEvent) => boolean;
   flushPendingTextDeltas: () => void;
   getCurrentThreadId: () => string | null;
@@ -128,9 +129,12 @@ function isActiveThread(
     || (currentThreadId === null && runningThreadIds.size === 0);
 }
 
-function clearSupersededApiRetry(context: AgentEventPreflightContext, event: AgentEvent): void {
+/** Any other event proves the provider moved on, so the retry holding state ends with it. */
+function clearSupersededRetryState(context: AgentEventPreflightContext, event: AgentEvent): void {
   if (event.type === "apiRetry") return;
-  if (context.getRecord(event.threadId).apiRetry) context.clearApiRetry(event.threadId);
+  const record = context.getRecord(event.threadId);
+  if (record.apiRetry) context.clearApiRetry(event.threadId);
+  if (event.type !== "rateLimited" && record.rateLimit) context.clearRateLimit(event.threadId);
 }
 
 /** Validates ordering and runs shared event sequencing before per-type projection. */
@@ -154,7 +158,7 @@ export function prepareAgentEvent(
     runningThreadIds,
   );
   sequencesLifecycle(context, event, activeThread);
-  clearSupersededApiRetry(context, event);
+  clearSupersededRetryState(context, event);
   return { incomingExecutionId, isActiveThread: activeThread, runtimeActive, runtimeRecord };
 }
 

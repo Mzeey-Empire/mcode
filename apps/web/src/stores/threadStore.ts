@@ -4240,6 +4240,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         ? stableAgentEventPublications.acceptCanonical(incoming, canonicalPublication)
         : stableAgentEventPublications.accept(incoming, getRec(incoming.threadId).canonicalAgent.progress?.epoch),
       clearApiRetry: (id) => patchRec(id, { apiRetry: undefined }),
+      clearRateLimit: (id) => patchRec(id, { rateLimit: undefined }),
       flushPendingTextDeltas,
       getCurrentThreadId: () => get().currentThreadId,
       getRecord: getRec,
