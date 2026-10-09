@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ChevronDown, Lock, Star } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerTab } from "@/components/ui/picker";
+import { PICKER_PANEL_CLASS, Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   MODEL_PROVIDERS,
@@ -375,19 +374,32 @@ function providerModelOptions(
       providerId,
       label: model.label,
       group: group.label,
-      endedOn: model.availableUntil && !isModelAvailable(model) ? formatEndDate(model.availableUntil) : undefined,
+      endedOn: accessEndedOn(model),
       showProvider: false,
     })),
   );
 }
 
-function favoriteModelOptions(favorites: readonly ModelFavoriteEntry[]): ModelOption[] {
-  return favorites.map((favorite) => ({
-    modelId: favorite.modelId,
-    providerId: favorite.providerId,
-    label: favorite.label,
-    showProvider: true,
-  }));
+function accessEndedOn(model: ModelProvider["models"][number]): string | undefined {
+  return model.availableUntil && !isModelAvailable(model) ? formatEndDate(model.availableUntil) : undefined;
+}
+
+function favoriteModelOptions(
+  favorites: readonly ModelFavoriteEntry[],
+  getModels: (provider: ModelProvider) => ModelProvider["models"],
+): ModelOption[] {
+  return favorites.map((favorite) => {
+    // A star outlives the model's access, so each favourite is checked against its provider's catalog.
+    const provider = MODEL_PROVIDERS.find((entry) => entry.id === favorite.providerId);
+    const model = provider && getModels(provider).find((entry) => entry.id === favorite.modelId);
+    return {
+      modelId: favorite.modelId,
+      providerId: favorite.providerId,
+      label: favorite.label,
+      endedOn: model ? accessEndedOn(model) : undefined,
+      showProvider: true,
+    };
+  });
 }
 
 function getPickerTabs(
@@ -413,34 +425,17 @@ function getPickerTabs(
   ];
 }
 
-function FavoriteStar({
-  option,
-  starred,
-  onToggle,
-}: {
-  option: ModelOption;
-  starred: boolean;
-  onToggle: (entry: ModelFavoriteEntry) => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={getFavoriteActionLabel(option.label, starred)}
-      aria-pressed={starred}
-      onClick={() => onToggle({ providerId: option.providerId, modelId: option.modelId, label: option.label })}
-      className={cn(
-        "flex size-[1.4rem] items-center justify-center rounded-xs outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        // An unstarred star shows only on the highlighted row, so the list reads as a column of names.
-        !starred && "opacity-0 focus-visible:opacity-100 group-data-active/option:opacity-100",
-      )}
-    >
-      <Star
-        aria-hidden
-        className={cn("size-[1.4rem]", starred ? "fill-primary text-primary" : "text-ink")}
-        strokeWidth={1.5}
-      />
-    </button>
-  );
+function favoriteAction(
+  option: ModelOption,
+  starred: boolean,
+  onToggle: (entry: ModelFavoriteEntry) => void,
+): PickerRowAction {
+  return {
+    label: getFavoriteActionLabel(option.label, starred),
+    icon: <Star className={starred ? "fill-primary text-primary" : "text-ink"} strokeWidth={1.5} />,
+    pinned: starred,
+    run: () => onToggle({ providerId: option.providerId, modelId: option.modelId, label: option.label }),
+  };
 }
 
 function LockedModelLabel({
@@ -507,7 +502,7 @@ export function ModelSelector({
 
   const items = useMemo(() => {
     if (activeTab === FAVORITES_TAB) {
-      return favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query));
+      return favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query), getModels);
     }
     const provider = MODEL_PROVIDERS.find((entry) => entry.id === activeTab);
     return provider ? providerModelOptions(provider.id, getModels(provider), query) : [];
@@ -516,6 +511,7 @@ export function ModelSelector({
   const renderItem = useCallback(
     (option: ModelOption): PickerRow => {
       const key = optionKey(option.providerId, option.modelId);
+      const starred = starredKeys.has(key);
       return {
         key,
         name: option.label,
@@ -528,9 +524,8 @@ export function ModelSelector({
             <span className="min-w-0 text-fade">{providerName(option.providerId)}</span>
           </>
         ) : undefined,
-        action: option.endedOn ? undefined : (
-          <FavoriteStar option={option} starred={starredKeys.has(key)} onToggle={toggleFavorite} />
-        ),
+        // A model whose access ended can still be unstarred, but not newly starred.
+        action: option.endedOn && !starred ? undefined : favoriteAction(option, starred, toggleFavorite),
       };
     },
     [starredKeys, toggleFavorite],
@@ -542,15 +537,6 @@ export function ModelSelector({
   const handleSelectModel = (modelId: string, providerId: string) => {
     onSelect(modelId, providerId);
     setOpen(false);
-  };
-  const handleTabChange = (tabId: string) => {
-    const provider = MODEL_PROVIDERS.find((entry) => entry.id === tabId);
-    // A one-model provider has nothing to browse, so choosing its tab chooses its model.
-    if (provider?.models.length === 1) {
-      handleSelectModel(provider.models[0].id, provider.id);
-      return;
-    }
-    setActiveTab(tabId);
   };
 
   if (locked) {
@@ -584,7 +570,7 @@ export function ModelSelector({
         <Picker
           tabs={tabs}
           activeTab={activeTab}
-          onTabChange={handleTabChange}
+          onTabChange={setActiveTab}
           query={query}
           onQueryChange={setQuery}
           searchPlaceholder="Search models"

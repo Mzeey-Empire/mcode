@@ -63,7 +63,12 @@ async function openPicker() {
 }
 
 function optionNames(): string[] {
-  return screen.getAllByRole("option").map((option) => option.textContent ?? "");
+  // Hidden description spans are part of textContent, so drop them to read only what the row shows.
+  return screen.getAllByRole("option").map((option) => {
+    const visible = option.cloneNode(true) as HTMLElement;
+    visible.querySelectorAll("[hidden]").forEach((node) => node.remove());
+    return visible.textContent ?? "";
+  });
 }
 
 beforeEach(() => {
@@ -153,12 +158,45 @@ describe("ModelSelector", () => {
 
     const selected = screen.getByRole("option", { selected: true });
     expect(selected).toHaveTextContent("Sonnet 4.6");
-    await userEvent.click(within(selected).getByRole("button", { name: /Add .* to favourites/ }));
+    expect(selected).toHaveAccessibleDescription(/Add .* to favourites/);
+    await userEvent.click(selected.querySelector("[data-slot=picker-row-action]") as HTMLElement);
 
     expect(onSelect).not.toHaveBeenCalled();
     expect(useModelFavoritesStore.getState().entries).toEqual([
       expect.objectContaining({ providerId: "claude", modelId: "claude-sonnet-4-6" }),
     ]);
+  });
+
+  it("stars the highlighted model with Ctrl+D and keeps the picker open", async () => {
+    const onSelect = vi.fn();
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={onSelect} locked={false} />);
+    await openPicker();
+    await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
+
+    await userEvent.keyboard("{Control>}d{/Control}");
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(useModelFavoritesStore.getState().entries).toHaveLength(1);
+  });
+
+  it("opens a one-model provider's tab without choosing its model", async () => {
+    setProviders({ claude: true, opencode: true });
+    const opencode = MODEL_PROVIDERS.find((provider) => provider.id === "opencode");
+    opencode?.models.push({ id: "solo-1", label: "Solo 1", providerId: "opencode" });
+    onTestFinished(() => {
+      opencode?.models.pop();
+    });
+    const onSelect = vi.fn();
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={onSelect} locked={false} />);
+    await openPicker();
+
+    await userEvent.click(screen.getByRole("radio", { name: opencode?.name ?? "" }));
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("lists favourites with their provider on a second line", async () => {
@@ -195,6 +233,29 @@ describe("ModelSelector", () => {
     expect(gated).toHaveAccessibleDescription(/Subscription access to Claude Retired 1 ended on/);
     await userEvent.click(gated);
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("dims a favourite whose access ended but still lets it be unstarred", async () => {
+    const claude = MODEL_PROVIDERS.find((provider) => provider.id === "claude");
+    claude?.models.push({ id: "claude-retired-1", label: "Claude Retired 1", providerId: "claude", availableUntil: "2020-01-31" });
+    onTestFinished(() => {
+      claude?.models.pop();
+    });
+    useModelFavoritesStore.setState({
+      entries: [{ providerId: "claude", modelId: "claude-retired-1", label: "Claude Retired 1" }],
+    });
+    const onSelect = vi.fn();
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={onSelect} locked={false} />);
+    await openPicker();
+    await userEvent.click(screen.getByRole("radio", { name: "Favourites" }));
+
+    const row = screen.getByRole("option", { name: /Claude Retired 1/ });
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(row);
+    expect(onSelect).not.toHaveBeenCalled();
+    await userEvent.click(row.querySelector("[data-slot=picker-row-action]") as HTMLElement);
+    expect(useModelFavoritesStore.getState().entries).toEqual([]);
   });
 
   it("shows the loading row while a catalog loads and keeps the cached models after a timeout", async () => {
