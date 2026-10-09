@@ -26,11 +26,12 @@ export function ProjectSlotHeading({ projectName }: ProjectSlotHeadingProps) {
               type="button"
               data-testid="new-thread-project-slot"
               className={cn(
-                "text-fade border-b-2 border-dashed border-primary pb-0.5 text-primary transition-colors hover:border-primary/60 hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+                "flex min-w-0 border-b-2 border-dashed border-primary pb-0.5 text-primary transition-colors hover:border-primary/60 hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
                 !projectName && "px-1",
               )}
             >
-              {projectName ?? "choose a project"}
+              {/* The fade masks only the name; masking the button would clip its focus outline. */}
+              <span className="text-fade">{projectName ?? "choose a project"}</span>
             </button>
           }
         />
