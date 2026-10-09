@@ -1,11 +1,9 @@
 import { ChecksPopover } from "@/components/chat/ChecksPopover";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
 import { SplitButton } from "@/components/ui/split-button";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
-import { useOverviewUsage } from "@/features/thread-overview/use-overview-usage";
 import { getBreakdown, getCiOverviewSummaryLabel, getCiSummaryHeadline } from "@/lib/ci-status";
 import { registerCommand } from "@/lib/command-registry";
 import { cn } from "@/lib/utils";
@@ -333,13 +331,9 @@ function ThreadOverviewPrRow({
 
 function PullRequestEntry({ thread }: { thread: Thread }) {
   const { prable: canShowPrActions, effectivePr, hasCommitsAhead, checks, openPrDetail, handleCommitOrPush, handleOpenPr, setCreatePrOpen } = useOverviewContext();
-  const { usageSummary } = useOverviewUsage(thread);
 
   return (<ThreadOverviewWhen when={canShowPrActions}>
     <>
-      <ThreadOverviewWhen when={usageSummary !== null}>
-        <Separator data-testid="thread-overview-pr-separator" className="my-1.5" />
-      </ThreadOverviewWhen>
       <ThreadOverviewPrRow
         pr={effectivePr}
         hasCommitsAhead={hasCommitsAhead}

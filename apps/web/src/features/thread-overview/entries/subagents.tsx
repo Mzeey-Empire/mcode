@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { ProviderDiscStack } from "@/components/ui/provider-icon";
 import { openSubagentsRoster, projectSubagents } from "@/features/subagents";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
@@ -39,7 +38,6 @@ function SubagentsEntry({ thread }: { thread: Thread }) {
   ].filter(Boolean).join(", ");
   return (<ThreadOverviewWhen when={subagentTotal > 0}>
     <>
-      <Separator className="my-1.5" />
       <div className="px-2 pt-1 text-xs font-medium text-muted">
         Subagents
       </div>

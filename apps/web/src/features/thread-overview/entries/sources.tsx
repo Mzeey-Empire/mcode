@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { SiteFavicon } from "@/components/ui/favicon";
-import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isModifierClick, isPreviewableUrl, openUrlInPreview } from "@/features/preview";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
@@ -85,7 +84,6 @@ function SourcesEntry({ thread }: { thread: Thread }) {
   );
   return (<ThreadOverviewWhen when={sources.length > 0}>
     <>
-      <Separator className="my-1.5" />
       <ThreadOverviewSources sources={sources} onOpen={openSource} />
     </>
   </ThreadOverviewWhen>);

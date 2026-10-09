@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
@@ -193,7 +192,7 @@ export const { Provider: RecapEntryState, useEntryState: useRecapEntryState } = 
 
 function RecapEntry() {
   const threadRecap = useRecapEntryState();
-  return (<><Separator className="my-1.5" />
+  return (<>
     <ThreadOverviewRecapRow
       recapText={threadRecap.recapText}
       hasCoverageGap={threadRecap.hasCoverageGap}
