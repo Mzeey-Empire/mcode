@@ -107,6 +107,9 @@ describe("GitRepositoryService.listRefsAt", () => {
       }, deps)).rejects.toThrow();
       const nonRepo = await routeGitRpc("git.refs.list", { workspaceId: other.id, purpose: "new-thread" }, deps);
       expect(nonRepo).toMatchObject({ ok: false, error: { code: "not_a_repository" } });
+      expect(await routeGitRpc("git.reviewState", {
+        workspaceId: other.id, threadId: "missing-thread",
+      }, deps)).toEqual({ isGitRepo: false });
     } finally { await database.close(); }
   });
 

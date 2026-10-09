@@ -89,10 +89,10 @@ export function DiffToolbar({
     () => visibleReviewViews(scope, { isGitRepo }),
     [scope, isGitRepo],
   );
-  const { state: reviewState, isDirty: workingTreeDirty } = useReviewState(
+  const { state: reviewState, isDirty: workingTreeDirty, error } = useReviewState(
     isGitRepo ? activeWorkspaceId : null, activeThreadId, reviewProbeNonce,
   );
-  const { commitAvailability, branchAvailability } = reviewAvailability(reviewState, isGitRepo);
+  const { commitAvailability, branchAvailability } = reviewAvailability(reviewState, isGitRepo, error);
 
   useReviewViewSynchronization({
     activeThreadId,
@@ -141,11 +141,11 @@ export function DiffToolbar({
   );
 }
 
-function reviewAvailability(state: ReviewState | null, isGitRepo: boolean): {
+function reviewAvailability(state: ReviewState | null, isGitRepo: boolean, error: unknown): {
   commitAvailability: CommitAvailability;
   branchAvailability: BranchAvailability;
 } {
-  if (!isGitRepo || state?.isGitRepo === false) return { commitAvailability: "empty", branchAvailability: "empty" };
+  if (!isGitRepo || state?.isGitRepo === false || error !== null) return { commitAvailability: "empty", branchAvailability: "empty" };
   if (!state) return { commitAvailability: "loading", branchAvailability: "loading" };
   return {
     commitAvailability: (state.commitsAhead?.count ?? 0) > 0 ? "available" : "empty",

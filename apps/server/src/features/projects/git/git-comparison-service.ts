@@ -241,7 +241,10 @@ export class GitComparisonService {
       throw new ReviewComparisonError("Could not read Review comparison", gitErrorDetail(error));
     } finally {
       await NodeFSPromises.unlink(temporary).catch((error: unknown) => {
-        if (!hasErrorCode(error, "ENOENT")) throw error;
+        // Cleanup must preserve both successful comparisons and the original Git failure.
+        if (!hasErrorCode(error, "ENOENT")) {
+          logger.warn("[withIntentToAddIndex] Failed to remove temporary index", { path: temporary, err: error });
+        }
       });
     }
   }

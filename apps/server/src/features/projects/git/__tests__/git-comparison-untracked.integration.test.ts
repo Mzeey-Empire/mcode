@@ -14,7 +14,7 @@ import type { GitExecutor } from "../execution/index.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...actual, copyFile: vi.fn(actual.copyFile) };
+  return { ...actual, copyFile: vi.fn(actual.copyFile), unlink: vi.fn(actual.unlink) };
 });
 
 describe("Review comparisons with the real Git index", () => {
@@ -80,6 +80,32 @@ describe("Review comparisons with the real Git index", () => {
         { path: "new.txt", previousPath: "old.txt", changeType: "renamed", binary: false, additions: 0, deletions: 0, untracked: true },
       ]);
     }
+  });
+
+  it.each([false, true])("honours global excludes with observed execution %s", async (observed) => {
+    const config = NodePath.join(cwd, ".git", "test-global-config");
+    const excludes = NodePath.join(cwd, ".git", "test-global-excludes");
+    NodeFS.writeFileSync(excludes, "*.global-ignore\n");
+    git("config", "--file", config, "core.excludesFile", excludes);
+    vi.stubEnv("GIT_CONFIG_GLOBAL", config);
+    if (observed) {
+      service = new GitComparisonService(repo, {
+        exec: (args, options) => executor.exec(args, { ...options, onStdout: () => {} }),
+      });
+    }
+    try {
+      write("hidden.global-ignore", "ignored\n");
+      write("visible.txt", "visible\n");
+      expect(git("status", "--porcelain")).toBe("?? visible.txt");
+      expect((await read("unstaged")).files).toEqual([
+        { path: "visible.txt", previousPath: null, changeType: "added", binary: false, additions: 1, deletions: 0, untracked: true },
+      ]);
+      expect(await service.readReviewState("fixture", cwd)).toEqual({
+        isGitRepo: true, head: null, branch: "main",
+        uncommitted: { staged: 0, unstaged: 0, untracked: 1 },
+        commitsAhead: null, branchDefault: { unavailable: "unborn" },
+      });
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it("keeps staged and unstaged edits distinct, preserves intent-to-add, and excludes ignored files", async () => {
@@ -173,6 +199,34 @@ describe("Review comparisons with the real Git index", () => {
       commitsAhead: null, branchDefault: { unavailable: "unborn" },
     });
     expect(indexHash()).toBe(staged);
+  });
+
+  it.each(["success", "failure"])("preserves a comparison %s when temporary index cleanup fails", async (outcome) => {
+    write("notes.md", "notes\n");
+    const failure = new ReviewComparisonError("Could not read Review comparison", "Git timed out");
+    service = new GitComparisonService(repo, {
+      exec: (args, options) => {
+        if (outcome === "failure" && args.includes("--name-status")) return Promise.reject(failure);
+        return executor.exec(args, options);
+      },
+    });
+    const unlink = vi.mocked(NodeFSPromises.unlink).mockRejectedValueOnce(
+      Object.assign(new Error("index busy"), { code: "EBUSY" }),
+    );
+    const before = indexHash();
+    try {
+      const result = service.readReviewComparison("fixture", "unstaged", {}, cwd);
+      if (outcome === "failure") {
+        await expect(result).rejects.toBe(failure);
+      } else {
+        await expect(result).resolves.toEqual({
+          files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 1, deletions: 0, untracked: true }],
+          additions: 1, deletions: 0,
+        });
+      }
+      expect(indexHash()).toBe(before);
+      expect(temporaryIndexes()).toHaveLength(1);
+    } finally { unlink.mockReset(); }
   });
 
   it("probes commits ahead and the ADR-0007 local branch default", async () => {

@@ -168,8 +168,8 @@ const gitHandlers: GitHandlerMap = {
     );
   },
   "git.reviewState": (deps, params) => {
-    const cwd = resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId);
     if (!isGitWorkspace(deps, params.workspaceId)) return { isGitRepo: false };
+    const cwd = resolveWorkspaceRepoPath(deps, params.workspaceId, params.threadId);
     const thread = params.threadId ? deps.threadRepo.findById(params.threadId) : null;
     return deps.gitComparison.readReviewState(params.workspaceId, cwd,
       thread?.checkout_state === "branchless" ? thread.base_branch ?? thread.branch : null);
