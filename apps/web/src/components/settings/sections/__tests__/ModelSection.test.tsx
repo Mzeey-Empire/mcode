@@ -85,7 +85,7 @@ function renderWithModel(provider: string, modelId: string, reasoning = "high") 
 }
 
 /**
- * Finds the reasoning effort SegControl radiogroup.
+ * Finds the reasoning effort segmented control radiogroup.
  * The component renders multiple radiogroups (provider, model, fallback, reasoning);
  * we locate ours by finding the "Reasoning effort" label and querying within its row.
  */

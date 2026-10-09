@@ -4,7 +4,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { SettingRow } from "../SettingRow";
 import { SectionHeading } from "../SectionHeading";
 import { Switch } from "@/components/ui/switch";
-import { SegControl } from "../SegControl";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Spinner } from "@/components/ui/spinner";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import type { Settings, UpdateCheckInterval, UpdateReleaseLine } from "@mcode/contracts";
@@ -44,7 +44,7 @@ function UpdateStatusControl({ status, statusLabel, canCheck, isBusy, onInstall,
 }
 
 function AboutSettingsRows({ version, updatesHint, status, statusLabel, canCheck, isBusy, onInstall, onCheck, releaseLine, onReleaseLineChange, checkInterval, onCheckIntervalChange, autoDownload, onAutoDownloadChange, autoInstallOnQuit, onAutoInstallOnQuitChange }: { version: string | null | undefined; updatesHint: string; status: UpdateStatus; statusLabel: string; canCheck: boolean; isBusy: boolean; onInstall: () => void; onCheck: () => void; releaseLine: UpdateReleaseLine; onReleaseLineChange: (value: UpdateReleaseLine) => void; checkInterval: UpdateCheckInterval; onCheckIntervalChange: (value: UpdateCheckInterval) => void; autoDownload: boolean; onAutoDownloadChange: (value: boolean) => void; autoInstallOnQuit: boolean; onAutoInstallOnQuitChange: (value: boolean) => void }) {
-  return <div><SettingRow label="Version" hint="Currently installed build."><span className="font-mono text-xs text-muted tabular-nums">{version || "—"}</span></SettingRow><SettingRow label="Updates" hint={updatesHint}><UpdateStatusControl status={status} statusLabel={statusLabel} canCheck={canCheck} isBusy={isBusy} onInstall={onInstall} onCheck={onCheck} /></SettingRow><SettingRow label="Release line" hint="Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them."><SegControl options={RELEASE_LINE_OPTIONS} value={releaseLine} onChange={(value) => onReleaseLineChange(value as UpdateReleaseLine)} /></SettingRow><SettingRow label="Check interval" hint="How often to poll for new releases. Takes effect on next launch."><SegControl options={INTERVAL_OPTIONS} value={checkInterval} onChange={(value) => onCheckIntervalChange(value as UpdateCheckInterval)} /></SettingRow><SettingRow label="Auto-download" hint="Download updates in the background as soon as they are available."><Switch checked={autoDownload} onCheckedChange={onAutoDownloadChange} /></SettingRow><SettingRow label="Auto-install on quit" hint="Apply downloaded updates automatically when the app closes."><Switch checked={autoInstallOnQuit} onCheckedChange={onAutoInstallOnQuitChange} /></SettingRow></div>;
+  return <div><SettingRow label="Version" hint="Currently installed build."><span className="font-mono text-xs text-muted tabular-nums">{version || "—"}</span></SettingRow><SettingRow label="Updates" hint={updatesHint}><UpdateStatusControl status={status} statusLabel={statusLabel} canCheck={canCheck} isBusy={isBusy} onInstall={onInstall} onCheck={onCheck} /></SettingRow><SettingRow label="Release line" hint="Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them."><SegmentedControl options={RELEASE_LINE_OPTIONS} value={releaseLine} onChange={(value) => onReleaseLineChange(value as UpdateReleaseLine)} /></SettingRow><SettingRow label="Check interval" hint="How often to poll for new releases. Takes effect on next launch."><SegmentedControl options={INTERVAL_OPTIONS} value={checkInterval} onChange={(value) => onCheckIntervalChange(value as UpdateCheckInterval)} /></SettingRow><SettingRow label="Auto-download" hint="Download updates in the background as soon as they are available."><Switch checked={autoDownload} onCheckedChange={onAutoDownloadChange} /></SettingRow><SettingRow label="Auto-install on quit" hint="Apply downloaded updates automatically when the app closes."><Switch checked={autoInstallOnQuit} onCheckedChange={onAutoInstallOnQuitChange} /></SettingRow></div>;
 }
 
 function getUpdatePreferences(settings: Settings): { autoDownload: boolean; autoInstallOnQuit: boolean; checkInterval: UpdateCheckInterval; releaseLine: UpdateReleaseLine } {
@@ -182,7 +182,7 @@ export function AboutSection() {
   };
 
   /**
-   * Handle a release-line change from the SegControl. Confirms with the user
+   * Handle a release-line change from the segmented control. Confirms with the user
    * when switching nightly → stable while running a newer-than-stable build,
    * because that path requires a downgrade install.
    */

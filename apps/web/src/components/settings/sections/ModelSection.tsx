@@ -16,7 +16,7 @@ import {
   type ModelDefinition,
 } from "@/lib/model-registry";
 import { SettingRow } from "../SettingRow";
-import { SegControl } from "../SegControl";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingsGroup } from "../SettingsGroup";
 import { SearchableGroupedPicker } from "../SearchableGroupedPicker";
 import { SettingsProviderPicker } from "../SettingsProviderPicker";
@@ -47,7 +47,7 @@ const REASONING_LEVEL_LABELS: Record<string, string> = {
 
 type ProviderOptions = ComponentProps<typeof SettingsProviderPicker>["options"];
 type ModelPickerOptions = ComponentProps<typeof SearchableGroupedPicker>["options"];
-type ReasoningOptions = ComponentProps<typeof SegControl>["options"];
+type ReasoningOptions = ComponentProps<typeof SegmentedControl>["options"];
 
 /**
  * Builds a provider option for the Model / Utility Model pickers. A provider is
@@ -706,7 +706,7 @@ function DefaultModelSettings({
       </SettingRow>
       {showReasoning && (
         <SettingRow label="Reasoning effort" configKey="model.defaults.reasoning" hint={reasoningHint}>
-          <SegControl options={reasoningOptions} value={reasoning} onChange={onReasoningChange} />
+          <SegmentedControl options={reasoningOptions} value={reasoning} onChange={onReasoningChange} />
         </SettingRow>
       )}
       {showFastMode && (
@@ -724,7 +724,7 @@ function DefaultModelSettings({
           configKey="model.defaults.contextWindow"
           hint="200k is the standard window. 1M uses the extended beta window on Opus 4.7/4.6 and Sonnet 4.6."
         >
-          <SegControl
+          <SegmentedControl
             options={[
               { value: "200k", label: "200K" },
               { value: "1m", label: "1M", disabled: !supports1MContextWindow(modelId) },
@@ -740,7 +740,7 @@ function DefaultModelSettings({
           configKey="model.defaults.thinking"
           hint="Enable extended thinking for Haiku 4.5. Effort-tier models ignore this and use the reasoning level instead."
         >
-          <SegControl
+          <SegmentedControl
             options={[
               { value: "off", label: "Off" },
               { value: "on", label: "On" },
