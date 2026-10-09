@@ -140,6 +140,7 @@ vi.mock("@/stores/threadStore", () => ({
       records,
       currentThreadId: currentThreadIdValue,
       runningThreadIds: runningThreadIdsValue,
+      pendingStopCounts: {},
       loadOlderMessages: loadOlderMessagesSpy,
       loadNewerMessages: loadNewerMessagesSpy,
       loadNarrativeForMessage: loadNarrativeForMessageSpy,

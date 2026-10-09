@@ -1,9 +1,11 @@
 # Narrative Pipeline Guide
 
-The live status line uses the latest active root tool's description, file action, or tool category.
-Without an active tool, it shows a complete summary heading from the current open thought segment, or `Thinking...`.
-The status line shows the step count only when it is greater than zero.
-Completed tools and closed segments cannot keep an old activity label visible. The label stays on one line as its text changes.
+`deriveRunStatus` in [`run-status.ts`](../../../apps/web/src/features/conversation/narrative/run-status.ts) owns the live status line label and icon.
+Its rule table is the precedence order, so add a state there rather than branching in the renderer.
+Holding states (stop pending, compacting, rate limited, retrying) outrank the narrative and use a spinner, because the agent is not making progress.
+Working states use the layers icon: waiting on a person, the active root tool, running subagents, the streaming answer, then a summary heading or `Thinking`.
+"Answering" depends on the live response row existing. An open segment that is not explicitly non-final already renders as that row, so summary headings appear only for explicitly non-final narration.
+Completed tools and closed segments cannot keep an old activity label visible. Labels carry no ellipses; overflow fades.
 Providers supply these details through the existing canonical tool and non-final text events. See [Activity labels](../providers/provider-architecture.md#activity-labels).
 
 Hooks appear beside Copy and Fork on the final response, not beside the turn duration or as inline narrative rows.
@@ -206,10 +208,11 @@ prefix and reports detected loss. The renderer drops the lost overlay and shows
 a loss notice. Unfinished saved turns become interrupted; already saved outcomes
 remain intact. Neither recovery nor a save retry reruns provider tools.
 
-The live status line always uses the layers icon. Its step count, optional
-subagent count, and activity label share a text shimmer while the turn runs.
-The elapsed time stays static between ticks. The shimmer and icon motion stop
-when the turn ends and are disabled when reduced motion is preferred.
+The live status line has no text shimmer; only the icon moves. The clock
+ticks once a second and freezes when the turn ends, and the exit fade keeps the
+last running label instead of swapping in a final word. Rate limit and retry
+state end with the first provider event that is neither, so a holding label
+cannot outlive the stall it describes.
 
 Provider-specific mapping happens before the narrative renderer. Canonical
 history can retain opaque provider-runtime records, but live effects use

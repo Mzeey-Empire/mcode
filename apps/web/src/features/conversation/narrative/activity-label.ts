@@ -1,5 +1,5 @@
 import type { ToolCall } from "@/transport/types";
-import { resolveToolName, TOOL_PHASE_LABELS } from "@/components/chat/tool-renderers/constants";
+import { isShellTool, resolveToolName, TOOL_PHASE_LABELS } from "@/components/chat/tool-renderers/constants";
 import { stripPlanFences } from "@/lib/plan-fences";
 import type { ThoughtSegment } from "./types";
 
@@ -9,7 +9,8 @@ function shortLabel(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.slice(0, 1024).replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim();
   if (!text) return undefined;
-  return text.length > LABEL_LIMIT ? `${text.slice(0, LABEL_LIMIT - 1)}…` : text;
+  // The status line fades overflow, so a hard cut reads cleaner than an ellipsis.
+  return text.slice(0, LABEL_LIMIT);
 }
 
 /** A hidden plan's headings must not surface as the live label; the cheap check skips the scan for ordinary prose. */
@@ -45,13 +46,18 @@ function fileActivity(tool: ToolCall, name: string): string | undefined {
   return file ? shortLabel(`${verb} ${file}`) : undefined;
 }
 
-/** Selects active tool detail, then a current summary heading, then an honest fallback. */
-export function narrativeActivityLabel(tools: readonly ToolCall[], summaryHeading?: string): string {
-  const active = tools.filter((tool) => !tool.isComplete && tool.parentToolCallId == null).at(-1);
-  if (!active) return shortLabel(summaryHeading) ?? "Thinking...";
-  const name = resolveToolName(active.toolName);
-  return shortLabel(active.toolInput.description)
-    ?? fileActivity(active, name)
+/** Shells read the command itself for every provider, so all providers word the same action alike. */
+function shellActivity(tool: ToolCall): string {
+  const command = shortLabel(tool.toolInput.command);
+  return shortLabel(command && `Running ${command}`) ?? "Running command";
+}
+
+/** Status line label for one running tool call. */
+export function toolActivityLabel(tool: ToolCall): string {
+  if (isShellTool(tool.toolName)) return shellActivity(tool);
+  const name = resolveToolName(tool.toolName);
+  return fileActivity(tool, name)
+    ?? shortLabel(tool.toolInput.description)
     ?? TOOL_PHASE_LABELS[name]
-    ?? (name === "file_change" ? "Editing files..." : "Working...");
+    ?? (name === "file_change" ? "Editing files" : "Working");
 }

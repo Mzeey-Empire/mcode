@@ -1,39 +1,46 @@
 import { describe, expect, it } from "vitest";
 import type { ToolCall } from "@/transport/types";
-import { currentActivityHeading, narrativeActivityLabel } from "../activity-label";
+import { currentActivityHeading, toolActivityLabel } from "../activity-label";
 
 function tool(overrides: Partial<ToolCall> = {}): ToolCall {
   return { id: "tool", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false, ...overrides };
 }
 
-describe("narrative activity", () => {
-  it("uses provider-supplied tool detail before the summary without requiring a provider ID", () => {
-    expect(narrativeActivityLabel([tool({ toolName: "custom_tool", toolInput: { description: "Running tests" } })], "Inspecting layout")).toBe("Running tests");
+describe("tool activity label", () => {
+  it.each(["Bash", "Shell", "Terminal", "command_execution"])("reads the %s command on one line, never the provider description", (toolName) => {
+    expect(toolActivityLabel(tool({ toolName, toolInput: { command: "bun run\n  lint", description: "Lint the web app" } }))).toBe("Running bun run lint");
   });
 
-  it("selects the latest active root action and ignores completed and child work", () => {
-    expect(narrativeActivityLabel([
-      tool({ toolInput: { file_path: "C:\\src\\settings.ts" } }),
-      tool({ isComplete: true, toolInput: { description: "Old work" } }),
-      tool({ parentToolCallId: "parent", toolInput: { description: "Child work" } }),
-    ])).toBe("Reading settings.ts");
-    expect(narrativeActivityLabel([tool({ isComplete: true })], "Checking layout")).toBe("Checking layout");
-    expect(narrativeActivityLabel([tool({ isComplete: true })])).toBe("Thinking...");
+  it("falls back when a shell call has no command", () => {
+    expect(toolActivityLabel(tool({ toolName: "Bash", toolInput: { description: "Lint the web app" } }))).toBe("Running command");
   });
 
-  it.each(["Bash", "Shell", "Terminal", "command_execution"])("uses an honest action fallback for %s without exposing command arguments", (toolName) => {
-    expect(narrativeActivityLabel([tool({ toolName, toolInput: { command: "arbitrary command" } })])).toBe("Running a command...");
+  it("names the file for Read, Edit and Write", () => {
+    expect(toolActivityLabel(tool({ toolInput: { file_path: "C:\\src\\settings.ts" } }))).toBe("Reading settings.ts");
+    expect(toolActivityLabel(tool({ toolName: "Edit", toolInput: { file_path: "/repo/app.ts" } }))).toBe("Editing app.ts");
+    expect(toolActivityLabel(tool({ toolName: "Write", toolInput: { path: "/repo/new.md" } }))).toBe("Writing new.md");
   });
 
+  it("uses the provider description, then the phase label, then an honest fallback, all without ellipses", () => {
+    expect(toolActivityLabel(tool({ toolName: "custom_tool", toolInput: { description: "Running tests" } }))).toBe("Running tests");
+    expect(toolActivityLabel(tool({ toolName: "Grep" }))).toBe("Searching the codebase");
+    expect(toolActivityLabel(tool({ toolInput: { description: {} } }))).toBe("Reading files");
+    expect(toolActivityLabel(tool({ toolName: "file_change" }))).toBe("Editing files");
+    expect(toolActivityLabel(tool({ toolName: "mystery" }))).toBe("Working");
+  });
+
+  it("bounds labels with a hard cut and removes control characters", () => {
+    expect(toolActivityLabel(tool({ toolName: "custom_tool", toolInput: { description: "Run\n\u202etests" } }))).toBe("Run tests");
+    const long = toolActivityLabel(tool({ toolName: "Bash", toolInput: { command: "x".repeat(5000) } }));
+    expect(long).toBe(`Running ${"x".repeat(112)}`);
+    expect(long).not.toContain("…");
+  });
+});
+
+describe("current activity heading", () => {
   it("never takes a heading from inside a hidden plan fence", () => {
     const text = "## Checking the README\nSummary.\n````mcode-plan\n# Plan\n## Risks and open points\n- none\n";
     expect(currentActivityHeading([{ text, startedAt: 1 }])).toBe("Checking the README");
-  });
-
-  it("bounds labels and removes control characters", () => {
-    expect(narrativeActivityLabel([tool({ toolInput: { description: "Run\n\u202etests" } })])).toBe("Run tests");
-    expect(narrativeActivityLabel([tool({ toolInput: { description: "x".repeat(5000) } })])).toHaveLength(120);
-    expect(narrativeActivityLabel([tool({ toolInput: { description: {} } })])).toBe("Reading files...");
   });
 
   it("waits for complete headings and does not change as the body streams", () => {

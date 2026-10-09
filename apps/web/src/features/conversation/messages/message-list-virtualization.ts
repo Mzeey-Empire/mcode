@@ -23,7 +23,7 @@ const PROVISIONAL_HEIGHT_BY_ITEM_TYPE: Record<ChatVirtualItem["type"], number> =
   "narrative-flow": 144,
   "work-fold": 32,
   "turn-meta-line": 24,
-  "narrative-indicator": 36,
+  "narrative-indicator": 32,
 };
 
 /**

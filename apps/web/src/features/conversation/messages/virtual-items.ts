@@ -4,6 +4,7 @@ import type { NarrativeCounts, ThoughtSegment, TurnSummary } from "../narrative/
 import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/build-narrative";
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
+import { deriveRunStatus, type RunHoldingSignals, type RunStatus } from "../narrative/run-status";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
 
@@ -150,6 +151,8 @@ export interface TranscriptProjectionInput {
   thoughtSegments?: readonly ThoughtSegment[];
   /** Persisted assistant text that remains visible while volatile rows settle. */
   committedAssistantBody?: string;
+  /** Stop, compaction and retry states that hold the status line regardless of narrative activity. */
+  holdingSignals?: RunHoldingSignals;
 }
 
 function messageOutcome(message: Message): TurnOutcome | null | undefined {
@@ -236,6 +239,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       input.currentTurn,
       input.committedAssistantBody,
       input.responseTextIsStreaming,
+      input.holdingSignals,
     );
     const responseMessageId = input.messages.find((message) => message.role === "assistant" && isCurrentResponse(message, stableInput))?.id;
     return buildVirtual(stableItems, volatileItems, hasLiveNarrative(input), responseMessageId);
@@ -353,9 +357,8 @@ export type ChatVirtualItem =
   | {
       key: string;
       type: "narrative-indicator";
-      summaryHeading?: string;
       /**
-       * "X steps · N subagents · phase…" status footer rendered BELOW the
+       * "X steps · label" status footer rendered BELOW the
        * live assistant response so the writing animation reads as the primary
        * surface and the progress meta sits underneath. Emitted while the agent
        * is running and kept through the turn's volatile tail (tool calls still
@@ -363,8 +366,7 @@ export type ChatVirtualItem =
        * single frame; it renders nothing once its exit completes.
        */
       stepCount: number;
-      subagentCount: number;
-      activeToolCalls: readonly ToolCall[];
+      status: RunStatus;
       startTime: number | undefined;
       /** False once the turn ended — tells the component to play its exit. */
       isAgentRunning: boolean;
@@ -537,6 +539,7 @@ export function buildVolatileItems(
   currentTurn?: CurrentTurnResponseIdentity,
   committedAssistantBody?: string,
   responseTextIsStreaming?: boolean,
+  holdingSignals?: RunHoldingSignals,
 ): ChatVirtualItem[] {
   const isAgentRunning = isAgentDisplayActive(agentDisplayState);
   const resolvedHooks = hooks ?? EMPTY_HOOKS;
@@ -552,7 +555,7 @@ export function buildVolatileItems(
   return [
     narrativeFlowItem(toolCalls, resolvedHooks, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning, agentStartTime, committedAssistantBody),
     liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
-    narrativeIndicatorItem(toolCalls, isAgentRunning, agentStartTime, resolvedThoughtSegments),
+    narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
     ...permissionRequestItems(permissions),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
 }
@@ -568,26 +571,33 @@ function liveResponseItem(liveText: string, currentTurn: CurrentTurnResponseIden
   return { key: responseKey, type: "message", message: { id: responseKey, thread_id: threadId, role: "assistant", content: liveText, tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: new Date(0).toISOString(), sequence: Number.MAX_SAFE_INTEGER, attachments: null }, textIsStreaming, agentDisplayState: agentDisplayState?.phase === "finalizing" ? { phase: "finalizing" } : { phase: "streaming" } };
 }
 
-function narrativeIndicatorItem(toolCalls: readonly ToolCall[], isAgentRunning: boolean, startTime: number | undefined, thoughts: readonly ThoughtSegment[]): ChatVirtualItem | undefined {
+interface NarrativeIndicatorInput {
+  toolCalls: readonly ToolCall[];
+  isAgentRunning: boolean;
+  startTime: number | undefined;
+  thoughts: readonly ThoughtSegment[];
+  answering: boolean;
+  holdingSignals: RunHoldingSignals | undefined;
+}
+
+const NO_HOLDING_SIGNALS: RunHoldingSignals = { stopPending: false, compacting: false };
+
+function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts, answering, holdingSignals }: NarrativeIndicatorInput): ChatVirtualItem | undefined {
   if (!isAgentRunning && toolCalls.length === 0) return undefined;
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
-  return { key: "narrative-indicator", type: "narrative-indicator", summaryHeading: currentActivityHeading(thoughts), stepCount: topLevelTools.length, subagentCount: topLevelTools.filter((toolCall) => toolCall.toolName === "Agent").length, activeToolCalls: toolCalls.filter((toolCall) => !toolCall.isComplete && toolCall.parentToolCallId == null), startTime, isAgentRunning };
+  const running = topLevelTools.filter((toolCall) => !toolCall.isComplete);
+  const status = deriveRunStatus({
+    ...(holdingSignals ?? NO_HOLDING_SIGNALS),
+    activeTool: running.filter((toolCall) => toolCall.toolName !== "Agent").at(-1),
+    subagentsRunning: running.some((toolCall) => toolCall.toolName === "Agent"),
+    answering,
+    summaryHeading: currentActivityHeading(thoughts),
+  });
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime, isAgentRunning };
 }
 
 function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
   return permissions?.map((permission) => ({ key: `permission-${permission.requestId}`, type: "permission-request" as const, requestId: permission.requestId, toolName: permission.toolName, input: permission.input, title: permission.title, questions: permission.questions, options: permission.options, settled: permission.settled, decision: permission.decision, optionLabel: permission.optionLabel })) ?? [];
-}
-
-function sameArrayItems<T>(
-  left: readonly T[] | undefined,
-  right: readonly T[] | undefined,
-): boolean {
-  if (left === right) return true;
-  if (!left || !right || left.length !== right.length) return false;
-  for (let i = 0; i < left.length; i++) {
-    if (left[i] !== right[i]) return false;
-  }
-  return true;
 }
 
 function sameAgentDisplayState(
@@ -647,7 +657,7 @@ function sameTurnMetaLineItem(left: ChatVirtualItem, right: ChatVirtualItem): bo
 }
 
 function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.summaryHeading === right.summaryHeading, left.stepCount === right.stepCount, left.subagentCount === right.subagentCount, sameArrayItems(left.activeToolCalls, right.activeToolCalls), left.startTime === right.startTime, left.isAgentRunning === right.isAgentRunning].every(Boolean);
+  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.status.label === right.status.label, left.status.icon === right.status.icon, left.stepCount === right.stepCount, left.startTime === right.startTime, left.isAgentRunning === right.isAgentRunning].every(Boolean);
 }
 
 const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualItem, right: ChatVirtualItem) => boolean> = {
