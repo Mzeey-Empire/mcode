@@ -354,11 +354,12 @@ function useLoadMoreOnce<T>({ onLoadMore, items, total, status }: PickerProps<T>
   // moved away, so coming back must be able to ask again. Counted during render so it lands before any effect.
   const [visit, setVisit] = useState({ listKey, count: 0 });
   if (visit.listKey !== listKey) setVisit({ listKey, count: visit.count + 1 });
-  // A failed page must be askable again after Retry, even though the item count has not moved.
-  const failed = typeof status === "object";
+  // A failed page must be askable again after Retry, and a list that reloads from its first page can come back at
+  // a length already asked for, so any request the owner reports as settling frees the guard.
+  const settling = status !== "ready";
   useEffect(() => {
-    if (failed) requestedFor.current = null;
-  }, [failed]);
+    if (settling) requestedFor.current = null;
+  }, [settling]);
   return useCallback(() => {
     const page = `${visit.count}\u0000${items.length}`;
     const exhausted = total !== null && items.length >= total;

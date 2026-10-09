@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { Picker, type PickerProps, type PickerStatus } from "@/components/ui/picker";
+import { installListboxLayout, LISTBOX_ROW_PX as ROW_PX, scrollListTo } from "@/__tests__/helpers/picker-layout";
 
 interface Branch {
   readonly name: string;
@@ -20,32 +21,7 @@ const TABS = [
   { id: "prs", label: "Pull requests" },
 ];
 
-const ROW_PX = 33;
-const VIEWPORT_PX = 172;
-
-// jsdom does no layout. Give the listbox a 172px viewport over 33px rows so the scroll math runs.
-const layoutProps = ["scrollHeight", "clientHeight"] as const;
-const originals = layoutProps.map((prop) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop));
-beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get(this: HTMLElement) {
-      return this.getAttribute("role") === "listbox" ? this.childElementCount * ROW_PX : 0;
-    },
-  });
-  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-    configurable: true,
-    get(this: HTMLElement) {
-      return this.getAttribute("role") === "listbox" ? VIEWPORT_PX : 0;
-    },
-  });
-});
-afterAll(() => {
-  layoutProps.forEach((prop, index) => {
-    const original = originals[index];
-    if (original) Object.defineProperty(HTMLElement.prototype, prop, original);
-  });
-});
+installListboxLayout();
 
 /** A fake paged source: filters by query and serves 50 rows per page, only when the test says so. */
 function PagedPicker(props: Partial<PickerProps<Branch>> & { readonly pages?: number; readonly status?: PickerStatus }) {
@@ -94,12 +70,6 @@ function RemovablePicker({ selectedKey }: { readonly selectedKey?: string }) {
   );
 }
 
-function scrollListTo(remainingPx: number) {
-  const list = screen.getByRole("listbox");
-  list.scrollTop = list.scrollHeight - list.clientHeight - remainingPx;
-  fireEvent.scroll(list);
-}
-
 describe("Picker", () => {
   it("counts the loaded page", () => {
     render(<PagedPicker />);
@@ -130,6 +100,18 @@ describe("Picker", () => {
     expect(onLoadMore).toHaveBeenCalledTimes(1);
 
     rerender(<PagedPicker onLoadMore={onLoadMore} status={{ failed: "Couldn't load more branches" }} />);
+    rerender(<PagedPicker onLoadMore={onLoadMore} />);
+    scrollListTo(0);
+    expect(onLoadMore).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks for the next page again after the list reloads to a length it already asked from", () => {
+    const onLoadMore = vi.fn();
+    const { rerender } = render(<PagedPicker onLoadMore={onLoadMore} />);
+    scrollListTo(0);
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+
+    rerender(<PagedPicker onLoadMore={onLoadMore} status="loading" />);
     rerender(<PagedPicker onLoadMore={onLoadMore} />);
     scrollListTo(0);
     expect(onLoadMore).toHaveBeenCalledTimes(2);
