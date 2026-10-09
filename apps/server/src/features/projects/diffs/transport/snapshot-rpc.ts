@@ -30,6 +30,8 @@ export interface SnapshotRouterDeps {
   threadService: Pick<ThreadService, "findById">;
   workspaceService: Pick<WorkspaceService, "findById">;
   gitWorktrees: Pick<GitWorktreeService, "resolveWorkingDir">;
+  /** Reconciles this store's snapshot pins with its rows, skipping threads the runtime holds. */
+  sweepSnapshotPins: () => Promise<void>;
 }
 
 type SnapshotHandlerMap = {
@@ -42,11 +44,7 @@ type SnapshotHandlerMap = {
 const snapshotHandlers: SnapshotHandlerMap = {
   "snapshot.getDiff": routeSnapshotDiff,
   "snapshot.getDiffStats": routeSnapshotDiffStats,
-  "snapshot.cleanup": async (deps) => ({
-    removed: await deps.turnSnapshotRepo.deleteExpired(
-      parseInt(process.env.SNAPSHOT_MAX_AGE_DAYS ?? "30", 10),
-    ),
-  }),
+  "snapshot.cleanup": routeSnapshotCleanup,
   "snapshot.listByThread": (deps, params) => deps.turnSnapshotRepo.listByThread(params.threadId),
   "snapshot.getCumulativeDiff": routeCumulativeSnapshotDiff,
   "snapshot.getCumulativeDiffStats": routeCumulativeSnapshotDiffStats,
@@ -64,6 +62,15 @@ export async function routeSnapshotRpc<Method extends SnapshotRpcMethod>(
   deps: SnapshotRouterDeps,
 ): Promise<unknown> {
   return await snapshotHandlers[method](deps, params);
+}
+
+/** Delete expired rows, then drop the pins they held so git gc can reclaim their trees. */
+async function routeSnapshotCleanup(deps: SnapshotRouterDeps): Promise<{ removed: number }> {
+  const removed = await deps.turnSnapshotRepo.deleteExpired(
+    parseInt(process.env.SNAPSHOT_MAX_AGE_DAYS ?? "30", 10),
+  );
+  await deps.sweepSnapshotPins();
+  return { removed };
 }
 
 async function routeSnapshotDiff(

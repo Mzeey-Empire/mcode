@@ -274,6 +274,8 @@ export interface RouterDeps {
   canonicalSink: CanonicalAgentBoundary;
   canonicalProgress?: import("../../features/agents/canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress;
   turnSnapshotRepo: TurnSnapshotRepo;
+  /** Reconciles this store's snapshot pins with its rows after expired rows are deleted. */
+  sweepSnapshotPins: () => Promise<void>;
   turnDiffs: TurnDiffService;
   snapshotService: SnapshotService;
   settingsService: SettingsService;
