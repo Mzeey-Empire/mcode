@@ -94,7 +94,7 @@ export function FileEditorPicker({
   return (
     <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger render={trigger} />
-      <DropdownMenuContent align="end" sideOffset={6} className="min-w-[200px]">
+      <DropdownMenuContent align="end" sideOffset={6}>
         {entries.length > 0 && (
           <>
             {entries.map((entry) => (
@@ -102,7 +102,6 @@ export function FileEditorPicker({
                 key={entry.id}
                 label={entry.label}
                 icon={entry.icon}
-                trailing={line !== undefined ? <span className="font-mono text-caption text-muted">:{line}</span> : undefined}
                 onClick={() => handleOpenEditor(entry.id)}
               />
             ))}

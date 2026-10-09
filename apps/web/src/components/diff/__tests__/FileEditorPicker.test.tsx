@@ -64,4 +64,22 @@ describe("FileEditorPicker open-in seam", () => {
 
     expect(openIn).toHaveBeenCalledWith("explorer", "/abs/repo/src");
   });
+
+  it("lists editor names with no line caption, a divider, then Reveal", () => {
+    render(
+      <FileEditorPicker
+        filePath="/abs/repo/src/x.ts"
+        dirPath="/abs/repo/src"
+        line={42}
+        trigger={<button>Open</button>}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
+
+    expect(items).toEqual(["VS Code", "Reveal in file manager"]);
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    expect(screen.queryByText(":42")).toBeNull();
+  });
 });
