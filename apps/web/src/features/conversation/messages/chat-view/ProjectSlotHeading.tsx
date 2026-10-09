@@ -1,4 +1,4 @@
-import { NewThreadProjectPicker } from "@/components/chat/NewThreadProjectPicker";
+import { ProjectChooser } from "@/features/projects/ProjectChooser";
 import { cn } from "@/lib/utils";
 
 /** Props for {@link ProjectSlotHeading}. */
@@ -18,8 +18,7 @@ export function ProjectSlotHeading({ projectName }: ProjectSlotHeadingProps) {
     >
       <span>What should we build in&nbsp;</span>
       <span className="flex min-w-[12rem] max-w-fit flex-[1_1_0] whitespace-nowrap">
-        <NewThreadProjectPicker
-          placement="bottom"
+        <ProjectChooser
           triggerTooltip={projectName ? "Change project" : "Choose project"}
           trigger={
             <button

@@ -1,22 +1,7 @@
-import { FolderIcon, type LucideIcon } from "lucide-react";
 import { CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { PALETTE_LIST_HINTS, PaletteFooterHints } from "../PaletteFooterHints";
-
-/** A place a new project can come from. */
-interface PaletteSource {
-  readonly id: string;
-  readonly title: string;
-  readonly subtitle: string;
-  readonly icon: LucideIcon;
-  /** The query that starts this source's flow. */
-  readonly query: string;
-}
-
-// Only sources that can finish adding a project belong here, so an unbuilt source is absent rather than dead.
-const PALETTE_SOURCES: readonly PaletteSource[] = [
-  { id: "local-folder", title: "Local folder", subtitle: "Add a folder on this computer", icon: FolderIcon, query: "~/" },
-];
+import { PALETTE_SOURCES, type PaletteSource } from "../palette-sources";
 
 function matchesQuery(source: PaletteSource, query: string): boolean {
   const needle = query.trim().toLowerCase();
