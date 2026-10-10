@@ -39,6 +39,8 @@ export type { AttachmentMeta, StoredAttachment } from "./models/attachment.js";
 
 export { TurnOutcomeSchema } from "./models/turn-outcome.js";
 export type { TurnOutcome } from "./models/turn-outcome.js";
+export { TurnFailureKindSchema, TurnFailureSchema } from "./models/turn-failure.js";
+export type { TurnFailureKind, TurnFailure } from "./models/turn-failure.js";
 
 export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
 export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
