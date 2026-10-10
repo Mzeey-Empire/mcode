@@ -43,6 +43,7 @@ export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
 
 export {
   WORKSPACE_ENVIRONMENT_VERSION,
+  WORKSPACE_ENVIRONMENT_LEGACY_VERSION,
   WORKSPACE_ENVIRONMENT_APPROVAL_CONTRACT_VERSION,
   WORKSPACE_ENVIRONMENT_SCRIPT_MAX_BYTES,
   WORKSPACE_ENVIRONMENT_COMMAND_MAX_BYTES,
@@ -86,7 +87,10 @@ export {
   WorkspaceEnvironmentAutomaticSetupTerminalInputSchema,
   WorkspaceEnvironmentAutomaticSetupTerminalSchema,
   WorkspaceEnvironmentActionSchema,
+  WorkspaceEnvironmentActionIdSchema,
+  WorkspaceEnvironmentActionIconIdSchema,
   WorkspaceEnvironmentDocumentSchema,
+  encodeEnvironmentDocument,
   DEFAULT_WORKSPACE_ENVIRONMENT_DOCUMENT,
   WorkspaceEnvironmentReadResultSchema,
   WorkspaceEnvironmentReadInputSchema,
