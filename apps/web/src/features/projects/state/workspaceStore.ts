@@ -1738,10 +1738,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       activeThreadId: id,
       activeDraftId: null,
       ...(id ? { pendingNewThread: false } : {}),
-      });
+    });
 
     activateSelectedConversation();
-
   },
 
   beginNewThread: (workspaceId) => {

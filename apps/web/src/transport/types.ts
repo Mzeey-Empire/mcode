@@ -503,10 +503,9 @@ export interface McodeTransport {
       defaultOpenInApp?: string | null;
     },
   ): Promise<boolean>;
-  /** Clear the "completed" badge for a thread. Transitions completed -> paused in the DB. */
   /** Return live waits and unseen settled outcomes across all threads. */
   listAttention(): Promise<import("@mcode/contracts").ThreadAttention[]>;
-  /** Acknowledge the highest settled message rendered by this client. */
+  /** Acknowledge a rendered server sequence up to a settled turn boundary. */
   acknowledgeSeen(threadId: string, throughSequence: number): Promise<import("@mcode/contracts").AcknowledgeSeenResult>;
   /** Scan threads for stale or missing PR data and refresh their state. Returns updated PR state
    * for all affected threads. A null prNumber/prStatus signals the PR was cleared (stale data removed). */

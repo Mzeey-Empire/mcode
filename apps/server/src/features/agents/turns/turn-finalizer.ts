@@ -628,7 +628,7 @@ export class TurnFinalizer {
     fileEffects: TurnFileEffectSummary | undefined,
     filesChanged: string[],
   ): Promise<string[]> {
-    const hasFileEffects = (fileEffects?.fileCount ?? 0) > 0;
+    const hasFileEffects = fileEffects !== undefined && fileEffects.fileCount > 0;
     const refBefore = refData.ref ?? "";
     const refAfterTree = refAfter ?? "";
     let snapshotId: string;
@@ -640,7 +640,7 @@ export class TurnFinalizer {
           refBefore,
           refAfter: refAfterTree,
           filesChanged,
-          fileEffects,
+          ...(fileEffects ? { fileEffects } : {}),
           worktreePath: null,
         },
         markFilesChanged: hasFileEffects || filesChanged.length > 0,
