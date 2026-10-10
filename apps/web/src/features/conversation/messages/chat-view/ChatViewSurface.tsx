@@ -528,7 +528,8 @@ function preserveIncompleteDraft(thread: WorkspaceThread, draft: ThreadDraftPayl
     },
     target: {
       mode: "worktree",
-      branch: thread.base_branch || thread.branch || "main",
+      // An empty branch follows the project's current-else-default branch when the draft reopens.
+      branch: thread.base_branch || thread.branch,
       branchSource: "branch",
       customBranchName: "",
       autoPreviewBranch,
