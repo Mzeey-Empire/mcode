@@ -1,4 +1,5 @@
 import type { ApprovalOutcome } from "@mcode/contracts";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ApprovalReceipt } from "./types";
 
 /**
@@ -60,11 +61,18 @@ export function ApprovalReceiptRow({ receipt }: { receipt: ApprovalReceipt }) {
       >
         <path d={approved ? "M20 6 9 17l-5-5" : "M18 6 6 18M6 6l12 12"} />
       </svg>
-      <span className="shrink-0 text-sm leading-5 text-muted">{label}</span>
+      <span className="min-w-0 max-w-[60%] shrink-0 text-fade whitespace-nowrap text-sm leading-5 text-muted">{label}</span>
       {showsSubject ? (
-        <span className="min-w-0 text-fade whitespace-nowrap font-mono text-xs leading-5 text-muted">
-          {receipt.subjectLabel}
-        </span>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span className="min-w-0 text-fade whitespace-nowrap font-mono text-xs leading-5 text-muted">
+                {receipt.subjectLabel}
+              </span>
+            }
+          />
+          <TooltipContent>{receipt.subjectLabel}</TooltipContent>
+        </Tooltip>
       ) : null}
     </div>
   );
